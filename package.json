@@ -1,0 +1,43 @@
+{
+  "name": "effect-jsonapi",
+  "version": "0.1.0",
+  "description": "A library for defining and implementing JSON:API compliant APIs in Effect.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "effect",
+    "jsonapi",
+    "json-api",
+    "api",
+    "rest",
+    "http"
+  ],
+  "author": "Thomas Foster",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thomasfosterau/effect-jsonapi.git"
+  },
+  "dependencies": {
+    "@effect/platform": "^0.94.2",
+    "@effect/schema": "^0.75.5",
+    "effect": "^3.19.15"
+  },
+  "devDependencies": {
+    "@types/node": "^25.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
