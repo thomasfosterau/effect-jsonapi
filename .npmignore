@@ -12,6 +12,3 @@ src/
 .git
 .gitignore
 node_modules/
-
-# Documentation that's not needed in package
-CHANGELOG.md
