@@ -13,6 +13,7 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "example": "tsx examples/blog-api.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -21,13 +22,26 @@
     "json-api",
     "api",
     "rest",
-    "http"
+    "http",
+    "typescript",
+    "functional-programming"
   ],
   "author": "Thomas Foster",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/thomasfosterau/effect-jsonapi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/thomasfosterau/effect-jsonapi/issues"
+  },
+  "homepage": "https://github.com/thomasfosterau/effect-jsonapi#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "peerDependencies": {
+    "effect": ">=3.0.0",
+    "@effect/platform": ">=0.90.0"
   },
   "dependencies": {
     "@effect/platform": "^0.94.2",
