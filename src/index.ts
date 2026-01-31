@@ -14,7 +14,14 @@ import * as S from "effect/Schema"
  * 
  * A link can be represented as:
  * - a string containing the link's URL
- * - an object with an "href" member containing the link's URL and optional meta information
+ * - an object with the following members:
+ *   - `href` (required) - the link's URL
+ *   - `rel` - the link relation type
+ *   - `describedby` - a link to a description document
+ *   - `title` - a human-readable title for the link
+ *   - `type` - the media type of the linked resource
+ *   - `hreflang` - the language(s) of the linked resource
+ *   - `meta` - non-standard meta-information about the link
  * 
  * @see https://jsonapi.org/format/1.1/#document-links
  */
@@ -46,7 +53,7 @@ export type Links = S.Schema.Type<typeof Links>
  * Resource Identifier - identifies a specific resource by type and id or lid
  * 
  * A "resource identifier object" identifies an individual resource.
- * - Must contain `type` and either `id` or `lid`
+ * - Must contain `type` and either `id` or `lid` (or both)
  * - `id` is used for resources that have been saved to the server
  * - `lid` (local id) is used for resources that have not yet been saved (client-generated temporary identifiers)
  * 
@@ -57,7 +64,14 @@ export const ResourceIdentifier = S.Struct({
   id: S.optional(S.String),
   lid: S.optional(S.String),
   meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
-})
+}).pipe(
+  S.filter((value) => {
+    // At least one of id or lid must be present
+    return value.id !== undefined || value.lid !== undefined
+  }, {
+    message: () => "ResourceIdentifier must have either 'id' or 'lid' (or both)"
+  })
+)
 
 export type ResourceIdentifier = S.Schema.Type<typeof ResourceIdentifier>
 

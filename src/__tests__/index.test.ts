@@ -39,6 +39,23 @@ describe("JSON:API Schemas", () => {
       expect(result).toEqual(input)
     })
 
+    it("should validate a resource identifier with both id and lid", () => {
+      const input = {
+        type: "articles",
+        id: "1",
+        lid: "temp-1"
+      }
+      const result = S.decodeUnknownSync(JsonApi.ResourceIdentifier)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should reject a resource identifier without id or lid", () => {
+      const input = {
+        type: "articles"
+      }
+      expect(() => S.decodeUnknownSync(JsonApi.ResourceIdentifier)(input)).toThrow()
+    })
+
     it("should validate a resource identifier with meta", () => {
       const input = {
         type: "articles",
