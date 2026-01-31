@@ -26,9 +26,9 @@ import * as S from "effect/Schema"
  * @see https://jsonapi.org/format/1.1/#document-links
  */
 export const Link = S.Union(
-  S.String,
+  S.String, // URLs as strings - could use S.URL for validation but would decode to URL objects
   S.Struct({
-    href: S.String,
+    href: S.String, // URL - could use S.URL for validation but would decode to URL objects
     rel: S.optional(S.String),
     describedby: S.optional(S.Union(S.String, S.Array(S.String))),
     title: S.optional(S.String),
@@ -149,6 +149,9 @@ export const ResourceObjectWithId = <
 /**
  * Resource Object with LID - an unsaved resource with client-generated identifier
  * 
+ * Note: The options parameter uses 'id' for the lid schema to maintain API consistency,
+ * as both id and lid share the same type constraints.
+ * 
  * @see https://jsonapi.org/format/1.1/#document-resource-objects
  */
 export const ResourceObjectWithLid = <
@@ -160,7 +163,7 @@ export const ResourceObjectWithLid = <
   Meta extends S.Schema.Any = S.Schema<Record<string, unknown>>
 >(options?: {
   type?: Type
-  id?: Lid
+  id?: Lid  // Maps to 'lid' field - maintains consistent API with ResourceObjectWithId
   attributes?: Attributes
   relationships?: Relationships
   links?: ResourceLinks

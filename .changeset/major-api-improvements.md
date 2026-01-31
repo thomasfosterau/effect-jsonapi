@@ -1,5 +1,5 @@
 ---
-"effect-jsonapi": minor
+"effect-jsonapi": major
 ---
 
 Major API improvements based on maintainer feedback:
@@ -12,3 +12,9 @@ Major API improvements based on maintainer feedback:
 - Set up changesets for version management
 - Changed Links from S.Record to properly support required keys
 - Improved type system enforcement for id/lid requirements
+
+**BREAKING CHANGES:**
+- ResourceObject is now a factory function, must be called: `ResourceObject()` instead of `ResourceObject`
+- ResourceIdentifier is now a union type; use ResourceIdentifierWithId or ResourceIdentifierWithLid for specific cases
+- Relationship is now a factory function: `Relationship()` instead of `Relationship`
+- Document is now a factory function: `Document()` instead of `Document`
