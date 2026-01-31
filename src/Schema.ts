@@ -64,6 +64,20 @@ export const ResourceObject = S.Struct({
 export type ResourceObject = S.Schema.Type<typeof ResourceObject>
 
 /**
+ * Resource Object for Create Requests - id is optional for client-generated create requests
+ */
+export const ResourceObjectCreate = S.Struct({
+  type: S.String,
+  id: S.optional(S.String),
+  attributes: S.optional(S.Record({ key: S.String, value: S.Unknown })),
+  relationships: S.optional(S.Record({ key: S.String, value: Relationship })),
+  links: S.optional(Links),
+  meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
+})
+
+export type ResourceObjectCreate = S.Schema.Type<typeof ResourceObjectCreate>
+
+/**
  * Error Source - pointer to the source of an error
  */
 export const ErrorSource = S.Struct({
@@ -116,3 +130,21 @@ export const Document = S.Struct({
 })
 
 export type Document = S.Schema.Type<typeof Document>
+
+/**
+ * JSON:API Document for Create Requests - allows resources without id
+ */
+export const DocumentCreate = S.Struct({
+  data: S.optional(S.Union(
+    ResourceObjectCreate,
+    S.Array(ResourceObjectCreate),
+    S.Null
+  )),
+  errors: S.optional(S.Array(ErrorObject)),
+  meta: S.optional(S.Record({ key: S.String, value: S.Unknown })),
+  jsonapi: S.optional(JsonApiObject),
+  links: S.optional(Links),
+  included: S.optional(S.Array(ResourceObject))
+})
+
+export type DocumentCreate = S.Schema.Type<typeof DocumentCreate>

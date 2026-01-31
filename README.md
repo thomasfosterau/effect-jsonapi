@@ -111,10 +111,22 @@ The top-level JSON:API document structure. Can contain:
 - `links` - Navigation links
 - `included` - Related resources
 
+#### `DocumentCreate`
+The top-level JSON:API document structure for create requests. Same as `Document` but uses `ResourceObjectCreate` for the data field, allowing resources without IDs.
+
 #### `ResourceObject`
 A JSON:API resource with:
 - `type` (required) - Resource type
 - `id` (required) - Resource identifier
+- `attributes` - Resource attributes
+- `relationships` - Relationships to other resources
+- `links` - Resource-specific links
+- `meta` - Resource-specific metadata
+
+#### `ResourceObjectCreate`
+A JSON:API resource for create requests with:
+- `type` (required) - Resource type
+- `id` (optional) - Resource identifier (can be omitted for server-generated IDs)
 - `attributes` - Resource attributes
 - `relationships` - Relationships to other resources
 - `links` - Resource-specific links

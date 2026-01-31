@@ -177,4 +177,49 @@ describe("Schema", () => {
       expect(result).toEqual(input)
     })
   })
+
+  describe("ResourceObjectCreate", () => {
+    it("should validate a create resource without id", () => {
+      const input = {
+        type: "articles",
+        attributes: {
+          title: "New Article",
+          body: "Content"
+        }
+      }
+      
+      const result = S.decodeUnknownSync(Schema.ResourceObjectCreate)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should validate a create resource with client-generated id", () => {
+      const input = {
+        type: "articles",
+        id: "client-123",
+        attributes: {
+          title: "New Article"
+        }
+      }
+      
+      const result = S.decodeUnknownSync(Schema.ResourceObjectCreate)(input)
+      expect(result).toEqual(input)
+    })
+  })
+
+  describe("DocumentCreate", () => {
+    it("should validate a create document without resource id", () => {
+      const input = {
+        data: {
+          type: "articles",
+          attributes: {
+            title: "New Article",
+            body: "Content"
+          }
+        }
+      }
+      
+      const result = S.decodeUnknownSync(Schema.DocumentCreate)(input)
+      expect(result).toEqual(input)
+    })
+  })
 })
