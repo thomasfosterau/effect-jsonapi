@@ -51,23 +51,17 @@ npm run test:watch
 npm run build
 ```
 
-### Running Examples
-
-```bash
-npm run example
-```
-
 ## Code Style
 
 - Use TypeScript for all code
 - Follow the existing code style
-- Use Effect's functional programming patterns
+- Use Effect's Schema patterns for validation
 - Add JSDoc comments for public APIs
-- Keep functions pure and composable
+- Keep the library focused on schema definitions
 
 ## Testing
 
-- Write tests for all new features
+- Write tests for all schema definitions
 - Ensure all tests pass before submitting a PR
 - Use vitest for testing
 - Follow the existing test structure in `src/__tests__/`
@@ -119,7 +113,11 @@ Feature requests are welcome! Please:
 - Check if the feature has already been requested
 - Provide a clear use case
 - Explain how it aligns with JSON:API specification
-- Consider how it fits with Effect's patterns
+- Consider how it fits with the library's focus on schema definitions
+
+## Scope
+
+This library is focused on providing type-safe JSON:API schema definitions using Effect Schema. Features outside this scope (such as HTTP integration, query parsing, or serialization) should be considered for separate packages.
 
 ## License
 

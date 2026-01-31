@@ -1,7 +1,7 @@
 {
   "name": "effect-jsonapi",
   "version": "0.1.0",
-  "description": "A library for defining and implementing JSON:API compliant APIs in Effect.",
+  "description": "Type-safe JSON:API schema definitions using Effect Schema.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -13,7 +13,6 @@
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
-    "example": "tsx examples/blog-api.ts",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
@@ -21,8 +20,7 @@
     "jsonapi",
     "json-api",
     "api",
-    "rest",
-    "http",
+    "schema",
     "typescript",
     "functional-programming"
   ],
@@ -40,16 +38,11 @@
     "node": ">=18.0.0"
   },
   "peerDependencies": {
-    "effect": ">=3.0.0",
-    "@effect/platform": ">=0.90.0"
-  },
-  "dependencies": {
-    "@effect/platform": "^0.94.2",
-    "effect": "^3.19.15"
+    "effect": ">=3.0.0"
   },
   "devDependencies": {
     "@types/node": "^25.1.0",
-    "tsx": "^4.21.0",
+    "effect": "^3.19.15",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }

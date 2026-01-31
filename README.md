@@ -1,256 +1,160 @@
 # effect-jsonapi
 
-A library for defining and implementing JSON:API compliant APIs in Effect.
+Type-safe JSON:API v1.1 schema definitions using Effect Schema.
 
 [![npm version](https://badge.fury.io/js/effect-jsonapi.svg)](https://www.npmjs.com/package/effect-jsonapi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## Overview
+
+This library provides type-safe schema definitions for [JSON:API v1.1](https://jsonapi.org/format/1.1/) using [Effect Schema](https://effect.website/docs/schema/introduction). It allows you to validate and type JSON:API documents, resources, relationships, and errors in your Effect applications.
+
 ## Features
 
-- 🔥 Built on top of [Effect](https://effect.website/) for type-safe, composable, and functional programming
+- 🔥 Type-safe JSON:API schema definitions using Effect Schema
 - 📝 Full JSON:API v1.1 specification compliance
-- 🎯 Type-safe schema definitions using Effect Schema
-- 🔗 HTTP integration with `@effect/platform`
-- 🔍 Query parameter parsing (filter, sort, pagination, includes)
-- 🛠️ Builder utilities for constructing responses
-- 📦 Serialization helpers for converting data to JSON:API format
-- ⚡ Minimal dependencies
+- 🎯 Validates documents, resources, relationships, and errors
+- ⚡ Minimal dependencies (only Effect)
 
 ## Installation
 
 ```bash
-npm install effect-jsonapi effect @effect/platform
+npm install effect-jsonapi effect
 ```
 
 ## Quick Start
 
-### Creating a Resource
+### Import the schemas
 
 ```typescript
-import * as JsonApi from "effect-jsonapi"
+import * as Schema from "effect-jsonapi"
+import * as S from "effect/Schema"
+```
 
-// Create a resource object
-const article = JsonApi.resource(
-  "articles",
-  "1",
-  {
-    title: "JSON:API with Effect",
-    body: "Learn how to build APIs with Effect and JSON:API",
-  },
-  {
-    relationships: {
-      author: JsonApi.toOneRelationship(
-        JsonApi.resourceIdentifier("people", "9")
-      ),
+### Validate a JSON:API document
+
+```typescript
+import * as Schema from "effect-jsonapi"
+import * as S from "effect/Schema"
+
+const document = {
+  data: {
+    type: "articles",
+    id: "1",
+    attributes: {
+      title: "JSON:API with Effect",
+      body: "Learn how to use JSON:API schemas with Effect",
     },
+    relationships: {
+      author: {
+        data: { type: "people", id: "9" }
+      }
+    }
   }
-)
-```
-
-### Building a Response
-
-```typescript
-import * as JsonApi from "effect-jsonapi"
-import { Effect } from "effect"
-
-// Create a success response with a single resource
-const response = JsonApi.successOne(article, {
-  meta: { version: "1.0" },
-})
-
-// Or with Effect
-const responseEffect = JsonApi.successOneEffect(article, {
-  meta: { version: "1.0" },
-})
-```
-
-### HTTP Integration
-
-```typescript
-import * as JsonApi from "effect-jsonapi"
-import * as HttpServerResponse from "@effect/platform/HttpServerResponse"
-
-// Create an HTTP response
-const httpResponse = JsonApi.successOneResponse(article, {
-  status: 200,
-  meta: { version: "1.0" },
-})
-
-// Error responses
-const notFound = JsonApi.notFoundResponse(
-  "Article with id '123' not found"
-)
-
-const validationError = JsonApi.errorResponse([
-  JsonApi.error({
-    status: "422",
-    title: "Validation Error",
-    detail: "Title must be at least 3 characters",
-    source: { pointer: "/data/attributes/title" },
-  }),
-])
-```
-
-### Parsing Query Parameters
-
-```typescript
-import * as JsonApi from "effect-jsonapi"
-
-const url = "https://api.example.com/articles?filter[status]=published&sort=-created&page[number]=1&include=author,comments"
-
-const params = JsonApi.parseQueryParams(url)
-// {
-//   filter: { status: 'published' },
-//   sort: [{ field: 'created', direction: 'desc' }],
-//   page: { number: '1' },
-//   include: ['author', 'comments']
-// }
-```
-
-### Serialization
-
-```typescript
-import * as JsonApi from "effect-jsonapi"
-
-interface Article {
-  id: string
-  title: string
-  body: string
-  authorId: string
 }
 
-// Create a serializer
-const articleSerializer = JsonApi.createSerializer<Article>({
-  type: "articles",
-  getId: (article) => article.id,
-  getAttributes: (article) => ({
-    title: article.title,
-    body: article.body,
-  }),
-  getRelationships: (article) => ({
-    author: JsonApi.toOneRelationship(
-      JsonApi.resourceIdentifier("people", article.authorId)
-    ),
-  }),
-})
-
-const article = {
-  id: "1",
-  title: "Hello World",
-  body: "This is my first article",
-  authorId: "42",
-}
-
-const resourceObject = articleSerializer.serialize(article)
+// Validate the document
+const result = S.decodeUnknownSync(Schema.Document)(document)
 ```
 
-## API Documentation
+### Validate multiple resources
+
+```typescript
+const document = {
+  data: [
+    {
+      type: "articles",
+      id: "1",
+      attributes: { title: "First Article" }
+    },
+    {
+      type: "articles",
+      id: "2",
+      attributes: { title: "Second Article" }
+    }
+  ],
+  meta: { total: 2 }
+}
+
+const result = S.decodeUnknownSync(Schema.Document)(document)
+```
+
+### Validate error documents
+
+```typescript
+const errorDoc = {
+  errors: [
+    {
+      status: "422",
+      title: "Validation Error",
+      detail: "Title must be at least 3 characters",
+      source: { pointer: "/data/attributes/title" }
+    }
+  ]
+}
+
+const result = S.decodeUnknownSync(Schema.Document)(errorDoc)
+```
+
+## API Reference
 
 ### Schema Types
 
 The library exports the following JSON:API schema types:
 
-- `Document` - Top-level JSON:API document
-- `ResourceObject` - A resource with type, id, attributes, and relationships
-- `ResourceIdentifier` - Reference to a resource (type + id)
-- `Relationship` - Relationship to other resources
-- `ErrorObject` - JSON:API error object
-- `Links` - Navigation links
-- `JsonApiObject` - JSON:API version information
+#### `Document`
+The top-level JSON:API document structure. Can contain:
+- `data` - Single resource, array of resources, or null
+- `errors` - Array of error objects
+- `meta` - Meta information
+- `jsonapi` - JSON:API version information
+- `links` - Navigation links
+- `included` - Related resources
 
-### Builder Functions
+#### `ResourceObject`
+A JSON:API resource with:
+- `type` (required) - Resource type
+- `id` (required) - Resource identifier
+- `attributes` - Resource attributes
+- `relationships` - Relationships to other resources
+- `links` - Resource-specific links
+- `meta` - Resource-specific metadata
 
-#### Resource Building
+#### `ResourceIdentifier`
+Reference to a resource:
+- `type` (required) - Resource type
+- `id` (required) - Resource identifier
+- `meta` - Optional metadata
 
-- `resource(type, id, attributes?, options?)` - Create a resource object
-- `resourceIdentifier(type, id, meta?)` - Create a resource identifier
-- `toOneRelationship(data, options?)` - Create a to-one relationship
-- `toManyRelationship(data, options?)` - Create a to-many relationship
+#### `Relationship`
+Describes a relationship to another resource:
+- `data` - Resource identifier(s), array, or null
+- `links` - Relationship links
+- `meta` - Relationship metadata
 
-#### Document Building
+#### `ErrorObject`
+JSON:API error information:
+- `id` - Unique error identifier
+- `status` - HTTP status code as string
+- `code` - Application-specific error code
+- `title` - Error title
+- `detail` - Detailed error description
+- `source` - Source of the error (pointer, parameter, or header)
+- `meta` - Additional metadata
 
-- `successOne(resource, options?)` - Create a success document with single resource
-- `successMany(resources, options?)` - Create a success document with multiple resources
-- `error(options)` - Create an error object
-- `errorDocument(errors, options?)` - Create an error document
+#### `ErrorSource`
+Points to the source of an error:
+- `pointer` - JSON Pointer to the error location
+- `parameter` - Query parameter name
+- `header` - Header name
 
-#### Effect Builders
+#### `Links`
+Navigation links object (string URLs or link objects with href and meta)
 
-- `successOneEffect(resource, options?)` - Effect version of successOne
-- `successManyEffect(resources, options?)` - Effect version of successMany
-- `errorEffect(errors, options?)` - Effect version of errorDocument
-
-### HTTP Functions
-
-- `jsonApiResponse(document, status?)` - Create HTTP response with JSON:API headers
-- `successOneResponse(resource, options?)` - HTTP response for single resource
-- `successManyResponse(resources, options?)` - HTTP response for multiple resources
-- `errorResponse(errors, options?)` - HTTP error response
-- `notFoundResponse(detail?)` - 404 error response
-- `badRequestResponse(detail, source?)` - 400 error response
-- `unprocessableEntityResponse(errors)` - 422 error response
-- `validateContentType(request)` - Validate Content-Type header
-- `validateAccept(request)` - Validate Accept header
-- `parseDocument(request)` - Parse and validate request body
-
-### Query Parameter Parsing
-
-- `parseQueryParams(url)` - Parse all query parameters
-- `parseFilter(searchParams)` - Parse filter parameters
-- `parseSort(sortParam)` - Parse sort parameter
-- `parsePage(searchParams)` - Parse pagination parameters
-- `parseInclude(includeParam)` - Parse include parameter
-- `parseFields(searchParams)` - Parse sparse fieldsets
-
-### Serialization
-
-- `serialize(config, data)` - Serialize data to resource object
-- `serializeMany(config, data)` - Serialize array to resource objects
-- `createSerializer(config)` - Create a reusable serializer
-- `createSimpleSerializer(type, getAttributes?)` - Create simple serializer for id-based entities
-
-## Example: Complete API Endpoint
-
-```typescript
-import * as Effect from "effect/Effect"
-import * as JsonApi from "effect-jsonapi"
-import * as HttpServerRequest from "@effect/platform/HttpServerRequest"
-
-interface Article {
-  id: string
-  title: string
-  body: string
-}
-
-const articleSerializer = JsonApi.createSimpleSerializer<Article>(
-  "articles",
-  (article) => ({
-    title: article.title,
-    body: article.body,
-  })
-)
-
-const getArticles = (request: HttpServerRequest.HttpServerRequest) =>
-  Effect.gen(function* () {
-    // Parse query parameters
-    const url = request.url
-    const params = JsonApi.parseQueryParams(url)
-    
-    // Fetch articles (mock data)
-    const articles: Article[] = [
-      { id: "1", title: "First Article", body: "Content 1" },
-      { id: "2", title: "Second Article", body: "Content 2" },
-    ]
-    
-    // Serialize to JSON:API
-    const resources = articleSerializer.serializeMany(articles)
-    
-    // Create response
-    return yield* JsonApi.successManyResponse(resources, {
-      meta: { total: articles.length },
-    })
-  })
-```
+#### `JsonApiObject`
+JSON:API version information:
+- `version` - JSON:API version (e.g., "1.1")
+- `meta` - Additional metadata
 
 ## Specification Compliance
 
@@ -262,9 +166,26 @@ This library implements the [JSON:API v1.1 specification](https://jsonapi.org/fo
 - ✅ Relationship objects
 - ✅ Error objects with source pointers
 - ✅ Links objects
-- ✅ Query parameters (filter, sort, page, include, fields)
-- ✅ Content negotiation (`application/vnd.api+json`)
-- ✅ HTTP status codes
+- ✅ Meta information
+
+## Usage with Effect
+
+The schemas can be used with Effect's validation and decoding functions:
+
+```typescript
+import * as Effect from "effect/Effect"
+import * as Schema from "effect-jsonapi"
+import * as S from "effect/Schema"
+
+// Decode with Effect
+const decodeDocument = S.decodeUnknown(Schema.Document)
+
+const program = Effect.gen(function* () {
+  const doc = yield* decodeDocument(unknownData)
+  // Work with validated document
+  return doc
+})
+```
 
 ## Contributing
 
@@ -278,5 +199,6 @@ MIT © Thomas Foster
 
 - [JSON:API Specification](https://jsonapi.org/)
 - [Effect Documentation](https://effect.website/)
+- [Effect Schema Documentation](https://effect.website/docs/schema/introduction)
 - [GitHub Repository](https://github.com/thomasfosterau/effect-jsonapi)
 
