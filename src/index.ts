@@ -41,36 +41,46 @@ export const Link = S.Union(
 export type Link = S.Schema.Type<typeof Link>
 
 /**
- * Links object - a collection of named links
+ * Resource Identifier with ID - identifies a saved resource by type and id
  * 
- * @see https://jsonapi.org/format/1.1/#document-links
+ * A "resource identifier object" with a server-assigned identifier.
+ * 
+ * @see https://jsonapi.org/format/1.1/#document-resource-identifier-objects
  */
-export const Links = S.Record({ key: S.String, value: Link })
+export const ResourceIdentifierWithId = S.Struct({
+  type: S.String,
+  id: S.String,
+  meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
+})
 
-export type Links = S.Schema.Type<typeof Links>
+export type ResourceIdentifierWithId = S.Schema.Type<typeof ResourceIdentifierWithId>
+
+/**
+ * Resource Identifier with LID - identifies an unsaved resource by type and lid
+ * 
+ * A "resource identifier object" with a client-generated local identifier.
+ * 
+ * @see https://jsonapi.org/format/1.1/#document-resource-identifier-objects
+ */
+export const ResourceIdentifierWithLid = S.Struct({
+  type: S.String,
+  lid: S.String,
+  meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
+})
+
+export type ResourceIdentifierWithLid = S.Schema.Type<typeof ResourceIdentifierWithLid>
 
 /**
  * Resource Identifier - identifies a specific resource by type and id or lid
  * 
  * A "resource identifier object" identifies an individual resource.
- * - Must contain `type` and either `id` or `lid` (or both)
- * - `id` is used for resources that have been saved to the server
- * - `lid` (local id) is used for resources that have not yet been saved (client-generated temporary identifiers)
+ * Can have either `id` (for saved resources) or `lid` (for unsaved resources).
  * 
  * @see https://jsonapi.org/format/1.1/#document-resource-identifier-objects
  */
-export const ResourceIdentifier = S.Struct({
-  type: S.String,
-  id: S.optional(S.String),
-  lid: S.optional(S.String),
-  meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
-}).pipe(
-  S.filter((value) => {
-    // At least one of id or lid must be present
-    return value.id !== undefined || value.lid !== undefined
-  }, {
-    message: () => "ResourceIdentifier must have either 'id' or 'lid' (or both)"
-  })
+export const ResourceIdentifier = S.Union(
+  ResourceIdentifierWithId,
+  ResourceIdentifierWithLid
 )
 
 export type ResourceIdentifier = S.Schema.Type<typeof ResourceIdentifier>
@@ -86,31 +96,97 @@ export type ResourceIdentifier = S.Schema.Type<typeof ResourceIdentifier>
  * 
  * @see https://jsonapi.org/format/1.1/#document-resource-object-relationships
  */
-export const Relationship = S.Struct({
+export const Relationship = <
+  Identifier extends S.Schema.Any = typeof ResourceIdentifier
+>(
+  identifier?: Identifier
+) => S.Struct({
   data: S.optional(S.Union(
-    ResourceIdentifier,
-    S.Array(ResourceIdentifier),
+    identifier ?? ResourceIdentifier,
+    S.Array(identifier ?? ResourceIdentifier),
     S.Null
   )),
-  links: S.optional(Links),
+  links: S.optional(S.Record({ key: S.String, value: Link })),
   meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
 })
 
-export type Relationship = S.Schema.Type<typeof Relationship>
+/**
+ * Resource Object with ID - a saved resource with server-assigned identifier
+ * 
+ * @see https://jsonapi.org/format/1.1/#document-resource-objects
+ */
+export const ResourceObjectWithId = <
+  Type extends S.Schema.Any = typeof S.String,
+  Id extends S.Schema.Any = typeof S.String,
+  Attributes extends S.Schema.Any = S.Schema<Record<string, unknown>>,
+  Relationships extends S.Schema.Any = S.Schema<Record<string, unknown>>,
+  ResourceLinks extends S.Schema.Any = S.Schema<Record<string, Link>>,
+  Meta extends S.Schema.Any = S.Schema<Record<string, unknown>>
+>(options?: {
+  type?: Type
+  id?: Id
+  attributes?: Attributes
+  relationships?: Relationships
+  links?: ResourceLinks
+  meta?: Meta
+}) => {
+  return S.Struct({
+    type: options?.type ?? S.String,
+    id: options?.id ?? S.String,
+    attributes: S.optional(
+      options?.attributes ?? S.Record({ key: S.String, value: S.Unknown })
+    ),
+    relationships: S.optional(
+      options?.relationships ?? S.Record({ key: S.String, value: S.Unknown })
+    ),
+    links: S.optional(options?.links ?? S.Record({ key: S.String, value: Link })),
+    meta: S.optional(
+      options?.meta ?? S.Record({ key: S.String, value: S.Unknown })
+    )
+  })
+}
+
+/**
+ * Resource Object with LID - an unsaved resource with client-generated identifier
+ * 
+ * @see https://jsonapi.org/format/1.1/#document-resource-objects
+ */
+export const ResourceObjectWithLid = <
+  Type extends S.Schema.Any = typeof S.String,
+  Lid extends S.Schema.Any = typeof S.String,
+  Attributes extends S.Schema.Any = S.Schema<Record<string, unknown>>,
+  Relationships extends S.Schema.Any = S.Schema<Record<string, unknown>>,
+  ResourceLinks extends S.Schema.Any = S.Schema<Record<string, Link>>,
+  Meta extends S.Schema.Any = S.Schema<Record<string, unknown>>
+>(options?: {
+  type?: Type
+  id?: Lid
+  attributes?: Attributes
+  relationships?: Relationships
+  links?: ResourceLinks
+  meta?: Meta
+}) => {
+  return S.Struct({
+    type: options?.type ?? S.String,
+    lid: options?.id ?? S.String,
+    attributes: S.optional(
+      options?.attributes ?? S.Record({ key: S.String, value: S.Unknown })
+    ),
+    relationships: S.optional(
+      options?.relationships ?? S.Record({ key: S.String, value: S.Unknown })
+    ),
+    links: S.optional(options?.links ?? S.Record({ key: S.String, value: Link })),
+    meta: S.optional(
+      options?.meta ?? S.Record({ key: S.String, value: S.Unknown })
+    )
+  })
+}
 
 /**
  * Creates a Resource Object schema with optional type constraints
  * 
  * A "resource object" represents a resource.
- * It must contain at least:
- * - `type` - The resource type
- * - `id` or `lid` - The resource identifier (id for saved resources, lid for unsaved)
- * 
- * It may also contain:
- * - `attributes` - An object representing the resource's data
- * - `relationships` - A relationships object describing relationships to other resources
- * - `links` - A links object containing links related to the resource
- * - `meta` - Non-standard meta-information about the resource
+ * Can have either `id` (for saved resources) or `lid` (for unsaved resources).
  * 
  * @see https://jsonapi.org/format/1.1/#document-resource-objects
  * 
@@ -127,35 +203,30 @@ export type Relationship = S.Schema.Type<typeof Relationship>
  *     email: S.String
  *   }),
  *   relationships: S.Struct({
- *     posts: JsonApi.Relationship
+ *     posts: JsonApi.Relationship()
  *   })
  * })
  * ```
  */
-export const ResourceObject = (options?: {
-  type?: S.Schema.Any
-  id?: S.Schema.Any
-  lid?: S.Schema.Any
-  attributes?: S.Schema.Any
-  relationships?: S.Schema.Any
-  links?: S.Schema.Any
-  meta?: S.Schema.Any
+export const ResourceObject = <
+  Type extends S.Schema.Any = typeof S.String,
+  Id extends S.Schema.Any = typeof S.String,
+  Attributes extends S.Schema.Any = S.Schema<Record<string, unknown>>,
+  Relationships extends S.Schema.Any = S.Schema<Record<string, unknown>>,
+  ResourceLinks extends S.Schema.Any = S.Schema<Record<string, Link>>,
+  Meta extends S.Schema.Any = S.Schema<Record<string, unknown>>
+>(options?: {
+  type?: Type
+  id?: Id
+  attributes?: Attributes
+  relationships?: Relationships
+  links?: ResourceLinks
+  meta?: Meta
 }) => {
-  return S.Struct({
-    type: options?.type ?? S.String,
-    id: S.optional(options?.id ?? S.String),
-    lid: S.optional(options?.lid ?? S.String),
-    attributes: S.optional(
-      options?.attributes ?? S.Record({ key: S.String, value: S.Unknown })
-    ),
-    relationships: S.optional(
-      options?.relationships ?? S.Record({ key: S.String, value: Relationship })
-    ),
-    links: S.optional(options?.links ?? Links),
-    meta: S.optional(
-      options?.meta ?? S.Record({ key: S.String, value: S.Unknown })
-    )
-  })
+  return S.Union(
+    ResourceObjectWithId(options),
+    ResourceObjectWithLid(options)
+  )
 }
 
 /**
@@ -244,17 +315,20 @@ const DefaultResourceObject = ResourceObject()
  * 
  * @see https://jsonapi.org/format/1.1/#document-top-level
  */
-export const Document = S.Struct({
-  data: S.optional(S.Union(
-    DefaultResourceObject,
-    S.Array(DefaultResourceObject),
-    S.Null
-  )),
-  errors: S.optional(S.Array(ErrorObject)),
-  meta: S.optional(S.Record({ key: S.String, value: S.Unknown })),
-  jsonapi: S.optional(JsonApiObject),
-  links: S.optional(Links),
-  included: S.optional(S.Array(DefaultResourceObject))
-})
-
-export type Document = S.Schema.Type<typeof Document>
+export const Document = <
+  Data extends S.Schema.Any = typeof DefaultResourceObject
+>(dataSchema?: Data) => {
+  const resourceSchema = dataSchema ?? DefaultResourceObject
+  return S.Struct({
+    data: S.optional(S.Union(
+      resourceSchema,
+      S.Array(resourceSchema),
+      S.Null
+    )),
+    errors: S.optional(S.Array(ErrorObject)),
+    meta: S.optional(S.Record({ key: S.String, value: S.Unknown })),
+    jsonapi: S.optional(JsonApiObject),
+    links: S.optional(S.Record({ key: S.String, value: Link })),
+    included: S.optional(S.Array(resourceSchema))
+  })
+}

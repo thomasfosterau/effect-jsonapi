@@ -15,6 +15,7 @@ This library provides type-safe schema definitions for [JSON:API v1.1](https://j
 - 📝 Full JSON:API v1.1 specification compliance
 - 🎯 Validates documents, resources, relationships, and errors
 - 🔧 Customizable resource schemas with type constraints
+- 🏷️ Separate types for saved (id) vs unsaved (lid) resources
 - ⚡ Minimal dependencies (only Effect)
 
 ## Installation
@@ -48,7 +49,8 @@ const document = {
 }
 
 // Validate the document
-const result = S.decodeUnknownSync(JsonApi.Document)(document)
+const schema = JsonApi.Document()
+const result = S.decodeUnknownSync(schema)(document)
 ```
 
 ### Define custom resource schemas
@@ -57,8 +59,8 @@ const result = S.decodeUnknownSync(JsonApi.Document)(document)
 import * as JsonApi from "effect-jsonapi"
 import * as S from "effect/Schema"
 
-// Define a typed User resource
-const User = JsonApi.ResourceObject({
+// Define a typed User resource with id
+const User = JsonApi.ResourceObjectWithId({
   type: S.Literal("users"),
   id: S.UUID,
   attributes: S.Struct({
@@ -66,7 +68,7 @@ const User = JsonApi.ResourceObject({
     email: S.String
   }),
   relationships: S.Struct({
-    posts: JsonApi.Relationship
+    posts: JsonApi.Relationship()
   })
 })
 
@@ -83,10 +85,19 @@ const user = {
 const validatedUser = S.decodeUnknownSync(User)(user)
 ```
 
-### Validate resources with local IDs
+### Work with unsaved resources (local IDs)
 
 ```typescript
-// Resources can use 'lid' (local id) for client-generated temporary identifiers
+// Define a resource with lid for create requests
+const NewArticle = JsonApi.ResourceObjectWithLid({
+  type: S.Literal("articles"),
+  id: S.String, // lid uses the same type parameter
+  attributes: S.Struct({
+    title: S.String,
+    body: S.String
+  })
+})
+
 const createRequest = {
   data: {
     type: "articles",
@@ -98,92 +109,130 @@ const createRequest = {
   }
 }
 
-const result = S.decodeUnknownSync(JsonApi.Document)(createRequest)
+const schema = JsonApi.Document(NewArticle)
+const result = S.decodeUnknownSync(schema)(createRequest)
 ```
 
-### Validate multiple resources
+### Custom relationships with typed identifiers
 
 ```typescript
+// Define a custom identifier schema for people
+const PersonIdentifier = S.Struct({
+  type: S.Literal("people"),
+  id: S.UUID
+})
+
+// Use it in a relationship
+const Article = JsonApi.ResourceObjectWithId({
+  type: S.Literal("articles"),
+  id: S.String,
+  attributes: S.Struct({
+    title: S.String
+  }),
+  relationships: S.Struct({
+    author: JsonApi.Relationship(PersonIdentifier)
+  })
+})
+```
+
+### Typed documents with included resources
+
+```typescript
+const ArticleSchema = JsonApi.ResourceObjectWithId({
+  type: S.Literal("articles"),
+  id: S.String,
+  attributes: S.Struct({ title: S.String })
+})
+
+// Document will type data and included to use ArticleSchema
+const DocumentSchema = JsonApi.Document(ArticleSchema)
+
 const document = {
-  data: [
-    {
-      type: "articles",
-      id: "1",
-      attributes: { title: "First Article" }
-    },
+  data: {
+    type: "articles",
+    id: "1",
+    attributes: { title: "Hello" }
+  },
+  included: [
     {
       type: "articles",
       id: "2",
-      attributes: { title: "Second Article" }
-    }
-  ],
-  meta: { total: 2 }
-}
-
-const result = S.decodeUnknownSync(JsonApi.Document)(document)
-```
-
-### Validate error documents
-
-```typescript
-const errorDoc = {
-  errors: [
-    {
-      status: "422",
-      title: "Validation Error",
-      detail: "Title must be at least 3 characters",
-      source: { pointer: "/data/attributes/title" }
+      attributes: { title: "World" }
     }
   ]
 }
 
-const result = S.decodeUnknownSync(JsonApi.Document)(errorDoc)
+const result = S.decodeUnknownSync(DocumentSchema)(document)
 ```
 
 ## API Reference
 
 ### Schema Types
 
-#### `ResourceObject(options?)`
-Factory function that creates a Resource Object schema with optional type constraints.
+#### `ResourceObjectWithId(options?)`
+Factory function that creates a Resource Object schema for **saved resources** with server-assigned IDs.
 
 **Parameters:**
-- `type` - Schema for resource type (default: `S.String`)
-- `id` - Schema for resource id (default: `S.String`)
-- `lid` - Schema for resource lid (default: `S.String`)
+- `type` - Schema for resource type
+- `id` - Schema for resource id
 - `attributes` - Schema for resource attributes
 - `relationships` - Schema for relationships object
 - `links` - Schema for links object
 - `meta` - Schema for meta object
 
-**Returns:** A schema that validates resource objects
+**Returns:** A schema that validates resource objects with `id`
 
-#### `Document`
-The top-level JSON:API document structure. Can contain:
-- `data` - Single resource, array of resources, or null
-- `errors` - Array of error objects
-- `meta` - Meta information
-- `jsonapi` - JSON:API version information
-- `links` - Navigation links
-- `included` - Related resources
+#### `ResourceObjectWithLid(options?)`
+Factory function that creates a Resource Object schema for **unsaved resources** with client-generated local IDs.
 
-#### `ResourceIdentifier`
-Reference to a resource with:
+**Parameters:**
+- `type` - Schema for resource type
+- `id` - Schema for resource lid (uses same parameter name)
+- `attributes` - Schema for resource attributes
+- `relationships` - Schema for relationships object
+- `links` - Schema for links object
+- `meta` - Schema for meta object
+
+**Returns:** A schema that validates resource objects with `lid`
+
+#### `ResourceObject(options?)`
+Factory function that creates a Resource Object schema that accepts **either** id or lid.
+
+**Returns:** Union of `ResourceObjectWithId` and `ResourceObjectWithLid`
+
+#### `Document(dataSchema?)`
+Factory function that creates a Document schema.
+
+**Parameters:**
+- `dataSchema` - Optional schema for the data and included fields
+
+**Returns:** A schema that validates JSON:API documents
+
+#### `ResourceIdentifierWithId`
+Schema for resource identifiers with server-assigned IDs:
 - `type` (required) - Resource type
-- `id` (optional) - Resource identifier (for saved resources)
-- `lid` (optional) - Local identifier (for unsaved resources)
+- `id` (required) - Resource identifier
 - `meta` (optional) - Metadata
 
-**Note:** Must have either `id` or `lid` (or both)
+#### `ResourceIdentifierWithLid`
+Schema for resource identifiers with client-generated local IDs:
+- `type` (required) - Resource type
+- `lid` (required) - Local identifier
+- `meta` (optional) - Metadata
 
-#### `Relationship`
-Describes a relationship to another resource:
-- `data` - Resource identifier(s), array, or null
-- `links` - Relationship links
-- `meta` - Relationship metadata
+#### `ResourceIdentifier`
+Union of `ResourceIdentifierWithId` and `ResourceIdentifierWithLid`
+
+#### `Relationship(identifierSchema?)`
+Factory function that creates a Relationship schema.
+
+**Parameters:**
+- `identifierSchema` - Optional custom schema for resource identifiers
+
+**Returns:** A schema that validates relationship objects
 
 #### `ErrorObject`
-JSON:API error information:
+Schema for JSON:API error objects:
 - `id` - Unique error identifier
 - `status` - HTTP status code as string
 - `code` - Application-specific error code
@@ -193,21 +242,16 @@ JSON:API error information:
 - `meta` - Additional metadata
 
 #### `ErrorSource`
-Points to the source of an error:
+Schema for error source information:
 - `pointer` - JSON Pointer to the error location
 - `parameter` - Query parameter name
 - `header` - Header name
 
 #### `Link`
-A link can be:
-- A string containing the URL
-- An object with `href` and optional metadata
-
-#### `Links`
-Navigation links object (record of named links)
+Schema for links (string URL or object with href and metadata)
 
 #### `JsonApiObject`
-JSON:API version information:
+Schema for JSON:API version information:
 - `version` - JSON:API version (e.g., "1.1")
 - `meta` - Additional metadata
 
@@ -216,32 +260,14 @@ JSON:API version information:
 This library implements the [JSON:API v1.1 specification](https://jsonapi.org/format/1.1/):
 
 - ✅ Document structure (data, errors, meta, links, included)
-- ✅ Resource objects (type, id/lid, attributes, relationships)
-- ✅ Resource identifier objects
-- ✅ Relationship objects
+- ✅ Resource objects with id or lid
+- ✅ Resource identifier objects (separate types for id/lid)
+- ✅ Relationship objects with custom identifier schemas
 - ✅ Error objects with source pointers
 - ✅ Links objects (string or object form)
 - ✅ Local identifiers (lid) for unsaved resources
+- ✅ Type-safe included resources matching data type
 - ✅ Meta information
-
-## Usage with Effect
-
-The schemas can be used with Effect's validation and decoding functions:
-
-```typescript
-import * as Effect from "effect/Effect"
-import * as JsonApi from "effect-jsonapi"
-import * as S from "effect/Schema"
-
-// Decode with Effect
-const decodeDocument = S.decodeUnknown(JsonApi.Document)
-
-const program = Effect.gen(function* () {
-  const doc = yield* decodeDocument(unknownData)
-  // Work with validated document
-  return doc
-})
-```
 
 ## Contributing
 
