@@ -1,16 +1,41 @@
 import { describe, it, expect } from "vitest"
 import * as S from "effect/Schema"
-import * as Schema from "../Schema"
+import * as JsonApi from "../index"
 
-describe("Schema", () => {
+describe("JSON:API Schemas", () => {
+  describe("Link", () => {
+    it("should validate a string link", () => {
+      const input = "https://example.com/articles/1"
+      const result = S.decodeUnknownSync(JsonApi.Link)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should validate a link object", () => {
+      const input = {
+        href: "https://example.com/articles/1",
+        meta: { count: 10 }
+      }
+      const result = S.decodeUnknownSync(JsonApi.Link)(input)
+      expect(result).toEqual(input)
+    })
+  })
+
   describe("ResourceIdentifier", () => {
-    it("should validate a valid resource identifier", () => {
+    it("should validate a resource identifier with id", () => {
       const input = {
         type: "articles",
         id: "1"
       }
-      
-      const result = S.decodeUnknownSync(Schema.ResourceIdentifier)(input)
+      const result = S.decodeUnknownSync(JsonApi.ResourceIdentifier)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should validate a resource identifier with lid", () => {
+      const input = {
+        type: "articles",
+        lid: "temp-123"
+      }
+      const result = S.decodeUnknownSync(JsonApi.ResourceIdentifier)(input)
       expect(result).toEqual(input)
     })
 
@@ -20,14 +45,14 @@ describe("Schema", () => {
         id: "1",
         meta: { version: "1.0" }
       }
-      
-      const result = S.decodeUnknownSync(Schema.ResourceIdentifier)(input)
+      const result = S.decodeUnknownSync(JsonApi.ResourceIdentifier)(input)
       expect(result).toEqual(input)
     })
   })
 
   describe("ResourceObject", () => {
     it("should validate a basic resource object", () => {
+      const schema = JsonApi.ResourceObject()
       const input = {
         type: "articles",
         id: "1",
@@ -36,12 +61,49 @@ describe("Schema", () => {
           body: "This is a test"
         }
       }
-      
-      const result = S.decodeUnknownSync(Schema.ResourceObject)(input)
+      const result = S.decodeUnknownSync(schema)(input)
       expect(result).toEqual(input)
     })
 
+    it("should validate a resource object with lid", () => {
+      const schema = JsonApi.ResourceObject()
+      const input = {
+        type: "articles",
+        lid: "temp-1",
+        attributes: {
+          title: "New Article"
+        }
+      }
+      const result = S.decodeUnknownSync(schema)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should validate a resource object with typed attributes", () => {
+      const schema = JsonApi.ResourceObject({
+        type: S.Literal("users"),
+        id: S.UUID,
+        attributes: S.Struct({
+          name: S.String,
+          email: S.String
+        })
+      })
+
+      const input = {
+        type: "users" as const,
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        attributes: {
+          name: "John Doe",
+          email: "john@example.com"
+        }
+      }
+
+      const result = S.decodeUnknownSync(schema)(input)
+      expect(result.type).toBe("users")
+      expect(result.attributes?.name).toBe("John Doe")
+    })
+
     it("should validate a resource object with relationships", () => {
+      const schema = JsonApi.ResourceObject()
       const input = {
         type: "articles",
         id: "1",
@@ -57,8 +119,7 @@ describe("Schema", () => {
           }
         }
       }
-      
-      const result = S.decodeUnknownSync(Schema.ResourceObject)(input)
+      const result = S.decodeUnknownSync(schema)(input)
       expect(result).toEqual(input)
     })
   })
@@ -70,8 +131,7 @@ describe("Schema", () => {
         title: "Not Found",
         detail: "The requested resource does not exist"
       }
-      
-      const result = S.decodeUnknownSync(Schema.ErrorObject)(input)
+      const result = S.decodeUnknownSync(JsonApi.ErrorObject)(input)
       expect(result).toEqual(input)
     })
 
@@ -84,8 +144,7 @@ describe("Schema", () => {
           pointer: "/data/attributes/title"
         }
       }
-      
-      const result = S.decodeUnknownSync(Schema.ErrorObject)(input)
+      const result = S.decodeUnknownSync(JsonApi.ErrorObject)(input)
       expect(result).toEqual(input)
     })
   })
@@ -101,8 +160,7 @@ describe("Schema", () => {
           }
         }
       }
-      
-      const result = S.decodeUnknownSync(Schema.Document)(input)
+      const result = S.decodeUnknownSync(JsonApi.Document)(input)
       expect(result).toEqual(input)
     })
 
@@ -121,8 +179,7 @@ describe("Schema", () => {
           }
         ]
       }
-      
-      const result = S.decodeUnknownSync(Schema.Document)(input)
+      const result = S.decodeUnknownSync(JsonApi.Document)(input)
       expect(result).toEqual(input)
     })
 
@@ -135,8 +192,7 @@ describe("Schema", () => {
           }
         ]
       }
-      
-      const result = S.decodeUnknownSync(Schema.Document)(input)
+      const result = S.decodeUnknownSync(JsonApi.Document)(input)
       expect(result).toEqual(input)
     })
 
@@ -159,8 +215,7 @@ describe("Schema", () => {
           }
         ]
       }
-      
-      const result = S.decodeUnknownSync(Schema.Document)(input)
+      const result = S.decodeUnknownSync(JsonApi.Document)(input)
       expect(result).toEqual(input)
     })
 
@@ -169,56 +224,24 @@ describe("Schema", () => {
         data: [],
         meta: { total: 0 },
         links: {
-          self: "/articles"
+          self: "https://example.com/articles"
         }
       }
-      
-      const result = S.decodeUnknownSync(Schema.Document)(input)
-      expect(result).toEqual(input)
-    })
-  })
-
-  describe("ResourceObjectCreate", () => {
-    it("should validate a create resource without id", () => {
-      const input = {
-        type: "articles",
-        attributes: {
-          title: "New Article",
-          body: "Content"
-        }
-      }
-      
-      const result = S.decodeUnknownSync(Schema.ResourceObjectCreate)(input)
+      const result = S.decodeUnknownSync(JsonApi.Document)(input)
       expect(result).toEqual(input)
     })
 
-    it("should validate a create resource with client-generated id", () => {
-      const input = {
-        type: "articles",
-        id: "client-123",
-        attributes: {
-          title: "New Article"
-        }
-      }
-      
-      const result = S.decodeUnknownSync(Schema.ResourceObjectCreate)(input)
-      expect(result).toEqual(input)
-    })
-  })
-
-  describe("DocumentCreate", () => {
-    it("should validate a create document without resource id", () => {
+    it("should validate a document with lid in data", () => {
       const input = {
         data: {
           type: "articles",
+          lid: "temp-1",
           attributes: {
-            title: "New Article",
-            body: "Content"
+            title: "New Article"
           }
         }
       }
-      
-      const result = S.decodeUnknownSync(Schema.DocumentCreate)(input)
+      const result = S.decodeUnknownSync(JsonApi.Document)(input)
       expect(result).toEqual(input)
     })
   })
