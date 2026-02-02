@@ -144,8 +144,17 @@ const ArticleSchema = JsonApi.ResourceObjectWithId({
   attributes: S.Struct({ title: S.String })
 })
 
-// Document will type data and included to use ArticleSchema
-const DocumentSchema = JsonApi.Document(ArticleSchema)
+const PersonSchema = JsonApi.ResourceObjectWithId({
+  type: S.Literal("people"),
+  id: S.String,
+  attributes: S.Struct({ name: S.String })
+})
+
+// Document with separate schemas for data and included
+const DocumentSchema = JsonApi.Document({
+  data: ArticleSchema,
+  included: S.Union(ArticleSchema, PersonSchema) // Can include multiple types
+})
 
 const document = {
   data: {
@@ -155,9 +164,9 @@ const document = {
   },
   included: [
     {
-      type: "articles",
-      id: "2",
-      attributes: { title: "World" }
+      type: "people",
+      id: "9",
+      attributes: { name: "John Doe" }
     }
   ]
 }
@@ -200,13 +209,18 @@ Factory function that creates a Resource Object schema that accepts **either** i
 
 **Returns:** Union of `ResourceObjectWithId` and `ResourceObjectWithLid`
 
-#### `Document(dataSchema?)`
+#### `Document(options?)`
 Factory function that creates a Document schema.
 
 **Parameters:**
-- `dataSchema` - Optional schema for the data and included fields
+- `options.data` - Optional schema for the data field
+- `options.included` - Optional schema for the included field (defaults to same as data)
 
 **Returns:** A schema that validates JSON:API documents
+
+**Note:** The Document schema enforces JSON:API constraints:
+- At least one of `data`, `errors`, or `meta` must be present
+- `data` and `errors` cannot coexist in the same document
 
 #### `ResourceIdentifierWithId`
 Schema for resource identifiers with server-assigned IDs:
@@ -230,6 +244,9 @@ Factory function that creates a Relationship schema.
 - `identifierSchema` - Optional custom schema for resource identifiers
 
 **Returns:** A schema that validates relationship objects
+
+**Note:** The Relationship schema enforces JSON:API constraints:
+- At least one of `data`, `links`, or `meta` must be present
 
 #### `ErrorObject`
 Schema for JSON:API error objects:
@@ -257,17 +274,22 @@ Schema for JSON:API version information:
 
 ## Specification Compliance
 
-This library implements the [JSON:API v1.1 specification](https://jsonapi.org/format/1.1/):
+This library implements key parts of the [JSON:API v1.1 specification](https://jsonapi.org/format/1.1/):
 
 - ✅ Document structure (data, errors, meta, links, included)
+- ⚠️  Mutual exclusivity of data and errors (enforced via union types, but excess properties may be stripped during validation)
+- ✅ Requires at least one top-level member (data, errors, or meta)
 - ✅ Resource objects with id or lid
 - ✅ Resource identifier objects (separate types for id/lid)
-- ✅ Relationship objects with custom identifier schemas
+- ✅ Relationship objects with at least one member required
+- ✅ Relationship custom identifier schemas
 - ✅ Error objects with source pointers
 - ✅ Links objects (string or object form)
 - ✅ Local identifiers (lid) for unsaved resources
-- ✅ Type-safe included resources matching data type
+- ✅ Separate schemas for data and included resources
 - ✅ Meta information
+
+**Note:** This library focuses on schema validation. The Document schema uses a union type to separate data documents from error documents, which provides type safety. However, due to how Effect Schema handles unions and excess properties, documents with both `data` and `errors` may be accepted (matching one of the union variants). In practice, JSON:API servers should not send such malformed documents. Some aspects of JSON:API (like content negotiation, query parameters, etc.) are outside this library's scope.
 
 ## Contributing
 

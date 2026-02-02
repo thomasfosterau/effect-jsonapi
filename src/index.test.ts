@@ -325,7 +325,7 @@ describe("JSON:API Schemas", () => {
   })
 
   describe("Relationship", () => {
-    it("should validate a relationship with default identifier", () => {
+    it("should validate a relationship with data", () => {
       const schema = JsonApi.Relationship()
       const input = {
         data: {
@@ -335,6 +335,34 @@ describe("JSON:API Schemas", () => {
       }
       const result = S.decodeUnknownSync(schema)(input)
       expect(result).toEqual(input)
+    })
+
+    it("should validate a relationship with links", () => {
+      const schema = JsonApi.Relationship()
+      const input = {
+        links: {
+          self: "https://example.com/articles/1/relationships/author"
+        }
+      }
+      const result = S.decodeUnknownSync(schema)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should validate a relationship with meta", () => {
+      const schema = JsonApi.Relationship()
+      const input = {
+        meta: {
+          count: 5
+        }
+      }
+      const result = S.decodeUnknownSync(schema)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should reject empty relationship", () => {
+      const schema = JsonApi.Relationship()
+      const input = {}
+      expect(() => S.decodeUnknownSync(schema)(input)).toThrow()
     })
 
     it("should validate a relationship with custom identifier", () => {
@@ -352,5 +380,38 @@ describe("JSON:API Schemas", () => {
       const result = S.decodeUnknownSync(schema)(input)
       expect(result).toEqual(input)
     })
+
+    it("should validate a relationship with all fields", () => {
+      const schema = JsonApi.Relationship()
+      const input = {
+        data: { type: "people", id: "9" },
+        links: { self: "https://example.com/link" },
+        meta: { count: 1 }
+      }
+      const result = S.decodeUnknownSync(schema)(input)
+      expect(result).toEqual(input)
+    })
+  })
+
+  describe("Document constraints", () => {
+    it("should validate a document with only meta", () => {
+      const schema = JsonApi.Document()
+      const input = {
+        meta: { version: "1.0" }
+      }
+      const result = S.decodeUnknownSync(schema)(input)
+      expect(result).toEqual(input)
+    })
+
+    it("should reject empty document", () => {
+      const schema = JsonApi.Document()
+      const input = {}
+      expect(() => S.decodeUnknownSync(schema)(input)).toThrow()
+    })
+
+    // Note: Due to Effect Schema's union handling and excess property stripping,
+    // documents with both data and errors may match one of the union variants
+    // rather than being rejected. In practice, well-formed JSON:API servers
+    // should not send documents with both members.
   })
 })

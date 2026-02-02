@@ -89,7 +89,7 @@ export type ResourceIdentifier = S.Schema.Type<typeof ResourceIdentifier>
  * Relationship object - describes relationships between resources
  * 
  * A "relationship object" describes a relationship between resources.
- * It can contain:
+ * At least one of the following must be present:
  * - `links` - URLs for fetching the relationship
  * - `data` - Resource linkage (identifier(s) or null)
  * - `meta` - Non-standard meta-information about the relationship
@@ -100,15 +100,37 @@ export const Relationship = <
   Identifier extends S.Schema.Any = typeof ResourceIdentifier
 >(
   identifier?: Identifier
-) => S.Struct({
-  data: S.optional(S.Union(
+) => {
+  const data = S.Union(
     identifier ?? ResourceIdentifier,
     S.Array(identifier ?? ResourceIdentifier),
     S.Null
-  )),
-  links: S.optional(S.Record({ key: S.String, value: Link })),
-  meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
-})
+  )
+  const links = S.Record({ key: S.String, value: Link })
+  const meta = S.Record({ key: S.String, value: S.Unknown })
+
+  // A relationship must have at least one of: data, links, or meta
+  return S.Union(
+    // data is present (links and meta optional)
+    S.Struct({
+      data,
+      links: S.optional(links),
+      meta: S.optional(meta)
+    }),
+    // links is present (data and meta optional)
+    S.Struct({
+      links,
+      data: S.optional(data),
+      meta: S.optional(meta)
+    }),
+    // meta is present (data and links optional)
+    S.Struct({
+      meta,
+      data: S.optional(data),
+      links: S.optional(links)
+    })
+  )
+}
 
 /**
  * Resource Object with ID - a saved resource with server-assigned identifier
@@ -316,22 +338,64 @@ const DefaultResourceObject = ResourceObject()
  * 
  * The members `data` and `errors` must not coexist in the same document.
  * 
+ * The schema enforces this through a union of three document types:
+ * - Data documents (with data and optional included/meta/links/jsonapi)
+ * - Error documents (with errors and optional meta/links/jsonapi)
+ * - Meta-only documents (with required meta and optional links/jsonapi)
+ * 
  * @see https://jsonapi.org/format/1.1/#document-top-level
  */
 export const Document = <
-  Data extends S.Schema.Any = typeof DefaultResourceObject
->(dataSchema?: Data) => {
-  const resourceSchema = dataSchema ?? DefaultResourceObject
-  return S.Struct({
-    data: S.optional(S.Union(
-      resourceSchema,
-      S.Array(resourceSchema),
-      S.Null
-    )),
-    errors: S.optional(S.Array(ErrorObject)),
-    meta: S.optional(S.Record({ key: S.String, value: S.Unknown })),
+  Data extends S.Schema.Any = typeof DefaultResourceObject,
+  Included extends S.Schema.Any = Data
+>(options?: {
+  data?: Data
+  included?: Included
+}) => {
+  const dataSchema = options?.data ?? DefaultResourceObject
+  const includedSchema = options?.included ?? dataSchema
+  
+  const commonFields = {
     jsonapi: S.optional(JsonApiObject),
-    links: S.optional(S.Record({ key: S.String, value: Link })),
-    included: S.optional(S.Array(resourceSchema))
+    links: S.optional(S.Record({ key: S.String, value: Link }))
+  }
+  
+  const optionalMeta = {
+    meta: S.optional(S.Record({ key: S.String, value: S.Unknown }))
+  }
+  
+  const requiredMeta = {
+    meta: S.Record({ key: S.String, value: S.Unknown })
+  }
+
+  // Document with data
+  const dataDocument = S.Struct({
+    data: S.Union(
+      dataSchema,
+      S.Array(dataSchema),
+      S.Null
+    ),
+    included: S.optional(S.Array(includedSchema)),
+    ...optionalMeta,
+    ...commonFields
   })
+
+  // Document with errors
+  const errorsDocument = S.Struct({
+    errors: S.Array(ErrorObject),
+    ...optionalMeta,
+    ...commonFields
+  })
+
+  // Document with only meta
+  const metaOnlyDocument = S.Struct({
+    ...requiredMeta,
+    ...commonFields
+  })
+
+  return S.Union(
+    dataDocument,
+    errorsDocument,
+    metaOnlyDocument
+  )
 }

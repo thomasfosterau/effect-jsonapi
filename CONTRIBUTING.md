@@ -64,7 +64,7 @@ npm run build
 - Write tests for all schema definitions
 - Ensure all tests pass before submitting a PR
 - Use vitest for testing
-- Follow the existing test structure in `src/__tests__/`
+- Follow the existing test structure (tests are alongside source files, e.g., `src/index.test.ts`)
 
 ## Commit Messages
 
