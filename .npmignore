@@ -1,0 +1,14 @@
+# Exclude development and example files from npm package
+*.test.ts
+__tests__
+examples/
+vitest.config.ts
+tsconfig.json
+
+# Source files (only distribute compiled files)
+src/
+
+# Development files
+.git
+.gitignore
+node_modules/
