@@ -1,8 +1,10 @@
 /**
- * effect-jsonapi — Type-safe JSON:API v1.1 schema and HttpApi definitions for Effect v4.
+ * effect-jsonapi — Type-safe, spec-compliant JSON:API v1.1 on Effect's HttpApi.
+ *
+ * ```ts
+ * import { JsonApi } from "effect-jsonapi"
+ * ```
  *
  * @packageDocumentation
  */
-export * from "./JsonApi.js"
-export * from "./JsonApiHttp.js"
-export * from "./JsonApiMiddleware.js"
+export * as JsonApi from "./JsonApi.js"
