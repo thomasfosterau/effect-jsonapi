@@ -1,0 +1,376 @@
+import { describe, expect, expectTypeOf, it } from "vitest"
+import { Schema } from "effect"
+import { AnyMeta } from "./Document.js"
+import { Identifier, Resource, toMany, toOne } from "./Resource.js"
+
+// ---------------------------------------------------------------------------
+// Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
+// ---------------------------------------------------------------------------
+
+const Person = Resource("people", {
+  attributes: {
+    firstName: Schema.NonEmptyString,
+    lastName: Schema.NonEmptyString
+  }
+})
+
+const Comment = Resource("comments", {
+  attributes: { body: Schema.NonEmptyString },
+  relationships: { author: toOne(() => Person) }
+})
+
+const Article = Resource("articles", {
+  attributes: {
+    title: Schema.NonEmptyString,
+    body: Schema.String,
+    createdAt: Schema.DateFromString
+  },
+  relationships: {
+    author: toOne(() => Person),
+    comments: toMany(() => Comment)
+  },
+  meta: Schema.Struct({ rank: Schema.Int })
+})
+
+describe("Resource", () => {
+  it("is itself the resource object schema", () => {
+    const decoded = Schema.decodeUnknownSync(Article)({
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+      relationships: {
+        author: { data: { type: "people", id: "9" } },
+        comments: { data: [{ type: "comments", id: "5" }] }
+      }
+    })
+    expect(decoded.type).toBe("articles")
+    expect(decoded.id).toBe("1")
+    expect(decoded.attributes.title).toBe("Hello")
+    // DateFromString decodes to a Date instance
+    expect(decoded.attributes.createdAt).toBeInstanceOf(Date)
+    expect(decoded.relationships?.author.data?.id).toBe("9")
+  })
+
+  it("rejects a resource with the wrong type tag", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Article)({
+        type: "people",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      })
+    ).toThrow()
+  })
+
+  it("exposes the resource type name", () => {
+    expect(Article.type).toBe("articles")
+    expect(Person.type).toBe("people")
+    expectTypeOf(Article.type).toEqualTypeOf<"articles">()
+  })
+
+  it("brands ids per resource type", () => {
+    const articleId = Article.Id.make("1")
+    const personId = Person.Id.make("1")
+    expect(articleId).toBe("1")
+    expect(personId).toBe("1")
+    // Branded ids are not assignable across resource types
+    expectTypeOf(articleId).not.toEqualTypeOf(personId)
+    // Branded ids flow into the resource object type
+    expectTypeOf<typeof Article.Type["id"]>().toEqualTypeOf<typeof articleId>()
+  })
+
+  it("derives the resource identifier schema", () => {
+    const decoded = Schema.decodeUnknownSync(Article.identifier)({ type: "articles", id: "1" })
+    expect(decoded).toEqual({ type: "articles", id: "1" })
+    expect(() => Schema.decodeUnknownSync(Article.identifier)({ type: "people", id: "1" })).toThrow()
+  })
+
+  it("encodes decoded resources back to wire form", () => {
+    const decoded = Schema.decodeUnknownSync(Article)({
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+    })
+    const encoded = Schema.encodeUnknownSync(Article)(decoded)
+    expect(encoded.attributes.createdAt).toBe("2024-01-01T00:00:00.000Z")
+  })
+
+  it("constructs values with make (type tag auto-filled)", () => {
+    const article = Article.make({
+      id: Article.Id.make("1"),
+      attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01") },
+      relationships: {
+        author: { data: { type: "people", id: Person.Id.make("9") } },
+        comments: { data: [] }
+      }
+    })
+    expect(article.type).toBe("articles")
+  })
+})
+
+describe("Resource.createPayload", () => {
+  it("accepts a payload without id", () => {
+    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+      data: {
+        type: "articles",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      }
+    })
+    expect(decoded.data.attributes.title).toBe("Hello")
+  })
+
+  it("accepts a payload with a client-generated lid", () => {
+    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+      data: {
+        type: "articles",
+        lid: "temp-1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      }
+    })
+    expect(decoded.data.lid).toBe("temp-1")
+  })
+
+  it("rejects a payload with a server-assigned id", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Article.createPayload)(
+        {
+          data: {
+            type: "articles",
+            id: "1",
+            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+          }
+        },
+        { onExcessProperty: "error" }
+      )
+    ).toThrow()
+  })
+
+  it("does not expose an id key in the payload type", () => {
+    type CreateData = typeof Article.createPayload.Type["data"]
+    expectTypeOf<CreateData>().not.toHaveProperty("id")
+    expectTypeOf<CreateData["lid"]>().toEqualTypeOf<string | undefined>()
+  })
+})
+
+describe("Resource.updatePayload", () => {
+  it("requires id and accepts partial attributes", () => {
+    const decoded = Schema.decodeUnknownSync(Article.updatePayload)({
+      data: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Updated" }
+      }
+    })
+    expect(decoded.data.id).toBe("1")
+    expect(decoded.data.attributes?.title).toBe("Updated")
+  })
+
+  it("rejects a payload without id", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Article.updatePayload)({
+        data: { type: "articles", attributes: { title: "Updated" } }
+      })
+    ).toThrow()
+  })
+})
+
+describe("Resource relationships", () => {
+  it("toOne accepts null data (empty linkage)", () => {
+    const decoded = Schema.decodeUnknownSync(Comment)({
+      type: "comments",
+      id: "5",
+      attributes: { body: "Nice" },
+      relationships: { author: { data: null } }
+    })
+    expect(decoded.relationships?.author.data).toBeNull()
+  })
+
+  it("toMany accepts an empty array but not null", () => {
+    const decode = (data: unknown) =>
+      Schema.decodeUnknownSync(Article)({
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+        relationships: {
+          author: { data: { type: "people", id: "9" } },
+          comments: { data }
+        }
+      })
+    expect(decode([]).relationships?.comments.data).toEqual([])
+    expect(() => decode(null)).toThrow()
+  })
+
+  it("rejects relationship identifiers of the wrong type", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Comment)({
+        type: "comments",
+        id: "5",
+        attributes: { body: "Nice" },
+        relationships: { author: { data: { type: "articles", id: "1" } } }
+      })
+    ).toThrow()
+  })
+
+  it("exposes relationship descriptors for graph walking", () => {
+    expect(Object.keys(Article.relationships)).toEqual(["author", "comments"])
+    expect(Article.relationships.author.kind).toBe("toOne")
+    expect(Article.relationships.comments.kind).toBe("toMany")
+    expect(Article.relationships.author.ref().type).toBe("people")
+  })
+})
+
+describe("Resource.document / Resource.collection", () => {
+  it("document accepts a single resource or null data", () => {
+    const doc = Article.document()
+    const withData = Schema.decodeUnknownSync(doc)({
+      data: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      }
+    })
+    expect(withData.data?.id).toBe("1")
+    const withNull = Schema.decodeUnknownSync(doc)({ data: null })
+    expect(withNull.data).toBeNull()
+  })
+
+  it("collection requires array data", () => {
+    const doc = Article.collection()
+    const decoded = Schema.decodeUnknownSync(doc)({ data: [] })
+    expect(decoded.data).toEqual([])
+    expect(() => Schema.decodeUnknownSync(doc)({ data: null })).toThrow()
+  })
+
+  it("included union is derived from the relationship graph (one hop)", () => {
+    const doc = Article.document()
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+        relationships: {
+          author: { data: { type: "people", id: "9" } },
+          comments: { data: [{ type: "comments", id: "5" }] }
+        }
+      },
+      included: [
+        { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } },
+        { type: "comments", id: "5", attributes: { body: "Nice" } }
+      ]
+    })
+    expect(decoded.included).toHaveLength(2)
+  })
+
+  it("included rejects resources outside the relationship graph", () => {
+    const doc = Comment.document()
+    expect(() =>
+      Schema.decodeUnknownSync(doc)({
+        data: { type: "comments", id: "5", attributes: { body: "Nice" } },
+        included: [
+          // articles is not reachable from Comment's relationships
+          {
+            type: "articles",
+            id: "1",
+            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+          }
+        ]
+      })
+    ).toThrow()
+  })
+
+  it("included can be overridden explicitly for deeper compound documents", () => {
+    const doc = Article.document({ included: Schema.Union([Person, Comment]) })
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: null,
+      included: [{ type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }]
+    })
+    expect(decoded.included).toHaveLength(1)
+  })
+
+  it("typed resource meta flows into documents", () => {
+    const decoded = Schema.decodeUnknownSync(Article)({
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+      meta: { rank: 3 }
+    })
+    expect(decoded.meta?.rank).toBe(3)
+    expectTypeOf<NonNullable<typeof Article.Type["meta"]>["rank"]>().toEqualTypeOf<number>()
+  })
+
+  it("document meta can be overridden per document", () => {
+    const PageMeta = Schema.Struct({ total: Schema.Int })
+    const doc = Article.collection({ meta: PageMeta })
+    const decoded = Schema.decodeUnknownSync(doc)({ data: [], meta: { total: 0 } })
+    expect(decoded.meta?.total).toBe(0)
+  })
+})
+
+describe("Resource without relationships", () => {
+  it("decodes documents without included", () => {
+    const doc = Person.document()
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
+    })
+    expect(decoded.data?.attributes.firstName).toBe("John")
+  })
+})
+
+describe("Identifier", () => {
+  it("can be used standalone", () => {
+    const PersonIdentifier = Identifier("people")
+    const decoded = Schema.decodeUnknownSync(PersonIdentifier)({ type: "people", id: "9" })
+    expect(decoded.id).toBe("9")
+  })
+})
+
+describe("forward references", () => {
+  it("resolves thunks regardless of declaration order", () => {
+    // Tag references Post which is declared *after* it.
+    const Tag = Resource("tags", {
+      attributes: { name: Schema.String },
+      relationships: { posts: toMany((): typeof Post => Post) }
+    })
+    const Post = Resource("posts", {
+      attributes: { title: Schema.String }
+    })
+    expect(Tag.relationships.posts.ref().type).toBe("posts")
+    const doc = Tag.document()
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: {
+        type: "tags",
+        id: "1",
+        attributes: { name: "effect" },
+        relationships: { posts: { data: [{ type: "posts", id: "2" }] } }
+      },
+      included: [{ type: "posts", id: "2", attributes: { title: "Hello" } }]
+    })
+    expect(decoded.included).toHaveLength(1)
+  })
+})
+
+describe("type-level guarantees", () => {
+  it("attribute types flow into the resource Type", () => {
+    expectTypeOf<typeof Article.Type["attributes"]["title"]>().toEqualTypeOf<string>()
+    expectTypeOf<typeof Article.Type["attributes"]["createdAt"]>().toEqualTypeOf<Date>()
+    // Encoded side keeps the wire form
+    expectTypeOf<typeof Article.Encoded["attributes"]["createdAt"]>().toEqualTypeOf<string>()
+  })
+
+  it("relationship identifier types are tagged with the target resource type", () => {
+    type AuthorData = NonNullable<NonNullable<typeof Article.Type["relationships"]>["author"]["data"]>
+    expectTypeOf<AuthorData["type"]>().toEqualTypeOf<"people">()
+  })
+
+  it("default meta is a free-form record", () => {
+    expectTypeOf<NonNullable<typeof Person.Type["meta"]>>().toEqualTypeOf<{
+      readonly [x: string]: unknown
+    }>()
+  })
+})
+
+describe("AnyMeta", () => {
+  it("accepts arbitrary records", () => {
+    const decoded = Schema.decodeUnknownSync(AnyMeta)({ anything: [1, 2, 3], nested: { a: true } })
+    expect(decoded.anything).toEqual([1, 2, 3])
+  })
+})

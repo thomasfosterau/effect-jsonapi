@@ -2,8 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["vitest/globals", "node"]
+    "rootDir": ".",
+    "types": ["vitest/globals", "node"],
+    "paths": {
+      "effect-jsonapi": ["./src/index.ts"]
+    }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "examples/**/*", "test/**/*"],
   "exclude": ["node_modules", "dist"]
 }
