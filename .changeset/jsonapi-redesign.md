@@ -40,11 +40,21 @@ import { JsonApi } from "effect-jsonapi"
 
 ### Typed query parameters (`JsonApi.Query`, `JsonApi.Page`)
 
-- First-class schemas for the spec's query families: `include` (validated against the relationship
-  graph), `fields[TYPE]` (closed per-type attribute sets), `sort` (typed fields + direction),
-  `page[*]` (`Page.Offset` / `Page.Number` / `Page.Cursor` / custom), `filter[*]` (user-defined).
+- First-class schemas for the spec's query families: `include` (literal paths derived from the
+  relationship graph, 2 hops), `fields[TYPE]` (closed per-type attribute sets), `sort` (typed
+  fields + direction), `page[*]` (`Page.Offset` / `Page.Number` / `Page.Cursor` / custom),
+  `filter[*]` (user-defined).
 - Flat bracket-keyed strings on the wire; ergonomic nested typed values in handlers; invalid
   values become spec-compliant 400 error documents.
+
+### Client-side include narrowing (`JsonApi.narrowIncluded`)
+
+- Narrows a response document's `included` member to exactly the resources reachable via the
+  include paths the client requested (`["author"]` → `included: ReadonlyArray<Person>`), justified
+  by the spec's "MUST NOT include unrequested resource objects" rule. Pure type-level operation;
+  works with `HttpApiClient` and `HttpApiTest` clients.
+- `JsonApi.IncludePath<R>` / `JsonApi.IncludedFor<R, Paths>` exported for building custom typed
+  client wrappers; `Resource.ref(id)` creates typed resource-identifier values.
 
 ### Protocol middleware (`JsonApi.Middleware`)
 

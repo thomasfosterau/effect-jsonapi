@@ -3,7 +3,7 @@
  * encoding → routing → middleware → handler → response decoding) through the
  * in-memory `HttpApiTest` client.
  */
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
@@ -68,6 +68,26 @@ describe("blog example: fetching", () => {
 
     const types = document.included?.map((resource) => resource.type).sort()
     expect(types).toEqual(["comments", "people"])
+  })
+
+  it("narrows `included` to the requested include paths on the client", async () => {
+    const include = ["author"] as const
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.fetch({
+        params: { id: Article.Id.make("1") },
+        query: { include }
+      }).pipe(JsonApi.narrowIncluded(Article, include))
+    }))
+
+    // Runtime: the server only included the requested author
+    expect(document.included?.map((resource) => resource.type)).toEqual(["people"])
+    // Types: `included` is narrowed to Person — its attributes are accessible
+    // without discriminating on `type`
+    const author = document.included?.[0]
+    expect(author?.attributes.firstName).toBe("Dan")
+    expectTypeOf(author!.attributes.firstName).toEqualTypeOf<string>()
+    expectTypeOf(author!.type).toEqualTypeOf<"people">()
   })
 
   it("404s with a typed error for unknown articles", async () => {

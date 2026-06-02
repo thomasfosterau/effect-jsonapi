@@ -270,6 +270,17 @@ export interface Resource<
   /** Request body schema for updating this resource (`id` required, attributes partial). */
   readonly updatePayload: UpdatePayload<Type, Attributes, Rels>
   /**
+   * Creates a typed resource-identifier value (a "ref"): `{ type, id }` with
+   * this resource's type tag and branded id.
+   *
+   * ```ts
+   * Article.ref("1")   // { type: "articles", id: "1" } — id is branded
+   * // handy for relationship linkage:
+   * relationships: { author: { data: Person.ref("9") } }
+   * ```
+   */
+  ref(id: string): Identifier<Type>["Type"]
+  /**
    * Single-resource document schema. The compound `included` union defaults to
    * the resources directly referenced by this resource's relationships;
    * override it (or the document `meta`) per call.
@@ -306,6 +317,52 @@ export interface Any extends Schema.Top {
  * The attribute keys of a resource definition, as a union of string literals.
  */
 export type AttributeKeys<R extends Any> = keyof R["fields"]["attributes"]["fields"] & string
+
+// ---------------------------------------------------------------------------
+// Include paths (type level)
+// ---------------------------------------------------------------------------
+
+/**
+ * The resource definition a relationship key points at.
+ */
+export type Target<R extends Any, K> = R["relationships"][K & keyof R["relationships"]] extends
+  { readonly ref: () => infer T } ? T extends Any ? T : never : never
+
+/**
+ * The legal `include` query parameter paths for a resource, as a union of
+ * string literals — every relationship key, plus dotted paths one further hop
+ * into the graph (e.g. `"author" | "comments" | "comments.author"`).
+ *
+ * Mirrors {@link includePaths} (the runtime walk) at depth 2.
+ */
+export type IncludePath<R extends Any> = {
+  [K in keyof R["relationships"] & string]:
+    | K
+    | `${K}.${keyof Target<R, K>["relationships"] & string}`
+}[keyof R["relationships"] & string]
+
+/**
+ * The resource definitions brought into a compound document by one include
+ * path. Dotted paths include the intermediate resources as well as the leaf,
+ * per the spec.
+ */
+export type ResolveIncludePath<R extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
+  ? Target<R, Head> | ResolveIncludePath<Target<R, Head>, Rest>
+  : Target<R, Path>
+
+/**
+ * The union of resource definitions brought into a compound document by a set
+ * of requested include paths.
+ *
+ * Per the spec, a server "MUST NOT include unrequested resource objects", so
+ * this is exactly the `included` member union of a compliant response.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
+ */
+export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = ResolveIncludePath<
+  R,
+  Paths[number]
+>
 
 /**
  * The attribute keys of a resource definition, at runtime.
@@ -436,6 +493,7 @@ export const Resource = <
     relationships,
     createPayload,
     updatePayload,
+    ref: (refId: string) => identifier.make({ id: id.make(refId) }),
     document: <Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(opts?: {
       readonly included?: Included
       readonly meta?: M

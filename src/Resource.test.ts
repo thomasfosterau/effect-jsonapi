@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
-import { AnyMeta } from "./Document.js"
+import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import { Identifier, Resource, toMany, toOne } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -312,6 +312,86 @@ describe("Resource without relationships", () => {
       data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
     })
     expect(decoded.data?.attributes.firstName).toBe("John")
+  })
+})
+
+describe("Resource.ref", () => {
+  it("creates a typed resource-identifier value", () => {
+    const ref = Article.ref("1")
+    expect(ref).toEqual({ type: "articles", id: "1" })
+    // the id is branded with the resource type
+    expectTypeOf(ref.id).toEqualTypeOf<typeof Article.Id.Type>()
+    expectTypeOf(ref.type).toEqualTypeOf<"articles">()
+  })
+
+  it("refs are usable as relationship linkage", () => {
+    const article = Article.make({
+      id: Article.Id.make("1"),
+      attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01") },
+      relationships: {
+        author: { data: Person.ref("9") },
+        comments: { data: [Comment.ref("5")] }
+      }
+    })
+    expect(article.relationships?.author.data?.id).toBe("9")
+    expect(article.relationships?.comments.data[0]?.type).toBe("comments")
+  })
+
+  it("refs validate against the identifier schema", () => {
+    const decoded = Schema.decodeUnknownSync(Article.identifier)(Article.ref("1"))
+    expect(decoded.id).toBe("1")
+  })
+})
+
+describe("heterogeneous (union) documents", () => {
+  // A polymorphic feed: data items are either articles or people,
+  // discriminated by the `type` tag.
+  const FeedItem = Schema.Union([Article, Person])
+
+  it("single-resource documents accept a union of resources", () => {
+    const doc = DataDocument(FeedItem)
+    const asArticle = Schema.decodeUnknownSync(doc)({
+      data: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      }
+    })
+    expect(asArticle.data?.type).toBe("articles")
+
+    const asPerson = Schema.decodeUnknownSync(doc)({
+      data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
+    })
+    expect(asPerson.data?.type).toBe("people")
+  })
+
+  it("collection documents accept mixed resource types", () => {
+    const feed = CollectionDocument(FeedItem)
+    const decoded = Schema.decodeUnknownSync(feed)({
+      data: [
+        {
+          type: "articles",
+          id: "1",
+          attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+        },
+        { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
+      ]
+    })
+    expect(decoded.data.map((item) => item.type)).toEqual(["articles", "people"])
+    // the union is discriminated by the `type` tag
+    const first = decoded.data[0]
+    if (first?.type === "articles") {
+      expectTypeOf(first.attributes.title).toEqualTypeOf<string>()
+    }
+  })
+
+  it("rejects resources outside the union", () => {
+    const feed = CollectionDocument(FeedItem)
+    expect(() =>
+      Schema.decodeUnknownSync(feed)({
+        data: [{ type: "comments", id: "5", attributes: { body: "Nice" } }]
+      })
+    ).toThrow()
   })
 })
 

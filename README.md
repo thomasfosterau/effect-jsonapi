@@ -66,11 +66,20 @@ Everything below is **derived** — never assembled by hand:
 | `Article`                | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…) |
 | `Article.Id`             | branded id schema — `Article.Id` values can't be mixed with `Person.Id` |
 | `Article.identifier`     | the `{ type: "articles", id }` resource-identifier schema               |
+| `Article.ref("1")`       | a typed identifier *value* — handy for relationship linkage             |
 | `Article.createPayload`  | `{ data: { type, lid?, attributes, relationships? } }` — no `id`        |
 | `Article.updatePayload`  | `{ data: { type, id, attributes? (partial), relationships? } }`         |
 | `Article.document()`     | single-resource document; `included` union derived from relationships   |
 | `Article.collection()`   | collection document (strict array `data`)                               |
 | `typeof Article.Type`    | the decoded TypeScript type                                             |
+
+Documents are not limited to one resource type — for polymorphic endpoints (feeds, search), pass
+a union to the document constructors and `data` is discriminated by the `type` tag:
+
+```ts
+const Feed = JsonApi.CollectionDocument(Schema.Union([Article, Video]))
+// data: ReadonlyArray<Article | Video>
+```
 
 ## 2. Errors — declared once, spec-compliant forever
 
@@ -214,18 +223,41 @@ const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost:3000"
 
 const doc = yield* client.articles.fetch({
   params: { id: Article.Id.make("1") },
-  query: { include: ["author"] }
+  query: { include: ["author"] }     // ← include paths are typed literals; typos don't compile
 }).pipe(
   Effect.catchTag("ArticleNotFound", (e) => /* e.id is typed */ …)
 )
 // doc.data.attributes.createdAt is a Date; doc.included is typed
 ```
 
+### Narrowing `included` by the requested include paths
+
+The spec guarantees that a server "MUST NOT include unrequested resource objects", so the client
+knows *statically* what `included` can contain — `JsonApi.narrowIncluded` exposes that:
+
+```ts
+const include = ["author"] as const
+
+const doc = yield* client.articles.fetch({
+  params: { id: Article.Id.make("1") },
+  query: { include }
+}).pipe(JsonApi.narrowIncluded(Article, include))
+
+doc.included
+// ^ ReadonlyArray<Person> — not Person | Comment | Tag.
+//   doc.included[0].attributes.firstName is accessible without narrowing on `type`.
+```
+
+Dotted paths include the intermediate resources (`["comments.author"]` → `Comment | Person`), and
+requesting nothing narrows `included` to `never`. This is a type-level operation with no runtime
+cost; the response is still decoded against the endpoint's full schema, so a non-compliant server
+fails loudly instead of lying.
+
 ## Query parameters
 
 | Family         | Wire form                          | Decoded form                                          |
 | -------------- | ---------------------------------- | ----------------------------------------------------- |
-| `include`      | `?include=author,comments.author`  | `ReadonlyArray<string>` — validated against the relationship graph |
+| `include`      | `?include=author,comments.author`  | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph |
 | `fields[TYPE]` | `?fields[articles]=title,body`     | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets |
 | `sort`         | `?sort=-createdAt,title`           | `[{ field: "createdAt", direction: "desc" }, …]`      |
 | `page[*]`      | `?page[offset]=0&page[limit]=10`   | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom) |
@@ -256,13 +288,40 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 A complete runnable example (resources, errors, api, in-memory handlers) lives in
 [`examples/blog`](./examples/blog), exercised end-to-end by [`test/blog.test.ts`](./test/blog.test.ts).
 
+## Metadata
+
+`meta` is free-form by spec, so every `meta` member accepts arbitrary records by default. Tighten
+any of them by passing a schema:
+
+```ts
+// Resource-level meta (on every resource object)
+const Article = JsonApi.Resource("articles", {
+  attributes: { … },
+  meta: Schema.Struct({ rank: Schema.Int })
+})
+
+// Document-level meta (per endpoint, e.g. pagination totals)
+JsonApi.Endpoint.list(Article, { meta: Schema.Struct({ total: Schema.Int }) })
+
+// Or on a document schema directly
+Article.collection({ meta: Schema.Struct({ total: Schema.Int }) })
+```
+
+Relationship and resource-identifier `meta` currently accept free-form records (untyped).
+
 ## Limitations
 
 - **Sparse fieldsets are advisory**: `?fields[TYPE]=` is decoded, validated and handed to your
   handler, but attribute projection in responses is handler logic (automatic projection would
   require post-processing responses against request state).
-- **Include paths are runtime-validated**: the legal path set is computed from the relationship
-  graph (3 hops by default); TypeScript types them as `ReadonlyArray<string>`.
+- **Include paths are typed to a depth of 2 hops** (`"comments.author"` works,
+  `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off. The runtime
+  validation matches the same set.
+- **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on
+  the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided
+  via `JsonApi.narrowIncluded`.
+- **Relationship and identifier `meta` are untyped** (free-form records); resource and document
+  meta are typed via options.
 - **Mutually recursive resources** (A ↔ B) need an explicit type annotation on one of the two
   relationship thunks, due to TypeScript's circular-inference limits.
 - **Relationship endpoints** (`/articles/1/relationships/author`) and the atomic operations

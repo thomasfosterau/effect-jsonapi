@@ -15,7 +15,7 @@
  *
  * ```ts
  * {
- *   include?: ReadonlyArray<string>            // validated against the relationship graph
+ *   include?: ReadonlyArray<"author" | "comments" | "comments.author">   // from the relationship graph
  *   fields?:  { articles?: ReadonlyArray<"title" | "body">, ... }
  *   sort?:    ReadonlyArray<{ field: "title" | ..., direction: "asc" | "desc" }>
  *   page?:    { offset?: number, limit?: number }
@@ -30,7 +30,7 @@
 import type { Types } from "effect"
 import { Schema, SchemaTransformation } from "effect"
 import { CommaSeparated, flatten, nest, Sort as SortCodec } from "./internal/codecs.js"
-import type { Any, AttributeKeys, RelationshipTargets } from "./Resource.js"
+import type { Any, AttributeKeys, IncludePath, RelationshipTargets } from "./Resource.js"
 import { attributeKeys, directTargets, includePaths } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -70,25 +70,22 @@ export const Page = {
 
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
- * validated at decode time against the resource's relationship graph.
+ * typed as the resource's legal path literals (2 hops into the relationship
+ * graph) and validated at decode time.
  */
-export interface Include extends CommaSeparated<Schema.String> {}
+export interface Include<R extends Any> extends
+  CommaSeparated<Schema.Literals<ReadonlyArray<IncludePath<R>>>>
+{}
 
 /**
- * Creates the `include` schema for a resource, validating paths against its
- * relationship graph (up to `maxDepth` hops, default 3).
+ * Creates the `include` schema for a resource. Paths are the relationship
+ * keys plus dotted paths one further hop into the graph; anything else fails
+ * decoding (→ 400).
  */
-export const Include = (resource: Any, maxDepth: number = 3): Include => {
-  const legal = new Set(includePaths(resource, maxDepth))
-  return CommaSeparated(Schema.String).check(
-    Schema.makeFilter<ReadonlyArray<string>>((paths) => {
-      const unknown = paths.filter((path) => !legal.has(path))
-      return unknown.length === 0
-        ? true
-        : `unknown include path${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}`
-    }, { title: "include paths" })
+export const Include = <R extends Any>(resource: R): Include<R> =>
+  CommaSeparated(
+    Schema.Literals(includePaths(resource, 2) as ReadonlyArray<IncludePath<R>>)
   )
-}
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
@@ -160,7 +157,7 @@ export type FieldsetResources<R extends Any> = R | RelationshipTargets<R["relati
  * The nested (decoded) struct fields of a query schema.
  */
 export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  & ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include> } : {})
+  & ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include<R>> } : {})
   & ([O["fields"]] extends [true] ? {
       readonly fields: Schema.optionalKey<
         Schema.Struct<

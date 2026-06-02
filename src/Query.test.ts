@@ -158,7 +158,10 @@ describe("Query.schema", () => {
 
   it("types the decoded query shape", () => {
     type Decoded = typeof query.Type
-    expectTypeOf<Decoded["include"]>().toEqualTypeOf<ReadonlyArray<string> | undefined>()
+    // include paths are typed literals derived from the relationship graph
+    expectTypeOf<Decoded["include"]>().toEqualTypeOf<
+      ReadonlyArray<"author" | "comments" | "comments.author"> | undefined
+    >()
     expectTypeOf<NonNullable<Decoded["fields"]>["articles"]>().toEqualTypeOf<
       ReadonlyArray<"title" | "body" | "createdAt"> | undefined
     >()
