@@ -299,11 +299,19 @@ describe("blog example: spec compliance on the wire", () => {
   })
 
   it("content negotiation predicates implement JSON:API §5", () => {
-    // parameterised JSON:API content type → 415
+    // JSON:API content type with parameters other than ext / profile → 415
     expect(JsonApi.Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(false)
     expect(JsonApi.Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true)
-    // Accept with only parameterised JSON:API → 406
-    expect(JsonApi.Middleware.acceptIsAcceptable('application/vnd.api+json; profile="x"')).toBe(false)
+    // profile parameters are never rejected; ext parameters require support
+    expect(JsonApi.Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="x"')).toBe(true)
+    expect(JsonApi.Middleware.contentTypeIsAcceptable(JsonApi.Atomic.MEDIA_TYPE)).toBe(false)
+    expect(
+      JsonApi.Middleware.contentTypeIsAcceptable(JsonApi.Atomic.MEDIA_TYPE, {
+        extensions: [JsonApi.Atomic.EXTENSION_URI]
+      })
+    ).toBe(true)
+    // Accept in which every JSON:API instance has non-ext/profile parameters → 406
+    expect(JsonApi.Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(false)
     expect(JsonApi.Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true)
     expect(JsonApi.Middleware.acceptIsAcceptable("*/*")).toBe(true)
   })

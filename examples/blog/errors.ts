@@ -21,3 +21,16 @@ export class TitleTaken extends JsonApi.Error<TitleTaken>()("TitleTaken", {
   fields: { title: Schema.String },
   detail: (e) => `An article titled "${e.title}" already exists`
 }) {}
+
+/**
+ * Fails an atomic operations request: carries the index of the operation that
+ * failed (also exposed as a JSON pointer in `detail`) so clients know which
+ * one to fix. Per the extension, no operation is applied.
+ */
+export class OperationFailed extends JsonApi.Error<OperationFailed>()("OperationFailed", {
+  status: 422,
+  code: "operation_failed",
+  title: "Atomic operation failed",
+  fields: { operation: Schema.Int, reason: Schema.String },
+  detail: (e) => `Operation at ${JsonApi.Atomic.operationPointer(e.operation)} failed: ${e.reason}`
+}) {}

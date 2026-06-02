@@ -6,12 +6,13 @@
  *
  * | Constructor | Method & path            | Payload                  | Success                    |
  * | ----------- | ------------------------ | ------------------------ | -------------------------- |
- * | `fetch`     | `GET /<type>/:id`        | —                        | 200, single-resource doc   |
- * | `list`      | `GET /<type>`            | —                        | 200, collection doc        |
- * | `create`    | `POST /<type>`           | `createPayload` (lid ok) | 201, single-resource doc   |
- * | `update`    | `PATCH /<type>/:id`      | `updatePayload`          | 200, single-resource doc   |
- * | `remove`    | `DELETE /<type>/:id`     | —                        | 204, no content            |
- * | `search`    | `GET /search`            | —                        | 200, heterogeneous doc     |
+ * | `fetch`      | `GET /<type>/:id`        | —                        | 200, single-resource doc   |
+ * | `list`       | `GET /<type>`            | —                        | 200, collection doc        |
+ * | `create`     | `POST /<type>`           | `createPayload` (lid ok) | 201, single-resource doc   |
+ * | `update`     | `PATCH /<type>/:id`      | `updatePayload`          | 200, single-resource doc   |
+ * | `remove`     | `DELETE /<type>/:id`     | —                        | 204, no content            |
+ * | `search`     | `GET /search`            | —                        | 200, heterogeneous doc     |
+ * | `operations` | `POST /operations`       | `atomic:operations` doc  | 200, `atomic:results` doc  |
  *
  * Every endpoint automatically:
  *   - serves and accepts `application/vnd.api+json`
@@ -31,8 +32,9 @@
  */
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
+import * as Atomic from "./Atomic.js"
 import { AnyMeta, CollectionDocument } from "./Document.js"
-import { asJsonApi } from "./internal/media.js"
+import { asJsonApi, asJsonApiAtomic } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
 import type { Any, AttributeKeys, Relationships, Resource, TargetsOf } from "./Resource.js"
@@ -416,6 +418,66 @@ export const search = <
           ) as unknown as SearchIncluded<Resources>,
           meta: (options?.meta ?? AnyMeta) as DocMeta
         })
+      ),
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+
+// ---------------------------------------------------------------------------
+// operations — POST /operations, atomic operations extension
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /operations` (path configurable) — the
+ * {@link https://jsonapi.org/ext/atomic/ atomic operations extension}: a
+ * single request carrying an ordered list of operations — creating, updating
+ * and deleting resources or their relationships — that the handler processes
+ * atomically.
+ *
+ * ```ts
+ * const operations = Endpoint.operations([Article, Comment], {
+ *   errors: [OperationFailed]
+ * })
+ * // payload:  { "atomic:operations": [{ op: "add", data: {...} }, ...] }
+ * // success:  { "atomic:results": [{ data: {...} }, ...] }   (200)
+ * ```
+ *
+ * The request payload is an `atomic:operations` document whose operation union
+ * spans every operation legal for the given resources (including relationship
+ * operations and lid-based refs); success is a 200 `atomic:results` document
+ * whose entries correspond to the operations, in order.
+ *
+ * Spec-compliant clients send the JSON:API media type with the
+ * `ext="https://jsonapi.org/ext/atomic"` parameter — provide the
+ * content-negotiation middleware via
+ * `Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })` so those
+ * requests are accepted.
+ */
+export const operations = <
+  const Resources extends ReadonlyArray<Any>,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const Name extends string = "operations",
+  const Path extends `/${string}` = "/operations",
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  resources: Resources,
+  options?: CommonOptions<Name, Path, Errors> & {
+    /** Override the result document's `meta` schema. */
+    readonly meta?: DocMeta
+  }
+) =>
+  HttpApiEndpoint.post(
+    (options?.name ?? "operations") as Name,
+    (options?.path ?? "/operations") as Path,
+    {
+      payload: asJsonApi(Atomic.RequestDocument(resources)),
+      success: asJsonApiAtomic(
+        Atomic.ResultDocument(
+          resources,
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+        )
       ),
       error: wires(options?.errors)
     }
