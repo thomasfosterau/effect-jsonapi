@@ -9,16 +9,17 @@ import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "../examples/blog/api.js"
 import { ArticleNotFound, TitleTaken } from "../examples/blog/errors.js"
-import { ArticlesLive, sampleArticle, sampleAuthor } from "../examples/blog/handlers.js"
+import { ArticlesLive, sampleArticle, sampleAuthor, SearchLive } from "../examples/blog/handlers.js"
 import { Article, Person } from "../examples/blog/resources.js"
 
-const buildClient = HttpApiTest.groups(Api, ["articles"])
+const buildClient = HttpApiTest.groups(Api, ["articles", "search"])
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.scoped,
       Effect.provide(ArticlesLive),
+      Effect.provide(SearchLive),
       Effect.provide(JsonApi.Middleware.layer)
     ) as Effect.Effect<A, E, never>
   )
@@ -28,6 +29,7 @@ const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E
     effect.pipe(
       Effect.scoped,
       Effect.provide(ArticlesLive),
+      Effect.provide(SearchLive),
       Effect.provide(JsonApi.Middleware.layer)
     ) as Effect.Effect<A, E, never>
   )
@@ -204,6 +206,81 @@ describe("blog example: writing", () => {
 
     expect(document.data?.attributes.body).toBe("Updated body")
     expect(document.data?.attributes.title).toBe(sampleArticle.attributes.title)
+  })
+})
+
+describe("blog example: heterogeneous search", () => {
+  it("returns a mixed collection of articles and people, discriminated by type", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      // "an" matches both "...paints my bikeshed!" (article body "...Ever.") — no.
+      // Use a term hitting both stores: "d" → "bikeshed"/"Dan"/"Gebhardt"
+      return yield* client.search.search({
+        query: { filter: { q: "d" } }
+      })
+    }))
+
+    const types = [...new Set(document.data.map((result) => result.type))].sort()
+    expect(types).toEqual(["articles", "people"])
+
+    // the union is discriminated by the `type` tag
+    for (const result of document.data) {
+      if (result.type === "articles") {
+        expectTypeOf(result.attributes.title).toEqualTypeOf<string>()
+        expect(typeof result.attributes.title).toBe("string")
+      } else {
+        expectTypeOf(result.attributes.firstName).toEqualTypeOf<string>()
+        expect(typeof result.attributes.firstName).toBe("string")
+      }
+    }
+  })
+
+  it("filters across both resource types", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.search.search({
+        query: { filter: { q: "bikeshed" } }
+      })
+    }))
+
+    // only the article matches "bikeshed"
+    expect(document.data.map((result) => result.type)).toEqual(["articles"])
+    expect(document.meta?.total).toBe(1)
+  })
+
+  it("paginates heterogeneous results with links", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.search.search({
+        query: { filter: { q: "" }, page: { offset: 0, limit: 1 } }
+      })
+    }))
+
+    expect(document.data).toHaveLength(1)
+    expect(document.meta?.total).toBeGreaterThan(1)
+    expect(document.links?.next).toBe("/search?page[offset]=1&page[limit]=1")
+  })
+
+  it("supports include across the searched resources' graphs", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.search.search({
+        query: { filter: { q: "bikeshed" }, include: ["author"] }
+      })
+    }))
+
+    // the matched article's author is included
+    expect(document.included?.map((resource) => resource.type)).toEqual(["people"])
+  })
+
+  it("documents the search endpoint in OpenAPI", () => {
+    const spec = OpenApi.fromApi(Api)
+    expect(spec.paths["/search"]?.get).toBeDefined()
+    const params = spec.paths["/search"]?.get?.parameters?.map((parameter: any) => parameter.name)
+    expect(params).toContain("filter[q]")
+    expect(params).toContain("fields[articles]")
+    expect(params).toContain("fields[people]")
+    expect(params).toContain("page[offset]")
   })
 })
 

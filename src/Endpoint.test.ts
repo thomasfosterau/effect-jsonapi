@@ -189,6 +189,89 @@ describe("endpoint conventions", () => {
     expect(articles.identifier).toBe("articles")
     expect(Object.keys(articles.endpoints)).toEqual(["fetch", "list", "create", "update", "remove"])
   })
+
+  it("groups can be named directly for heterogeneous endpoints", () => {
+    const group = Group.make("search", Endpoint.search([Article, Person]))
+    expect(group.identifier).toBe("search")
+    expect(Object.keys(group.endpoints)).toEqual(["search"])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Heterogeneous (search) endpoints
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.search", () => {
+  const searchEndpoint = Endpoint.search([Article, Person], {
+    include: true,
+    fields: true,
+    filter: { q: Schema.String },
+    page: Query.Page.Offset,
+    meta: Schema.Struct({ total: Schema.Int })
+  })
+
+  it("uses conventional name/path with GET", () => {
+    expect(searchEndpoint.name).toBe("search")
+    expect(searchEndpoint.method).toBe("GET")
+    expect(searchEndpoint.path).toBe("/search")
+  })
+
+  it("allows overriding name and path (e.g. for feeds)", () => {
+    const feed = Endpoint.search([Article, Comment], { name: "feed", path: "/feed" })
+    expect(feed.name).toBe("feed")
+    expect(feed.path).toBe("/feed")
+  })
+
+  it("attaches the JSON:API protocol middlewares", () => {
+    const middlewareIds = [...searchEndpoint.middlewares].map((m) => m.key)
+    expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation")
+    expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors")
+  })
+
+  it("success document data is the union of the searched resources", () => {
+    // the success schema decodes mixed collections, discriminated by type
+    const successSchema = [...searchEndpoint.success][0]!
+    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+      data: [
+        {
+          type: "articles",
+          id: "1",
+          attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+        },
+        { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
+      ],
+      meta: { total: 2 }
+    }) as { readonly data: ReadonlyArray<{ readonly type: string }> }
+    expect(decoded.data.map((item) => item.type)).toEqual(["articles", "people"])
+  })
+
+  it("rejects resources outside the searched union", () => {
+    const successSchema = [...searchEndpoint.success][0]!
+    expect(() =>
+      Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+        data: [{ type: "comments", id: "5", attributes: { body: "Nice" } }],
+        meta: { total: 1 }
+      })
+    ).toThrow()
+  })
+
+  it("query spans both resources: fieldsets for each type, include across graphs", () => {
+    const query = searchEndpoint.query as Schema.Codec<unknown, unknown>
+    const decoded = Schema.decodeUnknownSync(query)({
+      include: "author,comments.author",
+      "fields[articles]": "title",
+      "fields[people]": "firstName",
+      "filter[q]": "bikeshed",
+      "page[offset]": "0",
+      "page[limit]": "10"
+    }) as any
+    expect(decoded).toEqual({
+      include: ["author", "comments.author"],
+      fields: { articles: ["title"], people: ["firstName"] },
+      filter: { q: "bikeshed" },
+      page: { offset: 0, limit: 10 }
+    })
+  })
 })
 
 // ---------------------------------------------------------------------------

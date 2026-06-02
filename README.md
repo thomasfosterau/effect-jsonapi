@@ -73,13 +73,8 @@ Everything below is **derived** — never assembled by hand:
 | `Article.collection()`   | collection document (strict array `data`)                               |
 | `typeof Article.Type`    | the decoded TypeScript type                                             |
 
-Documents are not limited to one resource type — for polymorphic endpoints (feeds, search), pass
-a union to the document constructors and `data` is discriminated by the `type` tag:
-
-```ts
-const Feed = JsonApi.CollectionDocument(Schema.Union([Article, Video]))
-// data: ReadonlyArray<Article | Video>
-```
+Documents are not limited to one resource type — see
+[Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
 
 ## 2. Errors — declared once, spec-compliant forever
 
@@ -143,6 +138,35 @@ const articles = JsonApi.Group(Article,
 
 const Api = HttpApi.make("blog").add(articles)
 ```
+
+### Heterogeneous endpoints (search, feeds)
+
+`Endpoint.search` builds collection endpoints whose `data` mixes several resource types,
+discriminated by their `type` tags — the natural fit for search results, feeds and timelines:
+
+```ts
+const search = JsonApi.Group("search",
+  // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
+  JsonApi.Endpoint.search([Article, Person], {
+    filter: { q: Schema.String },
+    include: true,                            // include paths span both resources' graphs
+    fields: true,                             // ?fields[articles]= and ?fields[people]=
+    page: JsonApi.Page.Offset,
+    meta: Schema.Struct({ total: Schema.Int })
+  })
+)
+
+const Api = HttpApi.make("blog").add(articles).add(search)
+
+// Handlers return mixed collections; clients discriminate on `type`:
+for (const result of doc.data) {
+  if (result.type === "articles") result.attributes.title        // Article
+  else                            result.attributes.firstName    // Person
+}
+```
+
+The `included` union spans every searched resource's relationship targets, and query features
+(`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
 
 Every endpoint automatically:
 
@@ -324,6 +348,8 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   meta are typed via options.
 - **Mutually recursive resources** (A ↔ B) need an explicit type annotation on one of the two
   relationship thunks, due to TypeScript's circular-inference limits.
+- **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
+  responses by include paths is not yet supported.
 - **Relationship endpoints** (`/articles/1/relationships/author`) and the atomic operations
   extension are not yet modelled.
 

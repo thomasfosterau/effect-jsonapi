@@ -68,6 +68,13 @@ export const Page = {
 // Feature schemas
 // ---------------------------------------------------------------------------
 
+// Normalises "one resource or several" to an array (heterogeneous endpoints
+// pass several).
+const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArray<R> =>
+  Array.isArray(resource) ? resource as ReadonlyArray<R> : [resource as R]
+
+const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
+
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
  * typed as the resource's legal path literals (2 hops into the relationship
@@ -78,13 +85,15 @@ export interface Include<R extends Any> extends
 {}
 
 /**
- * Creates the `include` schema for a resource. Paths are the relationship
- * keys plus dotted paths one further hop into the graph; anything else fails
- * decoding (→ 400).
+ * Creates the `include` schema for one resource (or, for heterogeneous
+ * endpoints, several). Paths are the relationship keys plus dotted paths one
+ * further hop into the graph; anything else fails decoding (→ 400).
  */
-export const Include = <R extends Any>(resource: R): Include<R> =>
+export const Include = <R extends Any>(resource: R | ReadonlyArray<R>): Include<R> =>
   CommaSeparated(
-    Schema.Literals(includePaths(resource, 2) as ReadonlyArray<IncludePath<R>>)
+    Schema.Literals(
+      dedupe(toResources(resource).flatMap((r) => includePaths(r, 2))) as ReadonlyArray<IncludePath<R>>
+    )
   )
 
 /**
@@ -149,9 +158,12 @@ export interface Options<R extends Any> {
 
 /**
  * Resource definitions whose sparse fieldsets appear in `?fields[TYPE]=`:
- * the resource itself plus its direct relationship targets.
+ * the resource(s) themselves plus their direct relationship targets.
+ *
+ * Distributes over unions of resource definitions.
  */
-export type FieldsetResources<R extends Any> = R | RelationshipTargets<R["relationships"]>
+export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]>
+  : never
 
 /**
  * The nested (decoded) struct fields of a query schema.
@@ -219,27 +231,29 @@ export interface QuerySchema<R extends Any, O extends Options<R>> extends
 {}
 
 /**
- * Builds the query schema for a resource and feature set.
+ * Builds the query schema for a resource (or, for heterogeneous endpoints,
+ * several resources) and a feature set.
  *
  * The result is passed as an `HttpApiEndpoint` `query` schema; handlers
  * receive the decoded nested shape, clients provide it and it is encoded back
  * to flat query parameters.
  */
 export const schema = <R extends Any, const O extends Options<R>>(
-  resource: R,
+  resource: R | ReadonlyArray<R>,
   options: O
 ): QuerySchema<R, O> => {
+  const resources = toResources(resource)
   const nestedFields: Record<string, Schema.Top> = {}
   const flatFields: Record<string, Schema.Top> = {}
 
   if (options.include === true) {
-    nestedFields.include = Schema.optionalKey(Include(resource))
+    nestedFields.include = Schema.optionalKey(Include(resources))
     flatFields.include = Schema.optionalKey(Schema.String)
   }
 
   if (options.fields === true) {
     const fieldsetFields: Record<string, Schema.Top> = {}
-    for (const target of [resource, ...directTargets(resource)]) {
+    for (const target of dedupe([...resources, ...resources.flatMap(directTargets)])) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target))
       flatFields[`fields[${target.type}]`] = Schema.optionalKey(Schema.String)
     }
@@ -247,7 +261,9 @@ export const schema = <R extends Any, const O extends Options<R>>(
   }
 
   if (options.sort === true || (Array.isArray(options.sort) && options.sort.length > 0)) {
-    const sortable = options.sort === true ? attributeKeys(resource) : (options.sort as ReadonlyArray<string>)
+    const sortable = options.sort === true
+      ? dedupe(resources.flatMap((r) => attributeKeys(r)))
+      : (options.sort as ReadonlyArray<string>)
     nestedFields.sort = Schema.optionalKey(Sort(sortable))
     flatFields.sort = Schema.optionalKey(Schema.String)
   }

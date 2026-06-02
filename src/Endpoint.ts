@@ -11,6 +11,7 @@
  * | `create`    | `POST /<type>`           | `createPayload` (lid ok) | 201, single-resource doc   |
  * | `update`    | `PATCH /<type>/:id`      | `updatePayload`          | 200, single-resource doc   |
  * | `remove`    | `DELETE /<type>/:id`     | —                        | 204, no content            |
+ * | `search`    | `GET /search`            | —                        | 200, heterogeneous doc     |
  *
  * Every endpoint automatically:
  *   - serves and accepts `application/vnd.api+json`
@@ -28,12 +29,14 @@
  * with vanilla `HttpApiGroup` / `HttpApi` / `HttpApiBuilder` / `HttpApiClient`
  * / `HttpApiTest` / `OpenApi`.
  */
-import type { Schema } from "effect"
+import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
+import { AnyMeta, CollectionDocument } from "./Document.js"
 import { asJsonApi } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
-import type { AttributeKeys, Relationships, Resource } from "./Resource.js"
+import type { Any, AttributeKeys, Relationships, Resource, TargetsOf } from "./Resource.js"
+import { directTargets } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -321,6 +324,99 @@ export const remove = <
     {
       params: { id: resource.Id },
       success: HttpApiSchema.NoContent,
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+
+// ---------------------------------------------------------------------------
+// search — GET <path>, heterogeneous collection
+// ---------------------------------------------------------------------------
+
+const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
+
+/**
+ * The default compound `included` union of a heterogeneous endpoint: every
+ * resource directly referenced by any of the searched resources'
+ * relationships.
+ */
+export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends
+  Schema.Union<ReadonlyArray<TargetsOf<Resources[number]>>>
+{}
+
+/**
+ * `GET /search` (path configurable) — a heterogeneous collection endpoint:
+ * `data` is a mixed array of several resource types, discriminated by their
+ * `type` tags. The natural fit for search results, feeds and timelines.
+ *
+ * ```ts
+ * const search = Endpoint.search([Article, Person], {
+ *   filter: { q: Schema.String },
+ *   page: Query.Page.Offset,
+ *   include: true
+ * })
+ * // handler returns { data: ReadonlyArray<Article | Person>, ... }
+ * // query.include spans both resources' relationship graphs
+ * // ?fields[articles]= and ?fields[people]= are both available
+ * ```
+ *
+ * Success is a 200 collection document whose `data` member is the union of
+ * the given resources and whose `included` union spans all of their
+ * relationship targets.
+ */
+export const search = <
+  const Resources extends ReadonlyArray<Any>,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const Name extends string = "search",
+  const Path extends `/${string}` = "/search",
+  const Include extends boolean = false,
+  const Fields extends boolean = false,
+  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
+  const PageFields extends Schema.Struct.Fields | undefined = undefined,
+  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  resources: Resources,
+  options?: CommonOptions<Name, Path, Errors> & {
+    /** Enable the `?include=` query parameter (paths span all resources' graphs). */
+    readonly include?: Include
+    /** Enable `?fields[TYPE]=` sparse fieldsets for all resources and their targets. */
+    readonly fields?: Fields
+    /** Enable `?sort=`: `true` for every attribute of every resource, or an explicit list. */
+    readonly sort?: Sort
+    /** Enable `?page[*]=` pagination (see `Query.Page` for ready-made strategies). */
+    readonly page?: PageFields
+    /** Enable `?filter[*]=` filtering (user-defined fields, e.g. the search term). */
+    readonly filter?: FilterFields
+    /** Override the collection document's `meta` schema (e.g. result totals). */
+    readonly meta?: DocMeta
+  }
+) =>
+  HttpApiEndpoint.get(
+    (options?.name ?? "search") as Name,
+    (options?.path ?? "/search") as Path,
+    {
+      query: Query.schema(
+        resources as ReadonlyArray<Resources[number]>,
+        queryConfig(options) as {
+          readonly include: Include
+          readonly fields: Fields
+          readonly sort: Sort
+          readonly page: PageFields
+          readonly filter: FilterFields
+        }
+      ),
+      success: asJsonApi(
+        CollectionDocument(Schema.Union(resources), {
+          // The cast is sound: every direct target of every member of
+          // `Resources` is, by construction, a member of `TargetsOf<...>`.
+          included: Schema.Union(
+            dedupe(resources.flatMap((resource) => directTargets(resource)))
+          ) as unknown as SearchIncluded<Resources>,
+          meta: (options?.meta ?? AnyMeta) as DocMeta
+        })
+      ),
       error: wires(options?.errors)
     }
   )

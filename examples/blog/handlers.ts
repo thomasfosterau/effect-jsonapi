@@ -168,8 +168,46 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       ))
 )
 
+// ---------------------------------------------------------------------------
+// Search handlers — a heterogeneous collection of articles and people
+// ---------------------------------------------------------------------------
+
+const matches = (haystack: ReadonlyArray<string>, needle: string): boolean =>
+  haystack.some((value) => value.toLowerCase().includes(needle.toLowerCase()))
+
+export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
+  handlers.handle("search", ({ query }) => {
+    // no filter[q] → match everything
+    const q = query.filter?.q ?? ""
+
+    // search across both resource types; results stay discriminated by `type`
+    const articles = [...store.articles.values()].filter((article) =>
+      matches([article.attributes.title, article.attributes.body], q)
+    )
+    const people = [...store.people.values()].filter((person) =>
+      matches([person.attributes.firstName, person.attributes.lastName], q)
+    )
+    const results = [...articles, ...people]
+
+    const total = results.length
+    const offset = query.page?.offset ?? 0
+    const limit = query.page?.limit ?? total
+    const page = results.slice(offset, offset + limit)
+
+    return Effect.succeed(
+      JsonApi.collection(page, {
+        included: query.include === undefined
+          ? []
+          : page.flatMap((result) => result.type === "articles" ? resolveIncluded(result, query.include) : []),
+        meta: { total },
+        links: JsonApi.offsetPaginationLinks("/search", { offset, limit }, total)
+      })
+    )
+  })
+)
+
 /**
  * Everything needed to serve the blog: the handlers plus the JSON:API
  * protocol middleware (content negotiation + spec-compliant 400s).
  */
-export const BlogLive = Layer.mergeAll(ArticlesLive, JsonApi.Middleware.layer)
+export const BlogLive = Layer.mergeAll(ArticlesLive, SearchLive, JsonApi.Middleware.layer)

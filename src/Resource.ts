@@ -315,8 +315,12 @@ export interface Any extends Schema.Top {
 
 /**
  * The attribute keys of a resource definition, as a union of string literals.
+ *
+ * Distributes over unions of resource definitions (the keys of *any* member),
+ * so it also serves heterogeneous endpoints.
  */
-export type AttributeKeys<R extends Any> = keyof R["fields"]["attributes"]["fields"] & string
+export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["attributes"]["fields"] & string
+  : never
 
 // ---------------------------------------------------------------------------
 // Include paths (type level)
@@ -329,17 +333,26 @@ export type Target<R extends Any, K> = R["relationships"][K & keyof R["relations
   { readonly ref: () => infer T } ? T extends Any ? T : never : never
 
 /**
+ * The resource definitions directly referenced by a resource's relationships.
+ *
+ * Distributes over unions of resource definitions.
+ */
+export type TargetsOf<R extends Any> = R extends Any ? RelationshipTargets<R["relationships"]> : never
+
+/**
  * The legal `include` query parameter paths for a resource, as a union of
  * string literals — every relationship key, plus dotted paths one further hop
  * into the graph (e.g. `"author" | "comments" | "comments.author"`).
  *
- * Mirrors {@link includePaths} (the runtime walk) at depth 2.
+ * Mirrors {@link includePaths} (the runtime walk) at depth 2, and distributes
+ * over unions of resource definitions.
  */
-export type IncludePath<R extends Any> = {
-  [K in keyof R["relationships"] & string]:
-    | K
-    | `${K}.${keyof Target<R, K>["relationships"] & string}`
-}[keyof R["relationships"] & string]
+export type IncludePath<R extends Any> = R extends Any ? {
+    [K in keyof R["relationships"] & string]:
+      | K
+      | `${K}.${keyof Target<R, K>["relationships"] & string}`
+  }[keyof R["relationships"] & string]
+  : never
 
 /**
  * The resource definitions brought into a compound document by one include
@@ -368,7 +381,7 @@ export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = Re
  * The attribute keys of a resource definition, at runtime.
  */
 export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<AttributeKeys<R>> =>
-  Object.keys(resource.fields.attributes.fields) as ReadonlyArray<AttributeKeys<R>>
+  Object.keys(resource.fields.attributes.fields) as unknown as ReadonlyArray<AttributeKeys<R>>
 
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 

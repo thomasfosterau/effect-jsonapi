@@ -7,7 +7,7 @@ import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { ArticleNotFound, TitleTaken } from "./errors.js"
-import { Article } from "./resources.js"
+import { Article, Person } from "./resources.js"
 
 /**
  * Typed collection meta carried by list responses.
@@ -46,4 +46,20 @@ export const articles = JsonApi.Group(
   })
 )
 
-export const Api = HttpApi.make("blog").add(articles)
+/**
+ * A heterogeneous search endpoint: results are a mixed collection of articles
+ * and people, discriminated by their `type` tags.
+ */
+export const search = JsonApi.Group(
+  "search",
+  // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
+  JsonApi.Endpoint.search([Article, Person], {
+    filter: { q: Schema.String },
+    include: true,
+    fields: true,
+    page: JsonApi.Page.Offset,
+    meta: PageMeta
+  })
+)
+
+export const Api = HttpApi.make("blog").add(articles).add(search)

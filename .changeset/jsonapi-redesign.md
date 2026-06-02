@@ -35,6 +35,10 @@ import { JsonApi } from "effect-jsonapi"
 - `Endpoint.fetch` / `list` / `create` / `update` / `remove` adopt HttpApi's structured options
   model and bake in the JSON:API conventions: conventional paths, `application/vnd.api+json`,
   spec status codes (200/201/204), error documents, and typed query parameters.
+- `Endpoint.search` builds heterogeneous collection endpoints (search, feeds): `data` is a mixed
+  array of several resource types discriminated by their `type` tags, with query features
+  (`fields[TYPE]`, `include`, `sort`) derived across all of the searched resources.
+  `JsonApi.Group` accepts a plain string name for groups that span resource types.
 - All constructors return plain `HttpApiEndpoint` / `HttpApiGroup` values — they compose with
   vanilla `HttpApi`, `HttpApiBuilder`, `HttpApiClient`, `HttpApiTest` and `OpenApi`.
 
