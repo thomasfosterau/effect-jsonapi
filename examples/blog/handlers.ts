@@ -209,5 +209,10 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 /**
  * Everything needed to serve the blog: the handlers plus the JSON:API
  * protocol middleware (content negotiation + spec-compliant 400s).
+ *
+ * The middleware is provided *into* the handler groups (not merged alongside
+ * them) so that every endpoint's middleware requirement is satisfied.
  */
-export const BlogLive = Layer.mergeAll(ArticlesLive, SearchLive, JsonApi.Middleware.layer)
+export const BlogLive = Layer.mergeAll(ArticlesLive, SearchLive).pipe(
+  Layer.provideMerge(JsonApi.Middleware.layer)
+)

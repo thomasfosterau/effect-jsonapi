@@ -307,10 +307,15 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | 200 / 201 / 204 status codes per operation | set by the endpoint constructors |
 | Pagination / sorting / sparse fieldsets / inclusion / filtering query families | typed query schemas derived from the resource definition |
 
-## Example
+## Examples
 
-A complete runnable example (resources, errors, api, in-memory handlers) lives in
-[`examples/blog`](./examples/blog), exercised end-to-end by [`test/blog.test.ts`](./test/blog.test.ts).
+Complete runnable examples (resources, errors, api, in-memory handlers) live in
+[`examples`](./examples), each exercised end-to-end by a test:
+
+| Example | What it shows | Test |
+| --- | --- | --- |
+| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, comments; full CRUD; heterogeneous search | [`test/blog.test.ts`](./test/blog.test.ts) |
+| [`examples/github`](./examples/github) | A GitHub-like API: users, repositories, issues, pull requests, labels; a 5-resource relationship graph with 2-hop include paths (`repository.owner`); per-group endpoint subsets (read-only users/pulls, no issue deletion); typed filters over closed attribute sets (`filter[state]=open`); page-number pagination; 403/404/422 domain errors; global search across three resource types | [`test/github.test.ts`](./test/github.test.ts) |
 
 ## Metadata
 
