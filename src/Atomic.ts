@@ -7,16 +7,19 @@
  * atomically (all succeed, or none are applied).
  *
  * Everything is derived from {@link Resource} definitions, like the rest of
- * the library:
+ * the library. The operations derived for a resource are, exactly:
  *
- *   - {@link RequestDocument} — the `atomic:operations` request document
- *     schema: a typed union of every operation legal for a set of resources
- *   - {@link ResultDocument} — the `atomic:results` response document schema
- *   - operation value constructors for clients ({@link add}, {@link update},
- *     {@link remove}, {@link updateRelationship}, …)
- *   - handler-side helpers: {@link results}, {@link lidMap} (resolves client
- *     `lid`s to server-assigned ids across operations),
- *     {@link isRelationshipOperation}
+ * | Operation                                | Wire form                                          |
+ * | ---------------------------------------- | -------------------------------------------------- |
+ * | `add`                                    | `{ op: "add", data: { type, lid?, attributes, relationships? } }` |
+ * | `update`                                 | `{ op: "update", data: { type, id \| lid, attributes?, relationships? } }` |
+ * | `remove`                                 | `{ op: "remove", ref: { type, id \| lid } }`       |
+ * | per to-one relationship: `update`        | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref \| null }` |
+ * | per to-many relationship: `add` / `update` / `remove` | `{ op, ref: { type, id \| lid, relationship }, data: [refs] }` |
+ *
+ * {@link operationsFor} returns this set as a named, introspectable record of
+ * schemas; {@link Operations} / {@link RequestDocument} build the request
+ * union from it.
  *
  * ```ts
  * // The endpoint (one per api, conventionally POST /operations):
@@ -31,7 +34,7 @@
  *     Atomic.add(Article, { lid: "a1", attributes: { title: "Hello" } }),
  *     Atomic.add(Comment, {
  *       attributes: { body: "First!" },
- *       relationships: { article: { data: Atomic.lidRef(Article, "a1") } }
+ *       relationships: { article: { data: Article.lidRef("a1") } }
  *     })
  *   )
  * })
@@ -43,7 +46,8 @@ import { Schema, Struct } from "effect"
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js"
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js"
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js"
-import type { Any, PartialAttributes, Relationships, ToMany, ToOne } from "./Resource.js"
+import type { Any, PartialAttributes, RefValue, Relationships, ToMany, ToOne } from "./Resource.js"
+import { Ref } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Extension constants
@@ -71,64 +75,17 @@ export const MEDIA_TYPE: string = ATOMIC_MEDIA_TYPE
 export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", ext: [ATOMIC_EXTENSION_URI] }
 
 // ---------------------------------------------------------------------------
-// Refs: id-based identifiers and lid-based local identifiers
+// Operation refs (atomic-specific: with / without a `relationship` member)
 // ---------------------------------------------------------------------------
-
-/**
- * A local identifier: `{ type, lid }` — references a resource created by an
- * earlier operation in the same request, before the server has assigned it an
- * `id`.
- *
- * @see {@link https://jsonapi.org/ext/atomic/#operation-objects}
- */
-export interface LocalIdentifier<Type extends string> extends
-  Schema.Struct<{
-    readonly type: Schema.tag<Type>
-    readonly lid: Schema.String
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
-
-/**
- * Creates the local-identifier schema for a resource type.
- */
-export const LocalIdentifier = <const Type extends string>(type: Type): LocalIdentifier<Type> =>
-  Schema.Struct({
-    type: Schema.tag(type),
-    lid: Schema.String,
-    meta: Schema.optionalKey(AnyMeta)
-  })
-
-/**
- * A ref to a resource: either its `{ type, id }` identifier or — for resources
- * created earlier in the same atomic request — a `{ type, lid }` local
- * identifier.
- */
-export interface Ref<R extends Any> extends
-  Schema.Union<readonly [
-    Schema.suspend<R["identifier"]>,
-    Schema.suspend<LocalIdentifier<R["type"]>>
-  ]>
-{}
-
-/**
- * Creates the ref schema for a resource: identifier or local identifier.
- */
-export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
-  const thunk = typeof resource === "function" ? resource : () => resource
-  return Schema.Union([
-    Schema.suspend(() => thunk().identifier as R["identifier"]),
-    Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<R["type"]>)
-  ])
-}
 
 /**
  * A ref to a resource *as a whole* — the target of resource-level `update` /
  * `remove` operations.
  *
- * Structurally a {@link Ref} whose `relationship` member is forbidden
- * (`optionalKey(Never)`), which is what makes the operation union unambiguous:
- * a ref carrying `relationship` can only decode as a relationship operation.
+ * Structurally a `Ref` (id- or lid-based, see `Resource.Ref`) whose
+ * `relationship` member is forbidden (`optionalKey(Never)`), which is what
+ * makes the operation union unambiguous: a ref carrying `relationship` can
+ * only decode as a relationship operation.
  */
 export interface ResourceRef<R extends Any> extends
   Schema.Union<readonly [
@@ -407,10 +364,104 @@ export interface ToManyRelationshipOperation<
   }>
 {}
 
+// ---------------------------------------------------------------------------
+// The operations derived for a resource, as an introspectable record
+// ---------------------------------------------------------------------------
+
+/**
+ * The operations derived for one relationship: to-one relationships admit
+ * `update`; to-many relationships admit `add`, `update` and `remove`.
+ */
+export type RelationshipOperationsFor<R extends Any, K extends string, Rel> = Rel extends ToOne<infer T> ? {
+    /** Replace the to-one linkage with an identifier, or `null` to clear it. */
+    readonly update: UpdateToOneRelationshipOperation<R, K, T>
+  }
+  : Rel extends ToMany<infer T> ? {
+      /** Append members to the to-many linkage. */
+      readonly add: ToManyRelationshipOperation<"add", R, K, T>
+      /** Replace all members of the to-many linkage. */
+      readonly update: ToManyRelationshipOperation<"update", R, K, T>
+      /** Delete members from the to-many linkage. */
+      readonly remove: ToManyRelationshipOperation<"remove", R, K, T>
+    }
+  : never
+
+/**
+ * Every operation derived for a resource, as a named record of schemas —
+ * the single source of truth the request document union is built from, and
+ * the answer to "what operations exist for this resource?".
+ *
+ * ```ts
+ * const ops = Atomic.operationsFor(Article)
+ * ops.add                              // create an article
+ * ops.update                           // update an article
+ * ops.remove                           // delete an article
+ * ops.relationships.author.update      // replace its author (to-one)
+ * ops.relationships.comments.add       // append comments (to-many)
+ * ops.relationships.comments.update    // replace all comments
+ * ops.relationships.comments.remove    // delete comments from the linkage
+ * ```
+ */
+export interface ResourceOperations<R extends Any> {
+  /** `{ op: "add", data: { type, lid?, attributes, relationships? } }` — create the resource. */
+  readonly add: AddOperation<R>
+  /** `{ op: "update", data: { type, id | lid, attributes?, relationships? } }` — update the resource. */
+  readonly update: UpdateOperation<R>
+  /** `{ op: "remove", ref: { type, id | lid } }` — delete the resource. */
+  readonly remove: RemoveOperation<R>
+  /** Operations on each of the resource's relationships, by relationship key. */
+  readonly relationships: {
+    readonly [K in keyof R["relationships"] & string]: RelationshipOperationsFor<R, K, R["relationships"][K]>
+  }
+}
+
+/**
+ * Derives the full set of operations for a resource: resource-level
+ * add / update / remove plus the operations of each of its relationships.
+ */
+export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R> => {
+  const relationships: Record<string, Record<string, Schema.Top>> = {}
+  for (const [key, descriptor] of Object.entries(resource.relationships)) {
+    const ref = RelationshipRef(resource, key)
+    if (descriptor.kind === "toOne") {
+      relationships[key] = {
+        update: Schema.Struct({
+          op: Schema.tag("update"),
+          ref,
+          data: Schema.NullOr(Ref(descriptor.ref)),
+          meta: Schema.optionalKey(AnyMeta)
+        })
+      }
+    } else {
+      const data = Schema.Array(Ref(descriptor.ref))
+      relationships[key] = Object.fromEntries(
+        (["add", "update", "remove"] as const).map((op) => [
+          op,
+          Schema.Struct({
+            op: Schema.tag(op),
+            ref,
+            data,
+            meta: Schema.optionalKey(AnyMeta)
+          })
+        ])
+      )
+    }
+  }
+  return {
+    add: AddOperation(resource),
+    update: UpdateOperation(resource),
+    remove: RemoveOperation(resource),
+    relationships
+  } as ResourceOperations<R>
+}
+
+// ---------------------------------------------------------------------------
+// The operation union and the request document
+// ---------------------------------------------------------------------------
+
 /**
  * The union of relationship operations legal for a resource, derived from its
- * relationship descriptors: to-one relationships admit `update`, to-many
- * relationships admit `add` / `update` / `remove`.
+ * relationship descriptors.
  */
 export type RelationshipOperation<R extends Any> = {
   [K in keyof R["relationships"] & string]: R["relationships"][K] extends ToOne<infer T>
@@ -422,42 +473,10 @@ export type RelationshipOperation<R extends Any> = {
     : never
 }[keyof R["relationships"] & string]
 
-const relationshipOperationSchemas = (resource: Any): Array<Schema.Top> => {
-  const schemas: Array<Schema.Top> = []
-  for (const [key, descriptor] of Object.entries(resource.relationships)) {
-    const ref = RelationshipRef(resource, key)
-    if (descriptor.kind === "toOne") {
-      schemas.push(
-        Schema.Struct({
-          op: Schema.tag("update"),
-          ref,
-          data: Schema.NullOr(Ref(descriptor.ref)),
-          meta: Schema.optionalKey(AnyMeta)
-        })
-      )
-    } else {
-      for (const op of ["add", "update", "remove"] as const) {
-        schemas.push(
-          Schema.Struct({
-            op: Schema.tag(op),
-            ref,
-            data: Schema.Array(Ref(descriptor.ref)),
-            meta: Schema.optionalKey(AnyMeta)
-          })
-        )
-      }
-    }
-  }
-  return schemas
-}
-
-// ---------------------------------------------------------------------------
-// The operation union and the request document
-// ---------------------------------------------------------------------------
-
 /**
  * Every operation legal for a resource: its relationship operations plus
- * resource-level add / update / remove.
+ * resource-level add / update / remove — the union of everything in
+ * {@link operationsFor}.
  *
  * Distributes over unions of resource definitions.
  */
@@ -473,24 +492,27 @@ export type Operation<R extends Any> = R extends Any ?
  */
 export interface Operations<R extends Any> extends Schema.Union<ReadonlyArray<Operation<R>>> {}
 
+// Flattens one resource's operations record into union members. Relationship
+// operations come before resource operations: their refs carry a
+// `relationship` member, which resource-operation refs forbid, so decoding is
+// unambiguous.
+const flattenOperations = (operations: ResourceOperations<Any>): Array<Schema.Top> => [
+  ...Object.values(operations.relationships).flatMap((ops) => Object.values(ops) as Array<Schema.Top>),
+  operations.add,
+  operations.update,
+  operations.remove
+]
+
 /**
- * Creates the operation union schema for a set of resources.
- *
- * Relationship operations come before resource operations in the union: their
- * refs carry a `relationship` member, which resource-operation refs forbid, so
- * decoding is unambiguous.
+ * Creates the operation union schema for a set of resources — the union of
+ * every schema in each resource's {@link operationsFor} record.
  */
 export const Operations = <const Resources extends ReadonlyArray<Any>>(
   resources: Resources
 ): Operations<Resources[number]> =>
-  Schema.Union([
-    ...resources.flatMap(relationshipOperationSchemas),
-    ...resources.flatMap((resource) => [
-      AddOperation(resource),
-      UpdateOperation(resource),
-      RemoveOperation(resource)
-    ])
-  ]) as unknown as Operations<Resources[number]>
+  Schema.Union(
+    resources.flatMap((resource) => flattenOperations(operationsFor(resource)))
+  ) as unknown as Operations<Resources[number]>
 
 /**
  * The `atomic:operations` request document schema for a set of resources: a
@@ -586,27 +608,6 @@ export const ResultDocument = <
 // Operation value constructors (client side)
 // ---------------------------------------------------------------------------
 
-/**
- * A ref *value*: an id-based identifier or a lid-based local identifier.
- */
-export type RefValue =
-  | { readonly type: string; readonly id: string }
-  | { readonly type: string; readonly lid: string }
-
-/**
- * Creates a typed lid-based ref value: `{ type, lid }` with the resource's
- * type tag — the counterpart of `Resource.ref(id)` for resources that don't
- * have a server-assigned id yet.
- *
- * ```ts
- * Atomic.lidRef(Article, "a1")   // { type: "articles", lid: "a1" }
- * ```
- */
-export const lidRef = <R extends Any>(
-  resource: R,
-  lid: string
-): { readonly type: R["type"]; readonly lid: string } => ({ type: resource.type, lid })
-
 const targetRef = (type: string, target: string | { readonly lid: string }): RefValue =>
   typeof target === "string" ? { type, id: target } : { type, lid: target.lid }
 
@@ -686,11 +687,9 @@ export type ToManyKeys<R extends Any> = {
 
 /**
  * The ref values accepted for a target resource: its typed identifier or a
- * lid-based ref.
+ * lid-based local identifier (`Target.ref(id)` / `Target.lidRef(lid)`).
  */
-export type RefValueFor<T extends Any> =
-  | T["identifier"]["Type"]
-  | { readonly type: T["type"]; readonly lid: string }
+export type RefValueFor<T extends Any> = Ref<T>["Type"]
 
 /**
  * The linkage value of a relationship operation: one ref (or `null`) for
@@ -856,6 +855,24 @@ export const results = <const Entries extends ReadonlyArray<ResultValue>>(
   }) as { readonly "atomic:results": Entries }
 
 /**
+ * The JSON Pointer to the operation at `index` in a request document — for
+ * error objects' `source.pointer` member, per the extension's recommendation
+ * that errors identify the operation that failed.
+ *
+ * ```ts
+ * Atomic.operationPointer(1)   // "/atomic:operations/1"
+ * ```
+ */
+export const operationPointer = (index: number): string => `/atomic:operations/${index}`
+
+// ---------------------------------------------------------------------------
+// Operation discrimination (handler side)
+// ---------------------------------------------------------------------------
+
+const isOperationValue = (value: unknown): value is { readonly op: string } =>
+  typeof value === "object" && value !== null && typeof (value as { readonly op?: unknown }).op === "string"
+
+/**
  * Type guard: does this operation target a relationship (rather than a
  * resource)? Relationship operations are the ones whose `ref` carries a
  * `relationship` member.
@@ -878,30 +895,21 @@ export const isRelationshipOperation = <Op extends { readonly op: string }>(
 }
 
 /**
- * Type guard: does this operation target the given resource (an `add` /
- * `update` / `remove` of the resource itself, not of a relationship)?
- *
- * Narrows the operation union to that resource's operations, so handlers can
- * switch on `op` with fully typed `data` / `ref`:
- *
- * ```ts
- * if (Atomic.targetsResource(operation, Article)) {
- *   switch (operation.op) {
- *     case "add":     operation.data.attributes.title   // typed
- *     case "update":  operation.data.id
- *     case "remove":  operation.ref
- *   }
- * }
- * ```
+ * The structural shape of operations that target resource `R` itself: `add` /
+ * `update` operations carry it in `data.type`; `remove` operations in
+ * `ref.type` (with no `relationship` member).
  */
-export const targetsResource = <Op extends { readonly op: string }, R extends Any>(
-  operation: Op,
-  resource: R
-): operation is Extract<
-  Op,
+export type ResourceOperationShape<R extends Any> =
   | { readonly data: { readonly type: R["type"] } }
   | { readonly op: "remove"; readonly ref: { readonly type: R["type"]; readonly relationship?: never } }
-> => {
+
+/**
+ * The operations of `Op` that target resource `R` itself (not one of its
+ * relationships).
+ */
+export type TargetsResource<Op, R extends Any> = Extract<Op, ResourceOperationShape<R>>
+
+const targetsResourceImpl = (operation: { readonly op: string }, resource: Any): boolean => {
   if (isRelationshipOperation(operation)) return false
   const data = (operation as { readonly data?: unknown }).data
   if (data !== undefined && data !== null && typeof data === "object" && !Array.isArray(data)) {
@@ -912,32 +920,68 @@ export const targetsResource = <Op extends { readonly op: string }, R extends An
 }
 
 /**
- * Type guard: does this operation target the given relationship of the given
- * resource?
+ * Type guard: does this operation target the given resource (an `add` /
+ * `update` / `remove` of the resource itself, not of a relationship)?
  *
- * Narrows the operation union to exactly that relationship's operations, so
- * `data` has the right linkage type (one ref or `null` for to-one, an array
- * of refs for to-many):
+ * Narrows the operation union to that resource's operations, so handlers can
+ * switch on `op` with fully typed `data` / `ref`.
+ *
+ * Dual API — data-first for `if` statements, data-last (curried) for pattern
+ * matching with Effect's `Match` module:
  *
  * ```ts
- * if (Atomic.targetsRelationship(operation, Article, "comments")) {
- *   operation.op      // "add" | "update" | "remove"
- *   operation.data    // ReadonlyArray<comment ref>
+ * // data-first
+ * if (Atomic.targetsResource(operation, Article)) {
+ *   switch (operation.op) {
+ *     case "add":     operation.data.attributes.title   // typed
+ *     case "update":  operation.data.id
+ *     case "remove":  operation.ref
+ *   }
  * }
- * if (Atomic.targetsRelationship(operation, Comment, "author")) {
- *   operation.data    // person ref | null
- * }
+ *
+ * // data-last, with Match
+ * Match.value(operation).pipe(
+ *   Match.when(Atomic.targetsResource(Article), (op) => ...),
+ *   ...
+ * )
  * ```
  */
-export const targetsRelationship = <
-  Op extends { readonly op: string },
-  R extends Any,
-  const K extends RelationshipKeys<R>
->(
-  operation: Op,
-  resource: R,
-  relationship: K
-): operation is Extract<Op, { readonly ref: { readonly type: R["type"]; readonly relationship: K } }> => {
+export const targetsResource: {
+  <R extends Any>(
+    resource: R
+  ): (operation: unknown) => operation is ResourceOperationShape<R>
+  <Op extends { readonly op: string }, R extends Any>(
+    operation: Op,
+    resource: R
+  ): operation is TargetsResource<Op, R>
+} = ((...args: ReadonlyArray<unknown>) =>
+  isOperationValue(args[0])
+    // data-first: (operation, resource)
+    ? targetsResourceImpl(args[0], args[1] as Any)
+    // data-last: (resource) => (operation) => ...
+    : (operation: { readonly op: string }) => targetsResourceImpl(operation, args[0] as Any)) as never
+
+/**
+ * The structural shape of operations that target relationship `K` of resource
+ * `R`: their `ref` names the resource type and the relationship.
+ */
+export type RelationshipOperationShape<R extends Any, K extends string> = {
+  readonly ref: { readonly type: R["type"]; readonly relationship: K }
+}
+
+/**
+ * The operations of `Op` that target relationship `K` of resource `R`.
+ */
+export type TargetsRelationship<Op, R extends Any, K extends string> = Extract<
+  Op,
+  RelationshipOperationShape<R, K>
+>
+
+const targetsRelationshipImpl = (
+  operation: { readonly op: string },
+  resource: Any,
+  relationship: string
+): boolean => {
   const ref = (operation as {
     readonly ref?: { readonly type?: unknown; readonly relationship?: unknown } | undefined
   }).ref
@@ -945,139 +989,46 @@ export const targetsRelationship = <
 }
 
 /**
- * The JSON Pointer to the operation at `index` in a request document — for
- * error objects' `source.pointer` member, per the extension's recommendation
- * that errors identify the operation that failed.
+ * Type guard: does this operation target the given relationship of the given
+ * resource?
+ *
+ * Narrows the operation union to exactly that relationship's operations, so
+ * `data` has the right linkage type (one ref or `null` for to-one, an array
+ * of refs for to-many).
+ *
+ * Dual API — data-first for `if` statements, data-last (curried) for pattern
+ * matching with Effect's `Match` module:
  *
  * ```ts
- * Atomic.operationPointer(1)   // "/atomic:operations/1"
+ * // data-first
+ * if (Atomic.targetsRelationship(operation, Article, "comments")) {
+ *   operation.op      // "add" | "update" | "remove"
+ *   operation.data    // ReadonlyArray<comment ref>
+ * }
+ *
+ * // data-last, with Match
+ * Match.value(operation).pipe(
+ *   Match.when(Atomic.targetsRelationship(Comment, "author"), (op) => {
+ *     op.data           // person ref | null
+ *   }),
+ *   ...
+ * )
  * ```
  */
-export const operationPointer = (index: number): string => `/atomic:operations/${index}`
-
-// ---------------------------------------------------------------------------
-// Lid resolution (handler side)
-// ---------------------------------------------------------------------------
-
-/**
- * Thrown when resolving a ref whose `lid` was never assigned an id — the
- * client referenced a local id that no earlier `add` operation declared.
- */
-export class UnknownLidError extends Error {
-  override readonly name = "UnknownLidError"
-  readonly lid: string
-  constructor(lid: string) {
-    super(
-      `Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`
-    )
-    this.lid = lid
-  }
-}
-
-/**
- * The minimal runtime shape of relationship linkage inside an operation
- * (identifiers may be lid-based).
- */
-export interface RefLinkageValue {
-  readonly [key: string]: {
-    readonly data?: RefValue | ReadonlyArray<RefValue> | null
-    readonly meta?: MetaValue
-  }
-}
-
-/**
- * Maps relationship-descriptor records to their resolved (id-based) linkage
- * value type — the shape the resource's own schemas expect.
- */
-export type ResolvedLinkage<R extends Any> = {
-  readonly [K in keyof R["relationships"]]?: R["relationships"][K] extends ToOne<infer T>
-    ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
-    : R["relationships"][K] extends ToMany<infer T>
-      ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
-    : never
-}
-
-/**
- * Tracks the server-assigned ids of resources created with `lid`s while a
- * handler processes an atomic operations request, and resolves lid-based refs
- * to real identifiers.
- *
- * ```ts
- * const lids = Atomic.lidMap()
- *
- * // when an `add` operation with a lid succeeds:
- * lids.assign(operation.data.lid, createdId)
- *
- * // when a later operation references it:
- * const ref = lids.identifier(Article, operation.ref)          // { type, id }
- * const linkage = lids.resolveLinkage(Article, operation.data.relationships)
- * ```
- *
- * Resolution throws {@link UnknownLidError} for lids no earlier operation
- * assigned — convert it to your 4xx error of choice with `Effect.try`.
- */
-export interface LidMap {
-  /** Records the server-assigned id for a lid. */
-  readonly assign: (lid: string, id: string) => void
-  /** The id assigned to a lid, if any. */
-  readonly id: (lid: string) => string | undefined
-  /**
-   * Resolves a ref (id- or lid-based) to the resource's typed identifier.
-   * Throws {@link UnknownLidError} for unassigned lids.
-   */
-  readonly identifier: <R extends Any>(resource: R, ref: RefValue) => R["identifier"]["Type"]
-  /**
-   * Resolves every lid-based identifier inside relationship linkage to an
-   * id-based identifier — the shape the resource's own relationship schemas
-   * expect. `undefined` linkage resolves to an empty record. Throws
-   * {@link UnknownLidError} for unassigned lids.
-   */
-  readonly resolveLinkage: <R extends Any>(
+export const targetsRelationship: {
+  <R extends Any, const K extends RelationshipKeys<R>>(
     resource: R,
-    relationships: RefLinkageValue | undefined
-  ) => ResolvedLinkage<R>
-}
-
-/**
- * Creates an empty {@link LidMap}.
- */
-export const lidMap = (): LidMap => {
-  const ids = new Map<string, string>()
-
-  const resolveRef = (ref: RefValue): { readonly type: string; readonly id: string } => {
-    if ("id" in ref) return ref
-    const id = ids.get(ref.lid)
-    if (id === undefined) throw new UnknownLidError(ref.lid)
-    return { type: ref.type, id }
-  }
-
-  return {
-    assign: (lid, id) => {
-      ids.set(lid, id)
-    },
-    id: (lid) => ids.get(lid),
-    identifier: <R extends Any>(resource: R, ref: RefValue) => {
-      if (ref.type !== resource.type) {
-        throw new Error(`Ref type "${ref.type}" does not match resource type "${resource.type}"`)
-      }
-      return resolveRef(ref) as R["identifier"]["Type"]
-    },
-    // `_resource` only pins down the return type.
-    resolveLinkage: <R extends Any>(_resource: R, relationships: RefLinkageValue | undefined) => {
-      if (relationships === undefined) return {} as ResolvedLinkage<R>
-      const resolved: Record<string, unknown> = {}
-      for (const [key, value] of Object.entries(relationships)) {
-        const linkage = value.data
-        resolved[key] = {
-          ...value,
-          data: linkage === null || linkage === undefined
-            ? null
-            : Array.isArray(linkage)
-            ? linkage.map(resolveRef)
-            : resolveRef(linkage as RefValue)
-        }
-      }
-      return resolved as ResolvedLinkage<R>
-    }
-  }
-}
+    relationship: K
+  ): (operation: unknown) => operation is RelationshipOperationShape<R, K>
+  <Op extends { readonly op: string }, R extends Any, const K extends RelationshipKeys<R>>(
+    operation: Op,
+    resource: R,
+    relationship: K
+  ): operation is TargetsRelationship<Op, R, K>
+} = ((...args: ReadonlyArray<unknown>) =>
+  isOperationValue(args[0])
+    // data-first: (operation, resource, relationship)
+    ? targetsRelationshipImpl(args[0], args[1] as Any, args[2] as string)
+    // data-last: (resource, relationship) => (operation) => ...
+    : (operation: { readonly op: string }) =>
+      targetsRelationshipImpl(operation, args[0] as Any, args[1] as string)) as never

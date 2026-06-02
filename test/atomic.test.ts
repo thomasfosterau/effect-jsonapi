@@ -66,7 +66,7 @@ describe("atomic operations: creating with lids", () => {
             },
             relationships: {
               author: { data: Person.ref(sampleAuthor.id) },
-              comments: { data: [Atomic.lidRef(Comment, "c1")] }
+              comments: { data: [Comment.lidRef("c1")] }
             }
           })
         )
@@ -199,7 +199,7 @@ describe("atomic operations: relationship operations", () => {
             attributes: { body: "Link me" },
             relationships: { author: { data: null } }
           }),
-          Atomic.addToRelationship(Article, sampleArticle.id, "comments", [Atomic.lidRef(Comment, "linked")])
+          Atomic.addToRelationship(Article, sampleArticle.id, "comments", [Comment.lidRef("linked")])
         )
       })
 
@@ -274,7 +274,7 @@ describe("atomic operations: all-or-nothing", () => {
             attributes: { title: "Refers to nothing", body: "", createdAt: new Date() },
             relationships: {
               author: { data: null },
-              comments: { data: [Atomic.lidRef(Comment, "never-declared")] }
+              comments: { data: [Comment.lidRef("never-declared")] }
             }
           })
         )

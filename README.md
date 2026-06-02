@@ -67,6 +67,8 @@ Everything below is **derived** — never assembled by hand:
 | `Article.Id`             | branded id schema — `Article.Id` values can't be mixed with `Person.Id` |
 | `Article.identifier`     | the `{ type: "articles", id }` resource-identifier schema               |
 | `Article.ref("1")`       | a typed identifier *value* — handy for relationship linkage             |
+| `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet) |
+| `Article.lidRef("a1")`   | a typed local-identifier *value* — the `lid` counterpart of `ref`       |
 | `Article.createPayload`  | `{ data: { type, lid?, attributes, relationships? } }` — no `id`        |
 | `Article.updatePayload`  | `{ data: { type, id, attributes? (partial), relationships? } }`         |
 | `Article.document()`     | single-resource document; `included` union derived from relationships   |
@@ -172,9 +174,7 @@ The `included` union spans every searched resource's relationship targets, and q
 
 `Endpoint.operations` models the [atomic operations extension](https://jsonapi.org/ext/atomic/):
 one request carrying an ordered list of operations — creating, updating and deleting resources or
-their relationships — processed all-or-nothing. The operation union (including relationship
-operations and `lid`-based references between operations) is derived from the resource
-definitions:
+their relationships — processed all-or-nothing:
 
 ```ts
 const operations = JsonApi.Group("operations",
@@ -185,26 +185,38 @@ const operations = JsonApi.Group("operations",
 const Api = HttpApi.make("blog").add(articles).add(operations)
 ```
 
-Clients build requests with the typed operation constructors — note the `lid` linking two
+Like everything else, the operations a resource supports are **derived** from its definition —
+`JsonApi.Atomic.operationsFor(Article)` exposes them as a named record of schemas:
+
+| Derived operation | Wire form |
+| --- | --- |
+| `.add` | `{ op: "add", data: { type, lid?, attributes, relationships? } }` |
+| `.update` | `{ op: "update", data: { type, id \| lid, attributes?, relationships? } }` |
+| `.remove` | `{ op: "remove", ref: { type, id \| lid } }` |
+| `.relationships.author.update` (per to-one relationship) | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref \| null }` |
+| `.relationships.comments.add` / `.update` / `.remove` (per to-many relationship) | `{ op, ref: { type, id \| lid, relationship }, data: [refs] }` |
+
+Clients build requests with the typed operation constructors — note `Article.lidRef` linking two
 operations in the same request:
 
 ```ts
 const doc = yield* client.operations.operations({
   payload: JsonApi.Atomic.request(
-    // 1. create a comment; it has no id yet, so it declares a lid
-    JsonApi.Atomic.add(Comment, {
-      lid: "c1",
-      attributes: { body: "First!" },
-      relationships: { author: { data: Person.ref("9") } }
-    }),
-    // 2. create an article whose comments relationship references it by lid
+    // 1. create an article; it has no id yet, so it declares a lid
     JsonApi.Atomic.add(Article, {
+      lid: "a1",
       attributes: { title: "Atomic bikeshedding", body: "…", createdAt: new Date() },
       relationships: {
         author: { data: Person.ref("9") },
-        comments: { data: [JsonApi.Atomic.lidRef(Comment, "c1")] }
+        comments: { data: [] }
       }
     }),
+    // 2. create a comment and link it into the new article — by lid
+    JsonApi.Atomic.add(Comment, {
+      attributes: { body: "First!" },
+      relationships: { author: { data: Person.ref("9") } }
+    }),
+    JsonApi.Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.ref("5")]),
     // 3. relationship operations: update / addTo / removeFrom
     JsonApi.Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
   )
@@ -213,31 +225,42 @@ const doc = yield* client.operations.operations({
 doc["atomic:results"]   // one result per operation, in order; `data` is typed Article | Comment
 ```
 
-Handlers receive the decoded operation union and respond with `Atomic.results`; the
-`targetsResource` / `targetsRelationship` guards narrow each operation to fully typed `data` /
-`ref`, and `Atomic.lidMap()` tracks the server-assigned ids of lid-created resources:
+Handlers pattern-match over the decoded operation union — the `targetsResource` /
+`targetsRelationship` guards are curried, so they drop straight into Effect's `Match` module and
+narrow each case to fully typed `data` / `ref`; `JsonApi.lidMap()` tracks the server-assigned ids
+of lid-created resources:
 
 ```ts
 const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
   handlers.handle("operations", ({ payload }) =>
     Effect.gen(function*() {
-      const lids = JsonApi.Atomic.lidMap()
+      const lids = JsonApi.lidMap()
       const entries = []
-      for (const op of payload["atomic:operations"]) {
-        if (JsonApi.Atomic.targetsResource(op, Article)) {
-          // op.op is "add" | "update" | "remove"; op.data / op.ref are typed
-          const article = Article.make({
-            id: Article.Id.make(newId()),
-            attributes: op.data.attributes,
-            relationships: lids.resolveLinkage(Article, op.data.relationships)  // lids → real ids
-          })
-          if (op.data.lid !== undefined) lids.assign(op.data.lid, article.id)
-          entries.push({ data: article })
-        } else if (JsonApi.Atomic.targetsRelationship(op, Article, "comments")) {
-          // op.data is ReadonlyArray<comment ref>; op.op is "add" | "update" | "remove"
-          entries.push(JsonApi.Atomic.emptyResult)
-        }
-        // …
+      for (const operation of payload["atomic:operations"]) {
+        entries.push(Match.value(operation).pipe(
+          Match.when(JsonApi.Atomic.targetsRelationship(Article, "comments"), (op) => {
+            // op.data is ReadonlyArray<comment ref>; op.op is "add" | "update" | "remove"
+            return JsonApi.Atomic.emptyResult
+          }),
+          Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
+            Match.value(op).pipe(
+              Match.when({ op: "add" }, (add) => {
+                const article = Article.make({
+                  id: Article.Id.make(newId()),
+                  attributes: add.data.attributes,
+                  relationships: lids.resolveLinkage(Article, add.data.relationships)  // lids → real ids
+                })
+                if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id)
+                return { data: article }
+              }),
+              Match.when({ op: "update" }, (update) => /* … */),
+              Match.when({ op: "remove" }, (remove) => /* … */),
+              Match.exhaustive
+            )),
+          // … one case per resource and relationship; Match.exhaustive proves
+          //   every operation in the union is handled
+          Match.exhaustive
+        ))
       }
       return JsonApi.Atomic.results(entries)
     })))

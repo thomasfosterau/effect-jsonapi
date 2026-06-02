@@ -10,7 +10,7 @@
  * and return document values (`JsonApi.data` / `JsonApi.collection`), which
  * are validated against the endpoint's document schema on the way out.
  */
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Match } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "./api.js"
@@ -238,21 +238,21 @@ const emptyArticleRelationships: NonNullable<Article["relationships"]> = {
  * operations in the same request.
  */
 const targetId = (
-  lids: JsonApi.Atomic.LidMap,
+  lids: JsonApi.LidMap,
   target: { readonly id?: string; readonly lid?: string }
 ): string => {
   if (target.id !== undefined) return target.id
   if (target.lid !== undefined) {
     const id = lids.id(target.lid)
     if (id !== undefined) return id
-    throw new JsonApi.Atomic.UnknownLidError(target.lid)
+    throw new JsonApi.UnknownLidError(target.lid)
   }
   throw new Error("operation does not identify a target resource")
 }
 
 const getArticle = (
   draft: Draft,
-  lids: JsonApi.Atomic.LidMap,
+  lids: JsonApi.LidMap,
   target: { readonly id?: string; readonly lid?: string }
 ): Article => {
   const id = targetId(lids, target)
@@ -263,7 +263,7 @@ const getArticle = (
 
 const getComment = (
   draft: Draft,
-  lids: JsonApi.Atomic.LidMap,
+  lids: JsonApi.LidMap,
   target: { readonly id?: string; readonly lid?: string }
 ): Comment => {
   const id = targetId(lids, target)
@@ -275,146 +275,144 @@ const getComment = (
 /**
  * Applies one operation to the draft, returning its result entry.
  *
+ * Pattern-matches over the operation union with Effect's `Match` module: the
+ * curried `Atomic.targetsRelationship` / `Atomic.targetsResource` guards
+ * narrow each case to fully typed `data` / `ref`.
+ *
  * Failures throw; the handler converts them into typed `OperationFailed`
  * errors carrying the index of the operation that failed.
  */
 const applyOperation = (
   draft: Draft,
-  lids: JsonApi.Atomic.LidMap,
+  lids: JsonApi.LidMap,
   operation: AtomicOperation
-): ResultEntry => {
-  // --- relationship operations ---------------------------------------------
-
-  // replace an article's author (to-one)
-  if (JsonApi.Atomic.targetsRelationship(operation, Article, "author")) {
-    const article = getArticle(draft, lids, operation.ref)
-    draft.articles.set(
-      article.id,
-      Article.make({
-        ...article,
-        relationships: {
-          ...(article.relationships ?? emptyArticleRelationships),
-          author: { data: operation.data === null ? null : lids.identifier(Person, operation.data) }
-        }
-      })
-    )
-    return {}
-  }
-
-  // add to / replace / remove from an article's comments (to-many)
-  if (JsonApi.Atomic.targetsRelationship(operation, Article, "comments")) {
-    const article = getArticle(draft, lids, operation.ref)
-    const refs = operation.data.map((ref) => lids.identifier(Comment, ref))
-    const current = article.relationships?.comments.data ?? []
-    const next = operation.op === "add"
-      ? [...current, ...refs]
-      : operation.op === "remove"
-      ? current.filter((existing) => !refs.some((removed) => removed.id === existing.id))
-      : refs
-    draft.articles.set(
-      article.id,
-      Article.make({
-        ...article,
-        relationships: {
-          ...(article.relationships ?? emptyArticleRelationships),
-          comments: { data: next }
-        }
-      })
-    )
-    return {}
-  }
-
-  // replace a comment's author (to-one)
-  if (JsonApi.Atomic.targetsRelationship(operation, Comment, "author")) {
-    const comment = getComment(draft, lids, operation.ref)
-    draft.comments.set(
-      comment.id,
-      Comment.make({
-        ...comment,
-        relationships: {
-          author: { data: operation.data === null ? null : lids.identifier(Person, operation.data) }
-        }
-      })
-    )
-    return {}
-  }
-
-  // --- resource operations --------------------------------------------------
-
-  if (JsonApi.Atomic.targetsResource(operation, Article)) {
-    switch (operation.op) {
-      case "add": {
-        const article = Article.make({
-          id: Article.Id.make(freshId()),
-          attributes: operation.data.attributes,
-          relationships: {
-            ...emptyArticleRelationships,
-            ...lids.resolveLinkage(Article, operation.data.relationships)
-          }
-        })
-        draft.articles.set(article.id, article)
-        if (operation.data.lid !== undefined) lids.assign(operation.data.lid, article.id)
-        return { data: article }
-      }
-      case "update": {
-        const article = getArticle(draft, lids, operation.ref ?? operation.data)
-        const updated = Article.make({
+): ResultEntry =>
+  Match.value(operation).pipe(
+    // --- relationship operations (refs carrying a `relationship` member) ----
+    // replace an article's author (to-one)
+    Match.when(JsonApi.Atomic.targetsRelationship(Article, "author"), (op) => {
+      const article = getArticle(draft, lids, op.ref)
+      draft.articles.set(
+        article.id,
+        Article.make({
           ...article,
-          attributes: { ...article.attributes, ...(operation.data.attributes ?? {}) },
           relationships: {
             ...(article.relationships ?? emptyArticleRelationships),
-            ...lids.resolveLinkage(Article, operation.data.relationships)
+            author: { data: op.data === null ? null : lids.identifier(Person, op.data) }
           }
         })
-        draft.articles.set(updated.id, updated)
-        return { data: updated }
-      }
-      case "remove": {
-        const article = getArticle(draft, lids, operation.ref)
-        draft.articles.delete(article.id)
-        return {}
-      }
-    }
-  }
-
-  if (JsonApi.Atomic.targetsResource(operation, Comment)) {
-    switch (operation.op) {
-      case "add": {
-        const comment = Comment.make({
-          id: Comment.Id.make(freshId()),
-          attributes: operation.data.attributes,
+      )
+      return JsonApi.Atomic.emptyResult
+    }),
+    // add to / replace / remove from an article's comments (to-many)
+    Match.when(JsonApi.Atomic.targetsRelationship(Article, "comments"), (op) => {
+      const article = getArticle(draft, lids, op.ref)
+      const refs = op.data.map((ref) => lids.identifier(Comment, ref))
+      const current = article.relationships?.comments.data ?? []
+      const next = op.op === "add"
+        ? [...current, ...refs]
+        : op.op === "remove"
+        ? current.filter((existing) => !refs.some((removed) => removed.id === existing.id))
+        : refs
+      draft.articles.set(
+        article.id,
+        Article.make({
+          ...article,
           relationships: {
-            author: { data: null },
-            ...lids.resolveLinkage(Comment, operation.data.relationships)
+            ...(article.relationships ?? emptyArticleRelationships),
+            comments: { data: next }
           }
         })
-        draft.comments.set(comment.id, comment)
-        if (operation.data.lid !== undefined) lids.assign(operation.data.lid, comment.id)
-        return { data: comment }
-      }
-      case "update": {
-        const comment = getComment(draft, lids, operation.ref ?? operation.data)
-        const updated = Comment.make({
+      )
+      return JsonApi.Atomic.emptyResult
+    }),
+    // replace a comment's author (to-one)
+    Match.when(JsonApi.Atomic.targetsRelationship(Comment, "author"), (op) => {
+      const comment = getComment(draft, lids, op.ref)
+      draft.comments.set(
+        comment.id,
+        Comment.make({
           ...comment,
-          attributes: { ...comment.attributes, ...(operation.data.attributes ?? {}) },
           relationships: {
-            ...(comment.relationships ?? { author: { data: null } }),
-            ...lids.resolveLinkage(Comment, operation.data.relationships)
+            author: { data: op.data === null ? null : lids.identifier(Person, op.data) }
           }
         })
-        draft.comments.set(updated.id, updated)
-        return { data: updated }
-      }
-      case "remove": {
-        const comment = getComment(draft, lids, operation.ref)
-        draft.comments.delete(comment.id)
-        return {}
-      }
-    }
-  }
-
-  throw new Error("unsupported operation")
-}
+      )
+      return JsonApi.Atomic.emptyResult
+    }),
+    // --- resource operations -------------------------------------------------
+    Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
+      Match.value(op).pipe(
+        Match.when({ op: "add" }, (add) => {
+          const article = Article.make({
+            id: Article.Id.make(freshId()),
+            attributes: add.data.attributes,
+            relationships: {
+              ...emptyArticleRelationships,
+              ...lids.resolveLinkage(Article, add.data.relationships)
+            }
+          })
+          draft.articles.set(article.id, article)
+          if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id)
+          return { data: article }
+        }),
+        Match.when({ op: "update" }, (update) => {
+          const article = getArticle(draft, lids, update.ref ?? update.data)
+          const updated = Article.make({
+            ...article,
+            attributes: { ...article.attributes, ...(update.data.attributes ?? {}) },
+            relationships: {
+              ...(article.relationships ?? emptyArticleRelationships),
+              ...lids.resolveLinkage(Article, update.data.relationships)
+            }
+          })
+          draft.articles.set(updated.id, updated)
+          return { data: updated }
+        }),
+        Match.when({ op: "remove" }, (remove) => {
+          const article = getArticle(draft, lids, remove.ref)
+          draft.articles.delete(article.id)
+          return JsonApi.Atomic.emptyResult
+        }),
+        Match.exhaustive
+      )),
+    Match.when(JsonApi.Atomic.targetsResource(Comment), (op) =>
+      Match.value(op).pipe(
+        Match.when({ op: "add" }, (add) => {
+          const comment = Comment.make({
+            id: Comment.Id.make(freshId()),
+            attributes: add.data.attributes,
+            relationships: {
+              author: { data: null },
+              ...lids.resolveLinkage(Comment, add.data.relationships)
+            }
+          })
+          draft.comments.set(comment.id, comment)
+          if (add.data.lid !== undefined) lids.assign(add.data.lid, comment.id)
+          return { data: comment }
+        }),
+        Match.when({ op: "update" }, (update) => {
+          const comment = getComment(draft, lids, update.ref ?? update.data)
+          const updated = Comment.make({
+            ...comment,
+            attributes: { ...comment.attributes, ...(update.data.attributes ?? {}) },
+            relationships: {
+              ...(comment.relationships ?? { author: { data: null } }),
+              ...lids.resolveLinkage(Comment, update.data.relationships)
+            }
+          })
+          draft.comments.set(updated.id, updated)
+          return { data: updated }
+        }),
+        Match.when({ op: "remove" }, (remove) => {
+          const comment = getComment(draft, lids, remove.ref)
+          draft.comments.delete(comment.id)
+          return JsonApi.Atomic.emptyResult
+        }),
+        Match.exhaustive
+      )),
+    Match.exhaustive
+  )
 
 export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
   handlers.handle("operations", ({ payload }) =>
@@ -423,7 +421,7 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
         articles: new Map(store.articles),
         comments: new Map(store.comments)
       }
-      const lids = JsonApi.Atomic.lidMap()
+      const lids = JsonApi.lidMap()
       const entries: Array<ResultEntry> = []
 
       const operations = payload["atomic:operations"]

@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Schema } from "effect"
+import { Match, Schema } from "effect"
 import * as Atomic from "./Atomic.js"
 import * as Middleware from "./Middleware.js"
-import { Resource, toMany, toOne } from "./Resource.js"
+import { Ref, Resource, toMany, toOne } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -62,7 +62,7 @@ describe("extension constants", () => {
 
 describe("refs", () => {
   it("Ref decodes id-based identifiers", () => {
-    const ref = Schema.decodeUnknownSync(Atomic.Ref(Article) as Schema.Codec<unknown, unknown>)({
+    const ref = Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
       type: "articles",
       id: "1"
     })
@@ -70,7 +70,7 @@ describe("refs", () => {
   })
 
   it("Ref decodes lid-based local identifiers", () => {
-    const ref = Schema.decodeUnknownSync(Atomic.Ref(Article) as Schema.Codec<unknown, unknown>)({
+    const ref = Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
       type: "articles",
       lid: "a1"
     })
@@ -79,17 +79,23 @@ describe("refs", () => {
 
   it("Ref rejects identifiers of other types", () => {
     expect(() =>
-      Schema.decodeUnknownSync(Atomic.Ref(Article) as Schema.Codec<unknown, unknown>)({
+      Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
         type: "people",
         id: "9"
       })
     ).toThrow()
   })
 
-  it("lidRef creates typed lid-based ref values", () => {
-    const ref = Atomic.lidRef(Article, "a1")
+  it("Resource.lidRef creates typed lid-based ref values", () => {
+    const ref = Article.lidRef("a1")
     expect(ref).toEqual({ type: "articles", lid: "a1" })
     expectTypeOf(ref.type).toEqualTypeOf<"articles">()
+  })
+
+  it("Resource.localIdentifier is the { type, lid } schema", () => {
+    const decoded = Schema.decodeUnknownSync(Article.localIdentifier)({ type: "articles", lid: "a1" })
+    expect(decoded).toEqual({ type: "articles", lid: "a1" })
+    expect(() => Schema.decodeUnknownSync(Article.localIdentifier)({ type: "articles", id: "1" })).toThrow()
   })
 })
 
@@ -293,7 +299,7 @@ describe("RequestDocument", () => {
         attributes: { title: "Hello", body: "World" },
         relationships: {
           author: { data: Person.ref("9") },
-          comments: { data: [Atomic.lidRef(Comment, "c1")] }
+          comments: { data: [Comment.lidRef("c1")] }
         }
       }),
       Atomic.update(Article, { id: Article.Id.make("1"), attributes: { title: "Updated" } }),
@@ -414,68 +420,97 @@ describe("operationPointer", () => {
   })
 })
 
-describe("lidMap", () => {
-  it("assigns and resolves lids", () => {
-    const lids = Atomic.lidMap()
-    expect(lids.id("a1")).toBeUndefined()
-    lids.assign("a1", "42")
-    expect(lids.id("a1")).toBe("42")
+// ---------------------------------------------------------------------------
+// Discovering the derived operations
+// ---------------------------------------------------------------------------
+
+describe("operationsFor", () => {
+  it("derives a named record of every operation for a resource", () => {
+    const operations = Atomic.operationsFor(Article)
+
+    // resource-level operations
+    expect(Object.keys(operations)).toEqual(["add", "update", "remove", "relationships"])
+    // relationship operations, by relationship key and kind
+    expect(Object.keys(operations.relationships)).toEqual(["author", "comments"])
+    expect(Object.keys(operations.relationships.author)).toEqual(["update"])
+    expect(Object.keys(operations.relationships.comments)).toEqual(["add", "update", "remove"])
   })
 
-  it("resolves lid-based refs to typed identifiers", () => {
-    const lids = Atomic.lidMap()
-    lids.assign("a1", "42")
-    expect(lids.identifier(Article, { type: "articles", lid: "a1" })).toEqual({ type: "articles", id: "42" })
+  it("the record's schemas decode their wire forms", () => {
+    const operations = Atomic.operationsFor(Article)
+
+    const add = Schema.decodeUnknownSync(operations.add as Schema.Codec<unknown, unknown>)({
+      op: "add",
+      data: { type: "articles", attributes: { title: "Hello", body: "" } }
+    }) as { readonly op: string }
+    expect(add.op).toBe("add")
+
+    const linkComments = Schema.decodeUnknownSync(
+      operations.relationships.comments.add as Schema.Codec<unknown, unknown>
+    )({
+      op: "add",
+      ref: { type: "articles", id: "1", relationship: "comments" },
+      data: [{ type: "comments", id: "5" }]
+    }) as { readonly ref: { readonly relationship: string } }
+    expect(linkComments.ref.relationship).toBe("comments")
   })
 
-  it("passes id-based refs through unchanged", () => {
-    const lids = Atomic.lidMap()
-    expect(lids.identifier(Article, { type: "articles", id: "7" })).toEqual({ type: "articles", id: "7" })
+  it("resources without relationships derive only resource operations", () => {
+    const operations = Atomic.operationsFor(Person)
+    expect(Object.keys(operations.relationships)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Pattern matching over operations with Effect's Match module
+// ---------------------------------------------------------------------------
+
+describe("Match integration (curried guards)", () => {
+  type Op = Atomic.Operation<typeof Article | typeof Comment>["Type"]
+
+  const describeOperation = (operation: Op): string =>
+    Match.value(operation).pipe(
+      Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => `link ${op.data.length} comments`),
+      Match.when(Atomic.targetsRelationship(Article, "author"), () => "set article author"),
+      Match.when(Atomic.targetsRelationship(Comment, "author"), () => "set comment author"),
+      Match.when(Atomic.targetsResource(Article), (op) => `${op.op} article`),
+      Match.when(Atomic.targetsResource(Comment), (op) => `${op.op} comment`),
+      Match.exhaustive
+    )
+
+  it("dispatches relationship and resource operations", () => {
+    expect(describeOperation(decodeOperation({
+      op: "add",
+      ref: { type: "articles", id: "1", relationship: "comments" },
+      data: [{ type: "comments", id: "5" }]
+    }) as Op)).toBe("link 1 comments")
+
+    expect(describeOperation(decodeOperation({
+      op: "update",
+      ref: { type: "comments", id: "5", relationship: "author" },
+      data: { type: "people", id: "9" }
+    }) as Op)).toBe("set comment author")
+
+    expect(describeOperation(decodeOperation({
+      op: "add",
+      data: { type: "articles", attributes: { title: "Hello", body: "" } }
+    }) as Op)).toBe("add article")
+
+    expect(describeOperation(decodeOperation({
+      op: "remove",
+      ref: { type: "comments", id: "5" }
+    }) as Op)).toBe("remove comment")
   })
 
-  it("throws UnknownLidError for unassigned lids", () => {
-    const lids = Atomic.lidMap()
-    expect(() => lids.identifier(Article, { type: "articles", lid: "nope" })).toThrow(Atomic.UnknownLidError)
-    try {
-      lids.identifier(Article, { type: "articles", lid: "nope" })
-    } catch (error) {
-      expect((error as Atomic.UnknownLidError).lid).toBe("nope")
-    }
-  })
-
-  it("throws when the ref type does not match the resource", () => {
-    const lids = Atomic.lidMap()
-    expect(() => lids.identifier(Article, { type: "people", id: "9" })).toThrow(/does not match/)
-  })
-
-  it("resolves relationship linkage with mixed id- and lid-based refs", () => {
-    const lids = Atomic.lidMap()
-    lids.assign("c1", "100")
-
-    const linkage = lids.resolveLinkage(Article, {
-      author: { data: { type: "people", id: "9" } },
-      comments: { data: [{ type: "comments", lid: "c1" }, { type: "comments", id: "5" }] }
-    })
-
-    expect(linkage).toEqual({
-      author: { data: { type: "people", id: "9" } },
-      comments: { data: [{ type: "comments", id: "100" }, { type: "comments", id: "5" }] }
-    })
-  })
-
-  it("resolves null linkage and undefined relationships", () => {
-    const lids = Atomic.lidMap()
-    expect(lids.resolveLinkage(Article, { author: { data: null } })).toEqual({ author: { data: null } })
-    expect(lids.resolveLinkage(Article, undefined)).toEqual({})
-  })
-
-  it("throws UnknownLidError for unassigned lids in linkage", () => {
-    const lids = Atomic.lidMap()
-    expect(() =>
-      lids.resolveLinkage(Article, {
-        comments: { data: [{ type: "comments", lid: "never-created" }] }
-      })
-    ).toThrow(Atomic.UnknownLidError)
+  it("curried and data-first guards agree", () => {
+    const operation = decodeOperation({
+      op: "remove",
+      ref: { type: "articles", id: "1" }
+    }) as Op
+    expect(Atomic.targetsResource(operation, Article)).toBe(true)
+    expect(Atomic.targetsResource(Article)(operation)).toBe(true)
+    expect(Atomic.targetsResource(operation, Comment)).toBe(false)
+    expect(Atomic.targetsResource(Comment)(operation)).toBe(false)
   })
 })
 
