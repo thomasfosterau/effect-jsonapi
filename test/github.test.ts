@@ -8,9 +8,22 @@ import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "../examples/github/api.js"
-import { IssueLocked, RepositoryNameTaken, RepositoryNotFound } from "../examples/github/errors.js"
-import { bugIssue, GitHubLive, helloWorld, lockedIssue, octocat, readmePull, spoonKnife } from "../examples/github/handlers.js"
-import { Issue, PullRequest, Repository, User } from "../examples/github/resources.js"
+import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../examples/github/errors.js"
+import {
+  bugComments,
+  bugIssue,
+  bugLabel,
+  defunkt,
+  enhancementLabel,
+  GitHubLive,
+  helloWorld,
+  hubot,
+  lockedIssue,
+  octocat,
+  readmePull,
+  spoonKnife
+} from "../examples/github/handlers.js"
+import { Issue, Label, PullRequest, Repository, User } from "../examples/github/resources.js"
 
 const buildClient = HttpApiTest.groups(Api, ["users", "repositories", "issues", "pulls", "search"])
 
@@ -322,7 +335,8 @@ describe("github example: writing", () => {
             },
             relationships: {
               repository: { data: Repository.ref("does-not-exist") },
-              author: { data: null },
+              // `author` is required (`one`) — null wouldn't even decode.
+              author: { data: User.ref(octocat.id) },
               assignee: { data: null },
               labels: { data: [] }
             }
@@ -378,6 +392,198 @@ describe("github example: writing", () => {
       expect(error).toBeInstanceOf(IssueLocked)
       expect((error as IssueLocked).id).toBe(lockedIssue.id)
     }
+  })
+})
+
+describe("github example: related resource endpoints", () => {
+  it("GET /repositories/:id/owner serves the owning user", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.repositories.owner({
+        params: { id: Repository.Id.make("1") },
+        query: {}
+      })
+    }))
+
+    expect(document.data).toMatchObject({
+      type: "users",
+      id: octocat.id,
+      attributes: { login: "octocat" }
+    })
+    expect(document.links?.self).toBe("/repositories/1/owner")
+  })
+
+  it("GET /issues/:id/comments serves the paginated comment feed", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.comments({
+        params: { id: bugIssue.id },
+        query: { page: { number: 1, size: 2 } }
+      })
+    }))
+
+    // Full comment resources, paginated GitHub-style
+    expect(document.data).toHaveLength(2)
+    expect(document.data[0]?.attributes.body).toBe(bugComments[0]!.attributes.body)
+    expect(document.meta?.total).toBe(3)
+    expect(document.links?.next).toBe("/issues/1/comments?page[number]=2&page[size]=2")
+  })
+
+  it("GET /issues/:id/comments supports compound documents (?include=author)", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.comments({
+        params: { id: bugIssue.id },
+        query: { include: ["author"] }
+      })
+    }))
+
+    // Three comments by two distinct users → two deduplicated includes
+    expect(document.data).toHaveLength(3)
+    const authors = document.included?.map((resource) => resource.id).sort()
+    expect(authors).toEqual([octocat.id, defunkt.id].sort())
+  })
+
+  it("issues with no comments serve an empty related collection", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.comments({
+        params: { id: lockedIssue.id },
+        query: {}
+      })
+    }))
+
+    expect(document.data).toEqual([])
+    expect(document.meta?.total).toBe(0)
+  })
+})
+
+describe("github example: issue triage via relationship endpoints", () => {
+  it("GET /issues/:id/relationships/labels serves label linkage", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.labelsRelationship({
+        params: { id: bugIssue.id },
+        query: {}
+      })
+    }))
+
+    expect(document.data).toEqual([{ type: "labels", id: bugLabel.id }])
+    expect(document.links?.self).toBe("/issues/1/relationships/labels")
+    expect(document.links?.related).toBe("/issues/1/labels")
+  })
+
+  it("PATCH /issues/:id/relationships/assignee assigns a user", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      const linkage = yield* client.issues.updateAssigneeRelationship({
+        params: { id: bugIssue.id },
+        payload: { data: User.ref(hubot.id) }
+      })
+      // The issue reflects the assignment
+      const issue = yield* client.issues.fetch({ params: { id: bugIssue.id }, query: {} })
+      expect(issue.data?.relationships?.assignee.data?.id).toBe(hubot.id)
+      return linkage
+    }))
+
+    expect(document.data).toEqual({ type: "users", id: hubot.id })
+  })
+
+  it("PATCH /issues/:id/relationships/assignee with null unassigns", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.updateAssigneeRelationship({
+        params: { id: bugIssue.id },
+        payload: { data: null }
+      })
+    }))
+
+    expect(document.data).toBeNull()
+  })
+
+  it("404s when assigning an unknown user", async () => {
+    const exit = await runExit(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.updateAssigneeRelationship({
+        params: { id: bugIssue.id },
+        payload: { data: User.ref("ghost") }
+      })
+    }))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(findFailure(exit.cause)).toBeInstanceOf(UserNotFound)
+    }
+  })
+
+  it("403s when triaging a locked issue", async () => {
+    const exit = await runExit(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.issues.addLabelsRelationship({
+        params: { id: lockedIssue.id },
+        payload: { data: [Label.ref(bugLabel.id)] }
+      })
+    }))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(findFailure(exit.cause)).toBeInstanceOf(IssueLocked)
+    }
+  })
+
+  it("POST adds labels, DELETE removes them, PATCH replaces them", async () => {
+    await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      const issueId = bugIssue.id
+
+      // POST: add the enhancement label alongside the existing bug label
+      const added = yield* client.issues.addLabelsRelationship({
+        params: { id: issueId },
+        payload: { data: [Label.ref(enhancementLabel.id)] }
+      })
+      expect(added.data.map((identifier) => identifier.id).sort()).toEqual(
+        [bugLabel.id, enhancementLabel.id].sort()
+      )
+
+      // Adding an already-present label is a no-op (spec: MUST NOT add it again)
+      const addedTwice = yield* client.issues.addLabelsRelationship({
+        params: { id: issueId },
+        payload: { data: [Label.ref(enhancementLabel.id)] }
+      })
+      expect(addedTwice.data).toHaveLength(2)
+
+      // DELETE: remove the bug label → 204
+      yield* client.issues.removeLabelsRelationship({
+        params: { id: issueId },
+        payload: { data: [Label.ref(bugLabel.id)] }
+      })
+      const afterRemove = yield* client.issues.labelsRelationship({ params: { id: issueId }, query: {} })
+      expect(afterRemove.data).toEqual([{ type: "labels", id: enhancementLabel.id }])
+
+      // PATCH: replace the full set
+      const replaced = yield* client.issues.updateLabelsRelationship({
+        params: { id: issueId },
+        payload: { data: [Label.ref(bugLabel.id)] }
+      })
+      expect(replaced.data).toEqual([{ type: "labels", id: bugLabel.id }])
+    }))
+  })
+
+  it("documents relationship endpoints in OpenAPI", () => {
+    const spec = OpenApi.fromApi(Api)
+    // Related resource endpoints
+    expect(spec.paths["/repositories/{id}/owner"]?.get).toBeDefined()
+    expect(spec.paths["/issues/{id}/comments"]?.get).toBeDefined()
+    // Relationship (linkage) endpoints: GET/PATCH/POST/DELETE on labels
+    expect(spec.paths["/issues/{id}/relationships/labels"]?.get).toBeDefined()
+    expect(spec.paths["/issues/{id}/relationships/labels"]?.patch).toBeDefined()
+    expect(spec.paths["/issues/{id}/relationships/labels"]?.post).toBeDefined()
+    expect(spec.paths["/issues/{id}/relationships/labels"]?.delete).toBeDefined()
+    expect(spec.paths["/issues/{id}/relationships/assignee"]?.patch).toBeDefined()
+    // DELETE → 204
+    expect(spec.paths["/issues/{id}/relationships/labels"]?.delete?.responses).toHaveProperty("204")
+    // Locked issues → 403 documented on triage endpoints
+    expect(spec.paths["/issues/{id}/relationships/labels"]?.post?.responses).toHaveProperty("403")
   })
 })
 

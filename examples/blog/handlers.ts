@@ -6,16 +6,18 @@
  *   - `params.id` is the resource's branded id
  *   - `query.include` / `query.sort` / `query.page` / `query.filter` are typed
  *   - `payload.data.attributes` is the typed create/update payload
+ *   - relationship endpoints receive typed linkage payloads
  *
- * and return document values (`JsonApi.data` / `JsonApi.collection`), which
- * are validated against the endpoint's document schema on the way out.
+ * and return document values (`JsonApi.data` / `JsonApi.collection` /
+ * `JsonApi.linkage`), which are validated against the endpoint's document
+ * schema on the way out.
  */
 import { Effect, Layer } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "./api.js"
 import { ArticleNotFound, TitleTaken } from "./errors.js"
-import { Article, Comment, Person } from "./resources.js"
+import { Article, Comment, Person, Tag } from "./resources.js"
 
 // ---------------------------------------------------------------------------
 // In-memory store
@@ -26,13 +28,27 @@ export const sampleAuthor: Person = Person.make({
   attributes: { firstName: "Dan", lastName: "Gebhardt", twitter: "dgeb" }
 })
 
-export const sampleComment: Comment = Comment.make({
-  id: Comment.Id.make("5"),
-  attributes: { body: "First!" },
-  relationships: {
-    author: { data: { type: "people", id: sampleAuthor.id } }
-  }
+export const sampleTag: Tag = Tag.make({
+  id: Tag.Id.make("1"),
+  attributes: { name: "api-design" }
 })
+
+export const sampleComments: ReadonlyArray<Comment> = [
+  Comment.make({
+    id: Comment.Id.make("5"),
+    attributes: { body: "First!" },
+    relationships: {
+      author: { data: Person.ref(sampleAuthor.id) }
+    }
+  }),
+  Comment.make({
+    id: Comment.Id.make("12"),
+    attributes: { body: "I like XML better" },
+    relationships: {
+      author: { data: Person.ref(sampleAuthor.id) }
+    }
+  })
+]
 
 export const sampleArticle: Article = Article.make({
   id: Article.Id.make("1"),
@@ -42,15 +58,23 @@ export const sampleArticle: Article = Article.make({
     createdAt: new Date("2024-01-01T00:00:00.000Z")
   },
   relationships: {
-    author: { data: { type: "people", id: sampleAuthor.id } },
-    comments: { data: [{ type: "comments", id: sampleComment.id }] }
+    // `one`: inline identifier, never null
+    author: { data: Person.ref(sampleAuthor.id) },
+    // `many`: inline identifier array
+    tags: { data: [Tag.ref(sampleTag.id)] },
+    // `paginated`: no inline data — just the links clients follow
+    comments: JsonApi.paginatedRelationship("articles", "1", "comments")
   }
 })
 
 const store = {
   articles: new Map<string, Article>([[sampleArticle.id, sampleArticle]]),
   people: new Map<string, Person>([[sampleAuthor.id, sampleAuthor]]),
-  comments: new Map<string, Comment>([[sampleComment.id, sampleComment]])
+  tags: new Map<string, Tag>([[sampleTag.id, sampleTag]]),
+  comments: new Map<string, Comment>(sampleComments.map((comment) => [comment.id, comment])),
+  // The paginated comments relationship is backed by its own index, not by
+  // inline linkage on the article.
+  articleComments: new Map<string, Array<string>>([[sampleArticle.id, sampleComments.map((c) => c.id)]])
 }
 
 const loadArticle = (id: string): Effect.Effect<Article, ArticleNotFound> => {
@@ -59,25 +83,30 @@ const loadArticle = (id: string): Effect.Effect<Article, ArticleNotFound> => {
 }
 
 // Resolve the resources referenced by the requested include paths.
+// Only `one` / `optional` / `many` relationships are includable; the paginated
+// `comments` relationship never appears here.
 const resolveIncluded = (article: Article, include: ReadonlyArray<string> | undefined) => {
-  const included: Array<Person | Comment> = []
-  if (include?.some((path) => path === "author")) {
+  const included: Array<Person | Tag> = []
+  if (include?.includes("author")) {
     const author = article.relationships?.author.data
-    if (author != null && store.people.has(author.id)) included.push(store.people.get(author.id)!)
+    if (author !== undefined && store.people.has(author.id)) included.push(store.people.get(author.id)!)
   }
-  if (include?.some((path) => path === "comments" || path === "comments.author")) {
-    for (const identifier of article.relationships?.comments.data ?? []) {
-      const comment = store.comments.get(identifier.id)
-      if (comment === undefined) continue
-      included.push(comment)
-      if (include.includes("comments.author")) {
-        const author = comment.relationships?.author.data
-        if (author != null && store.people.has(author.id)) included.push(store.people.get(author.id)!)
-      }
+  if (include?.includes("tags")) {
+    for (const identifier of article.relationships?.tags.data ?? []) {
+      const tag = store.tags.get(identifier.id)
+      if (tag !== undefined) included.push(tag)
     }
   }
   return included
 }
+
+// The comments attached to an article, via the relationship index.
+const articleComments = (articleId: string): Array<Comment> =>
+  (store.articleComments.get(articleId) ?? [])
+    .flatMap((commentId) => {
+      const comment = store.comments.get(commentId)
+      return comment === undefined ? [] : [comment]
+    })
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -100,7 +129,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       // filter[author]=<person id>
       const author = query.filter?.author
       if (author !== undefined) {
-        articles = articles.filter((article) => article.relationships?.author.data?.id === author)
+        articles = articles.filter((article) => article.relationships?.author.data.id === author)
       }
 
       // sort=-createdAt,title
@@ -134,26 +163,34 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           return Effect.fail(new TitleTaken({ title }))
         }
       }
+      const id = Article.Id.make(`${store.articles.size + 1}`)
       const article = Article.make({
-        id: Article.Id.make(`${store.articles.size + 1}`),
+        id,
         attributes: payload.data.attributes,
-        relationships: payload.data.relationships ?? {
-          author: { data: null },
-          comments: { data: [] }
+        relationships: {
+          // `author` is a required relationship — the payload always carries it.
+          author: payload.data.relationships.author,
+          tags: payload.data.relationships.tags ?? { data: [] },
+          // `comments` can't be supplied at create time; new articles start
+          // with an empty, paginated comment collection.
+          comments: JsonApi.paginatedRelationship("articles", id, "comments")
         }
       })
       store.articles.set(article.id, article)
+      store.articleComments.set(article.id, [])
       return Effect.succeed(JsonApi.data(article, { self: `/articles/${article.id}` }))
     })
     .handle("update", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
+          const relationships = article.relationships!
           const updated = Article.make({
             ...article,
             attributes: { ...article.attributes, ...(payload.data.attributes ?? {}) },
-            relationships: payload.data.relationships ?? article.relationships ?? {
-              author: { data: null },
-              comments: { data: [] }
+            relationships: {
+              author: payload.data.relationships?.author ?? relationships.author,
+              tags: payload.data.relationships?.tags ?? relationships.tags,
+              comments: relationships.comments
             }
           })
           store.articles.set(updated.id, updated)
@@ -164,6 +201,91 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           store.articles.delete(article.id)
+          store.articleComments.delete(article.id)
+        })
+      ))
+    // --- Related resource endpoints -----------------------------------------
+    .handle("author", ({ params }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const author = store.people.get(article.relationships!.author.data.id) ?? null
+          return JsonApi.data(author, {
+            self: JsonApi.relatedLink("articles", article.id, "author")
+          })
+        })
+      ))
+    .handle("comments", ({ params, query }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const all = articleComments(article.id)
+          const total = all.length
+          const offset = query.page?.offset ?? 0
+          const limit = query.page?.limit ?? total
+          const page = all.slice(offset, offset + limit)
+          const path = JsonApi.relatedLink("articles", article.id, "comments")
+          return JsonApi.collection(page, {
+            included: query.include?.includes("author")
+              ? page.flatMap((comment) => {
+                const author = store.people.get(comment.relationships!.author.data.id)
+                return author === undefined ? [] : [author]
+              })
+              : [],
+            meta: { total },
+            links: JsonApi.offsetPaginationLinks(path, { offset, limit }, total)
+          })
+        })
+      ))
+    // --- Relationship (linkage) endpoints ------------------------------------
+    .handle("commentsRelationship", ({ params, query }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const all = articleComments(article.id).map((comment) => Comment.ref(comment.id))
+          const total = all.length
+          const offset = query.page?.offset ?? 0
+          const limit = query.page?.limit ?? total
+          return JsonApi.linkage(all.slice(offset, offset + limit), {
+            self: JsonApi.relationshipLink("articles", article.id, "comments"),
+            related: JsonApi.relatedLink("articles", article.id, "comments"),
+            meta: { total }
+          })
+        })
+      ))
+    .handle("updateAuthorRelationship", ({ params, payload }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const updated = Article.make({
+            ...article,
+            relationships: { ...article.relationships!, author: { data: payload.data } }
+          })
+          store.articles.set(updated.id, updated)
+          return JsonApi.linkage(payload.data, {
+            self: JsonApi.relationshipLink("articles", article.id, "author"),
+            related: JsonApi.relatedLink("articles", article.id, "author")
+          })
+        })
+      ))
+    .handle("addCommentsRelationship", ({ params, payload }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const linked = store.articleComments.get(article.id) ?? []
+          for (const identifier of payload.data) {
+            if (!linked.includes(identifier.id)) linked.push(identifier.id)
+          }
+          store.articleComments.set(article.id, linked)
+          return JsonApi.linkage(linked.map((id) => Comment.ref(id)), {
+            self: JsonApi.relationshipLink("articles", article.id, "comments"),
+            related: JsonApi.relatedLink("articles", article.id, "comments")
+          })
+        })
+      ))
+    .handle("removeCommentsRelationship", ({ params, payload }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const remove = new Set<string>(payload.data.map((identifier) => identifier.id))
+          store.articleComments.set(
+            article.id,
+            (store.articleComments.get(article.id) ?? []).filter((id) => !remove.has(id))
+          )
         })
       ))
 )

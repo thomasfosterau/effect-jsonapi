@@ -4,9 +4,11 @@ import { HttpApi, HttpApiBuilder, HttpApiTest } from "effect/unstable/httpapi"
 import * as ApiError from "./ApiError.js"
 import * as Endpoint from "./Endpoint.js"
 import * as Group from "./Group.js"
+import * as Handlers from "./Handlers.js"
 import * as Middleware from "./Middleware.js"
 import * as Query from "./Query.js"
-import { Resource, toMany, toOne } from "./Resource.js"
+import * as Relationship from "./Relationship.js"
+import { Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -21,7 +23,7 @@ const Person = Resource("people", {
 
 const Comment = Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: toOne(() => Person) }
+  relationships: { author: Relationship.one(() => Person) }
 })
 
 const Article = Resource("articles", {
@@ -31,8 +33,17 @@ const Article = Resource("articles", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    author: toOne(() => Person),
-    comments: toMany(() => Comment)
+    author: Relationship.optional(() => Person),
+    comments: Relationship.many(() => Comment)
+  }
+})
+
+// A resource with a paginated relationship, for the related/relationship
+// endpoint tests.
+const Publisher = Resource("publishers", {
+  attributes: { name: Schema.NonEmptyString },
+  relationships: {
+    catalog: Relationship.paginated(() => Article)
   }
 })
 
@@ -67,7 +78,36 @@ const updateArticle = Endpoint.update(Article, { errors: [ArticleNotFound] })
 
 const removeArticle = Endpoint.remove(Article, { errors: [ArticleNotFound] })
 
-const articles = Group.make(Article, fetchArticle, listArticles, createArticle, updateArticle, removeArticle)
+// Relationship & related endpoints
+const relatedAuthor = Endpoint.related(Article, "author", { errors: [ArticleNotFound] })
+
+const relatedComments = Endpoint.related(Article, "comments", {
+  page: Query.Page.Offset,
+  errors: [ArticleNotFound]
+})
+
+const fetchCommentsRelationship = Endpoint.fetchRelationship(Article, "comments", { errors: [ArticleNotFound] })
+
+const updateAuthorRelationship = Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
+
+const addCommentsRelationship = Endpoint.addRelationship(Article, "comments", { errors: [ArticleNotFound] })
+
+const removeCommentsRelationship = Endpoint.removeRelationship(Article, "comments", { errors: [ArticleNotFound] })
+
+const articles = Group.make(
+  Article,
+  fetchArticle,
+  listArticles,
+  createArticle,
+  updateArticle,
+  removeArticle,
+  relatedAuthor,
+  relatedComments,
+  fetchCommentsRelationship,
+  updateAuthorRelationship,
+  addCommentsRelationship,
+  removeCommentsRelationship
+)
 
 const Api = HttpApi.make("blog").add(articles)
 
@@ -93,6 +133,14 @@ const samplePerson = Person.make({
   attributes: { firstName: "John", lastName: "Doe" }
 })
 
+const sampleComment = Comment.make({
+  id: Comment.Id.make("5"),
+  attributes: { body: "Nice" },
+  relationships: {
+    author: { data: { type: "people", id: Person.Id.make("9") } }
+  }
+})
+
 const loadArticle = (id: string): Effect.Effect<typeof Article.Type, ArticleNotFound> =>
   id === "1" ? Effect.succeed(sampleArticle) : Effect.fail(new ArticleNotFound({ id }))
 
@@ -115,7 +163,10 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         data: Article.make({
           id: Article.Id.make("new-id"),
           attributes: payload.data.attributes,
-          ...(payload.data.relationships !== undefined ? { relationships: payload.data.relationships } : {})
+          relationships: {
+            author: payload.data.relationships?.author ?? { data: null },
+            comments: payload.data.relationships?.comments ?? { data: [] }
+          }
         })
       }))
     .handle("update", ({ params, payload }) =>
@@ -128,6 +179,49 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         }))
       ))
     .handle("remove", ({ params }) => loadArticle(params.id).pipe(Effect.asVoid))
+    // Related resource endpoints
+    .handle("author", ({ params }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) =>
+          Handlers.data(article.relationships?.author.data == null ? null : samplePerson, {
+            self: Handlers.relatedLink("articles", article.id, "author")
+          })
+        )
+      ))
+    .handle("comments", ({ params, query }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const all = (article.relationships?.comments.data ?? []).map(() => sampleComment)
+          const offset = query.page?.offset ?? 0
+          const limit = query.page?.limit ?? all.length
+          return Handlers.collection(all.slice(offset, offset + limit), {
+            self: Handlers.relatedLink("articles", article.id, "comments")
+          })
+        })
+      ))
+    // Relationship (linkage) endpoints
+    .handle("commentsRelationship", ({ params }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) =>
+          Handlers.linkage(article.relationships?.comments.data ?? [], {
+            self: Handlers.relationshipLink("articles", article.id, "comments"),
+            related: Handlers.relatedLink("articles", article.id, "comments")
+          })
+        )
+      ))
+    .handle("updateAuthorRelationship", ({ params, payload }) =>
+      loadArticle(params.id).pipe(
+        Effect.map(() => Handlers.linkage(payload.data))
+      ))
+    .handle("addCommentsRelationship", ({ params, payload }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) =>
+          Handlers.linkage([
+            ...(article.relationships?.comments.data ?? []),
+            ...payload.data
+          ]))
+      ))
+    .handle("removeCommentsRelationship", ({ params }) => loadArticle(params.id).pipe(Effect.asVoid))
 )
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
@@ -187,7 +281,19 @@ describe("endpoint conventions", () => {
 
   it("groups take the resource type as their identifier", () => {
     expect(articles.identifier).toBe("articles")
-    expect(Object.keys(articles.endpoints)).toEqual(["fetch", "list", "create", "update", "remove"])
+    expect(Object.keys(articles.endpoints)).toEqual([
+      "fetch",
+      "list",
+      "create",
+      "update",
+      "remove",
+      "author",
+      "comments",
+      "commentsRelationship",
+      "updateAuthorRelationship",
+      "addCommentsRelationship",
+      "removeCommentsRelationship"
+    ])
   })
 
   it("groups can be named directly for heterogeneous endpoints", () => {
@@ -271,6 +377,151 @@ describe("Endpoint.search", () => {
       filter: { q: "bikeshed" },
       page: { offset: 0, limit: 10 }
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Relationship & related endpoints
+// ---------------------------------------------------------------------------
+
+describe("relationship endpoint conventions", () => {
+  it("related derives conventional names, methods and paths", () => {
+    expect(relatedAuthor.name).toBe("author")
+    expect(relatedAuthor.method).toBe("GET")
+    expect(relatedAuthor.path).toBe("/articles/:id/author")
+
+    expect(relatedComments.name).toBe("comments")
+    expect(relatedComments.method).toBe("GET")
+    expect(relatedComments.path).toBe("/articles/:id/comments")
+  })
+
+  it("relationship endpoints derive conventional names, methods and paths", () => {
+    expect(fetchCommentsRelationship.name).toBe("commentsRelationship")
+    expect(fetchCommentsRelationship.method).toBe("GET")
+    expect(fetchCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
+
+    expect(updateAuthorRelationship.name).toBe("updateAuthorRelationship")
+    expect(updateAuthorRelationship.method).toBe("PATCH")
+    expect(updateAuthorRelationship.path).toBe("/articles/:id/relationships/author")
+
+    expect(addCommentsRelationship.name).toBe("addCommentsRelationship")
+    expect(addCommentsRelationship.method).toBe("POST")
+    expect(addCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
+
+    expect(removeCommentsRelationship.name).toBe("removeCommentsRelationship")
+    expect(removeCommentsRelationship.method).toBe("DELETE")
+    expect(removeCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
+  })
+
+  it("allows overriding name and path", () => {
+    const custom = Endpoint.related(Article, "author", {
+      name: "articleAuthor",
+      path: "/articles/:id/writer"
+    })
+    expect(custom.name).toBe("articleAuthor")
+    expect(custom.path).toBe("/articles/:id/writer")
+  })
+
+  it("attaches the JSON:API protocol middlewares", () => {
+    for (
+      const endpoint of [
+        relatedAuthor,
+        relatedComments,
+        fetchCommentsRelationship,
+        updateAuthorRelationship,
+        addCommentsRelationship,
+        removeCommentsRelationship
+      ]
+    ) {
+      const middlewareIds = [...endpoint.middlewares].map((m) => m.key)
+      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation")
+      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors")
+    }
+  })
+
+  it("add/remove relationship endpoints only accept to-many relationship names", () => {
+    // `comments` is to-many — fine.
+    Endpoint.addRelationship(Article, "comments")
+    Endpoint.removeRelationship(Article, "comments")
+    // @ts-expect-error -- `author` is to-one; the spec defines POST only for to-many
+    Endpoint.addRelationship(Article, "author")
+    // @ts-expect-error -- `author` is to-one; the spec defines DELETE only for to-many
+    Endpoint.removeRelationship(Article, "author")
+  })
+
+  it("relationship names must exist on the resource", () => {
+    // Unknown names are compile errors *and* descriptive construction errors.
+    expect(() =>
+      // @ts-expect-error -- `publisher` is not a relationship of Article
+      Endpoint.related(Article, "publisher")
+    ).toThrow(/Unknown relationship "publisher"/)
+    expect(() =>
+      // @ts-expect-error -- `publisher` is not a relationship of Article
+      Endpoint.fetchRelationship(Article, "publisher")
+    ).toThrow(/Unknown relationship "publisher"/)
+  })
+
+  it("paginated relationships get related collection endpoints", () => {
+    const catalog = Endpoint.related(Publisher, "catalog", { page: Query.Page.Offset })
+    expect(catalog.name).toBe("catalog")
+    expect(catalog.method).toBe("GET")
+    expect(catalog.path).toBe("/publishers/:id/catalog")
+
+    // ... and their linkage endpoint pages through identifiers.
+    const catalogLinkage = Endpoint.fetchRelationship(Publisher, "catalog", { page: Query.Page.Offset })
+    expect(catalogLinkage.path).toBe("/publishers/:id/relationships/catalog")
+  })
+})
+
+describe("relationship endpoint schemas", () => {
+  it("fetchRelationship success is a linkage document (identifiers, not resources)", () => {
+    const successSchema = [...fetchCommentsRelationship.success][0]!
+    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+      data: [{ type: "comments", id: "5" }]
+    }) as { readonly data: ReadonlyArray<{ readonly type: string; readonly id: string }> }
+    expect(decoded.data).toEqual([{ type: "comments", id: "5" }])
+
+    // Full resource objects are not linkage
+    expect(() =>
+      Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)(
+        { data: [{ type: "comments", id: "5", attributes: { body: "Nice" } }] },
+        { onExcessProperty: "error" }
+      )
+    ).toThrow()
+  })
+
+  it("updateRelationship payload follows the relationship kind", () => {
+    // `author` is optional → payload data may be null (clearing the relationship)
+    const authorPayload = [...updateAuthorRelationship.payload.values()][0]!.schemas[0]!
+    const cleared = Schema.decodeUnknownSync(authorPayload as Schema.Codec<unknown, unknown>)({ data: null }) as {
+      readonly data: null
+    }
+    expect(cleared.data).toBeNull()
+
+    // `one` relationships can't be cleared
+    const updateCommentAuthor = Endpoint.updateRelationship(Comment, "author")
+    const commentAuthorPayload = [...updateCommentAuthor.payload.values()][0]!.schemas[0]!
+    expect(() => Schema.decodeUnknownSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({ data: null }))
+      .toThrow()
+    const replaced = Schema.decodeUnknownSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({
+      data: { type: "people", id: "9" }
+    }) as { readonly data: { readonly id: string } }
+    expect(replaced.data.id).toBe("9")
+  })
+
+  it("addRelationship payload is an identifier array of the target type", () => {
+    const payloadSchema = [...addCommentsRelationship.payload.values()][0]!.schemas[0]!
+    const decoded = Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+      data: [{ type: "comments", id: "12" }]
+    }) as { readonly data: ReadonlyArray<{ readonly id: string }> }
+    expect(decoded.data[0]?.id).toBe("12")
+
+    // Wrong target type fails
+    expect(() =>
+      Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+        data: [{ type: "people", id: "9" }]
+      })
+    ).toThrow()
   })
 })
 
@@ -408,6 +659,113 @@ describe("HTTP round-trip via HttpApiTest", () => {
     })))
 
     expect(Exit.isFailure(exit)).toBe(true)
+  })
+
+  it("fetches related to-one resources (GET /articles/:id/author)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.author({ params: { id: Article.Id.make("1") }, query: {} })
+    })))
+
+    expect(result.data).toMatchObject({ type: "people", id: "9" })
+    expect(result.links?.self).toBe("/articles/1/author")
+  })
+
+  it("fetches related to-many resources with pagination (GET /articles/:id/comments)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.comments({
+        params: { id: Article.Id.make("1") },
+        query: { page: { offset: 0, limit: 10 } }
+      })
+    })))
+
+    expect(result.data).toHaveLength(1)
+    expect(result.data[0]).toMatchObject({ type: "comments", id: "5" })
+    // Full resource objects, not just identifiers
+    expect(result.data[0]?.attributes.body).toBe("Nice")
+  })
+
+  it("fetches relationship linkage (GET /articles/:id/relationships/comments)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.commentsRelationship({
+        params: { id: Article.Id.make("1") },
+        query: {}
+      })
+    })))
+
+    // Identifiers only — no attributes
+    expect(result.data).toEqual([{ type: "comments", id: "5" }])
+    expect(result.links?.self).toBe("/articles/1/relationships/comments")
+    expect(result.links?.related).toBe("/articles/1/comments")
+  })
+
+  it("replaces a to-one relationship (PATCH /articles/:id/relationships/author)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.updateAuthorRelationship({
+        params: { id: Article.Id.make("1") },
+        payload: { data: Person.ref("42") }
+      })
+    })))
+
+    expect(result.data).toEqual({ type: "people", id: "42" })
+  })
+
+  it("clears an optional to-one relationship (PATCH with null data)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.updateAuthorRelationship({
+        params: { id: Article.Id.make("1") },
+        payload: { data: null }
+      })
+    })))
+
+    expect(result.data).toBeNull()
+  })
+
+  it("adds to a to-many relationship (POST /articles/:id/relationships/comments)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.addCommentsRelationship({
+        params: { id: Article.Id.make("1") },
+        payload: { data: [Comment.ref("12")] }
+      })
+    })))
+
+    // Existing linkage plus the added identifier
+    expect(result.data).toEqual([
+      { type: "comments", id: "5" },
+      { type: "comments", id: "12" }
+    ])
+  })
+
+  it("removes from a to-many relationship (DELETE /articles/:id/relationships/comments, 204)", async () => {
+    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.removeCommentsRelationship({
+        params: { id: Article.Id.make("1") },
+        payload: { data: [Comment.ref("5")] }
+      })
+    })))
+
+    expect(result).toBeUndefined()
+  })
+
+  it("relationship endpoints surface domain errors as typed tagged errors", async () => {
+    const exit = await Effect.runPromiseExit(withHandlers(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.commentsRelationship({
+        params: { id: Article.Id.make("missing") },
+        query: {}
+      })
+    })))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound)
+    }
   })
 })
 

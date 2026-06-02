@@ -39,10 +39,14 @@ const Person = JsonApi.Resource("people", {
   }
 })
 
+const Tag = JsonApi.Resource("tags", {
+  attributes: { name: Schema.NonEmptyString }
+})
+
 const Comment = JsonApi.Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
   relationships: {
-    author: JsonApi.toOne(() => Person)      // a reference, not a string — typos don't compile
+    author: JsonApi.Relationship.one(() => Person)   // a reference, not a string — typos don't compile
   }
 })
 
@@ -50,14 +54,37 @@ const Article = JsonApi.Resource("articles", {
   attributes: {
     title: Schema.NonEmptyString,
     body: Schema.String,
-    createdAt: Schema.DateFromString          // ISO string on the wire, Date in your code
+    createdAt: Schema.DateFromString                 // ISO string on the wire, Date in your code
   },
   relationships: {
-    author: JsonApi.toOne(() => Person),
-    comments: JsonApi.toMany(() => Comment)
+    author: JsonApi.Relationship.one(() => Person),         // required to-one
+    editor: JsonApi.Relationship.optional(() => Person),    // nullable to-one
+    tags: JsonApi.Relationship.many(() => Tag),             // bounded to-many, inlined
+    comments: JsonApi.Relationship.paginated(() => Comment) // unbounded to-many, linked
   }
 })
 ```
+
+### Relationship kinds
+
+Each relationship declares its cardinality *and* how its data travels — inline
+as resource identifiers, or behind a link to a paginated endpoint:
+
+| Constructor              | Cardinality | Wire shape of the relationship object         | In `?include=` | In create payload |
+| ------------------------ | ----------- | ---------------------------------------------- | -------------- | ----------------- |
+| `Relationship.one`       | to-one      | `{ data: identifier }` — never null            | ✓              | **required**      |
+| `Relationship.optional`  | to-one      | `{ data: identifier \| null }`                 | ✓              | optional          |
+| `Relationship.many`      | to-many     | `{ data: identifier[] }`                       | ✓              | optional          |
+| `Relationship.paginated` | to-many     | `{ links: { related, self? } }` — **no data**  | ✗              | ✗ (use relationship endpoints) |
+
+`one` / `optional` / `many` carry **inline linkage**: clients see the related
+identifiers right inside the parent resource and can pull the full resources
+into a compound document with `?include=`.
+
+`paginated` is for **unbounded collections** (an article's comments, a user's
+repositories): the relationship object carries only a required `related` link
+pointing at a paginated collection endpoint (see
+[Relationship & related endpoints](#relationship--related-endpoints)).
 
 Everything below is **derived** — never assembled by hand:
 
@@ -67,9 +94,9 @@ Everything below is **derived** — never assembled by hand:
 | `Article.Id`             | branded id schema — `Article.Id` values can't be mixed with `Person.Id` |
 | `Article.identifier`     | the `{ type: "articles", id }` resource-identifier schema               |
 | `Article.ref("1")`       | a typed identifier *value* — handy for relationship linkage             |
-| `Article.createPayload`  | `{ data: { type, lid?, attributes, relationships? } }` — no `id`        |
-| `Article.updatePayload`  | `{ data: { type, id, attributes? (partial), relationships? } }`         |
-| `Article.document()`     | single-resource document; `included` union derived from relationships   |
+| `Article.createPayload`  | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded |
+| `Article.updatePayload`  | `{ data: { type, id, attributes? (partial), relationships? } }` — `paginated` excluded |
+| `Article.document()`     | single-resource document; `included` union derived from the non-paginated relationships |
 | `Article.collection()`   | collection document (strict array `data`)                               |
 | `typeof Article.Type`    | the decoded TypeScript type                                             |
 
@@ -114,7 +141,7 @@ One declaration gives you all of:
 
 ```ts
 const articles = JsonApi.Group(Article,
-  // GET /articles/:id?include=author,comments.author&fields[articles]=title
+  // GET /articles/:id?include=author,tags&fields[articles]=title
   JsonApi.Endpoint.fetch(Article, {
     include: true,
     fields: true,
@@ -128,15 +155,71 @@ const articles = JsonApi.Group(Article,
     filter: { author: Schema.optionalKey(Schema.String) },
     meta: Schema.Struct({ total: Schema.Int })
   }),
-  // POST /articles → 201 (client may send a lid)
+  // POST /articles → 201 (client may send a lid; the required author relationship must be present)
   JsonApi.Endpoint.create(Article, { errors: [TitleTaken] }),
   // PATCH /articles/:id (partial attributes)
   JsonApi.Endpoint.update(Article, { errors: [ArticleNotFound] }),
   // DELETE /articles/:id → 204
-  JsonApi.Endpoint.remove(Article, { errors: [ArticleNotFound] })
+  JsonApi.Endpoint.remove(Article, { errors: [ArticleNotFound] }),
+  // GET /articles/:id/comments — the paginated related collection
+  JsonApi.Endpoint.related(Article, "comments", {
+    page: JsonApi.Page.Offset,
+    errors: [ArticleNotFound]
+  }),
+  // PATCH /articles/:id/relationships/author — replace the author
+  JsonApi.Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
 )
 
 const Api = HttpApi.make("blog").add(articles)
+```
+
+### Relationship & related endpoints
+
+The spec defines two URL families per relationship; both are first-class:
+
+| Constructor                   | Method & path                             | Payload                | Success |
+| ----------------------------- | ----------------------------------------- | ---------------------- | ------- |
+| `Endpoint.related`            | `GET /<type>/:id/<name>`                  | —                      | 200 — the related resource(s) themselves: a single-resource document (to-one) or a collection document with full query support (to-many) |
+| `Endpoint.fetchRelationship`  | `GET /<type>/:id/relationships/<name>`    | —                      | 200 — a linkage document (`data` is identifiers, never full resources) |
+| `Endpoint.updateRelationship` | `PATCH /<type>/:id/relationships/<name>`  | replacement linkage    | 200 — the updated linkage |
+| `Endpoint.addRelationship`    | `POST /<type>/:id/relationships/<name>`   | identifiers to add     | 200 — the resulting linkage (to-many only) |
+| `Endpoint.removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | identifiers to remove  | 204 (to-many only) |
+
+Payload and success schemas follow the relationship's kind:
+
+```ts
+// `author` is Relationship.one(() => Person):
+JsonApi.Endpoint.updateRelationship(Article, "author")
+// PATCH payload: { data: PersonIdentifier }          — null doesn't decode (required relationship)
+
+// `editor` is Relationship.optional(() => Person):
+JsonApi.Endpoint.updateRelationship(Article, "editor")
+// PATCH payload: { data: PersonIdentifier | null }   — null clears the relationship
+
+// `comments` is Relationship.paginated(() => Comment):
+JsonApi.Endpoint.related(Article, "comments", { page: JsonApi.Page.Offset, include: true })
+// GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author
+// → a paginated collection document of full Comment resources
+
+JsonApi.Endpoint.addRelationship(Article, "comments")
+// POST payload: { data: CommentIdentifier[] }
+
+// to-many constructors only accept to-many relationship names:
+JsonApi.Endpoint.addRelationship(Article, "author")   // ✗ compile error
+```
+
+Handlers return linkage documents with `JsonApi.linkage`, and build the
+relationship URLs with `JsonApi.relationshipLink` / `JsonApi.relatedLink` /
+`JsonApi.paginatedRelationship`:
+
+```ts
+.handle("commentsRelationship", ({ params, query }) =>
+  loadComments(params.id, query.page).pipe(Effect.map((comments) =>
+    JsonApi.linkage(comments.map((c) => Comment.ref(c.id)), {
+      self: JsonApi.relationshipLink("articles", params.id, "comments"),
+      related: JsonApi.relatedLink("articles", params.id, "comments")
+    })
+  )))
 ```
 
 ### Heterogeneous endpoints (search, feeds)
@@ -301,8 +384,11 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | Resource objects have `type` and `id`; ids are not interchangeable across types | `Resource` always emits the type tag and a per-type branded id |
 | Create requests may omit `id` and send `lid` | `createPayload` derivation |
 | Update requests require `id`, attributes are partial | `updatePayload` derivation |
-| Relationships hold at least one of `data` / `links` / `meta` | `toOne` / `toMany` schemas require resource linkage (`data`) |
+| Relationships hold at least one of `data` / `links` / `meta` | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related` |
+| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many | `Endpoint.fetchRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
+| Related resource endpoints (`related` links) | `Endpoint.related` — single-resource document for to-one, paginated collection for to-many |
 | Compound documents: no duplicate resources, full linkage | `JsonApi.data` / `JsonApi.collection` builders (runtime check) |
+| Compound documents never inline unbounded relationships | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction |
 | `errors` array is never empty | non-empty check on the error document schema |
 | 200 / 201 / 204 status codes per operation | set by the endpoint constructors |
 | Pagination / sorting / sparse fieldsets / inclusion / filtering query families | typed query schemas derived from the resource definition |
@@ -314,8 +400,8 @@ Complete runnable examples (resources, errors, api, in-memory handlers) live in
 
 | Example | What it shows | Test |
 | --- | --- | --- |
-| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, comments; full CRUD; heterogeneous search | [`test/blog.test.ts`](./test/blog.test.ts) |
-| [`examples/github`](./examples/github) | A GitHub-like API: users, repositories, issues, pull requests, labels; a 5-resource relationship graph with 2-hop include paths (`repository.owner`); per-group endpoint subsets (read-only users/pulls, no issue deletion); typed filters over closed attribute sets (`filter[state]=open`); page-number pagination; 403/404/422 domain errors; global search across three resource types | [`test/github.test.ts`](./test/github.test.ts) |
+| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search | [`test/blog.test.ts`](./test/blog.test.ts) |
+| [`examples/github`](./examples/github) | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types | [`test/github.test.ts`](./test/github.test.ts) |
 
 ## Metadata
 
@@ -351,12 +437,13 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   via `JsonApi.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document
   meta are typed via options.
-- **Mutually recursive resources** (A ↔ B) need an explicit type annotation on one of the two
-  relationship thunks, due to TypeScript's circular-inference limits.
+- **Mutually recursive resources** (A ↔ B) are not supported: TypeScript cannot infer two resource
+  types that reference each other. Model one direction as a relationship and the reverse direction
+  as a filtered collection endpoint (e.g. `GET /articles?filter[author]=9`) or a related endpoint
+  on the side that owns the relationship.
 - **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
   responses by include paths is not yet supported.
-- **Relationship endpoints** (`/articles/1/relationships/author`) and the atomic operations
-  extension are not yet modelled.
+- **The atomic operations extension** is not yet modelled.
 
 ## Contributing
 

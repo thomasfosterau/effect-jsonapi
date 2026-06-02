@@ -1,7 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
 import * as Query from "./Query.js"
-import { Resource, toMany, toOne } from "./Resource.js"
+import * as Relationship from "./Relationship.js"
+import { Resource } from "./Resource.js"
 
 const Person = Resource("people", {
   attributes: {
@@ -12,7 +13,7 @@ const Person = Resource("people", {
 
 const Comment = Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: toOne(() => Person) }
+  relationships: { author: Relationship.one(() => Person) }
 })
 
 const Article = Resource("articles", {
@@ -22,8 +23,18 @@ const Article = Resource("articles", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    author: toOne(() => Person),
-    comments: toMany(() => Comment)
+    author: Relationship.one(() => Person),
+    comments: Relationship.many(() => Comment)
+  }
+})
+
+// A resource with a paginated relationship: excluded from include paths, but
+// its target still gets sparse fieldsets.
+const Feed = Resource("feeds", {
+  attributes: { name: Schema.NonEmptyString },
+  relationships: {
+    owner: Relationship.one(() => Person),
+    entries: Relationship.paginated(() => Article)
   }
 })
 
@@ -45,6 +56,17 @@ describe("Query.Include", () => {
 
   it("encodes back to a comma-separated string", () => {
     expect(Schema.encodeUnknownSync(include)(["author", "comments.author"])).toBe("author,comments.author")
+  })
+
+  it("excludes paginated relationships from include paths (→ 400)", () => {
+    const feedInclude = Query.Include(Feed)
+    // `owner` is linkable; `entries` is paginated and cannot be included.
+    expect(Schema.decodeUnknownSync(feedInclude)("owner")).toEqual(["owner"])
+    expect(() => Schema.decodeUnknownSync(feedInclude)("entries")).toThrow()
+    expect(() => Schema.decodeUnknownSync(feedInclude)("entries.author")).toThrow()
+    // ... and paths *through* a paginated relationship don't exist either.
+    type FeedPaths = typeof feedInclude.Type
+    expectTypeOf<FeedPaths>().toEqualTypeOf<ReadonlyArray<"owner">>()
   })
 })
 
@@ -188,6 +210,22 @@ describe("Query.schema", () => {
   it("builds an empty schema when no features are enabled", () => {
     const empty = Query.schema(Article, {})
     expect(Schema.decodeUnknownSync(empty)({})).toEqual({})
+  })
+
+  it("paginated targets still get sparse fieldsets (their related endpoint uses them)", () => {
+    const feedQuery = Query.schema(Feed, { include: true, fields: true })
+    const decoded = Schema.decodeUnknownSync(feedQuery)({
+      "fields[feeds]": "name",
+      "fields[people]": "firstName",
+      // Article is only reachable via the paginated `entries` relationship,
+      // but its fieldset is still configurable.
+      "fields[articles]": "title"
+    })
+    expect(decoded).toEqual({
+      fields: { feeds: ["name"], people: ["firstName"], articles: ["title"] }
+    })
+    // ... while `entries` remains invalid as an include path.
+    expect(() => Schema.decodeUnknownSync(feedQuery)({ include: "entries" })).toThrow()
   })
 })
 

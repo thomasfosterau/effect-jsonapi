@@ -8,7 +8,7 @@ import { JsonApi } from "effect-jsonapi"
 
 export class UserNotFound extends JsonApi.Error<UserNotFound>()("UserNotFound", {
   status: 404,
-  code: "not_found",
+  code: "user_not_found",
   title: "User not found",
   fields: { id: Schema.String },
   detail: (e) => `User ${e.id} not found`
@@ -16,7 +16,7 @@ export class UserNotFound extends JsonApi.Error<UserNotFound>()("UserNotFound", 
 
 export class RepositoryNotFound extends JsonApi.Error<RepositoryNotFound>()("RepositoryNotFound", {
   status: 404,
-  code: "not_found",
+  code: "repository_not_found",
   title: "Repository not found",
   fields: { id: Schema.String },
   detail: (e) => `Repository ${e.id} not found`
@@ -24,7 +24,7 @@ export class RepositoryNotFound extends JsonApi.Error<RepositoryNotFound>()("Rep
 
 export class IssueNotFound extends JsonApi.Error<IssueNotFound>()("IssueNotFound", {
   status: 404,
-  code: "not_found",
+  code: "issue_not_found",
   title: "Issue not found",
   fields: { id: Schema.String },
   detail: (e) => `Issue ${e.id} not found`
@@ -32,7 +32,7 @@ export class IssueNotFound extends JsonApi.Error<IssueNotFound>()("IssueNotFound
 
 export class PullRequestNotFound extends JsonApi.Error<PullRequestNotFound>()("PullRequestNotFound", {
   status: 404,
-  code: "not_found",
+  code: "pull_request_not_found",
   title: "Pull request not found",
   fields: { id: Schema.String },
   detail: (e) => `Pull request ${e.id} not found`
