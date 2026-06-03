@@ -4,15 +4,19 @@
  * Thin, convention-baking constructors over `HttpApiEndpoint`, one per
  * JSON:API operation:
  *
- * | Constructor | Method & path            | Payload                  | Success                    |
- * | ----------- | ------------------------ | ------------------------ | -------------------------- |
- * | `fetch`      | `GET /<type>/:id`        | —                        | 200, single-resource doc   |
- * | `list`       | `GET /<type>`            | —                        | 200, collection doc        |
- * | `create`     | `POST /<type>`           | `createPayload` (lid ok) | 201, single-resource doc   |
- * | `update`     | `PATCH /<type>/:id`      | `updatePayload`          | 200, single-resource doc   |
- * | `remove`     | `DELETE /<type>/:id`     | —                        | 204, no content            |
- * | `search`     | `GET /search`            | —                        | 200, heterogeneous doc     |
- * | `operations` | `POST /operations`       | `atomic:operations` doc  | 200, `atomic:results` doc  |
+ * | Constructor          | Method & path                              | Payload                  | Success                    |
+ * | -------------------- | ------------------------------------------ | ------------------------ | -------------------------- |
+ * | `fetch`              | `GET /<type>/:id`                          | —                        | 200, single-resource doc   |
+ * | `list`               | `GET /<type>`                              | —                        | 200, collection doc        |
+ * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
+ * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
+ * | `remove`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
+ * | `search`             | `GET /search`                              | —                        | 200, heterogeneous doc     |
+ * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
+ * | `fetchRelationship`  | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
+ * | `updateRelationship` | `PATCH /<type>/:id/relationships/<name>`   | linkage                  | 200, linkage doc           |
+ * | `addRelationship`    | `POST /<type>/:id/relationships/<name>`    | linkage (to-many only)   | 200, linkage doc           |
+ * | `removeRelationship` | `DELETE /<type>/:id/relationships/<name>`  | linkage (to-many only)   | 204, no content            |
  *
  * Every endpoint automatically:
  *   - serves and accepts `application/vnd.api+json`
@@ -33,11 +37,21 @@
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
 import * as Atomic from "./Atomic.js"
-import { AnyMeta, CollectionDocument } from "./Document.js"
+import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js"
 import { asJsonApi, asJsonApiAtomic } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
-import type { Any, AttributeKeys, Relationships, Resource, TargetsOf } from "./Resource.js"
+import * as Relationship from "./Relationship.js"
+import type {
+  Any,
+  AttributeKeys,
+  DefaultIncluded,
+  Relationships,
+  Resource,
+  Target,
+  TargetsOf,
+  ToManyName
+} from "./Resource.js"
 import { directTargets } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -424,6 +438,424 @@ export const search = <
   )
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
+
+// ---------------------------------------------------------------------------
+// Relationship endpoints — shared type machinery
+// ---------------------------------------------------------------------------
+
+// Resolves to `T` for every concrete relationship; needed because conditional
+// types over a still-generic resource can't be proven to satisfy `Schema.Top`.
+type AsSchema<T> = T extends Schema.Top ? T : never
+
+/**
+ * The descriptor of a named relationship.
+ */
+type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name & keyof R["relationships"]]
+
+/**
+ * The linkage (`data`) schema of a relationship, by kind:
+ *
+ *   - `one` → the target's identifier (never null)
+ *   - `optional` → the target's identifier or null
+ *   - `many` / `paginated` → an array of the target's identifiers
+ */
+export type LinkageData<R extends Any, Name extends string> = DescriptorOf<R, Name> extends
+  Relationship.One<infer T extends Any> ? T["identifier"]
+  : DescriptorOf<R, Name> extends Relationship.Optional<infer T extends Any> ? Schema.NullOr<AsSchema<T["identifier"]>>
+  : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any> ? Schema.$Array<AsSchema<T["identifier"]>>
+  : never
+
+/**
+ * The success document schema of a relationship endpoint: a linkage document
+ * whose `data` member matches the relationship's kind.
+ */
+export type RelationshipSuccess<
+  R extends Any,
+  Name extends string,
+  DocMeta extends Schema.Top
+> = LinkageDocument<AsSchema<LinkageData<R, Name>>, DocMeta>
+
+/**
+ * The request payload schema of a relationship mutation: `{ data: linkage }`.
+ */
+export interface LinkagePayload<R extends Any, Name extends string> extends
+  Schema.Struct<{
+    readonly data: AsSchema<LinkageData<R, Name>>
+  }>
+{}
+
+/**
+ * The success document schema of a related-resource endpoint:
+ *
+ *   - to-one relationships → a single-resource document of the target
+ *     (`data` may be null for `optional` relationships)
+ *   - to-many relationships → a collection document of the target
+ */
+export type RelatedSuccess<
+  R extends Any,
+  Name extends string,
+  DocMeta extends Schema.Top
+> = DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
+  ? DataDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+  : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+    ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+  : never
+
+const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1)
+
+// Looks up a relationship descriptor by name; an unknown name is a programmer
+// error (it is also a compile error at the constructor's call site).
+const descriptorFor = (resource: Any, name: string): Relationship.Descriptor => {
+  const descriptor = (resource.relationships as Record<string, Relationship.Descriptor>)[name]
+  if (descriptor === undefined) {
+    throw new Error(`Unknown relationship "${name}" on resource "${resource.type}"`)
+  }
+  return descriptor
+}
+
+// The runtime linkage (`data`) schema for a relationship descriptor.
+const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.Top =>
+  descriptor.kind === "one"
+    ? target.identifier
+    : descriptor.kind === "optional"
+    ? Schema.NullOr(target.identifier)
+    : Schema.Array(target.identifier)
+
+// ---------------------------------------------------------------------------
+// related — GET /<type>/:id/<name>
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /<type>/:id/<name>` — fetch the resource(s) a relationship points at.
+ *
+ * This is the endpoint a relationship's `related` link refers to. For to-one
+ * relationships success is a single-resource document of the target; for
+ * to-many relationships it is a collection document, with the full set of
+ * collection query parameters (`include`, `fields`, `sort`, `page`, `filter`)
+ * available.
+ *
+ * For `paginated` relationships this *is* the collection their required
+ * `links.related` member points at — enable `page` here:
+ *
+ * ```ts
+ * Endpoint.related(Person, "articles", { page: Query.Page.Offset })
+ * // GET /people/:id/articles?page[offset]=0&page[limit]=10
+ * ```
+ */
+export const related = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  const Name extends keyof Rels & string,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const EndpointName extends string = Name,
+  const Path extends `/${string}` = `/${Type}/:id/${Name}`,
+  const Include extends boolean = false,
+  const Fields extends boolean = false,
+  const Sort extends boolean | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta>, Name>>> =
+    false,
+  const PageFields extends Schema.Struct.Fields | undefined = undefined,
+  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  resource: Resource<Type, Attributes, Rels, Meta>,
+  name: Name,
+  options?: CommonOptions<EndpointName, Path, Errors> & {
+    /** Enable the `?include=` query parameter (paths span the *target's* graph). */
+    readonly include?: Include
+    /** Enable `?fields[TYPE]=` sparse fieldsets for the target and its targets. */
+    readonly fields?: Fields
+    /** Enable `?sort=` over the target's attributes (to-many relationships). */
+    readonly sort?: Sort
+    /** Enable `?page[*]=` pagination (to-many relationships; see `Query.Page`). */
+    readonly page?: PageFields
+    /** Enable `?filter[*]=` filtering (user-defined fields). */
+    readonly filter?: FilterFields
+    /** Override the success document's `meta` schema. */
+    readonly meta?: DocMeta
+  }
+) => {
+  type R = Resource<Type, Attributes, Rels, Meta>
+  const descriptor = descriptorFor(resource, name)
+  const target = descriptor.ref()
+  const included = Schema.Union(directTargets(target))
+  const docMeta = (options?.meta ?? AnyMeta) as DocMeta
+  // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly —
+  // a data document for to-one descriptors, a collection document otherwise.
+  const success = (Relationship.isToOne(descriptor)
+    ? DataDocument(target, { included, meta: docMeta })
+    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<
+      RelatedSuccess<R, Name, DocMeta>
+    >
+
+  return HttpApiEndpoint.get(
+    (options?.name ?? name) as EndpointName,
+    (options?.path ?? `/${resource.type}/:id/${name}`) as Path,
+    {
+      params: { id: resource.Id },
+      query: Query.schema(
+        target as Target<R, Name>,
+        queryConfig(options) as {
+          readonly include: Include
+          readonly fields: Fields
+          readonly sort: Sort
+          readonly page: PageFields
+          readonly filter: FilterFields
+        }
+      ),
+      success: asJsonApi(success),
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+}
+
+// ---------------------------------------------------------------------------
+// fetchRelationship — GET /<type>/:id/relationships/<name>
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /<type>/:id/relationships/<name>` — fetch a relationship's linkage.
+ *
+ * Success is a 200 linkage document: `data` is a single identifier (`one`),
+ * an identifier or null (`optional`), or an identifier array (`many` /
+ * `paginated`) — never full resource objects.
+ *
+ * For `paginated` relationships the identifier collection itself can be
+ * paginated — enable `page`:
+ *
+ * ```ts
+ * Endpoint.fetchRelationship(Person, "articles", { page: Query.Page.Offset })
+ * // GET /people/:id/relationships/articles?page[offset]=0&page[limit]=10
+ * ```
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
+ */
+export const fetchRelationship = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  const Name extends keyof Rels & string,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const EndpointName extends string = `${Name}Relationship`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  const PageFields extends Schema.Struct.Fields | undefined = undefined,
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  resource: Resource<Type, Attributes, Rels, Meta>,
+  name: Name,
+  options?: CommonOptions<EndpointName, Path, Errors> & {
+    /** Enable `?page[*]=` pagination of the identifier collection (to-many linkage). */
+    readonly page?: PageFields
+    /** Override the linkage document's `meta` schema. */
+    readonly meta?: DocMeta
+  }
+) => {
+  type R = Resource<Type, Attributes, Rels, Meta>
+  const descriptor = descriptorFor(resource, name)
+  const target = descriptor.ref()
+  // The cast is sound: `linkageData` mirrors `LinkageData` kind by kind.
+  const success = LinkageDocument(linkageData(descriptor, target), {
+    meta: (options?.meta ?? AnyMeta) as DocMeta
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta>
+
+  return HttpApiEndpoint.get(
+    (options?.name ?? `${name}Relationship`) as EndpointName,
+    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+    {
+      params: { id: resource.Id },
+      query: Query.schema(
+        target as Target<R, Name>,
+        {
+          include: false,
+          fields: false,
+          sort: false,
+          page: options?.page,
+          filter: undefined
+        } as {
+          readonly include: false
+          readonly fields: false
+          readonly sort: false
+          readonly page: PageFields
+          readonly filter: undefined
+        }
+      ),
+      success: asJsonApi(success),
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+}
+
+// ---------------------------------------------------------------------------
+// updateRelationship — PATCH /<type>/:id/relationships/<name>
+// ---------------------------------------------------------------------------
+
+/**
+ * `PATCH /<type>/:id/relationships/<name>` — replace a relationship's linkage.
+ *
+ * The payload is the full replacement linkage:
+ *
+ *   - `one` → `{ data: identifier }` (a required relationship can't be cleared)
+ *   - `optional` → `{ data: identifier | null }`
+ *   - `many` / `paginated` → `{ data: identifier[] }` (full replacement)
+ *
+ * Success is a 200 linkage document with the updated linkage.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#crud-updating-relationships}
+ */
+export const updateRelationship = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  const Name extends keyof Rels & string,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const EndpointName extends string = `update${Capitalize<Name>}Relationship`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  resource: Resource<Type, Attributes, Rels, Meta>,
+  name: Name,
+  options?: CommonOptions<EndpointName, Path, Errors> & {
+    /** Override the linkage document's `meta` schema. */
+    readonly meta?: DocMeta
+  }
+) => {
+  type R = Resource<Type, Attributes, Rels, Meta>
+  const descriptor = descriptorFor(resource, name)
+  const target = descriptor.ref()
+  const data = linkageData(descriptor, target)
+  // The casts are sound: the runtime schemas mirror the conditional types kind by kind.
+  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>
+  const success = LinkageDocument(data, {
+    meta: (options?.meta ?? AnyMeta) as DocMeta
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta>
+
+  return HttpApiEndpoint.patch(
+    (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
+    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+    {
+      params: { id: resource.Id },
+      payload: asJsonApi(payload),
+      success: asJsonApi(success),
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+}
+
+// ---------------------------------------------------------------------------
+// addRelationship — POST /<type>/:id/relationships/<name> (to-many only)
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /<type>/:id/relationships/<name>` — add members to a to-many
+ * relationship.
+ *
+ * Only `many` / `paginated` relationships have this endpoint (the spec defines
+ * POST only for to-many relationship URLs). The payload is the identifiers to
+ * add; members already present are ignored. Success is a 200 linkage document
+ * with the resulting linkage.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#crud-updating-to-many-relationships}
+ */
+export const addRelationship = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta>>,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const EndpointName extends string = `add${Capitalize<Name>}Relationship`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  resource: Resource<Type, Attributes, Rels, Meta>,
+  name: Name,
+  options?: CommonOptions<EndpointName, Path, Errors> & {
+    /** Override the linkage document's `meta` schema. */
+    readonly meta?: DocMeta
+  }
+) => {
+  type R = Resource<Type, Attributes, Rels, Meta>
+  const descriptor = descriptorFor(resource, name)
+  const target = descriptor.ref()
+  const data = Schema.Array(target.identifier)
+  // The casts are sound: to-many linkage is always an identifier array.
+  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>
+  const success = LinkageDocument(data, {
+    meta: (options?.meta ?? AnyMeta) as DocMeta
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta>
+
+  return HttpApiEndpoint.post(
+    (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
+    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+    {
+      params: { id: resource.Id },
+      payload: asJsonApi(payload),
+      success: asJsonApi(success),
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+}
+
+// ---------------------------------------------------------------------------
+// removeRelationship — DELETE /<type>/:id/relationships/<name> (to-many only)
+// ---------------------------------------------------------------------------
+
+/**
+ * `DELETE /<type>/:id/relationships/<name>` — remove members from a to-many
+ * relationship.
+ *
+ * Only `many` / `paginated` relationships have this endpoint. The payload is
+ * the identifiers to remove; members not present are ignored. Success is a
+ * 204 No Content response.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#crud-updating-to-many-relationships}
+ */
+export const removeRelationship = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta>>,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`
+>(
+  resource: Resource<Type, Attributes, Rels, Meta>,
+  name: Name,
+  options?: CommonOptions<EndpointName, Path, Errors>
+) => {
+  type R = Resource<Type, Attributes, Rels, Meta>
+  const descriptor = descriptorFor(resource, name)
+  const target = descriptor.ref()
+  // The cast is sound: to-many linkage is always an identifier array.
+  const payload = Schema.Struct({
+    data: Schema.Array(target.identifier)
+  }) as unknown as LinkagePayload<R, Name>
+
+  return HttpApiEndpoint.delete(
+    (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
+    (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
+    {
+      params: { id: resource.Id },
+      payload: asJsonApi(payload),
+      success: HttpApiSchema.NoContent,
+      error: wires(options?.errors)
+    }
+  )
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+}
 
 // ---------------------------------------------------------------------------
 // operations — POST /operations, atomic operations extension

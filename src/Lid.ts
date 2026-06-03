@@ -22,7 +22,8 @@
  * ```
  */
 import type { MetaValue } from "./Handlers.js"
-import type { Any, RefValue, ToMany, ToOne } from "./Resource.js"
+import type * as Relationship from "./Relationship.js"
+import type { Any, RefValue } from "./Resource.js"
 
 /**
  * Thrown when resolving a ref whose `lid` was never assigned an id — the
@@ -52,14 +53,22 @@ export interface RefLinkageValue {
 
 /**
  * Maps relationship-descriptor records to their resolved (id-based) linkage
- * value type — the shape the resource's own schemas expect.
+ * value type — the shape the resource's own schemas expect:
+ *
+ *   - `one` → `{ data: identifier }` (never null)
+ *   - `optional` → `{ data: identifier | null }`
+ *   - `many` → `{ data: identifier[] }`
+ *   - `paginated` → excluded (no inline linkage)
  */
 export type ResolvedLinkage<R extends Any> = {
-  readonly [K in keyof R["relationships"]]?: R["relationships"][K] extends ToOne<infer T>
-    ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
-    : R["relationships"][K] extends ToMany<infer T>
-      ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
-    : never
+  readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any> ? never : K]?:
+    R["relationships"][K] extends Relationship.One<infer T>
+      ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
+      : R["relationships"][K] extends Relationship.Optional<infer T>
+        ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
+      : R["relationships"][K] extends Relationship.Many<infer T>
+        ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
+      : never
 }
 
 /**

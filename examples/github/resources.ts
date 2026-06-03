@@ -1,18 +1,21 @@
 /**
- * A GitHub-like API's resources: users, repositories, issues, pull requests
- * and labels. Each one is defined once and everything else (identifiers,
- * payloads, documents, query parameters, endpoints) derives from these
- * definitions.
+ * A GitHub-like API's resources: users, repositories, issues, issue comments,
+ * pull requests and labels. Each one is defined once and everything else
+ * (identifiers, payloads, documents, query parameters, endpoints) derives
+ * from these definitions.
  *
- * The relationship graph:
+ * The relationship graph exercises all four relationship kinds:
  *
- *   Repository ──owner──────────────▶ User
- *   Issue ──repository──▶ Repository ──owner──▶ User   (a 2-hop include path)
- *   Issue ──author/assignee─────────▶ User
- *   Issue ──labels──────────────────▶ Label
- *   PullRequest ──repository────────▶ Repository
- *   PullRequest ──author────────────▶ User
- *   PullRequest ──reviewers─────────▶ User
+ *   Repository ──owner──────────────▶ User          `one`
+ *   Issue ──repository──▶ Repository ──owner──▶ User  (a 2-hop include path)
+ *   Issue ──author──────────────────▶ User          `one`
+ *   Issue ──assignee────────────────▶ User          `optional` (may be null)
+ *   Issue ──labels──────────────────▶ Label         `many` (bounded, inlined)
+ *   Issue ──comments────────────────▶ IssueComment  `paginated` (unbounded, linked)
+ *   IssueComment ──author───────────▶ User          `one`
+ *   PullRequest ──repository────────▶ Repository    `one`
+ *   PullRequest ──author────────────▶ User          `one`
+ *   PullRequest ──reviewers─────────▶ User          `many`
  */
 import { Schema } from "effect"
 import { JsonApi } from "effect-jsonapi"
@@ -46,7 +49,18 @@ export const Repository = JsonApi.Resource("repositories", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    owner: JsonApi.toOne(() => User)
+    // Every repository has an owner: required to-one.
+    owner: JsonApi.Relationship.one(() => User)
+  }
+})
+
+export const IssueComment = JsonApi.Resource("issueComments", {
+  attributes: {
+    body: Schema.NonEmptyString,
+    createdAt: Schema.DateFromString
+  },
+  relationships: {
+    author: JsonApi.Relationship.one(() => User)
   }
 })
 
@@ -61,10 +75,17 @@ export const Issue = JsonApi.Resource("issues", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    repository: JsonApi.toOne(() => Repository),
-    author: JsonApi.toOne(() => User),
-    assignee: JsonApi.toOne(() => User),
-    labels: JsonApi.toMany(() => Label)
+    // An issue is always opened against a repository, by someone.
+    repository: JsonApi.Relationship.one(() => Repository),
+    author: JsonApi.Relationship.one(() => User),
+    // ... but may be unassigned.
+    assignee: JsonApi.Relationship.optional(() => User),
+    // Labels are few and bounded: inlined identifiers, manageable through
+    // the /issues/:id/relationships/labels endpoints.
+    labels: JsonApi.Relationship.many(() => Label),
+    // Comments are unbounded: reachable only through the related link
+    // (GET /issues/:id/comments), never inlined.
+    comments: JsonApi.Relationship.paginated(() => IssueComment)
   }
 })
 
@@ -80,14 +101,15 @@ export const PullRequest = JsonApi.Resource("pulls", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    repository: JsonApi.toOne(() => Repository),
-    author: JsonApi.toOne(() => User),
-    reviewers: JsonApi.toMany(() => User)
+    repository: JsonApi.Relationship.one(() => Repository),
+    author: JsonApi.Relationship.one(() => User),
+    reviewers: JsonApi.Relationship.many(() => User)
   }
 })
 
 export type User = typeof User.Type
 export type Label = typeof Label.Type
 export type Repository = typeof Repository.Type
+export type IssueComment = typeof IssueComment.Type
 export type Issue = typeof Issue.Type
 export type PullRequest = typeof PullRequest.Type

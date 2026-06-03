@@ -2,10 +2,11 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Match, Schema } from "effect"
 import * as Atomic from "./Atomic.js"
 import * as Middleware from "./Middleware.js"
-import { Ref, Resource, toMany, toOne } from "./Resource.js"
+import * as Relationship from "./Relationship.js"
+import { Ref, Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
-// Fixtures
+// Fixtures — one relationship of every kind
 // ---------------------------------------------------------------------------
 
 const Person = Resource("people", {
@@ -17,7 +18,10 @@ const Person = Resource("people", {
 
 const Comment = Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: toOne(() => Person) }
+  relationships: {
+    // required to-one: comments can't exist without an author
+    author: Relationship.one(() => Person)
+  }
 })
 
 const Article = Resource("articles", {
@@ -26,8 +30,12 @@ const Article = Resource("articles", {
     body: Schema.String
   },
   relationships: {
-    author: toOne(() => Person),
-    comments: toMany(() => Comment)
+    // nullable to-one
+    author: Relationship.optional(() => Person),
+    // inline to-many
+    comments: Relationship.many(() => Comment),
+    // unbounded to-many: no inline linkage
+    subscribers: Relationship.paginated(() => Person)
   }
 })
 
@@ -133,6 +141,45 @@ describe("operation schemas", () => {
     expect(operation.data.relationships.comments.data).toEqual([{ type: "comments", lid: "c1" }])
   })
 
+  it("requires `one` relationships in add operations", () => {
+    // Comment's author is required: an add operation without it fails
+    expect(() =>
+      decodeOperation({
+        op: "add",
+        data: { type: "comments", attributes: { body: "No author" } }
+      })
+    ).toThrow()
+
+    const operation = decodeOperation({
+      op: "add",
+      data: {
+        type: "comments",
+        attributes: { body: "Nice" },
+        relationships: { author: { data: { type: "people", lid: "p1" } } }
+      }
+    }) as any
+    expect(operation.data.relationships.author.data).toEqual({ type: "people", lid: "p1" })
+  })
+
+  it("excludes `paginated` relationships from add operations", () => {
+    // Article's subscribers relationship is paginated — it is not part of the
+    // operation's relationships schema, so inline linkage for it is stripped
+    // (the same semantics as create payloads)
+    const operation = decodeOperation({
+      op: "add",
+      data: {
+        type: "articles",
+        attributes: { title: "Hello", body: "" },
+        relationships: {
+          author: { data: null },
+          subscribers: { data: [{ type: "people", id: "9" }] }
+        }
+      }
+    }) as any
+    expect(operation.data.relationships.subscribers).toBeUndefined()
+    expect(operation.data.relationships.author).toEqual({ data: null })
+  })
+
   it("decodes an update operation targeted by data id", () => {
     const operation = decodeOperation({
       op: "update",
@@ -184,7 +231,7 @@ describe("operation schemas", () => {
 })
 
 describe("relationship operation schemas", () => {
-  it("decodes a to-one relationship update", () => {
+  it("decodes a required (`one`) to-one relationship update", () => {
     const operation = decodeOperation({
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
@@ -194,16 +241,26 @@ describe("relationship operation schemas", () => {
     expect(operation.data).toEqual({ type: "people", id: "9" })
   })
 
-  it("decodes a to-one relationship update to null", () => {
+  it("rejects null data for required (`one`) to-one relationship updates", () => {
+    expect(() =>
+      decodeOperation({
+        op: "update",
+        ref: { type: "comments", id: "5", relationship: "author" },
+        data: null
+      })
+    ).toThrow()
+  })
+
+  it("decodes an `optional` to-one relationship update to null", () => {
     const operation = decodeOperation({
       op: "update",
-      ref: { type: "comments", id: "5", relationship: "author" },
+      ref: { type: "articles", id: "1", relationship: "author" },
       data: null
     }) as any
     expect(operation.data).toBeNull()
   })
 
-  it("decodes to-many relationship add / update / remove", () => {
+  it("decodes `many` relationship add / update / remove", () => {
     for (const op of ["add", "update", "remove"]) {
       const operation = decodeOperation({
         op,
@@ -213,6 +270,20 @@ describe("relationship operation schemas", () => {
       expect(operation.op).toBe(op)
       expect(operation.ref.relationship).toBe("comments")
       expect(operation.data).toHaveLength(2)
+    }
+  })
+
+  it("decodes `paginated` relationship add / update / remove", () => {
+    // paginated relationships have no inline linkage, but they ARE manageable
+    // through relationship operations
+    for (const op of ["add", "update", "remove"]) {
+      const operation = decodeOperation({
+        op,
+        ref: { type: "articles", id: "1", relationship: "subscribers" },
+        data: [{ type: "people", id: "9" }]
+      }) as any
+      expect(operation.op).toBe(op)
+      expect(operation.ref.relationship).toBe("subscribers")
     }
   })
 
@@ -249,15 +320,17 @@ describe("operation union disambiguation", () => {
     ).toThrow()
   })
 
-  it("a relationship update between same-typed resources stays a relationship update", () => {
-    // Comment's author is a Person; an update with ref.relationship must keep
-    // the ref (resource updates would drop it).
+  it("a relationship operation whose target type is in the resource set stays a relationship operation", () => {
+    // The comments relationship targets Comment, which is itself in the
+    // operations resource set — the relationship ref must keep the operation
+    // in relationship-space rather than decoding as a Comment resource op.
     const operation = decodeOperation({
       op: "update",
-      ref: { type: "comments", id: "5", relationship: "author" },
-      data: { type: "people", id: "9" }
+      ref: { type: "articles", id: "1", relationship: "comments" },
+      data: [{ type: "comments", id: "5" }]
     }) as any
-    expect(operation.ref.relationship).toBe("author")
+    expect(operation.ref.relationship).toBe("comments")
+    expect(Array.isArray(operation.data)).toBe(true)
   })
 
   it("resource removes still decode (refs without relationship)", () => {
@@ -305,12 +378,13 @@ describe("RequestDocument", () => {
       Atomic.update(Article, { id: Article.Id.make("1"), attributes: { title: "Updated" } }),
       Atomic.remove(Comment, "5"),
       Atomic.updateRelationship(Comment, "5", "author", Person.ref("9")),
+      Atomic.updateRelationship(Article, "1", "author", null),
       Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.ref("5")]),
-      Atomic.removeFromRelationship(Article, "1", "comments", [Comment.ref("5")])
+      Atomic.removeFromRelationship(Article, "1", "subscribers", [Person.ref("9")])
     )
 
     const encoded = encodeRequest(value) as any
-    expect(encoded["atomic:operations"]).toHaveLength(6)
+    expect(encoded["atomic:operations"]).toHaveLength(7)
     expect(encoded["atomic:operations"][0]).toEqual({
       op: "add",
       data: {
@@ -329,6 +403,11 @@ describe("RequestDocument", () => {
       data: { type: "people", id: "9" }
     })
     expect(encoded["atomic:operations"][4]).toEqual({
+      op: "update",
+      ref: { type: "articles", id: "1", relationship: "author" },
+      data: null
+    })
+    expect(encoded["atomic:operations"][5]).toEqual({
       op: "add",
       ref: { type: "articles", lid: "a1", relationship: "comments" },
       data: [{ type: "comments", id: "5" }]
@@ -336,7 +415,7 @@ describe("RequestDocument", () => {
 
     // and the wire form decodes back
     const decoded = decodeRequest(encoded) as any
-    expect(decoded["atomic:operations"]).toHaveLength(6)
+    expect(decoded["atomic:operations"]).toHaveLength(7)
   })
 })
 
@@ -400,7 +479,7 @@ describe("isRelationshipOperation", () => {
 
     if (Atomic.isRelationshipOperation(relationshipOp)) {
       // the guard narrows to operations whose ref carries `relationship`
-      expectTypeOf(relationshipOp.ref.relationship).toEqualTypeOf<"author" | "comments">()
+      expectTypeOf(relationshipOp.ref.relationship).toEqualTypeOf<"author" | "comments" | "subscribers">()
     }
   })
 
@@ -431,9 +510,13 @@ describe("operationsFor", () => {
     // resource-level operations
     expect(Object.keys(operations)).toEqual(["add", "update", "remove", "relationships"])
     // relationship operations, by relationship key and kind
-    expect(Object.keys(operations.relationships)).toEqual(["author", "comments"])
+    expect(Object.keys(operations.relationships)).toEqual(["author", "comments", "subscribers"])
+    // `optional` to-one → update only
     expect(Object.keys(operations.relationships.author)).toEqual(["update"])
+    // `many` to-many → add / update / remove
     expect(Object.keys(operations.relationships.comments)).toEqual(["add", "update", "remove"])
+    // `paginated` to-many → add / update / remove (managed through operations, not inline)
+    expect(Object.keys(operations.relationships.subscribers)).toEqual(["add", "update", "remove"])
   })
 
   it("the record's schemas decode their wire forms", () => {
@@ -471,7 +554,8 @@ describe("Match integration (curried guards)", () => {
   const describeOperation = (operation: Op): string =>
     Match.value(operation).pipe(
       Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => `link ${op.data.length} comments`),
-      Match.when(Atomic.targetsRelationship(Article, "author"), () => "set article author"),
+      Match.when(Atomic.targetsRelationship(Article, "author"), (op) => `set article author to ${op.data === null ? "null" : "a person"}`),
+      Match.when(Atomic.targetsRelationship(Article, "subscribers"), (op) => `${op.op} ${op.data.length} subscribers`),
       Match.when(Atomic.targetsRelationship(Comment, "author"), () => "set comment author"),
       Match.when(Atomic.targetsResource(Article), (op) => `${op.op} article`),
       Match.when(Atomic.targetsResource(Comment), (op) => `${op.op} comment`),
@@ -484,6 +568,12 @@ describe("Match integration (curried guards)", () => {
       ref: { type: "articles", id: "1", relationship: "comments" },
       data: [{ type: "comments", id: "5" }]
     }) as Op)).toBe("link 1 comments")
+
+    expect(describeOperation(decodeOperation({
+      op: "update",
+      ref: { type: "articles", id: "1", relationship: "author" },
+      data: null
+    }) as Op)).toBe("set article author to null")
 
     expect(describeOperation(decodeOperation({
       op: "update",
@@ -582,6 +672,10 @@ describe("type-level guarantees", () => {
     // to-many constructors only accept to-many keys
     // @ts-expect-error -- "author" is a to-one relationship
     Atomic.addToRelationship(Article, "1", "author", [])
+
+    // required (`one`) to-one relationships can't be set to null
+    // @ts-expect-error -- Comment.author is required
+    Atomic.updateRelationship(Comment, "5", "author", null)
   })
 
   it("add data attributes are required and typed", () => {

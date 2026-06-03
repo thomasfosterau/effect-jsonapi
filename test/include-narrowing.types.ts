@@ -22,19 +22,25 @@ const Person = JsonApi.Resource("people", {
 
 const Comment = JsonApi.Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: JsonApi.toOne(() => Person) }
+  relationships: { author: JsonApi.Relationship.one(() => Person) }
 })
 
 const Tag = JsonApi.Resource("tags", {
   attributes: { name: Schema.String }
 })
 
+const Revision = JsonApi.Resource("revisions", {
+  attributes: { editedAt: Schema.String }
+})
+
 const Article = JsonApi.Resource("articles", {
   attributes: { title: Schema.NonEmptyString },
   relationships: {
-    author: JsonApi.toOne(() => Person),
-    comments: JsonApi.toMany(() => Comment),
-    tags: JsonApi.toMany(() => Tag)
+    author: JsonApi.Relationship.one(() => Person),
+    comments: JsonApi.Relationship.many(() => Comment),
+    tags: JsonApi.Relationship.many(() => Tag),
+    // Paginated relationships are excluded from include paths entirely.
+    revisions: JsonApi.Relationship.paginated(() => Revision)
   }
 })
 
@@ -55,6 +61,8 @@ const p3: Paths = "tags"
 const bad1: Paths = "publisher"
 // @ts-expect-error -- unknown nested path
 const bad2: Paths = "comments.likes"
+// @ts-expect-error -- paginated relationships are not includable
+const bad3: Paths = "revisions"
 
 // ---------------------------------------------------------------------------
 // IncludedFor: resources brought in by a set of paths

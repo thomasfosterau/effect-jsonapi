@@ -1,7 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
-import { Identifier, Resource, toMany, toOne } from "./Resource.js"
+import * as Relationship from "./Relationship.js"
+import { Identifier, Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
@@ -14,11 +15,13 @@ const Person = Resource("people", {
   }
 })
 
+// A comment always has an author — `one`, required everywhere.
 const Comment = Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: toOne(() => Person) }
+  relationships: { author: Relationship.one(() => Person) }
 })
 
+// An article's author is nullable (`optional`), its comments are inlined (`many`).
 const Article = Resource("articles", {
   attributes: {
     title: Schema.NonEmptyString,
@@ -26,10 +29,19 @@ const Article = Resource("articles", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    author: toOne(() => Person),
-    comments: toMany(() => Comment)
+    author: Relationship.optional(() => Person),
+    comments: Relationship.many(() => Comment)
   },
   meta: Schema.Struct({ rank: Schema.Int })
+})
+
+// A resource with a required to-one and an unbounded (paginated) to-many.
+const Author = Resource("authors", {
+  attributes: { name: Schema.NonEmptyString },
+  relationships: {
+    profile: Relationship.one(() => Person),
+    posts: Relationship.paginated(() => Article)
+  }
 })
 
 describe("Resource", () => {
@@ -149,6 +161,79 @@ describe("Resource.createPayload", () => {
     expectTypeOf<CreateData>().not.toHaveProperty("id")
     expectTypeOf<CreateData["lid"]>().toEqualTypeOf<string | undefined>()
   })
+
+  it("requires relationships when the resource has a `one` relationship", () => {
+    // Comment.author is `one` → the payload must carry it.
+    expect(() =>
+      Schema.decodeUnknownSync(Comment.createPayload)({
+        data: { type: "comments", attributes: { body: "Nice" } }
+      })
+    ).toThrow()
+
+    const decoded = Schema.decodeUnknownSync(Comment.createPayload)({
+      data: {
+        type: "comments",
+        attributes: { body: "Nice" },
+        relationships: { author: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(decoded.data.relationships.author.data.id).toBe("9")
+  })
+
+  it("rejects null linkage for a `one` relationship in the payload", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Comment.createPayload)({
+        data: {
+          type: "comments",
+          attributes: { body: "Nice" },
+          relationships: { author: { data: null } }
+        }
+      })
+    ).toThrow()
+  })
+
+  it("keeps relationships optional when the resource has no `one` relationship", () => {
+    // Article only has `optional` / `many` relationships.
+    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+      data: {
+        type: "articles",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      }
+    })
+    expect(decoded.data.relationships).toBeUndefined()
+  })
+
+  it("excludes paginated relationships from the payload", () => {
+    // Author.posts is paginated → it cannot be supplied at create time.
+    expect(() =>
+      Schema.decodeUnknownSync(Author.createPayload)(
+        {
+          data: {
+            type: "authors",
+            attributes: { name: "Dan" },
+            relationships: {
+              profile: { data: { type: "people", id: "9" } },
+              posts: { data: [{ type: "articles", id: "1" }] }
+            }
+          }
+        },
+        { onExcessProperty: "error" }
+      )
+    ).toThrow()
+
+    // Without the paginated key the payload decodes (profile is required).
+    const decoded = Schema.decodeUnknownSync(Author.createPayload)({
+      data: {
+        type: "authors",
+        attributes: { name: "Dan" },
+        relationships: { profile: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(decoded.data.relationships.profile.data.id).toBe("9")
+    // ... and the paginated key does not exist in the payload type.
+    type CreateRels = typeof Author.createPayload.Type["data"]["relationships"]
+    expectTypeOf<CreateRels>().not.toHaveProperty("posts")
+  })
 })
 
 describe("Resource.updatePayload", () => {
@@ -171,20 +256,70 @@ describe("Resource.updatePayload", () => {
       })
     ).toThrow()
   })
+
+  it("keeps all relationships optional (PATCH semantics), even `one`", () => {
+    // Omitting a required relationship in a PATCH means "leave it unchanged".
+    const decoded = Schema.decodeUnknownSync(Comment.updatePayload)({
+      data: { type: "comments", id: "5", attributes: { body: "Updated" } }
+    })
+    expect(decoded.data.relationships).toBeUndefined()
+
+    // But when present, `one` linkage still can't be null.
+    expect(() =>
+      Schema.decodeUnknownSync(Comment.updatePayload)({
+        data: {
+          type: "comments",
+          id: "5",
+          relationships: { author: { data: null } }
+        }
+      })
+    ).toThrow()
+  })
+
+  it("excludes paginated relationships from the payload", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Author.updatePayload)(
+        {
+          data: {
+            type: "authors",
+            id: "7",
+            relationships: { posts: { data: [] } }
+          }
+        },
+        { onExcessProperty: "error" }
+      )
+    ).toThrow()
+    type UpdateRels = NonNullable<typeof Author.updatePayload.Type["data"]["relationships"]>
+    expectTypeOf<UpdateRels>().not.toHaveProperty("posts")
+  })
 })
 
 describe("Resource relationships", () => {
-  it("toOne accepts null data (empty linkage)", () => {
-    const decoded = Schema.decodeUnknownSync(Comment)({
-      type: "comments",
-      id: "5",
-      attributes: { body: "Nice" },
-      relationships: { author: { data: null } }
+  it("optional accepts null data (empty linkage)", () => {
+    const decoded = Schema.decodeUnknownSync(Article)({
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+      relationships: {
+        author: { data: null },
+        comments: { data: [] }
+      }
     })
     expect(decoded.relationships?.author.data).toBeNull()
   })
 
-  it("toMany accepts an empty array but not null", () => {
+  it("one rejects null data (required linkage)", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(Comment)({
+        type: "comments",
+        id: "5",
+        attributes: { body: "Nice" },
+        relationships: { author: { data: null } }
+      })
+    ).toThrow()
+  })
+
+  it("many accepts an empty array but not null", () => {
     const decode = (data: unknown) =>
       Schema.decodeUnknownSync(Article)({
         type: "articles",
@@ -197,6 +332,21 @@ describe("Resource relationships", () => {
       })
     expect(decode([]).relationships?.comments.data).toEqual([])
     expect(() => decode(null)).toThrow()
+  })
+
+  it("paginated carries only links (no inline data)", () => {
+    const decoded = Schema.decodeUnknownSync(Author)({
+      type: "authors",
+      id: "7",
+      attributes: { name: "Dan" },
+      relationships: {
+        profile: { data: { type: "people", id: "9" } },
+        posts: { links: { related: "/authors/7/posts" }, meta: { count: 42 } }
+      }
+    })
+    expect(decoded.relationships?.posts.links.related).toBe("/authors/7/posts")
+    expect(decoded.relationships?.posts.meta?.count).toBe(42)
+    expectTypeOf(decoded.relationships!.posts).not.toHaveProperty("data")
   })
 
   it("rejects relationship identifiers of the wrong type", () => {
@@ -212,8 +362,10 @@ describe("Resource relationships", () => {
 
   it("exposes relationship descriptors for graph walking", () => {
     expect(Object.keys(Article.relationships)).toEqual(["author", "comments"])
-    expect(Article.relationships.author.kind).toBe("toOne")
-    expect(Article.relationships.comments.kind).toBe("toMany")
+    expect(Article.relationships.author.kind).toBe("optional")
+    expect(Article.relationships.comments.kind).toBe("many")
+    expect(Comment.relationships.author.kind).toBe("one")
+    expect(Author.relationships.posts.kind).toBe("paginated")
     expect(Article.relationships.author.ref().type).toBe("people")
   })
 })
@@ -275,6 +427,47 @@ describe("Resource.document / Resource.collection", () => {
         ]
       })
     ).toThrow()
+  })
+
+  it("paginated relationship targets are excluded from the included union", () => {
+    // Author.posts is paginated → Article is NOT an includable target of Author;
+    // only Person (via the `one` profile relationship) is.
+    const doc = Author.document()
+    expect(() =>
+      Schema.decodeUnknownSync(doc)({
+        data: {
+          type: "authors",
+          id: "7",
+          attributes: { name: "Dan" },
+          relationships: {
+            profile: { data: { type: "people", id: "9" } },
+            posts: { links: { related: "/authors/7/posts" } }
+          }
+        },
+        included: [
+          {
+            type: "articles",
+            id: "1",
+            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+          }
+        ]
+      })
+    ).toThrow()
+
+    // The linkable target (Person) still works.
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: {
+        type: "authors",
+        id: "7",
+        attributes: { name: "Dan" },
+        relationships: {
+          profile: { data: { type: "people", id: "9" } },
+          posts: { links: { related: "/authors/7/posts" } }
+        }
+      },
+      included: [{ type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }]
+    })
+    expect(decoded.included).toHaveLength(1)
   })
 
   it("included can be overridden explicitly for deeper compound documents", () => {
@@ -408,7 +601,7 @@ describe("forward references", () => {
     // Tag references Post which is declared *after* it.
     const Tag = Resource("tags", {
       attributes: { name: Schema.String },
-      relationships: { posts: toMany((): typeof Post => Post) }
+      relationships: { posts: Relationship.many((): typeof Post => Post) }
     })
     const Post = Resource("posts", {
       attributes: { title: Schema.String }

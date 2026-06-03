@@ -14,7 +14,10 @@
  *
  * const Article = JsonApi.Resource("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
- *   relationships: { author: JsonApi.toOne(() => Person) }
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
  * })
  *
  * // 2. Errors — one-shot declarations
@@ -40,9 +43,27 @@
  */
 
 // ---------------------------------------------------------------------------
-// Resources: definitions, relationships, identifiers
+// Resources: definitions, identifiers
 // ---------------------------------------------------------------------------
 export * from "./Resource.js"
+
+// ---------------------------------------------------------------------------
+// Relationships: one / optional / many / paginated
+// ---------------------------------------------------------------------------
+
+/**
+ * Relationship constructors — see the `Relationship` module.
+ *
+ * ```ts
+ * relationships: {
+ *   author: JsonApi.Relationship.one(() => Person),         // required to-one
+ *   editor: JsonApi.Relationship.optional(() => Person),    // nullable to-one
+ *   tags: JsonApi.Relationship.many(() => Tag),             // inline to-many
+ *   comments: JsonApi.Relationship.paginated(() => Comment) // linked, paginated to-many
+ * }
+ * ```
+ */
+export * as Relationship from "./Relationship.js"
 
 // ---------------------------------------------------------------------------
 // Documents: links, meta, error objects, document schemas

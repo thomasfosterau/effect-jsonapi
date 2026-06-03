@@ -6,16 +6,25 @@
  *   - `params.id` is the resource's branded id
  *   - `query.include` / `query.sort` / `query.page` / `query.filter` are typed
  *   - `payload.data.attributes` is the typed create/update payload
+ *   - relationship endpoints receive typed linkage payloads
  *
- * and return document values (`JsonApi.data` / `JsonApi.collection`), which
- * are validated against the endpoint's document schema on the way out.
+ * and return document values (`JsonApi.data` / `JsonApi.collection` /
+ * `JsonApi.linkage`), which are validated against the endpoint's document
+ * schema on the way out.
  */
 import { Effect, Layer } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "./api.js"
-import { IssueLocked, IssueNotFound, PullRequestNotFound, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "./errors.js"
-import { Issue, Label, PullRequest, Repository, User } from "./resources.js"
+import {
+  IssueLocked,
+  IssueNotFound,
+  PullRequestNotFound,
+  RepositoryNameTaken,
+  RepositoryNotFound,
+  UserNotFound
+} from "./errors.js"
+import { Issue, IssueComment, Label, PullRequest, Repository, User } from "./resources.js"
 
 // ---------------------------------------------------------------------------
 // In-memory store
@@ -105,6 +114,10 @@ export const secretProject: Repository = Repository.make({
   }
 })
 
+// The relationship objects of an issue's paginated comment feed: links only,
+// no inline data.
+const issueComments = (issueId: string) => JsonApi.paginatedRelationship("issues", issueId, "comments")
+
 export const bugIssue: Issue = Issue.make({
   id: Issue.Id.make("1"),
   attributes: {
@@ -119,7 +132,8 @@ export const bugIssue: Issue = Issue.make({
     repository: { data: Repository.ref(helloWorld.id) },
     author: { data: User.ref(defunkt.id) },
     assignee: { data: User.ref(octocat.id) },
-    labels: { data: [Label.ref(bugLabel.id)] }
+    labels: { data: [Label.ref(bugLabel.id)] },
+    comments: issueComments("1")
   }
 })
 
@@ -137,7 +151,8 @@ export const featureIssue: Issue = Issue.make({
     repository: { data: Repository.ref(helloWorld.id) },
     author: { data: User.ref(hubot.id) },
     assignee: { data: null },
-    labels: { data: [Label.ref(enhancementLabel.id)] }
+    labels: { data: [Label.ref(enhancementLabel.id)] },
+    comments: issueComments("2")
   }
 })
 
@@ -155,9 +170,37 @@ export const lockedIssue: Issue = Issue.make({
     repository: { data: Repository.ref(secretProject.id) },
     author: { data: User.ref(defunkt.id) },
     assignee: { data: null },
-    labels: { data: [] }
+    labels: { data: [] },
+    comments: issueComments("3")
   }
 })
+
+export const bugComments: ReadonlyArray<IssueComment> = [
+  IssueComment.make({
+    id: IssueComment.Id.make("1"),
+    attributes: {
+      body: "Can you share a reproduction?",
+      createdAt: new Date("2011-04-22T14:00:00.000Z")
+    },
+    relationships: { author: { data: User.ref(octocat.id) } }
+  }),
+  IssueComment.make({
+    id: IssueComment.Id.make("2"),
+    attributes: {
+      body: "Sure — pushed to the repro branch.",
+      createdAt: new Date("2011-04-22T15:30:00.000Z")
+    },
+    relationships: { author: { data: User.ref(defunkt.id) } }
+  }),
+  IssueComment.make({
+    id: IssueComment.Id.make("3"),
+    attributes: {
+      body: "Thanks, I can reproduce it now.",
+      createdAt: new Date("2011-04-23T09:00:00.000Z")
+    },
+    relationships: { author: { data: User.ref(octocat.id) } }
+  })
+]
 
 export const readmePull: PullRequest = PullRequest.make({
   id: PullRequest.Id.make("1"),
@@ -185,6 +228,14 @@ const store = {
     [helloWorld, spoonKnife, secretProject].map((repository) => [repository.id, repository])
   ),
   issues: new Map<string, Issue>([bugIssue, featureIssue, lockedIssue].map((issue) => [issue.id, issue])),
+  issueComments: new Map<string, IssueComment>(bugComments.map((comment) => [comment.id, comment])),
+  // The paginated comments relationship is backed by its own index, not by
+  // inline linkage on the issue.
+  commentsByIssue: new Map<string, Array<string>>([
+    [bugIssue.id, bugComments.map((comment) => comment.id)],
+    [featureIssue.id, []],
+    [lockedIssue.id, []]
+  ]),
   pulls: new Map<string, PullRequest>([[readmePull.id, readmePull]])
 }
 
@@ -202,6 +253,13 @@ const loadIssue = (id: string): Effect.Effect<Issue, IssueNotFound> => {
   const issue = store.issues.get(id)
   return issue === undefined ? Effect.fail(new IssueNotFound({ id })) : Effect.succeed(issue)
 }
+
+const loadUnlockedIssue = (id: string): Effect.Effect<Issue, IssueNotFound | IssueLocked> =>
+  loadIssue(id).pipe(
+    Effect.flatMap((issue) =>
+      issue.attributes.locked ? Effect.fail(new IssueLocked({ id: issue.id })) : Effect.succeed(issue)
+    )
+  )
 
 const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> => {
   const pull = store.pulls.get(id)
@@ -221,7 +279,7 @@ const resolveRepositoryIncluded = (
   const included: Array<User> = []
   if (include?.includes("owner")) {
     const owner = repository.relationships?.owner.data
-    if (owner != null && store.users.has(owner.id)) included.push(store.users.get(owner.id)!)
+    if (owner !== undefined && store.users.has(owner.id)) included.push(store.users.get(owner.id)!)
   }
   return included
 }
@@ -234,7 +292,7 @@ const resolveIssueIncluded = (
   if (include === undefined) return included
   if (include.some((path) => path === "repository" || path === "repository.owner")) {
     const ref = issue.relationships?.repository.data
-    const repository = ref != null ? store.repositories.get(ref.id) : undefined
+    const repository = ref !== undefined ? store.repositories.get(ref.id) : undefined
     if (repository !== undefined) {
       included.push(repository)
       if (include.includes("repository.owner")) {
@@ -265,7 +323,7 @@ const resolvePullIncluded = (
   if (include === undefined) return included
   if (include.some((path) => path === "repository" || path === "repository.owner")) {
     const ref = pull.relationships?.repository.data
-    const repository = ref != null ? store.repositories.get(ref.id) : undefined
+    const repository = ref !== undefined ? store.repositories.get(ref.id) : undefined
     if (repository !== undefined) {
       included.push(repository)
       if (include.includes("repository.owner")) {
@@ -275,7 +333,7 @@ const resolvePullIncluded = (
   }
   if (include.includes("author")) {
     const ref = pull.relationships?.author.data
-    if (ref != null && store.users.has(ref.id)) included.push(store.users.get(ref.id)!)
+    if (ref !== undefined && store.users.has(ref.id)) included.push(store.users.get(ref.id)!)
   }
   if (include.includes("reviewers")) {
     for (const ref of pull.relationships?.reviewers.data ?? []) {
@@ -356,7 +414,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       // filter[owner]=<user id>
       const owner = query.filter?.owner
       if (owner !== undefined) {
-        repositories = repositories.filter((repository) => repository.relationships?.owner.data?.id === owner)
+        repositories = repositories.filter((repository) => repository.relationships?.owner.data.id === owner)
       }
       // filter[language]=TypeScript
       const language = query.filter?.language
@@ -384,16 +442,17 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
     })
     .handle("create", ({ payload }) => {
       const name = payload.data.attributes.name
-      const owner = payload.data.relationships?.owner.data?.id
+      // `owner` is a required (`one`) relationship — the payload always carries it.
+      const owner = payload.data.relationships.owner.data.id
       for (const existing of store.repositories.values()) {
-        if (existing.attributes.name === name && existing.relationships?.owner.data?.id === owner) {
+        if (existing.attributes.name === name && existing.relationships?.owner.data.id === owner) {
           return Effect.fail(new RepositoryNameTaken({ name }))
         }
       }
       const repository = Repository.make({
         id: Repository.Id.make(`${store.repositories.size + 1}`),
         attributes: payload.data.attributes,
-        relationships: payload.data.relationships ?? { owner: { data: null } }
+        relationships: payload.data.relationships
       })
       store.repositories.set(repository.id, repository)
       return Effect.succeed(JsonApi.data(repository, { self: `/repositories/${repository.id}` }))
@@ -404,7 +463,9 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
           const updated = Repository.make({
             ...repository,
             attributes: { ...repository.attributes, ...(payload.data.attributes ?? {}) },
-            relationships: payload.data.relationships ?? repository.relationships ?? { owner: { data: null } }
+            relationships: {
+              owner: payload.data.relationships?.owner ?? repository.relationships!.owner
+            }
           })
           store.repositories.set(updated.id, updated)
           return JsonApi.data(updated, { self: `/repositories/${updated.id}` })
@@ -416,11 +477,28 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
           store.repositories.delete(repository.id)
         })
       ))
+    // GET /repositories/:id/owner — the related user as a full resource
+    .handle("owner", ({ params }) =>
+      loadRepository(params.id).pipe(
+        Effect.map((repository) => {
+          const owner = store.users.get(repository.relationships!.owner.data.id) ?? null
+          return JsonApi.data(owner, {
+            self: JsonApi.relatedLink("repositories", repository.id, "owner")
+          })
+        })
+      ))
 )
 
 // ---------------------------------------------------------------------------
 // Issues
 // ---------------------------------------------------------------------------
+
+// The comments attached to an issue, via the relationship index.
+const commentsFor = (issueId: string): Array<IssueComment> =>
+  (store.commentsByIssue.get(issueId) ?? []).flatMap((commentId) => {
+    const comment = store.issueComments.get(commentId)
+    return comment === undefined ? [] : [comment]
+  })
 
 export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
   handlers
@@ -439,7 +517,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       // filter[repository]=<repository id>
       const repository = query.filter?.repository
       if (repository !== undefined) {
-        issues = issues.filter((issue) => issue.relationships?.repository.data?.id === repository)
+        issues = issues.filter((issue) => issue.relationships?.repository.data.id === repository)
       }
       // filter[state]=open|closed
       const state = query.filter?.state
@@ -464,39 +542,142 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       )
     })
     .handle("create", ({ payload }) => {
-      // An issue must be opened against an existing repository.
-      const relationships = payload.data.relationships
-      const repository = relationships?.repository.data
-      if (relationships === undefined || repository == null || !store.repositories.has(repository.id)) {
-        return Effect.fail(new RepositoryNotFound({ id: repository?.id ?? "unknown" }))
+      // `repository` and `author` are required (`one`) relationships — the
+      // payload always carries them; the repository must also exist.
+      const repository = payload.data.relationships.repository.data
+      if (!store.repositories.has(repository.id)) {
+        return Effect.fail(new RepositoryNotFound({ id: repository.id }))
       }
+      const id = Issue.Id.make(`${store.issues.size + 1}`)
       const issue = Issue.make({
-        id: Issue.Id.make(`${store.issues.size + 1}`),
+        id,
         attributes: payload.data.attributes,
-        relationships
+        relationships: {
+          repository: payload.data.relationships.repository,
+          author: payload.data.relationships.author,
+          assignee: payload.data.relationships.assignee ?? { data: null },
+          labels: payload.data.relationships.labels ?? { data: [] },
+          // The paginated comment feed starts empty; only its links exist.
+          comments: issueComments(id)
+        }
       })
       store.issues.set(issue.id, issue)
+      store.commentsByIssue.set(issue.id, [])
       return Effect.succeed(JsonApi.data(issue, { self: `/issues/${issue.id}` }))
     })
     .handle("update", ({ params, payload }) =>
-      loadIssue(params.id).pipe(
-        Effect.flatMap((issue) => {
-          // Locked issues cannot be modified (403).
-          if (issue.attributes.locked) {
-            return Effect.fail(new IssueLocked({ id: issue.id }))
-          }
+      loadUnlockedIssue(params.id).pipe(
+        Effect.map((issue) => {
+          const relationships = issue.relationships!
           const updated = Issue.make({
             ...issue,
             attributes: { ...issue.attributes, ...(payload.data.attributes ?? {}) },
-            relationships: payload.data.relationships ?? issue.relationships ?? {
-              repository: { data: null },
-              author: { data: null },
-              assignee: { data: null },
-              labels: { data: [] }
+            relationships: {
+              repository: payload.data.relationships?.repository ?? relationships.repository,
+              author: payload.data.relationships?.author ?? relationships.author,
+              assignee: payload.data.relationships?.assignee ?? relationships.assignee,
+              labels: payload.data.relationships?.labels ?? relationships.labels,
+              comments: relationships.comments
             }
           })
           store.issues.set(updated.id, updated)
-          return Effect.succeed(JsonApi.data(updated, { self: `/issues/${updated.id}` }))
+          return JsonApi.data(updated, { self: `/issues/${updated.id}` })
+        })
+      ))
+    // --- Related resource endpoints -----------------------------------------
+    // GET /issues/:id/comments — the paginated comment feed
+    .handle("comments", ({ params, query }) =>
+      loadIssue(params.id).pipe(
+        Effect.map((issue) => {
+          const all = commentsFor(issue.id)
+          const { number, page, size, total } = paginate(all, query.page)
+          const path = JsonApi.relatedLink("issues", issue.id, "comments")
+          return JsonApi.collection(page, {
+            included: query.include?.includes("author")
+              ? page.flatMap((comment) => {
+                const author = store.users.get(comment.relationships!.author.data.id)
+                return author === undefined ? [] : [author]
+              })
+              : [],
+            meta: { total },
+            links: JsonApi.numberPaginationLinks(path, { number, size }, total)
+          })
+        })
+      ))
+    // --- Relationship (linkage) endpoints ------------------------------------
+    // GET /issues/:id/relationships/labels
+    .handle("labelsRelationship", ({ params }) =>
+      loadIssue(params.id).pipe(
+        Effect.map((issue) =>
+          JsonApi.linkage(issue.relationships?.labels.data ?? [], {
+            self: JsonApi.relationshipLink("issues", issue.id, "labels"),
+            related: JsonApi.relatedLink("issues", issue.id, "labels")
+          })
+        )
+      ))
+    // PATCH /issues/:id/relationships/assignee — assign or unassign
+    .handle("updateAssigneeRelationship", ({ params, payload }) =>
+      loadUnlockedIssue(params.id).pipe(
+        Effect.flatMap((issue) => {
+          if (payload.data !== null && !store.users.has(payload.data.id)) {
+            return Effect.fail(new UserNotFound({ id: payload.data.id }))
+          }
+          const updated = Issue.make({
+            ...issue,
+            relationships: { ...issue.relationships!, assignee: { data: payload.data } }
+          })
+          store.issues.set(updated.id, updated)
+          return Effect.succeed(
+            JsonApi.linkage(payload.data, {
+              self: JsonApi.relationshipLink("issues", issue.id, "assignee")
+            })
+          )
+        })
+      ))
+    // PATCH /issues/:id/relationships/labels — replace all labels
+    .handle("updateLabelsRelationship", ({ params, payload }) =>
+      loadUnlockedIssue(params.id).pipe(
+        Effect.map((issue) => {
+          const updated = Issue.make({
+            ...issue,
+            relationships: { ...issue.relationships!, labels: { data: payload.data } }
+          })
+          store.issues.set(updated.id, updated)
+          return JsonApi.linkage(payload.data, {
+            self: JsonApi.relationshipLink("issues", issue.id, "labels")
+          })
+        })
+      ))
+    // POST /issues/:id/relationships/labels — add labels
+    .handle("addLabelsRelationship", ({ params, payload }) =>
+      loadUnlockedIssue(params.id).pipe(
+        Effect.map((issue) => {
+          const existing = issue.relationships?.labels.data ?? []
+          const known = new Set<string>(existing.map((identifier) => identifier.id))
+          const added = [...existing, ...payload.data.filter((identifier) => !known.has(identifier.id))]
+          const updated = Issue.make({
+            ...issue,
+            relationships: { ...issue.relationships!, labels: { data: added } }
+          })
+          store.issues.set(updated.id, updated)
+          return JsonApi.linkage(added, {
+            self: JsonApi.relationshipLink("issues", issue.id, "labels")
+          })
+        })
+      ))
+    // DELETE /issues/:id/relationships/labels — remove labels → 204
+    .handle("removeLabelsRelationship", ({ params, payload }) =>
+      loadUnlockedIssue(params.id).pipe(
+        Effect.map((issue) => {
+          const remove = new Set<string>(payload.data.map((identifier) => identifier.id))
+          const remaining = (issue.relationships?.labels.data ?? []).filter(
+            (identifier) => !remove.has(identifier.id)
+          )
+          const updated = Issue.make({
+            ...issue,
+            relationships: { ...issue.relationships!, labels: { data: remaining } }
+          })
+          store.issues.set(updated.id, updated)
         })
       ))
 )
@@ -521,7 +702,7 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
 
       const repository = query.filter?.repository
       if (repository !== undefined) {
-        pulls = pulls.filter((pull) => pull.relationships?.repository.data?.id === repository)
+        pulls = pulls.filter((pull) => pull.relationships?.repository.data.id === repository)
       }
       const state = query.filter?.state
       if (state !== undefined) {

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import { lidMap, UnknownLidError } from "./Lid.js"
-import { Resource, toMany, toOne } from "./Resource.js"
+import * as Relationship from "./Relationship.js"
+import { Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -16,7 +17,7 @@ const Person = Resource("people", {
 
 const Comment = Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: toOne(() => Person) }
+  relationships: { author: Relationship.one(() => Person) }
 })
 
 const Article = Resource("articles", {
@@ -25,8 +26,8 @@ const Article = Resource("articles", {
     body: Schema.String
   },
   relationships: {
-    author: toOne(() => Person),
-    comments: toMany(() => Comment)
+    author: Relationship.optional(() => Person),
+    comments: Relationship.many(() => Comment)
   }
 })
 

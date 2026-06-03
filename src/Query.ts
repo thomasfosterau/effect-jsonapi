@@ -31,7 +31,7 @@ import type { Types } from "effect"
 import { Schema, SchemaTransformation } from "effect"
 import { CommaSeparated, flatten, nest, Sort as SortCodec } from "./internal/codecs.js"
 import type { Any, AttributeKeys, IncludePath, RelationshipTargets } from "./Resource.js"
-import { attributeKeys, directTargets, includePaths } from "./Resource.js"
+import { allTargets, attributeKeys, includePaths } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -253,7 +253,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
 
   if (options.fields === true) {
     const fieldsetFields: Record<string, Schema.Top> = {}
-    for (const target of dedupe([...resources, ...resources.flatMap(directTargets)])) {
+    for (const target of dedupe([...resources, ...resources.flatMap(allTargets)])) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target))
       flatFields[`fields[${target.type}]`] = Schema.optionalKey(Schema.String)
     }

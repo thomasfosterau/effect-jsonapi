@@ -115,7 +115,19 @@ const makeWire = (
   const cached = wireCache.get(klass)
   if (cached !== undefined) return cached
 
-  const wire = WireDocument.pipe(
+  // The wire document only decodes error documents carrying *this* error's
+  // status and code, so unions of error schemas stay discriminated — e.g. an
+  // endpoint declaring both `IssueNotFound` and `UserNotFound` (two 404s with
+  // distinct codes) decodes each document into the right class.
+  const strictDocument = ErrorDocument(
+    Schema.Struct({
+      ...ErrorObject.fields,
+      status: Schema.Literals([String(options.status)]),
+      code: Schema.Literals([options.code])
+    })
+  ) as unknown as typeof WireDocument
+
+  const wire = strictDocument.pipe(
     Schema.decodeTo(
       klass as unknown as Schema.Top,
       SchemaTransformation.transform<unknown, WireDocumentType>({
