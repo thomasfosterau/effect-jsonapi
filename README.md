@@ -94,6 +94,8 @@ Everything below is **derived** — never assembled by hand:
 | `Article.Id`             | branded id schema — `Article.Id` values can't be mixed with `Person.Id` |
 | `Article.identifier`     | the `{ type: "articles", id }` resource-identifier schema               |
 | `Article.ref("1")`       | a typed identifier *value* — handy for relationship linkage             |
+| `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet) |
+| `Article.lidRef("a1")`   | a typed local-identifier *value* — the `lid` counterpart of `ref`       |
 | `Article.createPayload`  | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded |
 | `Article.updatePayload`  | `{ data: { type, id, attributes? (partial), relationships? } }` — `paginated` excluded |
 | `Article.document()`     | single-resource document; `included` union derived from the non-paginated relationships |
@@ -251,6 +253,118 @@ for (const result of doc.data) {
 The `included` union spans every searched resource's relationship targets, and query features
 (`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
 
+### Atomic operations
+
+`Endpoint.operations` models the [atomic operations extension](https://jsonapi.org/ext/atomic/):
+one request carrying an ordered list of operations — creating, updating and deleting resources or
+their relationships — processed all-or-nothing:
+
+```ts
+const operations = JsonApi.Group("operations",
+  // POST /operations with an atomic:operations document
+  JsonApi.Endpoint.operations([Article, Comment], { errors: [OperationFailed] })
+)
+
+const Api = HttpApi.make("blog").add(articles).add(operations)
+```
+
+Like everything else, the operations a resource supports are **derived** from its definition —
+`JsonApi.Atomic.operationsFor(Article)` exposes them as a named record of schemas:
+
+| Derived operation | Wire form |
+| --- | --- |
+| `.add` | `{ op: "add", data: { type, lid?, attributes, relationships } }` — `one` relationships required, `paginated` excluded |
+| `.update` | `{ op: "update", data: { type, id \| lid, attributes?, relationships? } }` — `paginated` excluded |
+| `.remove` | `{ op: "remove", ref: { type, id \| lid } }` |
+| `.relationships.author.update` (per `one` relationship) | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref }` — never null |
+| `.relationships.editor.update` (per `optional` relationship) | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref \| null }` |
+| `.relationships.comments.add` / `.update` / `.remove` (per `many` / `paginated` relationship) | `{ op, ref: { type, id \| lid, relationship }, data: [refs] }` |
+
+`paginated` relationships — which carry no inline linkage — are managed exactly this way: their
+membership is changed through relationship operations (or relationship endpoints), never inside a
+resource's `relationships` member.
+
+Clients build requests with the typed operation constructors — note the lid refs
+(`Article.lidRef` / `Comment.lidRef`) linking operations within the same request:
+
+```ts
+const doc = yield* client.operations.operations({
+  payload: JsonApi.Atomic.request(
+    // 1. create an article; it has no id yet, so it declares a lid.
+    //    `author` is a required (`one`) relationship, so it must be present.
+    JsonApi.Atomic.add(Article, {
+      lid: "a1",
+      attributes: { title: "Atomic bikeshedding", body: "…", createdAt: new Date() },
+      relationships: {
+        author: { data: Person.ref("9") },
+        tags: { data: [Tag.ref("1")] }
+      }
+    }),
+    // 2. create a comment...
+    JsonApi.Atomic.add(Comment, {
+      lid: "c1",
+      attributes: { body: "First!" },
+      relationships: { author: { data: Person.ref("9") } }
+    }),
+    // 3. ...and link it into the new article's paginated comments relationship —
+    //    both sides referenced by lid
+    JsonApi.Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.lidRef("c1")]),
+    // 4. to-one relationship operations replace linkage (`one`: never null)
+    JsonApi.Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
+  )
+})
+
+doc["atomic:results"]   // one result per operation, in order; `data` is typed Article | Comment
+```
+
+Handlers pattern-match over the decoded operation union — the `targetsResource` /
+`targetsRelationship` guards are curried, so they drop straight into Effect's `Match` module and
+narrow each case to fully typed `data` / `ref`; `JsonApi.lidMap()` tracks the server-assigned ids
+of lid-created resources:
+
+```ts
+const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
+  handlers.handle("operations", ({ payload }) =>
+    Effect.gen(function*() {
+      const lids = JsonApi.lidMap()
+      const entries = []
+      for (const operation of payload["atomic:operations"]) {
+        entries.push(Match.value(operation).pipe(
+          Match.when(JsonApi.Atomic.targetsRelationship(Article, "comments"), (op) => {
+            // op.data is ReadonlyArray<comment ref>; op.op is "add" | "update" | "remove"
+            return JsonApi.Atomic.emptyResult
+          }),
+          Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
+            Match.value(op).pipe(
+              Match.when({ op: "add" }, (add) => {
+                const article = Article.make({
+                  id: Article.Id.make(newId()),
+                  attributes: add.data.attributes,
+                  relationships: lids.resolveLinkage(Article, add.data.relationships)  // lids → real ids
+                })
+                if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id)
+                return { data: article }
+              }),
+              Match.when({ op: "update" }, (update) => /* … */),
+              Match.when({ op: "remove" }, (remove) => /* … */),
+              Match.exhaustive
+            )),
+          // … one case per resource and relationship; Match.exhaustive proves
+          //   every operation in the union is handled
+          Match.exhaustive
+        ))
+      }
+      return JsonApi.Atomic.results(entries)
+    })))
+```
+
+Because the extension uses the JSON:API media type with an `ext` parameter, provide the
+middleware with the extension declared:
+
+```ts
+Layer.provide(JsonApi.Middleware.layerWith({ extensions: [JsonApi.Atomic.EXTENSION_URI] }))
+```
+
 Every endpoint automatically:
 
 - serves and accepts **`application/vnd.api+json`**
@@ -378,7 +492,7 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | JSON:API v1.1 rule | How it's enforced |
 | --- | --- |
 | Media type `application/vnd.api+json` | baked into every document/payload/error schema |
-| 415 on parameterised request `Content-Type`; 406 on unacceptable `Accept` | middleware attached to every endpoint; providing it is required by the type system |
+| 415/406 on media type parameters other than `ext` / `profile` (or unsupported extensions) | middleware attached to every endpoint; providing it is required by the type system |
 | Error bodies are error documents | only `JsonApi.Error` classes can be declared as endpoint errors |
 | Top-level document holds exactly one of `data` / `errors` / `meta` | success schemas only ever contain `data`; error schemas only `errors` — mixing is unrepresentable |
 | Resource objects have `type` and `id`; ids are not interchangeable across types | `Resource` always emits the type tag and a per-type branded id |
@@ -392,6 +506,7 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | `errors` array is never empty | non-empty check on the error document schema |
 | 200 / 201 / 204 status codes per operation | set by the endpoint constructors |
 | Pagination / sorting / sparse fieldsets / inclusion / filtering query families | typed query schemas derived from the resource definition |
+| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `JsonApi.Atomic` schemas derived from resource definitions |
 
 ## Examples
 
@@ -400,7 +515,7 @@ Complete runnable examples (resources, errors, api, in-memory handlers) live in
 
 | Example | What it shows | Test |
 | --- | --- | --- |
-| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search | [`test/blog.test.ts`](./test/blog.test.ts) |
+| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution | [`test/blog.test.ts`](./test/blog.test.ts), [`test/atomic.test.ts`](./test/atomic.test.ts) |
 | [`examples/github`](./examples/github) | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types | [`test/github.test.ts`](./test/github.test.ts) |
 
 ## Metadata
@@ -443,7 +558,10 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   on the side that owns the relationship.
 - **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
   responses by include paths is not yet supported.
-- **The atomic operations extension** is not yet modelled.
+- **Atomic operations requests are accepted with or without the `ext` media type parameter**:
+  spec-compliant clients send `application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"`
+  (accepted once the middleware declares the extension), but the bare media type is not rejected.
+  Responses always carry the parameter.
 
 ## Contributing
 

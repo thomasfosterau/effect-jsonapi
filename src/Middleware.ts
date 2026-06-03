@@ -6,9 +6,10 @@
  *
  *   - {@link ContentNegotiation} — JSON:API §5 content negotiation:
  *       - a request `Content-Type: application/vnd.api+json` carrying media
- *         type parameters → 415 Unsupported Media Type
+ *         type parameters other than `ext` / `profile` (or unsupported
+ *         extension URIs) → 415 Unsupported Media Type
  *       - an `Accept` header in which every instance of the JSON:API media
- *         type carries parameters → 406 Not Acceptable
+ *         type carries such parameters → 406 Not Acceptable
  *   - {@link SchemaErrors} — converts request validation failures (malformed
  *     query parameters, payloads, path parameters) into spec-compliant
  *     JSON:API 400 error documents instead of the default HttpApi error shape.
@@ -28,43 +29,102 @@ import { MEDIA_TYPE } from "./internal/media.js"
 // Content negotiation predicates (JSON:API §5)
 // ---------------------------------------------------------------------------
 
-const stripWeight = (value: string): string => {
-  const semi = value.indexOf(";")
-  return (semi === -1 ? value : value.slice(0, semi)).trim().toLowerCase()
+/**
+ * Options for the content-negotiation predicates and middleware.
+ */
+export interface NegotiationOptions {
+  /**
+   * The JSON:API extension URIs this api supports (e.g.
+   * `Atomic.EXTENSION_URI`). Media types carrying `ext` parameters whose URIs
+   * are not all supported are rejected (415 / 406), per the spec.
+   *
+   * Defaults to none.
+   */
+  readonly extensions?: ReadonlyArray<string>
+}
+
+/**
+ * Splits one media type entry into its (lowercased) base type and its
+ * parameters.
+ */
+const parseMediaType = (
+  entry: string
+): { readonly base: string; readonly parameters: ReadonlyArray<readonly [name: string, value: string]> } => {
+  const [first, ...rest] = entry.split(";")
+  return {
+    base: (first ?? "").trim().toLowerCase(),
+    parameters: rest.map((part) => {
+      const eq = part.indexOf("=")
+      if (eq === -1) return [part.trim().toLowerCase(), ""] as const
+      const name = part.slice(0, eq).trim().toLowerCase()
+      const value = part.slice(eq + 1).trim()
+      // Parameter values may be quoted (ext / profile URI lists always are).
+      const unquoted = value.startsWith("\"") && value.endsWith("\"") && value.length >= 2
+        ? value.slice(1, -1)
+        : value
+      return [name, unquoted] as const
+    })
+  }
+}
+
+/**
+ * JSON:API §5: a JSON:API media type instance is acceptable when its only
+ * parameters are `ext` and `profile`, and every `ext` URI is supported.
+ * Unsupported profiles are ignored (never rejected), per the spec.
+ */
+const parametersAreAcceptable = (
+  parameters: ReadonlyArray<readonly [name: string, value: string]>,
+  extensions: ReadonlyArray<string>
+): boolean => {
+  for (const [name, value] of parameters) {
+    if (name === "profile") continue
+    if (name === "ext") {
+      const uris = value.split(" ").filter((uri) => uri !== "")
+      if (!uris.every((uri) => extensions.includes(uri))) return false
+      continue
+    }
+    // Any parameter other than ext / profile is unacceptable.
+    return false
+  }
+  return true
 }
 
 /**
  * JSON:API §5: the server MUST respond with 415 if the request `Content-Type`
- * is the JSON:API media type *and* carries any media type parameters.
+ * is the JSON:API media type with any media type parameters other than `ext`
+ * or `profile`, or with an `ext` parameter carrying unsupported extension
+ * URIs.
  *
  * Other content types are left to the downstream payload decoder.
  */
-export const contentTypeIsAcceptable = (header: string | undefined): boolean => {
+export const contentTypeIsAcceptable = (
+  header: string | undefined,
+  options?: NegotiationOptions
+): boolean => {
   if (header === undefined) return true
-  const trimmed = header.trim().toLowerCase()
-  const semi = trimmed.indexOf(";")
-  if (semi === -1) return true
-  const base = trimmed.slice(0, semi).trim()
-  return base !== MEDIA_TYPE
+  const { base, parameters } = parseMediaType(header.trim())
+  if (base !== MEDIA_TYPE) return true
+  return parametersAreAcceptable(parameters, options?.extensions ?? [])
 }
 
 /**
  * JSON:API §5: the server MUST respond with 406 if every instance of the
- * JSON:API media type in `Accept` carries media type parameters. An `Accept`
- * containing `*​/*` or `application/*` always satisfies the rule.
+ * JSON:API media type in `Accept` carries media type parameters other than
+ * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
+ * `*​/*` or `application/*` always satisfies the rule.
  */
-export const acceptIsAcceptable = (header: string | undefined): boolean => {
+export const acceptIsAcceptable = (
+  header: string | undefined,
+  options?: NegotiationOptions
+): boolean => {
   if (header === undefined) return true
-  const entries = header.split(",").map((entry) => entry.trim().toLowerCase())
+  const entries = header.split(",").map((entry) => entry.trim())
   for (const entry of entries) {
     if (entry === "") continue
-    if (entry === "*/*" || entry.startsWith("*/*;")) return true
-    if (entry === "application/*" || entry.startsWith("application/*;")) return true
-    const base = stripWeight(entry)
-    if (base === MEDIA_TYPE && entry === base) {
-      // Unparameterised match: accepted.
-      return true
-    }
+    const { base, parameters } = parseMediaType(entry)
+    if (base === "*/*" || base === "application/*") return true
+    if (base !== MEDIA_TYPE) continue
+    if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true
   }
   return false
 }
@@ -97,23 +157,30 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
 // ---------------------------------------------------------------------------
 
 /**
- * The live {@link ContentNegotiation} implementation.
+ * Creates the live {@link ContentNegotiation} implementation, optionally
+ * supporting JSON:API extensions (e.g. atomic operations).
  */
-export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = Layer.effect(
-  ContentNegotiation,
-  Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
-    Effect.gen(function*() {
-      const request = yield* HttpServerRequest
-      if (!contentTypeIsAcceptable(request.headers["content-type"])) {
-        return yield* Effect.fail(new UnsupportedMediaType())
-      }
-      if (!acceptIsAcceptable(request.headers["accept"])) {
-        return yield* Effect.fail(new NotAcceptable())
-      }
-      return yield* httpEffect
-    })
+export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Layer<ContentNegotiation> =>
+  Layer.effect(
+    ContentNegotiation,
+    Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
+      Effect.gen(function*() {
+        const request = yield* HttpServerRequest
+        if (!contentTypeIsAcceptable(request.headers["content-type"], options)) {
+          return yield* Effect.fail(new UnsupportedMediaType())
+        }
+        if (!acceptIsAcceptable(request.headers["accept"], options)) {
+          return yield* Effect.fail(new NotAcceptable())
+        }
+        return yield* httpEffect
+      })
+    )
   )
-)
+
+/**
+ * The live {@link ContentNegotiation} implementation (no extensions).
+ */
+export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNegotiationLayer()
 
 /**
  * The live {@link SchemaErrors} implementation: rewraps every request
@@ -132,3 +199,14 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
   ContentNegotiationLive,
   SchemaErrorsLive
 )
+
+/**
+ * Like {@link layer}, with content-negotiation options — required when the api
+ * uses JSON:API extensions:
+ *
+ * ```ts
+ * Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })
+ * ```
+ */
+export const layerWith = (options: NegotiationOptions): Layer.Layer<ContentNegotiation | SchemaErrors> =>
+  Layer.mergeAll(contentNegotiationLayer(options), SchemaErrorsLive)

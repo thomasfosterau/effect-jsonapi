@@ -76,6 +76,11 @@ export * from "./Document.js"
 export * from "./Handlers.js"
 
 // ---------------------------------------------------------------------------
+// Lid (local id) resolution
+// ---------------------------------------------------------------------------
+export * from "./Lid.js"
+
+// ---------------------------------------------------------------------------
 // Client-side helpers (include narrowing)
 // ---------------------------------------------------------------------------
 export * from "./Client.js"
@@ -111,6 +116,26 @@ export * as Endpoint from "./Endpoint.js"
  * Creates an `HttpApiGroup` named after a resource's type — see `Group.make`.
  */
 export { make as Group } from "./Group.js"
+
+// ---------------------------------------------------------------------------
+// Atomic operations extension
+// ---------------------------------------------------------------------------
+
+/**
+ * The {@link https://jsonapi.org/ext/atomic/ atomic operations extension}:
+ * request/result document schemas, operation value constructors, and handler
+ * helpers (lid resolution, result building).
+ *
+ * ```ts
+ * JsonApi.Endpoint.operations([Article, Comment])      // POST /operations
+ *
+ * JsonApi.Atomic.request(                               // client side
+ *   JsonApi.Atomic.add(Article, { lid: "a1", attributes: { title: "Hello" } }),
+ *   JsonApi.Atomic.remove(Comment, "5")
+ * )
+ * ```
+ */
+export * as Atomic from "./Atomic.js"
 
 // ---------------------------------------------------------------------------
 // Query parameters

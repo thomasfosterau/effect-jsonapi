@@ -7,6 +7,8 @@
  *   - the resource object schema (the definition *is* a `Schema.Struct`)
  *   - `Id` — the branded id schema (ids can't be mixed across resource types)
  *   - `identifier` — the `{ type, id }` resource-identifier schema
+ *   - `localIdentifier` — the `{ type, lid }` schema for resources the client
+ *     is creating (no server-assigned id yet); `lidRef(lid)` makes values
  *   - `createPayload` — `{ data: { type, lid?, attributes, relationships } }`
  *     (required `one` relationships must be present)
  *   - `updatePayload` — `{ data: { type, id, attributes? (partial), relationships? } }`
@@ -61,6 +63,67 @@ export const Identifier = <const Type extends string>(type: Type): Identifier<Ty
     id: Id(type),
     meta: Schema.optionalKey(AnyMeta)
   })
+
+/**
+ * The local-identifier schema for a resource type: `{ type, lid, meta? }`.
+ *
+ * A local identifier (JSON:API v1.1 `lid`) identifies a resource the client is
+ * creating, before the server has assigned it an `id` — in creation payloads
+ * and in atomic operations, where later operations can reference resources
+ * created by earlier ones.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#document-resource-object-identification}
+ */
+export interface LocalIdentifier<Type extends string> extends
+  Schema.Struct<{
+    readonly type: Schema.tag<Type>
+    readonly lid: Schema.String
+    readonly meta: Schema.optionalKey<typeof AnyMeta>
+  }>
+{}
+
+/**
+ * Creates the local-identifier schema for a resource type.
+ */
+export const LocalIdentifier = <const Type extends string>(type: Type): LocalIdentifier<Type> =>
+  Schema.Struct({
+    type: Schema.tag(type),
+    lid: Schema.String,
+    meta: Schema.optionalKey(AnyMeta)
+  })
+
+/**
+ * A ref to a resource: either its `{ type, id }` identifier or — for resources
+ * that don't have a server-assigned id yet — its `{ type, lid }` local
+ * identifier.
+ */
+export interface Ref<R extends Any> extends
+  Schema.Union<readonly [
+    Schema.suspend<R["identifier"]>,
+    Schema.suspend<LocalIdentifier<R["type"]>>
+  ]>
+{}
+
+/**
+ * Creates the ref schema for a resource: identifier or local identifier.
+ *
+ * Accepts the resource definition or a thunk, so refs can be built lazily from
+ * relationship descriptors.
+ */
+export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
+  const thunk = typeof resource === "function" ? resource : () => resource
+  return Schema.Union([
+    Schema.suspend(() => thunk().identifier as R["identifier"]),
+    Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<R["type"]>)
+  ])
+}
+
+/**
+ * A ref *value*: an id-based identifier or a lid-based local identifier.
+ */
+export type RefValue =
+  | { readonly type: string; readonly id: string }
+  | { readonly type: string; readonly lid: string }
 
 // ---------------------------------------------------------------------------
 // The resource definition
@@ -226,6 +289,8 @@ export interface Resource<
   readonly Id: Id<Type>
   /** The `{ type, id }` resource-identifier schema. */
   readonly identifier: Identifier<Type>
+  /** The `{ type, lid }` local-identifier schema (for resources not yet assigned an id). */
+  readonly localIdentifier: LocalIdentifier<Type>
   /** The relationship descriptors, as declared. */
   readonly relationships: Rels
   /** Request body schema for creating this resource (no `id`, optional `lid`, required `one` relationships). */
@@ -243,6 +308,17 @@ export interface Resource<
    * ```
    */
   ref(id: string): Identifier<Type>["Type"]
+  /**
+   * Creates a typed local-identifier value: `{ type, lid }` with this
+   * resource's type tag — the counterpart of {@link ref} for resources that
+   * don't have a server-assigned id yet (creation payloads, atomic
+   * operations).
+   *
+   * ```ts
+   * Article.lidRef("a1")   // { type: "articles", lid: "a1" }
+   * ```
+   */
+  lidRef(lid: string): LocalIdentifier<Type>["Type"]
   /**
    * Single-resource document schema. The compound `included` union defaults to
    * the resources referenced by this resource's non-`paginated` relationships;
@@ -476,6 +552,7 @@ export const Resource = <
   const meta = (options.meta ?? AnyMeta) as Meta
   const id = Id(type)
   const identifier = Identifier(type)
+  const localIdentifier = LocalIdentifier(type)
   const relationshipSchemas = Relationship.makeRelationshipSchemas(relationships)
   const schemaByKey = relationshipSchemas as Record<string, Schema.Top>
   const attributes = Schema.Struct(options.attributes)
@@ -556,10 +633,12 @@ export const Resource = <
     type,
     Id: id,
     identifier,
+    localIdentifier,
     relationships,
     createPayload,
     updatePayload,
     ref: (refId: string) => identifier.make({ id: id.make(refId) }),
+    lidRef: (lid: string) => localIdentifier.make({ lid }),
     document: <Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(opts?: {
       readonly included?: Included
       readonly meta?: M

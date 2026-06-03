@@ -12,11 +12,11 @@
  * `JsonApi.linkage`), which are validated against the endpoint's document
  * schema on the way out.
  */
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Match } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "./api.js"
-import { ArticleNotFound, TitleTaken } from "./errors.js"
+import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
 import { Article, Comment, Person, Tag } from "./resources.js"
 
 // ---------------------------------------------------------------------------
@@ -328,13 +328,271 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
   })
 )
 
+// ---------------------------------------------------------------------------
+// Atomic operations handlers — all-or-nothing processing with lid support
+// ---------------------------------------------------------------------------
+
+/** The operation union the operations endpoint accepts. */
+type AtomicOperation = JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]
+
+/** One result entry per operation; removals and relationship updates return no data. */
+type ResultEntry = { readonly data?: Article | Comment | null }
+
+/**
+ * A draft of the store: operations apply here, and the draft is committed only
+ * if every operation succeeds — all-or-nothing, per the extension.
+ */
+interface Draft {
+  readonly articles: Map<string, Article>
+  readonly comments: Map<string, Comment>
+  /** The paginated comments relationship index (article id → comment ids). */
+  readonly articleComments: Map<string, Array<string>>
+}
+
+let atomicIdCounter = 0
+const freshId = (): string => `atomic-${++atomicIdCounter}`
+
+/**
+ * The id a ref (or update `data`) targets, resolving lids assigned by earlier
+ * operations in the same request.
+ */
+const targetId = (
+  lids: JsonApi.LidMap,
+  target: { readonly id?: string; readonly lid?: string }
+): string => {
+  if (target.id !== undefined) return target.id
+  if (target.lid !== undefined) {
+    const id = lids.id(target.lid)
+    if (id !== undefined) return id
+    throw new JsonApi.UnknownLidError(target.lid)
+  }
+  throw new Error("operation does not identify a target resource")
+}
+
+const getArticle = (
+  draft: Draft,
+  lids: JsonApi.LidMap,
+  target: { readonly id?: string; readonly lid?: string }
+): Article => {
+  const id = targetId(lids, target)
+  const article = draft.articles.get(id)
+  if (article === undefined) throw new Error(`article "${id}" not found`)
+  return article
+}
+
+const getComment = (
+  draft: Draft,
+  lids: JsonApi.LidMap,
+  target: { readonly id?: string; readonly lid?: string }
+): Comment => {
+  const id = targetId(lids, target)
+  const comment = draft.comments.get(id)
+  if (comment === undefined) throw new Error(`comment "${id}" not found`)
+  return comment
+}
+
+/**
+ * Applies one operation to the draft, returning its result entry.
+ *
+ * Pattern-matches over the operation union with Effect's `Match` module: the
+ * curried `Atomic.targetsRelationship` / `Atomic.targetsResource` guards
+ * narrow each case to fully typed `data` / `ref`.
+ *
+ * Failures throw; the handler converts them into typed `OperationFailed`
+ * errors carrying the index of the operation that failed.
+ */
+const applyOperation = (
+  draft: Draft,
+  lids: JsonApi.LidMap,
+  operation: AtomicOperation
+): ResultEntry =>
+  Match.value(operation).pipe(
+    // --- relationship operations (refs carrying a `relationship` member) ----
+    // replace an article's author (`one`: the new linkage is never null)
+    Match.when(JsonApi.Atomic.targetsRelationship(Article, "author"), (op) => {
+      const article = getArticle(draft, lids, op.ref)
+      draft.articles.set(
+        article.id,
+        Article.make({
+          ...article,
+          relationships: {
+            ...article.relationships!,
+            author: { data: lids.identifier(Person, op.data) }
+          }
+        })
+      )
+      return JsonApi.Atomic.emptyResult
+    }),
+    // add to / replace / remove from an article's tags (`many`: inline linkage)
+    Match.when(JsonApi.Atomic.targetsRelationship(Article, "tags"), (op) => {
+      const article = getArticle(draft, lids, op.ref)
+      const refs = op.data.map((ref) => lids.identifier(Tag, ref))
+      const current = article.relationships?.tags.data ?? []
+      const next = op.op === "add"
+        ? [...current, ...refs]
+        : op.op === "remove"
+        ? current.filter((existing) => !refs.some((removed) => removed.id === existing.id))
+        : refs
+      draft.articles.set(
+        article.id,
+        Article.make({
+          ...article,
+          relationships: { ...article.relationships!, tags: { data: next } }
+        })
+      )
+      return JsonApi.Atomic.emptyResult
+    }),
+    // add to / replace / remove from an article's comments (`paginated`: the
+    // linkage lives in the relationship index, not inline on the article)
+    Match.when(JsonApi.Atomic.targetsRelationship(Article, "comments"), (op) => {
+      const article = getArticle(draft, lids, op.ref)
+      const ids: ReadonlyArray<string> = op.data.map((ref) => lids.identifier(Comment, ref).id)
+      const current = draft.articleComments.get(article.id) ?? []
+      const next = op.op === "add"
+        ? [...current, ...ids.filter((id) => !current.includes(id))]
+        : op.op === "remove"
+        ? current.filter((id) => !ids.includes(id))
+        : [...ids]
+      draft.articleComments.set(article.id, next)
+      return JsonApi.Atomic.emptyResult
+    }),
+    // replace a comment's author (`one`)
+    Match.when(JsonApi.Atomic.targetsRelationship(Comment, "author"), (op) => {
+      const comment = getComment(draft, lids, op.ref)
+      draft.comments.set(
+        comment.id,
+        Comment.make({
+          ...comment,
+          relationships: { author: { data: lids.identifier(Person, op.data) } }
+        })
+      )
+      return JsonApi.Atomic.emptyResult
+    }),
+    // --- resource operations -------------------------------------------------
+    Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
+      Match.value(op).pipe(
+        Match.when({ op: "add" }, (add) => {
+          const id = Article.Id.make(freshId())
+          const resolved = lids.resolveLinkage(Article, add.data.relationships)
+          const article = Article.make({
+            id,
+            attributes: add.data.attributes,
+            relationships: {
+              // `author` is required (`one`), so the operation always carries it
+              author: { data: lids.identifier(Person, add.data.relationships.author.data) },
+              tags: resolved.tags ?? { data: [] },
+              // `comments` is paginated: new articles start with an empty collection
+              comments: JsonApi.paginatedRelationship("articles", id, "comments")
+            }
+          })
+          draft.articles.set(article.id, article)
+          draft.articleComments.set(article.id, [])
+          if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id)
+          return { data: article }
+        }),
+        Match.when({ op: "update" }, (update) => {
+          const article = getArticle(draft, lids, update.ref ?? update.data)
+          const resolved = lids.resolveLinkage(Article, update.data.relationships)
+          const updated = Article.make({
+            ...article,
+            attributes: { ...article.attributes, ...(update.data.attributes ?? {}) },
+            relationships: { ...article.relationships!, ...resolved }
+          })
+          draft.articles.set(updated.id, updated)
+          return { data: updated }
+        }),
+        Match.when({ op: "remove" }, (remove) => {
+          const article = getArticle(draft, lids, remove.ref)
+          draft.articles.delete(article.id)
+          draft.articleComments.delete(article.id)
+          return JsonApi.Atomic.emptyResult
+        }),
+        Match.exhaustive
+      )),
+    Match.when(JsonApi.Atomic.targetsResource(Comment), (op) =>
+      Match.value(op).pipe(
+        Match.when({ op: "add" }, (add) => {
+          const comment = Comment.make({
+            id: Comment.Id.make(freshId()),
+            attributes: add.data.attributes,
+            relationships: {
+              // `author` is required (`one`)
+              author: { data: lids.identifier(Person, add.data.relationships.author.data) }
+            }
+          })
+          draft.comments.set(comment.id, comment)
+          if (add.data.lid !== undefined) lids.assign(add.data.lid, comment.id)
+          return { data: comment }
+        }),
+        Match.when({ op: "update" }, (update) => {
+          const comment = getComment(draft, lids, update.ref ?? update.data)
+          const resolved = lids.resolveLinkage(Comment, update.data.relationships)
+          const updated = Comment.make({
+            ...comment,
+            attributes: { ...comment.attributes, ...(update.data.attributes ?? {}) },
+            relationships: { ...comment.relationships!, ...resolved }
+          })
+          draft.comments.set(updated.id, updated)
+          return { data: updated }
+        }),
+        Match.when({ op: "remove" }, (remove) => {
+          const comment = getComment(draft, lids, remove.ref)
+          draft.comments.delete(comment.id)
+          // unlink it from any article's paginated comments relationship
+          for (const [articleId, ids] of draft.articleComments) {
+            draft.articleComments.set(articleId, ids.filter((id) => id !== comment.id))
+          }
+          return JsonApi.Atomic.emptyResult
+        }),
+        Match.exhaustive
+      )),
+    Match.exhaustive
+  )
+
+export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
+  handlers.handle("operations", ({ payload }) =>
+    Effect.gen(function*() {
+      const draft: Draft = {
+        articles: new Map(store.articles),
+        comments: new Map(store.comments),
+        articleComments: new Map(
+          [...store.articleComments].map(([articleId, ids]) => [articleId, [...ids]])
+        )
+      }
+      const lids = JsonApi.lidMap()
+      const entries: Array<ResultEntry> = []
+
+      const operations = payload["atomic:operations"]
+      for (let index = 0; index < operations.length; index++) {
+        const entry = yield* Effect.try({
+          try: () => applyOperation(draft, lids, operations[index]!),
+          catch: (error) =>
+            new OperationFailed({
+              operation: index,
+              reason: error instanceof Error ? error.message : String(error)
+            })
+        })
+        entries.push(entry)
+      }
+
+      // every operation succeeded — commit the draft
+      store.articles = draft.articles
+      store.comments = draft.comments
+      store.articleComments = draft.articleComments
+      return JsonApi.Atomic.results(entries)
+    })))
+
 /**
  * Everything needed to serve the blog: the handlers plus the JSON:API
  * protocol middleware (content negotiation + spec-compliant 400s).
  *
+ * The api supports the atomic operations extension, so the middleware is
+ * configured to accept its media type
+ * (`application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"`).
+ *
  * The middleware is provided *into* the handler groups (not merged alongside
  * them) so that every endpoint's middleware requirement is satisfied.
  */
-export const BlogLive = Layer.mergeAll(ArticlesLive, SearchLive).pipe(
-  Layer.provideMerge(JsonApi.Middleware.layer)
+export const BlogLive = Layer.mergeAll(ArticlesLive, SearchLive, OperationsLive).pipe(
+  Layer.provideMerge(JsonApi.Middleware.layerWith({ extensions: [JsonApi.Atomic.EXTENSION_URI] }))
 )

@@ -526,6 +526,91 @@ describe("relationship endpoint schemas", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Atomic operations endpoints
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.operations", () => {
+  const operationsEndpoint = Endpoint.operations([Article, Comment], {
+    errors: [ArticleNotFound]
+  })
+
+  it("uses conventional name/path with POST", () => {
+    expect(operationsEndpoint.name).toBe("operations")
+    expect(operationsEndpoint.method).toBe("POST")
+    expect(operationsEndpoint.path).toBe("/operations")
+  })
+
+  it("allows overriding name and path", () => {
+    const bulk = Endpoint.operations([Article], { name: "bulk", path: "/bulk" })
+    expect(bulk.name).toBe("bulk")
+    expect(bulk.path).toBe("/bulk")
+  })
+
+  it("attaches the JSON:API protocol middlewares", () => {
+    const middlewareIds = [...operationsEndpoint.middlewares].map((m) => m.key)
+    expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation")
+    expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors")
+  })
+
+  it("payload accepts operations across all of the given resources", () => {
+    const payloadSchema = [...operationsEndpoint.payload.values()][0]!.schemas[0]!
+    const decoded = Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+      "atomic:operations": [
+        {
+          op: "add",
+          data: {
+            // Article's relationships are `optional` / `many` here, so an add
+            // operation with attributes only is legal
+            type: "articles",
+            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+          }
+        },
+        // Comment's author is `one` (required), so its add operation must carry it
+        {
+          op: "add",
+          data: {
+            type: "comments",
+            attributes: { body: "Nice" },
+            relationships: { author: { data: { type: "people", id: "9" } } }
+          }
+        },
+        { op: "remove", ref: { type: "comments", id: "5" } }
+      ]
+    }) as { readonly "atomic:operations": ReadonlyArray<unknown> }
+    expect(decoded["atomic:operations"]).toHaveLength(3)
+  })
+
+  it("rejects add operations missing required (`one`) relationships", () => {
+    const payloadSchema = [...operationsEndpoint.payload.values()][0]!.schemas[0]!
+    expect(() =>
+      Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+        "atomic:operations": [
+          { op: "add", data: { type: "comments", attributes: { body: "No author" } } }
+        ]
+      })
+    ).toThrow()
+  })
+
+  it("success documents results as the union of the given resources", () => {
+    const successSchema = [...operationsEndpoint.success][0]!
+    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+      "atomic:results": [
+        {
+          data: {
+            type: "articles",
+            id: "1",
+            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+          }
+        },
+        {}
+      ]
+    }) as { readonly "atomic:results": ReadonlyArray<{ readonly data?: { readonly type: string } }> }
+    expect(decoded["atomic:results"][0]?.data?.type).toBe("articles")
+    expect(decoded["atomic:results"][1]?.data).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // HTTP round-trips through the in-memory client
 // ---------------------------------------------------------------------------
 

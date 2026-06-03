@@ -6,8 +6,8 @@
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
-import { ArticleNotFound, TitleTaken } from "./errors.js"
-import { Article, Person } from "./resources.js"
+import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
+import { Article, Comment, Person } from "./resources.js"
 
 /**
  * Typed collection meta carried by list responses.
@@ -94,4 +94,17 @@ export const search = JsonApi.Group(
   })
 )
 
-export const Api = HttpApi.make("blog").add(articles).add(search)
+/**
+ * An atomic operations endpoint (https://jsonapi.org/ext/atomic/): one request
+ * carrying an ordered list of operations on articles and comments — including
+ * lid-based references between them — processed all-or-nothing.
+ */
+export const operations = JsonApi.Group(
+  "operations",
+  // POST /operations with an atomic:operations document
+  JsonApi.Endpoint.operations([Article, Comment], {
+    errors: [OperationFailed]
+  })
+)
+
+export const Api = HttpApi.make("blog").add(articles).add(search).add(operations)
