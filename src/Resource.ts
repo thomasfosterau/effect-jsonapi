@@ -7,61 +7,24 @@
  *   - the resource object schema (the definition *is* a `Schema.Struct`)
  *   - `Id` — the branded id schema (ids can't be mixed across resource types)
  *   - `identifier` — the `{ type, id }` resource-identifier schema
- *   - `createPayload` — `{ data: { type, lid?, attributes, relationships? } }`
+ *   - `createPayload` — `{ data: { type, lid?, attributes, relationships } }`
+ *     (required `one` relationships must be present)
  *   - `updatePayload` — `{ data: { type, id, attributes? (partial), relationships? } }`
  *   - `document(...)` / `collection(...)` — top-level document schemas whose
  *     `included` union is derived from the relationship graph
  *
- * Relationships reference other resource definitions through lazy thunks
- * (`toOne(() => Person)`), so a typo'd reference is a compile error and the
- * relationship graph can be walked at runtime.
+ * Relationships are declared with the `Relationship` module's constructors
+ * (`Relationship.one(() => Person)`, `Relationship.many(() => Comment)`, …) and
+ * reference other resource definitions through lazy thunks, so a typo'd
+ * reference is a compile error and the relationship graph can be walked at
+ * runtime.
  */
 import { Schema, Struct } from "effect"
-import { AnyMeta, CollectionDocument, DataDocument, RelationshipLinks, ResourceLinks } from "./Document.js"
+import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js"
+import * as Relationship from "./Relationship.js"
+import type { Relationships, RelationshipSchemas } from "./Relationship.js"
 
-// ---------------------------------------------------------------------------
-// Relationship descriptors
-// ---------------------------------------------------------------------------
-
-/**
- * A to-one relationship descriptor pointing at another resource definition.
- */
-export interface ToOne<R extends Any> {
-  readonly kind: "toOne"
-  readonly ref: () => R
-}
-
-/**
- * A to-many relationship descriptor pointing at another resource definition.
- */
-export interface ToMany<R extends Any> {
-  readonly kind: "toMany"
-  readonly ref: () => R
-}
-
-/**
- * Any relationship descriptor.
- */
-export type Relationship = ToOne<Any> | ToMany<Any>
-
-/**
- * A record of relationship descriptors, as written in a resource definition.
- */
-export type Relationships = { readonly [key: string]: Relationship }
-
-/**
- * Declares a to-one relationship to another resource definition.
- *
- * The reference is a thunk so resources can reference each other regardless of
- * declaration order (mutually recursive definitions may require an explicit
- * type annotation on one side).
- */
-export const toOne = <R extends Any>(ref: () => R): ToOne<R> => ({ kind: "toOne", ref })
-
-/**
- * Declares a to-many relationship to another resource definition.
- */
-export const toMany = <R extends Any>(ref: () => R): ToMany<R> => ({ kind: "toMany", ref })
+export type { Descriptor, Relationships, RelationshipSchemas } from "./Relationship.js"
 
 // ---------------------------------------------------------------------------
 // Id / identifier schemas
@@ -100,67 +63,6 @@ export const Identifier = <const Type extends string>(type: Type): Identifier<Ty
   })
 
 // ---------------------------------------------------------------------------
-// Relationship wire schemas (derived from descriptors)
-// ---------------------------------------------------------------------------
-
-/**
- * The wire schema of a to-one relationship: `{ data: identifier | null, links?, meta? }`.
- *
- * `data` is required — the strongest guarantee for the common "linkage is
- * always present" case, and it satisfies the spec's "a relationship object
- * holds at least one of data / links / meta" invariant by construction.
- */
-export interface ToOneSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>
-    readonly links: Schema.optionalKey<typeof RelationshipLinks>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
-
-/**
- * The wire schema of a to-many relationship: `{ data: identifier[], links?, meta? }`.
- */
-export interface ToManySchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>
-    readonly links: Schema.optionalKey<typeof RelationshipLinks>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
-
-const makeToOneSchema = <R extends Any>(descriptor: ToOne<R>): ToOneSchema<R> =>
-  Schema.Struct({
-    data: Schema.NullOr(Schema.suspend(() => descriptor.ref().identifier as R["identifier"])),
-    links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta)
-  })
-
-const makeToManySchema = <R extends Any>(descriptor: ToMany<R>): ToManySchema<R> =>
-  Schema.Struct({
-    data: Schema.Array(Schema.suspend(() => descriptor.ref().identifier as R["identifier"])),
-    links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta)
-  })
-
-/**
- * Maps a record of relationship descriptors to their wire schemas.
- */
-export type RelationshipSchemas<Rels extends Relationships> = {
-  readonly [K in keyof Rels]: Rels[K] extends ToOne<infer R> ? ToOneSchema<R>
-    : Rels[K] extends ToMany<infer R> ? ToManySchema<R>
-    : never
-}
-
-const makeRelationshipSchemas = <Rels extends Relationships>(rels: Rels): RelationshipSchemas<Rels> =>
-  Object.fromEntries(
-    Object.entries(rels).map(([key, descriptor]) => [
-      key,
-      descriptor.kind === "toOne" ? makeToOneSchema(descriptor) : makeToManySchema(descriptor)
-    ])
-  ) as RelationshipSchemas<Rels>
-
-// ---------------------------------------------------------------------------
 // The resource definition
 // ---------------------------------------------------------------------------
 
@@ -182,17 +84,77 @@ export type ResourceFields<
 }
 
 /**
- * The union of resource definitions directly referenced by a relationship
- * record — used as the default `included` member union for compound documents.
+ * The union of resource definitions referenced by a relationship record —
+ * every relationship's target, regardless of kind.
  */
 export type RelationshipTargets<Rels extends Relationships> = {
-  [K in keyof Rels]: Rels[K] extends ToOne<infer R> ? R : Rels[K] extends ToMany<infer R> ? R : never
+  [K in keyof Rels]: Rels[K] extends { readonly ref: () => infer R extends Any } ? R : never
 }[keyof Rels]
 
 /**
+ * The union of resource definitions that can appear in a compound document's
+ * `included` member: the targets of every relationship *except* `paginated`
+ * ones (whose data is never inlined).
+ */
+export type IncludableTargets<Rels extends Relationships> = {
+  [K in keyof Rels]: Rels[K] extends Relationship.Paginated<Any> ? never
+    : Rels[K] extends { readonly ref: () => infer R extends Any } ? R
+    : never
+}[keyof Rels]
+
+// Resolves to `T` for every concrete relationship record; needed because the
+// conditional mapped types below can't be proven to satisfy `Struct.Fields`
+// while `Rels` is still generic.
+type AsFields<T> = T extends Schema.Struct.Fields ? T : never
+
+/**
+ * Whether a relationship record contains at least one required (`one`)
+ * relationship — in which case the create payload's `relationships` member is
+ * itself required.
+ */
+export type HasRequiredRelationship<Rels extends Relationships> = {
+  [K in keyof Rels]: Rels[K] extends Relationship.One<Any> ? true : never
+}[keyof Rels] extends never ? false : true
+
+/**
+ * The relationship fields of a create payload:
+ *
+ *   - `one` relationships are **required** (the resource cannot exist without them)
+ *   - `optional` / `many` relationships are optional
+ *   - `paginated` relationships are excluded — unbounded collections are
+ *     managed through relationship endpoints, not create payloads
+ */
+export type CreateRelationshipFields<Rels extends Relationships> = {
+  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Rels[K] extends
+    Relationship.One<Any> ? RelationshipSchemas<Rels>[K]
+    : Schema.optionalKey<RelationshipSchemas<Rels>[K]>
+}
+
+/**
+ * The `relationships` member of a create payload: a required key when the
+ * resource has required (`one`) relationships, optional otherwise.
+ */
+export type CreateRelationshipsMember<Rels extends Relationships> = HasRequiredRelationship<Rels> extends true
+  ? Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>
+  : Schema.optionalKey<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>>
+
+/**
+ * The relationship fields of an update payload: every non-`paginated`
+ * relationship, each optional (PATCH semantics — omitted means unchanged).
+ */
+export type UpdateRelationshipFields<Rels extends Relationships> = {
+  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Schema.optionalKey<
+    RelationshipSchemas<Rels>[K]
+  >
+}
+
+/**
  * The request body schema for creating a resource: the client supplies
- * attributes (and optionally relationships and a local id `lid`) but never a
+ * attributes (and relationships and optionally a local id `lid`) but never a
  * server-assigned `id`.
+ *
+ * Required (`one`) relationships must be present; `paginated` relationships
+ * cannot appear.
  *
  * @see {@link https://jsonapi.org/format/1.1/#crud-creating}
  */
@@ -206,7 +168,7 @@ export interface CreatePayload<
       readonly type: Schema.tag<Type>
       readonly lid: Schema.optionalKey<Schema.String>
       readonly attributes: Schema.Struct<Attributes>
-      readonly relationships: Schema.optionalKey<Schema.Struct<RelationshipSchemas<Rels>>>
+      readonly relationships: CreateRelationshipsMember<Rels>
     }>
   }>
 {}
@@ -220,7 +182,8 @@ export type PartialAttributes<Attributes extends Schema.Struct.Fields> = {
 
 /**
  * The request body schema for updating a resource: `id` is mandatory,
- * attributes and relationships are partial.
+ * attributes and relationships are partial. `paginated` relationships cannot
+ * appear (use relationship endpoints).
  *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating}
  */
@@ -234,17 +197,17 @@ export interface UpdatePayload<
       readonly type: Schema.tag<Type>
       readonly id: Id<Type>
       readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<Attributes>>>
-      readonly relationships: Schema.optionalKey<Schema.Struct<RelationshipSchemas<Rels>>>
+      readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>>
     }>
   }>
 {}
 
 /**
  * The default `included` union for a resource's compound documents: the
- * resource definitions directly referenced by its relationships.
+ * resource definitions referenced by its non-`paginated` relationships.
  */
 export interface DefaultIncluded<Rels extends Relationships> extends
-  Schema.Union<ReadonlyArray<RelationshipTargets<Rels>>>
+  Schema.Union<ReadonlyArray<IncludableTargets<Rels>>>
 {}
 
 /**
@@ -265,7 +228,7 @@ export interface Resource<
   readonly identifier: Identifier<Type>
   /** The relationship descriptors, as declared. */
   readonly relationships: Rels
-  /** Request body schema for creating this resource (no `id`, optional `lid`). */
+  /** Request body schema for creating this resource (no `id`, optional `lid`, required `one` relationships). */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>
   /** Request body schema for updating this resource (`id` required, attributes partial). */
   readonly updatePayload: UpdatePayload<Type, Attributes, Rels>
@@ -282,7 +245,7 @@ export interface Resource<
   ref(id: string): Identifier<Type>["Type"]
   /**
    * Single-resource document schema. The compound `included` union defaults to
-   * the resources directly referenced by this resource's relationships;
+   * the resources referenced by this resource's non-`paginated` relationships;
    * override it (or the document `meta`) per call.
    */
   document<Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(options?: {
@@ -323,8 +286,29 @@ export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["at
   : never
 
 // ---------------------------------------------------------------------------
-// Include paths (type level)
+// Relationship names & targets (type level)
 // ---------------------------------------------------------------------------
+
+/**
+ * The relationship keys of a resource definition, as a union of string
+ * literals.
+ */
+export type RelationshipName<R extends Any> = keyof R["relationships"] & string
+
+/**
+ * The to-one (`one` / `optional`) relationship keys of a resource definition.
+ */
+export type ToOneName<R extends Any> = {
+  [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToOne<Any> ? K : never
+}[keyof R["relationships"]] & string
+
+/**
+ * The to-many (`many` / `paginated`) relationship keys of a resource
+ * definition.
+ */
+export type ToManyName<R extends Any> = {
+  [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToMany<Any> ? K : never
+}[keyof R["relationships"]] & string
 
 /**
  * The resource definition a relationship key points at.
@@ -333,25 +317,37 @@ export type Target<R extends Any, K> = R["relationships"][K & keyof R["relations
   { readonly ref: () => infer T } ? T extends Any ? T : never : never
 
 /**
- * The resource definitions directly referenced by a resource's relationships.
+ * The resource definitions referenced by a resource's relationships.
  *
  * Distributes over unions of resource definitions.
  */
 export type TargetsOf<R extends Any> = R extends Any ? RelationshipTargets<R["relationships"]> : never
 
+// ---------------------------------------------------------------------------
+// Include paths (type level)
+// ---------------------------------------------------------------------------
+
+/**
+ * The relationship keys of a resource that can appear in `?include=` paths —
+ * every key except `paginated` relationships, whose data is never inlined.
+ */
+export type IncludableKeys<R extends Any> = {
+  [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.Paginated<Any> ? never : K
+}[keyof R["relationships"]] & string
+
 /**
  * The legal `include` query parameter paths for a resource, as a union of
- * string literals — every relationship key, plus dotted paths one further hop
- * into the graph (e.g. `"author" | "comments" | "comments.author"`).
+ * string literals — every non-`paginated` relationship key, plus dotted paths
+ * one further hop into the graph (e.g. `"author" | "comments" | "comments.author"`).
  *
  * Mirrors {@link includePaths} (the runtime walk) at depth 2, and distributes
  * over unions of resource definitions.
  */
 export type IncludePath<R extends Any> = R extends Any ? {
-    [K in keyof R["relationships"] & string]:
+    [K in IncludableKeys<R>]:
       | K
-      | `${K}.${keyof Target<R, K>["relationships"] & string}`
-  }[keyof R["relationships"] & string]
+      | `${K}.${IncludableKeys<Target<R, K>>}`
+  }[IncludableKeys<R>]
   : never
 
 /**
@@ -377,6 +373,10 @@ export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = Re
   Paths[number]
 >
 
+// ---------------------------------------------------------------------------
+// Runtime graph walking
+// ---------------------------------------------------------------------------
+
 /**
  * The attribute keys of a resource definition, at runtime.
  */
@@ -386,14 +386,29 @@ export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<Attribu
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 
 /**
- * Resource definitions directly referenced by `resource`'s relationships.
+ * Resource definitions referenced by `resource`'s non-`paginated`
+ * relationships — the ones whose data can appear inline (and therefore in
+ * compound documents).
  */
 export const directTargets = (resource: Any): ReadonlyArray<Any> =>
+  dedupe(
+    Object.values(resource.relationships)
+      .filter(Relationship.isLinkable)
+      .map((descriptor) => descriptor.ref())
+  )
+
+/**
+ * Resource definitions referenced by *all* of `resource`'s relationships,
+ * including `paginated` ones — e.g. for sparse-fieldset configuration, where
+ * a paginated relationship's target is still addressable.
+ */
+export const allTargets = (resource: Any): ReadonlyArray<Any> =>
   dedupe(Object.values(resource.relationships).map((descriptor) => descriptor.ref()))
 
 /**
- * The legal `include` query parameter paths for a resource: every relationship
- * path reachable from it, as dot-separated keys, up to `maxDepth` hops.
+ * The legal `include` query parameter paths for a resource: every
+ * non-`paginated` relationship path reachable from it, as dot-separated keys,
+ * up to `maxDepth` hops.
  *
  * Cycles in the relationship graph are handled by the depth limit.
  *
@@ -404,6 +419,7 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
   const visit = (current: Any, prefix: string, depth: number): void => {
     if (depth > maxDepth) return
     for (const [key, descriptor] of Object.entries(current.relationships)) {
+      if (descriptor.kind === "paginated") continue
       const path = prefix === "" ? key : `${prefix}.${key}`
       paths.push(path)
       visit(descriptor.ref(), path, depth + 1)
@@ -412,6 +428,10 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
   visit(resource, "", 1)
   return paths
 }
+
+// ---------------------------------------------------------------------------
+// The Resource constructor
+// ---------------------------------------------------------------------------
 
 /**
  * Defines a JSON:API resource — the single source of truth from which the
@@ -432,7 +452,10 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
  *
  * const Article = Resource("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { author: toOne(() => Person) }
+ *   relationships: {
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.paginated(() => Comment)
+ *   }
  * })
  * ```
  */
@@ -453,7 +476,8 @@ export const Resource = <
   const meta = (options.meta ?? AnyMeta) as Meta
   const id = Id(type)
   const identifier = Identifier(type)
-  const relationshipSchemas = makeRelationshipSchemas(relationships)
+  const relationshipSchemas = Relationship.makeRelationshipSchemas(relationships)
+  const schemaByKey = relationshipSchemas as Record<string, Schema.Top>
   const attributes = Schema.Struct(options.attributes)
   const relationshipsStruct = Schema.Struct(relationshipSchemas)
 
@@ -468,16 +492,40 @@ export const Resource = <
 
   const struct = Schema.Struct(fields)
 
-  const createPayload: CreatePayload<Type, Attributes, Rels> = Schema.Struct({
+  // Create payload relationships: `one` required, `optional`/`many` optional,
+  // `paginated` excluded. The member itself is required iff a `one` exists.
+  const createRelationshipFields: Record<string, Schema.Top> = {}
+  let hasRequiredRelationship = false
+  for (const [key, descriptor] of Object.entries(relationships)) {
+    if (descriptor.kind === "paginated") continue
+    if (descriptor.kind === "one") {
+      hasRequiredRelationship = true
+      createRelationshipFields[key] = schemaByKey[key]!
+    } else {
+      createRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!)
+    }
+  }
+  const createRelationshipsStruct = Schema.Struct(createRelationshipFields)
+
+  const createPayload = Schema.Struct({
     data: Schema.Struct({
       type: Schema.tag(type),
       lid: Schema.optionalKey(Schema.String),
       attributes,
-      relationships: Schema.optionalKey(relationshipsStruct)
+      relationships: hasRequiredRelationship
+        ? createRelationshipsStruct
+        : Schema.optionalKey(createRelationshipsStruct)
     })
-  })
+  }) as unknown as CreatePayload<Type, Attributes, Rels>
 
-  const updatePayload: UpdatePayload<Type, Attributes, Rels> = Schema.Struct({
+  // Update payload relationships: every non-`paginated` relationship, optional.
+  const updateRelationshipFields: Record<string, Schema.Top> = {}
+  for (const [key, descriptor] of Object.entries(relationships)) {
+    if (descriptor.kind === "paginated") continue
+    updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!)
+  }
+
+  const updatePayload = Schema.Struct({
     data: Schema.Struct({
       type: Schema.tag(type),
       id,
@@ -486,17 +534,22 @@ export const Resource = <
           Struct.map(Schema.optionalKey)(options.attributes) as PartialAttributes<Attributes>
         )
       ),
-      relationships: Schema.optionalKey(relationshipsStruct)
+      relationships: Schema.optionalKey(Schema.Struct(updateRelationshipFields))
     })
-  })
+  }) as unknown as UpdatePayload<Type, Attributes, Rels>
 
-  // The default `included` union: resources directly referenced by relationships.
-  // Built lazily so out-of-order / mutually recursive definitions resolve.
+  // The default `included` union: resources referenced by non-`paginated`
+  // relationships. Built lazily so out-of-order / mutually recursive
+  // definitions resolve.
   const includedUnion = (): DefaultIncluded<Rels> =>
-    // The cast is sound: every descriptor's target is, by construction of
-    // `Rels`, a member of `RelationshipTargets<Rels>`.
+    // The cast is sound: every linkable descriptor's target is, by construction
+    // of `Rels`, a member of `IncludableTargets<Rels>`.
     Schema.Union(
-      dedupe(Object.values(relationships).map((descriptor) => descriptor.ref()))
+      dedupe(
+        Object.values(relationships)
+          .filter(Relationship.isLinkable)
+          .map((descriptor) => descriptor.ref())
+      )
     ) as unknown as DefaultIncluded<Rels>
 
   const resource: Resource<Type, Attributes, Rels, Meta> = Object.assign(struct, {

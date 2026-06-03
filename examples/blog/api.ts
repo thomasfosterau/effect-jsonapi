@@ -18,7 +18,7 @@ export const PageMeta = Schema.Struct({
 
 export const articles = JsonApi.Group(
   Article,
-  // GET /articles/:id?include=author,comments&fields[articles]=title
+  // GET /articles/:id?include=author,tags&fields[articles]=title
   JsonApi.Endpoint.fetch(Article, {
     include: true,
     fields: true,
@@ -32,7 +32,7 @@ export const articles = JsonApi.Group(
     filter: { author: Schema.optionalKey(Schema.String) },
     meta: PageMeta
   }),
-  // POST /articles (payload may carry a client-generated lid)
+  // POST /articles (payload may carry a client-generated lid; author is required)
   JsonApi.Endpoint.create(Article, {
     errors: [TitleTaken]
   }),
@@ -42,6 +42,38 @@ export const articles = JsonApi.Group(
   }),
   // DELETE /articles/:id → 204
   JsonApi.Endpoint.remove(Article, {
+    errors: [ArticleNotFound]
+  }),
+  // --- Related resource endpoints --------------------------------------------
+  // GET /articles/:id/author — the article's author, as a full resource
+  JsonApi.Endpoint.related(Article, "author", {
+    errors: [ArticleNotFound]
+  }),
+  // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author —
+  // the paginated comment collection that `relationships.comments.links.related`
+  // points at
+  JsonApi.Endpoint.related(Article, "comments", {
+    include: true,
+    page: JsonApi.Page.Offset,
+    meta: PageMeta,
+    errors: [ArticleNotFound]
+  }),
+  // --- Relationship (linkage) endpoints ---------------------------------------
+  // GET /articles/:id/relationships/comments — comment identifiers, paginated
+  JsonApi.Endpoint.fetchRelationship(Article, "comments", {
+    page: JsonApi.Page.Offset,
+    errors: [ArticleNotFound]
+  }),
+  // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
+  JsonApi.Endpoint.updateRelationship(Article, "author", {
+    errors: [ArticleNotFound]
+  }),
+  // POST /articles/:id/relationships/comments — attach existing comments
+  JsonApi.Endpoint.addRelationship(Article, "comments", {
+    errors: [ArticleNotFound]
+  }),
+  // DELETE /articles/:id/relationships/comments — detach comments → 204
+  JsonApi.Endpoint.removeRelationship(Article, "comments", {
     errors: [ArticleNotFound]
   })
 )

@@ -75,6 +75,20 @@ export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
 ])
 
 /**
+ * The `links` of a paginated relationship: `related` is *required* — it is the
+ * only way to reach the relationship's data — and `self` (the relationship
+ * endpoint) is optional.
+ *
+ * Used by `Relationship.paginated`, whose relationship objects carry no inline
+ * `data`; the required `related` link satisfies the spec's "a relationship
+ * object holds at least one of data / links / meta" invariant by construction.
+ */
+export const PaginatedRelationshipLinks = Schema.Struct({
+  self: Schema.optionalKey(Link),
+  related: Link
+})
+
+/**
  * Top-level `links`: `self`/`related`/`describedby` plus the pagination
  * members (each nullable, per the spec).
  */
@@ -236,6 +250,49 @@ export const CollectionDocument = <
   Schema.Struct({
     data: Schema.Array(resource),
     included: Schema.optionalKey(Schema.Array((options?.included ?? Schema.Never) as Included)),
+    links: Schema.optionalKey(TopLevelLinks),
+    meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
+    jsonapi: Schema.optionalKey(JsonApiObject)
+  })
+
+/**
+ * A relationship-linkage document: the top-level document served by
+ * relationship endpoints (`GET /articles/1/relationships/comments`).
+ *
+ * `data` is resource linkage — one identifier, `identifier | null`, or an
+ * identifier array, depending on the relationship kind — never full resource
+ * objects.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
+ */
+export interface LinkageDocument<
+  D extends Schema.Top,
+  M extends Schema.Top = typeof AnyMeta
+> extends
+  Schema.Struct<{
+    readonly data: D
+    readonly links: Schema.optionalKey<typeof TopLevelLinks>
+    readonly meta: Schema.optionalKey<M>
+    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+  }>
+{}
+
+/**
+ * Creates a relationship-linkage document schema. Pass the linkage shape as
+ * `data`: an identifier schema, `Schema.NullOr(identifier)` or
+ * `Schema.Array(identifier)`.
+ */
+export const LinkageDocument = <
+  D extends Schema.Top,
+  M extends Schema.Top = typeof AnyMeta
+>(
+  data: D,
+  options?: {
+    readonly meta?: M
+  }
+): LinkageDocument<D, M> =>
+  Schema.Struct({
+    data,
     links: Schema.optionalKey(TopLevelLinks),
     meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
     jsonapi: Schema.optionalKey(JsonApiObject)

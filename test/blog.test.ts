@@ -9,8 +9,8 @@ import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
 import { Api } from "../examples/blog/api.js"
 import { ArticleNotFound, TitleTaken } from "../examples/blog/errors.js"
-import { ArticlesLive, sampleArticle, sampleAuthor, SearchLive } from "../examples/blog/handlers.js"
-import { Article, Person } from "../examples/blog/resources.js"
+import { ArticlesLive, sampleArticle, sampleAuthor, sampleComments, SearchLive } from "../examples/blog/handlers.js"
+import { Article, Comment, Person } from "../examples/blog/resources.js"
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "search"])
 
@@ -59,17 +59,39 @@ describe("blog example: fetching", () => {
     expect(document.data?.attributes.createdAt).toBeInstanceOf(Date)
   })
 
-  it("serves compound documents for ?include=author,comments.author", async () => {
+  it("serves compound documents for ?include=author,tags", async () => {
     const document = await run(Effect.gen(function*() {
       const client = yield* buildClient
       return yield* client.articles.fetch({
         params: { id: Article.Id.make("1") },
-        query: { include: ["author", "comments.author"] }
+        query: { include: ["author", "tags"] }
       })
     }))
 
     const types = document.included?.map((resource) => resource.type).sort()
-    expect(types).toEqual(["comments", "people"])
+    expect(types).toEqual(["people", "tags"])
+  })
+
+  it("paginated relationships appear as links, never as inline data or includes", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.fetch({
+        params: { id: Article.Id.make("1") },
+        query: {}
+      })
+    }))
+
+    // The comments relationship carries only links pointing at its endpoints.
+    const comments = document.data?.relationships?.comments
+    expect(comments).toEqual({
+      links: {
+        self: "/articles/1/relationships/comments",
+        related: "/articles/1/comments"
+      }
+    })
+    // ... and `comments` is not a legal include path.
+    type IncludePaths = JsonApi.IncludePath<typeof Article>
+    expectTypeOf<IncludePaths>().toEqualTypeOf<"author" | "tags">()
   })
 
   it("narrows `included` to the requested include paths on the client", async () => {
@@ -153,6 +175,11 @@ describe("blog example: writing", () => {
               title: "A fresh take",
               body: "...",
               createdAt: new Date("2024-06-01T00:00:00.000Z")
+            },
+            relationships: {
+              // `author` is a required (`one`) relationship — the payload
+              // doesn't compile (or decode) without it.
+              author: { data: Person.ref(sampleAuthor.id) }
             }
           }
         }
@@ -160,6 +187,11 @@ describe("blog example: writing", () => {
 
       expect(created.data).not.toBeNull()
       expect(created.data?.attributes.title).toBe("A fresh take")
+      expect(created.data?.relationships?.author.data.id).toBe(sampleAuthor.id)
+      // The paginated comments relationship is created empty, links only.
+      expect(created.data?.relationships?.comments.links.related).toBe(
+        `/articles/${created.data!.id}/comments`
+      )
 
       // and remove it again
       yield* client.articles.remove({ params: { id: created.data!.id } })
@@ -177,6 +209,9 @@ describe("blog example: writing", () => {
               title: sampleArticle.attributes.title,
               body: "duplicate",
               createdAt: new Date()
+            },
+            relationships: {
+              author: { data: Person.ref(sampleAuthor.id) }
             }
           }
         }
@@ -206,6 +241,154 @@ describe("blog example: writing", () => {
 
     expect(document.data?.attributes.body).toBe("Updated body")
     expect(document.data?.attributes.title).toBe(sampleArticle.attributes.title)
+  })
+})
+
+describe("blog example: related resource endpoints", () => {
+  it("GET /articles/:id/author serves the author as a full resource document", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.author({
+        params: { id: Article.Id.make("1") },
+        query: {}
+      })
+    }))
+
+    expect(document.data).toMatchObject({
+      type: "people",
+      id: sampleAuthor.id,
+      attributes: { firstName: "Dan", lastName: "Gebhardt" }
+    })
+    expect(document.links?.self).toBe("/articles/1/author")
+  })
+
+  it("GET /articles/:id/comments serves the paginated comment collection", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.comments({
+        params: { id: Article.Id.make("1") },
+        query: { page: { offset: 0, limit: 1 } }
+      })
+    }))
+
+    // Full comment resources, paginated
+    expect(document.data).toHaveLength(1)
+    expect(document.data[0]?.attributes.body).toBe("First!")
+    expect(document.meta?.total).toBe(2)
+    expect(document.links?.next).toBe("/articles/1/comments?page[offset]=1&page[limit]=1")
+  })
+
+  it("GET /articles/:id/comments supports compound documents (?include=author)", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.comments({
+        params: { id: Article.Id.make("1") },
+        query: { include: ["author"] }
+      })
+    }))
+
+    expect(document.data).toHaveLength(2)
+    // Both comments share the same author — deduplicated to one include.
+    expect(document.included?.map((resource) => resource.type)).toEqual(["people"])
+  })
+
+  it("404s for related endpoints of unknown articles", async () => {
+    const exit = await runExit(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.comments({
+        params: { id: Article.Id.make("nope") },
+        query: {}
+      })
+    }))
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound)
+    }
+  })
+})
+
+describe("blog example: relationship endpoints", () => {
+  it("GET /articles/:id/relationships/comments serves paginated linkage", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      return yield* client.articles.commentsRelationship({
+        params: { id: Article.Id.make("1") },
+        query: {}
+      })
+    }))
+
+    // Identifiers only — no attributes
+    expect(document.data).toEqual(sampleComments.map((comment) => ({ type: "comments", id: comment.id })))
+    expect(document.links?.self).toBe("/articles/1/relationships/comments")
+    expect(document.links?.related).toBe("/articles/1/comments")
+    expect(document.meta?.total).toBe(2)
+  })
+
+  it("PATCH /articles/:id/relationships/author replaces the author", async () => {
+    const document = await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      const replaced = yield* client.articles.updateAuthorRelationship({
+        params: { id: Article.Id.make("1") },
+        payload: { data: Person.ref(sampleAuthor.id) }
+      })
+      // The article reflects the change
+      const article = yield* client.articles.fetch({
+        params: { id: Article.Id.make("1") },
+        query: {}
+      })
+      expect(article.data?.relationships?.author.data.id).toBe(sampleAuthor.id)
+      return replaced
+    }))
+
+    expect(document.data).toEqual({ type: "people", id: sampleAuthor.id })
+  })
+
+  it("POST /articles/:id/relationships/comments attaches comments; DELETE detaches them", async () => {
+    await run(Effect.gen(function*() {
+      const client = yield* buildClient
+      const articleId = Article.Id.make("1")
+
+      // Detach one comment
+      yield* client.articles.removeCommentsRelationship({
+        params: { id: articleId },
+        payload: { data: [Comment.ref(sampleComments[0]!.id)] }
+      })
+
+      const afterRemove = yield* client.articles.commentsRelationship({
+        params: { id: articleId },
+        query: {}
+      })
+      expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([sampleComments[1]!.id])
+
+      // Re-attach it
+      const afterAdd = yield* client.articles.addCommentsRelationship({
+        params: { id: articleId },
+        payload: { data: [Comment.ref(sampleComments[0]!.id)] }
+      })
+      expect(afterAdd.data.map((identifier) => identifier.id).sort()).toEqual(
+        sampleComments.map((comment) => comment.id).sort()
+      )
+    }))
+  })
+
+  it("documents relationship endpoints in OpenAPI", () => {
+    const spec = OpenApi.fromApi(Api)
+    // Related resource endpoints
+    expect(spec.paths["/articles/{id}/author"]?.get).toBeDefined()
+    expect(spec.paths["/articles/{id}/comments"]?.get).toBeDefined()
+    // Relationship (linkage) endpoints
+    expect(spec.paths["/articles/{id}/relationships/comments"]?.get).toBeDefined()
+    expect(spec.paths["/articles/{id}/relationships/comments"]?.post).toBeDefined()
+    expect(spec.paths["/articles/{id}/relationships/comments"]?.delete).toBeDefined()
+    expect(spec.paths["/articles/{id}/relationships/author"]?.patch).toBeDefined()
+    // The related comment collection documents its pagination parameters
+    const commentParams = spec.paths["/articles/{id}/comments"]?.get?.parameters?.map((parameter: any) =>
+      parameter.name
+    )
+    expect(commentParams).toContain("page[offset]")
+    expect(commentParams).toContain("page[limit]")
+    expect(commentParams).toContain("include")
   })
 })
 

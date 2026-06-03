@@ -4,9 +4,12 @@
  * `HttpApi`.
  *
  * - `users` is read-only (fetch + list)
- * - `repositories` is full CRUD with GitHub-style page-number pagination
+ * - `repositories` is full CRUD with GitHub-style page-number pagination,
+ *   plus a related-owner endpoint
  * - `issues` can be created and updated (closing an issue is a state update)
- *   but never deleted — just like on GitHub
+ *   but never deleted — just like on GitHub. Issue triage happens through
+ *   relationship endpoints: assignment (`relationships/assignee`), labelling
+ *   (`relationships/labels`) and a paginated comment feed (`/issues/:id/comments`)
  * - `pulls` is read-only
  * - `search` is a heterogeneous endpoint across repositories, issues and
  *   users, like GitHub's global search
@@ -14,7 +17,14 @@
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
 import { JsonApi } from "effect-jsonapi"
-import { IssueLocked, IssueNotFound, PullRequestNotFound, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "./errors.js"
+import {
+  IssueLocked,
+  IssueNotFound,
+  PullRequestNotFound,
+  RepositoryNameTaken,
+  RepositoryNotFound,
+  UserNotFound
+} from "./errors.js"
 import { Issue, PullRequest, Repository, User } from "./resources.js"
 
 /**
@@ -69,6 +79,10 @@ export const repositories = JsonApi.Group(
   // DELETE /repositories/:id → 204
   JsonApi.Endpoint.remove(Repository, {
     errors: [RepositoryNotFound]
+  }),
+  // GET /repositories/:id/owner — the owning user, as a full resource
+  JsonApi.Endpoint.related(Repository, "owner", {
+    errors: [RepositoryNotFound]
   })
 )
 
@@ -92,12 +106,44 @@ export const issues = JsonApi.Group(
     },
     meta: PageMeta
   }),
-  // POST /issues → 201
+  // POST /issues → 201 (repository and author are required relationships)
   JsonApi.Endpoint.create(Issue, {
     errors: [RepositoryNotFound]
   }),
   // PATCH /issues/:id — closing an issue is `attributes: { state: "closed" }`
   JsonApi.Endpoint.update(Issue, {
+    errors: [IssueNotFound, IssueLocked]
+  }),
+  // --- Related resource endpoints --------------------------------------------
+  // GET /issues/:id/comments?page[number]=1&page[size]=30&include=author —
+  // the paginated comment feed the `comments` relationship's related link
+  // points at
+  JsonApi.Endpoint.related(Issue, "comments", {
+    include: true,
+    page: JsonApi.Page.Number,
+    meta: PageMeta,
+    errors: [IssueNotFound]
+  }),
+  // --- Relationship (linkage) endpoints: issue triage -------------------------
+  // GET /issues/:id/relationships/labels — label identifiers
+  JsonApi.Endpoint.fetchRelationship(Issue, "labels", {
+    errors: [IssueNotFound]
+  }),
+  // PATCH /issues/:id/relationships/assignee — assign ({ data: identifier })
+  // or unassign ({ data: null })
+  JsonApi.Endpoint.updateRelationship(Issue, "assignee", {
+    errors: [IssueNotFound, IssueLocked, UserNotFound]
+  }),
+  // PATCH /issues/:id/relationships/labels — replace all labels
+  JsonApi.Endpoint.updateRelationship(Issue, "labels", {
+    errors: [IssueNotFound, IssueLocked]
+  }),
+  // POST /issues/:id/relationships/labels — add labels
+  JsonApi.Endpoint.addRelationship(Issue, "labels", {
+    errors: [IssueNotFound, IssueLocked]
+  }),
+  // DELETE /issues/:id/relationships/labels → 204 — remove labels
+  JsonApi.Endpoint.removeRelationship(Issue, "labels", {
     errors: [IssueNotFound, IssueLocked]
   })
 )

@@ -93,6 +93,70 @@ describe("Handlers.collection", () => {
   })
 })
 
+describe("Handlers.linkage", () => {
+  it("builds a to-one linkage document", () => {
+    expect(Handlers.linkage({ type: "people", id: "9" })).toEqual({
+      data: { type: "people", id: "9" }
+    })
+  })
+
+  it("builds an empty to-one linkage document", () => {
+    expect(Handlers.linkage(null)).toEqual({ data: null })
+  })
+
+  it("builds a to-many linkage document", () => {
+    expect(Handlers.linkage([{ type: "comments", id: "5" }, { type: "comments", id: "12" }])).toEqual({
+      data: [{ type: "comments", id: "5" }, { type: "comments", id: "12" }]
+    })
+  })
+
+  it("adds self/related links and meta", () => {
+    const doc = Handlers.linkage([{ type: "comments", id: "5" }], {
+      self: "/articles/1/relationships/comments",
+      related: "/articles/1/comments",
+      meta: { count: 1 }
+    })
+    expect(doc).toEqual({
+      data: [{ type: "comments", id: "5" }],
+      links: {
+        self: "/articles/1/relationships/comments",
+        related: "/articles/1/comments"
+      },
+      meta: { count: 1 }
+    })
+  })
+
+  it("merges extra links (e.g. pagination)", () => {
+    const doc = Handlers.linkage([], {
+      self: "/articles/1/relationships/comments",
+      links: { next: "/articles/1/relationships/comments?page[offset]=10" }
+    })
+    expect(doc.links).toEqual({
+      self: "/articles/1/relationships/comments",
+      next: "/articles/1/relationships/comments?page[offset]=10"
+    })
+  })
+})
+
+describe("relationship URL helpers", () => {
+  it("relationshipLink builds the relationship-endpoint URL", () => {
+    expect(Handlers.relationshipLink("articles", "1", "comments")).toBe("/articles/1/relationships/comments")
+  })
+
+  it("relatedLink builds the related-resource URL", () => {
+    expect(Handlers.relatedLink("articles", "1", "comments")).toBe("/articles/1/comments")
+  })
+
+  it("paginatedRelationship builds a links-only relationship object", () => {
+    expect(Handlers.paginatedRelationship("people", "9", "articles")).toEqual({
+      links: {
+        self: "/people/9/relationships/articles",
+        related: "/people/9/articles"
+      }
+    })
+  })
+})
+
 describe("pagination links", () => {
   it("offset pagination: first page", () => {
     const links = Handlers.offsetPaginationLinks("/articles", { offset: 0, limit: 10 }, 35)
