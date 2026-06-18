@@ -7,14 +7,8 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-import { Api } from "../examples/northwind/api.js"
-import {
-  CategoryNotFound,
-  CustomerNotFound,
-  OrderNotFound,
-  ProductNameTaken,
-  ProductNotFound
-} from "../examples/northwind/errors.js"
+import { Api } from "../api.js"
+import { CategoryNotFound, CustomerNotFound, OrderNotFound, ProductNameTaken, ProductNotFound } from "../errors.js"
 import {
   alfreds,
   andrew,
@@ -33,17 +27,8 @@ import {
   speedy,
   united,
   westboro
-} from "../examples/northwind/handlers.js"
-import {
-  Category,
-  Customer,
-  Employee,
-  Order,
-  Product,
-  Shipper,
-  Supplier,
-  Territory
-} from "../examples/northwind/resources.js"
+} from "../handlers.js"
+import { Category, Customer, Employee, Order, Product, Shipper, Supplier, Territory } from "../resources.js"
 
 const buildClient = HttpApiTest.groups(Api, [
   "categories",

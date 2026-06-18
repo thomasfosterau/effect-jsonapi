@@ -7,8 +7,8 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-import { Api } from "../examples/github/api.js"
-import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../examples/github/errors.js"
+import { Api } from "../api.js"
+import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../errors.js"
 import {
   bugComments,
   bugIssue,
@@ -22,8 +22,8 @@ import {
   octocat,
   readmePull,
   spoonKnife
-} from "../examples/github/handlers.js"
-import { Issue, Label, PullRequest, Repository, User } from "../examples/github/resources.js"
+} from "../handlers.js"
+import { Issue, Label, PullRequest, Repository, User } from "../resources.js"
 
 const buildClient = HttpApiTest.groups(Api, ["users", "repositories", "issues", "pulls", "search"])
 
