@@ -54,3 +54,7 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # Type-checks AND runs every JSDoc @example, and generates the API docs.
+      - name: Verify documentation examples (docgen)
+        run: npm run docgen

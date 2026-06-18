@@ -218,7 +218,7 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
  * // `UsersLive` etc. are your `HttpApiBuilder.group(...)` implementations.
- * declare const UsersLive: Layer.Layer<never>
+ * const UsersLive: Layer.Layer<never> = Layer.empty
  *
  * // Provide the JSON:API middleware *into* the handler groups so every
  * // endpoint's middleware requirement is satisfied.
@@ -244,7 +244,7 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
  * import { Layer } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * declare const HandlersLive: Layer.Layer<never>
+ * const HandlersLive: Layer.Layer<never> = Layer.empty
  *
  * // Accept the atomic operations extension's media type.
  * const ApiLive = Layer.mergeAll(HandlersLive).pipe(

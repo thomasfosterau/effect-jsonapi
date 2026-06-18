@@ -60,13 +60,13 @@ import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js"
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js"
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js"
 import * as Relationship from "./Relationship.js"
+import type { Relationships } from "./Relationship.js"
 import type {
   Any,
   HasRequiredRelationship,
   PartialAttributes,
   RefValue,
   RelationshipName,
-  Relationships,
   ToManyName
 } from "./Resource.js"
 import { Ref } from "./Resource.js"
@@ -554,7 +554,26 @@ export type RelationshipOperationsFor<R extends Any, K extends string, Rel> =
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * const ops = JsonApi.Atomic.operationsFor(Article)
  * ops.add                              // create an article
@@ -588,7 +607,26 @@ export interface ResourceOperations<R extends Any> {
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * const ops = JsonApi.Atomic.operationsFor(Article)
  * Object.keys(ops)                 // ["add", "update", "remove", "relationships"]
@@ -697,7 +735,26 @@ const flattenOperations = (operations: ResourceOperations<Any>): Array<Schema.To
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * const Operations = JsonApi.Atomic.Operations([Article, Comment])
  * ```
@@ -732,7 +789,26 @@ export interface RequestDocument<R extends Any> extends Schema.Struct<{
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * const Request = JsonApi.Atomic.RequestDocument([Article, Comment])
  * ```
@@ -799,7 +875,26 @@ export interface ResultDocument<R extends Any, M extends Schema.Top = typeof Any
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * const Results = JsonApi.Atomic.ResultDocument([Article, Comment])
  * ```
@@ -832,7 +927,26 @@ const targetRef = (type: string, target: string | { readonly lid: string }): Ref
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * JsonApi.Atomic.add(Article, {
  *   lid: "a1",                          // so later operations can reference it
@@ -860,7 +974,26 @@ export const add = <R extends Any>(
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * JsonApi.Atomic.update(Article, {
  *   id: Article.Id.make("1"),
@@ -888,7 +1021,26 @@ export const update = <R extends Any>(
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * JsonApi.Atomic.remove(Article, "1")
  * JsonApi.Atomic.remove(Article, { lid: "a1" })
@@ -956,11 +1108,30 @@ export type UpdateRelationshipValue<R extends Any, K extends RelationshipName<R>
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * JsonApi.Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
  * JsonApi.Atomic.updateRelationship(Article, "1", "comments", [Comment.ref("3")])
- * JsonApi.Atomic.updateRelationship(Article, { lid: "a1" }, "author", null) // `optional` only
+ * JsonApi.Atomic.updateRelationship(Article, { lid: "a1" }, "editor", null) // `optional` only
  * ```
  *
  * @since 0.1.0
@@ -995,7 +1166,26 @@ export type ToManyTarget<R extends Any, K extends ToManyName<R>> =
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * JsonApi.Atomic.addToRelationship(Article, "1", "comments", [Comment.ref("5")])
  * ```
@@ -1023,7 +1213,26 @@ export const addToRelationship = <R extends Any, const K extends ToManyName<R>>(
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * JsonApi.Atomic.removeFromRelationship(Article, "1", "comments", [Comment.ref("5")])
  * ```
@@ -1050,12 +1259,32 @@ export const removeFromRelationship = <R extends Any, const K extends ToManyName
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
  * const doc = JsonApi.Atomic.request(
  *   JsonApi.Atomic.add(Article, {
  *     lid: "a1",
- *     attributes: { title: "Hello", body: "World" }
+ *     attributes: { title: "Hello", body: "World" },
+ *     relationships: { author: { data: Person.ref("9") } }
  *   }),
  *   JsonApi.Atomic.remove(Comment, "5")
  * )
@@ -1120,17 +1349,43 @@ export const result = <const R extends ResourceValue | null, const M extends Met
  *
  * @example
  * ```ts
- * import { Effect } from "effect"
+ * import { Effect, Schema } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * handlers.handle("operations", ({ payload }) =>
- *   Effect.gen(function*() {
- *     const entries = []
- *     for (const operation of payload["atomic:operations"]) {
- *       entries.push(yield* apply(operation)) // { data: resource } or JsonApi.Atomic.emptyResult
- *     }
- *     return JsonApi.Atomic.results(entries)
- *   }))
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ *
+ * const Api = HttpApi.make("blog").add(
+ *   JsonApi.Group("operations", JsonApi.Endpoint.operations([Article, Comment]))
+ * )
+ *
+ * // one result entry per operation; removals and relationship updates return no data
+ * type ResultEntry = { readonly data?: typeof Article.Type | typeof Comment.Type | null }
+ *
+ * // apply one operation, returning its result entry (your domain logic)
+ * const apply = (
+ *   operation: JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]
+ * ): Effect.Effect<ResultEntry> => Effect.succeed({})
+ *
+ * export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
+ *   handlers.handle("operations", ({ payload }) =>
+ *     Effect.gen(function*() {
+ *       const entries: Array<ResultEntry> = []
+ *       for (const operation of payload["atomic:operations"]) {
+ *         entries.push(yield* apply(operation)) // { data: resource } or JsonApi.Atomic.emptyResult
+ *       }
+ *       return JsonApi.Atomic.results(entries)
+ *     })))
  * ```
  *
  * @since 0.1.0
@@ -1180,15 +1435,38 @@ const isOperationValue = (value: unknown): value is { readonly op: string } =>
  *
  * @example
  * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * for (const operation of payload["atomic:operations"]) {
- *   if (JsonApi.Atomic.isRelationshipOperation(operation)) {
- *     operation.ref.relationship // typed relationship key
- *   } else {
- *     operation.op               // "add" | "update" | "remove" on a resource
- *   }
- * }
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ *
+ * const Api = HttpApi.make("blog").add(
+ *   JsonApi.Group("operations", JsonApi.Endpoint.operations([Article, Comment]))
+ * )
+ *
+ * export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
+ *   handlers.handle("operations", ({ payload }) =>
+ *     Effect.gen(function*() {
+ *       for (const operation of payload["atomic:operations"]) {
+ *         if (JsonApi.Atomic.isRelationshipOperation(operation)) {
+ *           operation.ref.relationship // typed relationship key
+ *         } else {
+ *           operation.op               // "add" | "update" | "remove" on a resource
+ *         }
+ *       }
+ *       return JsonApi.Atomic.results([])
+ *     })))
  * ```
  *
  * @since 0.1.0
@@ -1244,23 +1522,38 @@ const targetsResourceImpl = (operation: { readonly op: string }, resource: Any):
  *
  * @example
  * ```ts
- * import { Match } from "effect"
+ * import { Match, Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * // data-first
- * if (JsonApi.Atomic.targetsResource(operation, Article)) {
- *   switch (operation.op) {
- *     case "add":     operation.data.attributes.title // typed
- *     case "update":  operation.data.id
- *     case "remove":  operation.ref
- *   }
- * }
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
  *
- * // data-last, with Match
- * Match.value(operation).pipe(
- *   Match.when(JsonApi.Atomic.targetsResource(Article), (op) => `${op.op} article`),
- *   Match.orElse(() => "other")
- * )
+ * // `operation` is one element of a decoded `atomic:operations` payload
+ * const handle = (operation: JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]) => {
+ *   // data-first
+ *   if (JsonApi.Atomic.targetsResource(operation, Article)) {
+ *     switch (operation.op) {
+ *       case "add":     operation.data.attributes.title; break // typed
+ *       case "update":  operation.data.id; break
+ *       case "remove":  operation.ref; break
+ *     }
+ *   }
+ *
+ *   // data-last, with Match
+ *   return Match.value(operation).pipe(
+ *     Match.when(JsonApi.Atomic.targetsResource(Article), (op) => `${op.op} article`),
+ *     Match.orElse(() => "other")
+ *   )
+ * }
  * ```
  *
  * @since 0.1.0
@@ -1317,22 +1610,43 @@ const targetsRelationshipImpl = (operation: { readonly op: string }, resource: A
  *
  * @example
  * ```ts
- * import { Match } from "effect"
+ * import { Match, Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * // data-first
- * if (JsonApi.Atomic.targetsRelationship(operation, Article, "comments")) {
- *   operation.op   // "add" | "update" | "remove"
- *   operation.data // ReadonlyArray<comment ref>
- * }
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
  *
- * // data-last, with Match
- * Match.value(operation).pipe(
- *   Match.when(JsonApi.Atomic.targetsRelationship(Comment, "author"), (op) =>
- *     op.data // person ref (never null: `one`)
- *   ),
- *   Match.orElse(() => undefined)
- * )
+ * // `operation` is one element of a decoded `atomic:operations` payload
+ * const handle = (operation: JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]) => {
+ *   // data-first
+ *   if (JsonApi.Atomic.targetsRelationship(operation, Article, "comments")) {
+ *     operation.op   // "add" | "update" | "remove"
+ *     operation.data // ReadonlyArray<comment ref>
+ *   }
+ *
+ *   // data-last, with Match
+ *   return Match.value(operation).pipe(
+ *     Match.when(JsonApi.Atomic.targetsRelationship(Comment, "author"), (op) =>
+ *       op.data // person ref (never null: `one`)
+ *     ),
+ *     Match.orElse(() => undefined)
+ *   )
+ * }
  * ```
  *
  * @since 0.1.0

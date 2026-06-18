@@ -59,7 +59,12 @@ const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterTh
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
  *
  * // enable offset/limit pagination on a list endpoint
  * JsonApi.Endpoint.list(Article, { page: JsonApi.Page.Offset })
@@ -117,6 +122,21 @@ export interface Include<R extends Any> extends CommaSeparated<Schema.Literals<R
  * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     comments: JsonApi.Relationship.many(() => Comment)
+ *   }
+ * })
+ *
  * const include = JsonApi.Query.Include(Article)
  * Schema.decodeUnknownSync(include)("author,comments.author")
  * // → ["author", "comments.author"]
@@ -146,6 +166,10 @@ export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Li
  * ```ts
  * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
  *
  * const fieldset = JsonApi.Query.Fieldset(Article)
  * Schema.decodeUnknownSync(fieldset)("title,body")
@@ -323,6 +347,10 @@ export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema
  * ```ts
  * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
  *
  * const query = JsonApi.Query.schema(Article, {
  *   include: true,

@@ -44,16 +44,8 @@ import { asJsonApi, asJsonApiAtomic } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
-import type {
-  Any,
-  AttributeKeys,
-  DefaultIncluded,
-  Relationships,
-  Resource,
-  Target,
-  TargetsOf,
-  ToManyName
-} from "./Resource.js"
+import type { Relationships } from "./Relationship.js"
+import type { Any, AttributeKeys, DefaultIncluded, Resource, Target, TargetsOf, ToManyName } from "./Resource.js"
 import { directTargets } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -130,7 +122,31 @@ const queryConfig = (options?: {
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -202,6 +218,14 @@ export const fetch = <
  * ```ts
  * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     body: Schema.String,
+ *     createdAt: Schema.DateFromString
+ *   }
+ * })
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -281,7 +305,17 @@ export const list = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * class TitleTaken extends JsonApi.Error<TitleTaken>()("TitleTaken", {
+ *   status: 409,
+ *   fields: { title: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -333,7 +367,17 @@ export const create = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -384,7 +428,17 @@ export const update = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -447,6 +501,16 @@ export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Sc
  * ```ts
  * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person)
+ *   }
+ * })
  *
  * const search = JsonApi.Group(
  *   "search",
@@ -629,7 +693,31 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -731,7 +819,31 @@ export const related = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -822,7 +934,31 @@ export const fetchRelationship = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -894,7 +1030,31 @@ export const updateRelationship = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -965,7 +1125,31 @@ export const addRelationship = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
  *
  * const articles = JsonApi.Group(
  *   Article,
@@ -1040,7 +1224,31 @@ export const removeRelationship = <
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class OperationFailed extends JsonApi.Error<OperationFailed>()("OperationFailed", {
+ *   status: 422,
+ *   fields: { operation: Schema.Int, reason: Schema.String }
+ * }) {}
  *
  * const operations = JsonApi.Group(
  *   "operations",

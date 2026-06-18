@@ -61,10 +61,26 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  *
  * @example
  * ```ts
- * import { Effect } from "effect"
+ * import { Effect, Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * declare const client: {
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     comments: JsonApi.Relationship.many(() => Comment)
+ *   }
+ * })
+ *
+ * // `client` is a derived `HttpApiClient` for an api containing the articles group
+ * type Client = {
  *   readonly articles: {
  *     readonly fetch: (request: {
  *       readonly params: { readonly id: string }
@@ -72,15 +88,15 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  *     }) => Effect.Effect<ReturnType<typeof Article.document>["Type"]>
  *   }
  * }
- * declare const Article: JsonApi.Any
  *
- * const include = ["author", "comments.author"] as const
- *
- * const program = client.articles
- *   .fetch({ params: { id: "1" }, query: { include } })
- *   .pipe(JsonApi.narrowIncluded(Article, include))
- * //   ^ Effect of a document whose `included` is narrowed to the requested
- * //     resources — unrequested types are excluded from the type.
+ * const fetchArticle = (client: Client) => {
+ *   const include = ["author", "comments.author"] as const
+ *   return client.articles
+ *     .fetch({ params: { id: "1" }, query: { include } })
+ *     .pipe(JsonApi.narrowIncluded(Article, include))
+ *   //   ^ Effect of a document whose `included` is narrowed to the requested
+ *   //     resources — unrequested types are excluded from the type.
+ * }
  * ```
  *
  * @since 0.1.0

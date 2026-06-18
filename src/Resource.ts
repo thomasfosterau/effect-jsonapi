@@ -48,15 +48,10 @@ import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Docu
 import * as Relationship from "./Relationship.js"
 import type { Relationships, RelationshipSchemas } from "./Relationship.js"
 
-/**
- * Re-exports of the `Relationship` module's core types: `Descriptor` (a single
- * relationship descriptor), `Relationships` (a record of them, as declared on a
- * resource) and `RelationshipSchemas` (the schemas derived from them).
- *
- * @since 0.1.0
- * @category models
- */
-export type { Descriptor, Relationships, RelationshipSchemas } from "./Relationship.js"
+// The relationship descriptor types (`Descriptor`, `Relationships`,
+// `RelationshipSchemas`) are part of the public API under the `Relationship`
+// namespace (`JsonApi.Relationship.Descriptor`, …); they are not re-exported at
+// the top level to avoid duplicate documentation entries.
 
 // ---------------------------------------------------------------------------
 // Id / identifier schemas

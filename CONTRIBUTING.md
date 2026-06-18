@@ -46,6 +46,7 @@ The repository is validated by the same commands in CI. Run them locally before 
 | `npm run format:check` | Verify formatting without writing changes.                     |
 | `npm test`             | Run the test suite once with vitest.                           |
 | `npm run test:watch`   | Run vitest in watch mode.                                      |
+| `npm run docgen`       | Type-check & run every JSDoc `@example`; generate API docs.    |
 | `npm run check`        | Run typecheck + lint + format:check + test (the full CI gate). |
 
 ## Code Style
@@ -69,6 +70,11 @@ reads consistently and is ready for API-doc generation. When you add or change a
      must be self-contained — include the imports — and use the public `JsonApi.*` surface exactly as
      a consumer would (e.g. `JsonApi.Resource(...)`, `JsonApi.Endpoint.fetch(...)`). Ground examples
      in real, type-checked usage from `examples/` and `test/` rather than inventing.
+     [`@effect/docgen`](https://github.com/Effect-TS/docgen) compiles **and runs** every example
+     (via `npm run docgen`, also in CI), so each one must be a complete program that type-checks and
+     executes without throwing. Define every value an example references (use a function parameter or
+     `Effect.gen` for context like handlers/clients you don't want to construct), and don't use
+     `declare const` (it emits no runtime value).
   3. A `@since` tag (use the version the symbol was introduced; `0.1.0` for the initial surface).
   4. A `@category` tag. Use a consistent vocabulary: `constructors`, `combinators`, `models`,
      `schemas`, `guards`, `accessors`, `layers`, `services`, `errors`, `constants`, `type-level`,

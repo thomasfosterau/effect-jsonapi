@@ -33,8 +33,12 @@ import type { Any, RefValue } from "./Resource.js"
  *
  * @example
  * ```ts
- * import { Effect } from "effect"
+ * import { Effect, Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
  *
  * const lids = JsonApi.lidMap()
  *
@@ -50,7 +54,19 @@ import type { Any, RefValue } from "./Resource.js"
  * @category errors
  */
 export class UnknownLidError extends Error {
+  /**
+   * The error name (`"UnknownLidError"`).
+   *
+   * @since 0.1.0
+   * @category models
+   */
   override readonly name = "UnknownLidError"
+  /**
+   * The unresolved local id that no earlier operation in the request created.
+   *
+   * @since 0.1.0
+   * @category models
+   */
   readonly lid: string
   constructor(lid: string) {
     super(`Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`)
@@ -134,7 +150,23 @@ export interface LidMap {
  *
  * @example
  * ```ts
+ * import { Schema } from "effect"
  * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.optional(() => Person),
+ *     comments: JsonApi.Relationship.many(() => Comment)
+ *   }
+ * })
  *
  * const lids = JsonApi.lidMap()
  *
@@ -145,6 +177,7 @@ export interface LidMap {
  * const id = lids.identifier(Article, { type: "articles", lid: "a1" }) // { type: "articles", id: "42" }
  *
  * // resolve lid-based identifiers inside relationship linkage
+ * lids.assign("c1", "100")
  * const linkage = lids.resolveLinkage(Article, {
  *   comments: { data: [{ type: "comments", lid: "c1" }] }
  * })
