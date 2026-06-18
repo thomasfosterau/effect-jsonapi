@@ -21,6 +21,8 @@
  *
  * The declared `fields` are round-tripped through the error object's `meta`
  * member, so clients can reconstruct the typed error from the wire document.
+ *
+ * @since 0.1.0
  */
 import type { Cause } from "effect"
 import { Schema, SchemaTransformation } from "effect"
@@ -30,6 +32,9 @@ import { asJsonApi } from "./internal/media.js"
 
 /**
  * The wire document schema every {@link make} error encodes to.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const WireDocument = ErrorDocument(ErrorObject)
 
@@ -38,23 +43,29 @@ type WireDocumentType = typeof WireDocument.Type
 /**
  * The endpoint error schema derived from an error class: decodes a JSON:API
  * error document into an instance of the class (and back).
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends
-  Schema.decodeTo<
-    Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
-    typeof WireDocument,
-    never,
-    never
-  >
-{}
+export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.decodeTo<
+  Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
+  typeof WireDocument,
+  never,
+  never
+> {}
 
 /**
  * The class returned by {@link make}: a `Schema.TaggedErrorClass` augmented
  * with the JSON:API error metadata and the derived wire schema.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends
-  Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>
-{
+export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.Class<
+  Self,
+  Schema.TaggedStruct<Tag, Fields>,
+  Cause.YieldableError
+> {
   /** The HTTP status this error responds with. */
   readonly status: number
   /** The JSON:API error `code` (application-specific identifier). */
@@ -71,6 +82,9 @@ export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.S
 
 /**
  * Configuration for a JSON:API error declaration.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Config<Fields extends Schema.Struct.Fields> {
   /** HTTP status code for this error response (e.g. 404, 409, 422). */
@@ -95,7 +109,10 @@ export interface Config<Fields extends Schema.Struct.Fields> {
 }
 
 const snakeCase = (tag: string): string =>
-  tag.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase()
+  tag
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase()
 
 // Wire schemas are derived lazily (so they bind to the user's final subclass,
 // preserving `instanceof`) and cached per class.
@@ -127,38 +144,42 @@ const makeWire = (
     })
   ) as unknown as typeof WireDocument
 
-  const wire = strictDocument.pipe(
-    Schema.decodeTo(
-      klass as unknown as Schema.Top,
-      SchemaTransformation.transform<unknown, WireDocumentType>({
-        // document -> class encoded form ({ _tag, ...fields })
-        decode: (doc) => {
-          const meta = doc.errors[0]?.meta ?? {}
-          return {
-            _tag: options.tag,
-            ...Object.fromEntries(options.fieldKeys.map((key) => [key, meta[key]]))
+  const wire = strictDocument
+    .pipe(
+      Schema.decodeTo(
+        klass as unknown as Schema.Top,
+        SchemaTransformation.transform<unknown, WireDocumentType>({
+          // document -> class encoded form ({ _tag, ...fields })
+          decode: (doc) => {
+            const meta = doc.errors[0]?.meta ?? {}
+            return {
+              _tag: options.tag,
+              ...Object.fromEntries(options.fieldKeys.map((key) => [key, meta[key]]))
+            }
+          },
+          // class encoded form -> document
+          encode: (encoded) => {
+            const fields = encoded as Record<string, unknown>
+            const detail = options.detail?.(fields)
+            return {
+              errors: [
+                {
+                  status: String(options.status),
+                  code: options.code,
+                  ...(options.title !== undefined ? { title: options.title } : {}),
+                  ...(detail !== undefined ? { detail } : {}),
+                  ...(options.fieldKeys.length > 0
+                    ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
+                    : {})
+                }
+              ]
+            }
           }
-        },
-        // class encoded form -> document
-        encode: (encoded) => {
-          const fields = encoded as Record<string, unknown>
-          const detail = options.detail?.(fields)
-          return {
-            errors: [{
-              status: String(options.status),
-              code: options.code,
-              ...(options.title !== undefined ? { title: options.title } : {}),
-              ...(detail !== undefined ? { detail } : {}),
-              ...(options.fieldKeys.length > 0
-                ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
-                : {})
-            }]
-          }
-        }
-      })
-    ),
-    HttpApiSchema.status(options.status)
-  ).pipe((schema) => asJsonApi(schema))
+        })
+      ),
+      HttpApiSchema.status(options.status)
+    )
+    .pipe((schema) => asJsonApi(schema))
 
   wireCache.set(klass, wire)
   return wire
@@ -168,57 +189,69 @@ const makeWire = (
  * Declares a JSON:API error in one shot: a tagged error class whose wire
  * encoding is a spec-compliant JSON:API error document.
  *
- * **Example**
+ * Re-exported as `JsonApi.Error`.
  *
+ * @example
  * ```ts
- * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   code: "not_found",
  *   title: "Resource not found",
  *   fields: { id: Schema.String },
  *   detail: (e) => `Article ${e.id} not found`
  * }) {}
+ *
+ * // in a handler:   Effect.fail(new ArticleNotFound({ id: "42" }))
+ * // in a client:    Effect.catchTag("ArticleNotFound", (e) => ...)
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
-export const make = <Self = never>(identifier?: string) =>
-<const Tag extends string, const Fields extends Schema.Struct.Fields = {}>(
-  tag: Tag,
-  config: Config<Fields>
-): ApiErrorClass<Self, Tag, Fields> => {
-  const fields = (config.fields ?? {}) as Fields
-  const fieldKeys = Object.keys(fields)
-  const code = config.code ?? snakeCase(tag)
-  const detail = typeof config.detail === "function"
-    ? config.detail
-    : config.detail !== undefined
-    ? () => config.detail as string
-    : undefined
+export const make =
+  <Self = never>(identifier?: string) =>
+  <const Tag extends string, const Fields extends Schema.Struct.Fields = {}>(
+    tag: Tag,
+    config: Config<Fields>
+  ): ApiErrorClass<Self, Tag, Fields> => {
+    const fields = (config.fields ?? {}) as Fields
+    const fieldKeys = Object.keys(fields)
+    const code = config.code ?? snakeCase(tag)
+    const detail =
+      typeof config.detail === "function"
+        ? config.detail
+        : config.detail !== undefined
+          ? () => config.detail as string
+          : undefined
 
-  // The conditional `MissingSelfGeneric` branch only matters at the user's
-  // `extends` clause, where `Self` is concrete — cast it away here.
-  const Base = Schema.TaggedErrorClass<Self>(identifier)(tag, fields) as unknown as new(
-    ...args: Array<any>
-  ) => object
+    // The conditional `MissingSelfGeneric` branch only matters at the user's
+    // `extends` clause, where `Self` is concrete — cast it away here.
+    const Base = Schema.TaggedErrorClass<Self>(identifier)(tag, fields) as unknown as new (
+      ...args: Array<any>
+    ) => object
 
-  class ApiErrorBase extends Base {
-    static readonly status = config.status
-    static readonly code = code
-    static readonly title = config.title
-    static get wire() {
-      // `this` is the user's final class, so decoded errors are `instanceof` it.
-      return makeWire(this as unknown as { new (...args: Array<any>): any }, {
-        tag,
-        status: config.status,
-        code,
-        title: config.title,
-        fieldKeys,
-        detail
-      })
+    class ApiErrorBase extends Base {
+      static readonly status = config.status
+      static readonly code = code
+      static readonly title = config.title
+      static get wire() {
+        // `this` is the user's final class, so decoded errors are `instanceof` it.
+        return makeWire(this as unknown as { new (...args: Array<any>): any }, {
+          tag,
+          status: config.status,
+          code,
+          title: config.title,
+          fieldKeys,
+          detail
+        })
+      }
     }
-  }
 
-  return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>
-}
+    return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>
+  }
 
 // ---------------------------------------------------------------------------
 // Standard errors — the responses every JSON:API endpoint must support
@@ -226,6 +259,9 @@ export const make = <Self = never>(identifier?: string) =>
 
 /**
  * 400 Bad Request: malformed query parameters or document structure.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class BadRequest extends make<BadRequest>()("BadRequest", {
   status: 400,
@@ -237,6 +273,9 @@ export class BadRequest extends make<BadRequest>()("BadRequest", {
 
 /**
  * 403 Forbidden: the client is not allowed to perform this operation.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class Forbidden extends make<Forbidden>()("Forbidden", {
   status: 403,
@@ -247,6 +286,9 @@ export class Forbidden extends make<Forbidden>()("Forbidden", {
 /**
  * 406 Not Acceptable: JSON:API §5 content negotiation — the `Accept` header
  * contains the JSON:API media type only with media type parameters.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class NotAcceptable extends make<NotAcceptable>()("NotAcceptable", {
   status: 406,
@@ -257,6 +299,9 @@ export class NotAcceptable extends make<NotAcceptable>()("NotAcceptable", {
 /**
  * 409 Conflict: the request violates server constraints (e.g. duplicate id,
  * type mismatch between the URL and the document).
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class Conflict extends make<Conflict>()("Conflict", {
   status: 409,
@@ -269,6 +314,9 @@ export class Conflict extends make<Conflict>()("Conflict", {
 /**
  * 415 Unsupported Media Type: JSON:API §5 content negotiation — the request
  * `Content-Type` is the JSON:API media type with media type parameters.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class UnsupportedMediaType extends make<UnsupportedMediaType>()("UnsupportedMediaType", {
   status: 415,
@@ -279,5 +327,8 @@ export class UnsupportedMediaType extends make<UnsupportedMediaType>()("Unsuppor
 /**
  * The error responses every JSON:API endpoint declares automatically:
  * 400 (malformed request), 406 and 415 (content negotiation).
+ *
+ * @since 0.1.0
+ * @category constants
  */
 export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as const

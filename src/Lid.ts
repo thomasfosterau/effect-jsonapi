@@ -20,6 +20,8 @@
  * const ref = lids.identifier(Article, operation.ref)          // { type, id }
  * const linkage = lids.resolveLinkage(Article, operation.data.relationships)
  * ```
+ *
+ * @since 0.1.0
  */
 import type { MetaValue } from "./Handlers.js"
 import type * as Relationship from "./Relationship.js"
@@ -28,14 +30,46 @@ import type { Any, RefValue } from "./Resource.js"
 /**
  * Thrown when resolving a ref whose `lid` was never assigned an id — the
  * client referenced a local id that no earlier operation declared.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * const lids = JsonApi.lidMap()
+ *
+ * // converting the thrown error into an Effect failure
+ * const program = Effect.try({
+ *   try: () => lids.identifier(Article, { type: "articles", lid: "never-created" }),
+ *   catch: (error) =>
+ *     error instanceof JsonApi.UnknownLidError ? error : new Error(String(error))
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class UnknownLidError extends Error {
+  /**
+   * The error name (`"UnknownLidError"`).
+   *
+   * @since 0.1.0
+   * @category models
+   */
   override readonly name = "UnknownLidError"
+  /**
+   * The unresolved local id that no earlier operation in the request created.
+   *
+   * @since 0.1.0
+   * @category models
+   */
   readonly lid: string
   constructor(lid: string) {
-    super(
-      `Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`
-    )
+    super(`Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`)
     this.lid = lid
   }
 }
@@ -43,6 +77,9 @@ export class UnknownLidError extends Error {
 /**
  * The minimal runtime shape of relationship linkage holding refs (identifiers
  * that may be lid-based).
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface RefLinkageValue {
   readonly [key: string]: {
@@ -59,16 +96,20 @@ export interface RefLinkageValue {
  *   - `optional` → `{ data: identifier | null }`
  *   - `many` → `{ data: identifier[] }`
  *   - `paginated` → excluded (no inline linkage)
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type ResolvedLinkage<R extends Any> = {
-  readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any> ? never : K]?:
-    R["relationships"][K] extends Relationship.One<infer T>
-      ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
-      : R["relationships"][K] extends Relationship.Optional<infer T>
-        ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
+  readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any>
+    ? never
+    : K]?: R["relationships"][K] extends Relationship.One<infer T>
+    ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
+    : R["relationships"][K] extends Relationship.Optional<infer T>
+      ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
       : R["relationships"][K] extends Relationship.Many<infer T>
         ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
-      : never
+        : never
 }
 
 /**
@@ -78,6 +119,9 @@ export type ResolvedLinkage<R extends Any> = {
  *
  * Resolution throws {@link UnknownLidError} for lids no earlier operation
  * assigned — convert it to your 4xx error of choice with `Effect.try`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface LidMap {
   /** Records the server-assigned id for a lid. */
@@ -103,6 +147,44 @@ export interface LidMap {
 
 /**
  * Creates an empty {@link LidMap}.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.optional(() => Person),
+ *     comments: JsonApi.Relationship.many(() => Comment)
+ *   }
+ * })
+ *
+ * const lids = JsonApi.lidMap()
+ *
+ * // record the server-assigned id of a resource created with a lid
+ * lids.assign("a1", "42")
+ *
+ * // resolve a later lid-based ref to a typed identifier
+ * const id = lids.identifier(Article, { type: "articles", lid: "a1" }) // { type: "articles", id: "42" }
+ *
+ * // resolve lid-based identifiers inside relationship linkage
+ * lids.assign("c1", "100")
+ * const linkage = lids.resolveLinkage(Article, {
+ *   comments: { data: [{ type: "comments", lid: "c1" }] }
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const lidMap = (): LidMap => {
   const ids = new Map<string, string>()
@@ -133,11 +215,12 @@ export const lidMap = (): LidMap => {
         const linkage = value.data
         resolved[key] = {
           ...value,
-          data: linkage === null || linkage === undefined
-            ? null
-            : Array.isArray(linkage)
-            ? linkage.map(resolveRef)
-            : resolveRef(linkage as RefValue)
+          data:
+            linkage === null || linkage === undefined
+              ? null
+              : Array.isArray(linkage)
+                ? linkage.map(resolveRef)
+                : resolveRef(linkage as RefValue)
         }
       }
       return resolved as ResolvedLinkage<R>

@@ -14,7 +14,7 @@
  * annotations are the assertions.
  */
 import { Effect, Schema } from "effect"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 
 const Person = JsonApi.Resource("people", {
   attributes: { firstName: Schema.NonEmptyString }
@@ -99,7 +99,7 @@ declare const clientFetch: (request: {
   readonly query: { readonly include?: ReadonlyArray<JsonApi.IncludePath<typeof Article>> }
 }) => Effect.Effect<FetchDocument>
 
-const program = Effect.gen(function*() {
+const program = Effect.gen(function* () {
   // Narrowed to Person only
   const include = ["author"] as const
   const onlyAuthor = yield* clientFetch({ params: { id: "1" }, query: { include } }).pipe(
@@ -124,9 +124,7 @@ const program = Effect.gen(function*() {
 
   // Nothing requested → included is ReadonlyArray<never>
   const none = [] as const
-  const nothing = yield* clientFetch({ params: { id: "1" }, query: {} }).pipe(
-    JsonApi.narrowIncluded(Article, none)
-  )
+  const nothing = yield* clientFetch({ params: { id: "1" }, query: {} }).pipe(JsonApi.narrowIncluded(Article, none))
   type NoneIncluded = NonNullable<typeof nothing.included>[number]
   assertType<NoneIncluded extends never ? true : false>(true)
 

@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+
+# No permissions by default; the release job opts into exactly what it needs.
+permissions: {}
+
+jobs:
+  release:
+    name: Version or publish
+    # Never run on forks (they have neither the environment nor the trusted
+    # publisher binding, so a fork cannot publish on your behalf).
+    if: github.repository == 'thomasfosterau/effect-jsonapi'
+    runs-on: ubuntu-latest
+    # Requires manual approval via a protected GitHub Environment named
+    # "release". See SECURITY.md for the one-time setup.
+    environment: release
+    permissions:
+      contents: write # push the version commit/tag and the "Version Packages" PR branch
+      pull-requests: write # open/update the "Version Packages" PR
+      id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
+    steps:
+      - name: Checkout
+        # The Changesets action pushes the version branch, so it needs the
+        # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN).
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.x
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      # npm OIDC Trusted Publishing requires npm >= 11.5.1.
+      - name: Upgrade npm (OIDC trusted publishing)
+        run: npm install -g npm@latest
+
+      # --ignore-scripts stops a compromised dependency from running install
+      # scripts in the privileged publish job (the Shai-Hulud vector).
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      # When changesets are pending, this opens/updates a "Version Packages" PR.
+      # Once that PR is merged (no changesets remain), it publishes to npm via
+      # OIDC trusted publishing — there is no NPM_TOKEN to steal. Provenance is
+      # attached automatically.
+      - name: Create release PR or publish to npm
+        uses: changesets/action@3841a0683d3cfa6dae0f9bb335290003010fe3f0 # v1.9.0
+        with:
+          version: npm run version
+          publish: npm run release
+          commit: "chore: version packages"
+          title: "chore: version packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"

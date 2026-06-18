@@ -11,9 +11,12 @@ import { Schema, SchemaTransformation } from "effect"
  * Item validation (e.g. closed literal sets) is performed by the item schema
  * after splitting.
  */
-export interface CommaSeparated<S extends Schema.Top> extends
-  Schema.decodeTo<Schema.$Array<S>, Schema.String, never, never>
-{}
+export interface CommaSeparated<S extends Schema.Top> extends Schema.decodeTo<
+  Schema.$Array<S>,
+  Schema.String,
+  never,
+  never
+> {}
 
 export const CommaSeparated = <S extends Schema.Top>(item: S): CommaSeparated<S> =>
   Schema.String.pipe(
@@ -37,19 +40,17 @@ export interface SortTerm<Field extends string> {
 /**
  * The schema of a decoded sort list.
  */
-export interface Sort<Field extends string> extends
-  Schema.decodeTo<
-    Schema.$Array<
-      Schema.Struct<{
-        readonly field: Schema.Literals<ReadonlyArray<Field>>
-        readonly direction: Schema.Literals<["asc", "desc"]>
-      }>
-    >,
-    Schema.String,
-    never,
-    never
-  >
-{}
+export interface Sort<Field extends string> extends Schema.decodeTo<
+  Schema.$Array<
+    Schema.Struct<{
+      readonly field: Schema.Literals<ReadonlyArray<Field>>
+      readonly direction: Schema.Literals<["asc", "desc"]>
+    }>
+  >,
+  Schema.String,
+  never,
+  never
+> {}
 
 /**
  * JSON:API `sort` codec: `"-createdAt,title"` ↔
@@ -74,8 +75,7 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
               ? { field: term.slice(1), direction: "desc" as const }
               : { field: term, direction: "asc" as const }
           ) as unknown as Encoded,
-        encode: (terms) =>
-          terms.map((term) => (term.direction === "desc" ? `-${term.field}` : term.field)).join(",")
+        encode: (terms) => terms.map((term) => (term.direction === "desc" ? `-${term.field}` : term.field)).join(",")
       })
     )
   )

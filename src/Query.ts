@@ -26,6 +26,8 @@
  * Illegal values (unknown include paths, unknown sparse-fieldset names,
  * unknown sort fields) fail decoding, which HttpApi surfaces as a 400 — the
  * spec-compliant response.
+ *
+ * @since 0.1.0
  */
 import type { Types } from "effect"
 import { Schema, SchemaTransformation } from "effect"
@@ -46,6 +48,31 @@ import { allTargets, attributeKeys, includePaths } from "./Resource.js"
  */
 const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 
+/**
+ * Common pagination strategies, ready to pass as the `page` query option.
+ * Each key becomes a `page[<key>]` query parameter, and each
+ * `Page.Offset` / `Page.Number` / `Page.Cursor` value is a
+ * `Schema.Struct.Fields` whose members decode from strings.
+ *
+ * Custom strategies are plain `Schema.Struct.Fields` whose values decode from
+ * strings.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * // enable offset/limit pagination on a list endpoint
+ * JsonApi.Endpoint.list(Article, { page: JsonApi.Page.Offset })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
 export const Page = {
   /** `?page[offset]=0&page[limit]=10` */
   Offset: {
@@ -71,7 +98,7 @@ export const Page = {
 // Normalises "one resource or several" to an array (heterogeneous endpoints
 // pass several).
 const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArray<R> =>
-  Array.isArray(resource) ? resource as ReadonlyArray<R> : [resource as R]
+  Array.isArray(resource) ? (resource as ReadonlyArray<R>) : [resource as R]
 
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 
@@ -79,44 +106,106 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * The decoded `include` schema: a comma-separated list of relationship paths,
  * typed as the resource's legal path literals (2 hops into the relationship
  * graph) and validated at decode time.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface Include<R extends Any> extends
-  CommaSeparated<Schema.Literals<ReadonlyArray<IncludePath<R>>>>
-{}
+export interface Include<R extends Any> extends CommaSeparated<Schema.Literals<ReadonlyArray<IncludePath<R>>>> {}
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
  * endpoints, several). Paths are the relationship keys plus dotted paths one
  * further hop into the graph; anything else fails decoding (→ 400).
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     comments: JsonApi.Relationship.many(() => Comment)
+ *   }
+ * })
+ *
+ * const include = JsonApi.Query.Include(Article)
+ * Schema.decodeUnknownSync(include)("author,comments.author")
+ * // → ["author", "comments.author"]
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Include = <R extends Any>(resource: R | ReadonlyArray<R>): Include<R> =>
   CommaSeparated(
-    Schema.Literals(
-      dedupe(toResources(resource).flatMap((r) => includePaths(r, 2))) as ReadonlyArray<IncludePath<R>>
-    )
+    Schema.Literals(dedupe(toResources(resource).flatMap((r) => includePaths(r, 2))) as ReadonlyArray<IncludePath<R>>)
   )
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
  * list of attribute names, validated against the closed attribute set.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface Fieldset<Field extends string> extends
-  CommaSeparated<Schema.Literals<ReadonlyArray<Field>>>
-{}
+export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Literals<ReadonlyArray<Field>>> {}
 
 /**
  * Creates the sparse-fieldset schema for one resource type.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * const fieldset = JsonApi.Query.Fieldset(Article)
+ * Schema.decodeUnknownSync(fieldset)("title,body")
+ * // → ["title", "body"]
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
   CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>))
 
 /**
  * The decoded `sort` schema: a list of `{ field, direction }` terms.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Sort<Field extends string> extends SortCodec<Field> {}
 
 /**
  * Creates the `sort` schema for a set of sortable fields.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const sort = JsonApi.Query.Sort(["createdAt", "title"])
+ * Schema.decodeUnknownSync(sort)("-createdAt,title")
+ * // → [{ field: "createdAt", direction: "desc" },
+ * //    { field: "title", direction: "asc" }]
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => SortCodec(fields)
 
@@ -126,6 +215,9 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
 
 /**
  * Query feature configuration for an endpoint.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Options<R extends Any> {
   /**
@@ -161,55 +253,67 @@ export interface Options<R extends Any> {
  * the resource(s) themselves plus their direct relationship targets.
  *
  * Distributes over unions of resource definitions.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]>
-  : never
+export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]> : never
 
 /**
  * The nested (decoded) struct fields of a query schema.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  & ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include<R>> } : {})
-  & ([O["fields"]] extends [true] ? {
-      readonly fields: Schema.optionalKey<
-        Schema.Struct<
-          {
-            readonly [TypeName in FieldsetResources<R>["type"]]: Schema.optionalKey<
-              Fieldset<AttributeKeys<Extract<FieldsetResources<R>, { type: TypeName }>>>
-            >
-          }
-        >
-      >
-    }
-    : {})
-  & (O["sort"] extends true ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
-    : O["sort"] extends ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
-    : {})
-  & (O["page"] extends Schema.Struct.Fields ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> }
-    : {})
-  & (O["filter"] extends Schema.Struct.Fields ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
-    : {})
+  ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include<R>> } : {}) &
+    ([O["fields"]] extends [true]
+      ? {
+          readonly fields: Schema.optionalKey<
+            Schema.Struct<{
+              readonly [TypeName in FieldsetResources<R>["type"]]: Schema.optionalKey<
+                Fieldset<AttributeKeys<Extract<FieldsetResources<R>, { type: TypeName }>>>
+              >
+            }>
+          >
+        }
+      : {}) &
+    (O["sort"] extends true
+      ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
+      : O["sort"] extends ReadonlyArray<string>
+        ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
+        : {}) &
+    (O["page"] extends Schema.Struct.Fields ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> } : {}) &
+    (O["filter"] extends Schema.Struct.Fields
+      ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
+      : {})
 >
 
 /**
  * The flat (wire) struct fields of a query schema: every parameter is a
  * bracket-keyed string.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  & ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Schema.String> } : {})
-  & ([O["fields"]] extends [true] ? {
-      readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
-    }
-    : {})
-  & (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Schema.String> } : {})
-  & (O["page"] extends Schema.Struct.Fields ? {
-      readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
-    }
-    : {})
-  & (O["filter"] extends Schema.Struct.Fields ? {
-      readonly [K in keyof O["filter"] & string as `filter[${K}]`]: Schema.optionalKey<Schema.String>
-    }
-    : {})
+  ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Schema.String> } : {}) &
+    ([O["fields"]] extends [true]
+      ? {
+          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
+        }
+      : {}) &
+    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Schema.String> } : {}) &
+    (O["page"] extends Schema.Struct.Fields
+      ? {
+          readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
+        }
+      : {}) &
+    (O["filter"] extends Schema.Struct.Fields
+      ? {
+          readonly [K in keyof O["filter"] & string as `filter[${K}]`]: Schema.optionalKey<Schema.String>
+        }
+      : {})
 >
 
 // Resolves to `T` for every concrete query configuration; needed because the
@@ -220,15 +324,16 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
 /**
  * The full query schema for a resource and feature set: a flat, bracket-keyed
  * string record on the wire, an ergonomic nested shape when decoded.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface QuerySchema<R extends Any, O extends Options<R>> extends
-  Schema.decodeTo<
-    Schema.Struct<AsFields<NestedFields<R, O>>>,
-    Schema.Struct<AsFields<FlatFields<R, O>>>,
-    never,
-    never
-  >
-{}
+export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema.decodeTo<
+  Schema.Struct<AsFields<NestedFields<R, O>>>,
+  Schema.Struct<AsFields<FlatFields<R, O>>>,
+  never,
+  never
+> {}
 
 /**
  * Builds the query schema for a resource (or, for heterogeneous endpoints,
@@ -237,6 +342,31 @@ export interface QuerySchema<R extends Any, O extends Options<R>> extends
  * The result is passed as an `HttpApiEndpoint` `query` schema; handlers
  * receive the decoded nested shape, clients provide it and it is encoded back
  * to flat query parameters.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * const query = JsonApi.Query.schema(Article, {
+ *   include: true,
+ *   fields: true,
+ *   sort: true,
+ *   page: JsonApi.Page.Offset,
+ *   filter: { author: Schema.String }
+ * })
+ *
+ * // handlers receive the decoded nested shape
+ * Schema.decodeUnknownSync(query)({ "page[offset]": "20", "page[limit]": "10" })
+ * // → { page: { offset: 20, limit: 10 } }
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const schema = <R extends Any, const O extends Options<R>>(
   resource: R | ReadonlyArray<R>,
@@ -261,9 +391,10 @@ export const schema = <R extends Any, const O extends Options<R>>(
   }
 
   if (options.sort === true || (Array.isArray(options.sort) && options.sort.length > 0)) {
-    const sortable = options.sort === true
-      ? dedupe(resources.flatMap((r) => attributeKeys(r)))
-      : (options.sort as ReadonlyArray<string>)
+    const sortable =
+      options.sort === true
+        ? dedupe(resources.flatMap((r) => attributeKeys(r)))
+        : (options.sort as ReadonlyArray<string>)
     nestedFields.sort = Schema.optionalKey(Sort(sortable))
     flatFields.sort = Schema.optionalKey(Schema.String)
   }

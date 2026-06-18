@@ -87,7 +87,7 @@ describe("Resource", () => {
     // Branded ids are not assignable across resource types
     expectTypeOf(articleId).not.toEqualTypeOf(personId)
     // Branded ids flow into the resource object type
-    expectTypeOf<typeof Article.Type["id"]>().toEqualTypeOf<typeof articleId>()
+    expectTypeOf<(typeof Article.Type)["id"]>().toEqualTypeOf<typeof articleId>()
   })
 
   it("derives the resource identifier schema", () => {
@@ -157,7 +157,7 @@ describe("Resource.createPayload", () => {
   })
 
   it("does not expose an id key in the payload type", () => {
-    type CreateData = typeof Article.createPayload.Type["data"]
+    type CreateData = (typeof Article.createPayload.Type)["data"]
     expectTypeOf<CreateData>().not.toHaveProperty("id")
     expectTypeOf<CreateData["lid"]>().toEqualTypeOf<string | undefined>()
   })
@@ -231,7 +231,7 @@ describe("Resource.createPayload", () => {
     })
     expect(decoded.data.relationships.profile.data.id).toBe("9")
     // ... and the paginated key does not exist in the payload type.
-    type CreateRels = typeof Author.createPayload.Type["data"]["relationships"]
+    type CreateRels = (typeof Author.createPayload.Type)["data"]["relationships"]
     expectTypeOf<CreateRels>().not.toHaveProperty("posts")
   })
 })
@@ -289,7 +289,7 @@ describe("Resource.updatePayload", () => {
         { onExcessProperty: "error" }
       )
     ).toThrow()
-    type UpdateRels = NonNullable<typeof Author.updatePayload.Type["data"]["relationships"]>
+    type UpdateRels = NonNullable<(typeof Author.updatePayload.Type)["data"]["relationships"]>
     expectTypeOf<UpdateRels>().not.toHaveProperty("posts")
   })
 })
@@ -487,7 +487,7 @@ describe("Resource.document / Resource.collection", () => {
       meta: { rank: 3 }
     })
     expect(decoded.meta?.rank).toBe(3)
-    expectTypeOf<NonNullable<typeof Article.Type["meta"]>["rank"]>().toEqualTypeOf<number>()
+    expectTypeOf<NonNullable<(typeof Article.Type)["meta"]>["rank"]>().toEqualTypeOf<number>()
   })
 
   it("document meta can be overridden per document", () => {
@@ -623,19 +623,19 @@ describe("forward references", () => {
 
 describe("type-level guarantees", () => {
   it("attribute types flow into the resource Type", () => {
-    expectTypeOf<typeof Article.Type["attributes"]["title"]>().toEqualTypeOf<string>()
-    expectTypeOf<typeof Article.Type["attributes"]["createdAt"]>().toEqualTypeOf<Date>()
+    expectTypeOf<(typeof Article.Type)["attributes"]["title"]>().toEqualTypeOf<string>()
+    expectTypeOf<(typeof Article.Type)["attributes"]["createdAt"]>().toEqualTypeOf<Date>()
     // Encoded side keeps the wire form
-    expectTypeOf<typeof Article.Encoded["attributes"]["createdAt"]>().toEqualTypeOf<string>()
+    expectTypeOf<(typeof Article.Encoded)["attributes"]["createdAt"]>().toEqualTypeOf<string>()
   })
 
   it("relationship identifier types are tagged with the target resource type", () => {
-    type AuthorData = NonNullable<NonNullable<typeof Article.Type["relationships"]>["author"]["data"]>
+    type AuthorData = NonNullable<NonNullable<(typeof Article.Type)["relationships"]>["author"]["data"]>
     expectTypeOf<AuthorData["type"]>().toEqualTypeOf<"people">()
   })
 
   it("default meta is a free-form record", () => {
-    expectTypeOf<NonNullable<typeof Person.Type["meta"]>>().toEqualTypeOf<{
+    expectTypeOf<NonNullable<(typeof Person.Type)["meta"]>>().toEqualTypeOf<{
       readonly [x: string]: unknown
     }>()
   })

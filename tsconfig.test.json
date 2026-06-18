@@ -5,7 +5,7 @@
     "rootDir": ".",
     "types": ["vitest/globals", "node"],
     "paths": {
-      "effect-jsonapi": ["./src/index.ts"]
+      "@thomasfosterau/effect-jsonapi": ["./src/index.ts"]
     }
   },
   "include": ["src/**/*", "examples/**/*", "test/**/*"],

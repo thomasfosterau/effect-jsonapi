@@ -16,7 +16,7 @@
  */
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 import {
   IssueLocked,
   IssueNotFound,
@@ -184,9 +184,4 @@ export const search = JsonApi.Group(
   })
 )
 
-export const Api = HttpApi.make("github")
-  .add(users)
-  .add(repositories)
-  .add(issues)
-  .add(pulls)
-  .add(search)
+export const Api = HttpApi.make("github").add(users).add(repositories).add(issues).add(pulls).add(search)

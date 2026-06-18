@@ -5,7 +5,7 @@
  */
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
 import { Article, Comment, Person } from "./resources.js"
 

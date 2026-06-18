@@ -75,12 +75,22 @@ describe("lidMap", () => {
 
     const linkage = lids.resolveLinkage(Article, {
       author: { data: { type: "people", id: "9" } },
-      comments: { data: [{ type: "comments", lid: "c1" }, { type: "comments", id: "5" }] }
+      comments: {
+        data: [
+          { type: "comments", lid: "c1" },
+          { type: "comments", id: "5" }
+        ]
+      }
     })
 
     expect(linkage).toEqual({
       author: { data: { type: "people", id: "9" } },
-      comments: { data: [{ type: "comments", id: "100" }, { type: "comments", id: "5" }] }
+      comments: {
+        data: [
+          { type: "comments", id: "100" },
+          { type: "comments", id: "5" }
+        ]
+      }
     })
   })
 

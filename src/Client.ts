@@ -22,12 +22,17 @@
  * section" (https://jsonapi.org/format/1.1/#fetching-includes). The runtime
  * decode still validates against the endpoint's full `included` union, so a
  * non-compliant server fails decoding rather than producing lies.
+ *
+ * @since 0.1.0
  */
 import type { Effect } from "effect"
 import type { Any, IncludedFor, IncludePath } from "./Resource.js"
 
 /**
  * The minimal shape of a compound document value.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface AnyDocument {
   readonly included?: ReadonlyArray<unknown> | undefined
@@ -36,6 +41,9 @@ export interface AnyDocument {
 /**
  * A document with its `included` member narrowed to the given resources'
  * decoded types.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> & {
   readonly included?: ReadonlyArray<Included["Type"]>
@@ -50,6 +58,49 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  * - data-first (narrow a document value directly)
  *
  * This is a type-level operation with no runtime cost.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     comments: JsonApi.Relationship.many(() => Comment)
+ *   }
+ * })
+ *
+ * // `client` is a derived `HttpApiClient` for an api containing the articles group
+ * type Client = {
+ *   readonly articles: {
+ *     readonly fetch: (request: {
+ *       readonly params: { readonly id: string }
+ *       readonly query: { readonly include?: ReadonlyArray<JsonApi.IncludePath<typeof Article>> }
+ *     }) => Effect.Effect<ReturnType<typeof Article.document>["Type"]>
+ *   }
+ * }
+ *
+ * const fetchArticle = (client: Client) => {
+ *   const include = ["author", "comments.author"] as const
+ *   return client.articles
+ *     .fetch({ params: { id: "1" }, query: { include } })
+ *     .pipe(JsonApi.narrowIncluded(Article, include))
+ *   //   ^ Effect of a document whose `included` is narrowed to the requested
+ *   //     resources — unrequested types are excluded from the type.
+ * }
+ * ```
+ *
+ * @since 0.1.0
+ * @category combinators
  */
 export const narrowIncluded: {
   <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(
@@ -65,7 +116,7 @@ export const narrowIncluded: {
   ): NarrowedDocument<Doc, IncludedFor<R, Paths>>
 } = ((...args: ReadonlyArray<unknown>) =>
   args.length >= 3
-    // data-first: the document itself
-    ? args[2]
-    // data-last: an identity function over the effect
-    : (effect: unknown) => effect) as never
+    ? // data-first: the document itself
+      args[2]
+    : // data-last: an identity function over the effect
+      (effect: unknown) => effect) as never

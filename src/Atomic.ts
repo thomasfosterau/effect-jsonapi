@@ -53,19 +53,20 @@
  * ```
  *
  * @see {@link https://jsonapi.org/ext/atomic/}
+ * @since 0.1.0
  */
 import { Schema, Struct } from "effect"
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js"
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js"
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js"
 import * as Relationship from "./Relationship.js"
+import type { Relationships } from "./Relationship.js"
 import type {
   Any,
   HasRequiredRelationship,
   PartialAttributes,
   RefValue,
   RelationshipName,
-  Relationships,
   ToManyName
 } from "./Resource.js"
 import { Ref } from "./Resource.js"
@@ -80,18 +81,27 @@ import { Ref } from "./Resource.js"
  *
  * Pass it to `Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })` so
  * content negotiation accepts the extension media type.
+ *
+ * @since 0.1.0
+ * @category constants
  */
 export const EXTENSION_URI: string = ATOMIC_EXTENSION_URI
 
 /**
  * The JSON:API media type carrying the atomic operations `ext` parameter:
  * `'application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"'`.
+ *
+ * @since 0.1.0
+ * @category constants
  */
 export const MEDIA_TYPE: string = ATOMIC_MEDIA_TYPE
 
 /**
  * A ready-made top-level `jsonapi` member value advertising support for the
  * atomic operations extension.
+ *
+ * @since 0.1.0
+ * @category constants
  */
 export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", ext: [ATOMIC_EXTENSION_URI] }
 
@@ -107,9 +117,12 @@ export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", ext: [ATOMIC
  * `relationship` member is forbidden (`optionalKey(Never)`), which is what
  * makes the operation union unambiguous: a ref carrying `relationship` can
  * only decode as a relationship operation.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface ResourceRef<R extends Any> extends
-  Schema.Union<readonly [
+export interface ResourceRef<R extends Any> extends Schema.Union<
+  readonly [
     Schema.Struct<{
       readonly type: Schema.tag<R["type"]>
       readonly id: R["Id"]
@@ -122,11 +135,14 @@ export interface ResourceRef<R extends Any> extends
       readonly meta: Schema.optionalKey<typeof AnyMeta>
       readonly relationship: Schema.optionalKey<typeof Schema.Never>
     }>
-  ]>
-{}
+  ]
+> {}
 
 /**
  * Creates the resource-ref schema for a resource.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const ResourceRef = <R extends Any>(resource: R): ResourceRef<R> =>
   Schema.Union([
@@ -149,9 +165,11 @@ export const ResourceRef = <R extends Any>(resource: R): ResourceRef<R> =>
  * operations: `{ type, id | lid, relationship }`.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-to-one-relationships}
+ * @since 0.1.0
+ * @category models
  */
-export interface RelationshipRef<R extends Any, K extends string> extends
-  Schema.Union<readonly [
+export interface RelationshipRef<R extends Any, K extends string> extends Schema.Union<
+  readonly [
     Schema.Struct<{
       readonly type: Schema.tag<R["type"]>
       readonly id: R["Id"]
@@ -162,11 +180,14 @@ export interface RelationshipRef<R extends Any, K extends string> extends
       readonly lid: Schema.String
       readonly relationship: Schema.tag<K>
     }>
-  ]>
-{}
+  ]
+> {}
 
 /**
  * Creates the relationship-ref schema for one of a resource's relationships.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const RelationshipRef = <R extends Any, const K extends RelationshipName<R>>(
   resource: R,
@@ -193,51 +214,62 @@ export const RelationshipRef = <R extends Any, const K extends RelationshipName<
  * The linkage of a required (`one`) to-one relationship inside an operation:
  * like the resource's own relationship schema, but identifiers may be
  * lid-based.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface OneRefSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Ref<R>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface OneRefSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Ref<R>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The linkage of an `optional` (nullable) to-one relationship inside an
  * operation.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface OptionalRefSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.NullOr<Ref<R>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface OptionalRefSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.NullOr<Ref<R>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The linkage of an inline (`many`) to-many relationship inside an operation.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface ManyRefSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.$Array<Ref<R>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface ManyRefSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.$Array<Ref<R>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The operation-linkage schema of a relationship descriptor (id- or lid-based
  * identifiers). `paginated` relationships have none — their linkage is managed
  * through relationship operations, not inline.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type RefSchemaFor<D> = D extends Relationship.One<infer T> ? OneRefSchema<T>
-  : D extends Relationship.Optional<infer T> ? OptionalRefSchema<T>
-  : D extends Relationship.Many<infer T> ? ManyRefSchema<T>
-  : never
+export type RefSchemaFor<D> =
+  D extends Relationship.One<infer T>
+    ? OneRefSchema<T>
+    : D extends Relationship.Optional<infer T>
+      ? OptionalRefSchema<T>
+      : D extends Relationship.Many<infer T>
+        ? ManyRefSchema<T>
+        : never
 
 const refSchemaFor = (descriptor: Relationship.Descriptor): Schema.Top => {
-  const data = descriptor.kind === "one"
-    ? Ref(descriptor.ref)
-    : descriptor.kind === "optional"
-    ? Schema.NullOr(Ref(descriptor.ref))
-    : Schema.Array(Ref(descriptor.ref))
+  const data =
+    descriptor.kind === "one"
+      ? Ref(descriptor.ref)
+      : descriptor.kind === "optional"
+        ? Schema.NullOr(Ref(descriptor.ref))
+        : Schema.Array(Ref(descriptor.ref))
   return Schema.Struct({
     data,
     meta: Schema.optionalKey(AnyMeta)
@@ -253,25 +285,35 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
  * The relationship fields of an `add` operation's `data` — mirrors the create
  * payload: required `one` relationships must be present, `optional` / `many`
  * are optional, `paginated` are excluded. Identifiers may be lid-based.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type AddRelationshipFields<Rels extends Relationships> = {
-  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Rels[K] extends
-    Relationship.One<Any> ? RefSchemaFor<Rels[K]>
-    : Schema.optionalKey<RefSchemaFor<Rels[K]>>
+  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any>
+    ? never
+    : K]: Rels[K] extends Relationship.One<Any> ? RefSchemaFor<Rels[K]> : Schema.optionalKey<RefSchemaFor<Rels[K]>>
 }
 
 /**
  * The `relationships` member of an `add` operation: a required key when the
  * resource has required (`one`) relationships, optional otherwise.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type AddRelationshipsMember<Rels extends Relationships> = HasRequiredRelationship<Rels> extends true
-  ? Schema.Struct<AsFields<AddRelationshipFields<Rels>>>
-  : Schema.optionalKey<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>>
+export type AddRelationshipsMember<Rels extends Relationships> =
+  HasRequiredRelationship<Rels> extends true
+    ? Schema.Struct<AsFields<AddRelationshipFields<Rels>>>
+    : Schema.optionalKey<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>>
 
 /**
  * The relationship fields of an `update` operation's `data` — mirrors the
  * update payload: every non-`paginated` relationship, each optional (PATCH
  * semantics). Identifiers may be lid-based.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type UpdateRelationshipFields<Rels extends Relationships> = {
   readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Schema.optionalKey<
@@ -280,7 +322,9 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
 }
 
 // Runtime construction of the add / update operation relationship members.
-const addRelationshipMembers = (relationships: Relationships): {
+const addRelationshipMembers = (
+  relationships: Relationships
+): {
   readonly struct: Schema.Top
   readonly required: boolean
 } => {
@@ -319,22 +363,25 @@ const updateRelationshipFields = (relationships: Relationships): Schema.Top => {
  * present, `paginated` relationships are excluded).
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-creating-resources}
+ * @since 0.1.0
+ * @category models
  */
-export interface AddOperation<R extends Any> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"add">
-    readonly data: Schema.Struct<{
-      readonly type: Schema.tag<R["type"]>
-      readonly lid: Schema.optionalKey<Schema.String>
-      readonly attributes: R["fields"]["attributes"]
-      readonly relationships: AddRelationshipsMember<R["relationships"]>
-    }>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
+export interface AddOperation<R extends Any> extends Schema.Struct<{
+  readonly op: Schema.tag<"add">
+  readonly data: Schema.Struct<{
+    readonly type: Schema.tag<R["type"]>
+    readonly lid: Schema.optionalKey<Schema.String>
+    readonly attributes: R["fields"]["attributes"]
+    readonly relationships: AddRelationshipsMember<R["relationships"]>
   }>
-{}
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the `add` operation schema for a resource.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
   const { required, struct } = addRelationshipMembers(resource.relationships)
@@ -357,26 +404,27 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
  * `paginated` relationships are excluded.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-resources}
+ * @since 0.1.0
+ * @category models
  */
-export interface UpdateOperation<R extends Any> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"update">
-    readonly ref: Schema.optionalKey<ResourceRef<R>>
-    readonly data: Schema.Struct<{
-      readonly type: Schema.tag<R["type"]>
-      readonly id: Schema.optionalKey<R["Id"]>
-      readonly lid: Schema.optionalKey<Schema.String>
-      readonly attributes: Schema.optionalKey<
-        Schema.Struct<PartialAttributes<R["fields"]["attributes"]["fields"]>>
-      >
-      readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<R["relationships"]>>>>
-    }>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
+export interface UpdateOperation<R extends Any> extends Schema.Struct<{
+  readonly op: Schema.tag<"update">
+  readonly ref: Schema.optionalKey<ResourceRef<R>>
+  readonly data: Schema.Struct<{
+    readonly type: Schema.tag<R["type"]>
+    readonly id: Schema.optionalKey<R["Id"]>
+    readonly lid: Schema.optionalKey<Schema.String>
+    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<R["fields"]["attributes"]["fields"]>>>
+    readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<R["relationships"]>>>>
   }>
-{}
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the `update` operation schema for a resource.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> =>
   Schema.Struct({
@@ -386,9 +434,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       type: Schema.tag(resource.type),
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
-      attributes: Schema.optionalKey(
-        Schema.Struct(Struct.map(Schema.optionalKey)(resource.fields.attributes.fields))
-      ),
+      attributes: Schema.optionalKey(Schema.Struct(Struct.map(Schema.optionalKey)(resource.fields.attributes.fields))),
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships))
     }),
     meta: Schema.optionalKey(AnyMeta)
@@ -398,17 +444,20 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
  * A `remove` operation: deletes the resource targeted by `ref`.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-deleting-resources}
+ * @since 0.1.0
+ * @category models
  */
-export interface RemoveOperation<R extends Any> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"remove">
-    readonly ref: ResourceRef<R>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface RemoveOperation<R extends Any> extends Schema.Struct<{
+  readonly op: Schema.tag<"remove">
+  readonly ref: ResourceRef<R>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the `remove` operation schema for a resource.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const RemoveOperation = <R extends Any>(resource: R): RemoveOperation<R> =>
   Schema.Struct({
@@ -428,35 +477,39 @@ export const RemoveOperation = <R extends Any>(resource: R): RemoveOperation<R> 
  * never be cleared — or the target's ref / `null` for `optional` ones.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-to-one-relationships}
+ * @since 0.1.0
+ * @category models
  */
-export interface UpdateToOneRelationshipOperation<R extends Any, K extends string, Data extends Schema.Top> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"update">
-    readonly ref: RelationshipRef<R, K>
-    readonly data: Data
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface UpdateToOneRelationshipOperation<
+  R extends Any,
+  K extends string,
+  Data extends Schema.Top
+> extends Schema.Struct<{
+  readonly op: Schema.tag<"update">
+  readonly ref: RelationshipRef<R, K>
+  readonly data: Data
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * An operation on a to-many relationship (`many` or `paginated`): `add`
  * appends members, `update` replaces all members, `remove` deletes members.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-to-many-relationships}
+ * @since 0.1.0
+ * @category models
  */
 export interface ToManyRelationshipOperation<
   Op extends "add" | "update" | "remove",
   R extends Any,
   K extends string,
   T extends Any
-> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<Op>
-    readonly ref: RelationshipRef<R, K>
-    readonly data: Schema.$Array<Ref<T>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+> extends Schema.Struct<{
+  readonly op: Schema.tag<Op>
+  readonly ref: RelationshipRef<R, K>
+  readonly data: Schema.$Array<Ref<T>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 // ---------------------------------------------------------------------------
 // The operations derived for a resource, as an introspectable record
@@ -468,32 +521,61 @@ export interface ToManyRelationshipOperation<
  *   - `one` → `update` (data: the target's ref — never null)
  *   - `optional` → `update` (data: the target's ref or null)
  *   - `many` / `paginated` → `add` / `update` / `remove` (data: an array of refs)
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type RelationshipOperationsFor<R extends Any, K extends string, Rel> = Rel extends Relationship.One<infer T> ? {
-    /** Replace the to-one linkage with another identifier (required: never null). */
-    readonly update: UpdateToOneRelationshipOperation<R, K, Ref<T>>
-  }
-  : Rel extends Relationship.Optional<infer T> ? {
-      /** Replace the to-one linkage with an identifier, or `null` to clear it. */
-      readonly update: UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>
-    }
-  : Rel extends Relationship.ToMany<infer T> ? {
-      /** Append members to the to-many linkage. */
-      readonly add: ToManyRelationshipOperation<"add", R, K, T>
-      /** Replace all members of the to-many linkage. */
-      readonly update: ToManyRelationshipOperation<"update", R, K, T>
-      /** Delete members from the to-many linkage. */
-      readonly remove: ToManyRelationshipOperation<"remove", R, K, T>
-    }
-  : never
+export type RelationshipOperationsFor<R extends Any, K extends string, Rel> =
+  Rel extends Relationship.One<infer T>
+    ? {
+        /** Replace the to-one linkage with another identifier (required: never null). */
+        readonly update: UpdateToOneRelationshipOperation<R, K, Ref<T>>
+      }
+    : Rel extends Relationship.Optional<infer T>
+      ? {
+          /** Replace the to-one linkage with an identifier, or `null` to clear it. */
+          readonly update: UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>
+        }
+      : Rel extends Relationship.ToMany<infer T>
+        ? {
+            /** Append members to the to-many linkage. */
+            readonly add: ToManyRelationshipOperation<"add", R, K, T>
+            /** Replace all members of the to-many linkage. */
+            readonly update: ToManyRelationshipOperation<"update", R, K, T>
+            /** Delete members from the to-many linkage. */
+            readonly remove: ToManyRelationshipOperation<"remove", R, K, T>
+          }
+        : never
 
 /**
  * Every operation derived for a resource, as a named record of schemas —
  * the single source of truth the request document union is built from, and
  * the answer to "what operations exist for this resource?".
  *
+ * @example
  * ```ts
- * const ops = Atomic.operationsFor(Article)
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * const ops = JsonApi.Atomic.operationsFor(Article)
  * ops.add                              // create an article
  * ops.update                           // update an article
  * ops.remove                           // delete an article
@@ -502,6 +584,9 @@ export type RelationshipOperationsFor<R extends Any, K extends string, Rel> = Re
  * ops.relationships.comments.update    // replace all comments
  * ops.relationships.comments.remove    // delete comments from the linkage
  * ```
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ResourceOperations<R extends Any> {
   /** `{ op: "add", data: { type, lid?, attributes, relationships } }` — create the resource. */
@@ -519,6 +604,37 @@ export interface ResourceOperations<R extends Any> {
 /**
  * Derives the full set of operations for a resource: resource-level
  * add / update / remove plus the operations of each of its relationships.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * const ops = JsonApi.Atomic.operationsFor(Article)
+ * Object.keys(ops)                 // ["add", "update", "remove", "relationships"]
+ * Object.keys(ops.relationships)   // the resource's relationship keys
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R> => {
   const relationships: Record<string, Record<string, Schema.Top>> = {}
@@ -563,17 +679,21 @@ export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R>
 /**
  * The union of relationship operations legal for a resource, derived from its
  * relationship descriptors.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelationshipOperation<R extends Any> = {
   [K in RelationshipName<R>]: R["relationships"][K] extends Relationship.One<infer T>
     ? UpdateToOneRelationshipOperation<R, K, Ref<T>>
     : R["relationships"][K] extends Relationship.Optional<infer T>
       ? UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>
-    : R["relationships"][K] extends Relationship.ToMany<infer T> ?
-        | ToManyRelationshipOperation<"add", R, K, T>
-        | ToManyRelationshipOperation<"update", R, K, T>
-        | ToManyRelationshipOperation<"remove", R, K, T>
-    : never
+      : R["relationships"][K] extends Relationship.ToMany<infer T>
+        ?
+            | ToManyRelationshipOperation<"add", R, K, T>
+            | ToManyRelationshipOperation<"update", R, K, T>
+            | ToManyRelationshipOperation<"remove", R, K, T>
+        : never
 }[RelationshipName<R>]
 
 /**
@@ -582,16 +702,19 @@ export type RelationshipOperation<R extends Any> = {
  * {@link operationsFor}.
  *
  * Distributes over unions of resource definitions.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type Operation<R extends Any> = R extends Any ?
-    | RelationshipOperation<R>
-    | AddOperation<R>
-    | UpdateOperation<R>
-    | RemoveOperation<R>
+export type Operation<R extends Any> = R extends Any
+  ? RelationshipOperation<R> | AddOperation<R> | UpdateOperation<R> | RemoveOperation<R>
   : never
 
 /**
  * The schema of the operation union across a set of resources.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Operations<R extends Any> extends Schema.Union<ReadonlyArray<Operation<R>>> {}
 
@@ -609,31 +732,89 @@ const flattenOperations = (operations: ResourceOperations<Any>): Array<Schema.To
 /**
  * Creates the operation union schema for a set of resources — the union of
  * every schema in each resource's {@link operationsFor} record.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * const Operations = JsonApi.Atomic.Operations([Article, Comment])
+ * ```
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const Operations = <const Resources extends ReadonlyArray<Any>>(
   resources: Resources
 ): Operations<Resources[number]> =>
-  Schema.Union(
-    resources.flatMap((resource) => flattenOperations(operationsFor(resource)))
-  ) as unknown as Operations<Resources[number]>
+  Schema.Union(resources.flatMap((resource) => flattenOperations(operationsFor(resource)))) as unknown as Operations<
+    Resources[number]
+  >
 
 /**
  * The `atomic:operations` request document schema for a set of resources: a
  * non-empty, ordered list of operations.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#operation-objects}
+ * @since 0.1.0
+ * @category models
  */
-export interface RequestDocument<R extends Any> extends
-  Schema.Struct<{
-    readonly "atomic:operations": Schema.$Array<Operations<R>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface RequestDocument<R extends Any> extends Schema.Struct<{
+  readonly "atomic:operations": Schema.$Array<Operations<R>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates the `atomic:operations` request document schema for a set of
  * resources.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * const Request = JsonApi.Atomic.RequestDocument([Article, Comment])
+ * ```
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const RequestDocument = <const Resources extends ReadonlyArray<Any>>(
   resources: Resources
@@ -653,20 +834,21 @@ export const RequestDocument = <const Resources extends ReadonlyArray<Any>>(
  * nothing produce an empty object (or `{ data: null }`).
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-result-objects}
+ * @since 0.1.0
+ * @category models
  */
-export interface Result<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.optionalKey<Schema.NullOr<Schema.Union<ReadonlyArray<R>>>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface Result<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.optionalKey<Schema.NullOr<Schema.Union<ReadonlyArray<R>>>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the result-object schema for a set of resources.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
-export const Result = <const Resources extends ReadonlyArray<Any>>(
-  resources: Resources
-): Result<Resources[number]> =>
+export const Result = <const Resources extends ReadonlyArray<Any>>(resources: Resources): Result<Resources[number]> =>
   Schema.Struct({
     data: Schema.optionalKey(Schema.NullOr(Schema.Union(resources))),
     meta: Schema.optionalKey(AnyMeta)
@@ -677,24 +859,50 @@ export const Result = <const Resources extends ReadonlyArray<Any>>(
  * operation, in request order.
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-responses-4}
+ * @since 0.1.0
+ * @category models
  */
-export interface ResultDocument<R extends Any, M extends Schema.Top = typeof AnyMeta> extends
-  Schema.Struct<{
-    readonly "atomic:results": Schema.$Array<Result<R>>
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly meta: Schema.optionalKey<M>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface ResultDocument<R extends Any, M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
+  readonly "atomic:results": Schema.$Array<Result<R>>
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly meta: Schema.optionalKey<M>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates the `atomic:results` response document schema for a set of
  * resources.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * const Results = JsonApi.Atomic.ResultDocument([Article, Comment])
+ * ```
+ *
+ * @since 0.1.0
+ * @category schemas
  */
-export const ResultDocument = <
-  const Resources extends ReadonlyArray<Any>,
-  M extends Schema.Top = typeof AnyMeta
->(
+export const ResultDocument = <const Resources extends ReadonlyArray<Any>, M extends Schema.Top = typeof AnyMeta>(
   resources: Resources,
   options?: {
     readonly meta?: M
@@ -717,13 +925,38 @@ const targetRef = (type: string, target: string | { readonly lid: string }): Ref
 /**
  * Builds an `add` operation value: creates a resource.
  *
+ * @example
  * ```ts
- * Atomic.add(Article, {
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * JsonApi.Atomic.add(Article, {
  *   lid: "a1",                          // so later operations can reference it
- *   attributes: { title: "Hello" },
- *   relationships: { author: { data: Person.ref("9") } }   // `one`: required
+ *   attributes: { title: "Hello", body: "World" },
+ *   relationships: { author: { data: Person.ref("9") } }
  * })
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const add = <R extends Any>(
   resource: R,
@@ -739,12 +972,37 @@ export const add = <R extends Any>(
 /**
  * Builds an `update` operation value: updates a resource (partial attributes).
  *
+ * @example
  * ```ts
- * Atomic.update(Article, {
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * JsonApi.Atomic.update(Article, {
  *   id: Article.Id.make("1"),
  *   attributes: { title: "Updated" }
  * })
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const update = <R extends Any>(
   resource: R,
@@ -761,10 +1019,35 @@ export const update = <R extends Any>(
  * Builds a `remove` operation value: deletes a resource by id — or by lid, for
  * resources created earlier in the same request.
  *
+ * @example
  * ```ts
- * Atomic.remove(Article, "1")
- * Atomic.remove(Article, { lid: "a1" })
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * JsonApi.Atomic.remove(Article, "1")
+ * JsonApi.Atomic.remove(Article, { lid: "a1" })
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const remove = <R extends Any>(
   resource: R,
@@ -780,6 +1063,9 @@ export const remove = <R extends Any>(
 /**
  * The ref values accepted for a target resource: its typed identifier or a
  * lid-based local identifier (`Target.ref(id)` / `Target.lidRef(lid)`).
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RefValueFor<T extends Any> = Ref<T>["Type"]
 
@@ -787,33 +1073,69 @@ export type RefValueFor<T extends Any> = Ref<T>["Type"]
  * The linkage value of a relationship operation, by relationship kind: one ref
  * for required to-one (`one`), one ref or `null` for `optional`, an array of
  * refs for to-many (`many` / `paginated`).
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type RelationshipDataValue<R extends Any, K extends RelationshipName<R>> = R["relationships"][K] extends
-  Relationship.One<infer T> ? RefValueFor<T>
-  : R["relationships"][K] extends Relationship.Optional<infer T> ? RefValueFor<T> | null
-  : R["relationships"][K] extends Relationship.ToMany<infer T> ? ReadonlyArray<RefValueFor<T>>
-  : never
+export type RelationshipDataValue<R extends Any, K extends RelationshipName<R>> =
+  R["relationships"][K] extends Relationship.One<infer T>
+    ? RefValueFor<T>
+    : R["relationships"][K] extends Relationship.Optional<infer T>
+      ? RefValueFor<T> | null
+      : R["relationships"][K] extends Relationship.ToMany<infer T>
+        ? ReadonlyArray<RefValueFor<T>>
+        : never
 
 /**
  * The value type of an `update` operation on relationship `K` of `R`.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type UpdateRelationshipValue<R extends Any, K extends RelationshipName<R>> = R["relationships"][K] extends
-  Relationship.One<infer T> ? UpdateToOneRelationshipOperation<R, K, Ref<T>>["Type"]
-  : R["relationships"][K] extends Relationship.Optional<infer T>
-    ? UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>["Type"]
-  : R["relationships"][K] extends Relationship.ToMany<infer T> ? ToManyRelationshipOperation<"update", R, K, T>["Type"]
-  : never
+export type UpdateRelationshipValue<R extends Any, K extends RelationshipName<R>> =
+  R["relationships"][K] extends Relationship.One<infer T>
+    ? UpdateToOneRelationshipOperation<R, K, Ref<T>>["Type"]
+    : R["relationships"][K] extends Relationship.Optional<infer T>
+      ? UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>["Type"]
+      : R["relationships"][K] extends Relationship.ToMany<infer T>
+        ? ToManyRelationshipOperation<"update", R, K, T>["Type"]
+        : never
 
 /**
  * Builds an `update` operation on a relationship: replaces a to-one linkage
  * (an identifier — or `null`, for `optional` relationships) or all members of
  * a to-many linkage.
  *
+ * @example
  * ```ts
- * Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
- * Atomic.updateRelationship(Article, "1", "tags", [Tag.ref("3")])
- * Atomic.updateRelationship(Article, { lid: "a1" }, "editor", null)   // `optional` only
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * JsonApi.Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
+ * JsonApi.Atomic.updateRelationship(Article, "1", "comments", [Comment.ref("3")])
+ * JsonApi.Atomic.updateRelationship(Article, { lid: "a1" }, "editor", null) // `optional` only
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const updateRelationship = <R extends Any, const K extends RelationshipName<R>>(
   resource: R,
@@ -831,18 +1153,45 @@ export const updateRelationship = <R extends Any, const K extends RelationshipNa
 
 /**
  * The target resource of a to-many relationship key.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type ToManyTarget<R extends Any, K extends ToManyName<R>> = R["relationships"][K] extends
-  Relationship.ToMany<infer T> ? T
-  : never
+export type ToManyTarget<R extends Any, K extends ToManyName<R>> =
+  R["relationships"][K] extends Relationship.ToMany<infer T> ? T : never
 
 /**
  * Builds an `add` operation on a to-many relationship (`many` or `paginated`):
  * appends members.
  *
+ * @example
  * ```ts
- * Atomic.addToRelationship(Article, "1", "comments", [Comment.ref("5")])
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * JsonApi.Atomic.addToRelationship(Article, "1", "comments", [Comment.ref("5")])
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const addToRelationship = <R extends Any, const K extends ToManyName<R>>(
   resource: R,
@@ -862,9 +1211,34 @@ export const addToRelationship = <R extends Any, const K extends ToManyName<R>>(
  * Builds a `remove` operation on a to-many relationship (`many` or
  * `paginated`): deletes members.
  *
+ * @example
  * ```ts
- * Atomic.removeFromRelationship(Article, "1", "comments", [Comment.ref("5")])
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * JsonApi.Atomic.removeFromRelationship(Article, "1", "comments", [Comment.ref("5")])
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const removeFromRelationship = <R extends Any, const K extends ToManyName<R>>(
   resource: R,
@@ -883,14 +1257,41 @@ export const removeFromRelationship = <R extends Any, const K extends ToManyName
 /**
  * Builds an `atomic:operations` request document value from operation values.
  *
+ * @example
  * ```ts
- * client.operations.operations({
- *   payload: Atomic.request(
- *     Atomic.add(Article, { lid: "a1", attributes: { title: "Hello" }, relationships: {...} }),
- *     Atomic.remove(Comment, "5")
- *   )
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * const doc = JsonApi.Atomic.request(
+ *   JsonApi.Atomic.add(Article, {
+ *     lid: "a1",
+ *     attributes: { title: "Hello", body: "World" },
+ *     relationships: { author: { data: Person.ref("9") } }
+ *   }),
+ *   JsonApi.Atomic.remove(Comment, "5")
+ * )
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const request = <const Ops extends ReadonlyArray<{ readonly op: "add" | "update" | "remove" }>>(
   ...ops: Ops
@@ -902,6 +1303,9 @@ export const request = <const Ops extends ReadonlyArray<{ readonly op: "add" | "
 
 /**
  * The minimal runtime shape of one result object value.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ResultValue {
   readonly data?: ResourceValue | null
@@ -911,11 +1315,24 @@ export interface ResultValue {
 /**
  * An empty result object — for operations that complete without returning
  * data (relationship updates, removals).
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const emptyResult: { readonly data?: never } = {}
 
 /**
  * Builds one result object value.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * JsonApi.Atomic.result({ type: "articles", id: "1", attributes: { title: "Hello" } })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const result = <const R extends ResourceValue | null, const M extends MetaValue = never>(
   data: R,
@@ -930,16 +1347,49 @@ export const result = <const R extends ResourceValue | null, const M extends Met
  * Builds an `atomic:results` document value: one entry per operation, in
  * request order.
  *
+ * @example
  * ```ts
- * handlers.handle("operations", ({ payload }) =>
- *   Effect.gen(function*() {
- *     const entries = []
- *     for (const operation of payload["atomic:operations"]) {
- *       entries.push(yield* apply(operation))   // { data: resource } or Atomic.emptyResult
- *     }
- *     return Atomic.results(entries)
- *   }))
+ * import { Effect, Schema } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ *
+ * const Api = HttpApi.make("blog").add(
+ *   JsonApi.Group("operations", JsonApi.Endpoint.operations([Article, Comment]))
+ * )
+ *
+ * // one result entry per operation; removals and relationship updates return no data
+ * type ResultEntry = { readonly data?: typeof Article.Type | typeof Comment.Type | null }
+ *
+ * // apply one operation, returning its result entry (your domain logic)
+ * const apply = (
+ *   operation: JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]
+ * ): Effect.Effect<ResultEntry> => Effect.succeed({})
+ *
+ * export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
+ *   handlers.handle("operations", ({ payload }) =>
+ *     Effect.gen(function*() {
+ *       const entries: Array<ResultEntry> = []
+ *       for (const operation of payload["atomic:operations"]) {
+ *         entries.push(yield* apply(operation)) // { data: resource } or JsonApi.Atomic.emptyResult
+ *       }
+ *       return JsonApi.Atomic.results(entries)
+ *     })))
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const results = <const Entries extends ReadonlyArray<ResultValue>>(
   entries: Entries,
@@ -959,9 +1409,15 @@ export const results = <const Entries extends ReadonlyArray<ResultValue>>(
  * error objects' `source.pointer` member, per the extension's recommendation
  * that errors identify the operation that failed.
  *
+ * @example
  * ```ts
- * Atomic.operationPointer(1)   // "/atomic:operations/1"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * JsonApi.Atomic.operationPointer(1) // "/atomic:operations/1"
  * ```
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const operationPointer = (index: number): string => `/atomic:operations/${index}`
 
@@ -977,15 +1433,44 @@ const isOperationValue = (value: unknown): value is { readonly op: string } =>
  * resource)? Relationship operations are the ones whose `ref` carries a
  * `relationship` member.
  *
+ * @example
  * ```ts
- * for (const operation of payload["atomic:operations"]) {
- *   if (Atomic.isRelationshipOperation(operation)) {
- *     operation.ref.relationship   // typed relationship key
- *   } else {
- *     operation.op                 // "add" | "update" | "remove" on a resource
- *   }
- * }
+ * import { Effect, Schema } from "effect"
+ * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ *
+ * const Api = HttpApi.make("blog").add(
+ *   JsonApi.Group("operations", JsonApi.Endpoint.operations([Article, Comment]))
+ * )
+ *
+ * export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
+ *   handlers.handle("operations", ({ payload }) =>
+ *     Effect.gen(function*() {
+ *       for (const operation of payload["atomic:operations"]) {
+ *         if (JsonApi.Atomic.isRelationshipOperation(operation)) {
+ *           operation.ref.relationship // typed relationship key
+ *         } else {
+ *           operation.op               // "add" | "update" | "remove" on a resource
+ *         }
+ *       }
+ *       return JsonApi.Atomic.results([])
+ *     })))
  * ```
+ *
+ * @since 0.1.0
+ * @category guards
  */
 export const isRelationshipOperation = <Op extends { readonly op: string }>(
   operation: Op
@@ -998,6 +1483,9 @@ export const isRelationshipOperation = <Op extends { readonly op: string }>(
  * The structural shape of operations that target resource `R` itself: `add` /
  * `update` operations carry it in `data.type`; `remove` operations in
  * `ref.type` (with no `relationship` member).
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type ResourceOperationShape<R extends Any> =
   | { readonly data: { readonly type: R["type"] } }
@@ -1006,6 +1494,9 @@ export type ResourceOperationShape<R extends Any> =
 /**
  * The operations of `Op` that target resource `R` itself (not one of its
  * relationships).
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type TargetsResource<Op, R extends Any> = Extract<Op, ResourceOperationShape<R>>
 
@@ -1029,41 +1520,61 @@ const targetsResourceImpl = (operation: { readonly op: string }, resource: Any):
  * Dual API — data-first for `if` statements, data-last (curried) for pattern
  * matching with Effect's `Match` module:
  *
+ * @example
  * ```ts
- * // data-first
- * if (Atomic.targetsResource(operation, Article)) {
- *   switch (operation.op) {
- *     case "add":     operation.data.attributes.title   // typed
- *     case "update":  operation.data.id
- *     case "remove":  operation.ref
- *   }
- * }
+ * import { Match, Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * // data-last, with Match
- * Match.value(operation).pipe(
- *   Match.when(Atomic.targetsResource(Article), (op) => ...),
- *   ...
- * )
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ *
+ * // `operation` is one element of a decoded `atomic:operations` payload
+ * const handle = (operation: JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]) => {
+ *   // data-first
+ *   if (JsonApi.Atomic.targetsResource(operation, Article)) {
+ *     switch (operation.op) {
+ *       case "add":     operation.data.attributes.title; break // typed
+ *       case "update":  operation.data.id; break
+ *       case "remove":  operation.ref; break
+ *     }
+ *   }
+ *
+ *   // data-last, with Match
+ *   return Match.value(operation).pipe(
+ *     Match.when(JsonApi.Atomic.targetsResource(Article), (op) => `${op.op} article`),
+ *     Match.orElse(() => "other")
+ *   )
+ * }
  * ```
+ *
+ * @since 0.1.0
+ * @category guards
  */
 export const targetsResource: {
-  <R extends Any>(
-    resource: R
-  ): (operation: unknown) => operation is ResourceOperationShape<R>
-  <Op extends { readonly op: string }, R extends Any>(
-    operation: Op,
-    resource: R
-  ): operation is TargetsResource<Op, R>
+  <R extends Any>(resource: R): (operation: unknown) => operation is ResourceOperationShape<R>
+  <Op extends { readonly op: string }, R extends Any>(operation: Op, resource: R): operation is TargetsResource<Op, R>
 } = ((...args: ReadonlyArray<unknown>) =>
   isOperationValue(args[0])
-    // data-first: (operation, resource)
-    ? targetsResourceImpl(args[0], args[1] as Any)
-    // data-last: (resource) => (operation) => ...
-    : (operation: { readonly op: string }) => targetsResourceImpl(operation, args[0] as Any)) as never
+    ? // data-first: (operation, resource)
+      targetsResourceImpl(args[0], args[1] as Any)
+    : // data-last: (resource) => (operation) => ...
+      (operation: { readonly op: string }) => targetsResourceImpl(operation, args[0] as Any)) as never
 
 /**
  * The structural shape of operations that target relationship `K` of resource
  * `R`: their `ref` names the resource type and the relationship.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelationshipOperationShape<R extends Any, K extends string> = {
   readonly ref: { readonly type: R["type"]; readonly relationship: K }
@@ -1071,20 +1582,18 @@ export type RelationshipOperationShape<R extends Any, K extends string> = {
 
 /**
  * The operations of `Op` that target relationship `K` of resource `R`.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type TargetsRelationship<Op, R extends Any, K extends string> = Extract<
-  Op,
-  RelationshipOperationShape<R, K>
->
+export type TargetsRelationship<Op, R extends Any, K extends string> = Extract<Op, RelationshipOperationShape<R, K>>
 
-const targetsRelationshipImpl = (
-  operation: { readonly op: string },
-  resource: Any,
-  relationship: string
-): boolean => {
-  const ref = (operation as {
-    readonly ref?: { readonly type?: unknown; readonly relationship?: unknown } | undefined
-  }).ref
+const targetsRelationshipImpl = (operation: { readonly op: string }, resource: Any, relationship: string): boolean => {
+  const ref = (
+    operation as {
+      readonly ref?: { readonly type?: unknown; readonly relationship?: unknown } | undefined
+    }
+  ).ref
   return ref !== undefined && ref !== null && ref.type === resource.type && ref.relationship === relationship
 }
 
@@ -1099,21 +1608,49 @@ const targetsRelationshipImpl = (
  * Dual API — data-first for `if` statements, data-last (curried) for pattern
  * matching with Effect's `Match` module:
  *
+ * @example
  * ```ts
- * // data-first
- * if (Atomic.targetsRelationship(operation, Article, "comments")) {
- *   operation.op      // "add" | "update" | "remove"
- *   operation.data    // ReadonlyArray<comment ref>
- * }
+ * import { Match, Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
- * // data-last, with Match
- * Match.value(operation).pipe(
- *   Match.when(Atomic.targetsRelationship(Comment, "author"), (op) => {
- *     op.data           // person ref (never null: `one`)
- *   }),
- *   ...
- * )
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * // `operation` is one element of a decoded `atomic:operations` payload
+ * const handle = (operation: JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]) => {
+ *   // data-first
+ *   if (JsonApi.Atomic.targetsRelationship(operation, Article, "comments")) {
+ *     operation.op   // "add" | "update" | "remove"
+ *     operation.data // ReadonlyArray<comment ref>
+ *   }
+ *
+ *   // data-last, with Match
+ *   return Match.value(operation).pipe(
+ *     Match.when(JsonApi.Atomic.targetsRelationship(Comment, "author"), (op) =>
+ *       op.data // person ref (never null: `one`)
+ *     ),
+ *     Match.orElse(() => undefined)
+ *   )
+ * }
  * ```
+ *
+ * @since 0.1.0
+ * @category guards
  */
 export const targetsRelationship: {
   <R extends Any, const K extends RelationshipName<R>>(
@@ -1127,8 +1664,8 @@ export const targetsRelationship: {
   ): operation is TargetsRelationship<Op, R, K>
 } = ((...args: ReadonlyArray<unknown>) =>
   isOperationValue(args[0])
-    // data-first: (operation, resource, relationship)
-    ? targetsRelationshipImpl(args[0], args[1] as Any, args[2] as string)
-    // data-last: (resource, relationship) => (operation) => ...
-    : (operation: { readonly op: string }) =>
-      targetsRelationshipImpl(operation, args[0] as Any, args[1] as string)) as never
+    ? // data-first: (operation, resource, relationship)
+      targetsRelationshipImpl(args[0], args[1] as Any, args[2] as string)
+    : // data-last: (resource, relationship) => (operation) => ...
+      (operation: { readonly op: string }) =>
+        targetsRelationshipImpl(operation, args[0] as Any, args[1] as string)) as never

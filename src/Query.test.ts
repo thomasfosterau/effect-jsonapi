@@ -191,9 +191,7 @@ describe("Query.schema", () => {
       ReadonlyArray<"firstName" | "lastName"> | undefined
     >()
     expectTypeOf<NonNullable<Decoded["page"]>["offset"]>().toEqualTypeOf<number | undefined>()
-    expectTypeOf<NonNullable<Decoded["sort"]>[number]["field"]>().toEqualTypeOf<
-      "title" | "body" | "createdAt"
-    >()
+    expectTypeOf<NonNullable<Decoded["sort"]>[number]["field"]>().toEqualTypeOf<"title" | "body" | "createdAt">()
     expectTypeOf<NonNullable<Decoded["filter"]>["author"]>().toEqualTypeOf<string>()
   })
 

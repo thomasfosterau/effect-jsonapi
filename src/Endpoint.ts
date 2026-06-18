@@ -33,6 +33,8 @@
  * The constructors return plain `HttpApiEndpoint` values: everything composes
  * with vanilla `HttpApiGroup` / `HttpApi` / `HttpApiBuilder` / `HttpApiClient`
  * / `HttpApiTest` / `OpenApi`.
+ *
+ * @since 0.1.0
  */
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
@@ -42,16 +44,8 @@ import { asJsonApi, asJsonApiAtomic } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
-import type {
-  Any,
-  AttributeKeys,
-  DefaultIncluded,
-  Relationships,
-  Resource,
-  Target,
-  TargetsOf,
-  ToManyName
-} from "./Resource.js"
+import type { Relationships } from "./Relationship.js"
+import type { Any, AttributeKeys, DefaultIncluded, Resource, Target, TargetsOf, ToManyName } from "./Resource.js"
 import { directTargets } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -61,6 +55,9 @@ import { directTargets } from "./Resource.js"
 /**
  * The constraint satisfied by every `ApiError.make` class: something with a
  * derived wire schema.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ErrorClass {
   readonly wire: Schema.Top
@@ -69,14 +66,16 @@ export interface ErrorClass {
 
 /**
  * The wire schemas of a tuple of error classes.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type Wires<Errors extends ReadonlyArray<ErrorClass>> = {
   readonly [K in keyof Errors]: Errors[K]["wire"]
 }
 
-const wires = <const Errors extends ReadonlyArray<ErrorClass>>(
-  errors: Errors | undefined
-): Wires<Errors> => ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>
+const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors: Errors | undefined): Wires<Errors> =>
+  ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -84,6 +83,9 @@ const wires = <const Errors extends ReadonlyArray<ErrorClass>>(
 
 /**
  * Options common to all endpoint constructors.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface CommonOptions<Name extends string, Path extends `/${string}`, Errors> {
   /** Endpoint name within its group. Defaults to the operation name (`"fetch"`, `"list"`, …). */
@@ -117,6 +119,48 @@ const queryConfig = (options?: {
  *
  * Success is a 200 single-resource document (`data` may be `null`); the
  * compound `included` union is derived from the resource's relationships.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles/:id?include=author&fields[articles]=title
+ *   JsonApi.Endpoint.fetch(Article, {
+ *     include: true,
+ *     fields: true,
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const fetch = <
   Type extends string,
@@ -140,27 +184,23 @@ export const fetch = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get(
-    (options?.name ?? "fetch") as Name,
-    (options?.path ?? `/${resource.type}/:id`) as Path,
-    {
-      params: { id: resource.Id },
-      query: Query.schema(
-        resource,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: false
-          readonly page: undefined
-          readonly filter: undefined
-        }
-      ),
-      success: asJsonApi(
-        resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.get((options?.name ?? "fetch") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+    params: { id: resource.Id },
+    query: Query.schema(
+      resource,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: false
+        readonly page: undefined
+        readonly filter: undefined
+      }
+    ),
+    success: asJsonApi(
+      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -173,6 +213,34 @@ export const fetch = <
  *
  * Success is a 200 collection document (strict array `data`). Enable `sort`,
  * `page` and `filter` for the spec's collection query parameters.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     body: Schema.String,
+ *     createdAt: Schema.DateFromString
+ *   }
+ * })
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
+ *   JsonApi.Endpoint.list(Article, {
+ *     include: true,
+ *     sort: ["createdAt", "title"],
+ *     page: JsonApi.Page.Offset,
+ *     filter: { author: Schema.optionalKey(Schema.String) }
+ *   })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const list = <
   Type extends string,
@@ -205,26 +273,22 @@ export const list = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get(
-    (options?.name ?? "list") as Name,
-    (options?.path ?? `/${resource.type}`) as Path,
-    {
-      query: Query.schema(
-        resource,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: Sort
-          readonly page: PageFields
-          readonly filter: FilterFields
-        }
-      ),
-      success: asJsonApi(
-        resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
+    query: Query.schema(
+      resource,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: Sort
+        readonly page: PageFields
+        readonly filter: FilterFields
+      }
+    ),
+    success: asJsonApi(
+      resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -238,6 +302,30 @@ export const list = <
  * The request payload is the resource's `createPayload` (no `id`, client may
  * send a `lid`); success is a 201 single-resource document containing the
  * created resource.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * class TitleTaken extends JsonApi.Error<TitleTaken>()("TitleTaken", {
+ *   status: 409,
+ *   fields: { title: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // POST /articles → 201
+ *   JsonApi.Endpoint.create(Article, { errors: [TitleTaken] })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const create = <
   Type extends string,
@@ -255,18 +343,14 @@ export const create = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.post(
-    (options?.name ?? "create") as Name,
-    (options?.path ?? `/${resource.type}`) as Path,
-    {
-      payload: asJsonApi(resource.createPayload),
-      success: asJsonApi(
-        resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
-        201
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
+    payload: asJsonApi(resource.createPayload),
+    success: asJsonApi(
+      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
+      201
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -280,6 +364,30 @@ export const create = <
  * The request payload is the resource's `updatePayload` (`id` required,
  * attributes partial); success is a 200 single-resource document containing
  * the updated resource.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // PATCH /articles/:id (partial attributes)
+ *   JsonApi.Endpoint.update(Article, { errors: [ArticleNotFound] })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const update = <
   Type extends string,
@@ -297,18 +405,14 @@ export const update = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.patch(
-    (options?.name ?? "update") as Name,
-    (options?.path ?? `/${resource.type}/:id`) as Path,
-    {
-      params: { id: resource.Id },
-      payload: asJsonApi(resource.updatePayload),
-      success: asJsonApi(
-        resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+    params: { id: resource.Id },
+    payload: asJsonApi(resource.updatePayload),
+    success: asJsonApi(
+      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -321,6 +425,30 @@ export const update = <
  *
  * Success is a 204 No Content response, per the spec's recommendation for
  * deletions with no additional information to return.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // DELETE /articles/:id → 204
+ *   JsonApi.Endpoint.remove(Article, { errors: [ArticleNotFound] })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const remove = <
   Type extends string,
@@ -334,15 +462,11 @@ export const remove = <
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors>
 ) =>
-  HttpApiEndpoint.delete(
-    (options?.name ?? "remove") as Name,
-    (options?.path ?? `/${resource.type}/:id`) as Path,
-    {
-      params: { id: resource.Id },
-      success: HttpApiSchema.NoContent,
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.delete((options?.name ?? "remove") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+    params: { id: resource.Id },
+    success: HttpApiSchema.NoContent,
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -356,30 +480,55 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * The default compound `included` union of a heterogeneous endpoint: every
  * resource directly referenced by any of the searched resources'
  * relationships.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends
-  Schema.Union<ReadonlyArray<TargetsOf<Resources[number]>>>
-{}
+export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Schema.Union<
+  ReadonlyArray<TargetsOf<Resources[number]>>
+> {}
 
 /**
  * `GET /search` (path configurable) — a heterogeneous collection endpoint:
  * `data` is a mixed array of several resource types, discriminated by their
  * `type` tags. The natural fit for search results, feeds and timelines.
  *
+ * Success is a 200 collection document whose `data` member is the union of
+ * the given resources and whose `included` union spans all of their
+ * relationship targets.
+ *
+ * @example
  * ```ts
- * const search = Endpoint.search([Article, Person], {
- *   filter: { q: Schema.String },
- *   page: Query.Page.Offset,
- *   include: true
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person)
+ *   }
+ * })
+ *
+ * const search = JsonApi.Group(
+ *   "search",
+ *   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
+ *   JsonApi.Endpoint.search([Article, Person], {
+ *     filter: { q: Schema.String },
+ *     include: true,
+ *     fields: true,
+ *     page: JsonApi.Page.Offset
+ *   })
+ * )
  * // handler returns { data: ReadonlyArray<Article | Person>, ... }
  * // query.include spans both resources' relationship graphs
  * // ?fields[articles]= and ?fields[people]= are both available
  * ```
  *
- * Success is a 200 collection document whose `data` member is the union of
- * the given resources and whose `included` union spans all of their
- * relationship targets.
+ * @since 0.1.0
+ * @category constructors
  */
 export const search = <
   const Resources extends ReadonlyArray<Any>,
@@ -409,33 +558,29 @@ export const search = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get(
-    (options?.name ?? "search") as Name,
-    (options?.path ?? "/search") as Path,
-    {
-      query: Query.schema(
-        resources as ReadonlyArray<Resources[number]>,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: Sort
-          readonly page: PageFields
-          readonly filter: FilterFields
-        }
-      ),
-      success: asJsonApi(
-        CollectionDocument(Schema.Union(resources), {
-          // The cast is sound: every direct target of every member of
-          // `Resources` is, by construction, a member of `TargetsOf<...>`.
-          included: Schema.Union(
-            dedupe(resources.flatMap((resource) => directTargets(resource)))
-          ) as unknown as SearchIncluded<Resources>,
-          meta: (options?.meta ?? AnyMeta) as DocMeta
-        })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.get((options?.name ?? "search") as Name, (options?.path ?? "/search") as Path, {
+    query: Query.schema(
+      resources as ReadonlyArray<Resources[number]>,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: Sort
+        readonly page: PageFields
+        readonly filter: FilterFields
+      }
+    ),
+    success: asJsonApi(
+      CollectionDocument(Schema.Union(resources), {
+        // The cast is sound: every direct target of every member of
+        // `Resources` is, by construction, a member of `TargetsOf<...>`.
+        included: Schema.Union(
+          dedupe(resources.flatMap((resource) => directTargets(resource)))
+        ) as unknown as SearchIncluded<Resources>,
+        meta: (options?.meta ?? AnyMeta) as DocMeta
+      })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -458,31 +603,40 @@ type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name 
  *   - `one` → the target's identifier (never null)
  *   - `optional` → the target's identifier or null
  *   - `many` / `paginated` → an array of the target's identifiers
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type LinkageData<R extends Any, Name extends string> = DescriptorOf<R, Name> extends
-  Relationship.One<infer T extends Any> ? T["identifier"]
-  : DescriptorOf<R, Name> extends Relationship.Optional<infer T extends Any> ? Schema.NullOr<AsSchema<T["identifier"]>>
-  : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any> ? Schema.$Array<AsSchema<T["identifier"]>>
-  : never
+export type LinkageData<R extends Any, Name extends string> =
+  DescriptorOf<R, Name> extends Relationship.One<infer T extends Any>
+    ? T["identifier"]
+    : DescriptorOf<R, Name> extends Relationship.Optional<infer T extends Any>
+      ? Schema.NullOr<AsSchema<T["identifier"]>>
+      : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+        ? Schema.$Array<AsSchema<T["identifier"]>>
+        : never
 
 /**
  * The success document schema of a relationship endpoint: a linkage document
  * whose `data` member matches the relationship's kind.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type RelationshipSuccess<
-  R extends Any,
-  Name extends string,
-  DocMeta extends Schema.Top
-> = LinkageDocument<AsSchema<LinkageData<R, Name>>, DocMeta>
+export type RelationshipSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> = LinkageDocument<
+  AsSchema<LinkageData<R, Name>>,
+  DocMeta
+>
 
 /**
  * The request payload schema of a relationship mutation: `{ data: linkage }`.
+ *
+ * @since 0.1.0
+ * @category models
  */
-export interface LinkagePayload<R extends Any, Name extends string> extends
-  Schema.Struct<{
-    readonly data: AsSchema<LinkageData<R, Name>>
-  }>
-{}
+export interface LinkagePayload<R extends Any, Name extends string> extends Schema.Struct<{
+  readonly data: AsSchema<LinkageData<R, Name>>
+}> {}
 
 /**
  * The success document schema of a related-resource endpoint:
@@ -490,16 +644,16 @@ export interface LinkagePayload<R extends Any, Name extends string> extends
  *   - to-one relationships → a single-resource document of the target
  *     (`data` may be null for `optional` relationships)
  *   - to-many relationships → a collection document of the target
+ *
+ * @since 0.1.0
+ * @category type-level
  */
-export type RelatedSuccess<
-  R extends Any,
-  Name extends string,
-  DocMeta extends Schema.Top
-> = DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
-  ? DataDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
-  : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
-    ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
-  : never
+export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> =
+  DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
+    ? DataDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+    : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+      ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+      : never
 
 const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1)
 
@@ -518,8 +672,8 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
   descriptor.kind === "one"
     ? target.identifier
     : descriptor.kind === "optional"
-    ? Schema.NullOr(target.identifier)
-    : Schema.Array(target.identifier)
+      ? Schema.NullOr(target.identifier)
+      : Schema.Array(target.identifier)
 
 // ---------------------------------------------------------------------------
 // related — GET /<type>/:id/<name>
@@ -535,12 +689,51 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
  * available.
  *
  * For `paginated` relationships this *is* the collection their required
- * `links.related` member points at — enable `page` here:
+ * `links.related` member points at — enable `page` here.
  *
+ * @example
  * ```ts
- * Endpoint.related(Person, "articles", { page: Query.Page.Offset })
- * // GET /people/:id/articles?page[offset]=0&page[limit]=10
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles/:id/author — the author, as a full resource
+ *   JsonApi.Endpoint.related(Article, "author", { errors: [ArticleNotFound] }),
+ *   // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author
+ *   JsonApi.Endpoint.related(Article, "comments", {
+ *     include: true,
+ *     page: JsonApi.Page.Offset,
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const related = <
   Type extends string,
@@ -585,9 +778,7 @@ export const related = <
   // a data document for to-one descriptors, a collection document otherwise.
   const success = (Relationship.isToOne(descriptor)
     ? DataDocument(target, { included, meta: docMeta })
-    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<
-      RelatedSuccess<R, Name, DocMeta>
-    >
+    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<RelatedSuccess<R, Name, DocMeta>>
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
@@ -624,14 +815,49 @@ export const related = <
  * `paginated`) — never full resource objects.
  *
  * For `paginated` relationships the identifier collection itself can be
- * paginated — enable `page`:
+ * paginated — enable `page`.
  *
+ * @example
  * ```ts
- * Endpoint.fetchRelationship(Person, "articles", { page: Query.Page.Offset })
- * // GET /people/:id/relationships/articles?page[offset]=0&page[limit]=10
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles/:id/relationships/comments?page[offset]=0&page[limit]=10
+ *   JsonApi.Endpoint.fetchRelationship(Article, "comments", {
+ *     page: JsonApi.Page.Offset,
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
  * ```
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const fetchRelationship = <
   Type extends string,
@@ -706,7 +932,46 @@ export const fetchRelationship = <
  *
  * Success is a 200 linkage document with the updated linkage.
  *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // PATCH /articles/:id/relationships/author — replace the author
+ *   JsonApi.Endpoint.updateRelationship(Article, "author", {
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const updateRelationship = <
   Type extends string,
@@ -763,7 +1028,46 @@ export const updateRelationship = <
  * add; members already present are ignored. Success is a 200 linkage document
  * with the resulting linkage.
  *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // POST /articles/:id/relationships/comments — attach existing comments
+ *   JsonApi.Endpoint.addRelationship(Article, "comments", {
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating-to-many-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const addRelationship = <
   Type extends string,
@@ -819,7 +1123,46 @@ export const addRelationship = <
  * the identifiers to remove; members not present are ignored. Success is a
  * 204 No Content response.
  *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // DELETE /articles/:id/relationships/comments → 204 — detach comments
+ *   JsonApi.Endpoint.removeRelationship(Article, "comments", {
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating-to-many-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const removeRelationship = <
   Type extends string,
@@ -868,14 +1211,6 @@ export const removeRelationship = <
  * and deleting resources or their relationships — that the handler processes
  * atomically.
  *
- * ```ts
- * const operations = Endpoint.operations([Article, Comment], {
- *   errors: [OperationFailed]
- * })
- * // payload:  { "atomic:operations": [{ op: "add", data: {...} }, ...] }
- * // success:  { "atomic:results": [{ data: {...} }, ...] }   (200)
- * ```
- *
  * The request payload is an `atomic:operations` document whose operation union
  * spans every operation legal for the given resources (including relationship
  * operations and lid-based refs); success is a 200 `atomic:results` document
@@ -886,6 +1221,48 @@ export const removeRelationship = <
  * content-negotiation middleware via
  * `Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })` so those
  * requests are accepted.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     editor: JsonApi.Relationship.optional(() => Person),
+ *     tags: JsonApi.Relationship.many(() => Tag),
+ *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *   }
+ * })
+ *
+ * class OperationFailed extends JsonApi.Error<OperationFailed>()("OperationFailed", {
+ *   status: 422,
+ *   fields: { operation: Schema.Int, reason: Schema.String }
+ * }) {}
+ *
+ * const operations = JsonApi.Group(
+ *   "operations",
+ *   // POST /operations with an atomic:operations document
+ *   JsonApi.Endpoint.operations([Article, Comment], {
+ *     errors: [OperationFailed]
+ *   })
+ * )
+ * // payload:  { "atomic:operations": [{ op: "add", data: {...} }, ...] }
+ * // success:  { "atomic:results": [{ data: {...} }, ...] }   (200)
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const operations = <
   const Resources extends ReadonlyArray<Any>,
@@ -900,19 +1277,15 @@ export const operations = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.post(
-    (options?.name ?? "operations") as Name,
-    (options?.path ?? "/operations") as Path,
-    {
-      payload: asJsonApi(Atomic.RequestDocument(resources)),
-      success: asJsonApiAtomic(
-        Atomic.ResultDocument(
-          resources,
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.post((options?.name ?? "operations") as Name, (options?.path ?? "/operations") as Path, {
+    payload: asJsonApi(Atomic.RequestDocument(resources)),
+    success: asJsonApiAtomic(
+      Atomic.ResultDocument(
+        resources,
+        (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+      )
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
