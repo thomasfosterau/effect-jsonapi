@@ -14,7 +14,7 @@
  */
 import { Effect, Layer, Match } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "./api.js"
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
 import { Article, Comment, Person, Tag } from "./resources.js"
@@ -102,11 +102,10 @@ const resolveIncluded = (article: Article, include: ReadonlyArray<string> | unde
 
 // The comments attached to an article, via the relationship index.
 const articleComments = (articleId: string): Array<Comment> =>
-  (store.articleComments.get(articleId) ?? [])
-    .flatMap((commentId) => {
-      const comment = store.comments.get(commentId)
-      return comment === undefined ? [] : [comment]
-    })
+  (store.articleComments.get(articleId) ?? []).flatMap((commentId) => {
+    const comment = store.comments.get(commentId)
+    return comment === undefined ? [] : [comment]
+  })
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -122,7 +121,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             self: `/articles/${article.id}`
           })
         )
-      ))
+      )
+    )
     .handle("list", ({ query }) => {
       let articles = [...store.articles.values()]
 
@@ -186,7 +186,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           const relationships = article.relationships!
           const updated = Article.make({
             ...article,
-            attributes: { ...article.attributes, ...(payload.data.attributes ?? {}) },
+            attributes: { ...article.attributes, ...payload.data.attributes },
             relationships: {
               author: payload.data.relationships?.author ?? relationships.author,
               tags: payload.data.relationships?.tags ?? relationships.tags,
@@ -196,14 +196,16 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           store.articles.set(updated.id, updated)
           return JsonApi.data(updated, { self: `/articles/${updated.id}` })
         })
-      ))
+      )
+    )
     .handle("remove", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           store.articles.delete(article.id)
           store.articleComments.delete(article.id)
         })
-      ))
+      )
+    )
     // --- Related resource endpoints -----------------------------------------
     .handle("author", ({ params }) =>
       loadArticle(params.id).pipe(
@@ -213,7 +215,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             self: JsonApi.relatedLink("articles", article.id, "author")
           })
         })
-      ))
+      )
+    )
     .handle("comments", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
@@ -226,15 +229,16 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           return JsonApi.collection(page, {
             included: query.include?.includes("author")
               ? page.flatMap((comment) => {
-                const author = store.people.get(comment.relationships!.author.data.id)
-                return author === undefined ? [] : [author]
-              })
+                  const author = store.people.get(comment.relationships!.author.data.id)
+                  return author === undefined ? [] : [author]
+                })
               : [],
             meta: { total },
             links: JsonApi.offsetPaginationLinks(path, { offset, limit }, total)
           })
         })
-      ))
+      )
+    )
     // --- Relationship (linkage) endpoints ------------------------------------
     .handle("commentsRelationship", ({ params, query }) =>
       loadArticle(params.id).pipe(
@@ -249,7 +253,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             meta: { total }
           })
         })
-      ))
+      )
+    )
     .handle("updateAuthorRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
@@ -263,7 +268,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             related: JsonApi.relatedLink("articles", article.id, "author")
           })
         })
-      ))
+      )
+    )
     .handle("addCommentsRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
@@ -272,12 +278,16 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             if (!linked.includes(identifier.id)) linked.push(identifier.id)
           }
           store.articleComments.set(article.id, linked)
-          return JsonApi.linkage(linked.map((id) => Comment.ref(id)), {
-            self: JsonApi.relationshipLink("articles", article.id, "comments"),
-            related: JsonApi.relatedLink("articles", article.id, "comments")
-          })
+          return JsonApi.linkage(
+            linked.map((id) => Comment.ref(id)),
+            {
+              self: JsonApi.relationshipLink("articles", article.id, "comments"),
+              related: JsonApi.relatedLink("articles", article.id, "comments")
+            }
+          )
         })
-      ))
+      )
+    )
     .handle("removeCommentsRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
@@ -287,7 +297,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             (store.articleComments.get(article.id) ?? []).filter((id) => !remove.has(id))
           )
         })
-      ))
+      )
+    )
 )
 
 // ---------------------------------------------------------------------------
@@ -318,9 +329,10 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     return Effect.succeed(
       JsonApi.collection(page, {
-        included: query.include === undefined
-          ? []
-          : page.flatMap((result) => result.type === "articles" ? resolveIncluded(result, query.include) : []),
+        included:
+          query.include === undefined
+            ? []
+            : page.flatMap((result) => (result.type === "articles" ? resolveIncluded(result, query.include) : [])),
         meta: { total },
         links: JsonApi.offsetPaginationLinks("/search", { offset, limit }, total)
       })
@@ -356,10 +368,7 @@ const freshId = (): string => `atomic-${++atomicIdCounter}`
  * The id a ref (or update `data`) targets, resolving lids assigned by earlier
  * operations in the same request.
  */
-const targetId = (
-  lids: JsonApi.LidMap,
-  target: { readonly id?: string; readonly lid?: string }
-): string => {
+const targetId = (lids: JsonApi.LidMap, target: { readonly id?: string; readonly lid?: string }): string => {
   if (target.id !== undefined) return target.id
   if (target.lid !== undefined) {
     const id = lids.id(target.lid)
@@ -401,11 +410,7 @@ const getComment = (
  * Failures throw; the handler converts them into typed `OperationFailed`
  * errors carrying the index of the operation that failed.
  */
-const applyOperation = (
-  draft: Draft,
-  lids: JsonApi.LidMap,
-  operation: AtomicOperation
-): ResultEntry =>
+const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOperation): ResultEntry =>
   Match.value(operation).pipe(
     // --- relationship operations (refs carrying a `relationship` member) ----
     // replace an article's author (`one`: the new linkage is never null)
@@ -428,11 +433,12 @@ const applyOperation = (
       const article = getArticle(draft, lids, op.ref)
       const refs = op.data.map((ref) => lids.identifier(Tag, ref))
       const current = article.relationships?.tags.data ?? []
-      const next = op.op === "add"
-        ? [...current, ...refs]
-        : op.op === "remove"
-        ? current.filter((existing) => !refs.some((removed) => removed.id === existing.id))
-        : refs
+      const next =
+        op.op === "add"
+          ? [...current, ...refs]
+          : op.op === "remove"
+            ? current.filter((existing) => !refs.some((removed) => removed.id === existing.id))
+            : refs
       draft.articles.set(
         article.id,
         Article.make({
@@ -448,11 +454,12 @@ const applyOperation = (
       const article = getArticle(draft, lids, op.ref)
       const ids: ReadonlyArray<string> = op.data.map((ref) => lids.identifier(Comment, ref).id)
       const current = draft.articleComments.get(article.id) ?? []
-      const next = op.op === "add"
-        ? [...current, ...ids.filter((id) => !current.includes(id))]
-        : op.op === "remove"
-        ? current.filter((id) => !ids.includes(id))
-        : [...ids]
+      const next =
+        op.op === "add"
+          ? [...current, ...ids.filter((id) => !current.includes(id))]
+          : op.op === "remove"
+            ? current.filter((id) => !ids.includes(id))
+            : [...ids]
       draft.articleComments.set(article.id, next)
       return JsonApi.Atomic.emptyResult
     }),
@@ -495,7 +502,7 @@ const applyOperation = (
           const resolved = lids.resolveLinkage(Article, update.data.relationships)
           const updated = Article.make({
             ...article,
-            attributes: { ...article.attributes, ...(update.data.attributes ?? {}) },
+            attributes: { ...article.attributes, ...update.data.attributes },
             relationships: { ...article.relationships!, ...resolved }
           })
           draft.articles.set(updated.id, updated)
@@ -508,7 +515,8 @@ const applyOperation = (
           return JsonApi.Atomic.emptyResult
         }),
         Match.exhaustive
-      )),
+      )
+    ),
     Match.when(JsonApi.Atomic.targetsResource(Comment), (op) =>
       Match.value(op).pipe(
         Match.when({ op: "add" }, (add) => {
@@ -529,7 +537,7 @@ const applyOperation = (
           const resolved = lids.resolveLinkage(Comment, update.data.relationships)
           const updated = Comment.make({
             ...comment,
-            attributes: { ...comment.attributes, ...(update.data.attributes ?? {}) },
+            attributes: { ...comment.attributes, ...update.data.attributes },
             relationships: { ...comment.relationships!, ...resolved }
           })
           draft.comments.set(updated.id, updated)
@@ -540,24 +548,26 @@ const applyOperation = (
           draft.comments.delete(comment.id)
           // unlink it from any article's paginated comments relationship
           for (const [articleId, ids] of draft.articleComments) {
-            draft.articleComments.set(articleId, ids.filter((id) => id !== comment.id))
+            draft.articleComments.set(
+              articleId,
+              ids.filter((id) => id !== comment.id)
+            )
           }
           return JsonApi.Atomic.emptyResult
         }),
         Match.exhaustive
-      )),
+      )
+    ),
     Match.exhaustive
   )
 
 export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
   handlers.handle("operations", ({ payload }) =>
-    Effect.gen(function*() {
+    Effect.gen(function* () {
       const draft: Draft = {
         articles: new Map(store.articles),
         comments: new Map(store.comments),
-        articleComments: new Map(
-          [...store.articleComments].map(([articleId, ids]) => [articleId, [...ids]])
-        )
+        articleComments: new Map([...store.articleComments].map(([articleId, ids]) => [articleId, [...ids]]))
       }
       const lids = JsonApi.lidMap()
       const entries: Array<ResultEntry> = []
@@ -580,7 +590,9 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
       store.comments = draft.comments
       store.articleComments = draft.articleComments
       return JsonApi.Atomic.results(entries)
-    })))
+    })
+  )
+)
 
 /**
  * Everything needed to serve the blog: the handlers plus the JSON:API

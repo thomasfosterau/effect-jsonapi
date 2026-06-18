@@ -74,9 +74,8 @@ export type Wires<Errors extends ReadonlyArray<ErrorClass>> = {
   readonly [K in keyof Errors]: Errors[K]["wire"]
 }
 
-const wires = <const Errors extends ReadonlyArray<ErrorClass>>(
-  errors: Errors | undefined
-): Wires<Errors> => ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>
+const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors: Errors | undefined): Wires<Errors> =>
+  ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -140,27 +139,23 @@ export const fetch = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get(
-    (options?.name ?? "fetch") as Name,
-    (options?.path ?? `/${resource.type}/:id`) as Path,
-    {
-      params: { id: resource.Id },
-      query: Query.schema(
-        resource,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: false
-          readonly page: undefined
-          readonly filter: undefined
-        }
-      ),
-      success: asJsonApi(
-        resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.get((options?.name ?? "fetch") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+    params: { id: resource.Id },
+    query: Query.schema(
+      resource,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: false
+        readonly page: undefined
+        readonly filter: undefined
+      }
+    ),
+    success: asJsonApi(
+      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -205,26 +200,22 @@ export const list = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get(
-    (options?.name ?? "list") as Name,
-    (options?.path ?? `/${resource.type}`) as Path,
-    {
-      query: Query.schema(
-        resource,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: Sort
-          readonly page: PageFields
-          readonly filter: FilterFields
-        }
-      ),
-      success: asJsonApi(
-        resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
+    query: Query.schema(
+      resource,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: Sort
+        readonly page: PageFields
+        readonly filter: FilterFields
+      }
+    ),
+    success: asJsonApi(
+      resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -255,18 +246,14 @@ export const create = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.post(
-    (options?.name ?? "create") as Name,
-    (options?.path ?? `/${resource.type}`) as Path,
-    {
-      payload: asJsonApi(resource.createPayload),
-      success: asJsonApi(
-        resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
-        201
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
+    payload: asJsonApi(resource.createPayload),
+    success: asJsonApi(
+      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
+      201
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -297,18 +284,14 @@ export const update = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.patch(
-    (options?.name ?? "update") as Name,
-    (options?.path ?? `/${resource.type}/:id`) as Path,
-    {
-      params: { id: resource.Id },
-      payload: asJsonApi(resource.updatePayload),
-      success: asJsonApi(
-        resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+    params: { id: resource.Id },
+    payload: asJsonApi(resource.updatePayload),
+    success: asJsonApi(
+      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -334,15 +317,11 @@ export const remove = <
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors>
 ) =>
-  HttpApiEndpoint.delete(
-    (options?.name ?? "remove") as Name,
-    (options?.path ?? `/${resource.type}/:id`) as Path,
-    {
-      params: { id: resource.Id },
-      success: HttpApiSchema.NoContent,
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.delete((options?.name ?? "remove") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+    params: { id: resource.Id },
+    success: HttpApiSchema.NoContent,
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -357,9 +336,9 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * resource directly referenced by any of the searched resources'
  * relationships.
  */
-export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends
-  Schema.Union<ReadonlyArray<TargetsOf<Resources[number]>>>
-{}
+export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Schema.Union<
+  ReadonlyArray<TargetsOf<Resources[number]>>
+> {}
 
 /**
  * `GET /search` (path configurable) — a heterogeneous collection endpoint:
@@ -409,33 +388,29 @@ export const search = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get(
-    (options?.name ?? "search") as Name,
-    (options?.path ?? "/search") as Path,
-    {
-      query: Query.schema(
-        resources as ReadonlyArray<Resources[number]>,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: Sort
-          readonly page: PageFields
-          readonly filter: FilterFields
-        }
-      ),
-      success: asJsonApi(
-        CollectionDocument(Schema.Union(resources), {
-          // The cast is sound: every direct target of every member of
-          // `Resources` is, by construction, a member of `TargetsOf<...>`.
-          included: Schema.Union(
-            dedupe(resources.flatMap((resource) => directTargets(resource)))
-          ) as unknown as SearchIncluded<Resources>,
-          meta: (options?.meta ?? AnyMeta) as DocMeta
-        })
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.get((options?.name ?? "search") as Name, (options?.path ?? "/search") as Path, {
+    query: Query.schema(
+      resources as ReadonlyArray<Resources[number]>,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: Sort
+        readonly page: PageFields
+        readonly filter: FilterFields
+      }
+    ),
+    success: asJsonApi(
+      CollectionDocument(Schema.Union(resources), {
+        // The cast is sound: every direct target of every member of
+        // `Resources` is, by construction, a member of `TargetsOf<...>`.
+        included: Schema.Union(
+          dedupe(resources.flatMap((resource) => directTargets(resource)))
+        ) as unknown as SearchIncluded<Resources>,
+        meta: (options?.meta ?? AnyMeta) as DocMeta
+      })
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
 
@@ -459,30 +434,30 @@ type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name 
  *   - `optional` → the target's identifier or null
  *   - `many` / `paginated` → an array of the target's identifiers
  */
-export type LinkageData<R extends Any, Name extends string> = DescriptorOf<R, Name> extends
-  Relationship.One<infer T extends Any> ? T["identifier"]
-  : DescriptorOf<R, Name> extends Relationship.Optional<infer T extends Any> ? Schema.NullOr<AsSchema<T["identifier"]>>
-  : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any> ? Schema.$Array<AsSchema<T["identifier"]>>
-  : never
+export type LinkageData<R extends Any, Name extends string> =
+  DescriptorOf<R, Name> extends Relationship.One<infer T extends Any>
+    ? T["identifier"]
+    : DescriptorOf<R, Name> extends Relationship.Optional<infer T extends Any>
+      ? Schema.NullOr<AsSchema<T["identifier"]>>
+      : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+        ? Schema.$Array<AsSchema<T["identifier"]>>
+        : never
 
 /**
  * The success document schema of a relationship endpoint: a linkage document
  * whose `data` member matches the relationship's kind.
  */
-export type RelationshipSuccess<
-  R extends Any,
-  Name extends string,
-  DocMeta extends Schema.Top
-> = LinkageDocument<AsSchema<LinkageData<R, Name>>, DocMeta>
+export type RelationshipSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> = LinkageDocument<
+  AsSchema<LinkageData<R, Name>>,
+  DocMeta
+>
 
 /**
  * The request payload schema of a relationship mutation: `{ data: linkage }`.
  */
-export interface LinkagePayload<R extends Any, Name extends string> extends
-  Schema.Struct<{
-    readonly data: AsSchema<LinkageData<R, Name>>
-  }>
-{}
+export interface LinkagePayload<R extends Any, Name extends string> extends Schema.Struct<{
+  readonly data: AsSchema<LinkageData<R, Name>>
+}> {}
 
 /**
  * The success document schema of a related-resource endpoint:
@@ -491,15 +466,12 @@ export interface LinkagePayload<R extends Any, Name extends string> extends
  *     (`data` may be null for `optional` relationships)
  *   - to-many relationships → a collection document of the target
  */
-export type RelatedSuccess<
-  R extends Any,
-  Name extends string,
-  DocMeta extends Schema.Top
-> = DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
-  ? DataDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
-  : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
-    ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
-  : never
+export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> =
+  DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
+    ? DataDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+    : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
+      ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+      : never
 
 const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1)
 
@@ -518,8 +490,8 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
   descriptor.kind === "one"
     ? target.identifier
     : descriptor.kind === "optional"
-    ? Schema.NullOr(target.identifier)
-    : Schema.Array(target.identifier)
+      ? Schema.NullOr(target.identifier)
+      : Schema.Array(target.identifier)
 
 // ---------------------------------------------------------------------------
 // related — GET /<type>/:id/<name>
@@ -585,9 +557,7 @@ export const related = <
   // a data document for to-one descriptors, a collection document otherwise.
   const success = (Relationship.isToOne(descriptor)
     ? DataDocument(target, { included, meta: docMeta })
-    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<
-      RelatedSuccess<R, Name, DocMeta>
-    >
+    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<RelatedSuccess<R, Name, DocMeta>>
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
@@ -900,19 +870,15 @@ export const operations = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.post(
-    (options?.name ?? "operations") as Name,
-    (options?.path ?? "/operations") as Path,
-    {
-      payload: asJsonApi(Atomic.RequestDocument(resources)),
-      success: asJsonApiAtomic(
-        Atomic.ResultDocument(
-          resources,
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )
-      ),
-      error: wires(options?.errors)
-    }
-  )
+  HttpApiEndpoint.post((options?.name ?? "operations") as Name, (options?.path ?? "/operations") as Path, {
+    payload: asJsonApi(Atomic.RequestDocument(resources)),
+    success: asJsonApiAtomic(
+      Atomic.ResultDocument(
+        resources,
+        (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+      )
+    ),
+    error: wires(options?.errors)
+  })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)

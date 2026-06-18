@@ -176,48 +176,40 @@ export const isToMany = (descriptor: Descriptor): descriptor is ToMany<Any> =>
  * The wire schema of a required to-one relationship:
  * `{ data: identifier, links?, meta? }`.
  */
-export interface OneSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.suspend<R["identifier"]>
-    readonly links: Schema.optionalKey<typeof RelationshipLinks>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface OneSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.suspend<R["identifier"]>
+  readonly links: Schema.optionalKey<typeof RelationshipLinks>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The wire schema of an optional to-one relationship:
  * `{ data: identifier | null, links?, meta? }`.
  */
-export interface OptionalSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>
-    readonly links: Schema.optionalKey<typeof RelationshipLinks>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface OptionalSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>
+  readonly links: Schema.optionalKey<typeof RelationshipLinks>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The wire schema of an inline to-many relationship:
  * `{ data: identifier[], links?, meta? }`.
  */
-export interface ManySchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>
-    readonly links: Schema.optionalKey<typeof RelationshipLinks>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface ManySchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>
+  readonly links: Schema.optionalKey<typeof RelationshipLinks>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The wire schema of a paginated to-many relationship: *no* `data`; `links`
  * (with a required `related` member) is mandatory.
  */
-export interface PaginatedSchema extends
-  Schema.Struct<{
-    readonly links: typeof PaginatedRelationshipLinks
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface PaginatedSchema extends Schema.Struct<{
+  readonly links: typeof PaginatedRelationshipLinks
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 const makeOneSchema = <R extends Any>(descriptor: One<R>): OneSchema<R> =>
   Schema.Struct({
@@ -249,11 +241,16 @@ const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
 /**
  * The wire schema of a single relationship descriptor.
  */
-export type SchemaFor<D extends Descriptor> = D extends One<infer R> ? OneSchema<R>
-  : D extends Optional<infer R> ? OptionalSchema<R>
-  : D extends Many<infer R> ? ManySchema<R>
-  : D extends Paginated<Any> ? PaginatedSchema
-  : never
+export type SchemaFor<D extends Descriptor> =
+  D extends One<infer R>
+    ? OneSchema<R>
+    : D extends Optional<infer R>
+      ? OptionalSchema<R>
+      : D extends Many<infer R>
+        ? ManySchema<R>
+        : D extends Paginated<Any>
+          ? PaginatedSchema
+          : never
 
 /**
  * Creates the wire schema for a relationship descriptor.
@@ -262,10 +259,10 @@ export const schemaFor = <D extends Descriptor>(descriptor: D): SchemaFor<D> =>
   (descriptor.kind === "one"
     ? makeOneSchema(descriptor)
     : descriptor.kind === "optional"
-    ? makeOptionalSchema(descriptor)
-    : descriptor.kind === "many"
-    ? makeManySchema(descriptor)
-    : makePaginatedSchema(descriptor)) as SchemaFor<D>
+      ? makeOptionalSchema(descriptor)
+      : descriptor.kind === "many"
+        ? makeManySchema(descriptor)
+        : makePaginatedSchema(descriptor)) as SchemaFor<D>
 
 /**
  * Maps a record of relationship descriptors to their wire schemas.

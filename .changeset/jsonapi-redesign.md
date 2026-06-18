@@ -1,5 +1,5 @@
 ---
-"effect-jsonapi": major
+"@thomasfosterau/effect-jsonapi": major
 ---
 
 Clean-slate redesign: spec-compliant JSON:API v1.1 on Effect v4's HttpApi, by construction.
@@ -9,7 +9,7 @@ of truth and everything else — identifiers, payloads, documents, query paramet
 errors and middleware — is derived from it. The public surface is the `JsonApi` namespace:
 
 ```ts
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 ```
 
 ### Resources (`JsonApi.Resource`, `JsonApi.toOne`, `JsonApi.toMany`)

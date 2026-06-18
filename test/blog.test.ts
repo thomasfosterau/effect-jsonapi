@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "../examples/blog/api.js"
 import { ArticleNotFound, TitleTaken } from "../examples/blog/errors.js"
 import { ArticlesLive, sampleArticle, sampleAuthor, sampleComments, SearchLive } from "../examples/blog/handlers.js"
@@ -41,13 +41,15 @@ const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
 
 describe("blog example: fetching", () => {
   it("fetches a single article document with a self link", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        query: {}
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.fetch({
+          params: { id: Article.Id.make("1") },
+          query: {}
+        })
       })
-    }))
+    )
 
     expect(document.data).toMatchObject({
       type: "articles",
@@ -60,26 +62,30 @@ describe("blog example: fetching", () => {
   })
 
   it("serves compound documents for ?include=author,tags", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        query: { include: ["author", "tags"] }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.fetch({
+          params: { id: Article.Id.make("1") },
+          query: { include: ["author", "tags"] }
+        })
       })
-    }))
+    )
 
     const types = document.included?.map((resource) => resource.type).sort()
     expect(types).toEqual(["people", "tags"])
   })
 
   it("paginated relationships appear as links, never as inline data or includes", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        query: {}
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.fetch({
+          params: { id: Article.Id.make("1") },
+          query: {}
+        })
       })
-    }))
+    )
 
     // The comments relationship carries only links pointing at its endpoints.
     const comments = document.data?.relationships?.comments
@@ -96,13 +102,17 @@ describe("blog example: fetching", () => {
 
   it("narrows `included` to the requested include paths on the client", async () => {
     const include = ["author"] as const
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        query: { include }
-      }).pipe(JsonApi.narrowIncluded(Article, include))
-    }))
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles
+          .fetch({
+            params: { id: Article.Id.make("1") },
+            query: { include }
+          })
+          .pipe(JsonApi.narrowIncluded(Article, include))
+      })
+    )
 
     // Runtime: the server only included the requested author
     expect(document.included?.map((resource) => resource.type)).toEqual(["people"])
@@ -115,13 +125,15 @@ describe("blog example: fetching", () => {
   })
 
   it("404s with a typed error for unknown articles", async () => {
-    const exit = await runExit(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("nope") },
-        query: {}
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.fetch({
+          params: { id: Article.Id.make("nope") },
+          query: {}
+        })
       })
-    }))
+    )
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
@@ -134,15 +146,17 @@ describe("blog example: fetching", () => {
 
 describe("blog example: listing", () => {
   it("lists articles with sorting, pagination and typed meta", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.list({
-        query: {
-          sort: [{ field: "createdAt", direction: "desc" }],
-          page: { offset: 0, limit: 10 }
-        }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.list({
+          query: {
+            sort: [{ field: "createdAt", direction: "desc" }],
+            page: { offset: 0, limit: 10 }
+          }
+        })
       })
-    }))
+    )
 
     expect(document.data.length).toBeGreaterThan(0)
     expect(document.meta?.total).toBeGreaterThan(0)
@@ -150,12 +164,14 @@ describe("blog example: listing", () => {
   })
 
   it("filters by author", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.list({
-        query: { filter: { author: "does-not-exist" } }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.list({
+          query: { filter: { author: "does-not-exist" } }
+        })
       })
-    }))
+    )
 
     expect(document.data).toEqual([])
   })
@@ -163,60 +179,62 @@ describe("blog example: listing", () => {
 
 describe("blog example: writing", () => {
   it("creates an article from a JSON:API payload (201) and then deletes it (204)", async () => {
-    await run(Effect.gen(function*() {
-      const client = yield* buildClient
+    await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
 
-      const created = yield* client.articles.create({
-        payload: {
-          data: {
-            type: "articles",
-            lid: "temp-1",
-            attributes: {
-              title: "A fresh take",
-              body: "...",
-              createdAt: new Date("2024-06-01T00:00:00.000Z")
-            },
-            relationships: {
-              // `author` is a required (`one`) relationship — the payload
-              // doesn't compile (or decode) without it.
-              author: { data: Person.ref(sampleAuthor.id) }
+        const created = yield* client.articles.create({
+          payload: {
+            data: {
+              type: "articles",
+              lid: "temp-1",
+              attributes: {
+                title: "A fresh take",
+                body: "...",
+                createdAt: new Date("2024-06-01T00:00:00.000Z")
+              },
+              relationships: {
+                // `author` is a required (`one`) relationship — the payload
+                // doesn't compile (or decode) without it.
+                author: { data: Person.ref(sampleAuthor.id) }
+              }
             }
           }
-        }
+        })
+
+        expect(created.data).not.toBeNull()
+        expect(created.data?.attributes.title).toBe("A fresh take")
+        expect(created.data?.relationships?.author.data.id).toBe(sampleAuthor.id)
+        // The paginated comments relationship is created empty, links only.
+        expect(created.data?.relationships?.comments.links.related).toBe(`/articles/${created.data!.id}/comments`)
+
+        // and remove it again
+        yield* client.articles.remove({ params: { id: created.data!.id } })
       })
-
-      expect(created.data).not.toBeNull()
-      expect(created.data?.attributes.title).toBe("A fresh take")
-      expect(created.data?.relationships?.author.data.id).toBe(sampleAuthor.id)
-      // The paginated comments relationship is created empty, links only.
-      expect(created.data?.relationships?.comments.links.related).toBe(
-        `/articles/${created.data!.id}/comments`
-      )
-
-      // and remove it again
-      yield* client.articles.remove({ params: { id: created.data!.id } })
-    }))
+    )
   })
 
   it("409s when the title is already taken", async () => {
-    const exit = await runExit(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.create({
-        payload: {
-          data: {
-            type: "articles",
-            attributes: {
-              title: sampleArticle.attributes.title,
-              body: "duplicate",
-              createdAt: new Date()
-            },
-            relationships: {
-              author: { data: Person.ref(sampleAuthor.id) }
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.create({
+          payload: {
+            data: {
+              type: "articles",
+              attributes: {
+                title: sampleArticle.attributes.title,
+                body: "duplicate",
+                createdAt: new Date()
+              },
+              relationships: {
+                author: { data: Person.ref(sampleAuthor.id) }
+              }
             }
           }
-        }
+        })
       })
-    }))
+    )
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
@@ -225,19 +243,21 @@ describe("blog example: writing", () => {
   })
 
   it("updates an article with partial attributes", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.update({
-        params: { id: Article.Id.make("1") },
-        payload: {
-          data: {
-            type: "articles",
-            id: Article.Id.make("1"),
-            attributes: { body: "Updated body" }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.update({
+          params: { id: Article.Id.make("1") },
+          payload: {
+            data: {
+              type: "articles",
+              id: Article.Id.make("1"),
+              attributes: { body: "Updated body" }
+            }
           }
-        }
+        })
       })
-    }))
+    )
 
     expect(document.data?.attributes.body).toBe("Updated body")
     expect(document.data?.attributes.title).toBe(sampleArticle.attributes.title)
@@ -246,13 +266,15 @@ describe("blog example: writing", () => {
 
 describe("blog example: related resource endpoints", () => {
   it("GET /articles/:id/author serves the author as a full resource document", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.author({
-        params: { id: Article.Id.make("1") },
-        query: {}
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.author({
+          params: { id: Article.Id.make("1") },
+          query: {}
+        })
       })
-    }))
+    )
 
     expect(document.data).toMatchObject({
       type: "people",
@@ -263,13 +285,15 @@ describe("blog example: related resource endpoints", () => {
   })
 
   it("GET /articles/:id/comments serves the paginated comment collection", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.comments({
-        params: { id: Article.Id.make("1") },
-        query: { page: { offset: 0, limit: 1 } }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.comments({
+          params: { id: Article.Id.make("1") },
+          query: { page: { offset: 0, limit: 1 } }
+        })
       })
-    }))
+    )
 
     // Full comment resources, paginated
     expect(document.data).toHaveLength(1)
@@ -279,13 +303,15 @@ describe("blog example: related resource endpoints", () => {
   })
 
   it("GET /articles/:id/comments supports compound documents (?include=author)", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.comments({
-        params: { id: Article.Id.make("1") },
-        query: { include: ["author"] }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.comments({
+          params: { id: Article.Id.make("1") },
+          query: { include: ["author"] }
+        })
       })
-    }))
+    )
 
     expect(document.data).toHaveLength(2)
     // Both comments share the same author — deduplicated to one include.
@@ -293,13 +319,15 @@ describe("blog example: related resource endpoints", () => {
   })
 
   it("404s for related endpoints of unknown articles", async () => {
-    const exit = await runExit(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.comments({
-        params: { id: Article.Id.make("nope") },
-        query: {}
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.comments({
+          params: { id: Article.Id.make("nope") },
+          query: {}
+        })
       })
-    }))
+    )
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
@@ -310,13 +338,15 @@ describe("blog example: related resource endpoints", () => {
 
 describe("blog example: relationship endpoints", () => {
   it("GET /articles/:id/relationships/comments serves paginated linkage", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.commentsRelationship({
-        params: { id: Article.Id.make("1") },
-        query: {}
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.articles.commentsRelationship({
+          params: { id: Article.Id.make("1") },
+          query: {}
+        })
       })
-    }))
+    )
 
     // Identifiers only — no attributes
     expect(document.data).toEqual(sampleComments.map((comment) => ({ type: "comments", id: comment.id })))
@@ -326,50 +356,54 @@ describe("blog example: relationship endpoints", () => {
   })
 
   it("PATCH /articles/:id/relationships/author replaces the author", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      const replaced = yield* client.articles.updateAuthorRelationship({
-        params: { id: Article.Id.make("1") },
-        payload: { data: Person.ref(sampleAuthor.id) }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        const replaced = yield* client.articles.updateAuthorRelationship({
+          params: { id: Article.Id.make("1") },
+          payload: { data: Person.ref(sampleAuthor.id) }
+        })
+        // The article reflects the change
+        const article = yield* client.articles.fetch({
+          params: { id: Article.Id.make("1") },
+          query: {}
+        })
+        expect(article.data?.relationships?.author.data.id).toBe(sampleAuthor.id)
+        return replaced
       })
-      // The article reflects the change
-      const article = yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        query: {}
-      })
-      expect(article.data?.relationships?.author.data.id).toBe(sampleAuthor.id)
-      return replaced
-    }))
+    )
 
     expect(document.data).toEqual({ type: "people", id: sampleAuthor.id })
   })
 
   it("POST /articles/:id/relationships/comments attaches comments; DELETE detaches them", async () => {
-    await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      const articleId = Article.Id.make("1")
+    await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        const articleId = Article.Id.make("1")
 
-      // Detach one comment
-      yield* client.articles.removeCommentsRelationship({
-        params: { id: articleId },
-        payload: { data: [Comment.ref(sampleComments[0]!.id)] }
-      })
+        // Detach one comment
+        yield* client.articles.removeCommentsRelationship({
+          params: { id: articleId },
+          payload: { data: [Comment.ref(sampleComments[0]!.id)] }
+        })
 
-      const afterRemove = yield* client.articles.commentsRelationship({
-        params: { id: articleId },
-        query: {}
-      })
-      expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([sampleComments[1]!.id])
+        const afterRemove = yield* client.articles.commentsRelationship({
+          params: { id: articleId },
+          query: {}
+        })
+        expect(afterRemove.data.map((identifier) => identifier.id)).toEqual([sampleComments[1]!.id])
 
-      // Re-attach it
-      const afterAdd = yield* client.articles.addCommentsRelationship({
-        params: { id: articleId },
-        payload: { data: [Comment.ref(sampleComments[0]!.id)] }
+        // Re-attach it
+        const afterAdd = yield* client.articles.addCommentsRelationship({
+          params: { id: articleId },
+          payload: { data: [Comment.ref(sampleComments[0]!.id)] }
+        })
+        expect(afterAdd.data.map((identifier) => identifier.id).sort()).toEqual(
+          sampleComments.map((comment) => comment.id).sort()
+        )
       })
-      expect(afterAdd.data.map((identifier) => identifier.id).sort()).toEqual(
-        sampleComments.map((comment) => comment.id).sort()
-      )
-    }))
+    )
   })
 
   it("documents relationship endpoints in OpenAPI", () => {
@@ -383,8 +417,8 @@ describe("blog example: relationship endpoints", () => {
     expect(spec.paths["/articles/{id}/relationships/comments"]?.delete).toBeDefined()
     expect(spec.paths["/articles/{id}/relationships/author"]?.patch).toBeDefined()
     // The related comment collection documents its pagination parameters
-    const commentParams = spec.paths["/articles/{id}/comments"]?.get?.parameters?.map((parameter: any) =>
-      parameter.name
+    const commentParams = spec.paths["/articles/{id}/comments"]?.get?.parameters?.map(
+      (parameter: any) => parameter.name
     )
     expect(commentParams).toContain("page[offset]")
     expect(commentParams).toContain("page[limit]")
@@ -394,14 +428,16 @@ describe("blog example: relationship endpoints", () => {
 
 describe("blog example: heterogeneous search", () => {
   it("returns a mixed collection of articles and people, discriminated by type", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      // "an" matches both "...paints my bikeshed!" (article body "...Ever.") — no.
-      // Use a term hitting both stores: "d" → "bikeshed"/"Dan"/"Gebhardt"
-      return yield* client.search.search({
-        query: { filter: { q: "d" } }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        // "an" matches both "...paints my bikeshed!" (article body "...Ever.") — no.
+        // Use a term hitting both stores: "d" → "bikeshed"/"Dan"/"Gebhardt"
+        return yield* client.search.search({
+          query: { filter: { q: "d" } }
+        })
       })
-    }))
+    )
 
     const types = [...new Set(document.data.map((result) => result.type))].sort()
     expect(types).toEqual(["articles", "people"])
@@ -419,12 +455,14 @@ describe("blog example: heterogeneous search", () => {
   })
 
   it("filters across both resource types", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.search.search({
-        query: { filter: { q: "bikeshed" } }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.search.search({
+          query: { filter: { q: "bikeshed" } }
+        })
       })
-    }))
+    )
 
     // only the article matches "bikeshed"
     expect(document.data.map((result) => result.type)).toEqual(["articles"])
@@ -432,12 +470,14 @@ describe("blog example: heterogeneous search", () => {
   })
 
   it("paginates heterogeneous results with links", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.search.search({
-        query: { filter: { q: "" }, page: { offset: 0, limit: 1 } }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.search.search({
+          query: { filter: { q: "" }, page: { offset: 0, limit: 1 } }
+        })
       })
-    }))
+    )
 
     expect(document.data).toHaveLength(1)
     expect(document.meta?.total).toBeGreaterThan(1)
@@ -445,12 +485,14 @@ describe("blog example: heterogeneous search", () => {
   })
 
   it("supports include across the searched resources' graphs", async () => {
-    const document = await run(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.search.search({
-        query: { filter: { q: "bikeshed" }, include: ["author"] }
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient
+        return yield* client.search.search({
+          query: { filter: { q: "bikeshed" }, include: ["author"] }
+        })
       })
-    }))
+    )
 
     // the matched article's author is included
     expect(document.included?.map((resource) => resource.type)).toEqual(["people"])
@@ -471,13 +513,15 @@ describe("blog example: spec compliance on the wire", () => {
   it("error documents are spec-compliant JSON:API", () => {
     const wire = Schema.encodeUnknownSync(ArticleNotFound.wire)(new ArticleNotFound({ id: "42" }))
     expect(wire).toEqual({
-      errors: [{
-        status: "404",
-        code: "not_found",
-        title: "Resource not found",
-        detail: "Article 42 not found",
-        meta: { id: "42" }
-      }]
+      errors: [
+        {
+          status: "404",
+          code: "not_found",
+          title: "Resource not found",
+          detail: "Article 42 not found",
+          meta: { id: "42" }
+        }
+      ]
     })
   })
 

@@ -152,12 +152,14 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           data: article,
           ...(query.include?.includes("author") ? { included: [samplePerson] } : {})
         }))
-      ))
+      )
+    )
     .handle("list", ({ query }) =>
       Effect.succeed({
         data: query.page?.limit === 0 ? [] : [sampleArticle],
         meta: { total: 1 }
-      }))
+      })
+    )
     .handle("create", ({ payload }) =>
       Effect.succeed({
         data: Article.make({
@@ -168,16 +170,18 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             comments: payload.data.relationships?.comments ?? { data: [] }
           }
         })
-      }))
+      })
+    )
     .handle("update", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => ({
           data: Article.make({
             ...article,
-            attributes: { ...article.attributes, ...(payload.data.attributes ?? {}) }
+            attributes: { ...article.attributes, ...payload.data.attributes }
           })
         }))
-      ))
+      )
+    )
     .handle("remove", ({ params }) => loadArticle(params.id).pipe(Effect.asVoid))
     // Related resource endpoints
     .handle("author", ({ params }) =>
@@ -187,7 +191,8 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             self: Handlers.relatedLink("articles", article.id, "author")
           })
         )
-      ))
+      )
+    )
     .handle("comments", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
@@ -198,7 +203,8 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             self: Handlers.relatedLink("articles", article.id, "comments")
           })
         })
-      ))
+      )
+    )
     // Relationship (linkage) endpoints
     .handle("commentsRelationship", ({ params }) =>
       loadArticle(params.id).pipe(
@@ -208,19 +214,16 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             related: Handlers.relatedLink("articles", article.id, "comments")
           })
         )
-      ))
+      )
+    )
     .handle("updateAuthorRelationship", ({ params, payload }) =>
-      loadArticle(params.id).pipe(
-        Effect.map(() => Handlers.linkage(payload.data))
-      ))
+      loadArticle(params.id).pipe(Effect.map(() => Handlers.linkage(payload.data)))
+    )
     .handle("addCommentsRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
-        Effect.map((article) =>
-          Handlers.linkage([
-            ...(article.relationships?.comments.data ?? []),
-            ...payload.data
-          ]))
-      ))
+        Effect.map((article) => Handlers.linkage([...(article.relationships?.comments.data ?? []), ...payload.data]))
+      )
+    )
     .handle("removeCommentsRelationship", ({ params }) => loadArticle(params.id).pipe(Effect.asVoid))
 )
 
@@ -232,11 +235,11 @@ const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
 const buildClient = HttpApiTest.groups(Api, ["articles"])
 
 const withHandlers = <A, E>(effect: Effect.Effect<A, E, any>) =>
-  effect.pipe(
-    Effect.scoped,
-    Effect.provide(ArticlesLive),
-    Effect.provide(Middleware.layer)
-  ) as Effect.Effect<A, E, never>
+  effect.pipe(Effect.scoped, Effect.provide(ArticlesLive), Effect.provide(Middleware.layer)) as Effect.Effect<
+    A,
+    E,
+    never
+  >
 
 // ---------------------------------------------------------------------------
 // Endpoint shapes
@@ -423,16 +426,14 @@ describe("relationship endpoint conventions", () => {
   })
 
   it("attaches the JSON:API protocol middlewares", () => {
-    for (
-      const endpoint of [
-        relatedAuthor,
-        relatedComments,
-        fetchCommentsRelationship,
-        updateAuthorRelationship,
-        addCommentsRelationship,
-        removeCommentsRelationship
-      ]
-    ) {
+    for (const endpoint of [
+      relatedAuthor,
+      relatedComments,
+      fetchCommentsRelationship,
+      updateAuthorRelationship,
+      addCommentsRelationship,
+      removeCommentsRelationship
+    ]) {
       const middlewareIds = [...endpoint.middlewares].map((m) => m.key)
       expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation")
       expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors")
@@ -501,8 +502,9 @@ describe("relationship endpoint schemas", () => {
     // `one` relationships can't be cleared
     const updateCommentAuthor = Endpoint.updateRelationship(Comment, "author")
     const commentAuthorPayload = [...updateCommentAuthor.payload.values()][0]!.schemas[0]!
-    expect(() => Schema.decodeUnknownSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({ data: null }))
-      .toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({ data: null })
+    ).toThrow()
     const replaced = Schema.decodeUnknownSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({
       data: { type: "people", id: "9" }
     }) as { readonly data: { readonly id: string } }
@@ -584,9 +586,7 @@ describe("Endpoint.operations", () => {
     const payloadSchema = [...operationsEndpoint.payload.values()][0]!.schemas[0]!
     expect(() =>
       Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
-        "atomic:operations": [
-          { op: "add", data: { type: "comments", attributes: { body: "No author" } } }
-        ]
+        "atomic:operations": [{ op: "add", data: { type: "comments", attributes: { body: "No author" } } }]
       })
     ).toThrow()
   })
@@ -616,10 +616,14 @@ describe("Endpoint.operations", () => {
 
 describe("HTTP round-trip via HttpApiTest", () => {
   it("fetches a single resource document", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({ params: { id: Article.Id.make("1") }, query: {} })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.fetch({ params: { id: Article.Id.make("1") }, query: {} })
+        })
+      )
+    )
 
     expect(result.data).toMatchObject({ type: "articles", id: "1" })
     expect(result.data?.attributes.title).toBe("Hello")
@@ -631,88 +635,112 @@ describe("HTTP round-trip via HttpApiTest", () => {
   })
 
   it("serves compound documents when include is requested", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        query: { include: ["author"] }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.fetch({
+            params: { id: Article.Id.make("1") },
+            query: { include: ["author"] }
+          })
+        })
+      )
+    )
 
     expect(result.included).toHaveLength(1)
     expect(result.included?.[0]).toMatchObject({ type: "people", id: "9" })
   })
 
   it("lists a collection document with typed query params", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.list({
-        query: {
-          sort: [{ field: "createdAt", direction: "desc" }],
-          page: { offset: 0, limit: 10 },
-          filter: { author: "9" }
-        }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.list({
+            query: {
+              sort: [{ field: "createdAt", direction: "desc" }],
+              page: { offset: 0, limit: 10 },
+              filter: { author: "9" }
+            }
+          })
+        })
+      )
+    )
 
     expect(result.data).toHaveLength(1)
     expect(result.meta?.total).toBe(1)
   })
 
   it("creates a resource from a JSON:API payload (201)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.create({
-        payload: {
-          data: {
-            type: "articles",
-            lid: "temp-1",
-            attributes: {
-              title: "New article",
-              body: "Contents",
-              createdAt: new Date("2024-06-01T00:00:00.000Z")
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.create({
+            payload: {
+              data: {
+                type: "articles",
+                lid: "temp-1",
+                attributes: {
+                  title: "New article",
+                  body: "Contents",
+                  createdAt: new Date("2024-06-01T00:00:00.000Z")
+                }
+              }
             }
-          }
-        }
-      })
-    })))
+          })
+        })
+      )
+    )
 
     expect(result.data).toMatchObject({ type: "articles", id: "new-id" })
     expect(result.data?.attributes.title).toBe("New article")
   })
 
   it("updates a resource with a partial attributes payload", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.update({
-        params: { id: Article.Id.make("1") },
-        payload: {
-          data: {
-            type: "articles",
-            id: Article.Id.make("1"),
-            attributes: { title: "Updated title" }
-          }
-        }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.update({
+            params: { id: Article.Id.make("1") },
+            payload: {
+              data: {
+                type: "articles",
+                id: Article.Id.make("1"),
+                attributes: { title: "Updated title" }
+              }
+            }
+          })
+        })
+      )
+    )
 
     expect(result.data?.attributes.title).toBe("Updated title")
     expect(result.data?.attributes.body).toBe("World")
   })
 
   it("removes a resource (204, no content)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.remove({ params: { id: Article.Id.make("1") } })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.remove({ params: { id: Article.Id.make("1") } })
+        })
+      )
+    )
     expect(result).toBeUndefined()
   })
 
   it("surfaces domain errors as typed tagged errors on the client", async () => {
-    const exit = await Effect.runPromiseExit(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({ params: { id: Article.Id.make("missing") }, query: {} })
-    })))
+    const exit = await Effect.runPromiseExit(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.fetch({ params: { id: Article.Id.make("missing") }, query: {} })
+        })
+      )
+    )
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
@@ -723,47 +751,63 @@ describe("HTTP round-trip via HttpApiTest", () => {
   })
 
   it("recovers from domain errors with catchTag", async () => {
-    const recovered = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({ params: { id: Article.Id.make("missing") }, query: {} }).pipe(
-        Effect.catchTag("ArticleNotFound", (error) => Effect.succeed(`not found: ${error.id}`))
+    const recovered = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles
+            .fetch({ params: { id: Article.Id.make("missing") }, query: {} })
+            .pipe(Effect.catchTag("ArticleNotFound", (error) => Effect.succeed(`not found: ${error.id}`)))
+        })
       )
-    })))
+    )
 
     expect(recovered).toBe("not found: missing")
   })
 
   it("rejects unknown include paths with a 400 BadRequest", async () => {
-    const exit = await Effect.runPromiseExit(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.fetch({
-        params: { id: Article.Id.make("1") },
-        // Bypass client-side validation to test the server's response
-        query: { include: ["publisher"] } as never
-      })
-    })))
+    const exit = await Effect.runPromiseExit(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.fetch({
+            params: { id: Article.Id.make("1") },
+            // Bypass client-side validation to test the server's response
+            query: { include: ["publisher"] } as never
+          })
+        })
+      )
+    )
 
     expect(Exit.isFailure(exit)).toBe(true)
   })
 
   it("fetches related to-one resources (GET /articles/:id/author)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.author({ params: { id: Article.Id.make("1") }, query: {} })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.author({ params: { id: Article.Id.make("1") }, query: {} })
+        })
+      )
+    )
 
     expect(result.data).toMatchObject({ type: "people", id: "9" })
     expect(result.links?.self).toBe("/articles/1/author")
   })
 
   it("fetches related to-many resources with pagination (GET /articles/:id/comments)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.comments({
-        params: { id: Article.Id.make("1") },
-        query: { page: { offset: 0, limit: 10 } }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.comments({
+            params: { id: Article.Id.make("1") },
+            query: { page: { offset: 0, limit: 10 } }
+          })
+        })
+      )
+    )
 
     expect(result.data).toHaveLength(1)
     expect(result.data[0]).toMatchObject({ type: "comments", id: "5" })
@@ -772,13 +816,17 @@ describe("HTTP round-trip via HttpApiTest", () => {
   })
 
   it("fetches relationship linkage (GET /articles/:id/relationships/comments)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.commentsRelationship({
-        params: { id: Article.Id.make("1") },
-        query: {}
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.commentsRelationship({
+            params: { id: Article.Id.make("1") },
+            query: {}
+          })
+        })
+      )
+    )
 
     // Identifiers only — no attributes
     expect(result.data).toEqual([{ type: "comments", id: "5" }])
@@ -787,37 +835,49 @@ describe("HTTP round-trip via HttpApiTest", () => {
   })
 
   it("replaces a to-one relationship (PATCH /articles/:id/relationships/author)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.updateAuthorRelationship({
-        params: { id: Article.Id.make("1") },
-        payload: { data: Person.ref("42") }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.updateAuthorRelationship({
+            params: { id: Article.Id.make("1") },
+            payload: { data: Person.ref("42") }
+          })
+        })
+      )
+    )
 
     expect(result.data).toEqual({ type: "people", id: "42" })
   })
 
   it("clears an optional to-one relationship (PATCH with null data)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.updateAuthorRelationship({
-        params: { id: Article.Id.make("1") },
-        payload: { data: null }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.updateAuthorRelationship({
+            params: { id: Article.Id.make("1") },
+            payload: { data: null }
+          })
+        })
+      )
+    )
 
     expect(result.data).toBeNull()
   })
 
   it("adds to a to-many relationship (POST /articles/:id/relationships/comments)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.addCommentsRelationship({
-        params: { id: Article.Id.make("1") },
-        payload: { data: [Comment.ref("12")] }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.addCommentsRelationship({
+            params: { id: Article.Id.make("1") },
+            payload: { data: [Comment.ref("12")] }
+          })
+        })
+      )
+    )
 
     // Existing linkage plus the added identifier
     expect(result.data).toEqual([
@@ -827,25 +887,33 @@ describe("HTTP round-trip via HttpApiTest", () => {
   })
 
   it("removes from a to-many relationship (DELETE /articles/:id/relationships/comments, 204)", async () => {
-    const result = await Effect.runPromise(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.removeCommentsRelationship({
-        params: { id: Article.Id.make("1") },
-        payload: { data: [Comment.ref("5")] }
-      })
-    })))
+    const result = await Effect.runPromise(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.removeCommentsRelationship({
+            params: { id: Article.Id.make("1") },
+            payload: { data: [Comment.ref("5")] }
+          })
+        })
+      )
+    )
 
     expect(result).toBeUndefined()
   })
 
   it("relationship endpoints surface domain errors as typed tagged errors", async () => {
-    const exit = await Effect.runPromiseExit(withHandlers(Effect.gen(function*() {
-      const client = yield* buildClient
-      return yield* client.articles.commentsRelationship({
-        params: { id: Article.Id.make("missing") },
-        query: {}
-      })
-    })))
+    const exit = await Effect.runPromiseExit(
+      withHandlers(
+        Effect.gen(function* () {
+          const client = yield* buildClient
+          return yield* client.articles.commentsRelationship({
+            params: { id: Article.Id.make("missing") },
+            query: {}
+          })
+        })
+      )
+    )
 
     expect(Exit.isFailure(exit)).toBe(true)
     if (Exit.isFailure(exit)) {
@@ -862,7 +930,7 @@ describe("type-level guarantees", () => {
   it("handler error channels are restricted to declared errors", () => {
     // fetch declares ArticleNotFound, so its handler may fail with it;
     // create declares no errors, so its error channel is never.
-    type FetchError = typeof fetchArticle extends { readonly "~Error": { readonly "Type": infer E } } ? E : never
+    type FetchError = typeof fetchArticle extends { readonly "~Error": { readonly Type: infer E } } ? E : never
     expectTypeOf<ArticleNotFound>().toMatchTypeOf<FetchError>()
   })
 

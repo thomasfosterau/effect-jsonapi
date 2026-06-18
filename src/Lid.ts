@@ -33,9 +33,7 @@ export class UnknownLidError extends Error {
   override readonly name = "UnknownLidError"
   readonly lid: string
   constructor(lid: string) {
-    super(
-      `Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`
-    )
+    super(`Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`)
     this.lid = lid
   }
 }
@@ -61,14 +59,15 @@ export interface RefLinkageValue {
  *   - `paginated` → excluded (no inline linkage)
  */
 export type ResolvedLinkage<R extends Any> = {
-  readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any> ? never : K]?:
-    R["relationships"][K] extends Relationship.One<infer T>
-      ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
-      : R["relationships"][K] extends Relationship.Optional<infer T>
-        ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
+  readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any>
+    ? never
+    : K]?: R["relationships"][K] extends Relationship.One<infer T>
+    ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
+    : R["relationships"][K] extends Relationship.Optional<infer T>
+      ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
       : R["relationships"][K] extends Relationship.Many<infer T>
         ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
-      : never
+        : never
 }
 
 /**
@@ -133,11 +132,12 @@ export const lidMap = (): LidMap => {
         const linkage = value.data
         resolved[key] = {
           ...value,
-          data: linkage === null || linkage === undefined
-            ? null
-            : Array.isArray(linkage)
-            ? linkage.map(resolveRef)
-            : resolveRef(linkage as RefValue)
+          data:
+            linkage === null || linkage === undefined
+              ? null
+              : Array.isArray(linkage)
+                ? linkage.map(resolveRef)
+                : resolveRef(linkage as RefValue)
         }
       }
       return resolved as ResolvedLinkage<R>

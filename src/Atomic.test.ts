@@ -56,7 +56,7 @@ const encodeResults = Schema.encodeUnknownSync(Results as Schema.Codec<unknown, 
 describe("extension constants", () => {
   it("exposes the extension URI and media type", () => {
     expect(Atomic.EXTENSION_URI).toBe("https://jsonapi.org/ext/atomic")
-    expect(Atomic.MEDIA_TYPE).toBe("application/vnd.api+json;ext=\"https://jsonapi.org/ext/atomic\"")
+    expect(Atomic.MEDIA_TYPE).toBe('application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"')
   })
 
   it("provides a ready-made jsonapi member advertising the extension", () => {
@@ -265,7 +265,10 @@ describe("relationship operation schemas", () => {
       const operation = decodeOperation({
         op,
         ref: { type: "articles", id: "1", relationship: "comments" },
-        data: [{ type: "comments", id: "5" }, { type: "comments", lid: "c1" }]
+        data: [
+          { type: "comments", id: "5" },
+          { type: "comments", lid: "c1" }
+        ]
       }) as any
       expect(operation.op).toBe(op)
       expect(operation.ref.relationship).toBe("comments")
@@ -437,10 +440,7 @@ describe("ResultDocument", () => {
   })
 
   it("encodes values built with the results helpers", () => {
-    const value = Atomic.results([
-      Atomic.result(article),
-      Atomic.emptyResult
-    ], { meta: { processed: 2 } })
+    const value = Atomic.results([Atomic.result(article), Atomic.emptyResult], { meta: { processed: 2 } })
 
     const encoded = encodeResults(value) as any
     expect(encoded["atomic:results"]).toHaveLength(2)
@@ -554,7 +554,10 @@ describe("Match integration (curried guards)", () => {
   const describeOperation = (operation: Op): string =>
     Match.value(operation).pipe(
       Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => `link ${op.data.length} comments`),
-      Match.when(Atomic.targetsRelationship(Article, "author"), (op) => `set article author to ${op.data === null ? "null" : "a person"}`),
+      Match.when(
+        Atomic.targetsRelationship(Article, "author"),
+        (op) => `set article author to ${op.data === null ? "null" : "a person"}`
+      ),
       Match.when(Atomic.targetsRelationship(Article, "subscribers"), (op) => `${op.op} ${op.data.length} subscribers`),
       Match.when(Atomic.targetsRelationship(Comment, "author"), () => "set comment author"),
       Match.when(Atomic.targetsResource(Article), (op) => `${op.op} article`),
@@ -563,33 +566,53 @@ describe("Match integration (curried guards)", () => {
     )
 
   it("dispatches relationship and resource operations", () => {
-    expect(describeOperation(decodeOperation({
-      op: "add",
-      ref: { type: "articles", id: "1", relationship: "comments" },
-      data: [{ type: "comments", id: "5" }]
-    }) as Op)).toBe("link 1 comments")
+    expect(
+      describeOperation(
+        decodeOperation({
+          op: "add",
+          ref: { type: "articles", id: "1", relationship: "comments" },
+          data: [{ type: "comments", id: "5" }]
+        }) as Op
+      )
+    ).toBe("link 1 comments")
 
-    expect(describeOperation(decodeOperation({
-      op: "update",
-      ref: { type: "articles", id: "1", relationship: "author" },
-      data: null
-    }) as Op)).toBe("set article author to null")
+    expect(
+      describeOperation(
+        decodeOperation({
+          op: "update",
+          ref: { type: "articles", id: "1", relationship: "author" },
+          data: null
+        }) as Op
+      )
+    ).toBe("set article author to null")
 
-    expect(describeOperation(decodeOperation({
-      op: "update",
-      ref: { type: "comments", id: "5", relationship: "author" },
-      data: { type: "people", id: "9" }
-    }) as Op)).toBe("set comment author")
+    expect(
+      describeOperation(
+        decodeOperation({
+          op: "update",
+          ref: { type: "comments", id: "5", relationship: "author" },
+          data: { type: "people", id: "9" }
+        }) as Op
+      )
+    ).toBe("set comment author")
 
-    expect(describeOperation(decodeOperation({
-      op: "add",
-      data: { type: "articles", attributes: { title: "Hello", body: "" } }
-    }) as Op)).toBe("add article")
+    expect(
+      describeOperation(
+        decodeOperation({
+          op: "add",
+          data: { type: "articles", attributes: { title: "Hello", body: "" } }
+        }) as Op
+      )
+    ).toBe("add article")
 
-    expect(describeOperation(decodeOperation({
-      op: "remove",
-      ref: { type: "comments", id: "5" }
-    }) as Op)).toBe("remove comment")
+    expect(
+      describeOperation(
+        decodeOperation({
+          op: "remove",
+          ref: { type: "comments", id: "5" }
+        }) as Op
+      )
+    ).toBe("remove comment")
   })
 
   it("curried and data-first guards agree", () => {
@@ -622,13 +645,13 @@ describe("content negotiation with extensions", () => {
   })
 
   it("rejects unsupported extension URIs even when others are supported", () => {
-    const header = "application/vnd.api+json;ext=\"https://example.com/ext/other\""
+    const header = 'application/vnd.api+json;ext="https://example.com/ext/other"'
     expect(Middleware.contentTypeIsAcceptable(header, atomic)).toBe(false)
   })
 
   it("accepts profile parameters regardless of extension support (per §5)", () => {
-    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json;profile=\"https://example.com/p\"")).toBe(true)
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;profile=\"https://example.com/p\"")).toBe(true)
+    expect(Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="https://example.com/p"')).toBe(true)
+    expect(Middleware.acceptIsAcceptable('application/vnd.api+json;profile="https://example.com/p"')).toBe(true)
   })
 
   it("still rejects other media type parameters (charset, q, ...)", () => {

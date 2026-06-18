@@ -179,15 +179,13 @@ export interface DataDocument<
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta
-> extends
-  Schema.Struct<{
-    readonly data: Schema.NullOr<R>
-    readonly included: Schema.optionalKey<Schema.$Array<Included>>
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly meta: Schema.optionalKey<M>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+> extends Schema.Struct<{
+  readonly data: Schema.NullOr<R>
+  readonly included: Schema.optionalKey<Schema.$Array<Included>>
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly meta: Schema.optionalKey<M>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates a single-resource data document schema: `data` is one resource or
@@ -222,15 +220,13 @@ export interface CollectionDocument<
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta
-> extends
-  Schema.Struct<{
-    readonly data: Schema.$Array<R>
-    readonly included: Schema.optionalKey<Schema.$Array<Included>>
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly meta: Schema.optionalKey<M>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+> extends Schema.Struct<{
+  readonly data: Schema.$Array<R>
+  readonly included: Schema.optionalKey<Schema.$Array<Included>>
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly meta: Schema.optionalKey<M>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates a collection document schema: `data` is an array of resources
@@ -265,27 +261,19 @@ export const CollectionDocument = <
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
  */
-export interface LinkageDocument<
-  D extends Schema.Top,
-  M extends Schema.Top = typeof AnyMeta
-> extends
-  Schema.Struct<{
-    readonly data: D
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly meta: Schema.optionalKey<M>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
+  readonly data: D
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly meta: Schema.optionalKey<M>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates a relationship-linkage document schema. Pass the linkage shape as
  * `data`: an identifier schema, `Schema.NullOr(identifier)` or
  * `Schema.Array(identifier)`.
  */
-export const LinkageDocument = <
-  D extends Schema.Top,
-  M extends Schema.Top = typeof AnyMeta
->(
+export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typeof AnyMeta>(
   data: D,
   options?: {
     readonly meta?: M
@@ -301,14 +289,12 @@ export const LinkageDocument = <
 /**
  * An error document: a non-empty `errors` array, never `data`.
  */
-export interface ErrorDocument<E extends Schema.Top = typeof ErrorObject> extends
-  Schema.Struct<{
-    readonly errors: Schema.$Array<E>
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface ErrorDocument<E extends Schema.Top = typeof ErrorObject> extends Schema.Struct<{
+  readonly errors: Schema.$Array<E>
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates an error document schema: a non-empty `errors` array, never `data`.
@@ -324,13 +310,11 @@ export const ErrorDocument = <E extends Schema.Top = typeof ErrorObject>(error?:
 /**
  * A meta-only document.
  */
-export interface MetaDocument<M extends Schema.Top = typeof AnyMeta> extends
-  Schema.Struct<{
-    readonly meta: M
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface MetaDocument<M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
+  readonly meta: M
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates a meta-only document schema.
@@ -350,13 +334,7 @@ export interface Document<
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
   E extends Schema.Top = typeof ErrorObject
-> extends
-  Schema.Union<readonly [
-    DataDocument<R, Included, M>,
-    ErrorDocument<E>,
-    MetaDocument<M>
-  ]>
-{}
+> extends Schema.Union<readonly [DataDocument<R, Included, M>, ErrorDocument<E>, MetaDocument<M>]> {}
 
 /**
  * Creates the full top-level document union schema: exactly one of data /

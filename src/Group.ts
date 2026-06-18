@@ -42,9 +42,7 @@ export const make: {
     name: Name,
     ...endpoints: Endpoints
   ): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>
-} = (
-  nameOrResource: string | { readonly type: string },
-  ...endpoints: ReadonlyArray<HttpApiEndpoint.Any>
-) =>
-  HttpApiGroup.make(typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type)
-    .add(...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Any>)) as never
+} = (nameOrResource: string | { readonly type: string }, ...endpoints: ReadonlyArray<HttpApiEndpoint.Any>) =>
+  HttpApiGroup.make(typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type).add(
+    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Any>)
+  ) as never

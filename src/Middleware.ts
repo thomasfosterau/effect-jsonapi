@@ -59,9 +59,7 @@ const parseMediaType = (
       const name = part.slice(0, eq).trim().toLowerCase()
       const value = part.slice(eq + 1).trim()
       // Parameter values may be quoted (ext / profile URI lists always are).
-      const unquoted = value.startsWith("\"") && value.endsWith("\"") && value.length >= 2
-        ? value.slice(1, -1)
-        : value
+      const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
       return [name, unquoted] as const
     })
   }
@@ -97,10 +95,7 @@ const parametersAreAcceptable = (
  *
  * Other content types are left to the downstream payload decoder.
  */
-export const contentTypeIsAcceptable = (
-  header: string | undefined,
-  options?: NegotiationOptions
-): boolean => {
+export const contentTypeIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
   if (header === undefined) return true
   const { base, parameters } = parseMediaType(header.trim())
   if (base !== MEDIA_TYPE) return true
@@ -113,10 +108,7 @@ export const contentTypeIsAcceptable = (
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
  * `*​/*` or `application/*` always satisfies the rule.
  */
-export const acceptIsAcceptable = (
-  header: string | undefined,
-  options?: NegotiationOptions
-): boolean => {
+export const acceptIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
   if (header === undefined) return true
   const entries = header.split(",").map((entry) => entry.trim())
   for (const entry of entries) {
@@ -147,10 +139,9 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
  * Converts request validation failures (`HttpApiSchemaError`: malformed
  * params, query, payload or headers) into JSON:API 400 error documents.
  */
-export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
-  "effect-jsonapi/SchemaErrors",
-  { error: BadRequest.wire }
-) {}
+export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()("effect-jsonapi/SchemaErrors", {
+  error: BadRequest.wire
+}) {}
 
 // ---------------------------------------------------------------------------
 // Layers
@@ -164,7 +155,7 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
   Layer.effect(
     ContentNegotiation,
     Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
-      Effect.gen(function*() {
+      Effect.gen(function* () {
         const request = yield* HttpServerRequest
         if (!contentTypeIsAcceptable(request.headers["content-type"], options)) {
           return yield* Effect.fail(new UnsupportedMediaType())

@@ -71,7 +71,7 @@ export const Page = {
 // Normalises "one resource or several" to an array (heterogeneous endpoints
 // pass several).
 const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArray<R> =>
-  Array.isArray(resource) ? resource as ReadonlyArray<R> : [resource as R]
+  Array.isArray(resource) ? (resource as ReadonlyArray<R>) : [resource as R]
 
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 
@@ -80,9 +80,7 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * typed as the resource's legal path literals (2 hops into the relationship
  * graph) and validated at decode time.
  */
-export interface Include<R extends Any> extends
-  CommaSeparated<Schema.Literals<ReadonlyArray<IncludePath<R>>>>
-{}
+export interface Include<R extends Any> extends CommaSeparated<Schema.Literals<ReadonlyArray<IncludePath<R>>>> {}
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
@@ -91,18 +89,14 @@ export interface Include<R extends Any> extends
  */
 export const Include = <R extends Any>(resource: R | ReadonlyArray<R>): Include<R> =>
   CommaSeparated(
-    Schema.Literals(
-      dedupe(toResources(resource).flatMap((r) => includePaths(r, 2))) as ReadonlyArray<IncludePath<R>>
-    )
+    Schema.Literals(dedupe(toResources(resource).flatMap((r) => includePaths(r, 2))) as ReadonlyArray<IncludePath<R>>)
   )
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
  * list of attribute names, validated against the closed attribute set.
  */
-export interface Fieldset<Field extends string> extends
-  CommaSeparated<Schema.Literals<ReadonlyArray<Field>>>
-{}
+export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Literals<ReadonlyArray<Field>>> {}
 
 /**
  * Creates the sparse-fieldset schema for one resource type.
@@ -162,33 +156,33 @@ export interface Options<R extends Any> {
  *
  * Distributes over unions of resource definitions.
  */
-export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]>
-  : never
+export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]> : never
 
 /**
  * The nested (decoded) struct fields of a query schema.
  */
 export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  & ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include<R>> } : {})
-  & ([O["fields"]] extends [true] ? {
-      readonly fields: Schema.optionalKey<
-        Schema.Struct<
-          {
-            readonly [TypeName in FieldsetResources<R>["type"]]: Schema.optionalKey<
-              Fieldset<AttributeKeys<Extract<FieldsetResources<R>, { type: TypeName }>>>
-            >
-          }
-        >
-      >
-    }
-    : {})
-  & (O["sort"] extends true ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
-    : O["sort"] extends ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
-    : {})
-  & (O["page"] extends Schema.Struct.Fields ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> }
-    : {})
-  & (O["filter"] extends Schema.Struct.Fields ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
-    : {})
+  ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include<R>> } : {}) &
+    ([O["fields"]] extends [true]
+      ? {
+          readonly fields: Schema.optionalKey<
+            Schema.Struct<{
+              readonly [TypeName in FieldsetResources<R>["type"]]: Schema.optionalKey<
+                Fieldset<AttributeKeys<Extract<FieldsetResources<R>, { type: TypeName }>>>
+              >
+            }>
+          >
+        }
+      : {}) &
+    (O["sort"] extends true
+      ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
+      : O["sort"] extends ReadonlyArray<string>
+        ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
+        : {}) &
+    (O["page"] extends Schema.Struct.Fields ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> } : {}) &
+    (O["filter"] extends Schema.Struct.Fields
+      ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
+      : {})
 >
 
 /**
@@ -196,20 +190,23 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
  * bracket-keyed string.
  */
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  & ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Schema.String> } : {})
-  & ([O["fields"]] extends [true] ? {
-      readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
-    }
-    : {})
-  & (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Schema.String> } : {})
-  & (O["page"] extends Schema.Struct.Fields ? {
-      readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
-    }
-    : {})
-  & (O["filter"] extends Schema.Struct.Fields ? {
-      readonly [K in keyof O["filter"] & string as `filter[${K}]`]: Schema.optionalKey<Schema.String>
-    }
-    : {})
+  ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Schema.String> } : {}) &
+    ([O["fields"]] extends [true]
+      ? {
+          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
+        }
+      : {}) &
+    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Schema.String> } : {}) &
+    (O["page"] extends Schema.Struct.Fields
+      ? {
+          readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
+        }
+      : {}) &
+    (O["filter"] extends Schema.Struct.Fields
+      ? {
+          readonly [K in keyof O["filter"] & string as `filter[${K}]`]: Schema.optionalKey<Schema.String>
+        }
+      : {})
 >
 
 // Resolves to `T` for every concrete query configuration; needed because the
@@ -221,14 +218,12 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
  * The full query schema for a resource and feature set: a flat, bracket-keyed
  * string record on the wire, an ergonomic nested shape when decoded.
  */
-export interface QuerySchema<R extends Any, O extends Options<R>> extends
-  Schema.decodeTo<
-    Schema.Struct<AsFields<NestedFields<R, O>>>,
-    Schema.Struct<AsFields<FlatFields<R, O>>>,
-    never,
-    never
-  >
-{}
+export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema.decodeTo<
+  Schema.Struct<AsFields<NestedFields<R, O>>>,
+  Schema.Struct<AsFields<FlatFields<R, O>>>,
+  never,
+  never
+> {}
 
 /**
  * Builds the query schema for a resource (or, for heterogeneous endpoints,
@@ -261,9 +256,10 @@ export const schema = <R extends Any, const O extends Options<R>>(
   }
 
   if (options.sort === true || (Array.isArray(options.sort) && options.sort.length > 0)) {
-    const sortable = options.sort === true
-      ? dedupe(resources.flatMap((r) => attributeKeys(r)))
-      : (options.sort as ReadonlyArray<string>)
+    const sortable =
+      options.sort === true
+        ? dedupe(resources.flatMap((r) => attributeKeys(r)))
+        : (options.sort as ReadonlyArray<string>)
     nestedFields.sort = Schema.optionalKey(Sort(sortable))
     flatFields.sort = Schema.optionalKey(Schema.String)
   }

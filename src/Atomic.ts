@@ -108,8 +108,8 @@ export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", ext: [ATOMIC
  * makes the operation union unambiguous: a ref carrying `relationship` can
  * only decode as a relationship operation.
  */
-export interface ResourceRef<R extends Any> extends
-  Schema.Union<readonly [
+export interface ResourceRef<R extends Any> extends Schema.Union<
+  readonly [
     Schema.Struct<{
       readonly type: Schema.tag<R["type"]>
       readonly id: R["Id"]
@@ -122,8 +122,8 @@ export interface ResourceRef<R extends Any> extends
       readonly meta: Schema.optionalKey<typeof AnyMeta>
       readonly relationship: Schema.optionalKey<typeof Schema.Never>
     }>
-  ]>
-{}
+  ]
+> {}
 
 /**
  * Creates the resource-ref schema for a resource.
@@ -150,8 +150,8 @@ export const ResourceRef = <R extends Any>(resource: R): ResourceRef<R> =>
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-to-one-relationships}
  */
-export interface RelationshipRef<R extends Any, K extends string> extends
-  Schema.Union<readonly [
+export interface RelationshipRef<R extends Any, K extends string> extends Schema.Union<
+  readonly [
     Schema.Struct<{
       readonly type: Schema.tag<R["type"]>
       readonly id: R["Id"]
@@ -162,8 +162,8 @@ export interface RelationshipRef<R extends Any, K extends string> extends
       readonly lid: Schema.String
       readonly relationship: Schema.tag<K>
     }>
-  ]>
-{}
+  ]
+> {}
 
 /**
  * Creates the relationship-ref schema for one of a resource's relationships.
@@ -194,50 +194,49 @@ export const RelationshipRef = <R extends Any, const K extends RelationshipName<
  * like the resource's own relationship schema, but identifiers may be
  * lid-based.
  */
-export interface OneRefSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Ref<R>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface OneRefSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Ref<R>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The linkage of an `optional` (nullable) to-one relationship inside an
  * operation.
  */
-export interface OptionalRefSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.NullOr<Ref<R>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface OptionalRefSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.NullOr<Ref<R>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The linkage of an inline (`many`) to-many relationship inside an operation.
  */
-export interface ManyRefSchema<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.$Array<Ref<R>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface ManyRefSchema<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.$Array<Ref<R>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * The operation-linkage schema of a relationship descriptor (id- or lid-based
  * identifiers). `paginated` relationships have none — their linkage is managed
  * through relationship operations, not inline.
  */
-export type RefSchemaFor<D> = D extends Relationship.One<infer T> ? OneRefSchema<T>
-  : D extends Relationship.Optional<infer T> ? OptionalRefSchema<T>
-  : D extends Relationship.Many<infer T> ? ManyRefSchema<T>
-  : never
+export type RefSchemaFor<D> =
+  D extends Relationship.One<infer T>
+    ? OneRefSchema<T>
+    : D extends Relationship.Optional<infer T>
+      ? OptionalRefSchema<T>
+      : D extends Relationship.Many<infer T>
+        ? ManyRefSchema<T>
+        : never
 
 const refSchemaFor = (descriptor: Relationship.Descriptor): Schema.Top => {
-  const data = descriptor.kind === "one"
-    ? Ref(descriptor.ref)
-    : descriptor.kind === "optional"
-    ? Schema.NullOr(Ref(descriptor.ref))
-    : Schema.Array(Ref(descriptor.ref))
+  const data =
+    descriptor.kind === "one"
+      ? Ref(descriptor.ref)
+      : descriptor.kind === "optional"
+        ? Schema.NullOr(Ref(descriptor.ref))
+        : Schema.Array(Ref(descriptor.ref))
   return Schema.Struct({
     data,
     meta: Schema.optionalKey(AnyMeta)
@@ -255,18 +254,19 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
  * are optional, `paginated` are excluded. Identifiers may be lid-based.
  */
 export type AddRelationshipFields<Rels extends Relationships> = {
-  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Rels[K] extends
-    Relationship.One<Any> ? RefSchemaFor<Rels[K]>
-    : Schema.optionalKey<RefSchemaFor<Rels[K]>>
+  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any>
+    ? never
+    : K]: Rels[K] extends Relationship.One<Any> ? RefSchemaFor<Rels[K]> : Schema.optionalKey<RefSchemaFor<Rels[K]>>
 }
 
 /**
  * The `relationships` member of an `add` operation: a required key when the
  * resource has required (`one`) relationships, optional otherwise.
  */
-export type AddRelationshipsMember<Rels extends Relationships> = HasRequiredRelationship<Rels> extends true
-  ? Schema.Struct<AsFields<AddRelationshipFields<Rels>>>
-  : Schema.optionalKey<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>>
+export type AddRelationshipsMember<Rels extends Relationships> =
+  HasRequiredRelationship<Rels> extends true
+    ? Schema.Struct<AsFields<AddRelationshipFields<Rels>>>
+    : Schema.optionalKey<Schema.Struct<AsFields<AddRelationshipFields<Rels>>>>
 
 /**
  * The relationship fields of an `update` operation's `data` — mirrors the
@@ -280,7 +280,9 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
 }
 
 // Runtime construction of the add / update operation relationship members.
-const addRelationshipMembers = (relationships: Relationships): {
+const addRelationshipMembers = (
+  relationships: Relationships
+): {
   readonly struct: Schema.Top
   readonly required: boolean
 } => {
@@ -320,18 +322,16 @@ const updateRelationshipFields = (relationships: Relationships): Schema.Top => {
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-creating-resources}
  */
-export interface AddOperation<R extends Any> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"add">
-    readonly data: Schema.Struct<{
-      readonly type: Schema.tag<R["type"]>
-      readonly lid: Schema.optionalKey<Schema.String>
-      readonly attributes: R["fields"]["attributes"]
-      readonly relationships: AddRelationshipsMember<R["relationships"]>
-    }>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
+export interface AddOperation<R extends Any> extends Schema.Struct<{
+  readonly op: Schema.tag<"add">
+  readonly data: Schema.Struct<{
+    readonly type: Schema.tag<R["type"]>
+    readonly lid: Schema.optionalKey<Schema.String>
+    readonly attributes: R["fields"]["attributes"]
+    readonly relationships: AddRelationshipsMember<R["relationships"]>
   }>
-{}
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the `add` operation schema for a resource.
@@ -358,22 +358,18 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-resources}
  */
-export interface UpdateOperation<R extends Any> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"update">
-    readonly ref: Schema.optionalKey<ResourceRef<R>>
-    readonly data: Schema.Struct<{
-      readonly type: Schema.tag<R["type"]>
-      readonly id: Schema.optionalKey<R["Id"]>
-      readonly lid: Schema.optionalKey<Schema.String>
-      readonly attributes: Schema.optionalKey<
-        Schema.Struct<PartialAttributes<R["fields"]["attributes"]["fields"]>>
-      >
-      readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<R["relationships"]>>>>
-    }>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
+export interface UpdateOperation<R extends Any> extends Schema.Struct<{
+  readonly op: Schema.tag<"update">
+  readonly ref: Schema.optionalKey<ResourceRef<R>>
+  readonly data: Schema.Struct<{
+    readonly type: Schema.tag<R["type"]>
+    readonly id: Schema.optionalKey<R["Id"]>
+    readonly lid: Schema.optionalKey<Schema.String>
+    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<R["fields"]["attributes"]["fields"]>>>
+    readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<R["relationships"]>>>>
   }>
-{}
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the `update` operation schema for a resource.
@@ -386,9 +382,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       type: Schema.tag(resource.type),
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
-      attributes: Schema.optionalKey(
-        Schema.Struct(Struct.map(Schema.optionalKey)(resource.fields.attributes.fields))
-      ),
+      attributes: Schema.optionalKey(Schema.Struct(Struct.map(Schema.optionalKey)(resource.fields.attributes.fields))),
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships))
     }),
     meta: Schema.optionalKey(AnyMeta)
@@ -399,13 +393,11 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-deleting-resources}
  */
-export interface RemoveOperation<R extends Any> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"remove">
-    readonly ref: ResourceRef<R>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface RemoveOperation<R extends Any> extends Schema.Struct<{
+  readonly op: Schema.tag<"remove">
+  readonly ref: ResourceRef<R>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the `remove` operation schema for a resource.
@@ -429,14 +421,16 @@ export const RemoveOperation = <R extends Any>(resource: R): RemoveOperation<R> 
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-updating-to-one-relationships}
  */
-export interface UpdateToOneRelationshipOperation<R extends Any, K extends string, Data extends Schema.Top> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<"update">
-    readonly ref: RelationshipRef<R, K>
-    readonly data: Data
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface UpdateToOneRelationshipOperation<
+  R extends Any,
+  K extends string,
+  Data extends Schema.Top
+> extends Schema.Struct<{
+  readonly op: Schema.tag<"update">
+  readonly ref: RelationshipRef<R, K>
+  readonly data: Data
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * An operation on a to-many relationship (`many` or `paginated`): `add`
@@ -449,14 +443,12 @@ export interface ToManyRelationshipOperation<
   R extends Any,
   K extends string,
   T extends Any
-> extends
-  Schema.Struct<{
-    readonly op: Schema.tag<Op>
-    readonly ref: RelationshipRef<R, K>
-    readonly data: Schema.$Array<Ref<T>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+> extends Schema.Struct<{
+  readonly op: Schema.tag<Op>
+  readonly ref: RelationshipRef<R, K>
+  readonly data: Schema.$Array<Ref<T>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 // ---------------------------------------------------------------------------
 // The operations derived for a resource, as an introspectable record
@@ -469,23 +461,27 @@ export interface ToManyRelationshipOperation<
  *   - `optional` → `update` (data: the target's ref or null)
  *   - `many` / `paginated` → `add` / `update` / `remove` (data: an array of refs)
  */
-export type RelationshipOperationsFor<R extends Any, K extends string, Rel> = Rel extends Relationship.One<infer T> ? {
-    /** Replace the to-one linkage with another identifier (required: never null). */
-    readonly update: UpdateToOneRelationshipOperation<R, K, Ref<T>>
-  }
-  : Rel extends Relationship.Optional<infer T> ? {
-      /** Replace the to-one linkage with an identifier, or `null` to clear it. */
-      readonly update: UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>
-    }
-  : Rel extends Relationship.ToMany<infer T> ? {
-      /** Append members to the to-many linkage. */
-      readonly add: ToManyRelationshipOperation<"add", R, K, T>
-      /** Replace all members of the to-many linkage. */
-      readonly update: ToManyRelationshipOperation<"update", R, K, T>
-      /** Delete members from the to-many linkage. */
-      readonly remove: ToManyRelationshipOperation<"remove", R, K, T>
-    }
-  : never
+export type RelationshipOperationsFor<R extends Any, K extends string, Rel> =
+  Rel extends Relationship.One<infer T>
+    ? {
+        /** Replace the to-one linkage with another identifier (required: never null). */
+        readonly update: UpdateToOneRelationshipOperation<R, K, Ref<T>>
+      }
+    : Rel extends Relationship.Optional<infer T>
+      ? {
+          /** Replace the to-one linkage with an identifier, or `null` to clear it. */
+          readonly update: UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>
+        }
+      : Rel extends Relationship.ToMany<infer T>
+        ? {
+            /** Append members to the to-many linkage. */
+            readonly add: ToManyRelationshipOperation<"add", R, K, T>
+            /** Replace all members of the to-many linkage. */
+            readonly update: ToManyRelationshipOperation<"update", R, K, T>
+            /** Delete members from the to-many linkage. */
+            readonly remove: ToManyRelationshipOperation<"remove", R, K, T>
+          }
+        : never
 
 /**
  * Every operation derived for a resource, as a named record of schemas —
@@ -569,11 +565,12 @@ export type RelationshipOperation<R extends Any> = {
     ? UpdateToOneRelationshipOperation<R, K, Ref<T>>
     : R["relationships"][K] extends Relationship.Optional<infer T>
       ? UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>
-    : R["relationships"][K] extends Relationship.ToMany<infer T> ?
-        | ToManyRelationshipOperation<"add", R, K, T>
-        | ToManyRelationshipOperation<"update", R, K, T>
-        | ToManyRelationshipOperation<"remove", R, K, T>
-    : never
+      : R["relationships"][K] extends Relationship.ToMany<infer T>
+        ?
+            | ToManyRelationshipOperation<"add", R, K, T>
+            | ToManyRelationshipOperation<"update", R, K, T>
+            | ToManyRelationshipOperation<"remove", R, K, T>
+        : never
 }[RelationshipName<R>]
 
 /**
@@ -583,11 +580,8 @@ export type RelationshipOperation<R extends Any> = {
  *
  * Distributes over unions of resource definitions.
  */
-export type Operation<R extends Any> = R extends Any ?
-    | RelationshipOperation<R>
-    | AddOperation<R>
-    | UpdateOperation<R>
-    | RemoveOperation<R>
+export type Operation<R extends Any> = R extends Any
+  ? RelationshipOperation<R> | AddOperation<R> | UpdateOperation<R> | RemoveOperation<R>
   : never
 
 /**
@@ -613,9 +607,9 @@ const flattenOperations = (operations: ResourceOperations<Any>): Array<Schema.To
 export const Operations = <const Resources extends ReadonlyArray<Any>>(
   resources: Resources
 ): Operations<Resources[number]> =>
-  Schema.Union(
-    resources.flatMap((resource) => flattenOperations(operationsFor(resource)))
-  ) as unknown as Operations<Resources[number]>
+  Schema.Union(resources.flatMap((resource) => flattenOperations(operationsFor(resource)))) as unknown as Operations<
+    Resources[number]
+  >
 
 /**
  * The `atomic:operations` request document schema for a set of resources: a
@@ -623,13 +617,11 @@ export const Operations = <const Resources extends ReadonlyArray<Any>>(
  *
  * @see {@link https://jsonapi.org/ext/atomic/#operation-objects}
  */
-export interface RequestDocument<R extends Any> extends
-  Schema.Struct<{
-    readonly "atomic:operations": Schema.$Array<Operations<R>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface RequestDocument<R extends Any> extends Schema.Struct<{
+  readonly "atomic:operations": Schema.$Array<Operations<R>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates the `atomic:operations` request document schema for a set of
@@ -654,19 +646,15 @@ export const RequestDocument = <const Resources extends ReadonlyArray<Any>>(
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-result-objects}
  */
-export interface Result<R extends Any> extends
-  Schema.Struct<{
-    readonly data: Schema.optionalKey<Schema.NullOr<Schema.Union<ReadonlyArray<R>>>>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface Result<R extends Any> extends Schema.Struct<{
+  readonly data: Schema.optionalKey<Schema.NullOr<Schema.Union<ReadonlyArray<R>>>>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the result-object schema for a set of resources.
  */
-export const Result = <const Resources extends ReadonlyArray<Any>>(
-  resources: Resources
-): Result<Resources[number]> =>
+export const Result = <const Resources extends ReadonlyArray<Any>>(resources: Resources): Result<Resources[number]> =>
   Schema.Struct({
     data: Schema.optionalKey(Schema.NullOr(Schema.Union(resources))),
     meta: Schema.optionalKey(AnyMeta)
@@ -678,23 +666,18 @@ export const Result = <const Resources extends ReadonlyArray<Any>>(
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-responses-4}
  */
-export interface ResultDocument<R extends Any, M extends Schema.Top = typeof AnyMeta> extends
-  Schema.Struct<{
-    readonly "atomic:results": Schema.$Array<Result<R>>
-    readonly links: Schema.optionalKey<typeof TopLevelLinks>
-    readonly meta: Schema.optionalKey<M>
-    readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
-  }>
-{}
+export interface ResultDocument<R extends Any, M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
+  readonly "atomic:results": Schema.$Array<Result<R>>
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>
+  readonly meta: Schema.optionalKey<M>
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+}> {}
 
 /**
  * Creates the `atomic:results` response document schema for a set of
  * resources.
  */
-export const ResultDocument = <
-  const Resources extends ReadonlyArray<Any>,
-  M extends Schema.Top = typeof AnyMeta
->(
+export const ResultDocument = <const Resources extends ReadonlyArray<Any>, M extends Schema.Top = typeof AnyMeta>(
   resources: Resources,
   options?: {
     readonly meta?: M
@@ -788,21 +771,26 @@ export type RefValueFor<T extends Any> = Ref<T>["Type"]
  * for required to-one (`one`), one ref or `null` for `optional`, an array of
  * refs for to-many (`many` / `paginated`).
  */
-export type RelationshipDataValue<R extends Any, K extends RelationshipName<R>> = R["relationships"][K] extends
-  Relationship.One<infer T> ? RefValueFor<T>
-  : R["relationships"][K] extends Relationship.Optional<infer T> ? RefValueFor<T> | null
-  : R["relationships"][K] extends Relationship.ToMany<infer T> ? ReadonlyArray<RefValueFor<T>>
-  : never
+export type RelationshipDataValue<R extends Any, K extends RelationshipName<R>> =
+  R["relationships"][K] extends Relationship.One<infer T>
+    ? RefValueFor<T>
+    : R["relationships"][K] extends Relationship.Optional<infer T>
+      ? RefValueFor<T> | null
+      : R["relationships"][K] extends Relationship.ToMany<infer T>
+        ? ReadonlyArray<RefValueFor<T>>
+        : never
 
 /**
  * The value type of an `update` operation on relationship `K` of `R`.
  */
-export type UpdateRelationshipValue<R extends Any, K extends RelationshipName<R>> = R["relationships"][K] extends
-  Relationship.One<infer T> ? UpdateToOneRelationshipOperation<R, K, Ref<T>>["Type"]
-  : R["relationships"][K] extends Relationship.Optional<infer T>
-    ? UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>["Type"]
-  : R["relationships"][K] extends Relationship.ToMany<infer T> ? ToManyRelationshipOperation<"update", R, K, T>["Type"]
-  : never
+export type UpdateRelationshipValue<R extends Any, K extends RelationshipName<R>> =
+  R["relationships"][K] extends Relationship.One<infer T>
+    ? UpdateToOneRelationshipOperation<R, K, Ref<T>>["Type"]
+    : R["relationships"][K] extends Relationship.Optional<infer T>
+      ? UpdateToOneRelationshipOperation<R, K, Schema.NullOr<Ref<T>>>["Type"]
+      : R["relationships"][K] extends Relationship.ToMany<infer T>
+        ? ToManyRelationshipOperation<"update", R, K, T>["Type"]
+        : never
 
 /**
  * Builds an `update` operation on a relationship: replaces a to-one linkage
@@ -832,9 +820,8 @@ export const updateRelationship = <R extends Any, const K extends RelationshipNa
 /**
  * The target resource of a to-many relationship key.
  */
-export type ToManyTarget<R extends Any, K extends ToManyName<R>> = R["relationships"][K] extends
-  Relationship.ToMany<infer T> ? T
-  : never
+export type ToManyTarget<R extends Any, K extends ToManyName<R>> =
+  R["relationships"][K] extends Relationship.ToMany<infer T> ? T : never
 
 /**
  * Builds an `add` operation on a to-many relationship (`many` or `paginated`):
@@ -1047,19 +1034,14 @@ const targetsResourceImpl = (operation: { readonly op: string }, resource: Any):
  * ```
  */
 export const targetsResource: {
-  <R extends Any>(
-    resource: R
-  ): (operation: unknown) => operation is ResourceOperationShape<R>
-  <Op extends { readonly op: string }, R extends Any>(
-    operation: Op,
-    resource: R
-  ): operation is TargetsResource<Op, R>
+  <R extends Any>(resource: R): (operation: unknown) => operation is ResourceOperationShape<R>
+  <Op extends { readonly op: string }, R extends Any>(operation: Op, resource: R): operation is TargetsResource<Op, R>
 } = ((...args: ReadonlyArray<unknown>) =>
   isOperationValue(args[0])
-    // data-first: (operation, resource)
-    ? targetsResourceImpl(args[0], args[1] as Any)
-    // data-last: (resource) => (operation) => ...
-    : (operation: { readonly op: string }) => targetsResourceImpl(operation, args[0] as Any)) as never
+    ? // data-first: (operation, resource)
+      targetsResourceImpl(args[0], args[1] as Any)
+    : // data-last: (resource) => (operation) => ...
+      (operation: { readonly op: string }) => targetsResourceImpl(operation, args[0] as Any)) as never
 
 /**
  * The structural shape of operations that target relationship `K` of resource
@@ -1072,19 +1054,14 @@ export type RelationshipOperationShape<R extends Any, K extends string> = {
 /**
  * The operations of `Op` that target relationship `K` of resource `R`.
  */
-export type TargetsRelationship<Op, R extends Any, K extends string> = Extract<
-  Op,
-  RelationshipOperationShape<R, K>
->
+export type TargetsRelationship<Op, R extends Any, K extends string> = Extract<Op, RelationshipOperationShape<R, K>>
 
-const targetsRelationshipImpl = (
-  operation: { readonly op: string },
-  resource: Any,
-  relationship: string
-): boolean => {
-  const ref = (operation as {
-    readonly ref?: { readonly type?: unknown; readonly relationship?: unknown } | undefined
-  }).ref
+const targetsRelationshipImpl = (operation: { readonly op: string }, resource: Any, relationship: string): boolean => {
+  const ref = (
+    operation as {
+      readonly ref?: { readonly type?: unknown; readonly relationship?: unknown } | undefined
+    }
+  ).ref
   return ref !== undefined && ref !== null && ref.type === resource.type && ref.relationship === relationship
 }
 
@@ -1127,8 +1104,8 @@ export const targetsRelationship: {
   ): operation is TargetsRelationship<Op, R, K>
 } = ((...args: ReadonlyArray<unknown>) =>
   isOperationValue(args[0])
-    // data-first: (operation, resource, relationship)
-    ? targetsRelationshipImpl(args[0], args[1] as Any, args[2] as string)
-    // data-last: (resource, relationship) => (operation) => ...
-    : (operation: { readonly op: string }) =>
-      targetsRelationshipImpl(operation, args[0] as Any, args[1] as string)) as never
+    ? // data-first: (operation, resource, relationship)
+      targetsRelationshipImpl(args[0], args[1] as Any, args[2] as string)
+    : // data-last: (resource, relationship) => (operation) => ...
+      (operation: { readonly op: string }) =>
+        targetsRelationshipImpl(operation, args[0] as Any, args[1] as string)) as never

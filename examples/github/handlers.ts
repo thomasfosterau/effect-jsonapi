@@ -14,7 +14,7 @@
  */
 import { Effect, Layer } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "./api.js"
 import {
   IssueLocked,
@@ -272,10 +272,7 @@ const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> =
 
 // Resolve the resources referenced by the requested include paths.
 
-const resolveRepositoryIncluded = (
-  repository: Repository,
-  include: ReadonlyArray<string> | undefined
-): Array<User> => {
+const resolveRepositoryIncluded = (repository: Repository, include: ReadonlyArray<string> | undefined): Array<User> => {
   const included: Array<User> = []
   if (include?.includes("owner")) {
     const owner = repository.relationships?.owner.data
@@ -378,9 +375,8 @@ const paginate = <A>(
 export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
   handlers
     .handle("fetch", ({ params }) =>
-      loadUser(params.id).pipe(
-        Effect.map((user) => JsonApi.data(user, { self: `/users/${user.id}` }))
-      ))
+      loadUser(params.id).pipe(Effect.map((user) => JsonApi.data(user, { self: `/users/${user.id}` })))
+    )
     .handle("list", ({ query }) => {
       const users = sortBy([...store.users.values()], query.sort)
       const { number, page, size, total } = paginate(users, query.page)
@@ -407,7 +403,8 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
             self: `/repositories/${repository.id}`
           })
         )
-      ))
+      )
+    )
     .handle("list", ({ query }) => {
       let repositories = [...store.repositories.values()]
 
@@ -424,9 +421,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       // filter[visibility]=public|private
       const visibility = query.filter?.visibility
       if (visibility !== undefined) {
-        repositories = repositories.filter((repository) =>
-          repository.attributes.private === (visibility === "private")
-        )
+        repositories = repositories.filter((repository) => repository.attributes.private === (visibility === "private"))
       }
 
       sortBy(repositories, query.sort)
@@ -462,7 +457,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
         Effect.map((repository) => {
           const updated = Repository.make({
             ...repository,
-            attributes: { ...repository.attributes, ...(payload.data.attributes ?? {}) },
+            attributes: { ...repository.attributes, ...payload.data.attributes },
             relationships: {
               owner: payload.data.relationships?.owner ?? repository.relationships!.owner
             }
@@ -470,13 +465,15 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
           store.repositories.set(updated.id, updated)
           return JsonApi.data(updated, { self: `/repositories/${updated.id}` })
         })
-      ))
+      )
+    )
     .handle("remove", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
           store.repositories.delete(repository.id)
         })
-      ))
+      )
+    )
     // GET /repositories/:id/owner — the related user as a full resource
     .handle("owner", ({ params }) =>
       loadRepository(params.id).pipe(
@@ -486,7 +483,8 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
             self: JsonApi.relatedLink("repositories", repository.id, "owner")
           })
         })
-      ))
+      )
+    )
 )
 
 // ---------------------------------------------------------------------------
@@ -510,7 +508,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
             self: `/issues/${issue.id}`
           })
         )
-      ))
+      )
+    )
     .handle("list", ({ query }) => {
       let issues = [...store.issues.values()]
 
@@ -571,7 +570,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           const relationships = issue.relationships!
           const updated = Issue.make({
             ...issue,
-            attributes: { ...issue.attributes, ...(payload.data.attributes ?? {}) },
+            attributes: { ...issue.attributes, ...payload.data.attributes },
             relationships: {
               repository: payload.data.relationships?.repository ?? relationships.repository,
               author: payload.data.relationships?.author ?? relationships.author,
@@ -583,7 +582,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           store.issues.set(updated.id, updated)
           return JsonApi.data(updated, { self: `/issues/${updated.id}` })
         })
-      ))
+      )
+    )
     // --- Related resource endpoints -----------------------------------------
     // GET /issues/:id/comments — the paginated comment feed
     .handle("comments", ({ params, query }) =>
@@ -595,15 +595,16 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           return JsonApi.collection(page, {
             included: query.include?.includes("author")
               ? page.flatMap((comment) => {
-                const author = store.users.get(comment.relationships!.author.data.id)
-                return author === undefined ? [] : [author]
-              })
+                  const author = store.users.get(comment.relationships!.author.data.id)
+                  return author === undefined ? [] : [author]
+                })
               : [],
             meta: { total },
             links: JsonApi.numberPaginationLinks(path, { number, size }, total)
           })
         })
-      ))
+      )
+    )
     // --- Relationship (linkage) endpoints ------------------------------------
     // GET /issues/:id/relationships/labels
     .handle("labelsRelationship", ({ params }) =>
@@ -614,7 +615,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
             related: JsonApi.relatedLink("issues", issue.id, "labels")
           })
         )
-      ))
+      )
+    )
     // PATCH /issues/:id/relationships/assignee — assign or unassign
     .handle("updateAssigneeRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
@@ -633,7 +635,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
             })
           )
         })
-      ))
+      )
+    )
     // PATCH /issues/:id/relationships/labels — replace all labels
     .handle("updateLabelsRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
@@ -647,7 +650,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
             self: JsonApi.relationshipLink("issues", issue.id, "labels")
           })
         })
-      ))
+      )
+    )
     // POST /issues/:id/relationships/labels — add labels
     .handle("addLabelsRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
@@ -664,22 +668,22 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
             self: JsonApi.relationshipLink("issues", issue.id, "labels")
           })
         })
-      ))
+      )
+    )
     // DELETE /issues/:id/relationships/labels — remove labels → 204
     .handle("removeLabelsRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
         Effect.map((issue) => {
           const remove = new Set<string>(payload.data.map((identifier) => identifier.id))
-          const remaining = (issue.relationships?.labels.data ?? []).filter(
-            (identifier) => !remove.has(identifier.id)
-          )
+          const remaining = (issue.relationships?.labels.data ?? []).filter((identifier) => !remove.has(identifier.id))
           const updated = Issue.make({
             ...issue,
             relationships: { ...issue.relationships!, labels: { data: remaining } }
           })
           store.issues.set(updated.id, updated)
         })
-      ))
+      )
+    )
 )
 
 // ---------------------------------------------------------------------------
@@ -696,7 +700,8 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
             self: `/pulls/${pull.id}`
           })
         )
-      ))
+      )
+    )
     .handle("list", ({ query }) => {
       let pulls = [...store.pulls.values()]
 
@@ -740,9 +745,7 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     const issues = [...store.issues.values()].filter((issue) =>
       matches([issue.attributes.title, issue.attributes.body], q)
     )
-    const users = [...store.users.values()].filter((user) =>
-      matches([user.attributes.login, user.attributes.name], q)
-    )
+    const users = [...store.users.values()].filter((user) => matches([user.attributes.login, user.attributes.name], q))
     const results = [...repositories, ...issues, ...users]
 
     const total = results.length
@@ -756,8 +759,8 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
           result.type === "repositories"
             ? resolveRepositoryIncluded(result, query.include)
             : result.type === "issues"
-            ? resolveIssueIncluded(result, query.include)
-            : []
+              ? resolveIssueIncluded(result, query.include)
+              : []
         ),
         meta: { total },
         links: JsonApi.offsetPaginationLinks("/search", { offset, limit }, total)
@@ -773,10 +776,6 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
  * The middleware is provided *into* the handler groups (not merged alongside
  * them) so that every endpoint's middleware requirement is satisfied.
  */
-export const GitHubLive = Layer.mergeAll(
-  UsersLive,
-  RepositoriesLive,
-  IssuesLive,
-  PullsLive,
-  SearchLive
-).pipe(Layer.provideMerge(JsonApi.Middleware.layer))
+export const GitHubLive = Layer.mergeAll(UsersLive, RepositoriesLive, IssuesLive, PullsLive, SearchLive).pipe(
+  Layer.provideMerge(JsonApi.Middleware.layer)
+)

@@ -127,7 +127,10 @@ describe("Relationship wire schemas", () => {
 
     it("accepts identifier array linkage", () => {
       const decoded = Schema.decodeUnknownSync(schema)({
-        data: [{ type: "comments", id: "5" }, { type: "comments", id: "6" }]
+        data: [
+          { type: "comments", id: "5" },
+          { type: "comments", id: "6" }
+        ]
       })
       expect(decoded.data).toHaveLength(2)
     })
@@ -241,7 +244,7 @@ describe("relationship kinds in resource objects", () => {
   })
 
   it("types `one` linkage as non-nullable and `optional` linkage as nullable", () => {
-    type Rels = NonNullable<typeof Article.Type["relationships"]>
+    type Rels = NonNullable<(typeof Article.Type)["relationships"]>
     expectTypeOf<Rels["author"]["data"]>().toEqualTypeOf<typeof Person.identifier.Type>()
     expectTypeOf<Rels["editor"]["data"]>().toEqualTypeOf<typeof Person.identifier.Type | null>()
   })

@@ -5,7 +5,7 @@
  * ```ts
  * import { Schema } from "effect"
  * import { HttpApi } from "effect/unstable/httpapi"
- * import { JsonApi } from "effect-jsonapi"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
  *
  * // 1. Resources — the single source of truth
  * const Person = JsonApi.Resource("people", {

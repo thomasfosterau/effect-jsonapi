@@ -65,7 +65,7 @@ export const narrowIncluded: {
   ): NarrowedDocument<Doc, IncludedFor<R, Paths>>
 } = ((...args: ReadonlyArray<unknown>) =>
   args.length >= 3
-    // data-first: the document itself
-    ? args[2]
-    // data-last: an identity function over the effect
-    : (effect: unknown) => effect) as never
+    ? // data-first: the document itself
+      args[2]
+    : // data-last: an identity function over the effect
+      (effect: unknown) => effect) as never

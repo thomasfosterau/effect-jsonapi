@@ -50,25 +50,29 @@ describe("ApiError.make", () => {
   it("encodes to a spec-compliant JSON:API error document", () => {
     const wire = Schema.encodeUnknownSync(ArticleNotFound.wire)(new ArticleNotFound({ id: "42" }))
     expect(wire).toEqual({
-      errors: [{
-        status: "404",
-        code: "not_found",
-        title: "Resource not found",
-        detail: "Article 42 not found",
-        meta: { id: "42" }
-      }]
+      errors: [
+        {
+          status: "404",
+          code: "not_found",
+          title: "Resource not found",
+          detail: "Article 42 not found",
+          meta: { id: "42" }
+        }
+      ]
     })
   })
 
   it("decodes a JSON:API error document back into an instance of the class", () => {
     const document = {
-      errors: [{
-        status: "404",
-        code: "not_found",
-        title: "Resource not found",
-        detail: "Article 42 not found",
-        meta: { id: "42" }
-      }]
+      errors: [
+        {
+          status: "404",
+          code: "not_found",
+          title: "Resource not found",
+          detail: "Article 42 not found",
+          meta: { id: "42" }
+        }
+      ]
     }
     const error = Schema.decodeUnknownSync(ArticleNotFound.wire)(document)
     expect(error).toBeInstanceOf(ArticleNotFound)
@@ -106,13 +110,15 @@ describe("standard errors", () => {
       new ApiError.BadRequest({ detail: "missing data member" })
     )
     expect(wire).toEqual({
-      errors: [{
-        status: "400",
-        code: "bad_request",
-        title: "Bad Request",
-        detail: "missing data member",
-        meta: { detail: "missing data member" }
-      }]
+      errors: [
+        {
+          status: "400",
+          code: "bad_request",
+          title: "Bad Request",
+          detail: "missing data member",
+          meta: { detail: "missing data member" }
+        }
+      ]
     })
   })
 
@@ -124,9 +130,7 @@ describe("standard errors", () => {
   })
 
   it("UnsupportedMediaType encodes to a 415 error document", () => {
-    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedMediaType.wire)(
-      new ApiError.UnsupportedMediaType()
-    )
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedMediaType.wire)(new ApiError.UnsupportedMediaType())
     expect(wire).toEqual({
       errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }]
     })

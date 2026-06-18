@@ -46,13 +46,11 @@ export const Id = <const Type extends string>(type: Type): Id<Type> =>
 /**
  * The resource-identifier schema for a resource type: `{ type, id, meta? }`.
  */
-export interface Identifier<Type extends string> extends
-  Schema.Struct<{
-    readonly type: Schema.tag<Type>
-    readonly id: Id<Type>
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface Identifier<Type extends string> extends Schema.Struct<{
+  readonly type: Schema.tag<Type>
+  readonly id: Id<Type>
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the resource-identifier schema for a resource type.
@@ -74,13 +72,11 @@ export const Identifier = <const Type extends string>(type: Type): Identifier<Ty
  *
  * @see {@link https://jsonapi.org/format/1.1/#document-resource-object-identification}
  */
-export interface LocalIdentifier<Type extends string> extends
-  Schema.Struct<{
-    readonly type: Schema.tag<Type>
-    readonly lid: Schema.String
-    readonly meta: Schema.optionalKey<typeof AnyMeta>
-  }>
-{}
+export interface LocalIdentifier<Type extends string> extends Schema.Struct<{
+  readonly type: Schema.tag<Type>
+  readonly lid: Schema.String
+  readonly meta: Schema.optionalKey<typeof AnyMeta>
+}> {}
 
 /**
  * Creates the local-identifier schema for a resource type.
@@ -97,12 +93,9 @@ export const LocalIdentifier = <const Type extends string>(type: Type): LocalIde
  * that don't have a server-assigned id yet — its `{ type, lid }` local
  * identifier.
  */
-export interface Ref<R extends Any> extends
-  Schema.Union<readonly [
-    Schema.suspend<R["identifier"]>,
-    Schema.suspend<LocalIdentifier<R["type"]>>
-  ]>
-{}
+export interface Ref<R extends Any> extends Schema.Union<
+  readonly [Schema.suspend<R["identifier"]>, Schema.suspend<LocalIdentifier<R["type"]>>]
+> {}
 
 /**
  * Creates the ref schema for a resource: identifier or local identifier.
@@ -121,9 +114,7 @@ export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
 /**
  * A ref *value*: an id-based identifier or a lid-based local identifier.
  */
-export type RefValue =
-  | { readonly type: string; readonly id: string }
-  | { readonly type: string; readonly lid: string }
+export type RefValue = { readonly type: string; readonly id: string } | { readonly type: string; readonly lid: string }
 
 // ---------------------------------------------------------------------------
 // The resource definition
@@ -160,9 +151,11 @@ export type RelationshipTargets<Rels extends Relationships> = {
  * ones (whose data is never inlined).
  */
 export type IncludableTargets<Rels extends Relationships> = {
-  [K in keyof Rels]: Rels[K] extends Relationship.Paginated<Any> ? never
-    : Rels[K] extends { readonly ref: () => infer R extends Any } ? R
-    : never
+  [K in keyof Rels]: Rels[K] extends Relationship.Paginated<Any>
+    ? never
+    : Rels[K] extends { readonly ref: () => infer R extends Any }
+      ? R
+      : never
 }[keyof Rels]
 
 // Resolves to `T` for every concrete relationship record; needed because the
@@ -177,7 +170,9 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
  */
 export type HasRequiredRelationship<Rels extends Relationships> = {
   [K in keyof Rels]: Rels[K] extends Relationship.One<Any> ? true : never
-}[keyof Rels] extends never ? false : true
+}[keyof Rels] extends never
+  ? false
+  : true
 
 /**
  * The relationship fields of a create payload:
@@ -188,8 +183,10 @@ export type HasRequiredRelationship<Rels extends Relationships> = {
  *     managed through relationship endpoints, not create payloads
  */
 export type CreateRelationshipFields<Rels extends Relationships> = {
-  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Rels[K] extends
-    Relationship.One<Any> ? RelationshipSchemas<Rels>[K]
+  readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any>
+    ? never
+    : K]: Rels[K] extends Relationship.One<Any>
+    ? RelationshipSchemas<Rels>[K]
     : Schema.optionalKey<RelationshipSchemas<Rels>[K]>
 }
 
@@ -197,9 +194,10 @@ export type CreateRelationshipFields<Rels extends Relationships> = {
  * The `relationships` member of a create payload: a required key when the
  * resource has required (`one`) relationships, optional otherwise.
  */
-export type CreateRelationshipsMember<Rels extends Relationships> = HasRequiredRelationship<Rels> extends true
-  ? Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>
-  : Schema.optionalKey<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>>
+export type CreateRelationshipsMember<Rels extends Relationships> =
+  HasRequiredRelationship<Rels> extends true
+    ? Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>
+    : Schema.optionalKey<Schema.Struct<AsFields<CreateRelationshipFields<Rels>>>>
 
 /**
  * The relationship fields of an update payload: every non-`paginated`
@@ -225,16 +223,14 @@ export interface CreatePayload<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships
-> extends
-  Schema.Struct<{
-    readonly data: Schema.Struct<{
-      readonly type: Schema.tag<Type>
-      readonly lid: Schema.optionalKey<Schema.String>
-      readonly attributes: Schema.Struct<Attributes>
-      readonly relationships: CreateRelationshipsMember<Rels>
-    }>
+> extends Schema.Struct<{
+  readonly data: Schema.Struct<{
+    readonly type: Schema.tag<Type>
+    readonly lid: Schema.optionalKey<Schema.String>
+    readonly attributes: Schema.Struct<Attributes>
+    readonly relationships: CreateRelationshipsMember<Rels>
   }>
-{}
+}> {}
 
 /**
  * The partial attributes of an update payload.
@@ -254,24 +250,22 @@ export interface UpdatePayload<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships
-> extends
-  Schema.Struct<{
-    readonly data: Schema.Struct<{
-      readonly type: Schema.tag<Type>
-      readonly id: Id<Type>
-      readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<Attributes>>>
-      readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>>
-    }>
+> extends Schema.Struct<{
+  readonly data: Schema.Struct<{
+    readonly type: Schema.tag<Type>
+    readonly id: Id<Type>
+    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<Attributes>>>
+    readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>>
   }>
-{}
+}> {}
 
 /**
  * The default `included` union for a resource's compound documents: the
  * resource definitions referenced by its non-`paginated` relationships.
  */
-export interface DefaultIncluded<Rels extends Relationships> extends
-  Schema.Union<ReadonlyArray<IncludableTargets<Rels>>>
-{}
+export interface DefaultIncluded<Rels extends Relationships> extends Schema.Union<
+  ReadonlyArray<IncludableTargets<Rels>>
+> {}
 
 /**
  * A JSON:API resource definition: the resource object `Schema.Struct` itself,
@@ -358,8 +352,7 @@ export interface Any extends Schema.Top {
  * Distributes over unions of resource definitions (the keys of *any* member),
  * so it also serves heterogeneous endpoints.
  */
-export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["attributes"]["fields"] & string
-  : never
+export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["attributes"]["fields"] & string : never
 
 // ---------------------------------------------------------------------------
 // Relationship names & targets (type level)
@@ -376,7 +369,8 @@ export type RelationshipName<R extends Any> = keyof R["relationships"] & string
  */
 export type ToOneName<R extends Any> = {
   [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToOne<Any> ? K : never
-}[keyof R["relationships"]] & string
+}[keyof R["relationships"]] &
+  string
 
 /**
  * The to-many (`many` / `paginated`) relationship keys of a resource
@@ -384,13 +378,19 @@ export type ToOneName<R extends Any> = {
  */
 export type ToManyName<R extends Any> = {
   [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToMany<Any> ? K : never
-}[keyof R["relationships"]] & string
+}[keyof R["relationships"]] &
+  string
 
 /**
  * The resource definition a relationship key points at.
  */
-export type Target<R extends Any, K> = R["relationships"][K & keyof R["relationships"]] extends
-  { readonly ref: () => infer T } ? T extends Any ? T : never : never
+export type Target<R extends Any, K> = R["relationships"][K & keyof R["relationships"]] extends {
+  readonly ref: () => infer T
+}
+  ? T extends Any
+    ? T
+    : never
+  : never
 
 /**
  * The resource definitions referenced by a resource's relationships.
@@ -409,7 +409,8 @@ export type TargetsOf<R extends Any> = R extends Any ? RelationshipTargets<R["re
  */
 export type IncludableKeys<R extends Any> = {
   [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.Paginated<Any> ? never : K
-}[keyof R["relationships"]] & string
+}[keyof R["relationships"]] &
+  string
 
 /**
  * The legal `include` query parameter paths for a resource, as a union of
@@ -419,11 +420,10 @@ export type IncludableKeys<R extends Any> = {
  * Mirrors {@link includePaths} (the runtime walk) at depth 2, and distributes
  * over unions of resource definitions.
  */
-export type IncludePath<R extends Any> = R extends Any ? {
-    [K in IncludableKeys<R>]:
-      | K
-      | `${K}.${IncludableKeys<Target<R, K>>}`
-  }[IncludableKeys<R>]
+export type IncludePath<R extends Any> = R extends Any
+  ? {
+      [K in IncludableKeys<R>]: K | `${K}.${IncludableKeys<Target<R, K>>}`
+    }[IncludableKeys<R>]
   : never
 
 /**
@@ -444,10 +444,7 @@ export type ResolveIncludePath<R extends Any, Path> = Path extends `${infer Head
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
  */
-export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = ResolveIncludePath<
-  R,
-  Paths[number]
->
+export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = ResolveIncludePath<R, Paths[number]>
 
 // ---------------------------------------------------------------------------
 // Runtime graph walking
@@ -589,9 +586,7 @@ export const Resource = <
       type: Schema.tag(type),
       lid: Schema.optionalKey(Schema.String),
       attributes,
-      relationships: hasRequiredRelationship
-        ? createRelationshipsStruct
-        : Schema.optionalKey(createRelationshipsStruct)
+      relationships: hasRequiredRelationship ? createRelationshipsStruct : Schema.optionalKey(createRelationshipsStruct)
     })
   }) as unknown as CreatePayload<Type, Attributes, Rels>
 
@@ -607,9 +602,7 @@ export const Resource = <
       type: Schema.tag(type),
       id,
       attributes: Schema.optionalKey(
-        Schema.Struct(
-          Struct.map(Schema.optionalKey)(options.attributes) as PartialAttributes<Attributes>
-        )
+        Schema.Struct(Struct.map(Schema.optionalKey)(options.attributes) as PartialAttributes<Attributes>)
       ),
       relationships: Schema.optionalKey(Schema.Struct(updateRelationshipFields))
     })

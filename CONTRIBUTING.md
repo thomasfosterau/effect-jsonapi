@@ -1,98 +1,106 @@
 # Contributing to effect-jsonapi
 
-Thank you for your interest in contributing to effect-jsonapi! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to `@thomasfosterau/effect-jsonapi`! This document
+provides guidelines and instructions for contributing.
 
 ## Development Setup
 
 ### Prerequisites
 
-- Node.js 18.x or higher
-- npm or yarn
+- Node.js 20.x or higher
+- npm
 
 ### Getting Started
 
 1. Fork the repository
 2. Clone your fork:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/effect-jsonapi.git
    cd effect-jsonapi
    ```
 
 3. Install dependencies:
+
    ```bash
-   npm install
+   npm ci
    ```
 
-4. Build the project:
-   ```bash
-   npm run build
-   ```
+4. Run the full check suite (type-check, lint, format, tests):
 
-5. Run tests:
    ```bash
-   npm test
+   npm run check
    ```
 
 ## Development Workflow
 
-### Running Tests
+The repository is validated by the same commands in CI. Run them locally before opening a PR.
 
-```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-```
-
-### Building
-
-```bash
-npm run build
-```
+| Command                | Description                                                    |
+| ---------------------- | -------------------------------------------------------------- |
+| `npm run build`        | Compile `src` to `dist` with `tsc`.                            |
+| `npm run typecheck`    | Type-check sources, tests, examples and the type-level tests.  |
+| `npm run lint`         | Lint with [oxlint](https://oxc.rs) (warnings fail).            |
+| `npm run lint:fix`     | Apply oxlint's automatic fixes.                                |
+| `npm run format`       | Format the codebase with [oxfmt](https://oxc.rs).              |
+| `npm run format:check` | Verify formatting without writing changes.                     |
+| `npm test`             | Run the test suite once with vitest.                           |
+| `npm run test:watch`   | Run vitest in watch mode.                                      |
+| `npm run check`        | Run typecheck + lint + format:check + test (the full CI gate). |
 
 ## Code Style
 
-- Use TypeScript for all code
-- Follow the existing code style
-- Use Effect's Schema patterns for validation
-- Add JSDoc comments for public APIs
-- Keep the library focused on schema definitions
+- Use TypeScript for all code.
+- Formatting is enforced by oxfmt (`.oxfmtrc.json`) — run `npm run format` before committing.
+- Linting is enforced by oxlint (`.oxlintrc.json`).
+- Use Effect's `Schema` patterns; derive everything from a single resource definition where possible.
+- Add JSDoc comments for public APIs.
 
 ## Testing
 
-- Write tests for all schema definitions
-- Ensure all tests pass before submitting a PR
-- Use vitest for testing
-- Follow the existing test structure (tests are alongside source files, e.g., `src/index.test.ts`)
+- Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`);
+  end-to-end tests covering the worked examples live in `test/`.
+- Type-level expectations are asserted in `*.types.ts` files (checked by `npm run typecheck` via
+  `@ts-expect-error`), not at runtime.
+- Ensure `npm run check` passes before submitting a PR.
+
+## Changesets
+
+This project uses [Changesets](https://github.com/changesets/changesets) to manage versions and
+changelogs. If your change affects the published package, add a changeset describing it:
+
+```bash
+npm run changeset
+```
+
+Pick the appropriate bump (`patch` / `minor` / `major`) and write a user-facing summary. The
+changeset file is committed alongside your change; releases are published automatically when the
+"Version Packages" PR is merged into `main`.
 
 ## Commit Messages
 
-- Use clear and descriptive commit messages
-- Start with a verb in present tense (e.g., "Add", "Fix", "Update")
-- Reference issue numbers when applicable
+- Use clear and descriptive commit messages.
+- Start with a verb in present tense (e.g., "Add", "Fix", "Update").
+- Reference issue numbers when applicable.
 
 ## Pull Request Process
 
 1. Create a new branch for your feature/fix:
+
    ```bash
    git checkout -b feature/my-new-feature
    ```
 
-2. Make your changes and commit them with clear messages
+2. Make your changes and commit them with clear messages.
 
-3. Push to your fork:
-   ```bash
-   git push origin feature/my-new-feature
-   ```
+3. Add a changeset if the published package is affected (see above).
 
-4. Create a Pull Request from your fork to the main repository
+4. Push to your fork and open a Pull Request against `main`.
 
 5. Ensure your PR:
    - Has a clear description of the changes
    - Includes tests for new functionality
-   - Passes all existing tests
-   - Follows the code style guidelines
+   - Passes `npm run check`
    - Updates documentation if needed
 
 ## Reporting Issues
@@ -103,7 +111,7 @@ When reporting issues, please include:
 - Steps to reproduce the issue
 - Expected behavior
 - Actual behavior
-- Environment details (Node.js version, OS, etc.)
+- Environment details (Node.js version, OS, `effect` version)
 - Relevant code samples or error messages
 
 ## Feature Requests
@@ -112,12 +120,15 @@ Feature requests are welcome! Please:
 
 - Check if the feature has already been requested
 - Provide a clear use case
-- Explain how it aligns with JSON:API specification
-- Consider how it fits with the library's focus on schema definitions
+- Explain how it aligns with the JSON:API specification
 
 ## Scope
 
-This library is focused on providing type-safe JSON:API schema definitions using Effect Schema. Features outside this scope (such as HTTP integration, query parsing, or serialization) should be considered for separate packages.
+This library provides a type-safe, spec-compliant JSON:API v1.1 layer on top of Effect's `HttpApi`:
+resources, errors, endpoints, typed query parameters, content-negotiation middleware and the atomic
+operations extension. Contributions should keep compliance a property of construction — derived from
+resource definitions rather than left to developer discipline — and compose with vanilla `HttpApi`,
+`HttpApiBuilder`, `HttpApiClient`, `HttpApiTest` and `OpenApi`.
 
 ## License
 

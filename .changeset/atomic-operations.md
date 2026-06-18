@@ -1,5 +1,5 @@
 ---
-"effect-jsonapi": minor
+"@thomasfosterau/effect-jsonapi": minor
 ---
 
 Add helpers for the JSON:API atomic operations extension (https://jsonapi.org/ext/atomic/), plus the base-spec lid (local id) concepts they build on.
@@ -26,7 +26,7 @@ Operations respect the relationship kinds: `add` operations require `one` relati
 
 ### Content negotiation: `ext` / `profile` media type parameters
 
-The middleware now implements JSON:API v1.1 §5 precisely: only media type parameters *other than* `ext` / `profile` (or `ext` parameters carrying unsupported extension URIs) are rejected with 415/406. Previously any parameter was rejected, which also rejected spec-legal `profile` parameters.
+The middleware now implements JSON:API v1.1 §5 precisely: only media type parameters _other than_ `ext` / `profile` (or `ext` parameters carrying unsupported extension URIs) are rejected with 415/406. Previously any parameter was rejected, which also rejected spec-legal `profile` parameters.
 
 `Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })` configures the supported extension URIs; `Middleware.layer` is unchanged (no extensions). The `contentTypeIsAcceptable` / `acceptIsAcceptable` predicates accept an optional `NegotiationOptions` argument.
 

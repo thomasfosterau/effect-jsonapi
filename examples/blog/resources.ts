@@ -12,7 +12,7 @@
  *   Comment ──author───▶ Person   `one`
  */
 import { Schema } from "effect"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 
 export const Person = JsonApi.Resource("people", {
   attributes: {

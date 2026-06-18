@@ -18,7 +18,7 @@
  *   PullRequest ──reviewers─────────▶ User          `many`
  */
 import { Schema } from "effect"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 
 export const User = JsonApi.Resource("users", {
   attributes: {

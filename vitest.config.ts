@@ -6,7 +6,7 @@ export default defineConfig({
     alias: {
       // Lets examples and tests import the library by its package name,
       // exactly like user code does.
-      "effect-jsonapi": fileURLToPath(new URL("./src/index.ts", import.meta.url))
+      "@thomasfosterau/effect-jsonapi": fileURLToPath(new URL("./src/index.ts", import.meta.url))
     }
   },
   test: {

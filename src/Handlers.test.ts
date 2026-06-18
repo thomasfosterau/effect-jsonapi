@@ -105,8 +105,16 @@ describe("Handlers.linkage", () => {
   })
 
   it("builds a to-many linkage document", () => {
-    expect(Handlers.linkage([{ type: "comments", id: "5" }, { type: "comments", id: "12" }])).toEqual({
-      data: [{ type: "comments", id: "5" }, { type: "comments", id: "12" }]
+    expect(
+      Handlers.linkage([
+        { type: "comments", id: "5" },
+        { type: "comments", id: "12" }
+      ])
+    ).toEqual({
+      data: [
+        { type: "comments", id: "5" },
+        { type: "comments", id: "12" }
+      ]
     })
   })
 

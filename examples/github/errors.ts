@@ -4,7 +4,7 @@
  * with the declared HTTP status.
  */
 import { Schema } from "effect"
-import { JsonApi } from "effect-jsonapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 
 export class UserNotFound extends JsonApi.Error<UserNotFound>()("UserNotFound", {
   status: 404,

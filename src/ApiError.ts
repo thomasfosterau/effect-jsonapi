@@ -39,22 +39,22 @@ type WireDocumentType = typeof WireDocument.Type
  * The endpoint error schema derived from an error class: decodes a JSON:API
  * error document into an instance of the class (and back).
  */
-export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends
-  Schema.decodeTo<
-    Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
-    typeof WireDocument,
-    never,
-    never
-  >
-{}
+export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.decodeTo<
+  Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
+  typeof WireDocument,
+  never,
+  never
+> {}
 
 /**
  * The class returned by {@link make}: a `Schema.TaggedErrorClass` augmented
  * with the JSON:API error metadata and the derived wire schema.
  */
-export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends
-  Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>
-{
+export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.Class<
+  Self,
+  Schema.TaggedStruct<Tag, Fields>,
+  Cause.YieldableError
+> {
   /** The HTTP status this error responds with. */
   readonly status: number
   /** The JSON:API error `code` (application-specific identifier). */
@@ -95,7 +95,10 @@ export interface Config<Fields extends Schema.Struct.Fields> {
 }
 
 const snakeCase = (tag: string): string =>
-  tag.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/[\s-]+/g, "_").toLowerCase()
+  tag
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[\s-]+/g, "_")
+    .toLowerCase()
 
 // Wire schemas are derived lazily (so they bind to the user's final subclass,
 // preserving `instanceof`) and cached per class.
@@ -127,38 +130,42 @@ const makeWire = (
     })
   ) as unknown as typeof WireDocument
 
-  const wire = strictDocument.pipe(
-    Schema.decodeTo(
-      klass as unknown as Schema.Top,
-      SchemaTransformation.transform<unknown, WireDocumentType>({
-        // document -> class encoded form ({ _tag, ...fields })
-        decode: (doc) => {
-          const meta = doc.errors[0]?.meta ?? {}
-          return {
-            _tag: options.tag,
-            ...Object.fromEntries(options.fieldKeys.map((key) => [key, meta[key]]))
+  const wire = strictDocument
+    .pipe(
+      Schema.decodeTo(
+        klass as unknown as Schema.Top,
+        SchemaTransformation.transform<unknown, WireDocumentType>({
+          // document -> class encoded form ({ _tag, ...fields })
+          decode: (doc) => {
+            const meta = doc.errors[0]?.meta ?? {}
+            return {
+              _tag: options.tag,
+              ...Object.fromEntries(options.fieldKeys.map((key) => [key, meta[key]]))
+            }
+          },
+          // class encoded form -> document
+          encode: (encoded) => {
+            const fields = encoded as Record<string, unknown>
+            const detail = options.detail?.(fields)
+            return {
+              errors: [
+                {
+                  status: String(options.status),
+                  code: options.code,
+                  ...(options.title !== undefined ? { title: options.title } : {}),
+                  ...(detail !== undefined ? { detail } : {}),
+                  ...(options.fieldKeys.length > 0
+                    ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
+                    : {})
+                }
+              ]
+            }
           }
-        },
-        // class encoded form -> document
-        encode: (encoded) => {
-          const fields = encoded as Record<string, unknown>
-          const detail = options.detail?.(fields)
-          return {
-            errors: [{
-              status: String(options.status),
-              code: options.code,
-              ...(options.title !== undefined ? { title: options.title } : {}),
-              ...(detail !== undefined ? { detail } : {}),
-              ...(options.fieldKeys.length > 0
-                ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
-                : {})
-            }]
-          }
-        }
-      })
-    ),
-    HttpApiSchema.status(options.status)
-  ).pipe((schema) => asJsonApi(schema))
+        })
+      ),
+      HttpApiSchema.status(options.status)
+    )
+    .pipe((schema) => asJsonApi(schema))
 
   wireCache.set(klass, wire)
   return wire
@@ -180,45 +187,47 @@ const makeWire = (
  * }) {}
  * ```
  */
-export const make = <Self = never>(identifier?: string) =>
-<const Tag extends string, const Fields extends Schema.Struct.Fields = {}>(
-  tag: Tag,
-  config: Config<Fields>
-): ApiErrorClass<Self, Tag, Fields> => {
-  const fields = (config.fields ?? {}) as Fields
-  const fieldKeys = Object.keys(fields)
-  const code = config.code ?? snakeCase(tag)
-  const detail = typeof config.detail === "function"
-    ? config.detail
-    : config.detail !== undefined
-    ? () => config.detail as string
-    : undefined
+export const make =
+  <Self = never>(identifier?: string) =>
+  <const Tag extends string, const Fields extends Schema.Struct.Fields = {}>(
+    tag: Tag,
+    config: Config<Fields>
+  ): ApiErrorClass<Self, Tag, Fields> => {
+    const fields = (config.fields ?? {}) as Fields
+    const fieldKeys = Object.keys(fields)
+    const code = config.code ?? snakeCase(tag)
+    const detail =
+      typeof config.detail === "function"
+        ? config.detail
+        : config.detail !== undefined
+          ? () => config.detail as string
+          : undefined
 
-  // The conditional `MissingSelfGeneric` branch only matters at the user's
-  // `extends` clause, where `Self` is concrete — cast it away here.
-  const Base = Schema.TaggedErrorClass<Self>(identifier)(tag, fields) as unknown as new(
-    ...args: Array<any>
-  ) => object
+    // The conditional `MissingSelfGeneric` branch only matters at the user's
+    // `extends` clause, where `Self` is concrete — cast it away here.
+    const Base = Schema.TaggedErrorClass<Self>(identifier)(tag, fields) as unknown as new (
+      ...args: Array<any>
+    ) => object
 
-  class ApiErrorBase extends Base {
-    static readonly status = config.status
-    static readonly code = code
-    static readonly title = config.title
-    static get wire() {
-      // `this` is the user's final class, so decoded errors are `instanceof` it.
-      return makeWire(this as unknown as { new (...args: Array<any>): any }, {
-        tag,
-        status: config.status,
-        code,
-        title: config.title,
-        fieldKeys,
-        detail
-      })
+    class ApiErrorBase extends Base {
+      static readonly status = config.status
+      static readonly code = code
+      static readonly title = config.title
+      static get wire() {
+        // `this` is the user's final class, so decoded errors are `instanceof` it.
+        return makeWire(this as unknown as { new (...args: Array<any>): any }, {
+          tag,
+          status: config.status,
+          code,
+          title: config.title,
+          fieldKeys,
+          detail
+        })
+      }
     }
-  }
 
-  return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>
-}
+    return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>
+  }
 
 // ---------------------------------------------------------------------------
 // Standard errors — the responses every JSON:API endpoint must support
