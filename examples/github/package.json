@@ -13,6 +13,6 @@
     "effect": "^4.0.0-beta.70"
   },
   "devDependencies": {
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.9"
   }
 }
