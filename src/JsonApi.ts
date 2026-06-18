@@ -40,6 +40,7 @@
  * ```
  *
  * @module
+ * @since 0.1.0
  */
 
 // ---------------------------------------------------------------------------
@@ -101,6 +102,9 @@ export * from "./Client.js"
  *   detail: (e) => `Article ${e.id} not found`
  * }) {}
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export { make as Error } from "./ApiError.js"
 export { BadRequest, Conflict, Forbidden, NotAcceptable, UnsupportedMediaType } from "./ApiError.js"
@@ -114,6 +118,9 @@ export * as Endpoint from "./Endpoint.js"
 
 /**
  * Creates an `HttpApiGroup` named after a resource's type — see `Group.make`.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export { make as Group } from "./Group.js"
 

@@ -20,6 +20,8 @@
  * const ref = lids.identifier(Article, operation.ref)          // { type, id }
  * const linkage = lids.resolveLinkage(Article, operation.data.relationships)
  * ```
+ *
+ * @since 0.1.0
  */
 import type { MetaValue } from "./Handlers.js"
 import type * as Relationship from "./Relationship.js"
@@ -28,6 +30,24 @@ import type { Any, RefValue } from "./Resource.js"
 /**
  * Thrown when resolving a ref whose `lid` was never assigned an id — the
  * client referenced a local id that no earlier operation declared.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const lids = JsonApi.lidMap()
+ *
+ * // converting the thrown error into an Effect failure
+ * const program = Effect.try({
+ *   try: () => lids.identifier(Article, { type: "articles", lid: "never-created" }),
+ *   catch: (error) =>
+ *     error instanceof JsonApi.UnknownLidError ? error : new Error(String(error))
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class UnknownLidError extends Error {
   override readonly name = "UnknownLidError"
@@ -41,6 +61,9 @@ export class UnknownLidError extends Error {
 /**
  * The minimal runtime shape of relationship linkage holding refs (identifiers
  * that may be lid-based).
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface RefLinkageValue {
   readonly [key: string]: {
@@ -57,6 +80,9 @@ export interface RefLinkageValue {
  *   - `optional` → `{ data: identifier | null }`
  *   - `many` → `{ data: identifier[] }`
  *   - `paginated` → excluded (no inline linkage)
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type ResolvedLinkage<R extends Any> = {
   readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any>
@@ -77,6 +103,9 @@ export type ResolvedLinkage<R extends Any> = {
  *
  * Resolution throws {@link UnknownLidError} for lids no earlier operation
  * assigned — convert it to your 4xx error of choice with `Effect.try`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface LidMap {
   /** Records the server-assigned id for a lid. */
@@ -102,6 +131,27 @@ export interface LidMap {
 
 /**
  * Creates an empty {@link LidMap}.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const lids = JsonApi.lidMap()
+ *
+ * // record the server-assigned id of a resource created with a lid
+ * lids.assign("a1", "42")
+ *
+ * // resolve a later lid-based ref to a typed identifier
+ * const id = lids.identifier(Article, { type: "articles", lid: "a1" }) // { type: "articles", id: "42" }
+ *
+ * // resolve lid-based identifiers inside relationship linkage
+ * const linkage = lids.resolveLinkage(Article, {
+ *   comments: { data: [{ type: "comments", lid: "c1" }] }
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const lidMap = (): LidMap => {
   const ids = new Map<string, string>()

@@ -20,12 +20,42 @@
  * reference other resource definitions through lazy thunks, so a typo'd
  * reference is a compile error and the relationship graph can be walked at
  * runtime.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: {
+ *     firstName: Schema.NonEmptyString,
+ *     lastName: Schema.NonEmptyString
+ *   }
+ * })
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: {
+ *     author: JsonApi.Relationship.one(() => Person)
+ *   }
+ * })
+ * ```
+ *
+ * @since 0.1.0
  */
 import { Schema, Struct } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js"
 import * as Relationship from "./Relationship.js"
 import type { Relationships, RelationshipSchemas } from "./Relationship.js"
 
+/**
+ * Re-exports of the `Relationship` module's core types: `Descriptor` (a single
+ * relationship descriptor), `Relationships` (a record of them, as declared on a
+ * resource) and `RelationshipSchemas` (the schemas derived from them).
+ *
+ * @since 0.1.0
+ * @category models
+ */
 export type { Descriptor, Relationships, RelationshipSchemas } from "./Relationship.js"
 
 // ---------------------------------------------------------------------------
@@ -34,17 +64,41 @@ export type { Descriptor, Relationships, RelationshipSchemas } from "./Relations
 
 /**
  * The branded id schema for a resource type: `string & Brand<"<type>Id">`.
+ *
+ * Branding the id by resource type means ids cannot be accidentally mixed
+ * across resource types at the type level.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Id<Type extends string> extends Schema.brand<Schema.String, `${Type}Id`> {}
 
 /**
  * Creates the branded id schema for a resource type.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ *
+ * const personId = Person.Id.make("9") // branded with "peopleId"
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Id = <const Type extends string>(type: Type): Id<Type> =>
   Schema.String.pipe(Schema.brand(`${type}Id` as `${Type}Id`))
 
 /**
  * The resource-identifier schema for a resource type: `{ type, id, meta? }`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Identifier<Type extends string> extends Schema.Struct<{
   readonly type: Schema.tag<Type>
@@ -54,6 +108,21 @@ export interface Identifier<Type extends string> extends Schema.Struct<{
 
 /**
  * Creates the resource-identifier schema for a resource type.
+ *
+ * Useful standalone — e.g. to validate a `{ type, id }` linkage independently
+ * of any resource definition.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const PersonIdentifier = JsonApi.Identifier("people")
+ * const decoded = Schema.decodeUnknownSync(PersonIdentifier)({ type: "people", id: "9" })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Identifier = <const Type extends string>(type: Type): Identifier<Type> =>
   Schema.Struct({
@@ -71,6 +140,9 @@ export const Identifier = <const Type extends string>(type: Type): Identifier<Ty
  * created by earlier ones.
  *
  * @see {@link https://jsonapi.org/format/1.1/#document-resource-object-identification}
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface LocalIdentifier<Type extends string> extends Schema.Struct<{
   readonly type: Schema.tag<Type>
@@ -80,6 +152,9 @@ export interface LocalIdentifier<Type extends string> extends Schema.Struct<{
 
 /**
  * Creates the local-identifier schema for a resource type.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const LocalIdentifier = <const Type extends string>(type: Type): LocalIdentifier<Type> =>
   Schema.Struct({
@@ -92,6 +167,9 @@ export const LocalIdentifier = <const Type extends string>(type: Type): LocalIde
  * A ref to a resource: either its `{ type, id }` identifier or — for resources
  * that don't have a server-assigned id yet — its `{ type, lid }` local
  * identifier.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Ref<R extends Any> extends Schema.Union<
   readonly [Schema.suspend<R["identifier"]>, Schema.suspend<LocalIdentifier<R["type"]>>]
@@ -102,6 +180,9 @@ export interface Ref<R extends Any> extends Schema.Union<
  *
  * Accepts the resource definition or a thunk, so refs can be built lazily from
  * relationship descriptors.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
   const thunk = typeof resource === "function" ? resource : () => resource
@@ -113,6 +194,9 @@ export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
 
 /**
  * A ref *value*: an id-based identifier or a lid-based local identifier.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type RefValue = { readonly type: string; readonly id: string } | { readonly type: string; readonly lid: string }
 
@@ -122,6 +206,9 @@ export type RefValue = { readonly type: string; readonly id: string } | { readon
 
 /**
  * The field map of a resource object schema.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type ResourceFields<
   Type extends string,
@@ -140,6 +227,9 @@ export type ResourceFields<
 /**
  * The union of resource definitions referenced by a relationship record —
  * every relationship's target, regardless of kind.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelationshipTargets<Rels extends Relationships> = {
   [K in keyof Rels]: Rels[K] extends { readonly ref: () => infer R extends Any } ? R : never
@@ -149,6 +239,9 @@ export type RelationshipTargets<Rels extends Relationships> = {
  * The union of resource definitions that can appear in a compound document's
  * `included` member: the targets of every relationship *except* `paginated`
  * ones (whose data is never inlined).
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type IncludableTargets<Rels extends Relationships> = {
   [K in keyof Rels]: Rels[K] extends Relationship.Paginated<Any>
@@ -167,6 +260,9 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
  * Whether a relationship record contains at least one required (`one`)
  * relationship — in which case the create payload's `relationships` member is
  * itself required.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type HasRequiredRelationship<Rels extends Relationships> = {
   [K in keyof Rels]: Rels[K] extends Relationship.One<Any> ? true : never
@@ -181,6 +277,9 @@ export type HasRequiredRelationship<Rels extends Relationships> = {
  *   - `optional` / `many` relationships are optional
  *   - `paginated` relationships are excluded — unbounded collections are
  *     managed through relationship endpoints, not create payloads
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type CreateRelationshipFields<Rels extends Relationships> = {
   readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any>
@@ -193,6 +292,9 @@ export type CreateRelationshipFields<Rels extends Relationships> = {
 /**
  * The `relationships` member of a create payload: a required key when the
  * resource has required (`one`) relationships, optional otherwise.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type CreateRelationshipsMember<Rels extends Relationships> =
   HasRequiredRelationship<Rels> extends true
@@ -202,6 +304,9 @@ export type CreateRelationshipsMember<Rels extends Relationships> =
 /**
  * The relationship fields of an update payload: every non-`paginated`
  * relationship, each optional (PATCH semantics — omitted means unchanged).
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type UpdateRelationshipFields<Rels extends Relationships> = {
   readonly [K in keyof Rels as Rels[K] extends Relationship.Paginated<Any> ? never : K]: Schema.optionalKey<
@@ -218,6 +323,22 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
  * cannot appear.
  *
  * @see {@link https://jsonapi.org/format/1.1/#crud-creating}
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ *
+ * // { data: { type: "articles", lid?, attributes, relationships? } }
+ * const CreateArticle = Article.createPayload
+ * ```
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface CreatePayload<
   Type extends string,
@@ -234,6 +355,9 @@ export interface CreatePayload<
 
 /**
  * The partial attributes of an update payload.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type PartialAttributes<Attributes extends Schema.Struct.Fields> = {
   readonly [K in keyof Attributes]: Schema.optionalKey<Attributes[K]>
@@ -245,6 +369,22 @@ export type PartialAttributes<Attributes extends Schema.Struct.Fields> = {
  * appear (use relationship endpoints).
  *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating}
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ *
+ * // { data: { type: "articles", id, attributes?, relationships? } }
+ * const UpdateArticle = Article.updatePayload
+ * ```
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface UpdatePayload<
   Type extends string,
@@ -262,6 +402,9 @@ export interface UpdatePayload<
 /**
  * The default `included` union for a resource's compound documents: the
  * resource definitions referenced by its non-`paginated` relationships.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface DefaultIncluded<Rels extends Relationships> extends Schema.Union<
   ReadonlyArray<IncludableTargets<Rels>>
@@ -270,6 +413,25 @@ export interface DefaultIncluded<Rels extends Relationships> extends Schema.Unio
 /**
  * A JSON:API resource definition: the resource object `Schema.Struct` itself,
  * augmented with every schema derived from it.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ *
+ * // Everything is derived from the definition:
+ * Person.Id            // branded id schema
+ * Person.identifier    // { type, id } schema
+ * Person.createPayload // create request body schema
+ * Person.document()    // single-resource document schema
+ * ```
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Resource<
   Type extends string,
@@ -335,6 +497,9 @@ export interface Resource<
 /**
  * The structural interface every {@link Resource} definition satisfies.
  * Use as the constraint when accepting "any resource definition".
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Any extends Schema.Top {
   readonly type: string
@@ -351,6 +516,9 @@ export interface Any extends Schema.Top {
  *
  * Distributes over unions of resource definitions (the keys of *any* member),
  * so it also serves heterogeneous endpoints.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["attributes"]["fields"] & string : never
 
@@ -361,11 +529,17 @@ export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["at
 /**
  * The relationship keys of a resource definition, as a union of string
  * literals.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelationshipName<R extends Any> = keyof R["relationships"] & string
 
 /**
  * The to-one (`one` / `optional`) relationship keys of a resource definition.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type ToOneName<R extends Any> = {
   [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToOne<Any> ? K : never
@@ -375,6 +549,9 @@ export type ToOneName<R extends Any> = {
 /**
  * The to-many (`many` / `paginated`) relationship keys of a resource
  * definition.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type ToManyName<R extends Any> = {
   [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.ToMany<Any> ? K : never
@@ -383,6 +560,9 @@ export type ToManyName<R extends Any> = {
 
 /**
  * The resource definition a relationship key points at.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type Target<R extends Any, K> = R["relationships"][K & keyof R["relationships"]] extends {
   readonly ref: () => infer T
@@ -396,6 +576,9 @@ export type Target<R extends Any, K> = R["relationships"][K & keyof R["relations
  * The resource definitions referenced by a resource's relationships.
  *
  * Distributes over unions of resource definitions.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type TargetsOf<R extends Any> = R extends Any ? RelationshipTargets<R["relationships"]> : never
 
@@ -406,6 +589,9 @@ export type TargetsOf<R extends Any> = R extends Any ? RelationshipTargets<R["re
 /**
  * The relationship keys of a resource that can appear in `?include=` paths —
  * every key except `paginated` relationships, whose data is never inlined.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type IncludableKeys<R extends Any> = {
   [K in keyof R["relationships"]]: R["relationships"][K] extends Relationship.Paginated<Any> ? never : K
@@ -419,6 +605,9 @@ export type IncludableKeys<R extends Any> = {
  *
  * Mirrors {@link includePaths} (the runtime walk) at depth 2, and distributes
  * over unions of resource definitions.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type IncludePath<R extends Any> = R extends Any
   ? {
@@ -430,6 +619,9 @@ export type IncludePath<R extends Any> = R extends Any
  * The resource definitions brought into a compound document by one include
  * path. Dotted paths include the intermediate resources as well as the leaf,
  * per the spec.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type ResolveIncludePath<R extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
   ? Target<R, Head> | ResolveIncludePath<Target<R, Head>, Rest>
@@ -443,6 +635,9 @@ export type ResolveIncludePath<R extends Any, Path> = Path extends `${infer Head
  * this is exactly the `included` member union of a compliant response.
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = ResolveIncludePath<R, Paths[number]>
 
@@ -452,6 +647,9 @@ export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = Re
 
 /**
  * The attribute keys of a resource definition, at runtime.
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<AttributeKeys<R>> =>
   Object.keys(resource.fields.attributes.fields) as unknown as ReadonlyArray<AttributeKeys<R>>
@@ -462,6 +660,9 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * Resource definitions referenced by `resource`'s non-`paginated`
  * relationships — the ones whose data can appear inline (and therefore in
  * compound documents).
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const directTargets = (resource: Any): ReadonlyArray<Any> =>
   dedupe(
@@ -474,6 +675,9 @@ export const directTargets = (resource: Any): ReadonlyArray<Any> =>
  * Resource definitions referenced by *all* of `resource`'s relationships,
  * including `paginated` ones — e.g. for sparse-fieldset configuration, where
  * a paginated relationship's target is still addressable.
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const allTargets = (resource: Any): ReadonlyArray<Any> =>
   dedupe(Object.values(resource.relationships).map((descriptor) => descriptor.ref()))
@@ -486,6 +690,25 @@ export const allTargets = (resource: Any): ReadonlyArray<Any> =>
  * Cycles in the relationship graph are handled by the depth limit.
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ *
+ * JsonApi.includePaths(Article) // ["author"]
+ * ```
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray<string> => {
   const paths: Array<string> = []
@@ -513,24 +736,29 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
  * The returned value *is* the resource object `Schema.Struct`, augmented with
  * the derived members.
  *
- * **Example**
- *
+ * @example
  * ```ts
- * const Person = Resource("people", {
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = JsonApi.Resource("people", {
  *   attributes: {
  *     firstName: Schema.NonEmptyString,
  *     lastName: Schema.NonEmptyString
  *   }
  * })
  *
- * const Article = Resource("articles", {
+ * const Article = JsonApi.Resource("articles", {
  *   attributes: { title: Schema.NonEmptyString },
  *   relationships: {
- *     author: Relationship.one(() => Person),
- *     comments: Relationship.paginated(() => Comment)
+ *     author: JsonApi.Relationship.one(() => Person),
+ *     comments: JsonApi.Relationship.paginated(() => Person)
  *   }
  * })
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Resource = <
   const Type extends string,

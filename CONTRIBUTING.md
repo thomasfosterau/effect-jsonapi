@@ -54,7 +54,30 @@ The repository is validated by the same commands in CI. Run them locally before 
 - Formatting is enforced by oxfmt (`.oxfmtrc.json`) — run `npm run format` before committing.
 - Linting is enforced by oxlint (`.oxlintrc.json`).
 - Use Effect's `Schema` patterns; derive everything from a single resource definition where possible.
-- Add JSDoc comments for public APIs.
+- Document public APIs with JSDoc (see [Documentation](#documentation)).
+
+## Documentation
+
+Public API documentation follows the same JSDoc conventions as the `effect` package, so the surface
+reads consistently and is ready for API-doc generation. When you add or change a public export:
+
+- **Module header.** Each module starts with a JSDoc block describing the module, ending with a
+  `@since` tag.
+- **Every public export** gets a JSDoc block containing, in order:
+  1. A concise description of what it is and when to reach for it.
+  2. An `@example` for the principal, user-facing APIs (constructors, combinators, guards). Examples
+     must be self-contained — include the imports — and use the public `JsonApi.*` surface exactly as
+     a consumer would (e.g. `JsonApi.Resource(...)`, `JsonApi.Endpoint.fetch(...)`). Ground examples
+     in real, type-checked usage from `examples/` and `test/` rather than inventing.
+  3. A `@since` tag (use the version the symbol was introduced; `0.1.0` for the initial surface).
+  4. A `@category` tag. Use a consistent vocabulary: `constructors`, `combinators`, `models`,
+     `schemas`, `guards`, `accessors`, `layers`, `services`, `errors`, `constants`, `type-level`,
+     `utils`.
+- Keep the existing prose when refining docs — improve clarity, don't delete useful explanation.
+- Implementation-only exports that aren't part of the public surface should be marked `@internal`.
+
+Run `npm run check` before committing; it type-checks the sources, tests and examples, so a broken
+example pattern that you copied into a doc will usually surface there.
 
 ## Testing
 

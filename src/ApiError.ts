@@ -21,6 +21,8 @@
  *
  * The declared `fields` are round-tripped through the error object's `meta`
  * member, so clients can reconstruct the typed error from the wire document.
+ *
+ * @since 0.1.0
  */
 import type { Cause } from "effect"
 import { Schema, SchemaTransformation } from "effect"
@@ -30,6 +32,9 @@ import { asJsonApi } from "./internal/media.js"
 
 /**
  * The wire document schema every {@link make} error encodes to.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const WireDocument = ErrorDocument(ErrorObject)
 
@@ -38,6 +43,9 @@ type WireDocumentType = typeof WireDocument.Type
 /**
  * The endpoint error schema derived from an error class: decodes a JSON:API
  * error document into an instance of the class (and back).
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.decodeTo<
   Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
@@ -49,6 +57,9 @@ export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fie
 /**
  * The class returned by {@link make}: a `Schema.TaggedErrorClass` augmented
  * with the JSON:API error metadata and the derived wire schema.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.Class<
   Self,
@@ -71,6 +82,9 @@ export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.S
 
 /**
  * Configuration for a JSON:API error declaration.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Config<Fields extends Schema.Struct.Fields> {
   /** HTTP status code for this error response (e.g. 404, 409, 422). */
@@ -175,17 +189,27 @@ const makeWire = (
  * Declares a JSON:API error in one shot: a tagged error class whose wire
  * encoding is a spec-compliant JSON:API error document.
  *
- * **Example**
+ * Re-exported as `JsonApi.Error`.
  *
+ * @example
  * ```ts
- * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   code: "not_found",
  *   title: "Resource not found",
  *   fields: { id: Schema.String },
  *   detail: (e) => `Article ${e.id} not found`
  * }) {}
+ *
+ * // in a handler:   Effect.fail(new ArticleNotFound({ id: "42" }))
+ * // in a client:    Effect.catchTag("ArticleNotFound", (e) => ...)
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const make =
   <Self = never>(identifier?: string) =>
@@ -235,6 +259,9 @@ export const make =
 
 /**
  * 400 Bad Request: malformed query parameters or document structure.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class BadRequest extends make<BadRequest>()("BadRequest", {
   status: 400,
@@ -246,6 +273,9 @@ export class BadRequest extends make<BadRequest>()("BadRequest", {
 
 /**
  * 403 Forbidden: the client is not allowed to perform this operation.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class Forbidden extends make<Forbidden>()("Forbidden", {
   status: 403,
@@ -256,6 +286,9 @@ export class Forbidden extends make<Forbidden>()("Forbidden", {
 /**
  * 406 Not Acceptable: JSON:API §5 content negotiation — the `Accept` header
  * contains the JSON:API media type only with media type parameters.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class NotAcceptable extends make<NotAcceptable>()("NotAcceptable", {
   status: 406,
@@ -266,6 +299,9 @@ export class NotAcceptable extends make<NotAcceptable>()("NotAcceptable", {
 /**
  * 409 Conflict: the request violates server constraints (e.g. duplicate id,
  * type mismatch between the URL and the document).
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class Conflict extends make<Conflict>()("Conflict", {
   status: 409,
@@ -278,6 +314,9 @@ export class Conflict extends make<Conflict>()("Conflict", {
 /**
  * 415 Unsupported Media Type: JSON:API §5 content negotiation — the request
  * `Content-Type` is the JSON:API media type with media type parameters.
+ *
+ * @since 0.1.0
+ * @category errors
  */
 export class UnsupportedMediaType extends make<UnsupportedMediaType>()("UnsupportedMediaType", {
   status: 415,
@@ -288,5 +327,8 @@ export class UnsupportedMediaType extends make<UnsupportedMediaType>()("Unsuppor
 /**
  * The error responses every JSON:API endpoint declares automatically:
  * 400 (malformed request), 406 and 415 (content negotiation).
+ *
+ * @since 0.1.0
+ * @category constants
  */
 export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as const

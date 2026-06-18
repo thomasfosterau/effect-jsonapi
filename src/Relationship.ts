@@ -37,6 +37,8 @@
  * References are lazy thunks (`() => Person`), so a typo'd reference is a
  * compile error and resources can reference each other regardless of
  * declaration order.
+ *
+ * @since 0.1.0
  */
 import { Schema } from "effect"
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js"
@@ -49,6 +51,9 @@ import type { Any } from "./Resource.js"
 /**
  * A required to-one relationship: linkage is always a single resource
  * identifier, never `null`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface One<R extends Any> {
   readonly kind: "one"
@@ -58,6 +63,9 @@ export interface One<R extends Any> {
 /**
  * An optional (nullable) to-one relationship: linkage is a single resource
  * identifier or `null`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Optional<R extends Any> {
   readonly kind: "optional"
@@ -67,6 +75,9 @@ export interface Optional<R extends Any> {
 /**
  * A to-many relationship with inline linkage: an array of resource
  * identifiers (possibly empty).
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Many<R extends Any> {
   readonly kind: "many"
@@ -77,6 +88,9 @@ export interface Many<R extends Any> {
  * An unbounded to-many relationship with *no* inline linkage: the relationship
  * object carries only a required `related` link pointing at a paginated
  * collection endpoint.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Paginated<R extends Any> {
   readonly kind: "paginated"
@@ -85,27 +99,42 @@ export interface Paginated<R extends Any> {
 
 /**
  * Any relationship descriptor.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type Descriptor = One<Any> | Optional<Any> | Many<Any> | Paginated<Any>
 
 /**
  * A record of relationship descriptors, as written in a resource definition.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type Relationships = { readonly [key: string]: Descriptor }
 
 /**
  * The to-one descriptors: linkage is a single identifier (nullable or not).
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type ToOne<R extends Any> = One<R> | Optional<R>
 
 /**
  * The to-many (collection-valued) descriptors.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type ToMany<R extends Any> = Many<R> | Paginated<R>
 
 /**
  * The descriptors that carry inline `data` linkage — everything except
  * `paginated`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
 
@@ -120,18 +149,72 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  * The reference is a thunk so resources can reference each other regardless of
  * declaration order (mutually recursive definitions may require an explicit
  * type annotation on one side).
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const one = <R extends Any>(ref: () => R): One<R> => ({ kind: "one", ref })
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
  * identifier or `null`.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ *
+ * const Issue = JsonApi.Resource("issues", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { assignee: JsonApi.Relationship.optional(() => Person) }
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const optional = <R extends Any>(ref: () => R): Optional<R> => ({ kind: "optional", ref })
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
  * resource identifiers (possibly empty). Suited to small, bounded collections.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Tag = JsonApi.Resource("tags", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { tags: JsonApi.Relationship.many(() => Tag) }
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", ref })
 
@@ -143,6 +226,24 @@ export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", r
  * Paginated relationships are excluded from `?include=` paths, compound
  * `included` unions and create/update payloads — they are read and written
  * through their own endpoints.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Comment = JsonApi.Resource("comments", {
+ *   attributes: { body: Schema.NonEmptyString }
+ * })
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { comments: JsonApi.Relationship.paginated(() => Comment) }
+ * })
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const paginated = <R extends Any>(ref: () => R): Paginated<R> => ({ kind: "paginated", ref })
 
@@ -153,17 +254,26 @@ export const paginated = <R extends Any>(ref: () => R): Paginated<R> => ({ kind:
 /**
  * Whether a descriptor carries inline `data` linkage (everything except
  * `paginated`).
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const isLinkable = (descriptor: Descriptor): descriptor is Linkable<Any> => descriptor.kind !== "paginated"
 
 /**
  * Whether a descriptor is to-one (`one` or `optional`).
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const isToOne = (descriptor: Descriptor): descriptor is ToOne<Any> =>
   descriptor.kind === "one" || descriptor.kind === "optional"
 
 /**
  * Whether a descriptor is to-many (`many` or `paginated`).
+ *
+ * @since 0.1.0
+ * @category accessors
  */
 export const isToMany = (descriptor: Descriptor): descriptor is ToMany<Any> =>
   descriptor.kind === "many" || descriptor.kind === "paginated"
@@ -175,6 +285,9 @@ export const isToMany = (descriptor: Descriptor): descriptor is ToMany<Any> =>
 /**
  * The wire schema of a required to-one relationship:
  * `{ data: identifier, links?, meta? }`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface OneSchema<R extends Any> extends Schema.Struct<{
   readonly data: Schema.suspend<R["identifier"]>
@@ -185,6 +298,9 @@ export interface OneSchema<R extends Any> extends Schema.Struct<{
 /**
  * The wire schema of an optional to-one relationship:
  * `{ data: identifier | null, links?, meta? }`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface OptionalSchema<R extends Any> extends Schema.Struct<{
   readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>
@@ -195,6 +311,9 @@ export interface OptionalSchema<R extends Any> extends Schema.Struct<{
 /**
  * The wire schema of an inline to-many relationship:
  * `{ data: identifier[], links?, meta? }`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ManySchema<R extends Any> extends Schema.Struct<{
   readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>
@@ -205,6 +324,9 @@ export interface ManySchema<R extends Any> extends Schema.Struct<{
 /**
  * The wire schema of a paginated to-many relationship: *no* `data`; `links`
  * (with a required `related` member) is mandatory.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface PaginatedSchema extends Schema.Struct<{
   readonly links: typeof PaginatedRelationshipLinks
@@ -240,6 +362,9 @@ const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
 
 /**
  * The wire schema of a single relationship descriptor.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type SchemaFor<D extends Descriptor> =
   D extends One<infer R>
@@ -254,6 +379,9 @@ export type SchemaFor<D extends Descriptor> =
 
 /**
  * Creates the wire schema for a relationship descriptor.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const schemaFor = <D extends Descriptor>(descriptor: D): SchemaFor<D> =>
   (descriptor.kind === "one"
@@ -266,6 +394,9 @@ export const schemaFor = <D extends Descriptor>(descriptor: D): SchemaFor<D> =>
 
 /**
  * Maps a record of relationship descriptors to their wire schemas.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelationshipSchemas<Rels extends Relationships> = {
   readonly [K in keyof Rels]: SchemaFor<Rels[K]>
@@ -273,6 +404,9 @@ export type RelationshipSchemas<Rels extends Relationships> = {
 
 /**
  * Creates the wire schemas for a record of relationship descriptors.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const makeRelationshipSchemas = <Rels extends Relationships>(rels: Rels): RelationshipSchemas<Rels> =>
   Object.fromEntries(

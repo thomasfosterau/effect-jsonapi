@@ -18,6 +18,8 @@
  * so any `HttpApi` containing JSON:API endpoints will fail to build (at the
  * type level) until {@link layer} is provided — compliance cannot be
  * forgotten.
+ *
+ * @since 0.1.0
  */
 import { Effect, Layer } from "effect"
 import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
@@ -31,6 +33,9 @@ import { MEDIA_TYPE } from "./internal/media.js"
 
 /**
  * Options for the content-negotiation predicates and middleware.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface NegotiationOptions {
   /**
@@ -94,6 +99,9 @@ const parametersAreAcceptable = (
  * URIs.
  *
  * Other content types are left to the downstream payload decoder.
+ *
+ * @since 0.1.0
+ * @category utils
  */
 export const contentTypeIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
   if (header === undefined) return true
@@ -107,6 +115,9 @@ export const contentTypeIsAcceptable = (header: string | undefined, options?: Ne
  * JSON:API media type in `Accept` carries media type parameters other than
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
  * `*​/*` or `application/*` always satisfies the rule.
+ *
+ * @since 0.1.0
+ * @category utils
  */
 export const acceptIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
   if (header === undefined) return true
@@ -129,6 +140,9 @@ export const acceptIsAcceptable = (header: string | undefined, options?: Negotia
  * Enforces JSON:API §5 content negotiation. Fails with
  * {@link UnsupportedMediaType} (415) or {@link NotAcceptable} (406), both of
  * which encode to JSON:API error documents.
+ *
+ * @since 0.1.0
+ * @category services
  */
 export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotiation>()(
   "effect-jsonapi/ContentNegotiation",
@@ -138,6 +152,9 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
 /**
  * Converts request validation failures (`HttpApiSchemaError`: malformed
  * params, query, payload or headers) into JSON:API 400 error documents.
+ *
+ * @since 0.1.0
+ * @category services
  */
 export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()("effect-jsonapi/SchemaErrors", {
   error: BadRequest.wire
@@ -150,6 +167,9 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()("eff
 /**
  * Creates the live {@link ContentNegotiation} implementation, optionally
  * supporting JSON:API extensions (e.g. atomic operations).
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Layer<ContentNegotiation> =>
   Layer.effect(
@@ -170,12 +190,18 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
 
 /**
  * The live {@link ContentNegotiation} implementation (no extensions).
+ *
+ * @since 0.1.0
+ * @category layers
  */
 export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNegotiationLayer()
 
 /**
  * The live {@link SchemaErrors} implementation: rewraps every request
  * validation failure as a JSON:API 400 error document.
+ *
+ * @since 0.1.0
+ * @category layers
  */
 export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.layerSchemaErrorTransform(
   SchemaErrors,
@@ -185,6 +211,24 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
 /**
  * Everything a JSON:API api needs to run: provide this layer alongside your
  * `HttpApiBuilder` group implementations.
+ *
+ * @example
+ * ```ts
+ * import { Layer } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // `UsersLive` etc. are your `HttpApiBuilder.group(...)` implementations.
+ * declare const UsersLive: Layer.Layer<never>
+ *
+ * // Provide the JSON:API middleware *into* the handler groups so every
+ * // endpoint's middleware requirement is satisfied.
+ * const ApiLive = Layer.mergeAll(UsersLive).pipe(
+ *   Layer.provideMerge(JsonApi.Middleware.layer)
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category layers
  */
 export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.mergeAll(
   ContentNegotiationLive,
@@ -193,11 +237,25 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
 
 /**
  * Like {@link layer}, with content-negotiation options — required when the api
- * uses JSON:API extensions:
+ * uses JSON:API extensions.
  *
+ * @example
  * ```ts
- * Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })
+ * import { Layer } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * declare const HandlersLive: Layer.Layer<never>
+ *
+ * // Accept the atomic operations extension's media type.
+ * const ApiLive = Layer.mergeAll(HandlersLive).pipe(
+ *   Layer.provideMerge(
+ *     JsonApi.Middleware.layerWith({ extensions: [JsonApi.Atomic.EXTENSION_URI] })
+ *   )
+ * )
  * ```
+ *
+ * @since 0.1.0
+ * @category layers
  */
 export const layerWith = (options: NegotiationOptions): Layer.Layer<ContentNegotiation | SchemaErrors> =>
   Layer.mergeAll(contentNegotiationLayer(options), SchemaErrorsLive)

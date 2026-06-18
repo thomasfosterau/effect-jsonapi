@@ -6,5 +6,6 @@
  * ```
  *
  * @packageDocumentation
+ * @since 0.1.0
  */
 export * as JsonApi from "./JsonApi.js"

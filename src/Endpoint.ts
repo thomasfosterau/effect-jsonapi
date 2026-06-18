@@ -33,6 +33,8 @@
  * The constructors return plain `HttpApiEndpoint` values: everything composes
  * with vanilla `HttpApiGroup` / `HttpApi` / `HttpApiBuilder` / `HttpApiClient`
  * / `HttpApiTest` / `OpenApi`.
+ *
+ * @since 0.1.0
  */
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
@@ -61,6 +63,9 @@ import { directTargets } from "./Resource.js"
 /**
  * The constraint satisfied by every `ApiError.make` class: something with a
  * derived wire schema.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ErrorClass {
   readonly wire: Schema.Top
@@ -69,6 +74,9 @@ export interface ErrorClass {
 
 /**
  * The wire schemas of a tuple of error classes.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type Wires<Errors extends ReadonlyArray<ErrorClass>> = {
   readonly [K in keyof Errors]: Errors[K]["wire"]
@@ -83,6 +91,9 @@ const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors: Errors | 
 
 /**
  * Options common to all endpoint constructors.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface CommonOptions<Name extends string, Path extends `/${string}`, Errors> {
   /** Endpoint name within its group. Defaults to the operation name (`"fetch"`, `"list"`, …). */
@@ -116,6 +127,24 @@ const queryConfig = (options?: {
  *
  * Success is a 200 single-resource document (`data` may be `null`); the
  * compound `included` union is derived from the resource's relationships.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles/:id?include=author&fields[articles]=title
+ *   JsonApi.Endpoint.fetch(Article, {
+ *     include: true,
+ *     fields: true,
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const fetch = <
   Type extends string,
@@ -168,6 +197,26 @@ export const fetch = <
  *
  * Success is a 200 collection document (strict array `data`). Enable `sort`,
  * `page` and `filter` for the spec's collection query parameters.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
+ *   JsonApi.Endpoint.list(Article, {
+ *     include: true,
+ *     sort: ["createdAt", "title"],
+ *     page: JsonApi.Page.Offset,
+ *     filter: { author: Schema.optionalKey(Schema.String) }
+ *   })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const list = <
   Type extends string,
@@ -229,6 +278,20 @@ export const list = <
  * The request payload is the resource's `createPayload` (no `id`, client may
  * send a `lid`); success is a 201 single-resource document containing the
  * created resource.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // POST /articles → 201
+ *   JsonApi.Endpoint.create(Article, { errors: [TitleTaken] })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const create = <
   Type extends string,
@@ -267,6 +330,20 @@ export const create = <
  * The request payload is the resource's `updatePayload` (`id` required,
  * attributes partial); success is a 200 single-resource document containing
  * the updated resource.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // PATCH /articles/:id (partial attributes)
+ *   JsonApi.Endpoint.update(Article, { errors: [ArticleNotFound] })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const update = <
   Type extends string,
@@ -304,6 +381,20 @@ export const update = <
  *
  * Success is a 204 No Content response, per the spec's recommendation for
  * deletions with no additional information to return.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // DELETE /articles/:id → 204
+ *   JsonApi.Endpoint.remove(Article, { errors: [ArticleNotFound] })
+ * )
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const remove = <
   Type extends string,
@@ -335,6 +426,9 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  * The default compound `included` union of a heterogeneous endpoint: every
  * resource directly referenced by any of the searched resources'
  * relationships.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Schema.Union<
   ReadonlyArray<TargetsOf<Resources[number]>>
@@ -345,20 +439,32 @@ export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Sc
  * `data` is a mixed array of several resource types, discriminated by their
  * `type` tags. The natural fit for search results, feeds and timelines.
  *
+ * Success is a 200 collection document whose `data` member is the union of
+ * the given resources and whose `included` union spans all of their
+ * relationship targets.
+ *
+ * @example
  * ```ts
- * const search = Endpoint.search([Article, Person], {
- *   filter: { q: Schema.String },
- *   page: Query.Page.Offset,
- *   include: true
- * })
+ * import { Schema } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const search = JsonApi.Group(
+ *   "search",
+ *   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
+ *   JsonApi.Endpoint.search([Article, Person], {
+ *     filter: { q: Schema.String },
+ *     include: true,
+ *     fields: true,
+ *     page: JsonApi.Page.Offset
+ *   })
+ * )
  * // handler returns { data: ReadonlyArray<Article | Person>, ... }
  * // query.include spans both resources' relationship graphs
  * // ?fields[articles]= and ?fields[people]= are both available
  * ```
  *
- * Success is a 200 collection document whose `data` member is the union of
- * the given resources and whose `included` union spans all of their
- * relationship targets.
+ * @since 0.1.0
+ * @category constructors
  */
 export const search = <
   const Resources extends ReadonlyArray<Any>,
@@ -433,6 +539,9 @@ type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name 
  *   - `one` → the target's identifier (never null)
  *   - `optional` → the target's identifier or null
  *   - `many` / `paginated` → an array of the target's identifiers
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type LinkageData<R extends Any, Name extends string> =
   DescriptorOf<R, Name> extends Relationship.One<infer T extends Any>
@@ -446,6 +555,9 @@ export type LinkageData<R extends Any, Name extends string> =
 /**
  * The success document schema of a relationship endpoint: a linkage document
  * whose `data` member matches the relationship's kind.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelationshipSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> = LinkageDocument<
   AsSchema<LinkageData<R, Name>>,
@@ -454,6 +566,9 @@ export type RelationshipSuccess<R extends Any, Name extends string, DocMeta exte
 
 /**
  * The request payload schema of a relationship mutation: `{ data: linkage }`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface LinkagePayload<R extends Any, Name extends string> extends Schema.Struct<{
   readonly data: AsSchema<LinkageData<R, Name>>
@@ -465,6 +580,9 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  *   - to-one relationships → a single-resource document of the target
  *     (`data` may be null for `optional` relationships)
  *   - to-many relationships → a collection document of the target
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> =
   DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
@@ -507,12 +625,27 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
  * available.
  *
  * For `paginated` relationships this *is* the collection their required
- * `links.related` member points at — enable `page` here:
+ * `links.related` member points at — enable `page` here.
  *
+ * @example
  * ```ts
- * Endpoint.related(Person, "articles", { page: Query.Page.Offset })
- * // GET /people/:id/articles?page[offset]=0&page[limit]=10
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles/:id/author — the author, as a full resource
+ *   JsonApi.Endpoint.related(Article, "author", { errors: [ArticleNotFound] }),
+ *   // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author
+ *   JsonApi.Endpoint.related(Article, "comments", {
+ *     include: true,
+ *     page: JsonApi.Page.Offset,
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
  * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const related = <
   Type extends string,
@@ -594,14 +727,25 @@ export const related = <
  * `paginated`) — never full resource objects.
  *
  * For `paginated` relationships the identifier collection itself can be
- * paginated — enable `page`:
+ * paginated — enable `page`.
  *
+ * @example
  * ```ts
- * Endpoint.fetchRelationship(Person, "articles", { page: Query.Page.Offset })
- * // GET /people/:id/relationships/articles?page[offset]=0&page[limit]=10
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // GET /articles/:id/relationships/comments?page[offset]=0&page[limit]=10
+ *   JsonApi.Endpoint.fetchRelationship(Article, "comments", {
+ *     page: JsonApi.Page.Offset,
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
  * ```
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const fetchRelationship = <
   Type extends string,
@@ -676,7 +820,22 @@ export const fetchRelationship = <
  *
  * Success is a 200 linkage document with the updated linkage.
  *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // PATCH /articles/:id/relationships/author — replace the author
+ *   JsonApi.Endpoint.updateRelationship(Article, "author", {
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const updateRelationship = <
   Type extends string,
@@ -733,7 +892,22 @@ export const updateRelationship = <
  * add; members already present are ignored. Success is a 200 linkage document
  * with the resulting linkage.
  *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // POST /articles/:id/relationships/comments — attach existing comments
+ *   JsonApi.Endpoint.addRelationship(Article, "comments", {
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating-to-many-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const addRelationship = <
   Type extends string,
@@ -789,7 +963,22 @@ export const addRelationship = <
  * the identifiers to remove; members not present are ignored. Success is a
  * 204 No Content response.
  *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articles = JsonApi.Group(
+ *   Article,
+ *   // DELETE /articles/:id/relationships/comments → 204 — detach comments
+ *   JsonApi.Endpoint.removeRelationship(Article, "comments", {
+ *     errors: [ArticleNotFound]
+ *   })
+ * )
+ * ```
+ *
  * @see {@link https://jsonapi.org/format/1.1/#crud-updating-to-many-relationships}
+ * @since 0.1.0
+ * @category constructors
  */
 export const removeRelationship = <
   Type extends string,
@@ -838,14 +1027,6 @@ export const removeRelationship = <
  * and deleting resources or their relationships — that the handler processes
  * atomically.
  *
- * ```ts
- * const operations = Endpoint.operations([Article, Comment], {
- *   errors: [OperationFailed]
- * })
- * // payload:  { "atomic:operations": [{ op: "add", data: {...} }, ...] }
- * // success:  { "atomic:results": [{ data: {...} }, ...] }   (200)
- * ```
- *
  * The request payload is an `atomic:operations` document whose operation union
  * spans every operation legal for the given resources (including relationship
  * operations and lid-based refs); success is a 200 `atomic:results` document
@@ -856,6 +1037,24 @@ export const removeRelationship = <
  * content-negotiation middleware via
  * `Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })` so those
  * requests are accepted.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const operations = JsonApi.Group(
+ *   "operations",
+ *   // POST /operations with an atomic:operations document
+ *   JsonApi.Endpoint.operations([Article, Comment], {
+ *     errors: [OperationFailed]
+ *   })
+ * )
+ * // payload:  { "atomic:operations": [{ op: "add", data: {...} }, ...] }
+ * // success:  { "atomic:results": [{ data: {...} }, ...] }   (200)
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const operations = <
   const Resources extends ReadonlyArray<Any>,

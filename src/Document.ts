@@ -15,6 +15,8 @@
  *
  * `meta` is free-form by spec, so it is *parameterized* (permissive default,
  * override per site) rather than hard-closed.
+ *
+ * @since 0.1.0
  */
 import { Schema } from "effect"
 
@@ -27,6 +29,9 @@ import { Schema } from "effect"
  *
  * Used as the default wherever `meta` appears; pass a typed schema to any
  * constructor that accepts a `meta` option to tighten it.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown)
 
@@ -36,6 +41,9 @@ export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown)
 
 /**
  * A link object, per https://jsonapi.org/format/1.1/#document-links
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const LinkObject = Schema.Struct({
   href: Schema.String,
@@ -49,11 +57,17 @@ export const LinkObject = Schema.Struct({
 
 /**
  * A link: either a URL string or a {@link LinkObject}.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const Link = Schema.Union([Schema.String, LinkObject])
 
 /**
  * A resource object's `links`: the spec standardises `self`.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const ResourceLinks = Schema.Struct({
   self: Schema.optionalKey(Link)
@@ -61,6 +75,9 @@ export const ResourceLinks = Schema.Struct({
 
 /**
  * A relationship object's `links`: the spec standardises `self` and `related`.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const RelationshipLinks = Schema.Struct({
   self: Schema.optionalKey(Link),
@@ -69,6 +86,9 @@ export const RelationshipLinks = Schema.Struct({
 
 /**
  * {@link RelationshipLinks} that also admits profile-defined members.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
   Schema.Record(Schema.String, Schema.NullOr(Link))
@@ -82,6 +102,9 @@ export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
  * Used by `Relationship.paginated`, whose relationship objects carry no inline
  * `data`; the required `related` link satisfies the spec's "a relationship
  * object holds at least one of data / links / meta" invariant by construction.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const PaginatedRelationshipLinks = Schema.Struct({
   self: Schema.optionalKey(Link),
@@ -91,6 +114,9 @@ export const PaginatedRelationshipLinks = Schema.Struct({
 /**
  * Top-level `links`: `self`/`related`/`describedby` plus the pagination
  * members (each nullable, per the spec).
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const TopLevelLinks = Schema.Struct({
   self: Schema.optionalKey(Link),
@@ -108,6 +134,9 @@ export const TopLevelLinks = Schema.Struct({
 
 /**
  * The top-level `jsonapi` object: version (closed set), extensions, profiles.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const JsonApiObject = Schema.Struct({
   version: Schema.optionalKey(Schema.Literals(["1.0", "1.1"])),
@@ -118,6 +147,9 @@ export const JsonApiObject = Schema.Struct({
 
 /**
  * A ready-made `jsonapi` member value advertising JSON:API v1.1.
+ *
+ * @since 0.1.0
+ * @category constants
  */
 export const v1_1: typeof JsonApiObject.Type = { version: "1.1" }
 
@@ -128,6 +160,9 @@ export const v1_1: typeof JsonApiObject.Type = { version: "1.1" }
 /**
  * An error's `source` members are alternatives — modelled as a union, not
  * three optional keys.
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const ErrorSource = Schema.Union([
   Schema.Struct({ pointer: Schema.String }),
@@ -144,6 +179,9 @@ const errorLinks = Schema.Struct({
  * A JSON:API error object with an open `code`.
  *
  * @see {@link https://jsonapi.org/format/1.1/#error-objects}
+ *
+ * @since 0.1.0
+ * @category schemas
  */
 export const ErrorObject = Schema.Struct({
   id: Schema.optionalKey(Schema.String),
@@ -161,6 +199,16 @@ export const ErrorObject = Schema.Struct({
  *
  * `code` stays optional (the spec permits omission); drop the `optionalKey`
  * wrapper in a custom schema to force presence.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const AppError = JsonApi.ErrorObjectWithCodes(["not_found", "forbidden"])
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const ErrorObjectWithCodes = <const Codes extends ReadonlyArray<string>>(codes: Codes) =>
   Schema.Struct({
@@ -174,6 +222,9 @@ export const ErrorObjectWithCodes = <const Codes extends ReadonlyArray<string>>(
 
 /**
  * A single-resource data document: `data` is one resource or `null`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface DataDocument<
   R extends Schema.Top,
@@ -193,6 +244,21 @@ export interface DataDocument<
  *
  * `included` defaults to `Schema.Never` (no compound members permitted) so
  * compound documents are an explicit, typed decision.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ *
+ * const ArticleDocument = JsonApi.DataDocument(Article)
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const DataDocument = <
   R extends Schema.Top,
@@ -215,6 +281,9 @@ export const DataDocument = <
 
 /**
  * A collection document: `data` is an array of resources (possibly empty).
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface CollectionDocument<
   R extends Schema.Top,
@@ -231,6 +300,21 @@ export interface CollectionDocument<
 /**
  * Creates a collection document schema: `data` is an array of resources
  * (possibly empty).
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ *
+ * const ArticleCollection = JsonApi.CollectionDocument(Article)
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const CollectionDocument = <
   R extends Schema.Top,
@@ -260,6 +344,9 @@ export const CollectionDocument = <
  * objects.
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
   readonly data: D
@@ -272,6 +359,22 @@ export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = ty
  * Creates a relationship-linkage document schema. Pass the linkage shape as
  * `data`: an identifier schema, `Schema.NullOr(identifier)` or
  * `Schema.Array(identifier)`.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Person = JsonApi.Resource("people", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ *
+ * // Linkage document for a to-one relationship endpoint.
+ * const AuthorLinkage = JsonApi.LinkageDocument(Schema.NullOr(Person.identifier))
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typeof AnyMeta>(
   data: D,
@@ -288,6 +391,9 @@ export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typ
 
 /**
  * An error document: a non-empty `errors` array, never `data`.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface ErrorDocument<E extends Schema.Top = typeof ErrorObject> extends Schema.Struct<{
   readonly errors: Schema.$Array<E>
@@ -298,6 +404,9 @@ export interface ErrorDocument<E extends Schema.Top = typeof ErrorObject> extend
 
 /**
  * Creates an error document schema: a non-empty `errors` array, never `data`.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const ErrorDocument = <E extends Schema.Top = typeof ErrorObject>(error?: E): ErrorDocument<E> =>
   Schema.Struct({
@@ -309,6 +418,9 @@ export const ErrorDocument = <E extends Schema.Top = typeof ErrorObject>(error?:
 
 /**
  * A meta-only document.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface MetaDocument<M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
   readonly meta: M
@@ -318,6 +430,9 @@ export interface MetaDocument<M extends Schema.Top = typeof AnyMeta> extends Sch
 
 /**
  * Creates a meta-only document schema.
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const MetaDocument = <M extends Schema.Top = typeof AnyMeta>(meta?: M): MetaDocument<M> =>
   Schema.Struct({
@@ -328,6 +443,9 @@ export const MetaDocument = <M extends Schema.Top = typeof AnyMeta>(meta?: M): M
 
 /**
  * The full top-level document union: exactly one of data / errors / meta.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface Document<
   R extends Schema.Top,
@@ -339,6 +457,22 @@ export interface Document<
 /**
  * Creates the full top-level document union schema: exactly one of data /
  * errors / meta.
+ *
+ * @example
+ * ```ts
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ *
+ * const Article = JsonApi.Resource("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ *
+ * // A schema accepting a data, error, or meta document for `Article`.
+ * const ArticleResponse = JsonApi.Document(Article)
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
  */
 export const Document = <
   R extends Schema.Top,

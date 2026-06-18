@@ -22,12 +22,17 @@
  * section" (https://jsonapi.org/format/1.1/#fetching-includes). The runtime
  * decode still validates against the endpoint's full `included` union, so a
  * non-compliant server fails decoding rather than producing lies.
+ *
+ * @since 0.1.0
  */
 import type { Effect } from "effect"
 import type { Any, IncludedFor, IncludePath } from "./Resource.js"
 
 /**
  * The minimal shape of a compound document value.
+ *
+ * @since 0.1.0
+ * @category models
  */
 export interface AnyDocument {
   readonly included?: ReadonlyArray<unknown> | undefined
@@ -36,6 +41,9 @@ export interface AnyDocument {
 /**
  * A document with its `included` member narrowed to the given resources'
  * decoded types.
+ *
+ * @since 0.1.0
+ * @category type-level
  */
 export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> & {
   readonly included?: ReadonlyArray<Included["Type"]>
@@ -50,6 +58,33 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  * - data-first (narrow a document value directly)
  *
  * This is a type-level operation with no runtime cost.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ *
+ * declare const client: {
+ *   readonly articles: {
+ *     readonly fetch: (request: {
+ *       readonly params: { readonly id: string }
+ *       readonly query: { readonly include?: ReadonlyArray<JsonApi.IncludePath<typeof Article>> }
+ *     }) => Effect.Effect<ReturnType<typeof Article.document>["Type"]>
+ *   }
+ * }
+ * declare const Article: JsonApi.Any
+ *
+ * const include = ["author", "comments.author"] as const
+ *
+ * const program = client.articles
+ *   .fetch({ params: { id: "1" }, query: { include } })
+ *   .pipe(JsonApi.narrowIncluded(Article, include))
+ * //   ^ Effect of a document whose `included` is narrowed to the requested
+ * //     resources — unrequested types are excluded from the type.
+ * ```
+ *
+ * @since 0.1.0
+ * @category combinators
  */
 export const narrowIncluded: {
   <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(

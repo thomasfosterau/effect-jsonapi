@@ -35,8 +35,72 @@ import { HttpApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 ```
 
-> **Status**: built against `effect@4.0.0-beta.70` (the v4 beta). The
+> **Status**: built against `effect@>=4.0.0-beta.70` (the v4 beta). The
 > `effect/unstable/httpapi` surface may shift between betas.
+
+## Contents
+
+- [Quick start](#quick-start)
+- [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
+  - [Relationship kinds](#relationship-kinds)
+- [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
+- [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
+  - [Relationship & related endpoints](#relationship--related-endpoints)
+  - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
+  - [Atomic operations](#atomic-operations)
+- [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
+  - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
+- [Query parameters](#query-parameters)
+- [Spec compliance, by construction](#spec-compliance-by-construction)
+- [Examples](#examples)
+- [Metadata](#metadata)
+- [Limitations](#limitations)
+
+## Quick start
+
+A complete read API — resource, error, endpoints, handlers, server — in one file. Each piece is
+expanded in the sections below.
+
+```ts
+import { Effect, Layer, Schema } from "effect"
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+
+// 1. Define a resource once — identifiers, payloads, documents and query
+//    parameters are all derived from this single definition.
+const Article = JsonApi.Resource("articles", {
+  attributes: { title: Schema.NonEmptyString, body: Schema.String }
+})
+
+// 2. Declare an error once — its wire encoding *is* a JSON:API error document.
+class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+  status: 404,
+  fields: { id: Schema.String },
+  detail: (e) => `Article ${e.id} not found`
+}) {}
+
+// 3. Build endpoints with the JSON:API conventions baked in.
+const articles = JsonApi.Group(
+  Article,
+  JsonApi.Endpoint.fetch(Article, { include: true, errors: [ArticleNotFound] }),
+  JsonApi.Endpoint.list(Article, { page: JsonApi.Page.Offset })
+)
+
+const Api = HttpApi.make("blog").add(articles)
+
+// 4. Implement handlers — inputs are typed and validated, documents are checked
+//    for the compound-document rules. (`loadArticle` / `listArticles` are your
+//    own data access returning `Effect`s.)
+const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
+  handlers
+    .handle("fetch", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => JsonApi.data(article))))
+    .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => JsonApi.collection(items))))
+)
+
+// 5. Wire it up — the api won't build unless the JSON:API middleware is
+//    provided, so spec compliance can't be forgotten.
+const ApiLive = HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive), Layer.provide(JsonApi.Middleware.layer))
+```
 
 ## 1. Resources — the single source of truth
 
@@ -354,10 +418,18 @@ const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
           Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
             Match.value(op).pipe(
               Match.when({ op: "add" }, (add) => {
+                const id = Article.Id.make(newId())
+                const resolved = lids.resolveLinkage(Article, add.data.relationships) // lids → real ids
                 const article = Article.make({
-                  id: Article.Id.make(newId()),
+                  id,
                   attributes: add.data.attributes,
-                  relationships: lids.resolveLinkage(Article, add.data.relationships)  // lids → real ids
+                  relationships: {
+                    // `author` is required (`one`), so the operation always carries it
+                    author: { data: lids.identifier(Person, add.data.relationships.author.data) },
+                    tags: resolved.tags ?? { data: [] },
+                    // `comments` is paginated: new articles start with an empty collection
+                    comments: JsonApi.paginatedRelationship("articles", id, "comments")
+                  }
                 })
                 if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id)
                 return { data: article }
@@ -435,6 +507,10 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 The document builders (`JsonApi.data` / `JsonApi.collection`) enforce the compound-document rules
 at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every
 included resource must be referenced in the document).
+
+Pagination links are built with `JsonApi.offsetPaginationLinks` (for `Page.Offset`) and
+`JsonApi.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
+`next` / `last` top-level links from the request's page parameters and the total count.
 
 To serve it (with `@effect/platform-node`):
 
