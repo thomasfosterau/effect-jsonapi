@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "baseUrl": ".",
+    "types": ["vitest/globals", "node"],
+    "paths": {
+      "@thomasfosterau/effect-jsonapi": ["../../src/index.ts"]
+    }
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

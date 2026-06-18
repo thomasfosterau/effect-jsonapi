@@ -88,7 +88,8 @@ example pattern that you copied into a doc will usually surface there.
 ## Testing
 
 - Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`);
-  end-to-end tests covering the worked examples live in `test/`.
+  each worked example is a standalone workspace package under `examples/` that carries its own
+  end-to-end tests (e.g. `examples/northwind/test/`). `npm run check` runs them all across the workspace.
 - Type-level expectations are asserted in `*.types.ts` files (checked by `npm run typecheck` via
   `@ts-expect-error`), not at runtime.
 - Ensure `npm run check` passes before submitting a PR.

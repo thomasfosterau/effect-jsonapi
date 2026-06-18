@@ -7,10 +7,10 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-import { Api } from "../examples/blog/api.js"
-import { ArticleNotFound, TitleTaken } from "../examples/blog/errors.js"
-import { ArticlesLive, sampleArticle, sampleAuthor, sampleComments, SearchLive } from "../examples/blog/handlers.js"
-import { Article, Comment, Person } from "../examples/blog/resources.js"
+import { Api } from "../api.js"
+import { ArticleNotFound, TitleTaken } from "../errors.js"
+import { ArticlesLive, sampleArticle, sampleAuthor, sampleComments, SearchLive } from "../handlers.js"
+import { Article, Comment, Person } from "../resources.js"
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "search"])
 

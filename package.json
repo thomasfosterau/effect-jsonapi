@@ -21,6 +21,9 @@
     "type": "git",
     "url": "https://github.com/thomasfosterau/effect-jsonapi.git"
   },
+  "workspaces": [
+    "examples/*"
+  ],
   "files": [
     "dist",
     "src",
@@ -42,12 +45,12 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json && npm run typecheck --workspaces --if-present",
     "lint": "oxlint --deny-warnings src test examples",
     "lint:fix": "oxlint --fix src test examples",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "vitest run",
+    "test": "vitest run && npm run test --workspaces --if-present",
     "test:watch": "vitest",
     "docgen": "docgen",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",

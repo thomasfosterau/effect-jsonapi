@@ -9,17 +9,10 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-import { Api } from "../examples/blog/api.js"
-import { OperationFailed } from "../examples/blog/errors.js"
-import {
-  ArticlesLive,
-  OperationsLive,
-  sampleArticle,
-  sampleAuthor,
-  sampleComments,
-  sampleTag
-} from "../examples/blog/handlers.js"
-import { Article, Comment, Person, Tag } from "../examples/blog/resources.js"
+import { Api } from "../api.js"
+import { OperationFailed } from "../errors.js"
+import { ArticlesLive, OperationsLive, sampleArticle, sampleAuthor, sampleComments, sampleTag } from "../handlers.js"
+import { Article, Comment, Person, Tag } from "../resources.js"
 
 const Atomic = JsonApi.Atomic
 
