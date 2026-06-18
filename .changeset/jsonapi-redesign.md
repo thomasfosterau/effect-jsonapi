@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-jsonapi": major
+"@thomasfosterau/effect-jsonapi": minor
 ---
 
 Clean-slate redesign: spec-compliant JSON:API v1.1 on Effect v4's HttpApi, by construction.
