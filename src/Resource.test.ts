@@ -2,7 +2,14 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Option, Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
-import { directTargets, Identifier, make as Resource } from "./Resource.js"
+import {
+  attributes as attributesOf,
+  directTargets,
+  extend,
+  Identifier,
+  make as Resource,
+  relationships as relationshipsOf
+} from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
@@ -719,5 +726,188 @@ describe("AnyMeta", () => {
   it("accepts arbitrary records", () => {
     const decoded = Schema.decodeUnknownSync(AnyMeta)({ anything: [1, 2, 3], nested: { a: true } })
     expect(decoded.anything).toEqual([1, 2, 3])
+  })
+})
+
+describe("Resource.attributes / Resource.relationships", () => {
+  it("extracts the attribute field map", () => {
+    const fields = attributesOf(Article)
+    expect(Object.keys(fields)).toEqual(["title", "body", "createdAt"])
+    // the extracted schemas are the ones the resource was defined with
+    expect(Schema.decodeUnknownSync(fields.title)("Hello")).toBe("Hello")
+  })
+
+  it("attributes can be spread into a new resource definition", () => {
+    const Profile = Resource("profiles", {
+      attributes: { ...attributesOf(Person), bio: Schema.String }
+    })
+    const decoded = Schema.decodeUnknownSync(Profile)({
+      type: "profiles",
+      id: "1",
+      attributes: { firstName: "John", lastName: "Doe", bio: "hi" }
+    })
+    expect(decoded.attributes.firstName).toBe("John")
+    expect(decoded.attributes.bio).toBe("hi")
+  })
+
+  it("extracts the relationship descriptor record", () => {
+    const rels = relationshipsOf(Article)
+    expect(Object.keys(rels)).toEqual(["author", "comments"])
+    expect(rels.author.kind).toBe("optional")
+    expect(rels.comments.ref().type).toBe("comments")
+    // it is the same record the resource exposes
+    expect(rels).toBe(Article.relationships)
+  })
+})
+
+describe("Resource.extend", () => {
+  // The shared shape, defined once.
+  const Account = Resource("accounts", {
+    attributes: {
+      email: Schema.NonEmptyString,
+      createdAt: Schema.DateFromString
+    },
+    relationships: { profile: Relationship.one(() => Person) },
+    meta: Schema.Struct({ tier: Schema.Int })
+  })
+
+  const Admin = extend(Account, "admins", {
+    attributes: { permissions: Schema.Array(Schema.String) },
+    relationships: { manages: Relationship.many(() => Account) }
+  })
+
+  it("creates a distinct resource type with its own branded id", () => {
+    expect(Admin.type).toBe("admins")
+    expectTypeOf(Admin.type).toEqualTypeOf<"admins">()
+    const adminId = Admin.Id.make("1")
+    const accountId = Account.Id.make("1")
+    expectTypeOf(adminId).not.toEqualTypeOf(accountId)
+    expect(() => Schema.decodeUnknownSync(Admin.identifier)({ type: "accounts", id: "1" })).toThrow()
+  })
+
+  it("inherits the base attributes and relationships, adding its own", () => {
+    const decoded = Schema.decodeUnknownSync(Admin)({
+      type: "admins",
+      id: "1",
+      attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: ["write"] },
+      relationships: {
+        profile: { data: { type: "people", id: "9" } },
+        manages: { data: [{ type: "accounts", id: "2" }] }
+      }
+    })
+    // inherited attribute, decoded by the inherited schema (string ⇆ Date)
+    expect(decoded.attributes.createdAt).toBeInstanceOf(Date)
+    // added attribute
+    expect(decoded.attributes.permissions).toEqual(["write"])
+    // inherited + added relationships
+    expect(decoded.relationships?.profile.data.id).toBe("9")
+    expect(decoded.relationships?.manages.data[0]?.type).toBe("accounts")
+    // type-level: the attribute map is the merge of base and extra
+    expectTypeOf<(typeof Admin.Type)["attributes"]>().toEqualTypeOf<{
+      readonly email: string
+      readonly createdAt: Date
+      readonly permissions: ReadonlyArray<string>
+    }>()
+  })
+
+  it("derives payloads afresh for the new type, carrying inherited `one` relationships", () => {
+    // Account.profile is `one` → inherited as required in the create payload.
+    expect(() =>
+      Schema.decodeUnknownSync(Admin.createPayload)({
+        data: { type: "admins", attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: [] } }
+      })
+    ).toThrow()
+
+    const decoded = Schema.decodeUnknownSync(Admin.createPayload)({
+      data: {
+        type: "admins",
+        attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: [] },
+        relationships: { profile: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(decoded.data.relationships.profile.data.id).toBe("9")
+  })
+
+  it("inherits the base meta by default", () => {
+    const decoded = Schema.decodeUnknownSync(Admin)({
+      type: "admins",
+      id: "1",
+      attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: [] },
+      meta: { tier: 3 }
+    })
+    expect(decoded.meta?.tier).toBe(3)
+    expectTypeOf<NonNullable<(typeof Admin.Type)["meta"]>["tier"]>().toEqualTypeOf<number>()
+  })
+
+  it("can override the meta", () => {
+    const Flagged = extend(Account, "flagged", { meta: Schema.Struct({ flag: Schema.Boolean }) })
+    const decoded = Schema.decodeUnknownSync(Flagged)({
+      type: "flagged",
+      id: "1",
+      attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z" },
+      meta: { flag: true }
+    })
+    expect(decoded.meta?.flag).toBe(true)
+  })
+
+  it("lets extra fields override the base on key collision", () => {
+    const Restricted = extend(Account, "restricted", {
+      attributes: { email: Schema.Literal("fixed@example.com") }
+    })
+    const decoded = Schema.decodeUnknownSync(Restricted)({
+      type: "restricted",
+      id: "1",
+      attributes: { email: "fixed@example.com", createdAt: "2024-01-01T00:00:00.000Z" }
+    })
+    expect(decoded.attributes.email).toBe("fixed@example.com")
+    expect(() =>
+      Schema.decodeUnknownSync(Restricted)({
+        type: "restricted",
+        id: "1",
+        attributes: { email: "anything@example.com", createdAt: "2024-01-01T00:00:00.000Z" }
+      })
+    ).toThrow()
+  })
+
+  it("extends with attributes only (relationships optional)", () => {
+    const Named = extend(Person, "named", { attributes: { nickname: Schema.String } })
+    const decoded = Schema.decodeUnknownSync(Named)({
+      type: "named",
+      id: "1",
+      attributes: { firstName: "John", lastName: "Doe", nickname: "JD" }
+    })
+    expect(decoded.attributes.nickname).toBe("JD")
+    expect(Object.keys(Named.relationships)).toEqual([])
+  })
+
+  it("derives the included union from the merged relationship graph", () => {
+    // Admin's linkable targets: Person (inherited `profile`) and Account (added `manages`).
+    expect(directTargets(Admin).map((target) => target.type)).toEqual(["people", "accounts"])
+    const doc = Admin.document()
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: {
+        type: "admins",
+        id: "1",
+        attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: [] },
+        relationships: {
+          profile: { data: { type: "people", id: "9" } },
+          manages: { data: [{ type: "accounts", id: "2" }] }
+        }
+      },
+      included: [
+        { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } },
+        {
+          type: "accounts",
+          id: "2",
+          attributes: { email: "x@y.z", createdAt: "2024-01-01T00:00:00.000Z" }
+        }
+      ]
+    })
+    expect(decoded.included).toHaveLength(2)
+  })
+
+  it("leaves the base resource unchanged", () => {
+    expect(Object.keys(attributesOf(Account))).toEqual(["email", "createdAt"])
+    expect(Object.keys(Account.relationships)).toEqual(["profile"])
   })
 })

@@ -251,6 +251,10 @@ export type IncludableTargets<Rels extends Relationships> = {
 // while `Rels` is still generic.
 type AsFields<T> = T extends Schema.Struct.Fields ? T : never
 
+// The relationship-record counterpart of `AsFields`: pins a merged descriptor
+// record back to `Relationships` so it satisfies the constraint generically.
+type AsRelationships<T> = T extends Relationships ? T : never
+
 /**
  * Whether a relationship record contains at least one required (`one`)
  * relationship — in which case the create payload's `relationships` member is
@@ -538,6 +542,18 @@ export interface Any extends Schema.Top {
  */
 export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["attributes"]["fields"] & string : never
 
+/**
+ * The attribute field map of a resource definition — the `Schema.Struct.Fields`
+ * record it was defined with.
+ *
+ * The type-level counterpart of {@link attributes}; spread the runtime value
+ * into another resource's `attributes` to reuse a resource's attribute schemas.
+ *
+ * @since 0.2.0
+ * @category type-level
+ */
+export type AttributesOf<R extends Any> = R["fields"]["attributes"]["fields"]
+
 // ---------------------------------------------------------------------------
 // Relationship names & targets (type level)
 // ---------------------------------------------------------------------------
@@ -550,6 +566,18 @@ export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["at
  * @category type-level
  */
 export type RelationshipName<R extends Any> = keyof R["relationships"] & string
+
+/**
+ * The relationship descriptor record of a resource definition — the
+ * `Relationship.Relationships` record it was defined with.
+ *
+ * The type-level counterpart of {@link relationships}; spread the runtime value
+ * into another resource's `relationships` to reuse a resource's relationships.
+ *
+ * @since 0.2.0
+ * @category type-level
+ */
+export type RelationshipsOf<R extends Any> = R["relationships"]
 
 /**
  * The to-one (`one` / `optional`) relationship keys of a resource definition.
@@ -669,6 +697,65 @@ export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = Re
  */
 export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<AttributeKeys<R>> =>
   Object.keys(resource.fields.attributes.fields) as unknown as ReadonlyArray<AttributeKeys<R>>
+
+/**
+ * The attribute field map of a resource definition — the `Schema.Struct.Fields`
+ * record it was defined with.
+ *
+ * Spread the result into another resource's `attributes` to reuse a resource's
+ * attribute schemas (the runtime counterpart of {@link AttributesOf}). To
+ * inherit a resource's attributes *and* relationships wholesale, reach for
+ * {@link extend} instead.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ *
+ * // Reuse Person's attribute schemas, adding one of its own.
+ * const Profile = Resource.make("profiles", {
+ *   attributes: { ...Resource.attributes(Person), bio: Schema.String }
+ * })
+ * ```
+ *
+ * @since 0.2.0
+ * @category accessors
+ */
+export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
+  resource.fields.attributes.fields as AttributesOf<R>
+
+/**
+ * The relationship descriptor record of a resource definition — the
+ * `Relationship.Relationships` record it was defined with.
+ *
+ * Spread the result into another resource's `relationships` to reuse a
+ * resource's relationships (the runtime counterpart of {@link RelationshipsOf}).
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ *
+ * const Comment = Resource.make("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * Resource.relationships(Comment).author.kind // "one"
+ * ```
+ *
+ * @since 0.2.0
+ * @category accessors
+ */
+export const relationships = <R extends Any>(resource: R): RelationshipsOf<R> => resource.relationships
 
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 
@@ -897,3 +984,107 @@ export const make = <
 
   return resource
 }
+
+// ---------------------------------------------------------------------------
+// Extending (subtyping) a resource
+// ---------------------------------------------------------------------------
+
+/**
+ * The attribute field map of a resource that {@link extend}s `Base` with
+ * `Extra`: the base's attributes merged with the extra ones, the extra ones
+ * winning on key collisions.
+ *
+ * @since 0.2.0
+ * @category type-level
+ */
+export type ExtendedAttributes<Base extends Schema.Struct.Fields, Extra extends Schema.Struct.Fields> = AsFields<
+  Struct.Assign<Base, Extra>
+>
+
+/**
+ * The relationship descriptor record of a resource that {@link extend}s `Base`
+ * with `Extra`: the base's relationships merged with the extra ones, the extra
+ * ones winning on key collisions.
+ *
+ * @since 0.2.0
+ * @category type-level
+ */
+export type ExtendedRelationships<Base extends Relationships, Extra extends Relationships> = AsRelationships<
+  Struct.Assign<Base, Extra>
+>
+
+/**
+ * Defines a new resource that **extends** (subtypes) an existing one: the new
+ * resource inherits the base's attributes and relationships, to which `options`
+ * adds more — keys present in `options` override the base's.
+ *
+ * JSON:API has no native subtyping, so the result is a *distinct* resource type
+ * (its own `type` tag and branded id, with payloads and documents derived
+ * afresh) that happens to share the base's structure — handy when several
+ * resources carry a common set of attributes and relationships defined once.
+ * `meta` is inherited from the base; pass `meta` to override it.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Organisation = Resource.make("organisations", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ *
+ * // The shared shape, defined once.
+ * const Account = Resource.make("accounts", {
+ *   attributes: {
+ *     email: Schema.NonEmptyString,
+ *     createdAt: Schema.DateFromString
+ *   },
+ *   relationships: { organisation: Relationship.one(() => Organisation) }
+ * })
+ *
+ * // `Admin` is its own resource type, but inherits Account's email, createdAt
+ * // and organisation, adding a `permissions` attribute of its own.
+ * const Admin = Resource.extend(Account, "admins", {
+ *   attributes: { permissions: Schema.Array(Schema.String) }
+ * })
+ *
+ * Admin.type // "admins"
+ * Resource.attributeKeys(Admin) // ["email", "createdAt", "permissions"]
+ * ```
+ *
+ * @since 0.2.0
+ * @category constructors
+ */
+export const extend = <
+  const BaseType extends string,
+  const BaseAttributes extends Schema.Struct.Fields,
+  const BaseRels extends Relationships,
+  BaseMeta extends Schema.Top,
+  const Type extends string,
+  const ExtraAttributes extends Schema.Struct.Fields = {},
+  const ExtraRels extends Relationships = {},
+  Meta extends Schema.Top = BaseMeta
+>(
+  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta>,
+  type: Type,
+  options?: {
+    readonly attributes?: ExtraAttributes
+    readonly relationships?: ExtraRels
+    readonly meta?: Meta
+  }
+): Resource<
+  Type,
+  ExtendedAttributes<BaseAttributes, ExtraAttributes>,
+  ExtendedRelationships<BaseRels, ExtraRels>,
+  Meta
+> =>
+  make(type, {
+    attributes: { ...base.fields.attributes.fields, ...options?.attributes },
+    relationships: { ...base.relationships, ...options?.relationships },
+    meta: (options?.meta ?? base.fields.meta.schema) as Meta
+  }) as unknown as Resource<
+    Type,
+    ExtendedAttributes<BaseAttributes, ExtraAttributes>,
+    ExtendedRelationships<BaseRels, ExtraRels>,
+    Meta
+  >
