@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@thomasfosterau/effect-jsonapi": "file:../..",
+    "@thomasfosterau/effect-jsonapi": "workspace:*",
     "effect": "^4.0.0-beta.70"
   },
   "devDependencies": {

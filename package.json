@@ -21,9 +21,6 @@
     "type": "git",
     "url": "https://github.com/thomasfosterau/effect-jsonapi.git"
   },
-  "workspaces": [
-    "examples/*"
-  ],
   "files": [
     "dist",
     "src",
@@ -45,19 +42,19 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc -p tsconfig.test.json && npm run typecheck --workspaces --if-present",
+    "typecheck": "tsc -p tsconfig.test.json && pnpm --filter \"./examples/*\" run typecheck",
     "lint": "oxlint --deny-warnings src test examples",
     "lint:fix": "oxlint --fix src test examples",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "test": "vitest run && npm run test --workspaces --if-present",
+    "test": "vitest run && pnpm --filter \"./examples/*\" run test",
     "test:watch": "vitest",
     "docgen": "docgen",
-    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "npm run build && changeset publish",
-    "prepublishOnly": "npm run build"
+    "release": "npm publish && changeset tag",
+    "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
@@ -75,5 +72,11 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "overrides": {
+      "effect": "4.0.0-beta.70"
+    }
   }
 }

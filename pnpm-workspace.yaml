@@ -1,0 +1,6 @@
+# The library lives at the repo root; listing "." makes it a workspace member
+# so Changesets versions and publishes it (a workspace *root* on its own is not
+# a publishable package). The examples are private packages alongside it.
+packages:
+  - "."
+  - "examples/*"

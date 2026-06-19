@@ -608,10 +608,10 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 ## Examples
 
 Complete runnable examples (resources, errors, api, in-memory handlers) live in
-[`examples`](./examples). Each is a **standalone package** in the npm workspace —
+[`examples`](./examples). Each is a **standalone package** in the pnpm workspace —
 it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you
 can lift any one out as a starting point. Run them all from the repo root with
-`npm test`, or a single one with `npm test -w @thomasfosterau/effect-jsonapi-example-northwind`.
+`pnpm test`, or a single one with `pnpm --filter @thomasfosterau/effect-jsonapi-example-northwind test`.
 
 | Example                                      | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Test                                          |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |

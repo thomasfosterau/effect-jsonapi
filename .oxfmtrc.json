@@ -6,5 +6,5 @@
   "printWidth": 120,
   "trailingComma": "none",
   "arrowParens": "always",
-  "ignorePatterns": ["dist", "coverage", "package-lock.json", "CHANGELOG.md"]
+  "ignorePatterns": ["dist", "coverage", "pnpm-lock.yaml", "CHANGELOG.md"]
 }

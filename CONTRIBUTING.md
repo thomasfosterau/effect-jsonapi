@@ -8,7 +8,8 @@ provides guidelines and instructions for contributing.
 ### Prerequisites
 
 - Node.js 20.x or higher
-- npm
+- [pnpm](https://pnpm.io) — the repo pins a version via the `packageManager` field, so
+  `corepack enable` will provision the right one automatically
 
 ### Getting Started
 
@@ -23,36 +24,36 @@ provides guidelines and instructions for contributing.
 3. Install dependencies:
 
    ```bash
-   npm ci
+   pnpm install --frozen-lockfile
    ```
 
 4. Run the full check suite (type-check, lint, format, tests):
 
    ```bash
-   npm run check
+   pnpm run check
    ```
 
 ## Development Workflow
 
 The repository is validated by the same commands in CI. Run them locally before opening a PR.
 
-| Command                | Description                                                    |
-| ---------------------- | -------------------------------------------------------------- |
-| `npm run build`        | Compile `src` to `dist` with `tsc`.                            |
-| `npm run typecheck`    | Type-check sources, tests, examples and the type-level tests.  |
-| `npm run lint`         | Lint with [oxlint](https://oxc.rs) (warnings fail).            |
-| `npm run lint:fix`     | Apply oxlint's automatic fixes.                                |
-| `npm run format`       | Format the codebase with [oxfmt](https://oxc.rs).              |
-| `npm run format:check` | Verify formatting without writing changes.                     |
-| `npm test`             | Run the test suite once with vitest.                           |
-| `npm run test:watch`   | Run vitest in watch mode.                                      |
-| `npm run docgen`       | Type-check & run every JSDoc `@example`; generate API docs.    |
-| `npm run check`        | Run typecheck + lint + format:check + test (the full CI gate). |
+| Command                 | Description                                                    |
+| ----------------------- | -------------------------------------------------------------- |
+| `pnpm run build`        | Compile `src` to `dist` with `tsc`.                            |
+| `pnpm run typecheck`    | Type-check sources, tests, examples and the type-level tests.  |
+| `pnpm run lint`         | Lint with [oxlint](https://oxc.rs) (warnings fail).            |
+| `pnpm run lint:fix`     | Apply oxlint's automatic fixes.                                |
+| `pnpm run format`       | Format the codebase with [oxfmt](https://oxc.rs).              |
+| `pnpm run format:check` | Verify formatting without writing changes.                     |
+| `pnpm test`             | Run the test suite once with vitest.                           |
+| `pnpm run test:watch`   | Run vitest in watch mode.                                      |
+| `pnpm run docgen`       | Type-check & run every JSDoc `@example`; generate API docs.    |
+| `pnpm run check`        | Run typecheck + lint + format:check + test (the full CI gate). |
 
 ## Code Style
 
 - Use TypeScript for all code.
-- Formatting is enforced by oxfmt (`.oxfmtrc.json`) — run `npm run format` before committing.
+- Formatting is enforced by oxfmt (`.oxfmtrc.json`) — run `pnpm run format` before committing.
 - Linting is enforced by oxlint (`.oxlintrc.json`).
 - Use Effect's `Schema` patterns; derive everything from a single resource definition where possible.
 - Document public APIs with JSDoc (see [Documentation](#documentation)).
@@ -71,7 +72,7 @@ reads consistently and is ready for API-doc generation. When you add or change a
      a consumer would (e.g. `JsonApi.Resource(...)`, `JsonApi.Endpoint.fetch(...)`). Ground examples
      in real, type-checked usage from `examples/` and `test/` rather than inventing.
      [`@effect/docgen`](https://github.com/Effect-TS/docgen) compiles **and runs** every example
-     (via `npm run docgen`, also in CI), so each one must be a complete program that type-checks and
+     (via `pnpm run docgen`, also in CI), so each one must be a complete program that type-checks and
      executes without throwing. Define every value an example references (use a function parameter or
      `Effect.gen` for context like handlers/clients you don't want to construct), and don't use
      `declare const` (it emits no runtime value).
@@ -82,17 +83,17 @@ reads consistently and is ready for API-doc generation. When you add or change a
 - Keep the existing prose when refining docs — improve clarity, don't delete useful explanation.
 - Implementation-only exports that aren't part of the public surface should be marked `@internal`.
 
-Run `npm run check` before committing; it type-checks the sources, tests and examples, so a broken
+Run `pnpm run check` before committing; it type-checks the sources, tests and examples, so a broken
 example pattern that you copied into a doc will usually surface there.
 
 ## Testing
 
 - Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`);
   each worked example is a standalone workspace package under `examples/` that carries its own
-  end-to-end tests (e.g. `examples/northwind/test/`). `npm run check` runs them all across the workspace.
-- Type-level expectations are asserted in `*.types.ts` files (checked by `npm run typecheck` via
+  end-to-end tests (e.g. `examples/northwind/test/`). `pnpm run check` runs them all across the workspace.
+- Type-level expectations are asserted in `*.types.ts` files (checked by `pnpm run typecheck` via
   `@ts-expect-error`), not at runtime.
-- Ensure `npm run check` passes before submitting a PR.
+- Ensure `pnpm run check` passes before submitting a PR.
 
 ## Changesets
 
@@ -100,7 +101,7 @@ This project uses [Changesets](https://github.com/changesets/changesets) to mana
 changelogs. If your change affects the published package, add a changeset describing it:
 
 ```bash
-npm run changeset
+pnpm run changeset
 ```
 
 Pick the appropriate bump (`patch` / `minor` / `major`) and write a user-facing summary. The
@@ -130,7 +131,7 @@ changeset file is committed alongside your change; releases are published automa
 5. Ensure your PR:
    - Has a clear description of the changes
    - Includes tests for new functionality
-   - Passes `npm run check`
+   - Passes `pnpm run check`
    - Updates documentation if needed
 
 ## Reporting Issues

@@ -18,21 +18,22 @@ publish trojanized versions):
 - **No long-lived npm token.** Releases use npm
   [**OIDC Trusted Publishing**](https://docs.npmjs.com/trusted-publishers): GitHub
   Actions proves its identity to npm with a short-lived, workflow-bound OIDC token.
-  There is no `NPM_TOKEN` secret to steal from CI.
+  There is no `NPM_TOKEN` secret to steal from CI. The publish step uses the npm CLI
+  directly (`npm publish`), since pnpm does not yet support OIDC trusted publishing.
 - **Provenance.** Every published version carries
   [npm provenance](https://docs.npmjs.com/generating-provenance-statements),
   cryptographically linking the artifact to the exact source commit and workflow.
 - **Install scripts disabled in CI.** Both CI and the release workflow install
-  dependencies with `npm ci --ignore-scripts`, so a compromised (transitive)
-  dependency cannot execute install hooks in a privileged job.
+  dependencies with `pnpm install --frozen-lockfile --ignore-scripts`, so a
+  compromised (transitive) dependency cannot execute install hooks in a privileged job.
 - **Pinned actions.** All GitHub Actions are pinned to full commit SHAs, so a
   hijacked tag cannot inject malicious workflow code.
 - **Least privilege.** Workflows default to `permissions: {}`; each job opts into
   only the scopes it needs. CI checks out with `persist-credentials: false`.
 - **Manual approval gate.** Publishing runs in a protected `release` environment
   that requires manual approval.
-- **Locked dependencies.** Installs use `npm ci` against the committed
-  `package-lock.json`; Dependabot proposes updates for review.
+- **Locked dependencies.** Installs use `pnpm install --frozen-lockfile` against the
+  committed `pnpm-lock.yaml`; Dependabot proposes updates for review.
 
 ## Maintainer setup (one-time)
 
@@ -43,8 +44,8 @@ trusted publishing once these one-time steps are done:
    already exists. Publish `0.1.0` once from a trusted machine with 2FA enabled:
 
    ```bash
-   npm ci --ignore-scripts
-   npm run build
+   pnpm install --frozen-lockfile --ignore-scripts
+   pnpm run build
    npm publish --access public --provenance
    ```
 
