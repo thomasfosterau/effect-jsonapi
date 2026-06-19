@@ -117,8 +117,10 @@ const queryConfig = (options?: {
 /**
  * `GET /<type>/:id` — fetch a single resource.
  *
- * Success is a 200 single-resource document (`data` may be `null`); the
- * compound `included` union is derived from the resource's relationships.
+ * Success is a 200 single-resource document whose primary `data` is the
+ * resource itself (non-null — a missing resource is a `404`, not
+ * `200 { data: null }`); the compound `included` union is derived from the
+ * resource's relationships.
  *
  * @example
  * ```ts
@@ -647,8 +649,9 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
 /**
  * The success document schema of a related-resource endpoint:
  *
- *   - to-one relationships → a single-resource document of the target
- *     (`data` may be null for `optional` relationships)
+ *   - to-one relationships → a single-resource document of the target with
+ *     *nullable* primary `data` (`data: target | null`) — the spec permits an
+ *     empty-linkage `data: null` for a to-one related URL
  *   - to-many relationships → a collection document of the target
  *
  * @since 0.1.0
@@ -656,7 +659,7 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  */
 export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> =
   DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
-    ? DataDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+    ? DataDocument<Schema.NullOr<T>, DefaultIncluded<T["relationships"]>, DocMeta>
     : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
       ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
       : never
@@ -780,10 +783,12 @@ export const related = <
   const target = descriptor.ref()
   const included = Schema.Union(directTargets(target))
   const docMeta = (options?.meta ?? AnyMeta) as DocMeta
-  // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly —
-  // a data document for to-one descriptors, a collection document otherwise.
+  // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly — a
+  // nullable single-resource document for to-one descriptors (`data: null` is
+  // the empty-linkage case), a collection document otherwise. `included` keys
+  // off the target's relationship graph, independent of the `data` wrapper.
   const success = (Relationship.isToOne(descriptor)
-    ? DataDocument(target, { included, meta: docMeta })
+    ? DataDocument(Schema.NullOr(target), { included, meta: docMeta })
     : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<RelatedSuccess<R, Name, DocMeta>>
 
   return HttpApiEndpoint.get(

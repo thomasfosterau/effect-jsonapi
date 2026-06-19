@@ -471,9 +471,13 @@ export interface Resource<
    */
   lidRef(lid: string): LocalIdentifier<Type>["Type"]
   /**
-   * Single-resource document schema. The compound `included` union defaults to
-   * the resources referenced by this resource's non-`paginated` relationships;
-   * override it (or the document `meta`) per call.
+   * Single-resource document schema with this resource as primary `data`
+   * (non-null) — the canonical document for an existing resource. When the data
+   * can be absent, build `Document.DataDocument(Schema.NullOr(R))` (for
+   * `R | null`) or `Document.DataDocument(R.nullable())` (for `Option<R>`)
+   * instead. The compound `included` union defaults to the resources referenced
+   * by this resource's non-`paginated` relationships; override it (or the
+   * document `meta`) per call.
    */
   document<Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(options?: {
     readonly included?: Included
@@ -487,6 +491,23 @@ export interface Resource<
     readonly included?: Included
     readonly meta?: M
   }): CollectionDocument<Resource<Type, Attributes, Rels, Meta>, Included, M>
+  /**
+   * This resource wrapped for nullable primary `data`:
+   * `Schema.OptionFromNullOr<this>`, decoding and encoding `None ⇆ null` on the
+   * wire — the spec-clean way to model JSON:API's `null` primary data.
+   *
+   * Pass it to `Document.DataDocument` for a single-resource document whose
+   * `data` is `Option<R>`:
+   *
+   * ```ts
+   * Document.DataDocument(Article.nullable()) // data: Option<Article>, ⇆ null
+   * ```
+   *
+   * Prefer this to effect's *structural* `Schema.Option` (`{ _tag, value }`),
+   * which would serialise a non-conformant body. For a plain `data: R | null`
+   * (no `Option`), wrap with `Schema.NullOr(R)` instead.
+   */
+  nullable(): Schema.OptionFromNullOr<Resource<Type, Attributes, Rels, Meta>>
 }
 
 /**
@@ -855,6 +876,7 @@ export const make = <
     updatePayload,
     ref: (refId: string) => identifier.make({ id: id.make(refId) }),
     lidRef: (lid: string) => localIdentifier.make({ lid }),
+    nullable: () => Schema.OptionFromNullOr(resource),
     document: <Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(opts?: {
       readonly included?: Included
       readonly meta?: M

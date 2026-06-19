@@ -626,12 +626,11 @@ describe("HTTP round-trip via HttpApiTest", () => {
     )
 
     expect(result.data).toMatchObject({ type: "articles", id: "1" })
-    expect(result.data?.attributes.title).toBe("Hello")
+    // `data` is non-null now — the resource itself, no optional chaining needed
+    expect(result.data.attributes.title).toBe("Hello")
     // The branded id type flows through the client
-    if (result.data !== null) {
-      expectTypeOf<typeof result.data.id>().toEqualTypeOf<typeof Article.Id.Type>()
-      expect(result.data.attributes.createdAt).toBeInstanceOf(Date)
-    }
+    expectTypeOf<typeof result.data.id>().toEqualTypeOf<typeof Article.Id.Type>()
+    expect(result.data.attributes.createdAt).toBeInstanceOf(Date)
   })
 
   it("serves compound documents when include is requested", async () => {
@@ -694,7 +693,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
     )
 
     expect(result.data).toMatchObject({ type: "articles", id: "new-id" })
-    expect(result.data?.attributes.title).toBe("New article")
+    expect(result.data.attributes.title).toBe("New article")
   })
 
   it("updates a resource with a partial attributes payload", async () => {
@@ -716,8 +715,8 @@ describe("HTTP round-trip via HttpApiTest", () => {
       )
     )
 
-    expect(result.data?.attributes.title).toBe("Updated title")
-    expect(result.data?.attributes.body).toBe("World")
+    expect(result.data.attributes.title).toBe("Updated title")
+    expect(result.data.attributes.body).toBe("World")
   })
 
   it("removes a resource (204, no content)", async () => {

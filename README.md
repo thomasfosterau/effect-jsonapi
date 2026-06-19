@@ -160,22 +160,44 @@ pointing at a paginated collection endpoint (see
 
 Everything below is **derived** — never assembled by hand:
 
-| Derived                   | What it is                                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `Article`                 | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                             |
-| `Article.Id`              | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                             |
-| `Article.identifier`      | the `{ type: "articles", id }` resource-identifier schema                                                           |
-| `Article.ref("1")`        | a typed identifier _value_ — handy for relationship linkage                                                         |
-| `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                     |
-| `Article.lidRef("a1")`    | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                   |
-| `Article.createPayload`   | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded |
-| `Article.updatePayload`   | `{ data: { type, id, attributes? (partial), relationships? } }` — `paginated` excluded                              |
-| `Article.document()`      | single-resource document; `included` union derived from the non-paginated relationships                             |
-| `Article.collection()`    | collection document (strict array `data`)                                                                           |
-| `typeof Article.Type`     | the decoded TypeScript type                                                                                         |
+| Derived                   | What it is                                                                                                                          |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `Article`                 | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                                             |
+| `Article.Id`              | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                                             |
+| `Article.identifier`      | the `{ type: "articles", id }` resource-identifier schema                                                                           |
+| `Article.ref("1")`        | a typed identifier _value_ — handy for relationship linkage                                                                         |
+| `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                                     |
+| `Article.lidRef("a1")`    | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                                   |
+| `Article.createPayload`   | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded                 |
+| `Article.updatePayload`   | `{ data: { type, id, attributes? (partial), relationships? } }` — `paginated` excluded                                              |
+| `Article.document()`      | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships |
+| `Article.collection()`    | collection document (strict array `data`)                                                                                           |
+| `typeof Article.Type`     | the decoded TypeScript type                                                                                                         |
 
 Documents are not limited to one resource type — see
 [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
+
+### Nullable primary `data`
+
+`Document.DataDocument` is a **pure envelope**: its `data` member is exactly the
+schema you pass, so nullability is your compositional choice — not something the
+constructor decides for you. JSON:API only permits `data: null` for a
+single-resource request whose URL _might_ correspond to a resource but currently
+doesn't; fetch-existing / create / update always carry the resource (a missing
+one is a `404`, never `200 { data: null }`).
+
+```ts
+Document.DataDocument(Article) //                       data: Article
+Document.DataDocument(Schema.NullOr(Article)) //        data: Article | null
+Document.DataDocument(Article.nullable()) //            data: Option<Article>, ⇆ null on the wire
+```
+
+`Article.nullable()` is `Schema.OptionFromNullOr(Article)` — the spec-clean
+nullable codec (`None ⇆ null`). Avoid effect's _structural_ `Schema.Option`
+(`{ _tag, value }`): it serialises a non-conformant body, and `DataDocument`
+can't tell the two apart. `Article.document()` and `Endpoint.fetch` / `create` /
+`update` use the non-null form; `Endpoint.related` for a to-one relationship
+keeps the nullable form (`data: target | null`) for the empty-linkage case.
 
 ## 2. Errors — declared once, spec-compliant forever
 
@@ -585,24 +607,25 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 
 ## Spec compliance, by construction
 
-| JSON:API v1.1 rule                                                                                               | How it's enforced                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Media type `application/vnd.api+json`                                                                            | baked into every document/payload/error schema                                                                                                          |
-| 415/406 on media type parameters other than `ext` / `profile` (or unsupported extensions)                        | middleware attached to every endpoint; providing it is required by the type system                                                                      |
-| Error bodies are error documents                                                                                 | only `ApiError.make` classes can be declared as endpoint errors                                                                                         |
-| Top-level document holds exactly one of `data` / `errors` / `meta`                                               | success schemas only ever contain `data`; error schemas only `errors` — mixing is unrepresentable                                                       |
-| Resource objects have `type` and `id`; ids are not interchangeable across types                                  | `Resource` always emits the type tag and a per-type branded id                                                                                          |
-| Create requests may omit `id` and send `lid`                                                                     | `createPayload` derivation                                                                                                                              |
-| Update requests require `id`, attributes are partial                                                             | `updatePayload` derivation                                                                                                                              |
-| Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                      |
-| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.fetchRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
-| Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document for to-one, paginated collection for to-many                                                              |
-| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.data` / `Handlers.collection` builders (runtime check)                                                                                        |
-| Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                     |
-| `errors` array is never empty                                                                                    | non-empty check on the error document schema                                                                                                            |
-| 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                        |
-| Pagination / sorting / sparse fieldsets / inclusion / filtering query families                                   | typed query schemas derived from the resource definition                                                                                                |
-| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                              |
+| JSON:API v1.1 rule                                                                                               | How it's enforced                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Media type `application/vnd.api+json`                                                                            | baked into every document/payload/error schema                                                                                                                                                         |
+| 415/406 on media type parameters other than `ext` / `profile` (or unsupported extensions)                        | middleware attached to every endpoint; providing it is required by the type system                                                                                                                     |
+| Error bodies are error documents                                                                                 | only `ApiError.make` classes can be declared as endpoint errors                                                                                                                                        |
+| Top-level document holds exactly one of `data` / `errors` / `meta`                                               | success schemas only ever contain `data`; error schemas only `errors` — mixing is unrepresentable                                                                                                      |
+| `null` primary `data` only for a single-resource URL that might correspond to a resource but currently doesn't   | `DataDocument` is a pure envelope: `DataDocument(R)` is non-null; opt into `data: null` with `Schema.NullOr(R)` / `R.nullable()`. `Endpoint.related` keeps the nullable form for a to-one relationship |
+| Resource objects have `type` and `id`; ids are not interchangeable across types                                  | `Resource` always emits the type tag and a per-type branded id                                                                                                                                         |
+| Create requests may omit `id` and send `lid`                                                                     | `createPayload` derivation                                                                                                                                                                             |
+| Update requests require `id`, attributes are partial                                                             | `updatePayload` derivation                                                                                                                                                                             |
+| Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                                                                     |
+| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.fetchRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships                                                |
+| Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many                                                                   |
+| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.data` / `Handlers.collection` builders (runtime check)                                                                                                                                       |
+| Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                                                                    |
+| `errors` array is never empty                                                                                    | non-empty check on the error document schema                                                                                                                                                           |
+| 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                                                                       |
+| Pagination / sorting / sparse fieldsets / inclusion / filtering query families                                   | typed query schemas derived from the resource definition                                                                                                                                               |
+| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                                                                             |
 
 ## Examples
 

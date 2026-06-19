@@ -1,8 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
-import { Identifier, make as Resource } from "./Resource.js"
+import { directTargets, Identifier, make as Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
@@ -371,7 +371,7 @@ describe("Resource relationships", () => {
 })
 
 describe("Resource.document / Resource.collection", () => {
-  it("document accepts a single resource or null data", () => {
+  it("document produces non-null primary data", () => {
     const doc = Article.document()
     const withData = Schema.decodeUnknownSync(doc)({
       data: {
@@ -380,9 +380,10 @@ describe("Resource.document / Resource.collection", () => {
         attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
       }
     })
-    expect(withData.data?.id).toBe("1")
-    const withNull = Schema.decodeUnknownSync(doc)({ data: null })
-    expect(withNull.data).toBeNull()
+    expect(withData.data.id).toBe("1")
+    expectTypeOf(withData.data).toEqualTypeOf<typeof Article.Type>()
+    // `data` is the resource verbatim now — `null` is rejected
+    expect(() => Schema.decodeUnknownSync(doc)({ data: null })).toThrow()
   })
 
   it("collection requires array data", () => {
@@ -473,7 +474,11 @@ describe("Resource.document / Resource.collection", () => {
   it("included can be overridden explicitly for deeper compound documents", () => {
     const doc = Article.document({ included: Schema.Union([Person, Comment]) })
     const decoded = Schema.decodeUnknownSync(doc)({
-      data: null,
+      data: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+      },
       included: [{ type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }]
     })
     expect(decoded.included).toHaveLength(1)
@@ -498,13 +503,82 @@ describe("Resource.document / Resource.collection", () => {
   })
 })
 
+describe("DataDocument nullability is compositional", () => {
+  const article = {
+    type: "articles",
+    id: "1",
+    attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+  }
+
+  it("non-null: `data` is the resource verbatim and `null` is rejected", () => {
+    const doc = DataDocument(Article)
+    const decoded = Schema.decodeUnknownSync(doc)({ data: article })
+    expect(decoded.data.id).toBe("1")
+    expectTypeOf(decoded.data).toEqualTypeOf<typeof Article.Type>()
+    expect(() => Schema.decodeUnknownSync(doc)({ data: null })).toThrow()
+  })
+
+  it("NullOr: `data` is `resource | null` and round-trips `null` on the wire", () => {
+    const doc = DataDocument(Schema.NullOr(Article))
+    const decoded = Schema.decodeUnknownSync(doc)({ data: null })
+    expect(decoded.data).toBeNull()
+    expectTypeOf(decoded.data).toEqualTypeOf<typeof Article.Type | null>()
+    expect(Schema.encodeUnknownSync(doc)({ data: null })).toEqual({ data: null })
+  })
+
+  it("OptionFromNullOr: `data` is `Option<resource>`, encoding `None ⇆ null`", () => {
+    const doc = DataDocument(Article.nullable())
+    const none = Schema.decodeUnknownSync(doc)({ data: null })
+    expect(Option.isNone(none.data)).toBe(true)
+    const some = Schema.decodeUnknownSync(doc)({ data: article })
+    expect(Option.isSome(some.data)).toBe(true)
+    expectTypeOf(some.data).toEqualTypeOf<Option.Option<typeof Article.Type>>()
+    // `None` encodes back to a spec-conformant `data: null`
+    expect(Schema.encodeUnknownSync(doc)({ data: Option.none() })).toEqual({ data: null })
+  })
+
+  it("generalises to linkage unions with no special case", () => {
+    const doc = DataDocument(Schema.NullOr(Schema.Union([Comment.identifier, Schema.Array(Comment.identifier)])))
+    expect(Schema.decodeUnknownSync(doc)({ data: null }).data).toBeNull()
+    expect(Schema.decodeUnknownSync(doc)({ data: { type: "comments", id: "5" } }).data).toEqual({
+      type: "comments",
+      id: "5"
+    })
+    expect(Schema.decodeUnknownSync(doc)({ data: [{ type: "comments", id: "5" }] }).data).toEqual([
+      { type: "comments", id: "5" }
+    ])
+  })
+
+  it("included derivation still works when `data` is wrapped", () => {
+    // `included` keys off the underlying resource graph (Article's non-paginated
+    // relationship targets), independent of how the primary `data` is wrapped.
+    expect(directTargets(Article).map((target) => target.type)).toEqual(["people", "comments"])
+    const doc = DataDocument(Schema.NullOr(Article), {
+      included: Schema.Union([Person, Comment])
+    })
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: null,
+      included: [{ type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }]
+    })
+    expect(decoded.data).toBeNull()
+    expect(decoded.included).toHaveLength(1)
+    // resources outside the relationship graph are still rejected
+    expect(() =>
+      Schema.decodeUnknownSync(doc)({
+        data: null,
+        included: [{ type: "tags", id: "1", attributes: { name: "x" } }]
+      })
+    ).toThrow()
+  })
+})
+
 describe("Resource without relationships", () => {
   it("decodes documents without included", () => {
     const doc = Person.document()
     const decoded = Schema.decodeUnknownSync(doc)({
       data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
     })
-    expect(decoded.data?.attributes.firstName).toBe("John")
+    expect(decoded.data.attributes.firstName).toBe("John")
   })
 })
 
@@ -550,12 +624,12 @@ describe("heterogeneous (union) documents", () => {
         attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
       }
     })
-    expect(asArticle.data?.type).toBe("articles")
+    expect(asArticle.data.type).toBe("articles")
 
     const asPerson = Schema.decodeUnknownSync(doc)({
       data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }
     })
-    expect(asPerson.data?.type).toBe("people")
+    expect(asPerson.data.type).toBe("people")
   })
 
   it("collection documents accept mixed resource types", () => {
