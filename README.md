@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) on [E
 npm install @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-beta.70`). Node.js 20 or newer is required.
+`effect` is a peer dependency (`>=4.0.0-beta.84`). Node.js 20 or newer is required.
 
 ## Overview
 
@@ -35,7 +35,7 @@ import { HttpApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 ```
 
-> **Status**: built against `effect@>=4.0.0-beta.70` (the v4 beta). The
+> **Status**: built against `effect@>=4.0.0-beta.84` (the v4 beta). The
 > `effect/unstable/httpapi` surface may shift between betas.
 
 ## Contents

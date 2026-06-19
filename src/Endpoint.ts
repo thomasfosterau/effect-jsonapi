@@ -199,6 +199,7 @@ export const fetch = <
     success: asJsonApi(
       resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
     ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
@@ -287,6 +288,7 @@ export const list = <
     success: asJsonApi(
       resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
     ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
@@ -349,6 +351,7 @@ export const create = <
       resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
       201
     ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
@@ -411,6 +414,7 @@ export const update = <
     success: asJsonApi(
       resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
     ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
@@ -465,6 +469,7 @@ export const remove = <
   HttpApiEndpoint.delete((options?.name ?? "remove") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
     success: HttpApiSchema.NoContent,
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
@@ -579,6 +584,7 @@ export const search = <
         meta: (options?.meta ?? AnyMeta) as DocMeta
       })
     ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
@@ -796,6 +802,7 @@ export const related = <
         }
       ),
       success: asJsonApi(success),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors)
     }
   )
@@ -910,6 +917,7 @@ export const fetchRelationship = <
         }
       ),
       success: asJsonApi(success),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors)
     }
   )
@@ -1008,6 +1016,7 @@ export const updateRelationship = <
       params: { id: resource.Id },
       payload: asJsonApi(payload),
       success: asJsonApi(success),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors)
     }
   )
@@ -1104,6 +1113,7 @@ export const addRelationship = <
       params: { id: resource.Id },
       payload: asJsonApi(payload),
       success: asJsonApi(success),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors)
     }
   )
@@ -1193,6 +1203,7 @@ export const removeRelationship = <
       params: { id: resource.Id },
       payload: asJsonApi(payload),
       success: HttpApiSchema.NoContent,
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors)
     }
   )
@@ -1285,6 +1296,7 @@ export const operations = <
         (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
       )
     ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)

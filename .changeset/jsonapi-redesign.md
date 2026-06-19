@@ -77,4 +77,4 @@ import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 - The worked example moved out of the published package into `examples/blog`, exercised by an
   end-to-end test suite.
 - Every public symbol of the previous surface is removed or renamed. Pinned to
-  `effect@>=4.0.0-beta.70`; Node.js 20+.
+  `effect@>=4.0.0-beta.84`; Node.js 20+.

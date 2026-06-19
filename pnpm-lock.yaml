@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  effect: 4.0.0-beta.70
-
 importers:
 
   .:
@@ -21,8 +18,8 @@ importers:
         specifier: ^25.1.0
         version: 25.9.4
       effect:
-        specifier: 4.0.0-beta.70
-        version: 4.0.0-beta.70
+        specifier: ^4.0.0-beta.84
+        version: 4.0.0-beta.84
       oxfmt:
         specifier: ^0.55.0
         version: 0.55.0
@@ -45,8 +42,8 @@ importers:
         specifier: workspace:*
         version: link:../..
       effect:
-        specifier: 4.0.0-beta.70
-        version: 4.0.0-beta.70
+        specifier: ^4.0.0-beta.84
+        version: 4.0.0-beta.84
     devDependencies:
       vitest:
         specifier: ^4.0.18
@@ -58,8 +55,8 @@ importers:
         specifier: workspace:*
         version: link:../..
       effect:
-        specifier: 4.0.0-beta.70
-        version: 4.0.0-beta.70
+        specifier: ^4.0.0-beta.84
+        version: 4.0.0-beta.84
     devDependencies:
       vitest:
         specifier: ^4.0.18
@@ -71,8 +68,8 @@ importers:
         specifier: workspace:*
         version: link:../..
       effect:
-        specifier: 4.0.0-beta.70
-        version: 4.0.0-beta.70
+        specifier: ^4.0.0-beta.84
+        version: 4.0.0-beta.84
     devDependencies:
       vitest:
         specifier: ^4.0.18
@@ -894,8 +891,8 @@ packages:
   eastasianwidth@0.2.0:
     resolution: {integrity: sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA==}
 
-  effect@4.0.0-beta.70:
-    resolution: {integrity: sha512-8AwGTRiNriirHGEYHrOS0E9fzdhIqCdZjiHP1YXmNo2UyPGS43ILsymsSHT7V0DJS+8dvlKq2RxnrDBUhDNZHg==}
+  effect@4.0.0-beta.84:
+    resolution: {integrity: sha512-zWwFI9WZ4TsddBmtcuuAO2IXGR0Dp56xIUt8cX29ZeyOEtErXqP6muDaVpro08lGiMSOGMqSpuH/C1TUxHsRAA==}
 
   emoji-regex@8.0.0:
     resolution: {integrity: sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A==}
@@ -2374,7 +2371,7 @@ snapshots:
 
   eastasianwidth@0.2.0: {}
 
-  effect@4.0.0-beta.70:
+  effect@4.0.0-beta.84:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.8.0
