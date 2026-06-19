@@ -30,34 +30,43 @@ jobs:
         # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN).
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
+      # Installs the pnpm version pinned by the package.json "packageManager"
+      # field. Must run before setup-node so its pnpm cache can find the store.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.x
-          cache: npm
+          cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      # npm OIDC Trusted Publishing requires npm >= 11.5.1.
+      # The publish step uses the npm CLI (not pnpm) so it can use npm OIDC
+      # Trusted Publishing, which requires npm >= 11.5.1. pnpm does not yet
+      # support OIDC trusted publishing (https://github.com/pnpm/pnpm/issues/9812).
       - name: Upgrade npm (OIDC trusted publishing)
         run: npm install -g npm@latest
 
       # --ignore-scripts stops a compromised dependency from running install
       # scripts in the privileged publish job (the Shai-Hulud vector).
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
-      # When changesets are pending, this opens/updates a "Version Packages" PR.
-      # Once that PR is merged (no changesets remain), it publishes to npm via
-      # OIDC trusted publishing — there is no NPM_TOKEN to steal. Provenance is
-      # attached automatically.
+      # When changesets are pending, this opens/updates a "Version Packages" PR
+      # (via `pnpm run version`). Once that PR is merged (no changesets remain),
+      # it runs `pnpm run release`, which publishes with `npm publish` (OIDC
+      # trusted publishing — there is no NPM_TOKEN to steal; provenance is
+      # attached automatically) and then `changeset tag`. The action parses the
+      # "New tag:" output, pushes the tags and creates the GitHub releases.
       - name: Create release PR or publish to npm
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
-          version: npm run version
-          publish: npm run release
+          version: pnpm run version
+          publish: pnpm run release
           commit: "chore: version packages"
           title: "chore: version packages"
         env:

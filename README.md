@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) on [E
 npm install @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-beta.70`). Node.js 20 or newer is required.
+`effect` is a peer dependency (`>=4.0.0-beta.84`). Node.js 20 or newer is required.
 
 ## Overview
 
@@ -35,7 +35,7 @@ import { HttpApi } from "effect/unstable/httpapi"
 import { JsonApi } from "@thomasfosterau/effect-jsonapi"
 ```
 
-> **Status**: built against `effect@>=4.0.0-beta.70` (the v4 beta). The
+> **Status**: built against `effect@>=4.0.0-beta.84` (the v4 beta). The
 > `effect/unstable/httpapi` surface may shift between betas.
 
 ## Contents
@@ -608,10 +608,10 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 ## Examples
 
 Complete runnable examples (resources, errors, api, in-memory handlers) live in
-[`examples`](./examples). Each is a **standalone package** in the npm workspace —
+[`examples`](./examples). Each is a **standalone package** in the pnpm workspace —
 it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you
 can lift any one out as a starting point. Run them all from the repo root with
-`npm test`, or a single one with `npm test -w @thomasfosterau/effect-jsonapi-example-northwind`.
+`pnpm test`, or a single one with `pnpm --filter @thomasfosterau/effect-jsonapi-example-northwind test`.
 
 | Example                                      | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Test                                          |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
