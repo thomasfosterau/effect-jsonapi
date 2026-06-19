@@ -18,7 +18,7 @@ jobs:
     if: github.repository == 'thomasfosterau/effect-jsonapi'
     runs-on: ubuntu-latest
     # Requires manual approval via a protected GitHub Environment named
-    # "release". See SECURITY.md for the one-time setup.
+    # "release". See PUBLISHING.md for the one-time setup.
     environment: release
     permissions:
       contents: write # push the version commit/tag and the "Version Packages" PR branch

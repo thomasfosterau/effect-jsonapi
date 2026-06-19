@@ -35,36 +35,8 @@ publish trojanized versions):
 - **Locked dependencies.** Installs use `pnpm install --frozen-lockfile` against the
   committed `pnpm-lock.yaml`; Dependabot proposes updates for review.
 
-## Maintainer setup (one-time)
+## Release pipeline
 
-The release workflow (`.github/workflows/release.yml`) is ready to publish via
-trusted publishing once these one-time steps are done:
-
-1. **First publish.** Trusted publishing can only be configured for a package that
-   already exists. Publish `0.1.0` once from a trusted machine with 2FA enabled:
-
-   ```bash
-   pnpm install --frozen-lockfile --ignore-scripts
-   pnpm run build
-   npm publish --access public --provenance
-   ```
-
-2. **Configure the trusted publisher.** On npmjs.com, open the package →
-   **Settings → Trusted Publisher** and add:
-   - Provider: **GitHub Actions**
-   - Repository: `thomasfosterau/effect-jsonapi`
-   - Workflow: `release.yml`
-   - Environment: `release`
-
-   Then remove any classic automation tokens for the package.
-
-3. **Protect the `release` environment.** In the repo: **Settings → Environments →
-   `release`** → enable **Required reviewers** (yourself) and restrict deployment
-   to the `main` branch.
-
-4. **Protect `main`.** Require pull requests and passing CI before merge, and
-   disallow direct pushes, so a release can only be triggered by merging the
-   reviewed "Version Packages" PR.
-
-After this, releases are fully automated: merging a change adds a changeset, the
-workflow opens a "Version Packages" PR, and merging that PR publishes to npm.
+The publishing pipeline and its one-time maintainer setup (trusted publisher,
+protected `release` environment, branch protection) are documented in
+[PUBLISHING.md](./PUBLISHING.md).

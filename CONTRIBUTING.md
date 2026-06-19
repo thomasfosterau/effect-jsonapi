@@ -106,7 +106,8 @@ pnpm run changeset
 
 Pick the appropriate bump (`patch` / `minor` / `major`) and write a user-facing summary. The
 changeset file is committed alongside your change; releases are published automatically when the
-"Version Packages" PR is merged into `main`.
+"Version Packages" PR is merged into `main`. See [PUBLISHING.md](./PUBLISHING.md) for the full
+release flow and one-time maintainer setup.
 
 ## Commit Messages
 
