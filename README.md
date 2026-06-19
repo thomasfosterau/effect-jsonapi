@@ -199,6 +199,39 @@ can't tell the two apart. `Article.document()` and `Endpoint.fetch` / `create` /
 `update` use the non-null form; `Endpoint.related` for a to-one relationship
 keeps the nullable form (`data: target | null`) for the empty-linkage case.
 
+### Reusing & extending resources
+
+When several resources share a set of attributes or relationships, define them
+once and reuse them. `Resource.attributes` / `Resource.relationships` extract a
+resource's field map and descriptor record so you can spread them into another
+definition:
+
+```ts
+const Profile = Resource.make("profiles", {
+  attributes: { ...Resource.attributes(Person), bio: Schema.String }
+})
+```
+
+`Resource.extend` does the same wholesale — a **subtype** that inherits the
+base's attributes _and_ relationships, adding (or overriding) its own. JSON:API
+has no native subtyping, so the result is a _distinct_ resource type: its own
+`type` tag and branded id, with payloads and documents derived afresh. `meta` is
+inherited unless overridden.
+
+```ts
+const Account = Resource.make("accounts", {
+  attributes: { email: Schema.NonEmptyString, createdAt: Schema.DateFromString },
+  relationships: { organisation: Relationship.one(() => Organisation) }
+})
+
+// `admins` inherits email, createdAt and organisation, adding `permissions`.
+const Admin = Resource.extend(Account, "admins", {
+  attributes: { permissions: Schema.Array(Schema.String) }
+})
+
+Resource.attributeKeys(Admin) // ["email", "createdAt", "permissions"]
+```
+
 ## 2. Errors — declared once, spec-compliant forever
 
 ```ts
