@@ -256,17 +256,17 @@ export interface DataDocument<
  *   - `DataDocument(Schema.NullOr(Article))` → `data: Article | null` — the
  *     spec's nullable primary data, for a single-resource URL that *might*
  *     correspond to a resource but currently doesn't.
- *   - `DataDocument(nullable(Article))` → `data: Option<Article>`, decoding and
- *     encoding `None ⇆ null` on the wire (see {@link nullable}).
+ *   - `DataDocument(Article.nullable())` → `data: Option<Article>`, decoding and
+ *     encoding `None ⇆ null` on the wire (`Article.nullable()` is
+ *     `Schema.OptionFromNullOr(Article)`).
  *
  * It generalises to linkage with no special case, e.g.
  * `DataDocument(Schema.NullOr(Comment.identifier))`.
  *
  * **Nullable data:** use `Schema.NullOr(R)` for `R | null`, or the spec-clean
- * {@link nullable} / `Schema.OptionFromNullOr(R)` for `Option<R>`. Do *not*
- * reach for effect's *structural* `Schema.Option` (`{ _tag, value }`): it
- * serialises a non-conformant body, and `DataDocument` cannot tell the two
- * codecs apart.
+ * `R.nullable()` / `Schema.OptionFromNullOr(R)` for `Option<R>`. Do *not* reach
+ * for effect's *structural* `Schema.Option` (`{ _tag, value }`): it serialises a
+ * non-conformant body, and `DataDocument` cannot tell the two codecs apart.
  *
  * `included` defaults to `Schema.Never` (no compound members permitted) so
  * compound documents are an explicit, typed decision; pass the `included` union
@@ -307,35 +307,6 @@ export const DataDocument = <
     meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
     jsonapi: Schema.optionalKey(JsonApiObject)
   })
-
-/**
- * The blessed nullable codec for {@link DataDocument}: `nullable(R)` is
- * `Schema.OptionFromNullOr(R)`, so a document built from it has
- * `data: Option<R>` that round-trips JSON:API's `null` primary data
- * (`None ⇆ null`, `Some(r) ⇆ r`).
- *
- * Prefer this to effect's *structural* `Schema.Option` (`{ _tag, value }`),
- * which would serialise a non-conformant body — `DataDocument` cannot tell the
- * two codecs apart, so the choice is yours to get right. For a plain
- * `data: R | null` (no `Option` wrapper), pass `Schema.NullOr(R)` instead.
- *
- * @example
- * ```ts
- * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
- * import { Schema } from "effect"
- *
- * const Article = Resource.make("articles", {
- *   attributes: { title: Schema.NonEmptyString }
- * })
- *
- * // data: Option<Article>, ⇆ null on the wire
- * const MaybeArticle = Document.DataDocument(Document.nullable(Article))
- * ```
- *
- * @since 0.2.0
- * @category constructors
- */
-export const nullable = Schema.OptionFromNullOr
 
 /**
  * A collection document: `data` is an array of resources (possibly empty).

@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Option, Schema } from "effect"
-import { AnyMeta, CollectionDocument, DataDocument, nullable } from "./Document.js"
+import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
 import { directTargets, Identifier, make as Resource } from "./Resource.js"
 
@@ -527,7 +527,7 @@ describe("DataDocument nullability is compositional", () => {
   })
 
   it("OptionFromNullOr: `data` is `Option<resource>`, encoding `None ⇆ null`", () => {
-    const doc = DataDocument(nullable(Article))
+    const doc = DataDocument(Article.nullable())
     const none = Schema.decodeUnknownSync(doc)({ data: null })
     expect(Option.isNone(none.data)).toBe(true)
     const some = Schema.decodeUnknownSync(doc)({ data: article })
