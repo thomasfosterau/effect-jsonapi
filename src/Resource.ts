@@ -471,9 +471,12 @@ export interface Resource<
    */
   lidRef(lid: string): LocalIdentifier<Type>["Type"]
   /**
-   * Single-resource document schema. The compound `included` union defaults to
-   * the resources referenced by this resource's non-`paginated` relationships;
-   * override it (or the document `meta`) per call.
+   * Single-resource document schema with this resource as primary `data`
+   * (non-null) — the canonical document for an existing resource. When the data
+   * can be absent, build `Document.DataDocument(Schema.NullOr(R))` /
+   * `Document.DataDocument(Document.nullable(R))` instead. The compound
+   * `included` union defaults to the resources referenced by this resource's
+   * non-`paginated` relationships; override it (or the document `meta`) per call.
    */
   document<Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(options?: {
     readonly included?: Included
