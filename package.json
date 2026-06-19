@@ -1,6 +1,6 @@
 {
   "name": "@thomasfosterau/effect-jsonapi",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Type-safe, spec-compliant JSON:API v1.1 on Effect's HttpApi.",
   "keywords": [
     "api",
