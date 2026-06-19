@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
-import { Identifier, Resource } from "./Resource.js"
+import { Identifier, make as Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)

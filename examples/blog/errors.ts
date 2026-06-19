@@ -4,9 +4,8 @@
  * declared HTTP status.
  */
 import { Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-export class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+import { ApiError, Atomic } from "@thomasfosterau/effect-jsonapi"
+export class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
   status: 404,
   code: "not_found",
   title: "Resource not found",
@@ -14,7 +13,7 @@ export class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNo
   detail: (e) => `Article ${e.id} not found`
 }) {}
 
-export class TitleTaken extends JsonApi.Error<TitleTaken>()("TitleTaken", {
+export class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {
   status: 409,
   code: "title_taken",
   title: "Title already taken",
@@ -27,10 +26,10 @@ export class TitleTaken extends JsonApi.Error<TitleTaken>()("TitleTaken", {
  * failed (also exposed as a JSON pointer in `detail`) so clients know which
  * one to fix. Per the extension, no operation is applied.
  */
-export class OperationFailed extends JsonApi.Error<OperationFailed>()("OperationFailed", {
+export class OperationFailed extends ApiError.make<OperationFailed>()("OperationFailed", {
   status: 422,
   code: "operation_failed",
   title: "Atomic operation failed",
   fields: { operation: Schema.Int, reason: Schema.String },
-  detail: (e) => `Operation at ${JsonApi.Atomic.operationPointer(e.operation)} failed: ${e.reason}`
+  detail: (e) => `Operation at ${Atomic.operationPointer(e.operation)} failed: ${e.reason}`
 }) {}

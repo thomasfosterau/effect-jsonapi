@@ -8,13 +8,13 @@
  *   - `payload.data.attributes` is the typed create/update payload
  *   - relationship endpoints receive typed linkage payloads
  *
- * and return document values (`JsonApi.data` / `JsonApi.collection` /
- * `JsonApi.linkage`), which are validated against the endpoint's document
+ * and return document values (`Handlers.data` / `Handlers.collection` /
+ * `Handlers.linkage`), which are validated against the endpoint's document
  * schema on the way out.
  */
 import { Effect, Layer, Match } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Atomic, Handlers, Lid, Middleware } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "./api.js"
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
 import { Article, Comment, Person, Tag } from "./resources.js"
@@ -63,7 +63,7 @@ export const sampleArticle: Article = Article.make({
     // `many`: inline identifier array
     tags: { data: [Tag.ref(sampleTag.id)] },
     // `paginated`: no inline data — just the links clients follow
-    comments: JsonApi.paginatedRelationship("articles", "1", "comments")
+    comments: Handlers.paginatedRelationship("articles", "1", "comments")
   }
 })
 
@@ -116,7 +116,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("fetch", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) =>
-          JsonApi.data(article, {
+          Handlers.data(article, {
             included: resolveIncluded(article, query.include),
             self: `/articles/${article.id}`
           })
@@ -149,10 +149,10 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       const page = articles.slice(offset, offset + limit)
 
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           included: page.flatMap((article) => resolveIncluded(article, query.include)),
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/articles", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total)
         })
       )
     })
@@ -173,12 +173,12 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           tags: payload.data.relationships.tags ?? { data: [] },
           // `comments` can't be supplied at create time; new articles start
           // with an empty, paginated comment collection.
-          comments: JsonApi.paginatedRelationship("articles", id, "comments")
+          comments: Handlers.paginatedRelationship("articles", id, "comments")
         }
       })
       store.articles.set(article.id, article)
       store.articleComments.set(article.id, [])
-      return Effect.succeed(JsonApi.data(article, { self: `/articles/${article.id}` }))
+      return Effect.succeed(Handlers.data(article, { self: `/articles/${article.id}` }))
     })
     .handle("update", ({ params, payload }) =>
       loadArticle(params.id).pipe(
@@ -194,7 +194,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             }
           })
           store.articles.set(updated.id, updated)
-          return JsonApi.data(updated, { self: `/articles/${updated.id}` })
+          return Handlers.data(updated, { self: `/articles/${updated.id}` })
         })
       )
     )
@@ -211,8 +211,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           const author = store.people.get(article.relationships!.author.data.id) ?? null
-          return JsonApi.data(author, {
-            self: JsonApi.relatedLink("articles", article.id, "author")
+          return Handlers.data(author, {
+            self: Handlers.relatedLink("articles", article.id, "author")
           })
         })
       )
@@ -225,8 +225,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           const offset = query.page?.offset ?? 0
           const limit = query.page?.limit ?? total
           const page = all.slice(offset, offset + limit)
-          const path = JsonApi.relatedLink("articles", article.id, "comments")
-          return JsonApi.collection(page, {
+          const path = Handlers.relatedLink("articles", article.id, "comments")
+          return Handlers.collection(page, {
             included: query.include?.includes("author")
               ? page.flatMap((comment) => {
                   const author = store.people.get(comment.relationships!.author.data.id)
@@ -234,7 +234,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
                 })
               : [],
             meta: { total },
-            links: JsonApi.offsetPaginationLinks(path, { offset, limit }, total)
+            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total)
           })
         })
       )
@@ -247,9 +247,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           const total = all.length
           const offset = query.page?.offset ?? 0
           const limit = query.page?.limit ?? total
-          return JsonApi.linkage(all.slice(offset, offset + limit), {
-            self: JsonApi.relationshipLink("articles", article.id, "comments"),
-            related: JsonApi.relatedLink("articles", article.id, "comments"),
+          return Handlers.linkage(all.slice(offset, offset + limit), {
+            self: Handlers.relationshipLink("articles", article.id, "comments"),
+            related: Handlers.relatedLink("articles", article.id, "comments"),
             meta: { total }
           })
         })
@@ -263,9 +263,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             relationships: { ...article.relationships!, author: { data: payload.data } }
           })
           store.articles.set(updated.id, updated)
-          return JsonApi.linkage(payload.data, {
-            self: JsonApi.relationshipLink("articles", article.id, "author"),
-            related: JsonApi.relatedLink("articles", article.id, "author")
+          return Handlers.linkage(payload.data, {
+            self: Handlers.relationshipLink("articles", article.id, "author"),
+            related: Handlers.relatedLink("articles", article.id, "author")
           })
         })
       )
@@ -278,11 +278,11 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             if (!linked.includes(identifier.id)) linked.push(identifier.id)
           }
           store.articleComments.set(article.id, linked)
-          return JsonApi.linkage(
+          return Handlers.linkage(
             linked.map((id) => Comment.ref(id)),
             {
-              self: JsonApi.relationshipLink("articles", article.id, "comments"),
-              related: JsonApi.relatedLink("articles", article.id, "comments")
+              self: Handlers.relationshipLink("articles", article.id, "comments"),
+              related: Handlers.relatedLink("articles", article.id, "comments")
             }
           )
         })
@@ -328,13 +328,13 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     const page = results.slice(offset, offset + limit)
 
     return Effect.succeed(
-      JsonApi.collection(page, {
+      Handlers.collection(page, {
         included:
           query.include === undefined
             ? []
             : page.flatMap((result) => (result.type === "articles" ? resolveIncluded(result, query.include) : [])),
         meta: { total },
-        links: JsonApi.offsetPaginationLinks("/search", { offset, limit }, total)
+        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total)
       })
     )
   })
@@ -345,7 +345,7 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 // ---------------------------------------------------------------------------
 
 /** The operation union the operations endpoint accepts. */
-type AtomicOperation = JsonApi.Atomic.Operation<typeof Article | typeof Comment>["Type"]
+type AtomicOperation = Atomic.Operation<typeof Article | typeof Comment>["Type"]
 
 /** One result entry per operation; removals and relationship updates return no data. */
 type ResultEntry = { readonly data?: Article | Comment | null }
@@ -368,19 +368,19 @@ const freshId = (): string => `atomic-${++atomicIdCounter}`
  * The id a ref (or update `data`) targets, resolving lids assigned by earlier
  * operations in the same request.
  */
-const targetId = (lids: JsonApi.LidMap, target: { readonly id?: string; readonly lid?: string }): string => {
+const targetId = (lids: Lid.LidMap, target: { readonly id?: string; readonly lid?: string }): string => {
   if (target.id !== undefined) return target.id
   if (target.lid !== undefined) {
     const id = lids.id(target.lid)
     if (id !== undefined) return id
-    throw new JsonApi.UnknownLidError(target.lid)
+    throw new Lid.UnknownLidError(target.lid)
   }
   throw new Error("operation does not identify a target resource")
 }
 
 const getArticle = (
   draft: Draft,
-  lids: JsonApi.LidMap,
+  lids: Lid.LidMap,
   target: { readonly id?: string; readonly lid?: string }
 ): Article => {
   const id = targetId(lids, target)
@@ -391,7 +391,7 @@ const getArticle = (
 
 const getComment = (
   draft: Draft,
-  lids: JsonApi.LidMap,
+  lids: Lid.LidMap,
   target: { readonly id?: string; readonly lid?: string }
 ): Comment => {
   const id = targetId(lids, target)
@@ -410,11 +410,11 @@ const getComment = (
  * Failures throw; the handler converts them into typed `OperationFailed`
  * errors carrying the index of the operation that failed.
  */
-const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOperation): ResultEntry =>
+const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperation): ResultEntry =>
   Match.value(operation).pipe(
     // --- relationship operations (refs carrying a `relationship` member) ----
     // replace an article's author (`one`: the new linkage is never null)
-    Match.when(JsonApi.Atomic.targetsRelationship(Article, "author"), (op) => {
+    Match.when(Atomic.targetsRelationship(Article, "author"), (op) => {
       const article = getArticle(draft, lids, op.ref)
       draft.articles.set(
         article.id,
@@ -426,10 +426,10 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
           }
         })
       )
-      return JsonApi.Atomic.emptyResult
+      return Atomic.emptyResult
     }),
     // add to / replace / remove from an article's tags (`many`: inline linkage)
-    Match.when(JsonApi.Atomic.targetsRelationship(Article, "tags"), (op) => {
+    Match.when(Atomic.targetsRelationship(Article, "tags"), (op) => {
       const article = getArticle(draft, lids, op.ref)
       const refs = op.data.map((ref) => lids.identifier(Tag, ref))
       const current = article.relationships?.tags.data ?? []
@@ -446,11 +446,11 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
           relationships: { ...article.relationships!, tags: { data: next } }
         })
       )
-      return JsonApi.Atomic.emptyResult
+      return Atomic.emptyResult
     }),
     // add to / replace / remove from an article's comments (`paginated`: the
     // linkage lives in the relationship index, not inline on the article)
-    Match.when(JsonApi.Atomic.targetsRelationship(Article, "comments"), (op) => {
+    Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => {
       const article = getArticle(draft, lids, op.ref)
       const ids: ReadonlyArray<string> = op.data.map((ref) => lids.identifier(Comment, ref).id)
       const current = draft.articleComments.get(article.id) ?? []
@@ -461,10 +461,10 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
             ? current.filter((id) => !ids.includes(id))
             : [...ids]
       draft.articleComments.set(article.id, next)
-      return JsonApi.Atomic.emptyResult
+      return Atomic.emptyResult
     }),
     // replace a comment's author (`one`)
-    Match.when(JsonApi.Atomic.targetsRelationship(Comment, "author"), (op) => {
+    Match.when(Atomic.targetsRelationship(Comment, "author"), (op) => {
       const comment = getComment(draft, lids, op.ref)
       draft.comments.set(
         comment.id,
@@ -473,10 +473,10 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
           relationships: { author: { data: lids.identifier(Person, op.data) } }
         })
       )
-      return JsonApi.Atomic.emptyResult
+      return Atomic.emptyResult
     }),
     // --- resource operations -------------------------------------------------
-    Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
+    Match.when(Atomic.targetsResource(Article), (op) =>
       Match.value(op).pipe(
         Match.when({ op: "add" }, (add) => {
           const id = Article.Id.make(freshId())
@@ -489,7 +489,7 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
               author: { data: lids.identifier(Person, add.data.relationships.author.data) },
               tags: resolved.tags ?? { data: [] },
               // `comments` is paginated: new articles start with an empty collection
-              comments: JsonApi.paginatedRelationship("articles", id, "comments")
+              comments: Handlers.paginatedRelationship("articles", id, "comments")
             }
           })
           draft.articles.set(article.id, article)
@@ -512,12 +512,12 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
           const article = getArticle(draft, lids, remove.ref)
           draft.articles.delete(article.id)
           draft.articleComments.delete(article.id)
-          return JsonApi.Atomic.emptyResult
+          return Atomic.emptyResult
         }),
         Match.exhaustive
       )
     ),
-    Match.when(JsonApi.Atomic.targetsResource(Comment), (op) =>
+    Match.when(Atomic.targetsResource(Comment), (op) =>
       Match.value(op).pipe(
         Match.when({ op: "add" }, (add) => {
           const comment = Comment.make({
@@ -553,7 +553,7 @@ const applyOperation = (draft: Draft, lids: JsonApi.LidMap, operation: AtomicOpe
               ids.filter((id) => id !== comment.id)
             )
           }
-          return JsonApi.Atomic.emptyResult
+          return Atomic.emptyResult
         }),
         Match.exhaustive
       )
@@ -569,7 +569,7 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
         comments: new Map(store.comments),
         articleComments: new Map([...store.articleComments].map(([articleId, ids]) => [articleId, [...ids]]))
       }
-      const lids = JsonApi.lidMap()
+      const lids = Lid.make()
       const entries: Array<ResultEntry> = []
 
       const operations = payload["atomic:operations"]
@@ -589,7 +589,7 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
       store.articles = draft.articles
       store.comments = draft.comments
       store.articleComments = draft.articleComments
-      return JsonApi.Atomic.results(entries)
+      return Atomic.results(entries)
     })
   )
 )
@@ -606,5 +606,5 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
  * them) so that every endpoint's middleware requirement is satisfied.
  */
 export const BlogLive = Layer.mergeAll(ArticlesLive, SearchLive, OperationsLive).pipe(
-  Layer.provideMerge(JsonApi.Middleware.layerWith({ extensions: [JsonApi.Atomic.EXTENSION_URI] }))
+  Layer.provideMerge(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] }))
 )

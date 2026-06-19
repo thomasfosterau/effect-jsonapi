@@ -6,12 +6,12 @@
  * payloads, and across the operations of an atomic operations request, where
  * later operations may reference resources created by earlier ones.
  *
- * {@link lidMap} is the server-side counterpart: while a handler processes a
+ * {@link make} is the server-side counterpart: while a handler processes a
  * request, it records the real id assigned to each lid and resolves lid-based
  * refs back to typed identifiers — including inside relationship linkage.
  *
  * ```ts
- * const lids = lidMap()
+ * const lids = Lid.make()
  *
  * // when a creation with a lid succeeds:
  * lids.assign(operation.data.lid, createdId)
@@ -34,19 +34,19 @@ import type { Any, RefValue } from "./Resource.js"
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Lid, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
- * const lids = JsonApi.lidMap()
+ * const lids = Lid.make()
  *
  * // converting the thrown error into an Effect failure
  * const program = Effect.try({
  *   try: () => lids.identifier(Article, { type: "articles", lid: "never-created" }),
  *   catch: (error) =>
- *     error instanceof JsonApi.UnknownLidError ? error : new Error(String(error))
+ *     error instanceof Lid.UnknownLidError ? error : new Error(String(error))
  * })
  * ```
  *
@@ -151,24 +151,24 @@ export interface LidMap {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Lid, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Comment = JsonApi.Resource("comments", {
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.optional(() => Person),
- *     comments: JsonApi.Relationship.many(() => Comment)
+ *     author: Relationship.optional(() => Person),
+ *     comments: Relationship.many(() => Comment)
  *   }
  * })
  *
- * const lids = JsonApi.lidMap()
+ * const lids = Lid.make()
  *
  * // record the server-assigned id of a resource created with a lid
  * lids.assign("a1", "42")
@@ -186,7 +186,7 @@ export interface LidMap {
  * @since 0.1.0
  * @category constructors
  */
-export const lidMap = (): LidMap => {
+export const make = (): LidMap => {
   const ids = new Map<string, string>()
 
   const resolveRef = (ref: RefValue): { readonly type: string; readonly id: string } => {

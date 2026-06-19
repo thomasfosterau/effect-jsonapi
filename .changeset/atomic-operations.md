@@ -7,16 +7,16 @@ Add helpers for the JSON:API atomic operations extension (https://jsonapi.org/ex
 ### Lids as a first-class Resource concept
 
 - Every resource definition now derives `localIdentifier` (the `{ type, lid }` schema) and `lidRef(lid)` (typed local-identifier values), alongside the existing `identifier` / `ref(id)`.
-- `JsonApi.LocalIdentifier`, `JsonApi.Ref` (id-or-lid identifier union) and `JsonApi.RefValue` are exported from the Resource module.
-- The new standalone Lid module provides handler-side lid resolution: `JsonApi.lidMap()` tracks the server-assigned ids of lid-created resources and resolves lid-based refs (including inside relationship linkage) back to typed identifiers; `JsonApi.UnknownLidError` signals refs to lids no operation declared.
+- `Resource.LocalIdentifier`, `Resource.Ref` (id-or-lid identifier union) and `Resource.RefValue` are exported from the Resource module.
+- The new standalone Lid module provides handler-side lid resolution: `Lid.make()` tracks the server-assigned ids of lid-created resources and resolves lid-based refs (including inside relationship linkage) back to typed identifiers; `Lid.UnknownLidError` signals refs to lids no operation declared.
 
-### `JsonApi.Endpoint.operations` — the endpoint
+### `Endpoint.operations` — the endpoint
 
 `Endpoint.operations([Article, Comment], options?)` builds a `POST /operations` endpoint whose payload is an `atomic:operations` document and whose success is a 200 `atomic:results` document. The operation union — resource add/update/remove, relationship operations, and lid-based refs — is derived from the resource definitions, like everything else in the library.
 
 Operations respect the relationship kinds: `add` operations require `one` relationships and exclude `paginated` ones (mirroring create payloads); `one` relationship updates can never be `null` while `optional` ones can; `many` and `paginated` relationships are managed through `add` / `update` / `remove` relationship operations.
 
-### `JsonApi.Atomic` — schemas, constructors and handler helpers
+### `Atomic` — schemas, constructors and handler helpers
 
 - **Discoverable operation derivation**: `Atomic.operationsFor(Article)` returns a named record of every operation derived for a resource — `add`, `update`, `remove`, and per-relationship operations by kind (`relationships.author.update`, `relationships.comments.add` / `update` / `remove`). The request document union is built from this record.
 - **Document schemas**: `RequestDocument`, `ResultDocument`, `Operations`, plus the building blocks (`AddOperation`, `UpdateOperation`, `RemoveOperation`, relationship operations, `ResourceRef` / `RelationshipRef`).

@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "../api.js"
 import { ArticleNotFound, TitleTaken } from "../errors.js"
 import { ArticlesLive, sampleArticle, sampleAuthor, sampleComments, SearchLive } from "../handlers.js"
@@ -20,7 +20,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
       Effect.scoped,
       Effect.provide(ArticlesLive),
       Effect.provide(SearchLive),
-      Effect.provide(JsonApi.Middleware.layer)
+      Effect.provide(Middleware.layer)
     ) as Effect.Effect<A, E, never>
   )
 
@@ -30,7 +30,7 @@ const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E
       Effect.scoped,
       Effect.provide(ArticlesLive),
       Effect.provide(SearchLive),
-      Effect.provide(JsonApi.Middleware.layer)
+      Effect.provide(Middleware.layer)
     ) as Effect.Effect<A, E, never>
   )
 
@@ -96,7 +96,7 @@ describe("blog example: fetching", () => {
       }
     })
     // ... and `comments` is not a legal include path.
-    type IncludePaths = JsonApi.IncludePath<typeof Article>
+    type IncludePaths = Resource.IncludePath<typeof Article>
     expectTypeOf<IncludePaths>().toEqualTypeOf<"author" | "tags">()
   })
 
@@ -110,7 +110,7 @@ describe("blog example: fetching", () => {
             params: { id: Article.Id.make("1") },
             query: { include }
           })
-          .pipe(JsonApi.narrowIncluded(Article, include))
+          .pipe(Client.narrowIncluded(Article, include))
       })
     )
 
@@ -527,20 +527,20 @@ describe("blog example: spec compliance on the wire", () => {
 
   it("content negotiation predicates implement JSON:API §5", () => {
     // JSON:API content type with parameters other than ext / profile → 415
-    expect(JsonApi.Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(false)
-    expect(JsonApi.Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true)
+    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(false)
+    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true)
     // profile parameters are never rejected; ext parameters require support
-    expect(JsonApi.Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="x"')).toBe(true)
-    expect(JsonApi.Middleware.contentTypeIsAcceptable(JsonApi.Atomic.MEDIA_TYPE)).toBe(false)
+    expect(Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="x"')).toBe(true)
+    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false)
     expect(
-      JsonApi.Middleware.contentTypeIsAcceptable(JsonApi.Atomic.MEDIA_TYPE, {
-        extensions: [JsonApi.Atomic.EXTENSION_URI]
+      Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, {
+        extensions: [Atomic.EXTENSION_URI]
       })
     ).toBe(true)
     // Accept in which every JSON:API instance has non-ext/profile parameters → 406
-    expect(JsonApi.Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(false)
-    expect(JsonApi.Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true)
-    expect(JsonApi.Middleware.acceptIsAcceptable("*/*")).toBe(true)
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(false)
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true)
+    expect(Middleware.acceptIsAcceptable("*/*")).toBe(true)
   })
 
   it("OpenAPI generation reflects the JSON:API media type and statuses", () => {

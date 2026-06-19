@@ -23,7 +23,7 @@
  * managed through relationship endpoints instead.
  *
  * ```ts
- * const Article = Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
  *   relationships: {
  *     author: Relationship.one(() => Person),         // always present
@@ -152,16 +152,16 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { name: Schema.NonEmptyString }
  * })
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
  * ```
  *
@@ -176,16 +176,16 @@ export const one = <R extends Any>(ref: () => R): One<R> => ({ kind: "one", ref 
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { name: Schema.NonEmptyString }
  * })
  *
- * const Issue = JsonApi.Resource("issues", {
+ * const Issue = Resource.make("issues", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { assignee: JsonApi.Relationship.optional(() => Person) }
+ *   relationships: { assignee: Relationship.optional(() => Person) }
  * })
  * ```
  *
@@ -200,16 +200,16 @@ export const optional = <R extends Any>(ref: () => R): Optional<R> => ({ kind: "
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Tag = JsonApi.Resource("tags", {
+ * const Tag = Resource.make("tags", {
  *   attributes: { name: Schema.NonEmptyString }
  * })
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { tags: JsonApi.Relationship.many(() => Tag) }
+ *   relationships: { tags: Relationship.many(() => Tag) }
  * })
  * ```
  *
@@ -229,16 +229,16 @@ export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", r
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Comment = JsonApi.Resource("comments", {
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString }
  * })
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { comments: JsonApi.Relationship.paginated(() => Comment) }
+ *   relationships: { comments: Relationship.paginated(() => Comment) }
  * })
  * ```
  *

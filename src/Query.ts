@@ -60,14 +60,14 @@ const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterTh
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Endpoint, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
  * // enable offset/limit pagination on a list endpoint
- * JsonApi.Endpoint.list(Article, { page: JsonApi.Page.Offset })
+ * Endpoint.list(Article, { page: Query.Page.Offset })
  * ```
  *
  * @since 0.1.0
@@ -120,24 +120,24 @@ export interface Include<R extends Any> extends CommaSeparated<Schema.Literals<R
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Comment = JsonApi.Resource("comments", {
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     comments: JsonApi.Relationship.many(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.many(() => Comment)
  *   }
  * })
  *
- * const include = JsonApi.Query.Include(Article)
+ * const include = Query.Include(Article)
  * Schema.decodeUnknownSync(include)("author,comments.author")
  * // → ["author", "comments.author"]
  * ```
@@ -165,13 +165,13 @@ export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Li
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
- * const fieldset = JsonApi.Query.Fieldset(Article)
+ * const fieldset = Query.Fieldset(Article)
  * Schema.decodeUnknownSync(fieldset)("title,body")
  * // → ["title", "body"]
  * ```
@@ -196,9 +196,9 @@ export interface Sort<Field extends string> extends SortCodec<Field> {}
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
  *
- * const sort = JsonApi.Query.Sort(["createdAt", "title"])
+ * const sort = Query.Sort(["createdAt", "title"])
  * Schema.decodeUnknownSync(sort)("-createdAt,title")
  * // → [{ field: "createdAt", direction: "desc" },
  * //    { field: "title", direction: "asc" }]
@@ -346,17 +346,17 @@ export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
- * const query = JsonApi.Query.schema(Article, {
+ * const query = Query.schema(Article, {
  *   include: true,
  *   fields: true,
  *   sort: true,
- *   page: JsonApi.Page.Offset,
+ *   page: Query.Page.Offset,
  *   filter: { author: Schema.String }
  * })
  *

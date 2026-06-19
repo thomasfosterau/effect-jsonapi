@@ -12,9 +12,8 @@
  *   Comment ──author───▶ Person   `one`
  */
 import { Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-export const Person = JsonApi.Resource("people", {
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+export const Person = Resource.make("people", {
   attributes: {
     firstName: Schema.NonEmptyString,
     lastName: Schema.NonEmptyString,
@@ -22,23 +21,23 @@ export const Person = JsonApi.Resource("people", {
   }
 })
 
-export const Tag = JsonApi.Resource("tags", {
+export const Tag = Resource.make("tags", {
   attributes: {
     name: Schema.NonEmptyString
   }
 })
 
-export const Comment = JsonApi.Resource("comments", {
+export const Comment = Resource.make("comments", {
   attributes: {
     body: Schema.NonEmptyString
   },
   relationships: {
     // A comment always has an author: required to-one.
-    author: JsonApi.Relationship.one(() => Person)
+    author: Relationship.one(() => Person)
   }
 })
 
-export const Article = JsonApi.Resource("articles", {
+export const Article = Resource.make("articles", {
   attributes: {
     title: Schema.NonEmptyString,
     body: Schema.String,
@@ -48,14 +47,14 @@ export const Article = JsonApi.Resource("articles", {
   relationships: {
     // Required to-one: an article cannot exist without an author, so the
     // create payload must carry it.
-    author: JsonApi.Relationship.one(() => Person),
+    author: Relationship.one(() => Person),
     // Bounded to-many: tags are few, so they are inlined as identifiers and
     // can be brought into compound documents via `?include=tags`.
-    tags: JsonApi.Relationship.many(() => Tag),
+    tags: Relationship.many(() => Tag),
     // Unbounded to-many: comments are reachable only through the relationship's
     // `related` link — a paginated collection endpoint. They never appear
     // inline and can't be included.
-    comments: JsonApi.Relationship.paginated(() => Comment)
+    comments: Relationship.paginated(() => Comment)
   }
 })
 

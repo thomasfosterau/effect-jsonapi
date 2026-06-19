@@ -11,13 +11,13 @@ import { HttpApiSchema } from "effect/unstable/httpapi"
  * The JSON:API media type, per
  * {@link https://jsonapi.org/format/1.1/#content-negotiation-all the spec}.
  *
- * Re-exported from the package root as `JsonApi.MEDIA_TYPE`.
+ * Re-exported from the package root as `MEDIA_TYPE`.
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi"
  *
- * JsonApi.MEDIA_TYPE // "application/vnd.api+json"
+ * MEDIA_TYPE // "application/vnd.api+json"
  * ```
  *
  * @since 0.1.0

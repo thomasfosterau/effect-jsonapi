@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
-import { lidMap, UnknownLidError } from "./Lid.js"
+import { make as lidMap, UnknownLidError } from "./Lid.js"
 import * as Relationship from "./Relationship.js"
-import { Resource } from "./Resource.js"
+import { make as Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures

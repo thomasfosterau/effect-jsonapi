@@ -215,7 +215,7 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
  *
  * // `UsersLive` etc. are your `HttpApiBuilder.group(...)` implementations.
  * const UsersLive: Layer.Layer<never> = Layer.empty
@@ -223,7 +223,7 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
  * // Provide the JSON:API middleware *into* the handler groups so every
  * // endpoint's middleware requirement is satisfied.
  * const ApiLive = Layer.mergeAll(UsersLive).pipe(
- *   Layer.provideMerge(JsonApi.Middleware.layer)
+ *   Layer.provideMerge(Middleware.layer)
  * )
  * ```
  *
@@ -242,14 +242,14 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
  * @example
  * ```ts
  * import { Layer } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Atomic, Middleware } from "@thomasfosterau/effect-jsonapi"
  *
  * const HandlersLive: Layer.Layer<never> = Layer.empty
  *
  * // Accept the atomic operations extension's media type.
  * const ApiLive = Layer.mergeAll(HandlersLive).pipe(
  *   Layer.provideMerge(
- *     JsonApi.Middleware.layerWith({ extensions: [JsonApi.Atomic.EXTENSION_URI] })
+ *     Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })
  *   )
  * )
  * ```
