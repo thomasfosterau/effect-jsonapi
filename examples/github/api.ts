@@ -16,7 +16,7 @@
  */
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi"
 import {
   IssueLocked,
   IssueNotFound,
@@ -34,33 +34,33 @@ export const PageMeta = Schema.Struct({
   total: Schema.Int
 })
 
-export const users = JsonApi.Group(
+export const users = Group.make(
   User,
   // GET /users/:id
-  JsonApi.Endpoint.fetch(User, {
+  Endpoint.fetch(User, {
     errors: [UserNotFound]
   }),
   // GET /users?sort=login&page[number]=1&page[size]=30
-  JsonApi.Endpoint.list(User, {
+  Endpoint.list(User, {
     sort: ["login", "createdAt"],
-    page: JsonApi.Page.Number,
+    page: Query.Page.Number,
     meta: PageMeta
   })
 )
 
-export const repositories = JsonApi.Group(
+export const repositories = Group.make(
   Repository,
   // GET /repositories/:id?include=owner&fields[repositories]=name,description
-  JsonApi.Endpoint.fetch(Repository, {
+  Endpoint.fetch(Repository, {
     include: true,
     fields: true,
     errors: [RepositoryNotFound]
   }),
   // GET /repositories?sort=-stargazerCount&filter[language]=TypeScript&page[number]=1&page[size]=30
-  JsonApi.Endpoint.list(Repository, {
+  Endpoint.list(Repository, {
     include: true,
     sort: ["stargazerCount", "name", "createdAt"],
-    page: JsonApi.Page.Number,
+    page: Query.Page.Number,
     filter: {
       owner: Schema.optionalKey(Schema.String),
       language: Schema.optionalKey(Schema.String),
@@ -69,36 +69,36 @@ export const repositories = JsonApi.Group(
     meta: PageMeta
   }),
   // POST /repositories → 201
-  JsonApi.Endpoint.create(Repository, {
+  Endpoint.create(Repository, {
     errors: [RepositoryNameTaken]
   }),
   // PATCH /repositories/:id (partial attributes)
-  JsonApi.Endpoint.update(Repository, {
+  Endpoint.update(Repository, {
     errors: [RepositoryNotFound]
   }),
   // DELETE /repositories/:id → 204
-  JsonApi.Endpoint.remove(Repository, {
+  Endpoint.remove(Repository, {
     errors: [RepositoryNotFound]
   }),
   // GET /repositories/:id/owner — the owning user, as a full resource
-  JsonApi.Endpoint.related(Repository, "owner", {
+  Endpoint.related(Repository, "owner", {
     errors: [RepositoryNotFound]
   })
 )
 
-export const issues = JsonApi.Group(
+export const issues = Group.make(
   Issue,
   // GET /issues/:id?include=author,assignee,labels,repository.owner
-  JsonApi.Endpoint.fetch(Issue, {
+  Endpoint.fetch(Issue, {
     include: true,
     fields: true,
     errors: [IssueNotFound]
   }),
   // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt
-  JsonApi.Endpoint.list(Issue, {
+  Endpoint.list(Issue, {
     include: true,
     sort: ["number", "createdAt"],
-    page: JsonApi.Page.Number,
+    page: Query.Page.Number,
     filter: {
       repository: Schema.optionalKey(Schema.String),
       state: Schema.optionalKey(Schema.Literals(["open", "closed"])),
@@ -107,59 +107,59 @@ export const issues = JsonApi.Group(
     meta: PageMeta
   }),
   // POST /issues → 201 (repository and author are required relationships)
-  JsonApi.Endpoint.create(Issue, {
+  Endpoint.create(Issue, {
     errors: [RepositoryNotFound]
   }),
   // PATCH /issues/:id — closing an issue is `attributes: { state: "closed" }`
-  JsonApi.Endpoint.update(Issue, {
+  Endpoint.update(Issue, {
     errors: [IssueNotFound, IssueLocked]
   }),
   // --- Related resource endpoints --------------------------------------------
   // GET /issues/:id/comments?page[number]=1&page[size]=30&include=author —
   // the paginated comment feed the `comments` relationship's related link
   // points at
-  JsonApi.Endpoint.related(Issue, "comments", {
+  Endpoint.related(Issue, "comments", {
     include: true,
-    page: JsonApi.Page.Number,
+    page: Query.Page.Number,
     meta: PageMeta,
     errors: [IssueNotFound]
   }),
   // --- Relationship (linkage) endpoints: issue triage -------------------------
   // GET /issues/:id/relationships/labels — label identifiers
-  JsonApi.Endpoint.fetchRelationship(Issue, "labels", {
+  Endpoint.fetchRelationship(Issue, "labels", {
     errors: [IssueNotFound]
   }),
   // PATCH /issues/:id/relationships/assignee — assign ({ data: identifier })
   // or unassign ({ data: null })
-  JsonApi.Endpoint.updateRelationship(Issue, "assignee", {
+  Endpoint.updateRelationship(Issue, "assignee", {
     errors: [IssueNotFound, IssueLocked, UserNotFound]
   }),
   // PATCH /issues/:id/relationships/labels — replace all labels
-  JsonApi.Endpoint.updateRelationship(Issue, "labels", {
+  Endpoint.updateRelationship(Issue, "labels", {
     errors: [IssueNotFound, IssueLocked]
   }),
   // POST /issues/:id/relationships/labels — add labels
-  JsonApi.Endpoint.addRelationship(Issue, "labels", {
+  Endpoint.addRelationship(Issue, "labels", {
     errors: [IssueNotFound, IssueLocked]
   }),
   // DELETE /issues/:id/relationships/labels → 204 — remove labels
-  JsonApi.Endpoint.removeRelationship(Issue, "labels", {
+  Endpoint.removeRelationship(Issue, "labels", {
     errors: [IssueNotFound, IssueLocked]
   })
 )
 
-export const pulls = JsonApi.Group(
+export const pulls = Group.make(
   PullRequest,
   // GET /pulls/:id?include=author,reviewers,repository
-  JsonApi.Endpoint.fetch(PullRequest, {
+  Endpoint.fetch(PullRequest, {
     include: true,
     errors: [PullRequestNotFound]
   }),
   // GET /pulls?filter[state]=open
-  JsonApi.Endpoint.list(PullRequest, {
+  Endpoint.list(PullRequest, {
     include: true,
     sort: ["number", "createdAt"],
-    page: JsonApi.Page.Number,
+    page: Query.Page.Number,
     filter: {
       repository: Schema.optionalKey(Schema.String),
       state: Schema.optionalKey(Schema.Literals(["open", "closed", "merged"]))
@@ -172,14 +172,14 @@ export const pulls = JsonApi.Group(
  * GitHub-style global search: a heterogeneous collection of repositories,
  * issues and users, discriminated by their `type` tags.
  */
-export const search = JsonApi.Group(
+export const search = Group.make(
   "search",
   // GET /search?filter[q]=hello&include=owner&page[offset]=0&page[limit]=10
-  JsonApi.Endpoint.search([Repository, Issue, User], {
+  Endpoint.search([Repository, Issue, User], {
     filter: { q: Schema.String },
     include: true,
     fields: true,
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta
   })
 )

@@ -68,8 +68,9 @@ reads consistently and is ready for API-doc generation. When you add or change a
 - **Every public export** gets a JSDoc block containing, in order:
   1. A concise description of what it is and when to reach for it.
   2. An `@example` for the principal, user-facing APIs (constructors, combinators, guards). Examples
-     must be self-contained — include the imports — and use the public `JsonApi.*` surface exactly as
-     a consumer would (e.g. `JsonApi.Resource(...)`, `JsonApi.Endpoint.fetch(...)`). Ground examples
+     must be self-contained — include the imports — and use the public per-module surface exactly as
+     a consumer would (e.g. `Resource.make(...)`, `Endpoint.fetch(...)`, importing the namespaces from
+     the package root). Ground examples
      in real, type-checked usage from `examples/` and `test/` rather than inventing.
      [`@effect/docgen`](https://github.com/Effect-TS/docgen) compiles **and runs** every example
      (via `pnpm run docgen`, also in CI), so each one must be a complete program that type-checks and

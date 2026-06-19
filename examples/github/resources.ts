@@ -18,9 +18,8 @@
  *   PullRequest ──reviewers─────────▶ User          `many`
  */
 import { Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-export const User = JsonApi.Resource("users", {
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+export const User = Resource.make("users", {
   attributes: {
     login: Schema.NonEmptyString,
     name: Schema.optionalKey(Schema.String),
@@ -30,7 +29,7 @@ export const User = JsonApi.Resource("users", {
   }
 })
 
-export const Label = JsonApi.Resource("labels", {
+export const Label = Resource.make("labels", {
   attributes: {
     name: Schema.NonEmptyString,
     /** Six-character hex color code, without the leading `#`. */
@@ -39,7 +38,7 @@ export const Label = JsonApi.Resource("labels", {
   }
 })
 
-export const Repository = JsonApi.Resource("repositories", {
+export const Repository = Resource.make("repositories", {
   attributes: {
     name: Schema.NonEmptyString,
     description: Schema.optionalKey(Schema.String),
@@ -50,21 +49,21 @@ export const Repository = JsonApi.Resource("repositories", {
   },
   relationships: {
     // Every repository has an owner: required to-one.
-    owner: JsonApi.Relationship.one(() => User)
+    owner: Relationship.one(() => User)
   }
 })
 
-export const IssueComment = JsonApi.Resource("issueComments", {
+export const IssueComment = Resource.make("issueComments", {
   attributes: {
     body: Schema.NonEmptyString,
     createdAt: Schema.DateFromString
   },
   relationships: {
-    author: JsonApi.Relationship.one(() => User)
+    author: Relationship.one(() => User)
   }
 })
 
-export const Issue = JsonApi.Resource("issues", {
+export const Issue = Resource.make("issues", {
   attributes: {
     number: Schema.Int,
     title: Schema.NonEmptyString,
@@ -76,20 +75,20 @@ export const Issue = JsonApi.Resource("issues", {
   },
   relationships: {
     // An issue is always opened against a repository, by someone.
-    repository: JsonApi.Relationship.one(() => Repository),
-    author: JsonApi.Relationship.one(() => User),
+    repository: Relationship.one(() => Repository),
+    author: Relationship.one(() => User),
     // ... but may be unassigned.
-    assignee: JsonApi.Relationship.optional(() => User),
+    assignee: Relationship.optional(() => User),
     // Labels are few and bounded: inlined identifiers, manageable through
     // the /issues/:id/relationships/labels endpoints.
-    labels: JsonApi.Relationship.many(() => Label),
+    labels: Relationship.many(() => Label),
     // Comments are unbounded: reachable only through the related link
     // (GET /issues/:id/comments), never inlined.
-    comments: JsonApi.Relationship.paginated(() => IssueComment)
+    comments: Relationship.paginated(() => IssueComment)
   }
 })
 
-export const PullRequest = JsonApi.Resource("pulls", {
+export const PullRequest = Resource.make("pulls", {
   attributes: {
     number: Schema.Int,
     title: Schema.NonEmptyString,
@@ -101,9 +100,9 @@ export const PullRequest = JsonApi.Resource("pulls", {
     createdAt: Schema.DateFromString
   },
   relationships: {
-    repository: JsonApi.Relationship.one(() => Repository),
-    author: JsonApi.Relationship.one(() => User),
-    reviewers: JsonApi.Relationship.many(() => User)
+    repository: Relationship.one(() => Repository),
+    author: Relationship.one(() => User),
+    reviewers: Relationship.many(() => User)
   }
 })
 

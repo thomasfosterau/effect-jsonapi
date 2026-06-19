@@ -8,17 +8,15 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { ApiError, Atomic, Middleware } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "../api.js"
 import { OperationFailed } from "../errors.js"
 import { ArticlesLive, OperationsLive, sampleArticle, sampleAuthor, sampleComments, sampleTag } from "../handlers.js"
 import { Article, Comment, Person, Tag } from "../resources.js"
 
-const Atomic = JsonApi.Atomic
-
 const buildClient = HttpApiTest.groups(Api, ["articles", "operations"])
 
-const middleware = JsonApi.Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })
+const middleware = Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
@@ -356,7 +354,7 @@ describe("atomic operations: the wire format", () => {
   it("error documents point at the failing operation", () => {
     const encoded = Schema.encodeUnknownSync(OperationFailed.wire)(
       new OperationFailed({ operation: 1, reason: "article not found" })
-    ) as typeof JsonApi.ApiError.WireDocument.Type
+    ) as typeof ApiError.WireDocument.Type
     expect(encoded.errors[0]?.detail).toBe("Operation at /atomic:operations/1 failed: article not found")
     expect(encoded.errors[0]?.status).toBe("422")
     expect(encoded.errors[0]?.meta).toEqual({ operation: 1, reason: "article not found" })
@@ -370,9 +368,7 @@ describe("atomic operations: the wire format", () => {
   })
 
   it("content negotiation accepts the extension media type only when configured", () => {
-    expect(JsonApi.Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, { extensions: [Atomic.EXTENSION_URI] })).toBe(
-      true
-    )
-    expect(JsonApi.Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false)
+    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, { extensions: [Atomic.EXTENSION_URI] })).toBe(true)
+    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false)
   })
 })

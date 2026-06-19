@@ -14,33 +14,32 @@
  * annotations are the assertions.
  */
 import { Effect, Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-const Person = JsonApi.Resource("people", {
+import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+const Person = Resource.make("people", {
   attributes: { firstName: Schema.NonEmptyString }
 })
 
-const Comment = JsonApi.Resource("comments", {
+const Comment = Resource.make("comments", {
   attributes: { body: Schema.NonEmptyString },
-  relationships: { author: JsonApi.Relationship.one(() => Person) }
+  relationships: { author: Relationship.one(() => Person) }
 })
 
-const Tag = JsonApi.Resource("tags", {
+const Tag = Resource.make("tags", {
   attributes: { name: Schema.String }
 })
 
-const Revision = JsonApi.Resource("revisions", {
+const Revision = Resource.make("revisions", {
   attributes: { editedAt: Schema.String }
 })
 
-const Article = JsonApi.Resource("articles", {
+const Article = Resource.make("articles", {
   attributes: { title: Schema.NonEmptyString },
   relationships: {
-    author: JsonApi.Relationship.one(() => Person),
-    comments: JsonApi.Relationship.many(() => Comment),
-    tags: JsonApi.Relationship.many(() => Tag),
+    author: Relationship.one(() => Person),
+    comments: Relationship.many(() => Comment),
+    tags: Relationship.many(() => Tag),
     // Paginated relationships are excluded from include paths entirely.
-    revisions: JsonApi.Relationship.paginated(() => Revision)
+    revisions: Relationship.paginated(() => Revision)
   }
 })
 
@@ -51,7 +50,7 @@ const assertType = <Expected>(_value: Expected): void => {}
 // IncludePath: legal paths as literals
 // ---------------------------------------------------------------------------
 
-type Paths = JsonApi.IncludePath<typeof Article>
+type Paths = Resource.IncludePath<typeof Article>
 
 // Expect: "author" | "comments" | "tags" | "comments.author"
 const p1: Paths = "author"
@@ -69,20 +68,20 @@ const bad3: Paths = "revisions"
 // ---------------------------------------------------------------------------
 
 // Only "author" requested → included is just Person
-type A = JsonApi.IncludedFor<typeof Article, ["author"]>
+type A = Resource.IncludedFor<typeof Article, ["author"]>
 const a: A = Person
 // @ts-expect-error -- Comment is not included when only "author" is requested
 const aBad: A = Comment
 
 // "comments.author" → Comment | Person (intermediate + leaf)
-type B = JsonApi.IncludedFor<typeof Article, ["comments.author"]>
+type B = Resource.IncludedFor<typeof Article, ["comments.author"]>
 const b1: B = Comment
 const b2: B = Person
 // @ts-expect-error -- Tag not requested
 const bBad: B = Tag
 
 // Multiple paths union
-type C = JsonApi.IncludedFor<typeof Article, ["author", "tags"]>
+type C = Resource.IncludedFor<typeof Article, ["author", "tags"]>
 const c1: C = Person
 const c2: C = Tag
 // @ts-expect-error -- Comment not requested
@@ -96,14 +95,14 @@ const cBad: C = Comment
 type FetchDocument = ReturnType<typeof Article.document>["Type"]
 declare const clientFetch: (request: {
   readonly params: { readonly id: string }
-  readonly query: { readonly include?: ReadonlyArray<JsonApi.IncludePath<typeof Article>> }
+  readonly query: { readonly include?: ReadonlyArray<Resource.IncludePath<typeof Article>> }
 }) => Effect.Effect<FetchDocument>
 
 const program = Effect.gen(function* () {
   // Narrowed to Person only
   const include = ["author"] as const
   const onlyAuthor = yield* clientFetch({ params: { id: "1" }, query: { include } }).pipe(
-    JsonApi.narrowIncluded(Article, include)
+    Client.narrowIncluded(Article, include)
   )
   const person = onlyAuthor.included?.[0]
   if (person !== undefined) {
@@ -115,7 +114,7 @@ const program = Effect.gen(function* () {
   // Dotted path: Comment | Person, discriminated by `type`
   const nested = ["comments.author"] as const
   const withComments = yield* clientFetch({ params: { id: "1" }, query: { include: nested } }).pipe(
-    JsonApi.narrowIncluded(Article, nested)
+    Client.narrowIncluded(Article, nested)
   )
   const item = withComments.included?.[0]
   if (item !== undefined && item.type === "comments") {
@@ -124,13 +123,13 @@ const program = Effect.gen(function* () {
 
   // Nothing requested → included is ReadonlyArray<never>
   const none = [] as const
-  const nothing = yield* clientFetch({ params: { id: "1" }, query: {} }).pipe(JsonApi.narrowIncluded(Article, none))
+  const nothing = yield* clientFetch({ params: { id: "1" }, query: {} }).pipe(Client.narrowIncluded(Article, none))
   type NoneIncluded = NonNullable<typeof nothing.included>[number]
   assertType<NoneIncluded extends never ? true : false>(true)
 
   // Unknown paths are compile errors at the call site
   // @ts-expect-error -- "publisher" is not a relationship path of Article
-  JsonApi.narrowIncluded(Article, ["publisher"])
+  Client.narrowIncluded(Article, ["publisher"])
 })
 
 // ---------------------------------------------------------------------------
@@ -138,7 +137,7 @@ const program = Effect.gen(function* () {
 // ---------------------------------------------------------------------------
 
 declare const someDocument: FetchDocument
-const narrowed = JsonApi.narrowIncluded(Article, ["tags"], someDocument)
+const narrowed = Client.narrowIncluded(Article, ["tags"], someDocument)
 const tag = narrowed.included?.[0]
 if (tag !== undefined) {
   assertType<string>(tag.attributes.name)

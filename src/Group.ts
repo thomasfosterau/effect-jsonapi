@@ -35,32 +35,30 @@ import { HttpApiGroup } from "effect/unstable/httpapi"
  * string, for groups that span several resource types — containing the given
  * endpoints.
  *
- * Re-exported as `JsonApi.Group`.
- *
  * @example
  * ```ts
  * import { Schema } from "effect"
  * import { HttpApi } from "effect/unstable/httpapi"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Endpoint, Group, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString }
  * })
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { name: Schema.NonEmptyString }
  * })
  *
  * // A group named after a resource type
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
- *   JsonApi.Endpoint.fetch(Article, { include: true }),
- *   JsonApi.Endpoint.list(Article, { page: JsonApi.Page.Offset })
+ *   Endpoint.fetch(Article, { include: true }),
+ *   Endpoint.list(Article, { page: Query.Page.Offset })
  * )
  *
  * // A group named after a plain string, for heterogeneous endpoints
- * const search = JsonApi.Group(
+ * const search = Group.make(
  *   "search",
- *   JsonApi.Endpoint.search([Article, Person], { filter: { q: Schema.String } })
+ *   Endpoint.search([Article, Person], { filter: { q: Schema.String } })
  * )
  *
  * const Api = HttpApi.make("blog").add(articles).add(search)

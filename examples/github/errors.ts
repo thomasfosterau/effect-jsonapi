@@ -4,9 +4,8 @@
  * with the declared HTTP status.
  */
 import { Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-export class UserNotFound extends JsonApi.Error<UserNotFound>()("UserNotFound", {
+import { ApiError } from "@thomasfosterau/effect-jsonapi"
+export class UserNotFound extends ApiError.make<UserNotFound>()("UserNotFound", {
   status: 404,
   code: "user_not_found",
   title: "User not found",
@@ -14,7 +13,7 @@ export class UserNotFound extends JsonApi.Error<UserNotFound>()("UserNotFound", 
   detail: (e) => `User ${e.id} not found`
 }) {}
 
-export class RepositoryNotFound extends JsonApi.Error<RepositoryNotFound>()("RepositoryNotFound", {
+export class RepositoryNotFound extends ApiError.make<RepositoryNotFound>()("RepositoryNotFound", {
   status: 404,
   code: "repository_not_found",
   title: "Repository not found",
@@ -22,7 +21,7 @@ export class RepositoryNotFound extends JsonApi.Error<RepositoryNotFound>()("Rep
   detail: (e) => `Repository ${e.id} not found`
 }) {}
 
-export class IssueNotFound extends JsonApi.Error<IssueNotFound>()("IssueNotFound", {
+export class IssueNotFound extends ApiError.make<IssueNotFound>()("IssueNotFound", {
   status: 404,
   code: "issue_not_found",
   title: "Issue not found",
@@ -30,7 +29,7 @@ export class IssueNotFound extends JsonApi.Error<IssueNotFound>()("IssueNotFound
   detail: (e) => `Issue ${e.id} not found`
 }) {}
 
-export class PullRequestNotFound extends JsonApi.Error<PullRequestNotFound>()("PullRequestNotFound", {
+export class PullRequestNotFound extends ApiError.make<PullRequestNotFound>()("PullRequestNotFound", {
   status: 404,
   code: "pull_request_not_found",
   title: "Pull request not found",
@@ -38,7 +37,7 @@ export class PullRequestNotFound extends JsonApi.Error<PullRequestNotFound>()("P
   detail: (e) => `Pull request ${e.id} not found`
 }) {}
 
-export class RepositoryNameTaken extends JsonApi.Error<RepositoryNameTaken>()("RepositoryNameTaken", {
+export class RepositoryNameTaken extends ApiError.make<RepositoryNameTaken>()("RepositoryNameTaken", {
   status: 422,
   code: "name_taken",
   title: "Repository name already taken",
@@ -46,7 +45,7 @@ export class RepositoryNameTaken extends JsonApi.Error<RepositoryNameTaken>()("R
   detail: (e) => `A repository named "${e.name}" already exists for this owner`
 }) {}
 
-export class IssueLocked extends JsonApi.Error<IssueLocked>()("IssueLocked", {
+export class IssueLocked extends ApiError.make<IssueLocked>()("IssueLocked", {
   status: 403,
   code: "issue_locked",
   title: "Issue is locked",

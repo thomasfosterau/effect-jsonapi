@@ -3,7 +3,7 @@ import { Match, Schema } from "effect"
 import * as Atomic from "./Atomic.js"
 import * as Middleware from "./Middleware.js"
 import * as Relationship from "./Relationship.js"
-import { Ref, Resource } from "./Resource.js"
+import { make as Resource, Ref } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures — one relationship of every kind

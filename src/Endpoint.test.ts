@@ -8,7 +8,7 @@ import * as Handlers from "./Handlers.js"
 import * as Middleware from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
-import { Resource } from "./Resource.js"
+import { make as Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures

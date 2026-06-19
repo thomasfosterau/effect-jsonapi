@@ -21,7 +21,7 @@
  */
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi"
 import {
   CategoryNotFound,
   CustomerNotFound,
@@ -42,30 +42,30 @@ export const PageMeta = Schema.Struct({
   total: Schema.Int
 })
 
-export const categories = JsonApi.Group(
+export const categories = Group.make(
   Category,
   // GET /categories/:id
-  JsonApi.Endpoint.fetch(Category, {
+  Endpoint.fetch(Category, {
     errors: [CategoryNotFound]
   }),
   // GET /categories?sort=name&page[offset]=0&page[limit]=10
-  JsonApi.Endpoint.list(Category, {
+  Endpoint.list(Category, {
     sort: ["name"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta
   })
 )
 
-export const suppliers = JsonApi.Group(
+export const suppliers = Group.make(
   Supplier,
   // GET /suppliers/:id
-  JsonApi.Endpoint.fetch(Supplier, {
+  Endpoint.fetch(Supplier, {
     errors: [SupplierNotFound]
   }),
   // GET /suppliers?filter[country]=UK&sort=companyName
-  JsonApi.Endpoint.list(Supplier, {
+  Endpoint.list(Supplier, {
     sort: ["companyName", "country"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: {
       country: Schema.optionalKey(Schema.String)
     },
@@ -73,30 +73,30 @@ export const suppliers = JsonApi.Group(
   })
 )
 
-export const shippers = JsonApi.Group(
+export const shippers = Group.make(
   Shipper,
   // GET /shippers/:id
-  JsonApi.Endpoint.fetch(Shipper, {
+  Endpoint.fetch(Shipper, {
     errors: [ShipperNotFound]
   }),
   // GET /shippers
-  JsonApi.Endpoint.list(Shipper, {
+  Endpoint.list(Shipper, {
     sort: ["companyName"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta
   })
 )
 
-export const territories = JsonApi.Group(
+export const territories = Group.make(
   Territory,
   // GET /territories/:id
-  JsonApi.Endpoint.fetch(Territory, {
+  Endpoint.fetch(Territory, {
     errors: [TerritoryNotFound]
   }),
   // GET /territories?filter[region]=Eastern
-  JsonApi.Endpoint.list(Territory, {
+  Endpoint.list(Territory, {
     sort: ["description", "region"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: {
       region: Schema.optionalKey(Schema.String)
     },
@@ -104,16 +104,16 @@ export const territories = JsonApi.Group(
   })
 )
 
-export const customers = JsonApi.Group(
+export const customers = Group.make(
   Customer,
   // GET /customers/:id
-  JsonApi.Endpoint.fetch(Customer, {
+  Endpoint.fetch(Customer, {
     errors: [CustomerNotFound]
   }),
   // GET /customers?filter[country]=Germany&sort=companyName
-  JsonApi.Endpoint.list(Customer, {
+  Endpoint.list(Customer, {
     sort: ["companyName", "country"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: {
       country: Schema.optionalKey(Schema.String)
     },
@@ -121,10 +121,10 @@ export const customers = JsonApi.Group(
   })
 )
 
-export const products = JsonApi.Group(
+export const products = Group.make(
   Product,
   // GET /products/:id?include=category,supplier&fields[products]=name,unitPrice
-  JsonApi.Endpoint.fetch(Product, {
+  Endpoint.fetch(Product, {
     include: true,
     fields: true,
     errors: [ProductNotFound]
@@ -133,10 +133,10 @@ export const products = JsonApi.Group(
   // Numeric filters decode from the query string into `number`s; this list
   // endpoint also serves the reverse "products in a category / from a supplier"
   // lookups via filter[category] / filter[supplier].
-  JsonApi.Endpoint.list(Product, {
+  Endpoint.list(Product, {
     include: true,
     sort: ["name", "unitPrice", "unitsInStock"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: {
       category: Schema.optionalKey(Schema.String),
       supplier: Schema.optionalKey(Schema.String),
@@ -147,43 +147,43 @@ export const products = JsonApi.Group(
     meta: PageMeta
   }),
   // POST /products → 201 (category and supplier are required relationships)
-  JsonApi.Endpoint.create(Product, {
+  Endpoint.create(Product, {
     errors: [ProductNameTaken, CategoryNotFound, SupplierNotFound]
   }),
   // PATCH /products/:id (partial attributes — e.g. mark discontinued)
-  JsonApi.Endpoint.update(Product, {
+  Endpoint.update(Product, {
     errors: [ProductNotFound]
   }),
   // DELETE /products/:id → 204
-  JsonApi.Endpoint.remove(Product, {
+  Endpoint.remove(Product, {
     errors: [ProductNotFound]
   }),
   // GET /products/:id/supplier — the supplying company, as a full resource
-  JsonApi.Endpoint.related(Product, "supplier", {
+  Endpoint.related(Product, "supplier", {
     errors: [ProductNotFound]
   }),
   // PATCH /products/:id/relationships/category — reassign the category
-  JsonApi.Endpoint.updateRelationship(Product, "category", {
+  Endpoint.updateRelationship(Product, "category", {
     errors: [ProductNotFound, CategoryNotFound]
   }),
   // PATCH /products/:id/relationships/supplier — reassign the supplier
-  JsonApi.Endpoint.updateRelationship(Product, "supplier", {
+  Endpoint.updateRelationship(Product, "supplier", {
     errors: [ProductNotFound, SupplierNotFound]
   })
 )
 
-export const employees = JsonApi.Group(
+export const employees = Group.make(
   Employee,
   // GET /employees/:id?include=territories
-  JsonApi.Endpoint.fetch(Employee, {
+  Endpoint.fetch(Employee, {
     include: true,
     errors: [EmployeeNotFound]
   }),
   // GET /employees?filter[manager]=2 — an employee's direct reports
-  JsonApi.Endpoint.list(Employee, {
+  Endpoint.list(Employee, {
     include: true,
     sort: ["lastName", "hireDate"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: {
       manager: Schema.optionalKey(Schema.String)
     },
@@ -191,36 +191,36 @@ export const employees = JsonApi.Group(
   }),
   // --- Relationship (linkage) endpoints: territory assignment -----------------
   // GET /employees/:id/relationships/territories — territory identifiers
-  JsonApi.Endpoint.fetchRelationship(Employee, "territories", {
+  Endpoint.fetchRelationship(Employee, "territories", {
     errors: [EmployeeNotFound]
   }),
   // PATCH /employees/:id/relationships/territories — replace the full set
-  JsonApi.Endpoint.updateRelationship(Employee, "territories", {
+  Endpoint.updateRelationship(Employee, "territories", {
     errors: [EmployeeNotFound, TerritoryNotFound]
   }),
   // POST /employees/:id/relationships/territories — assign territories
-  JsonApi.Endpoint.addRelationship(Employee, "territories", {
+  Endpoint.addRelationship(Employee, "territories", {
     errors: [EmployeeNotFound, TerritoryNotFound]
   }),
   // DELETE /employees/:id/relationships/territories → 204 — unassign territories
-  JsonApi.Endpoint.removeRelationship(Employee, "territories", {
+  Endpoint.removeRelationship(Employee, "territories", {
     errors: [EmployeeNotFound]
   })
 )
 
-export const orders = JsonApi.Group(
+export const orders = Group.make(
   Order,
   // GET /orders/:id?include=customer,employee,shipper
-  JsonApi.Endpoint.fetch(Order, {
+  Endpoint.fetch(Order, {
     include: true,
     fields: true,
     errors: [OrderNotFound]
   }),
   // GET /orders?filter[customer]=1&filter[shipped]=false&sort=-orderDate
-  JsonApi.Endpoint.list(Order, {
+  Endpoint.list(Order, {
     include: true,
     sort: ["orderDate", "requiredDate", "freight"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: {
       customer: Schema.optionalKey(Schema.String),
       employee: Schema.optionalKey(Schema.String),
@@ -230,31 +230,31 @@ export const orders = JsonApi.Group(
     meta: PageMeta
   }),
   // POST /orders → 201 (customer and employee are required relationships)
-  JsonApi.Endpoint.create(Order, {
+  Endpoint.create(Order, {
     errors: [CustomerNotFound, EmployeeNotFound]
   }),
   // PATCH /orders/:id — record the shipped date, adjust freight, etc.
-  JsonApi.Endpoint.update(Order, {
+  Endpoint.update(Order, {
     errors: [OrderNotFound]
   }),
   // --- Related resource endpoint ----------------------------------------------
   // GET /orders/:id/lineItems?page[offset]=0&page[limit]=10&include=product —
   // the paginated line-item feed the `lineItems` relationship's related link
   // points at, with the line item's product brought in as a compound document
-  JsonApi.Endpoint.related(Order, "lineItems", {
+  Endpoint.related(Order, "lineItems", {
     include: true,
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta,
     errors: [OrderNotFound]
   }),
   // --- Relationship (linkage) endpoint ----------------------------------------
   // GET /orders/:id/relationships/shipper — the shipper identifier (or null)
-  JsonApi.Endpoint.fetchRelationship(Order, "shipper", {
+  Endpoint.fetchRelationship(Order, "shipper", {
     errors: [OrderNotFound]
   }),
   // PATCH /orders/:id/relationships/shipper — assign ({ data: identifier }) or
   // clear ({ data: null }) the shipper
-  JsonApi.Endpoint.updateRelationship(Order, "shipper", {
+  Endpoint.updateRelationship(Order, "shipper", {
     errors: [OrderNotFound, ShipperNotFound]
   })
 )
@@ -263,14 +263,14 @@ export const orders = JsonApi.Group(
  * Global catalog search: a heterogeneous collection of products, customers and
  * suppliers, discriminated by their `type` tags.
  */
-export const search = JsonApi.Group(
+export const search = Group.make(
   "search",
   // GET /search?filter[q]=chai&include=category&page[offset]=0&page[limit]=10
-  JsonApi.Endpoint.search([Product, Customer, Supplier], {
+  Endpoint.search([Product, Customer, Supplier], {
     filter: { q: Schema.String },
     include: true,
     fields: true,
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta
   })
 )

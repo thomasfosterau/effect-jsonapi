@@ -4,9 +4,8 @@
  * with the declared HTTP status.
  */
 import { Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-export class CategoryNotFound extends JsonApi.Error<CategoryNotFound>()("CategoryNotFound", {
+import { ApiError } from "@thomasfosterau/effect-jsonapi"
+export class CategoryNotFound extends ApiError.make<CategoryNotFound>()("CategoryNotFound", {
   status: 404,
   code: "category_not_found",
   title: "Category not found",
@@ -14,7 +13,7 @@ export class CategoryNotFound extends JsonApi.Error<CategoryNotFound>()("Categor
   detail: (e) => `Category ${e.id} not found`
 }) {}
 
-export class SupplierNotFound extends JsonApi.Error<SupplierNotFound>()("SupplierNotFound", {
+export class SupplierNotFound extends ApiError.make<SupplierNotFound>()("SupplierNotFound", {
   status: 404,
   code: "supplier_not_found",
   title: "Supplier not found",
@@ -22,7 +21,7 @@ export class SupplierNotFound extends JsonApi.Error<SupplierNotFound>()("Supplie
   detail: (e) => `Supplier ${e.id} not found`
 }) {}
 
-export class ShipperNotFound extends JsonApi.Error<ShipperNotFound>()("ShipperNotFound", {
+export class ShipperNotFound extends ApiError.make<ShipperNotFound>()("ShipperNotFound", {
   status: 404,
   code: "shipper_not_found",
   title: "Shipper not found",
@@ -30,7 +29,7 @@ export class ShipperNotFound extends JsonApi.Error<ShipperNotFound>()("ShipperNo
   detail: (e) => `Shipper ${e.id} not found`
 }) {}
 
-export class CustomerNotFound extends JsonApi.Error<CustomerNotFound>()("CustomerNotFound", {
+export class CustomerNotFound extends ApiError.make<CustomerNotFound>()("CustomerNotFound", {
   status: 404,
   code: "customer_not_found",
   title: "Customer not found",
@@ -38,7 +37,7 @@ export class CustomerNotFound extends JsonApi.Error<CustomerNotFound>()("Custome
   detail: (e) => `Customer ${e.id} not found`
 }) {}
 
-export class EmployeeNotFound extends JsonApi.Error<EmployeeNotFound>()("EmployeeNotFound", {
+export class EmployeeNotFound extends ApiError.make<EmployeeNotFound>()("EmployeeNotFound", {
   status: 404,
   code: "employee_not_found",
   title: "Employee not found",
@@ -46,7 +45,7 @@ export class EmployeeNotFound extends JsonApi.Error<EmployeeNotFound>()("Employe
   detail: (e) => `Employee ${e.id} not found`
 }) {}
 
-export class TerritoryNotFound extends JsonApi.Error<TerritoryNotFound>()("TerritoryNotFound", {
+export class TerritoryNotFound extends ApiError.make<TerritoryNotFound>()("TerritoryNotFound", {
   status: 404,
   code: "territory_not_found",
   title: "Territory not found",
@@ -54,7 +53,7 @@ export class TerritoryNotFound extends JsonApi.Error<TerritoryNotFound>()("Terri
   detail: (e) => `Territory ${e.id} not found`
 }) {}
 
-export class ProductNotFound extends JsonApi.Error<ProductNotFound>()("ProductNotFound", {
+export class ProductNotFound extends ApiError.make<ProductNotFound>()("ProductNotFound", {
   status: 404,
   code: "product_not_found",
   title: "Product not found",
@@ -62,7 +61,7 @@ export class ProductNotFound extends JsonApi.Error<ProductNotFound>()("ProductNo
   detail: (e) => `Product ${e.id} not found`
 }) {}
 
-export class OrderNotFound extends JsonApi.Error<OrderNotFound>()("OrderNotFound", {
+export class OrderNotFound extends ApiError.make<OrderNotFound>()("OrderNotFound", {
   status: 404,
   code: "order_not_found",
   title: "Order not found",
@@ -70,7 +69,7 @@ export class OrderNotFound extends JsonApi.Error<OrderNotFound>()("OrderNotFound
   detail: (e) => `Order ${e.id} not found`
 }) {}
 
-export class ProductNameTaken extends JsonApi.Error<ProductNameTaken>()("ProductNameTaken", {
+export class ProductNameTaken extends ApiError.make<ProductNameTaken>()("ProductNameTaken", {
   status: 409,
   code: "product_name_taken",
   title: "Product name already taken",

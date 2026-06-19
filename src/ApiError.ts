@@ -189,14 +189,12 @@ const makeWire = (
  * Declares a JSON:API error in one shot: a tagged error class whose wire
  * encoding is a spec-compliant JSON:API error document.
  *
- * Re-exported as `JsonApi.Error`.
- *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   code: "not_found",
  *   title: "Resource not found",

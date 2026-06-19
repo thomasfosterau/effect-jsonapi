@@ -9,13 +9,13 @@
  *   - `payload.data.attributes` is the typed create/update payload
  *   - relationship endpoints receive typed linkage payloads
  *
- * and return document values (`JsonApi.data` / `JsonApi.collection` /
- * `JsonApi.linkage`), which are validated against the endpoint's document
+ * and return document values (`Handlers.data` / `Handlers.collection` /
+ * `Handlers.linkage`), which are validated against the endpoint's document
  * schema on the way out.
  */
 import { Effect, Layer } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Handlers, Middleware } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "./api.js"
 import {
   CategoryNotFound,
@@ -199,7 +199,7 @@ export const gumbo: Product = Product.make({
 
 // The relationship object of an order's paginated line-item feed: links only,
 // no inline data.
-const orderLineItems = (orderId: string) => JsonApi.paginatedRelationship("orders", orderId, "lineItems")
+const orderLineItems = (orderId: string) => Handlers.paginatedRelationship("orders", orderId, "lineItems")
 
 export const order10248: Order = Order.make({
   id: Order.Id.make("10248"),
@@ -437,16 +437,16 @@ export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers)
   handlers
     .handle("fetch", ({ params }) =>
       loadCategory(params.id).pipe(
-        Effect.map((category) => JsonApi.data(category, { self: `/categories/${category.id}` }))
+        Effect.map((category) => Handlers.data(category, { self: `/categories/${category.id}` }))
       )
     )
     .handle("list", ({ query }) => {
       const categories = sortBy([...store.categories.values()], query.sort)
       const { limit, offset, page, total } = paginate(categories, query.page)
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/categories", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/categories", { offset, limit }, total)
         })
       )
     })
@@ -456,7 +456,7 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
   handlers
     .handle("fetch", ({ params }) =>
       loadSupplier(params.id).pipe(
-        Effect.map((supplier) => JsonApi.data(supplier, { self: `/suppliers/${supplier.id}` }))
+        Effect.map((supplier) => Handlers.data(supplier, { self: `/suppliers/${supplier.id}` }))
       )
     )
     .handle("list", ({ query }) => {
@@ -468,9 +468,9 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
       sortBy(suppliers, query.sort)
       const { limit, offset, page, total } = paginate(suppliers, query.page)
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/suppliers", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/suppliers", { offset, limit }, total)
         })
       )
     })
@@ -479,15 +479,15 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
 export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
   handlers
     .handle("fetch", ({ params }) =>
-      loadShipper(params.id).pipe(Effect.map((shipper) => JsonApi.data(shipper, { self: `/shippers/${shipper.id}` })))
+      loadShipper(params.id).pipe(Effect.map((shipper) => Handlers.data(shipper, { self: `/shippers/${shipper.id}` })))
     )
     .handle("list", ({ query }) => {
       const shippers = sortBy([...store.shippers.values()], query.sort)
       const { limit, offset, page, total } = paginate(shippers, query.page)
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/shippers", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/shippers", { offset, limit }, total)
         })
       )
     })
@@ -497,7 +497,7 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
   handlers
     .handle("fetch", ({ params }) =>
       loadTerritory(params.id).pipe(
-        Effect.map((territory) => JsonApi.data(territory, { self: `/territories/${territory.id}` }))
+        Effect.map((territory) => Handlers.data(territory, { self: `/territories/${territory.id}` }))
       )
     )
     .handle("list", ({ query }) => {
@@ -509,9 +509,9 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
       sortBy(territories, query.sort)
       const { limit, offset, page, total } = paginate(territories, query.page)
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/territories", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/territories", { offset, limit }, total)
         })
       )
     })
@@ -521,7 +521,7 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
   handlers
     .handle("fetch", ({ params }) =>
       loadCustomer(params.id).pipe(
-        Effect.map((customer) => JsonApi.data(customer, { self: `/customers/${customer.id}` }))
+        Effect.map((customer) => Handlers.data(customer, { self: `/customers/${customer.id}` }))
       )
     )
     .handle("list", ({ query }) => {
@@ -533,9 +533,9 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
       sortBy(customers, query.sort)
       const { limit, offset, page, total } = paginate(customers, query.page)
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/customers", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/customers", { offset, limit }, total)
         })
       )
     })
@@ -550,7 +550,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("fetch", ({ params, query }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) =>
-          JsonApi.data(product, {
+          Handlers.data(product, {
             included: resolveProductIncluded(product, query.include),
             self: `/products/${product.id}`
           })
@@ -589,10 +589,10 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       const { limit, offset, page, total } = paginate(products, query.page)
 
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           included: page.flatMap((product) => resolveProductIncluded(product, query.include)),
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/products", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total)
         })
       )
     })
@@ -612,7 +612,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
           relationships: payload.data.relationships
         })
         store.products.set(product.id, product)
-        return JsonApi.data(product, { self: `/products/${product.id}` })
+        return Handlers.data(product, { self: `/products/${product.id}` })
       })
     )
     .handle("update", ({ params, payload }) =>
@@ -627,7 +627,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
             }
           })
           store.products.set(updated.id, updated)
-          return JsonApi.data(updated, { self: `/products/${updated.id}` })
+          return Handlers.data(updated, { self: `/products/${updated.id}` })
         })
       )
     )
@@ -643,7 +643,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       loadProduct(params.id).pipe(
         Effect.map((product) => {
           const supplier = store.suppliers.get(product.relationships!.supplier.data.id) ?? null
-          return JsonApi.data(supplier, { self: JsonApi.relatedLink("products", product.id, "supplier") })
+          return Handlers.data(supplier, { self: Handlers.relatedLink("products", product.id, "supplier") })
         })
       )
     )
@@ -658,8 +658,8 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
                 relationships: { ...product.relationships!, category: { data: payload.data } }
               })
               store.products.set(updated.id, updated)
-              return JsonApi.linkage(payload.data, {
-                self: JsonApi.relationshipLink("products", product.id, "category")
+              return Handlers.linkage(payload.data, {
+                self: Handlers.relationshipLink("products", product.id, "category")
               })
             })
           )
@@ -677,8 +677,8 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
                 relationships: { ...product.relationships!, supplier: { data: payload.data } }
               })
               store.products.set(updated.id, updated)
-              return JsonApi.linkage(payload.data, {
-                self: JsonApi.relationshipLink("products", product.id, "supplier")
+              return Handlers.linkage(payload.data, {
+                self: Handlers.relationshipLink("products", product.id, "supplier")
               })
             })
           )
@@ -696,7 +696,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
     .handle("fetch", ({ params, query }) =>
       loadEmployee(params.id).pipe(
         Effect.map((employee) =>
-          JsonApi.data(employee, {
+          Handlers.data(employee, {
             included: resolveEmployeeIncluded(employee, query.include),
             self: `/employees/${employee.id}`
           })
@@ -713,10 +713,10 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       sortBy(employees, query.sort)
       const { limit, offset, page, total } = paginate(employees, query.page)
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           included: page.flatMap((employee) => resolveEmployeeIncluded(employee, query.include)),
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/employees", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total)
         })
       )
     })
@@ -724,9 +724,9 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
     .handle("territoriesRelationship", ({ params }) =>
       loadEmployee(params.id).pipe(
         Effect.map((employee) =>
-          JsonApi.linkage(employee.relationships?.territories.data ?? [], {
-            self: JsonApi.relationshipLink("employees", employee.id, "territories"),
-            related: JsonApi.relatedLink("employees", employee.id, "territories")
+          Handlers.linkage(employee.relationships?.territories.data ?? [], {
+            self: Handlers.relationshipLink("employees", employee.id, "territories"),
+            related: Handlers.relatedLink("employees", employee.id, "territories")
           })
         )
       )
@@ -743,8 +743,8 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
                 relationships: { ...employee.relationships!, territories: { data: payload.data } }
               })
               store.employees.set(updated.id, updated)
-              return JsonApi.linkage(payload.data, {
-                self: JsonApi.relationshipLink("employees", employee.id, "territories")
+              return Handlers.linkage(payload.data, {
+                self: Handlers.relationshipLink("employees", employee.id, "territories")
               })
             })
           )
@@ -765,8 +765,8 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
                 relationships: { ...employee.relationships!, territories: { data: added } }
               })
               store.employees.set(updated.id, updated)
-              return JsonApi.linkage(added, {
-                self: JsonApi.relationshipLink("employees", employee.id, "territories")
+              return Handlers.linkage(added, {
+                self: Handlers.relationshipLink("employees", employee.id, "territories")
               })
             })
           )
@@ -805,7 +805,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
     .handle("fetch", ({ params, query }) =>
       loadOrder(params.id).pipe(
         Effect.map((order) =>
-          JsonApi.data(order, {
+          Handlers.data(order, {
             included: resolveOrderIncluded(order, query.include),
             self: `/orders/${order.id}`
           })
@@ -840,10 +840,10 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
       const { limit, offset, page, total } = paginate(orders, query.page)
 
       return Effect.succeed(
-        JsonApi.collection(page, {
+        Handlers.collection(page, {
           included: page.flatMap((order) => resolveOrderIncluded(order, query.include)),
           meta: { total },
-          links: JsonApi.offsetPaginationLinks("/orders", { offset, limit }, total)
+          links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total)
         })
       )
     })
@@ -868,7 +868,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         })
         store.orders.set(order.id, order)
         store.itemsByOrder.set(order.id, [])
-        return JsonApi.data(order, { self: `/orders/${order.id}` })
+        return Handlers.data(order, { self: `/orders/${order.id}` })
       })
     )
     .handle("update", ({ params, payload }) =>
@@ -886,7 +886,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
             }
           })
           store.orders.set(updated.id, updated)
-          return JsonApi.data(updated, { self: `/orders/${updated.id}` })
+          return Handlers.data(updated, { self: `/orders/${updated.id}` })
         })
       )
     )
@@ -896,11 +896,11 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         Effect.map((order) => {
           const all = itemsFor(order.id)
           const { limit, offset, page, total } = paginate(all, query.page)
-          const path = JsonApi.relatedLink("orders", order.id, "lineItems")
-          return JsonApi.collection(page, {
+          const path = Handlers.relatedLink("orders", order.id, "lineItems")
+          return Handlers.collection(page, {
             included: page.flatMap((item) => resolveOrderItemIncluded(item, query.include)),
             meta: { total },
-            links: JsonApi.offsetPaginationLinks(path, { offset, limit }, total)
+            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total)
           })
         })
       )
@@ -909,9 +909,9 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
     .handle("shipperRelationship", ({ params }) =>
       loadOrder(params.id).pipe(
         Effect.map((order) =>
-          JsonApi.linkage(order.relationships!.shipper.data, {
-            self: JsonApi.relationshipLink("orders", order.id, "shipper"),
-            related: JsonApi.relatedLink("orders", order.id, "shipper")
+          Handlers.linkage(order.relationships!.shipper.data, {
+            self: Handlers.relationshipLink("orders", order.id, "shipper"),
+            related: Handlers.relatedLink("orders", order.id, "shipper")
           })
         )
       )
@@ -928,8 +928,8 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
                 relationships: { ...order.relationships!, shipper: { data: payload.data } }
               })
               store.orders.set(updated.id, updated)
-              return JsonApi.linkage(payload.data, {
-                self: JsonApi.relationshipLink("orders", order.id, "shipper")
+              return Handlers.linkage(payload.data, {
+                self: Handlers.relationshipLink("orders", order.id, "shipper")
               })
             })
           )
@@ -959,12 +959,12 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     const { limit, offset, page, total } = paginate(results, query.page)
 
     return Effect.succeed(
-      JsonApi.collection(page, {
+      Handlers.collection(page, {
         included: page.flatMap((result) =>
           result.type === "products" ? resolveProductIncluded(result, query.include) : []
         ),
         meta: { total },
-        links: JsonApi.offsetPaginationLinks("/search", { offset, limit }, total)
+        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total)
       })
     )
   })
@@ -987,4 +987,4 @@ export const NorthwindLive = Layer.mergeAll(
   EmployeesLive,
   OrdersLive,
   SearchLive
-).pipe(Layer.provideMerge(JsonApi.Middleware.layer))
+).pipe(Layer.provideMerge(Middleware.layer))

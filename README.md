@@ -32,7 +32,7 @@ is a property of the construction, not of developer discipline:
 ```ts
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 ```
 
 > **Status**: built against `effect@>=4.0.0-beta.84` (the v4 beta). The
@@ -64,26 +64,25 @@ expanded in the sections below.
 ```ts
 import { Effect, Layer, Schema } from "effect"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
+import { ApiError, Endpoint, Group, Handlers, Middleware, Query, Resource } from "@thomasfosterau/effect-jsonapi"
 // 1. Define a resource once — identifiers, payloads, documents and query
 //    parameters are all derived from this single definition.
-const Article = JsonApi.Resource("articles", {
+const Article = Resource.make("articles", {
   attributes: { title: Schema.NonEmptyString, body: Schema.String }
 })
 
 // 2. Declare an error once — its wire encoding *is* a JSON:API error document.
-class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
   status: 404,
   fields: { id: Schema.String },
   detail: (e) => `Article ${e.id} not found`
 }) {}
 
 // 3. Build endpoints with the JSON:API conventions baked in.
-const articles = JsonApi.Group(
+const articles = Group.make(
   Article,
-  JsonApi.Endpoint.fetch(Article, { include: true, errors: [ArticleNotFound] }),
-  JsonApi.Endpoint.list(Article, { page: JsonApi.Page.Offset })
+  Endpoint.fetch(Article, { include: true, errors: [ArticleNotFound] }),
+  Endpoint.list(Article, { page: Query.Page.Offset })
 )
 
 const Api = HttpApi.make("blog").add(articles)
@@ -93,47 +92,47 @@ const Api = HttpApi.make("blog").add(articles)
 //    own data access returning `Effect`s.)
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => JsonApi.data(article))))
-    .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => JsonApi.collection(items))))
+    .handle("fetch", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))))
+    .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => Handlers.collection(items))))
 )
 
 // 5. Wire it up — the api won't build unless the JSON:API middleware is
 //    provided, so spec compliance can't be forgotten.
-const ApiLive = HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive), Layer.provide(JsonApi.Middleware.layer))
+const ApiLive = HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive), Layer.provide(Middleware.layer))
 ```
 
 ## 1. Resources — the single source of truth
 
 ```ts
-const Person = JsonApi.Resource("people", {
+const Person = Resource.make("people", {
   attributes: {
     firstName: Schema.NonEmptyString,
     lastName: Schema.NonEmptyString
   }
 })
 
-const Tag = JsonApi.Resource("tags", {
+const Tag = Resource.make("tags", {
   attributes: { name: Schema.NonEmptyString }
 })
 
-const Comment = JsonApi.Resource("comments", {
+const Comment = Resource.make("comments", {
   attributes: { body: Schema.NonEmptyString },
   relationships: {
-    author: JsonApi.Relationship.one(() => Person) // a reference, not a string — typos don't compile
+    author: Relationship.one(() => Person) // a reference, not a string — typos don't compile
   }
 })
 
-const Article = JsonApi.Resource("articles", {
+const Article = Resource.make("articles", {
   attributes: {
     title: Schema.NonEmptyString,
     body: Schema.String,
     createdAt: Schema.DateFromString // ISO string on the wire, Date in your code
   },
   relationships: {
-    author: JsonApi.Relationship.one(() => Person), // required to-one
-    editor: JsonApi.Relationship.optional(() => Person), // nullable to-one
-    tags: JsonApi.Relationship.many(() => Tag), // bounded to-many, inlined
-    comments: JsonApi.Relationship.paginated(() => Comment) // unbounded to-many, linked
+    author: Relationship.one(() => Person), // required to-one
+    editor: Relationship.optional(() => Person), // nullable to-one
+    tags: Relationship.many(() => Tag), // bounded to-many, inlined
+    comments: Relationship.paginated(() => Comment) // unbounded to-many, linked
   }
 })
 ```
@@ -181,7 +180,7 @@ Documents are not limited to one resource type — see
 ## 2. Errors — declared once, spec-compliant forever
 
 ```ts
-class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
   status: 404,
   code: "not_found",
   title: "Resource not found",
@@ -211,41 +210,41 @@ One declaration gives you all of:
 
 - the **HTTP status** and OpenAPI documentation for free.
 
-`JsonApi.BadRequest` (400), `JsonApi.NotAcceptable` (406), `JsonApi.UnsupportedMediaType` (415),
-`JsonApi.Forbidden` (403) and `JsonApi.Conflict` (409) are predefined.
+`ApiError.BadRequest` (400), `ApiError.NotAcceptable` (406), `ApiError.UnsupportedMediaType` (415),
+`ApiError.Forbidden` (403) and `ApiError.Conflict` (409) are predefined.
 
 ## 3. Endpoints & groups — conventions baked in
 
 ```ts
-const articles = JsonApi.Group(
+const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
-  JsonApi.Endpoint.fetch(Article, {
+  Endpoint.fetch(Article, {
     include: true,
     fields: true,
     errors: [ArticleNotFound]
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
-  JsonApi.Endpoint.list(Article, {
+  Endpoint.list(Article, {
     include: true,
     sort: ["createdAt", "title"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: { author: Schema.optionalKey(Schema.String) },
     meta: Schema.Struct({ total: Schema.Int })
   }),
   // POST /articles → 201 (client may send a lid; the required author relationship must be present)
-  JsonApi.Endpoint.create(Article, { errors: [TitleTaken] }),
+  Endpoint.create(Article, { errors: [TitleTaken] }),
   // PATCH /articles/:id (partial attributes)
-  JsonApi.Endpoint.update(Article, { errors: [ArticleNotFound] }),
+  Endpoint.update(Article, { errors: [ArticleNotFound] }),
   // DELETE /articles/:id → 204
-  JsonApi.Endpoint.remove(Article, { errors: [ArticleNotFound] }),
+  Endpoint.remove(Article, { errors: [ArticleNotFound] }),
   // GET /articles/:id/comments — the paginated related collection
-  JsonApi.Endpoint.related(Article, "comments", {
-    page: JsonApi.Page.Offset,
+  Endpoint.related(Article, "comments", {
+    page: Query.Page.Offset,
     errors: [ArticleNotFound]
   }),
   // PATCH /articles/:id/relationships/author — replace the author
-  JsonApi.Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
+  Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
 )
 
 const Api = HttpApi.make("blog").add(articles)
@@ -267,35 +266,35 @@ Payload and success schemas follow the relationship's kind:
 
 ```ts
 // `author` is Relationship.one(() => Person):
-JsonApi.Endpoint.updateRelationship(Article, "author")
+Endpoint.updateRelationship(Article, "author")
 // PATCH payload: { data: PersonIdentifier }          — null doesn't decode (required relationship)
 
 // `editor` is Relationship.optional(() => Person):
-JsonApi.Endpoint.updateRelationship(Article, "editor")
+Endpoint.updateRelationship(Article, "editor")
 // PATCH payload: { data: PersonIdentifier | null }   — null clears the relationship
 
 // `comments` is Relationship.paginated(() => Comment):
-JsonApi.Endpoint.related(Article, "comments", { page: JsonApi.Page.Offset, include: true })
+Endpoint.related(Article, "comments", { page: Query.Page.Offset, include: true })
 // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author
 // → a paginated collection document of full Comment resources
 
-JsonApi.Endpoint.addRelationship(Article, "comments")
+Endpoint.addRelationship(Article, "comments")
 // POST payload: { data: CommentIdentifier[] }
 
 // to-many constructors only accept to-many relationship names:
-JsonApi.Endpoint.addRelationship(Article, "author") // ✗ compile error
+Endpoint.addRelationship(Article, "author") // ✗ compile error
 ```
 
-Handlers return linkage documents with `JsonApi.linkage`, and build the
-relationship URLs with `JsonApi.relationshipLink` / `JsonApi.relatedLink` /
-`JsonApi.paginatedRelationship`:
+Handlers return linkage documents with `Handlers.linkage`, and build the
+relationship URLs with `Handlers.relationshipLink` / `Handlers.relatedLink` /
+`Handlers.paginatedRelationship`:
 
 ```ts
 .handle("commentsRelationship", ({ params, query }) =>
   loadComments(params.id, query.page).pipe(Effect.map((comments) =>
-    JsonApi.linkage(comments.map((c) => Comment.ref(c.id)), {
-      self: JsonApi.relationshipLink("articles", params.id, "comments"),
-      related: JsonApi.relatedLink("articles", params.id, "comments")
+    Handlers.linkage(comments.map((c) => Comment.ref(c.id)), {
+      self: Handlers.relationshipLink("articles", params.id, "comments"),
+      related: Handlers.relatedLink("articles", params.id, "comments")
     })
   )))
 ```
@@ -306,14 +305,14 @@ relationship URLs with `JsonApi.relationshipLink` / `JsonApi.relatedLink` /
 discriminated by their `type` tags — the natural fit for search results, feeds and timelines:
 
 ```ts
-const search = JsonApi.Group(
+const search = Group.make(
   "search",
   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
-  JsonApi.Endpoint.search([Article, Person], {
+  Endpoint.search([Article, Person], {
     filter: { q: Schema.String },
     include: true, // include paths span both resources' graphs
     fields: true, // ?fields[articles]= and ?fields[people]=
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: Schema.Struct({ total: Schema.Int })
   })
 )
@@ -338,17 +337,17 @@ one request carrying an ordered list of operations — creating, updating and de
 their relationships — processed all-or-nothing:
 
 ```ts
-const operations = JsonApi.Group(
+const operations = Group.make(
   "operations",
   // POST /operations with an atomic:operations document
-  JsonApi.Endpoint.operations([Article, Comment], { errors: [OperationFailed] })
+  Endpoint.operations([Article, Comment], { errors: [OperationFailed] })
 )
 
 const Api = HttpApi.make("blog").add(articles).add(operations)
 ```
 
 Like everything else, the operations a resource supports are **derived** from its definition —
-`JsonApi.Atomic.operationsFor(Article)` exposes them as a named record of schemas:
+`Atomic.operationsFor(Article)` exposes them as a named record of schemas:
 
 | Derived operation                                                                             | Wire form                                                                                                             |
 | --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -370,10 +369,10 @@ Clients build requests with the typed operation constructors — note the lid re
 const doc =
   yield *
   client.operations.operations({
-    payload: JsonApi.Atomic.request(
+    payload: Atomic.request(
       // 1. create an article; it has no id yet, so it declares a lid.
       //    `author` is a required (`one`) relationship, so it must be present.
-      JsonApi.Atomic.add(Article, {
+      Atomic.add(Article, {
         lid: "a1",
         attributes: { title: "Atomic bikeshedding", body: "…", createdAt: new Date() },
         relationships: {
@@ -382,16 +381,16 @@ const doc =
         }
       }),
       // 2. create a comment...
-      JsonApi.Atomic.add(Comment, {
+      Atomic.add(Comment, {
         lid: "c1",
         attributes: { body: "First!" },
         relationships: { author: { data: Person.ref("9") } }
       }),
       // 3. ...and link it into the new article's paginated comments relationship —
       //    both sides referenced by lid
-      JsonApi.Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.lidRef("c1")]),
+      Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.lidRef("c1")]),
       // 4. to-one relationship operations replace linkage (`one`: never null)
-      JsonApi.Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
+      Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
     )
   })
 
@@ -400,22 +399,22 @@ doc["atomic:results"] // one result per operation, in order; `data` is typed Art
 
 Handlers pattern-match over the decoded operation union — the `targetsResource` /
 `targetsRelationship` guards are curried, so they drop straight into Effect's `Match` module and
-narrow each case to fully typed `data` / `ref`; `JsonApi.lidMap()` tracks the server-assigned ids
+narrow each case to fully typed `data` / `ref`; `Lid.make()` tracks the server-assigned ids
 of lid-created resources:
 
 ```ts
 const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
   handlers.handle("operations", ({ payload }) =>
     Effect.gen(function*() {
-      const lids = JsonApi.lidMap()
+      const lids = Lid.make()
       const entries = []
       for (const operation of payload["atomic:operations"]) {
         entries.push(Match.value(operation).pipe(
-          Match.when(JsonApi.Atomic.targetsRelationship(Article, "comments"), (op) => {
+          Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => {
             // op.data is ReadonlyArray<comment ref>; op.op is "add" | "update" | "remove"
-            return JsonApi.Atomic.emptyResult
+            return Atomic.emptyResult
           }),
-          Match.when(JsonApi.Atomic.targetsResource(Article), (op) =>
+          Match.when(Atomic.targetsResource(Article), (op) =>
             Match.value(op).pipe(
               Match.when({ op: "add" }, (add) => {
                 const id = Article.Id.make(newId())
@@ -428,7 +427,7 @@ const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
                     author: { data: lids.identifier(Person, add.data.relationships.author.data) },
                     tags: resolved.tags ?? { data: [] },
                     // `comments` is paginated: new articles start with an empty collection
-                    comments: JsonApi.paginatedRelationship("articles", id, "comments")
+                    comments: Handlers.paginatedRelationship("articles", id, "comments")
                   }
                 })
                 if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id)
@@ -443,7 +442,7 @@ const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
           Match.exhaustive
         ))
       }
-      return JsonApi.Atomic.results(entries)
+      return Atomic.results(entries)
     })))
 ```
 
@@ -451,7 +450,7 @@ Because the extension uses the JSON:API media type with an `ext` parameter, prov
 middleware with the extension declared:
 
 ```ts
-Layer.provide(JsonApi.Middleware.layerWith({ extensions: [JsonApi.Atomic.EXTENSION_URI] }))
+Layer.provide(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] }))
 ```
 
 Every endpoint automatically:
@@ -479,7 +478,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       //                         ^ query.include / query.fields are typed & validated
       loadArticle(params.id).pipe(
         Effect.map((article) =>
-          JsonApi.data(article, {
+          Handlers.data(article, {
             included: resolveIncluded(article, query.include),
             self: `/articles/${article.id}`
           })
@@ -490,26 +489,26 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       // query.page: { offset?: number, limit?: number }
       listArticles(query).pipe(
         Effect.map(({ items, total }) =>
-          JsonApi.collection(items, {
+          Handlers.collection(items, {
             meta: { total },
-            links: JsonApi.offsetPaginationLinks("/articles", query.page ?? {}, total)
+            links: Handlers.offsetPaginationLinks("/articles", query.page ?? {}, total)
           })
         )
       ))
     .handle("create", ({ payload }) =>
       // payload.data.attributes is fully typed; payload.data.lid is supported
-      createArticle(payload.data).pipe(Effect.map((article) => JsonApi.data(article))))
+      createArticle(payload.data).pipe(Effect.map((article) => Handlers.data(article))))
     .handle("update", ({ params, payload }) => /* … */)
     .handle("remove", ({ params }) => deleteArticle(params.id))   // void → 204
 )
 ```
 
-The document builders (`JsonApi.data` / `JsonApi.collection`) enforce the compound-document rules
+The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules
 at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every
 included resource must be referenced in the document).
 
-Pagination links are built with `JsonApi.offsetPaginationLinks` (for `Page.Offset`) and
-`JsonApi.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
+Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and
+`Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
 `next` / `last` top-level links from the request's page parameters and the total count.
 
 To serve it (with `@effect/platform-node`):
@@ -521,7 +520,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 
 HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),
-  Layer.provide(JsonApi.Middleware.layer),    // content negotiation + JSON:API 400s
+  Layer.provide(Middleware.layer),    // content negotiation + JSON:API 400s
   Layer.provide(NodeHttpServer.layer(...)),
   Layer.launch,
   NodeRuntime.runMain
@@ -547,7 +546,7 @@ const doc = yield* client.articles.fetch({
 ### Narrowing `included` by the requested include paths
 
 The spec guarantees that a server "MUST NOT include unrequested resource objects", so the client
-knows _statically_ what `included` can contain — `JsonApi.narrowIncluded` exposes that:
+knows _statically_ what `included` can contain — `Client.narrowIncluded` exposes that:
 
 ```ts
 const include = ["author"] as const
@@ -559,7 +558,7 @@ const doc =
       params: { id: Article.Id.make("1") },
       query: { include }
     })
-    .pipe(JsonApi.narrowIncluded(Article, include))
+    .pipe(Client.narrowIncluded(Article, include))
 
 doc.included
 // ^ ReadonlyArray<Person> — not Person | Comment | Tag.
@@ -590,7 +589,7 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Media type `application/vnd.api+json`                                                                            | baked into every document/payload/error schema                                                                                                          |
 | 415/406 on media type parameters other than `ext` / `profile` (or unsupported extensions)                        | middleware attached to every endpoint; providing it is required by the type system                                                                      |
-| Error bodies are error documents                                                                                 | only `JsonApi.Error` classes can be declared as endpoint errors                                                                                         |
+| Error bodies are error documents                                                                                 | only `ApiError.make` classes can be declared as endpoint errors                                                                                         |
 | Top-level document holds exactly one of `data` / `errors` / `meta`                                               | success schemas only ever contain `data`; error schemas only `errors` — mixing is unrepresentable                                                       |
 | Resource objects have `type` and `id`; ids are not interchangeable across types                                  | `Resource` always emits the type tag and a per-type branded id                                                                                          |
 | Create requests may omit `id` and send `lid`                                                                     | `createPayload` derivation                                                                                                                              |
@@ -598,12 +597,12 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                      |
 | Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.fetchRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
 | Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document for to-one, paginated collection for to-many                                                              |
-| Compound documents: no duplicate resources, full linkage                                                         | `JsonApi.data` / `JsonApi.collection` builders (runtime check)                                                                                          |
+| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.data` / `Handlers.collection` builders (runtime check)                                                                                        |
 | Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                     |
 | `errors` array is never empty                                                                                    | non-empty check on the error document schema                                                                                                            |
 | 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                        |
 | Pagination / sorting / sparse fieldsets / inclusion / filtering query families                                   | typed query schemas derived from the resource definition                                                                                                |
-| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `JsonApi.Atomic` schemas derived from resource definitions                                                                      |
+| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                              |
 
 ## Examples
 
@@ -626,13 +625,13 @@ any of them by passing a schema:
 
 ```ts
 // Resource-level meta (on every resource object)
-const Article = JsonApi.Resource("articles", {
+const Article = Resource.make("articles", {
   attributes: { … },
   meta: Schema.Struct({ rank: Schema.Int })
 })
 
 // Document-level meta (per endpoint, e.g. pagination totals)
-JsonApi.Endpoint.list(Article, { meta: Schema.Struct({ total: Schema.Int }) })
+Endpoint.list(Article, { meta: Schema.Struct({ total: Schema.Int }) })
 
 // Or on a document schema directly
 Article.collection({ meta: Schema.Struct({ total: Schema.Int }) })
@@ -650,7 +649,7 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   validation matches the same set.
 - **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on
   the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided
-  via `JsonApi.narrowIncluded`.
+  via `Client.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document
   meta are typed via options.
 - **Mutually recursive resources** (A ↔ B) are not supported: TypeScript cannot infer two resource

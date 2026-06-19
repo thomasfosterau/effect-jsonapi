@@ -34,16 +34,15 @@
  * reports are listed with GET /employees?filter[manager]=<id>.
  */
 import { Schema } from "effect"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
-
-export const Category = JsonApi.Resource("categories", {
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+export const Category = Resource.make("categories", {
   attributes: {
     name: Schema.NonEmptyString,
     description: Schema.optionalKey(Schema.String)
   }
 })
 
-export const Supplier = JsonApi.Resource("suppliers", {
+export const Supplier = Resource.make("suppliers", {
   attributes: {
     companyName: Schema.NonEmptyString,
     contactName: Schema.optionalKey(Schema.String),
@@ -52,14 +51,14 @@ export const Supplier = JsonApi.Resource("suppliers", {
   }
 })
 
-export const Shipper = JsonApi.Resource("shippers", {
+export const Shipper = Resource.make("shippers", {
   attributes: {
     companyName: Schema.NonEmptyString,
     phone: Schema.optionalKey(Schema.String)
   }
 })
 
-export const Customer = JsonApi.Resource("customers", {
+export const Customer = Resource.make("customers", {
   attributes: {
     companyName: Schema.NonEmptyString,
     contactName: Schema.optionalKey(Schema.String),
@@ -68,14 +67,14 @@ export const Customer = JsonApi.Resource("customers", {
   }
 })
 
-export const Territory = JsonApi.Resource("territories", {
+export const Territory = Resource.make("territories", {
   attributes: {
     description: Schema.NonEmptyString,
     region: Schema.NonEmptyString
   }
 })
 
-export const Employee = JsonApi.Resource("employees", {
+export const Employee = Resource.make("employees", {
   attributes: {
     firstName: Schema.NonEmptyString,
     lastName: Schema.NonEmptyString,
@@ -90,11 +89,11 @@ export const Employee = JsonApi.Resource("employees", {
   relationships: {
     // Sales territories are few and bounded: inlined identifiers, managed
     // through the /employees/:id/relationships/territories endpoints.
-    territories: JsonApi.Relationship.many(() => Territory)
+    territories: Relationship.many(() => Territory)
   }
 })
 
-export const Product = JsonApi.Resource("products", {
+export const Product = Resource.make("products", {
   attributes: {
     name: Schema.NonEmptyString,
     unitPrice: Schema.Number,
@@ -105,12 +104,12 @@ export const Product = JsonApi.Resource("products", {
     // Every product belongs to a category and comes from a supplier: required
     // to-one relationships, present in the create payload and reassignable
     // through the relationship endpoints.
-    category: JsonApi.Relationship.one(() => Category),
-    supplier: JsonApi.Relationship.one(() => Supplier)
+    category: Relationship.one(() => Category),
+    supplier: Relationship.one(() => Supplier)
   }
 })
 
-export const OrderItem = JsonApi.Resource("orderItems", {
+export const OrderItem = Resource.make("orderItems", {
   attributes: {
     unitPrice: Schema.Number,
     quantity: Schema.Int,
@@ -118,11 +117,11 @@ export const OrderItem = JsonApi.Resource("orderItems", {
     discount: Schema.Number
   },
   relationships: {
-    product: JsonApi.Relationship.one(() => Product)
+    product: Relationship.one(() => Product)
   }
 })
 
-export const Order = JsonApi.Resource("orders", {
+export const Order = Resource.make("orders", {
   attributes: {
     orderDate: Schema.DateFromString,
     requiredDate: Schema.DateFromString,
@@ -134,13 +133,13 @@ export const Order = JsonApi.Resource("orders", {
   },
   relationships: {
     // An order is always placed by a customer and taken by an employee.
-    customer: JsonApi.Relationship.one(() => Customer),
-    employee: JsonApi.Relationship.one(() => Employee),
+    customer: Relationship.one(() => Customer),
+    employee: Relationship.one(() => Employee),
     // ... but is not assigned a shipper until it ships.
-    shipper: JsonApi.Relationship.optional(() => Shipper),
+    shipper: Relationship.optional(() => Shipper),
     // Line items are unbounded: reachable only through the related link
     // (GET /orders/:id/lineItems), never inlined.
-    lineItems: JsonApi.Relationship.paginated(() => OrderItem)
+    lineItems: Relationship.paginated(() => OrderItem)
   }
 })
 

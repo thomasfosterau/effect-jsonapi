@@ -5,7 +5,7 @@
  */
 import { Schema } from "effect"
 import { HttpApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi"
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
 import { Article, Comment, Person } from "./resources.js"
 
@@ -16,64 +16,64 @@ export const PageMeta = Schema.Struct({
   total: Schema.Int
 })
 
-export const articles = JsonApi.Group(
+export const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
-  JsonApi.Endpoint.fetch(Article, {
+  Endpoint.fetch(Article, {
     include: true,
     fields: true,
     errors: [ArticleNotFound]
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
-  JsonApi.Endpoint.list(Article, {
+  Endpoint.list(Article, {
     include: true,
     sort: ["createdAt", "title"],
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     filter: { author: Schema.optionalKey(Schema.String) },
     meta: PageMeta
   }),
   // POST /articles (payload may carry a client-generated lid; author is required)
-  JsonApi.Endpoint.create(Article, {
+  Endpoint.create(Article, {
     errors: [TitleTaken]
   }),
   // PATCH /articles/:id (partial attributes)
-  JsonApi.Endpoint.update(Article, {
+  Endpoint.update(Article, {
     errors: [ArticleNotFound]
   }),
   // DELETE /articles/:id → 204
-  JsonApi.Endpoint.remove(Article, {
+  Endpoint.remove(Article, {
     errors: [ArticleNotFound]
   }),
   // --- Related resource endpoints --------------------------------------------
   // GET /articles/:id/author — the article's author, as a full resource
-  JsonApi.Endpoint.related(Article, "author", {
+  Endpoint.related(Article, "author", {
     errors: [ArticleNotFound]
   }),
   // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author —
   // the paginated comment collection that `relationships.comments.links.related`
   // points at
-  JsonApi.Endpoint.related(Article, "comments", {
+  Endpoint.related(Article, "comments", {
     include: true,
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta,
     errors: [ArticleNotFound]
   }),
   // --- Relationship (linkage) endpoints ---------------------------------------
   // GET /articles/:id/relationships/comments — comment identifiers, paginated
-  JsonApi.Endpoint.fetchRelationship(Article, "comments", {
-    page: JsonApi.Page.Offset,
+  Endpoint.fetchRelationship(Article, "comments", {
+    page: Query.Page.Offset,
     errors: [ArticleNotFound]
   }),
   // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
-  JsonApi.Endpoint.updateRelationship(Article, "author", {
+  Endpoint.updateRelationship(Article, "author", {
     errors: [ArticleNotFound]
   }),
   // POST /articles/:id/relationships/comments — attach existing comments
-  JsonApi.Endpoint.addRelationship(Article, "comments", {
+  Endpoint.addRelationship(Article, "comments", {
     errors: [ArticleNotFound]
   }),
   // DELETE /articles/:id/relationships/comments — detach comments → 204
-  JsonApi.Endpoint.removeRelationship(Article, "comments", {
+  Endpoint.removeRelationship(Article, "comments", {
     errors: [ArticleNotFound]
   })
 )
@@ -82,14 +82,14 @@ export const articles = JsonApi.Group(
  * A heterogeneous search endpoint: results are a mixed collection of articles
  * and people, discriminated by their `type` tags.
  */
-export const search = JsonApi.Group(
+export const search = Group.make(
   "search",
   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
-  JsonApi.Endpoint.search([Article, Person], {
+  Endpoint.search([Article, Person], {
     filter: { q: Schema.String },
     include: true,
     fields: true,
-    page: JsonApi.Page.Offset,
+    page: Query.Page.Offset,
     meta: PageMeta
   })
 )
@@ -99,10 +99,10 @@ export const search = JsonApi.Group(
  * carrying an ordered list of operations on articles and comments — including
  * lid-based references between them — processed all-or-nothing.
  */
-export const operations = JsonApi.Group(
+export const operations = Group.make(
   "operations",
   // POST /operations with an atomic:operations document
-  JsonApi.Endpoint.operations([Article, Comment], {
+  Endpoint.operations([Article, Comment], {
     errors: [OperationFailed]
   })
 )

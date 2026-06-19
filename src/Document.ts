@@ -202,9 +202,9 @@ export const ErrorObject = Schema.Struct({
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Document } from "@thomasfosterau/effect-jsonapi"
  *
- * const AppError = JsonApi.ErrorObjectWithCodes(["not_found", "forbidden"])
+ * const AppError = Document.ErrorObjectWithCodes(["not_found", "forbidden"])
  * ```
  *
  * @since 0.1.0
@@ -247,14 +247,14 @@ export interface DataDocument<
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString }
  * })
  *
- * const ArticleDocument = JsonApi.DataDocument(Article)
+ * const ArticleDocument = Document.DataDocument(Article)
  * ```
  *
  * @since 0.1.0
@@ -303,14 +303,14 @@ export interface CollectionDocument<
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString }
  * })
  *
- * const ArticleCollection = JsonApi.CollectionDocument(Article)
+ * const ArticleCollection = Document.CollectionDocument(Article)
  * ```
  *
  * @since 0.1.0
@@ -362,15 +362,15 @@ export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = ty
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { name: Schema.NonEmptyString }
  * })
  *
  * // Linkage document for a to-one relationship endpoint.
- * const AuthorLinkage = JsonApi.LinkageDocument(Schema.NullOr(Person.identifier))
+ * const AuthorLinkage = Document.LinkageDocument(Schema.NullOr(Person.identifier))
  * ```
  *
  * @since 0.1.0
@@ -460,15 +460,15 @@ export interface Document<
  *
  * @example
  * ```ts
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString }
  * })
  *
  * // A schema accepting a data, error, or meta document for `Article`.
- * const ArticleResponse = JsonApi.Document(Article)
+ * const ArticleResponse = Document.Document(Article)
  * ```
  *
  * @since 0.1.0

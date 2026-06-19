@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
 import * as Relationship from "./Relationship.js"
-import { Resource } from "./Resource.js"
+import { make as Resource } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Test fixtures

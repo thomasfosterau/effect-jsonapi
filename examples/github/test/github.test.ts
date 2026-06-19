@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Client } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "../api.js"
 import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../errors.js"
 import {
@@ -100,7 +100,7 @@ describe("github example: fetching", () => {
             params: { id: Repository.Id.make("1") },
             query: { include }
           })
-          .pipe(JsonApi.narrowIncluded(Repository, include))
+          .pipe(Client.narrowIncluded(Repository, include))
       })
     )
 

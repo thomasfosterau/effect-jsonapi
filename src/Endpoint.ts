@@ -123,35 +123,35 @@ const queryConfig = (options?: {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // GET /articles/:id?include=author&fields[articles]=title
- *   JsonApi.Endpoint.fetch(Article, {
+ *   Endpoint.fetch(Article, {
  *     include: true,
  *     fields: true,
  *     errors: [ArticleNotFound]
@@ -218,9 +218,9 @@ export const fetch = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Endpoint, Group, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: {
  *     title: Schema.NonEmptyString,
  *     body: Schema.String,
@@ -228,13 +228,13 @@ export const fetch = <
  *   }
  * })
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
- *   JsonApi.Endpoint.list(Article, {
+ *   Endpoint.list(Article, {
  *     include: true,
  *     sort: ["createdAt", "title"],
- *     page: JsonApi.Page.Offset,
+ *     page: Query.Page.Offset,
  *     filter: { author: Schema.optionalKey(Schema.String) }
  *   })
  * )
@@ -308,21 +308,21 @@ export const list = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
- * class TitleTaken extends JsonApi.Error<TitleTaken>()("TitleTaken", {
+ * class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {
  *   status: 409,
  *   fields: { title: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // POST /articles → 201
- *   JsonApi.Endpoint.create(Article, { errors: [TitleTaken] })
+ *   Endpoint.create(Article, { errors: [TitleTaken] })
  * )
  * ```
  *
@@ -371,21 +371,21 @@ export const create = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // PATCH /articles/:id (partial attributes)
- *   JsonApi.Endpoint.update(Article, { errors: [ArticleNotFound] })
+ *   Endpoint.update(Article, { errors: [ArticleNotFound] })
  * )
  * ```
  *
@@ -433,21 +433,21 @@ export const update = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // DELETE /articles/:id → 204
- *   JsonApi.Endpoint.remove(Article, { errors: [ArticleNotFound] })
+ *   Endpoint.remove(Article, { errors: [ArticleNotFound] })
  * )
  * ```
  *
@@ -505,26 +505,26 @@ export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Sc
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Endpoint, Group, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person)
+ *     author: Relationship.one(() => Person)
  *   }
  * })
  *
- * const search = JsonApi.Group(
+ * const search = Group.make(
  *   "search",
  *   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
- *   JsonApi.Endpoint.search([Article, Person], {
+ *   Endpoint.search([Article, Person], {
  *     filter: { q: Schema.String },
  *     include: true,
  *     fields: true,
- *     page: JsonApi.Page.Offset
+ *     page: Query.Page.Offset
  *   })
  * )
  * // handler returns { data: ReadonlyArray<Article | Person>, ... }
@@ -700,39 +700,39 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // GET /articles/:id/author — the author, as a full resource
- *   JsonApi.Endpoint.related(Article, "author", { errors: [ArticleNotFound] }),
+ *   Endpoint.related(Article, "author", { errors: [ArticleNotFound] }),
  *   // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author
- *   JsonApi.Endpoint.related(Article, "comments", {
+ *   Endpoint.related(Article, "comments", {
  *     include: true,
- *     page: JsonApi.Page.Offset,
+ *     page: Query.Page.Offset,
  *     errors: [ArticleNotFound]
  *   })
  * )
@@ -827,36 +827,36 @@ export const related = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // GET /articles/:id/relationships/comments?page[offset]=0&page[limit]=10
- *   JsonApi.Endpoint.fetchRelationship(Article, "comments", {
- *     page: JsonApi.Page.Offset,
+ *   Endpoint.fetchRelationship(Article, "comments", {
+ *     page: Query.Page.Offset,
  *     errors: [ArticleNotFound]
  *   })
  * )
@@ -943,35 +943,35 @@ export const fetchRelationship = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // PATCH /articles/:id/relationships/author — replace the author
- *   JsonApi.Endpoint.updateRelationship(Article, "author", {
+ *   Endpoint.updateRelationship(Article, "author", {
  *     errors: [ArticleNotFound]
  *   })
  * )
@@ -1040,35 +1040,35 @@ export const updateRelationship = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // POST /articles/:id/relationships/comments — attach existing comments
- *   JsonApi.Endpoint.addRelationship(Article, "comments", {
+ *   Endpoint.addRelationship(Article, "comments", {
  *     errors: [ArticleNotFound]
  *   })
  * )
@@ -1136,35 +1136,35 @@ export const addRelationship = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class ArticleNotFound extends JsonApi.Error<ArticleNotFound>()("ArticleNotFound", {
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
  *
- * const articles = JsonApi.Group(
+ * const articles = Group.make(
  *   Article,
  *   // DELETE /articles/:id/relationships/comments → 204 — detach comments
- *   JsonApi.Endpoint.removeRelationship(Article, "comments", {
+ *   Endpoint.removeRelationship(Article, "comments", {
  *     errors: [ArticleNotFound]
  *   })
  * )
@@ -1236,35 +1236,35 @@ export const removeRelationship = <
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
  * })
- * const Tag = JsonApi.Resource("tags", { attributes: { name: Schema.NonEmptyString } })
- * const Comment = JsonApi.Resource("comments", {
+ * const Tag = Resource.make("tags", { attributes: { name: Schema.NonEmptyString } })
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     editor: JsonApi.Relationship.optional(() => Person),
- *     tags: JsonApi.Relationship.many(() => Tag),
- *     comments: JsonApi.Relationship.paginated(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     editor: Relationship.optional(() => Person),
+ *     tags: Relationship.many(() => Tag),
+ *     comments: Relationship.paginated(() => Comment)
  *   }
  * })
  *
- * class OperationFailed extends JsonApi.Error<OperationFailed>()("OperationFailed", {
+ * class OperationFailed extends ApiError.make<OperationFailed>()("OperationFailed", {
  *   status: 422,
  *   fields: { operation: Schema.Int, reason: Schema.String }
  * }) {}
  *
- * const operations = JsonApi.Group(
+ * const operations = Group.make(
  *   "operations",
  *   // POST /operations with an atomic:operations document
- *   JsonApi.Endpoint.operations([Article, Comment], {
+ *   Endpoint.operations([Article, Comment], {
  *     errors: [OperationFailed]
  *   })
  * )

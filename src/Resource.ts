@@ -24,19 +24,19 @@
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: {
  *     firstName: Schema.NonEmptyString,
  *     lastName: Schema.NonEmptyString
  *   }
  * })
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person)
+ *     author: Relationship.one(() => Person)
  *   }
  * })
  * ```
@@ -50,7 +50,7 @@ import type { Relationships, RelationshipSchemas } from "./Relationship.js"
 
 // The relationship descriptor types (`Descriptor`, `Relationships`,
 // `RelationshipSchemas`) are part of the public API under the `Relationship`
-// namespace (`JsonApi.Relationship.Descriptor`, …); they are not re-exported at
+// namespace (`Relationship.Descriptor`, …); they are not re-exported at
 // the top level to avoid duplicate documentation entries.
 
 // ---------------------------------------------------------------------------
@@ -74,9 +74,9 @@ export interface Id<Type extends string> extends Schema.brand<Schema.String, `${
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString }
  * })
  *
@@ -110,9 +110,9 @@ export interface Identifier<Type extends string> extends Schema.Struct<{
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const PersonIdentifier = JsonApi.Identifier("people")
+ * const PersonIdentifier = Resource.Identifier("people")
  * const decoded = Schema.decodeUnknownSync(PersonIdentifier)({ type: "people", id: "9" })
  * ```
  *
@@ -322,9 +322,9 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString }
  * })
  *
@@ -368,9 +368,9 @@ export type PartialAttributes<Attributes extends Schema.Struct.Fields> = {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString }
  * })
  *
@@ -412,9 +412,9 @@ export interface DefaultIncluded<Rels extends Relationships> extends Schema.Unio
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString }
  * })
  *
@@ -689,17 +689,17 @@ export const allTargets = (resource: Any): ReadonlyArray<Any> =>
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
  *
- * JsonApi.includePaths(Article) // ["author"]
+ * Resource.includePaths(Article) // ["author"]
  * ```
  *
  * @since 0.1.0
@@ -734,20 +734,20 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: {
  *     firstName: Schema.NonEmptyString,
  *     lastName: Schema.NonEmptyString
  *   }
  * })
  *
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     comments: JsonApi.Relationship.paginated(() => Person)
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.paginated(() => Person)
  *   }
  * })
  * ```
@@ -755,7 +755,7 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
  * @since 0.1.0
  * @category constructors
  */
-export const Resource = <
+export const make = <
   const Type extends string,
   const Attributes extends Schema.Struct.Fields,
   const Rels extends Relationships = {},

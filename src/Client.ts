@@ -10,7 +10,7 @@
  * const document = yield* client.articles.fetch({
  *   params: { id: Article.Id.make("1") },
  *   query: { include }
- * }).pipe(JsonApi.narrowIncluded(Article, include))
+ * }).pipe(Client.narrowIncluded(Article, include))
  *
  * document.included
  * //       ^ ReadonlyArray<Person | Comment> — Tag and other unrequested
@@ -62,20 +62,20 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+ * import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
- * const Person = JsonApi.Resource("people", {
+ * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString }
  * })
- * const Comment = JsonApi.Resource("comments", {
+ * const Comment = Resource.make("comments", {
  *   attributes: { body: Schema.NonEmptyString },
- *   relationships: { author: JsonApi.Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
- * const Article = JsonApi.Resource("articles", {
+ * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
  *   relationships: {
- *     author: JsonApi.Relationship.one(() => Person),
- *     comments: JsonApi.Relationship.many(() => Comment)
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.many(() => Comment)
  *   }
  * })
  *
@@ -84,7 +84,7 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  *   readonly articles: {
  *     readonly fetch: (request: {
  *       readonly params: { readonly id: string }
- *       readonly query: { readonly include?: ReadonlyArray<JsonApi.IncludePath<typeof Article>> }
+ *       readonly query: { readonly include?: ReadonlyArray<Resource.IncludePath<typeof Article>> }
  *     }) => Effect.Effect<ReturnType<typeof Article.document>["Type"]>
  *   }
  * }
@@ -93,7 +93,7 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  *   const include = ["author", "comments.author"] as const
  *   return client.articles
  *     .fetch({ params: { id: "1" }, query: { include } })
- *     .pipe(JsonApi.narrowIncluded(Article, include))
+ *     .pipe(Client.narrowIncluded(Article, include))
  *   //   ^ Effect of a document whose `included` is narrowed to the requested
  *   //     resources — unrequested types are excluded from the type.
  * }

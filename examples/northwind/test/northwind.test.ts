@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
-import { JsonApi } from "@thomasfosterau/effect-jsonapi"
+import { Client } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "../api.js"
 import { CategoryNotFound, CustomerNotFound, OrderNotFound, ProductNameTaken, ProductNotFound } from "../errors.js"
 import {
@@ -87,7 +87,7 @@ describe("northwind example: fetching", () => {
         const client = yield* buildClient
         return yield* client.products
           .fetch({ params: { id: Product.Id.make("1") }, query: { include } })
-          .pipe(JsonApi.narrowIncluded(Product, include))
+          .pipe(Client.narrowIncluded(Product, include))
       })
     )
 
