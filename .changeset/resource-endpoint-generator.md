@@ -1,0 +1,40 @@
+---
+"@thomasfosterau/effect-jsonapi": minor
+---
+
+**Whole-resource endpoint generation:** `Endpoint.resource` and `Group.resource` derive an entire JSON:API endpoint set from a single resource definition — the full CRUD surface plus, for every relationship, the `related` and linkage endpoints appropriate to its kind — with `include` / `fields` / `sort` query parameters derived from the resource graph.
+
+```ts
+// The whole group, fully typed, in one call:
+const articles = Group.resource(Article, {
+  errors: [ArticleNotFound],
+  page: Query.Page.Offset,
+  // per-endpoint config overrides the top-level defaults:
+  endpoints: {
+    create: { errors: [TitleTaken] },
+    list: { filter: { author: Schema.optionalKey(Schema.String) } }
+  }
+})
+
+// Or get the endpoints as a tuple to compose with Group.make:
+const articles = Group.make(
+  Article,
+  ...Endpoint.resource(Article, { errors: [ArticleNotFound] }),
+  Endpoint.list(Article, { name: "search", path: "/articles/search", filter: { q: Schema.String } })
+)
+```
+
+Defaults emit all five CRUD operations and every relationship's endpoints with `include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in, and `errors` is applied uniformly. Everything is overridable, globally or per entry:
+
+- `endpoints` is an object keyed by operation (`get` / `list` / `create` / `update` / `delete`); each value is `true` (emit with defaults), `false` (omit), or an object configuring that endpoint (its `name` / `path` / `errors` and applicable query / `meta`), overriding the top-level defaults.
+- `relationships` is `true` (all, default) / `false` (none), or an object keyed by relationship name — each `false` to exclude, or an object to configure that relationship's endpoints. Relationships not mentioned are emitted with the defaults.
+- `meta` may be a `Schema` (overriding the document meta) or a function `(base) => schema` that _extends_ the resource's base meta rather than replacing it.
+
+The result is plain `HttpApiEndpoint` / `HttpApiGroup` values, so it composes with everything as before. See `Endpoint.ResourceOptions`.
+
+**Breaking:** the destructive single-resource endpoints are renamed to the spec-accurate HTTP verbs.
+
+- `Endpoint.fetch` → `Endpoint.get` (default endpoint name `"fetch"` → `"get"`).
+- `Endpoint.remove` → `Endpoint.delete` (default endpoint name `"remove"` → `"delete"`). `delete` is a reserved word, so it is re-exported from an internal implementation; `Endpoint.delete(...)` is the public name.
+
+**Migration:** replace `Endpoint.fetch(R, …)` / `Endpoint.remove(R, …)` with `Endpoint.get(R, …)` / `Endpoint.delete(R, …)`, and rename the corresponding handler keys and client methods (`"fetch"` → `"get"`, `"remove"` → `"delete"`). The relationship constructors `Endpoint.fetchRelationship` and `Endpoint.removeRelationship` are unchanged — they match the spec's "fetching"/"removing members" terminology and operate on relationship linkage, not whole resources.

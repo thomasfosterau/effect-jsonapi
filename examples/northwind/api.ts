@@ -45,7 +45,7 @@ export const PageMeta = Schema.Struct({
 export const categories = Group.make(
   Category,
   // GET /categories/:id
-  Endpoint.fetch(Category, {
+  Endpoint.get(Category, {
     errors: [CategoryNotFound]
   }),
   // GET /categories?sort=name&page[offset]=0&page[limit]=10
@@ -59,7 +59,7 @@ export const categories = Group.make(
 export const suppliers = Group.make(
   Supplier,
   // GET /suppliers/:id
-  Endpoint.fetch(Supplier, {
+  Endpoint.get(Supplier, {
     errors: [SupplierNotFound]
   }),
   // GET /suppliers?filter[country]=UK&sort=companyName
@@ -76,7 +76,7 @@ export const suppliers = Group.make(
 export const shippers = Group.make(
   Shipper,
   // GET /shippers/:id
-  Endpoint.fetch(Shipper, {
+  Endpoint.get(Shipper, {
     errors: [ShipperNotFound]
   }),
   // GET /shippers
@@ -90,7 +90,7 @@ export const shippers = Group.make(
 export const territories = Group.make(
   Territory,
   // GET /territories/:id
-  Endpoint.fetch(Territory, {
+  Endpoint.get(Territory, {
     errors: [TerritoryNotFound]
   }),
   // GET /territories?filter[region]=Eastern
@@ -107,7 +107,7 @@ export const territories = Group.make(
 export const customers = Group.make(
   Customer,
   // GET /customers/:id
-  Endpoint.fetch(Customer, {
+  Endpoint.get(Customer, {
     errors: [CustomerNotFound]
   }),
   // GET /customers?filter[country]=Germany&sort=companyName
@@ -124,7 +124,7 @@ export const customers = Group.make(
 export const products = Group.make(
   Product,
   // GET /products/:id?include=category,supplier&fields[products]=name,unitPrice
-  Endpoint.fetch(Product, {
+  Endpoint.get(Product, {
     include: true,
     fields: true,
     errors: [ProductNotFound]
@@ -155,7 +155,7 @@ export const products = Group.make(
     errors: [ProductNotFound]
   }),
   // DELETE /products/:id → 204
-  Endpoint.remove(Product, {
+  Endpoint.delete(Product, {
     errors: [ProductNotFound]
   }),
   // GET /products/:id/supplier — the supplying company, as a full resource
@@ -175,7 +175,7 @@ export const products = Group.make(
 export const employees = Group.make(
   Employee,
   // GET /employees/:id?include=territories
-  Endpoint.fetch(Employee, {
+  Endpoint.get(Employee, {
     include: true,
     errors: [EmployeeNotFound]
   }),
@@ -211,7 +211,7 @@ export const employees = Group.make(
 export const orders = Group.make(
   Order,
   // GET /orders/:id?include=customer,employee,shipper
-  Endpoint.fetch(Order, {
+  Endpoint.get(Order, {
     include: true,
     fields: true,
     errors: [OrderNotFound]

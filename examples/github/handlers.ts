@@ -374,7 +374,7 @@ const paginate = <A>(
 
 export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) =>
+    .handle("get", ({ params }) =>
       loadUser(params.id).pipe(Effect.map((user) => Handlers.data(user, { self: `/users/${user.id}` })))
     )
     .handle("list", ({ query }) => {
@@ -395,7 +395,7 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
 
 export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) =>
           Handlers.data(repository, {
@@ -467,7 +467,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
         })
       )
     )
-    .handle("remove", ({ params }) =>
+    .handle("delete", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
           store.repositories.delete(repository.id)
@@ -500,7 +500,7 @@ const commentsFor = (issueId: string): Array<IssueComment> =>
 
 export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadIssue(params.id).pipe(
         Effect.map((issue) =>
           Handlers.data(issue, {
@@ -692,7 +692,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
 
 export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadPull(params.id).pipe(
         Effect.map((pull) =>
           Handlers.data(pull, {

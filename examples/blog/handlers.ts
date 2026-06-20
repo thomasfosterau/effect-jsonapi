@@ -113,7 +113,7 @@ const articleComments = (articleId: string): Array<Comment> =>
 
 export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) =>
           Handlers.data(article, {
@@ -198,7 +198,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         })
       )
     )
-    .handle("remove", ({ params }) =>
+    .handle("delete", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           store.articles.delete(article.id)

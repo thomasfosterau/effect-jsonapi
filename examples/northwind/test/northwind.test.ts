@@ -58,7 +58,7 @@ describe("northwind example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.products.fetch({ params: { id: Product.Id.make("1") }, query: {} })
+        return yield* client.products.get({ params: { id: Product.Id.make("1") }, query: {} })
       })
     )
 
@@ -70,7 +70,7 @@ describe("northwind example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.products.fetch({
+        return yield* client.products.get({
           params: { id: Product.Id.make("1") },
           query: { include: ["category", "supplier"] }
         })
@@ -86,7 +86,7 @@ describe("northwind example: fetching", () => {
       Effect.gen(function* () {
         const client = yield* buildClient
         return yield* client.products
-          .fetch({ params: { id: Product.Id.make("1") }, query: { include } })
+          .get({ params: { id: Product.Id.make("1") }, query: { include } })
           .pipe(Client.narrowIncluded(Product, include))
       })
     )
@@ -105,7 +105,7 @@ describe("northwind example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.employees.fetch({ params: { id: nancy.id }, query: { include: ["territories"] } })
+        return yield* client.employees.get({ params: { id: nancy.id }, query: { include: ["territories"] } })
       })
     )
 
@@ -119,7 +119,7 @@ describe("northwind example: fetching", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.products.fetch({ params: { id: Product.Id.make("nope") }, query: {} })
+        return yield* client.products.get({ params: { id: Product.Id.make("nope") }, query: {} })
       })
     )
 
@@ -260,7 +260,7 @@ describe("northwind example: writing", () => {
         expect(created.data?.attributes.name).toBe("Genmaicha")
         expect(created.data?.relationships?.category.data?.id).toBe(beverages.id)
 
-        yield* client.products.remove({ params: { id: created.data!.id } })
+        yield* client.products.delete({ params: { id: created.data!.id } })
       })
     )
   })
@@ -455,7 +455,7 @@ describe("northwind example: related & relationship endpoints", () => {
           payload: { data: Category.ref(seafood.id) }
         })
         // the product reflects the reassignment
-        const product = yield* client.products.fetch({ params: { id: Product.Id.make("4") }, query: {} })
+        const product = yield* client.products.get({ params: { id: Product.Id.make("4") }, query: {} })
         expect(product.data?.relationships?.category.data?.id).toBe(seafood.id)
         return linkage
       })
@@ -661,7 +661,7 @@ describe("northwind example: spec compliance on the wire", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.shippers.fetch({ params: { id: speedy.id }, query: {} })
+        return yield* client.shippers.get({ params: { id: speedy.id }, query: {} })
       })
     )
 

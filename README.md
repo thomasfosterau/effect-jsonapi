@@ -45,6 +45,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Relationship kinds](#relationship-kinds)
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
+  - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
   - [Atomic operations](#atomic-operations)
@@ -81,7 +82,7 @@ class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound"
 // 3. Build endpoints with the JSON:API conventions baked in.
 const articles = Group.make(
   Article,
-  Endpoint.fetch(Article, { include: true, errors: [ArticleNotFound] }),
+  Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }),
   Endpoint.list(Article, { page: Query.Page.Offset })
 )
 
@@ -92,7 +93,7 @@ const Api = HttpApi.make("blog").add(articles)
 //    own data access returning `Effect`s.)
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))))
+    .handle("get", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))))
     .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => Handlers.collection(items))))
 )
 
@@ -195,7 +196,7 @@ Document.DataDocument(Article.nullable()) //            data: Option<Article>, �
 `Article.nullable()` is `Schema.OptionFromNullOr(Article)` — the spec-clean
 nullable codec (`None ⇆ null`). Avoid effect's _structural_ `Schema.Option`
 (`{ _tag, value }`): it serialises a non-conformant body, and `DataDocument`
-can't tell the two apart. `Article.document()` and `Endpoint.fetch` / `create` /
+can't tell the two apart. `Article.document()` and `Endpoint.get` / `create` /
 `update` use the non-null form; `Endpoint.related` for a to-one relationship
 keeps the nullable form (`data: target | null`) for the empty-linkage case.
 
@@ -274,7 +275,7 @@ One declaration gives you all of:
 const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
-  Endpoint.fetch(Article, {
+  Endpoint.get(Article, {
     include: true,
     fields: true,
     errors: [ArticleNotFound]
@@ -292,7 +293,7 @@ const articles = Group.make(
   // PATCH /articles/:id (partial attributes)
   Endpoint.update(Article, { errors: [ArticleNotFound] }),
   // DELETE /articles/:id → 204
-  Endpoint.remove(Article, { errors: [ArticleNotFound] }),
+  Endpoint.delete(Article, { errors: [ArticleNotFound] }),
   // GET /articles/:id/comments — the paginated related collection
   Endpoint.related(Article, "comments", {
     page: Query.Page.Offset,
@@ -303,6 +304,65 @@ const articles = Group.make(
 )
 
 const Api = HttpApi.make("blog").add(articles)
+```
+
+### Generating a whole group from a resource
+
+Writing out every endpoint is explicit, but repetitive — a resource definition
+already knows its attributes, relationships and graph. `Group.resource` walks
+that definition and emits the entire group: the CRUD surface plus, for every
+relationship, the `related` and linkage endpoints appropriate to its kind, with
+`include` / `fields` / `sort` derived from the graph.
+
+```ts
+// CRUD + every relationship endpoint, fully typed — equivalent to spelling out
+// get / list / create / update / delete and each relationship endpoint by hand:
+const articles = Group.resource(Article, {
+  errors: [ArticleNotFound],
+  page: Query.Page.Offset,
+  // Per-endpoint config overrides the top-level defaults; the keys are the CRUD
+  // operations, the values a boolean (emit / omit) or that endpoint's options.
+  endpoints: {
+    create: { errors: [TitleTaken] },
+    list: { filter: { author: Schema.optionalKey(Schema.String) } }
+  }
+})
+
+// A read-only resource: just get + list, no relationship endpoints:
+const people = Group.resource(Person, {
+  endpoints: { create: false, update: false, delete: false },
+  relationships: false
+})
+
+// Per-relationship config: drop one relationship, re-error another:
+const issues = Group.resource(Issue, {
+  relationships: {
+    comments: false, // omit this relationship's endpoints
+    assignee: { errors: [UserNotFound] } // configure that relationship's endpoints
+  },
+  // `meta` may be a function, *extending* the resource's base meta rather than
+  // replacing it:
+  meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int })
+})
+```
+
+Defaults emit all five CRUD operations and every relationship's endpoints with
+`include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their
+semantics are application-defined), and `errors` is applied to every generated
+endpoint. Every default is overridable, globally or per endpoint / relationship
+— see `Endpoint.ResourceOptions`.
+
+For finer control — adding a heterogeneous `search`, dropping or replacing an
+individual endpoint — `Endpoint.resource` returns the same endpoints as a plain
+tuple to spread into `Group.make`:
+
+```ts
+const articles = Group.make(
+  Article,
+  ...Endpoint.resource(Article, { errors: [ArticleNotFound] }),
+  // …plus anything else this group should serve
+  Endpoint.list(Article, { name: "search", path: "/articles/search", filter: { q: Schema.String } })
+)
 ```
 
 ### Relationship & related endpoints
@@ -528,7 +588,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       //                 ^ params.id is a branded Article id
       //                         ^ query.include / query.fields are typed & validated
       loadArticle(params.id).pipe(
@@ -554,7 +614,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       // payload.data.attributes is fully typed; payload.data.lid is supported
       createArticle(payload.data).pipe(Effect.map((article) => Handlers.data(article))))
     .handle("update", ({ params, payload }) => /* … */)
-    .handle("remove", ({ params }) => deleteArticle(params.id))   // void → 204
+    .handle("delete", ({ params }) => deleteArticle(params.id))   // void → 204
 )
 ```
 
@@ -589,7 +649,7 @@ import { HttpApiClient } from "effect/unstable/httpapi"
 
 const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost:3000" })
 
-const doc = yield* client.articles.fetch({
+const doc = yield* client.articles.get({
   params: { id: Article.Id.make("1") },
   query: { include: ["author"] }     // ← include paths are typed literals; typos don't compile
 }).pipe(
@@ -609,7 +669,7 @@ const include = ["author"] as const
 const doc =
   yield *
   client.articles
-    .fetch({
+    .get({
       params: { id: Article.Id.make("1") },
       query: { include }
     })

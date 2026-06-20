@@ -19,7 +19,7 @@ export const PageMeta = Schema.Struct({
 export const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
-  Endpoint.fetch(Article, {
+  Endpoint.get(Article, {
     include: true,
     fields: true,
     errors: [ArticleNotFound]
@@ -41,7 +41,7 @@ export const articles = Group.make(
     errors: [ArticleNotFound]
   }),
   // DELETE /articles/:id → 204
-  Endpoint.remove(Article, {
+  Endpoint.delete(Article, {
     errors: [ArticleNotFound]
   }),
   // --- Related resource endpoints --------------------------------------------

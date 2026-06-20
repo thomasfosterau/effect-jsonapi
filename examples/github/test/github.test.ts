@@ -43,7 +43,7 @@ describe("github example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.repositories.fetch({
+        return yield* client.repositories.get({
           params: { id: Repository.Id.make("1") },
           query: {}
         })
@@ -64,7 +64,7 @@ describe("github example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.repositories.fetch({
+        return yield* client.repositories.get({
           params: { id: Repository.Id.make("1") },
           query: { include: ["owner"] }
         })
@@ -78,7 +78,7 @@ describe("github example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.issues.fetch({
+        return yield* client.issues.get({
           params: { id: Issue.Id.make("1") },
           query: { include: ["repository.owner", "author", "labels"] }
         })
@@ -96,7 +96,7 @@ describe("github example: fetching", () => {
       Effect.gen(function* () {
         const client = yield* buildClient
         return yield* client.repositories
-          .fetch({
+          .get({
             params: { id: Repository.Id.make("1") },
             query: { include }
           })
@@ -118,7 +118,7 @@ describe("github example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.pulls.fetch({
+        return yield* client.pulls.get({
           params: { id: PullRequest.Id.make("1") },
           query: { include: ["author", "reviewers"] }
         })
@@ -134,7 +134,7 @@ describe("github example: fetching", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.repositories.fetch({
+        return yield* client.repositories.get({
           params: { id: Repository.Id.make("nope") },
           query: {}
         })
@@ -273,8 +273,8 @@ describe("github example: writing", () => {
         expect(created.data?.attributes.name).toBe("my-new-repo")
         expect(created.data?.relationships?.owner.data?.id).toBe(octocat.id)
 
-        // and remove it again
-        yield* client.repositories.remove({ params: { id: created.data!.id } })
+        // and delete it again
+        yield* client.repositories.delete({ params: { id: created.data!.id } })
       })
     )
   })
@@ -520,7 +520,7 @@ describe("github example: issue triage via relationship endpoints", () => {
           payload: { data: User.ref(hubot.id) }
         })
         // The issue reflects the assignment
-        const issue = yield* client.issues.fetch({ params: { id: bugIssue.id }, query: {} })
+        const issue = yield* client.issues.get({ params: { id: bugIssue.id }, query: {} })
         expect(issue.data?.relationships?.assignee.data?.id).toBe(hubot.id)
         return linkage
       })

@@ -44,7 +44,7 @@ describe("blog example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.articles.fetch({
+        return yield* client.articles.get({
           params: { id: Article.Id.make("1") },
           query: {}
         })
@@ -65,7 +65,7 @@ describe("blog example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.articles.fetch({
+        return yield* client.articles.get({
           params: { id: Article.Id.make("1") },
           query: { include: ["author", "tags"] }
         })
@@ -80,7 +80,7 @@ describe("blog example: fetching", () => {
     const document = await run(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.articles.fetch({
+        return yield* client.articles.get({
           params: { id: Article.Id.make("1") },
           query: {}
         })
@@ -106,7 +106,7 @@ describe("blog example: fetching", () => {
       Effect.gen(function* () {
         const client = yield* buildClient
         return yield* client.articles
-          .fetch({
+          .get({
             params: { id: Article.Id.make("1") },
             query: { include }
           })
@@ -128,7 +128,7 @@ describe("blog example: fetching", () => {
     const exit = await runExit(
       Effect.gen(function* () {
         const client = yield* buildClient
-        return yield* client.articles.fetch({
+        return yield* client.articles.get({
           params: { id: Article.Id.make("nope") },
           query: {}
         })
@@ -208,8 +208,8 @@ describe("blog example: writing", () => {
         // The paginated comments relationship is created empty, links only.
         expect(created.data?.relationships?.comments.links.related).toBe(`/articles/${created.data!.id}/comments`)
 
-        // and remove it again
-        yield* client.articles.remove({ params: { id: created.data!.id } })
+        // and delete it again
+        yield* client.articles.delete({ params: { id: created.data!.id } })
       })
     )
   })
@@ -364,7 +364,7 @@ describe("blog example: relationship endpoints", () => {
           payload: { data: Person.ref(sampleAuthor.id) }
         })
         // The article reflects the change
-        const article = yield* client.articles.fetch({
+        const article = yield* client.articles.get({
           params: { id: Article.Id.make("1") },
           query: {}
         })
