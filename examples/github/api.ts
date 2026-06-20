@@ -126,7 +126,7 @@ export const issues = Group.make(
   }),
   // --- Relationship (linkage) endpoints: issue triage -------------------------
   // GET /issues/:id/relationships/labels — label identifiers
-  Endpoint.fetchRelationship(Issue, "labels", {
+  Endpoint.getRelationship(Issue, "labels", {
     errors: [IssueNotFound]
   }),
   // PATCH /issues/:id/relationships/assignee — assign ({ data: identifier })

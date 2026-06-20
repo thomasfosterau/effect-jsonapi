@@ -13,7 +13,7 @@
  * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
  * | `search`             | `GET /search`                              | —                        | 200, heterogeneous doc     |
  * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
- * | `fetchRelationship`  | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
+ * | `getRelationship`    | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
  * | `updateRelationship` | `PATCH /<type>/:id/relationships/<name>`   | linkage                  | 200, linkage doc           |
  * | `addRelationship`    | `POST /<type>/:id/relationships/<name>`    | linkage (to-many only)   | 200, linkage doc           |
  * | `removeRelationship` | `DELETE /<type>/:id/relationships/<name>`  | linkage (to-many only)   | 204, no content            |
@@ -844,11 +844,11 @@ export const related = <
 }
 
 // ---------------------------------------------------------------------------
-// fetchRelationship — GET /<type>/:id/relationships/<name>
+// getRelationship — GET /<type>/:id/relationships/<name>
 // ---------------------------------------------------------------------------
 
 /**
- * `GET /<type>/:id/relationships/<name>` — fetch a relationship's linkage.
+ * `GET /<type>/:id/relationships/<name>` — get a relationship's linkage.
  *
  * Success is a 200 linkage document: `data` is a single identifier (`one`),
  * an identifier or null (`optional`), or an identifier array (`many` /
@@ -888,7 +888,7 @@ export const related = <
  * const articles = Group.make(
  *   Article,
  *   // GET /articles/:id/relationships/comments?page[offset]=0&page[limit]=10
- *   Endpoint.fetchRelationship(Article, "comments", {
+ *   Endpoint.getRelationship(Article, "comments", {
  *     page: Query.Page.Offset,
  *     errors: [ArticleNotFound]
  *   })
@@ -899,7 +899,7 @@ export const related = <
  * @since 0.1.0
  * @category constructors
  */
-export const fetchRelationship = <
+export const getRelationship = <
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
@@ -1754,7 +1754,7 @@ type GeneratedRelationships<
                 GPage
               >
             | ReturnType<
-                typeof fetchRelationship<
+                typeof getRelationship<
                   Type,
                   Attributes,
                   Rels,
@@ -2171,7 +2171,7 @@ export const resource = <
         )
       )
       endpoints.push(
-        fetchRelationship(
+        getRelationship(
           resource,
           name as never,
           {

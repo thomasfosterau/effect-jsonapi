@@ -60,7 +60,7 @@ export const articles = Group.make(
   }),
   // --- Relationship (linkage) endpoints ---------------------------------------
   // GET /articles/:id/relationships/comments — comment identifiers, paginated
-  Endpoint.fetchRelationship(Article, "comments", {
+  Endpoint.getRelationship(Article, "comments", {
     page: Query.Page.Offset,
     errors: [ArticleNotFound]
   }),

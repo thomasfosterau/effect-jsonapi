@@ -86,7 +86,7 @@ const relatedComments = Endpoint.related(Article, "comments", {
   errors: [ArticleNotFound]
 })
 
-const fetchCommentsRelationship = Endpoint.fetchRelationship(Article, "comments", { errors: [ArticleNotFound] })
+const getCommentsRelationship = Endpoint.getRelationship(Article, "comments", { errors: [ArticleNotFound] })
 
 const updateAuthorRelationship = Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
 
@@ -103,7 +103,7 @@ const articles = Group.make(
   deleteArticle,
   relatedAuthor,
   relatedComments,
-  fetchCommentsRelationship,
+  getCommentsRelationship,
   updateAuthorRelationship,
   addCommentsRelationship,
   removeCommentsRelationship
@@ -399,9 +399,9 @@ describe("relationship endpoint conventions", () => {
   })
 
   it("relationship endpoints derive conventional names, methods and paths", () => {
-    expect(fetchCommentsRelationship.name).toBe("commentsRelationship")
-    expect(fetchCommentsRelationship.method).toBe("GET")
-    expect(fetchCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
+    expect(getCommentsRelationship.name).toBe("commentsRelationship")
+    expect(getCommentsRelationship.method).toBe("GET")
+    expect(getCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
 
     expect(updateAuthorRelationship.name).toBe("updateAuthorRelationship")
     expect(updateAuthorRelationship.method).toBe("PATCH")
@@ -429,7 +429,7 @@ describe("relationship endpoint conventions", () => {
     for (const endpoint of [
       relatedAuthor,
       relatedComments,
-      fetchCommentsRelationship,
+      getCommentsRelationship,
       updateAuthorRelationship,
       addCommentsRelationship,
       removeCommentsRelationship
@@ -458,7 +458,7 @@ describe("relationship endpoint conventions", () => {
     ).toThrow(/Unknown relationship "publisher"/)
     expect(() =>
       // @ts-expect-error -- `publisher` is not a relationship of Article
-      Endpoint.fetchRelationship(Article, "publisher")
+      Endpoint.getRelationship(Article, "publisher")
     ).toThrow(/Unknown relationship "publisher"/)
   })
 
@@ -469,14 +469,14 @@ describe("relationship endpoint conventions", () => {
     expect(catalog.path).toBe("/publishers/:id/catalog")
 
     // ... and their linkage endpoint pages through identifiers.
-    const catalogLinkage = Endpoint.fetchRelationship(Publisher, "catalog", { page: Query.Page.Offset })
+    const catalogLinkage = Endpoint.getRelationship(Publisher, "catalog", { page: Query.Page.Offset })
     expect(catalogLinkage.path).toBe("/publishers/:id/relationships/catalog")
   })
 })
 
 describe("relationship endpoint schemas", () => {
-  it("fetchRelationship success is a linkage document (identifiers, not resources)", () => {
-    const successSchema = [...fetchCommentsRelationship.success][0]!
+  it("getRelationship success is a linkage document (identifiers, not resources)", () => {
+    const successSchema = [...getCommentsRelationship.success][0]!
     const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: [{ type: "comments", id: "5" }]
     }) as { readonly data: ReadonlyArray<{ readonly type: string; readonly id: string }> }

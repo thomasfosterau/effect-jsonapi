@@ -191,7 +191,7 @@ export const employees = Group.make(
   }),
   // --- Relationship (linkage) endpoints: territory assignment -----------------
   // GET /employees/:id/relationships/territories — territory identifiers
-  Endpoint.fetchRelationship(Employee, "territories", {
+  Endpoint.getRelationship(Employee, "territories", {
     errors: [EmployeeNotFound]
   }),
   // PATCH /employees/:id/relationships/territories — replace the full set
@@ -249,7 +249,7 @@ export const orders = Group.make(
   }),
   // --- Relationship (linkage) endpoint ----------------------------------------
   // GET /orders/:id/relationships/shipper — the shipper identifier (or null)
-  Endpoint.fetchRelationship(Order, "shipper", {
+  Endpoint.getRelationship(Order, "shipper", {
     errors: [OrderNotFound]
   }),
   // PATCH /orders/:id/relationships/shipper — assign ({ data: identifier }) or
