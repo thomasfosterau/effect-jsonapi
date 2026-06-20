@@ -86,7 +86,7 @@ const relatedComments = Endpoint.related(Article, "comments", {
   errors: [ArticleNotFound]
 })
 
-const fetchCommentsRelationship = Endpoint.fetchRelationship(Article, "comments", { errors: [ArticleNotFound] })
+const getCommentsRelationship = Endpoint.getRelationship(Article, "comments", { errors: [ArticleNotFound] })
 
 const updateAuthorRelationship = Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
 
@@ -103,7 +103,7 @@ const articles = Group.make(
   deleteArticle,
   relatedAuthor,
   relatedComments,
-  fetchCommentsRelationship,
+  getCommentsRelationship,
   updateAuthorRelationship,
   addCommentsRelationship,
   removeCommentsRelationship
@@ -300,18 +300,20 @@ describe("endpoint conventions", () => {
   })
 
   it("groups can be named directly for heterogeneous endpoints", () => {
-    const group = Group.make("search", Endpoint.search([Article, Person]))
+    const group = Group.make("search", Endpoint.collection([Article, Person], { name: "search", path: "/search" }))
     expect(group.identifier).toBe("search")
     expect(Object.keys(group.endpoints)).toEqual(["search"])
   })
 })
 
 // ---------------------------------------------------------------------------
-// Heterogeneous (search) endpoints
+// Heterogeneous (collection) endpoints
 // ---------------------------------------------------------------------------
 
-describe("Endpoint.search", () => {
-  const searchEndpoint = Endpoint.search([Article, Person], {
+describe("Endpoint.collection", () => {
+  const searchEndpoint = Endpoint.collection([Article, Person], {
+    name: "search",
+    path: "/search",
     include: true,
     fields: true,
     filter: { q: Schema.String },
@@ -319,14 +321,14 @@ describe("Endpoint.search", () => {
     meta: Schema.Struct({ total: Schema.Int })
   })
 
-  it("uses conventional name/path with GET", () => {
+  it("uses the given name/path with GET", () => {
     expect(searchEndpoint.name).toBe("search")
     expect(searchEndpoint.method).toBe("GET")
     expect(searchEndpoint.path).toBe("/search")
   })
 
-  it("allows overriding name and path (e.g. for feeds)", () => {
-    const feed = Endpoint.search([Article, Comment], { name: "feed", path: "/feed" })
+  it("names other heterogeneous collections (e.g. feeds)", () => {
+    const feed = Endpoint.collection([Article, Comment], { name: "feed", path: "/feed" })
     expect(feed.name).toBe("feed")
     expect(feed.path).toBe("/feed")
   })
@@ -399,9 +401,9 @@ describe("relationship endpoint conventions", () => {
   })
 
   it("relationship endpoints derive conventional names, methods and paths", () => {
-    expect(fetchCommentsRelationship.name).toBe("commentsRelationship")
-    expect(fetchCommentsRelationship.method).toBe("GET")
-    expect(fetchCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
+    expect(getCommentsRelationship.name).toBe("commentsRelationship")
+    expect(getCommentsRelationship.method).toBe("GET")
+    expect(getCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
 
     expect(updateAuthorRelationship.name).toBe("updateAuthorRelationship")
     expect(updateAuthorRelationship.method).toBe("PATCH")
@@ -429,7 +431,7 @@ describe("relationship endpoint conventions", () => {
     for (const endpoint of [
       relatedAuthor,
       relatedComments,
-      fetchCommentsRelationship,
+      getCommentsRelationship,
       updateAuthorRelationship,
       addCommentsRelationship,
       removeCommentsRelationship
@@ -458,7 +460,7 @@ describe("relationship endpoint conventions", () => {
     ).toThrow(/Unknown relationship "publisher"/)
     expect(() =>
       // @ts-expect-error -- `publisher` is not a relationship of Article
-      Endpoint.fetchRelationship(Article, "publisher")
+      Endpoint.getRelationship(Article, "publisher")
     ).toThrow(/Unknown relationship "publisher"/)
   })
 
@@ -469,14 +471,14 @@ describe("relationship endpoint conventions", () => {
     expect(catalog.path).toBe("/publishers/:id/catalog")
 
     // ... and their linkage endpoint pages through identifiers.
-    const catalogLinkage = Endpoint.fetchRelationship(Publisher, "catalog", { page: Query.Page.Offset })
+    const catalogLinkage = Endpoint.getRelationship(Publisher, "catalog", { page: Query.Page.Offset })
     expect(catalogLinkage.path).toBe("/publishers/:id/relationships/catalog")
   })
 })
 
 describe("relationship endpoint schemas", () => {
-  it("fetchRelationship success is a linkage document (identifiers, not resources)", () => {
-    const successSchema = [...fetchCommentsRelationship.success][0]!
+  it("getRelationship success is a linkage document (identifiers, not resources)", () => {
+    const successSchema = [...getCommentsRelationship.success][0]!
     const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: [{ type: "comments", id: "5" }]
     }) as { readonly data: ReadonlyArray<{ readonly type: string; readonly id: string }> }

@@ -18,7 +18,7 @@
  * const articles = Group.resource(Article, { errors: [ArticleNotFound] })
  *
  * const search = Group.make("search",
- *   Endpoint.search([Article, Person], { filter: { q: Schema.String } })
+ *   Endpoint.collection([Article, Person], { name: "search", path: "/search", filter: { q: Schema.String } })
  * )
  *
  * const Api = HttpApi.make("blog").add(articles).add(search)
@@ -65,7 +65,7 @@ import type { AttributeKeys, Resource } from "./Resource.js"
  * // A group named after a plain string, for heterogeneous endpoints
  * const search = Group.make(
  *   "search",
- *   Endpoint.search([Article, Person], { filter: { q: Schema.String } })
+ *   Endpoint.collection([Article, Person], { name: "search", path: "/search", filter: { q: Schema.String } })
  * )
  *
  * const Api = HttpApi.make("blog").add(articles).add(search)

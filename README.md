@@ -372,7 +372,7 @@ The spec defines two URL families per relationship; both are first-class:
 | Constructor                   | Method & path                             | Payload               | Success                                                                                                                                  |
 | ----------------------------- | ----------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `Endpoint.related`            | `GET /<type>/:id/<name>`                  | —                     | 200 — the related resource(s) themselves: a single-resource document (to-one) or a collection document with full query support (to-many) |
-| `Endpoint.fetchRelationship`  | `GET /<type>/:id/relationships/<name>`    | —                     | 200 — a linkage document (`data` is identifiers, never full resources)                                                                   |
+| `Endpoint.getRelationship`    | `GET /<type>/:id/relationships/<name>`    | —                     | 200 — a linkage document (`data` is identifiers, never full resources)                                                                   |
 | `Endpoint.updateRelationship` | `PATCH /<type>/:id/relationships/<name>`  | replacement linkage   | 200 — the updated linkage                                                                                                                |
 | `Endpoint.addRelationship`    | `POST /<type>/:id/relationships/<name>`   | identifiers to add    | 200 — the resulting linkage (to-many only)                                                                                               |
 | `Endpoint.removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | identifiers to remove | 204 (to-many only)                                                                                                                       |
@@ -416,14 +416,17 @@ relationship URLs with `Handlers.relationshipLink` / `Handlers.relatedLink` /
 
 ### Heterogeneous endpoints (search, feeds)
 
-`Endpoint.search` builds collection endpoints whose `data` mixes several resource types,
-discriminated by their `type` tags — the natural fit for search results, feeds and timelines:
+`Endpoint.collection` builds collection endpoints whose `data` mixes several resource types,
+discriminated by their `type` tags — the natural fit for search results, feeds and timelines.
+A polymorphic collection has no single owning resource, so `name` and `path` are required:
 
 ```ts
 const search = Group.make(
   "search",
   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
-  Endpoint.search([Article, Person], {
+  Endpoint.collection([Article, Person], {
+    name: "search",
+    path: "/search",
     filter: { q: Schema.String },
     include: true, // include paths span both resources' graphs
     fields: true, // ?fields[articles]= and ?fields[people]=
@@ -711,7 +714,7 @@ the schema-error middleware turns into a spec-compliant **400 JSON:API error doc
 | Create requests may omit `id` and send `lid`                                                                     | `createPayload` derivation                                                                                                                                                                             |
 | Update requests require `id`, attributes are partial                                                             | `updatePayload` derivation                                                                                                                                                                             |
 | Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                                                                     |
-| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.fetchRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships                                                |
+| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships                                                  |
 | Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many                                                                   |
 | Compound documents: no duplicate resources, full linkage                                                         | `Handlers.data` / `Handlers.collection` builders (runtime check)                                                                                                                                       |
 | Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                                                                    |

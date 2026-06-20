@@ -60,7 +60,7 @@ export const articles = Group.make(
   }),
   // --- Relationship (linkage) endpoints ---------------------------------------
   // GET /articles/:id/relationships/comments — comment identifiers, paginated
-  Endpoint.fetchRelationship(Article, "comments", {
+  Endpoint.getRelationship(Article, "comments", {
     page: Query.Page.Offset,
     errors: [ArticleNotFound]
   }),
@@ -85,7 +85,9 @@ export const articles = Group.make(
 export const search = Group.make(
   "search",
   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
-  Endpoint.search([Article, Person], {
+  Endpoint.collection([Article, Person], {
+    name: "search",
+    path: "/search",
     filter: { q: Schema.String },
     include: true,
     fields: true,
