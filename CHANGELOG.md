@@ -1,5 +1,96 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.2.0
+
+### Minor Changes
+
+- 7cb72be: **Breaking:** `Document.DataDocument` is now a pure envelope — its `data` member is exactly the schema you pass, dropping the implicit `Schema.NullOr`. `DataDocument(R)` changes from `data: R | null` to `data: R`.
+
+  JSON:API only permits `null` primary data for a single-resource request whose URL might correspond to a resource but currently doesn't ([§Fetching Resources → 200 OK](https://jsonapi.org/format/1.1/#fetching-resources-responses-200)). Fetch-existing / create (201) / update (200) always carry the resource — a missing one is a `404`, never `200 { data: null }` — so nullability is now the caller's compositional decision rather than something the constructor bakes in:
+
+  ```ts
+  DataDocument(Article); //                  data: Article            (was: Article | null)
+  DataDocument(Schema.NullOr(Article)); //   data: Article | null
+  DataDocument(Article.nullable()); //       data: Option<Article>, ⇆ null on the wire
+  ```
+
+  **Migration:** restore the old shape by wrapping the argument — `DataDocument(Schema.NullOr(R))`. Downstream this lets consumers delete hand-rolled non-null single-resource envelopes (e.g. a website's `ResourceDocument` becomes `Document.DataDocument(wireResource(resource))`).
+
+  Ripple effects:
+
+  - `Resource.document()` and `Endpoint.fetch` / `Endpoint.create` / `Endpoint.update` now produce non-null primary `data` (the canonical single-resource document for an existing resource).
+  - `Endpoint.related` for a to-one relationship keeps the nullable form (`data: target | null`) to preserve the empty-linkage `data: null` case.
+  - New `Resource.nullable()` method on every resource definition — `Article.nullable()` is `Schema.OptionFromNullOr(Article)`, the blessed, spec-clean nullable codec (`None ⇆ null`) for `Document.DataDocument(Article.nullable())`. Prefer it over effect's structural `Schema.Option` (`{ _tag, value }`), which would serialise a non-conformant body.
+
+- 513119f: **Whole-resource endpoint generation:** `Endpoint.resource` and `Group.resource` derive an entire JSON:API endpoint set from a single resource definition — the full CRUD surface plus, for every relationship, the `related` and linkage endpoints appropriate to its kind — with `include` / `fields` / `sort` query parameters derived from the resource graph.
+
+  ```ts
+  // The whole group, fully typed, in one call:
+  const articles = Group.resource(Article, {
+    errors: [ArticleNotFound],
+    page: Query.Page.Offset,
+    // per-endpoint config overrides the top-level defaults:
+    endpoints: {
+      create: { errors: [TitleTaken] },
+      list: { filter: { author: Schema.optionalKey(Schema.String) } },
+    },
+  });
+
+  // Or get the endpoints as a tuple to compose with Group.make:
+  const articles = Group.make(
+    Article,
+    ...Endpoint.resource(Article, { errors: [ArticleNotFound] }),
+    Endpoint.list(Article, {
+      name: "search",
+      path: "/articles/search",
+      filter: { q: Schema.String },
+    }),
+  );
+  ```
+
+  Defaults emit all five CRUD operations and every relationship's endpoints with `include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in, and `errors` is applied uniformly. Everything is overridable, globally or per entry:
+
+  - `endpoints` is an object keyed by operation (`get` / `list` / `create` / `update` / `delete`); each value is `true` (emit with defaults), `false` (omit), or an object configuring that endpoint (its `name` / `path` / `errors` and applicable query / `meta`), overriding the top-level defaults.
+  - `relationships` is `true` (all, default) / `false` (none), or an object keyed by relationship name — each `false` to exclude, or an object to configure that relationship's endpoints. Relationships not mentioned are emitted with the defaults.
+  - `meta` may be a `Schema` (overriding the document meta) or a function `(base) => schema` that _extends_ the resource's base meta rather than replacing it.
+
+  The result is plain `HttpApiEndpoint` / `HttpApiGroup` values, so it composes with everything as before. See `Endpoint.ResourceOptions`.
+
+  **Breaking:** several endpoint constructors are renamed, and the heterogeneous-collection constructor now takes an explicit route.
+
+  - `Endpoint.fetch` → `Endpoint.get` (default endpoint name `"fetch"` → `"get"`).
+  - `Endpoint.remove` → `Endpoint.delete` (default endpoint name `"remove"` → `"delete"`). `delete` is a reserved word, so it is re-exported from an internal implementation; `Endpoint.delete(...)` is the public name.
+  - `Endpoint.fetchRelationship` → `Endpoint.getRelationship` (the relationship-linkage GET, for parity with `Endpoint.get`). The generated endpoint name `<name>Relationship` is unchanged, so handler keys and client methods are unaffected.
+  - `Endpoint.search` → `Endpoint.collection`, and its `name` and `path` are now **required** (the `"search"` / `/search` defaults are removed). A polymorphic collection has no owning resource and so no conventional route; the constructor name no longer presumes "search" (it fits feeds and timelines just as well). The exported `SearchIncluded` type is renamed to `CollectionIncluded`.
+
+  **Migration:** replace `Endpoint.fetch(R, …)` / `Endpoint.remove(R, …)` with `Endpoint.get(R, …)` / `Endpoint.delete(R, …)`, and rename the corresponding handler keys and client methods (`"fetch"` → `"get"`, `"remove"` → `"delete"`). Replace `Endpoint.fetchRelationship(R, …)` with `Endpoint.getRelationship(R, …)` — a rename of the constructor only; its `<name>Relationship` endpoint name (and thus its handler key) is unchanged. Replace `Endpoint.search([…], { … })` with `Endpoint.collection([…], { name: "search", path: "/search", … })` (the explicit `name` / `path` reproduce the old defaults), and rename any `SearchIncluded` references to `CollectionIncluded`. `Endpoint.removeRelationship` is unchanged — it matches the spec's "removing members" terminology and operates on relationship linkage, not whole resources.
+
+- 55f8920: Add `Resource.extend` for subtyping resources, plus accessors for extracting a resource's attributes and relationships.
+
+  ### `Resource.extend` — subtype an existing resource
+
+  `Resource.extend(Base, type, options?)` defines a new resource that inherits the base's attributes and relationships, to which `options` adds more (keys present in `options` override the base's). JSON:API has no native subtyping, so the result is a _distinct_ resource type — its own `type` tag and branded id, with payloads and documents derived afresh — that shares the base's structure. Handy when several resources carry a common set of attributes/relationships defined once. `meta` is inherited from the base unless overridden.
+
+  ```ts
+  const Account = Resource.make("accounts", {
+    attributes: {
+      email: Schema.NonEmptyString,
+      createdAt: Schema.DateFromString,
+    },
+    relationships: { organisation: Relationship.one(() => Organisation) },
+  });
+
+  // `admins` inherits email, createdAt and organisation, adding `permissions`.
+  const Admin = Resource.extend(Account, "admins", {
+    attributes: { permissions: Schema.Array(Schema.String) },
+  });
+  ```
+
+  ### Extracting attributes and relationships
+  - `Resource.attributes(resource)` returns the attribute field map the resource was defined with; spread it into another resource's `attributes` to reuse its schemas.
+  - `Resource.relationships(resource)` returns the relationship descriptor record.
+  - Type-level counterparts `Resource.AttributesOf<R>` and `Resource.RelationshipsOf<R>`, plus `Resource.ExtendedAttributes` / `Resource.ExtendedRelationships` describing the merge `extend` performs.
+
 ## 0.1.0
 
 ### Minor Changes
