@@ -41,7 +41,7 @@ export const articles = Group.make(
     errors: [ArticleNotFound]
   }),
   // DELETE /articles/:id → 204
-  Endpoint.remove(Article, {
+  Endpoint.delete(Article, {
     errors: [ArticleNotFound]
   }),
   // --- Related resource endpoints --------------------------------------------

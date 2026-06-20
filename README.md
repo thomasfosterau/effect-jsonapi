@@ -45,6 +45,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Relationship kinds](#relationship-kinds)
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
+  - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
   - [Atomic operations](#atomic-operations)
@@ -259,7 +260,7 @@ const articles = Group.make(
   // PATCH /articles/:id (partial attributes)
   Endpoint.update(Article, { errors: [ArticleNotFound] }),
   // DELETE /articles/:id → 204
-  Endpoint.remove(Article, { errors: [ArticleNotFound] }),
+  Endpoint.delete(Article, { errors: [ArticleNotFound] }),
   // GET /articles/:id/comments — the paginated related collection
   Endpoint.related(Article, "comments", {
     page: Query.Page.Offset,
@@ -270,6 +271,48 @@ const articles = Group.make(
 )
 
 const Api = HttpApi.make("blog").add(articles)
+```
+
+### Generating a whole group from a resource
+
+Writing out every endpoint is explicit, but repetitive — a resource definition
+already knows its attributes, relationships and graph. `Group.resource` walks
+that definition and emits the entire group: the CRUD surface plus, for every
+relationship, the `related` and linkage endpoints appropriate to its kind, with
+`include` / `fields` / `sort` derived from the graph.
+
+```ts
+// CRUD + every relationship endpoint, fully typed — equivalent to spelling out
+// fetch / list / create / update / delete and each relationship endpoint by hand:
+const articles = Group.resource(Article, {
+  errors: [ArticleNotFound],
+  page: Query.Page.Offset,
+  filter: { author: Schema.optionalKey(Schema.String) }
+})
+
+// A read-only resource: just fetch + list, no relationship endpoints:
+const people = Group.resource(Person, {
+  endpoints: ["fetch", "list"],
+  relationships: false
+})
+```
+
+Defaults emit all five CRUD operations and every relationship's endpoints with
+`include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their
+semantics are application-defined), and `errors` is applied to every generated
+endpoint. Each option is overridable — see `Endpoint.ResourceOptions`.
+
+For finer control — adding a heterogeneous `search`, dropping or replacing an
+individual endpoint — `Endpoint.resource` returns the same endpoints as a plain
+tuple to spread into `Group.make`:
+
+```ts
+const articles = Group.make(
+  Article,
+  ...Endpoint.resource(Article, { errors: [ArticleNotFound] }),
+  // …plus anything else this group should serve
+  Endpoint.list(Article, { name: "search", path: "/articles/search", filter: { q: Schema.String } })
+)
 ```
 
 ### Relationship & related endpoints
@@ -521,7 +564,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       // payload.data.attributes is fully typed; payload.data.lid is supported
       createArticle(payload.data).pipe(Effect.map((article) => Handlers.data(article))))
     .handle("update", ({ params, payload }) => /* … */)
-    .handle("remove", ({ params }) => deleteArticle(params.id))   // void → 204
+    .handle("delete", ({ params }) => deleteArticle(params.id))   // void → 204
 )
 ```
 

@@ -273,8 +273,8 @@ describe("github example: writing", () => {
         expect(created.data?.attributes.name).toBe("my-new-repo")
         expect(created.data?.relationships?.owner.data?.id).toBe(octocat.id)
 
-        // and remove it again
-        yield* client.repositories.remove({ params: { id: created.data!.id } })
+        // and delete it again
+        yield* client.repositories.delete({ params: { id: created.data!.id } })
       })
     )
   })

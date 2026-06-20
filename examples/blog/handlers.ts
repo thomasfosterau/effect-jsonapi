@@ -198,7 +198,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         })
       )
     )
-    .handle("remove", ({ params }) =>
+    .handle("delete", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           store.articles.delete(article.id)

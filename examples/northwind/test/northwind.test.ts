@@ -260,7 +260,7 @@ describe("northwind example: writing", () => {
         expect(created.data?.attributes.name).toBe("Genmaicha")
         expect(created.data?.relationships?.category.data?.id).toBe(beverages.id)
 
-        yield* client.products.remove({ params: { id: created.data!.id } })
+        yield* client.products.delete({ params: { id: created.data!.id } })
       })
     )
   })

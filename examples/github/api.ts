@@ -77,7 +77,7 @@ export const repositories = Group.make(
     errors: [RepositoryNotFound]
   }),
   // DELETE /repositories/:id → 204
-  Endpoint.remove(Repository, {
+  Endpoint.delete(Repository, {
     errors: [RepositoryNotFound]
   }),
   // GET /repositories/:id/owner — the owning user, as a full resource

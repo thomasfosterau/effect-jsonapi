@@ -208,8 +208,8 @@ describe("blog example: writing", () => {
         // The paginated comments relationship is created empty, links only.
         expect(created.data?.relationships?.comments.links.related).toBe(`/articles/${created.data!.id}/comments`)
 
-        // and remove it again
-        yield* client.articles.remove({ params: { id: created.data!.id } })
+        // and delete it again
+        yield* client.articles.delete({ params: { id: created.data!.id } })
       })
     )
   })

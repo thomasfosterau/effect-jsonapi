@@ -155,7 +155,7 @@ export const products = Group.make(
     errors: [ProductNotFound]
   }),
   // DELETE /products/:id → 204
-  Endpoint.remove(Product, {
+  Endpoint.delete(Product, {
     errors: [ProductNotFound]
   }),
   // GET /products/:id/supplier — the supplying company, as a full resource

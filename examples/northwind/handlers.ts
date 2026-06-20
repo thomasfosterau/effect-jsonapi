@@ -631,7 +631,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
         })
       )
     )
-    .handle("remove", ({ params }) =>
+    .handle("delete", ({ params }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) => {
           store.products.delete(product.id)

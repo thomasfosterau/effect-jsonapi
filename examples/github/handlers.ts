@@ -467,7 +467,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
         })
       )
     )
-    .handle("remove", ({ params }) =>
+    .handle("delete", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
           store.repositories.delete(repository.id)

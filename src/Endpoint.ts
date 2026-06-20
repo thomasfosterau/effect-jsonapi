@@ -10,7 +10,7 @@
  * | `list`               | `GET /<type>`                              | —                        | 200, collection doc        |
  * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
  * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
- * | `remove`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
+ * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
  * | `search`             | `GET /search`                              | —                        | 200, heterogeneous doc     |
  * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
  * | `fetchRelationship`  | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
@@ -30,6 +30,11 @@
  *
  * Names and paths follow the conventions above but can be overridden.
  *
+ * For the common case, {@link resource} derives an entire endpoint set — the
+ * CRUD surface plus every relationship's endpoints, with query parameters
+ * derived from the resource graph — from a single resource definition (and
+ * `Group.resource` wraps it into a whole `HttpApiGroup`).
+ *
  * The constructors return plain `HttpApiEndpoint` values: everything composes
  * with vanilla `HttpApiGroup` / `HttpApi` / `HttpApiBuilder` / `HttpApiClient`
  * / `HttpApiTest` / `OpenApi`.
@@ -45,7 +50,16 @@ import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import type { Relationships } from "./Relationship.js"
-import type { Any, AttributeKeys, DefaultIncluded, Resource, Target, TargetsOf, ToManyName } from "./Resource.js"
+import type {
+  Any,
+  AttributeKeys,
+  DefaultIncluded,
+  RelationshipName,
+  Resource,
+  Target,
+  TargetsOf,
+  ToManyName
+} from "./Resource.js"
 import { directTargets } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -423,7 +437,7 @@ export const update = <
     .middleware(SchemaErrors)
 
 // ---------------------------------------------------------------------------
-// remove — DELETE /<type>/:id
+// delete — DELETE /<type>/:id
 // ---------------------------------------------------------------------------
 
 /**
@@ -431,6 +445,10 @@ export const update = <
  *
  * Success is a 204 No Content response, per the spec's recommendation for
  * deletions with no additional information to return.
+ *
+ * Exported as `Endpoint.delete`. Because `delete` is a reserved word it cannot
+ * be a bare `const` binding, so it is re-exported from the internal
+ * `deleteEndpoint` implementation — `Endpoint.delete(...)` is the public name.
  *
  * @example
  * ```ts
@@ -449,26 +467,26 @@ export const update = <
  * const articles = Group.make(
  *   Article,
  *   // DELETE /articles/:id → 204
- *   Endpoint.remove(Article, { errors: [ArticleNotFound] })
+ *   Endpoint.delete(Article, { errors: [ArticleNotFound] })
  * )
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const remove = <
+const deleteEndpoint = <
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Name extends string = "remove",
+  const Name extends string = "delete",
   const Path extends `/${string}` = `/${Type}/:id`
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors>
 ) =>
-  HttpApiEndpoint.delete((options?.name ?? "remove") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+  HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
     success: HttpApiSchema.NoContent,
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -476,6 +494,16 @@ export const remove = <
   })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
+
+export {
+  /**
+   * `DELETE /<type>/:id` — delete a resource. See {@link deleteEndpoint}.
+   *
+   * @since 0.1.0
+   * @category constructors
+   */
+  deleteEndpoint as delete
+}
 
 // ---------------------------------------------------------------------------
 // search — GET <path>, heterogeneous collection
@@ -1306,3 +1334,505 @@ export const operations = <
   })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
+
+// ---------------------------------------------------------------------------
+// resource — generate an entire endpoint set from a resource definition
+// ---------------------------------------------------------------------------
+
+/**
+ * The CRUD operation names {@link resource} can emit, in their conventional
+ * order.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type CrudOperation = "fetch" | "list" | "create" | "update" | "delete"
+
+const DEFAULT_CRUD_OPERATIONS = ["fetch", "list", "create", "update", "delete"] as const
+
+/**
+ * The default CRUD operation set: `fetch`, `list`, `create`, `update`,
+ * `delete`.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type DefaultCrudOperations = typeof DEFAULT_CRUD_OPERATIONS
+
+// Whether the generator-level `sort` option enables sorting at all: `false`
+// only when explicitly disabled, `true` for `true` or an explicit field list.
+type EnabledSort<Sort> = [Sort] extends [false] ? false : true
+
+/**
+ * Configuration for {@link resource} — the whole-resource endpoint generator.
+ *
+ * Every field is optional; the defaults emit the full CRUD set, every
+ * relationship's endpoints, and derived `include` / `fields` / `sort`
+ * parameters.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface ResourceOptions<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Errors extends ReadonlyArray<ErrorClass>,
+  Ops extends ReadonlyArray<CrudOperation>,
+  WithRelationships extends boolean,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  PageFields extends Schema.Struct.Fields | undefined,
+  FilterFields extends Schema.Struct.Fields | undefined,
+  DocMeta extends Schema.Top
+> {
+  /** Which CRUD operations to emit. Defaults to all five (see {@link DefaultCrudOperations}). */
+  readonly endpoints?: Ops
+  /** Whether to emit the relationship endpoints (`related` + linkage CRUD). Defaults to `true`. */
+  readonly relationships?: WithRelationships
+  /** `ApiError` classes applied to every generated endpoint. */
+  readonly errors?: Errors
+  /** Enable `?include=` on the collection-bearing endpoints. Defaults to `true`. */
+  readonly include?: Include
+  /** Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`. */
+  readonly fields?: Fields
+  /** Enable `?sort=`: `true` for all attributes, an explicit list, or `false` to disable. Defaults to `true`. */
+  readonly sort?: Sort
+  /** Enable `?page[*]=` on `list`, to-many `related` and paginated-linkage endpoints (see `Query.Page`). */
+  readonly page?: PageFields
+  /** Enable `?filter[*]=` on `list` (user-defined fields). */
+  readonly filter?: FilterFields
+  /** Override the `meta` schema of the primary-data documents (`fetch` / `list` / `create` / `update`). */
+  readonly meta?: DocMeta
+}
+
+/**
+ * The relationship endpoints {@link resource} emits for a resource: for every
+ * relationship a `related` endpoint, a `fetchRelationship` (linkage) endpoint
+ * and an `updateRelationship` endpoint; for to-many relationships also
+ * `addRelationship` and `removeRelationship`.
+ *
+ * @since 0.1.0
+ * @category type-level
+ */
+export type RelationshipEndpoint<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Errors extends ReadonlyArray<ErrorClass>,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  PageFields extends Schema.Struct.Fields | undefined
+> =
+  | {
+      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta>>]:
+        | (Rels[K] extends Relationship.ToMany<Any>
+            ? ReturnType<
+                typeof related<
+                  Type,
+                  Attributes,
+                  Rels,
+                  Meta,
+                  K,
+                  Errors,
+                  K,
+                  `/${Type}/:id/${K}`,
+                  Include,
+                  Fields,
+                  EnabledSort<Sort>,
+                  PageFields,
+                  undefined,
+                  typeof AnyMeta
+                >
+              >
+            : ReturnType<
+                typeof related<
+                  Type,
+                  Attributes,
+                  Rels,
+                  Meta,
+                  K,
+                  Errors,
+                  K,
+                  `/${Type}/:id/${K}`,
+                  Include,
+                  Fields,
+                  false,
+                  undefined,
+                  undefined,
+                  typeof AnyMeta
+                >
+              >)
+        | ReturnType<
+            typeof fetchRelationship<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              K,
+              Errors,
+              `${K}Relationship`,
+              `/${Type}/:id/relationships/${K}`,
+              Rels[K] extends Relationship.ToMany<Any> ? PageFields : undefined,
+              typeof AnyMeta
+            >
+          >
+        | ReturnType<
+            typeof updateRelationship<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              K,
+              Errors,
+              `update${Capitalize<K>}Relationship`,
+              `/${Type}/:id/relationships/${K}`,
+              typeof AnyMeta
+            >
+          >
+    }[RelationshipName<Resource<Type, Attributes, Rels, Meta>>]
+  | {
+      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta>>]:
+        | ReturnType<
+            typeof addRelationship<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              K,
+              Errors,
+              `add${Capitalize<K>}Relationship`,
+              `/${Type}/:id/relationships/${K}`,
+              typeof AnyMeta
+            >
+          >
+        | ReturnType<
+            typeof removeRelationship<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              K,
+              Errors,
+              `remove${Capitalize<K>}Relationship`,
+              `/${Type}/:id/relationships/${K}`
+            >
+          >
+    }[ToManyName<Resource<Type, Attributes, Rels, Meta>>]
+
+/**
+ * The union of every endpoint {@link resource} emits for a resource and its
+ * configuration: the selected CRUD endpoints plus, unless disabled, the
+ * relationship endpoints.
+ *
+ * @since 0.1.0
+ * @category type-level
+ */
+export type ResourceEndpoint<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Errors extends ReadonlyArray<ErrorClass>,
+  Ops extends ReadonlyArray<CrudOperation>,
+  WithRelationships extends boolean,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  PageFields extends Schema.Struct.Fields | undefined,
+  FilterFields extends Schema.Struct.Fields | undefined,
+  DocMeta extends Schema.Top
+> =
+  | ("fetch" extends Ops[number]
+      ? ReturnType<
+          typeof fetch<Type, Attributes, Rels, Meta, Errors, "fetch", `/${Type}/:id`, Include, Fields, DocMeta>
+        >
+      : never)
+  | ("list" extends Ops[number]
+      ? ReturnType<
+          typeof list<
+            Type,
+            Attributes,
+            Rels,
+            Meta,
+            Errors,
+            "list",
+            `/${Type}`,
+            Include,
+            Fields,
+            Sort,
+            PageFields,
+            FilterFields,
+            DocMeta
+          >
+        >
+      : never)
+  | ("create" extends Ops[number]
+      ? ReturnType<typeof create<Type, Attributes, Rels, Meta, Errors, "create", `/${Type}`, DocMeta>>
+      : never)
+  | ("update" extends Ops[number]
+      ? ReturnType<typeof update<Type, Attributes, Rels, Meta, Errors, "update", `/${Type}/:id`, DocMeta>>
+      : never)
+  | ("delete" extends Ops[number]
+      ? ReturnType<typeof deleteEndpoint<Type, Attributes, Rels, Meta, Errors, "delete", `/${Type}/:id`>>
+      : never)
+  | (WithRelationships extends true
+      ? RelationshipEndpoint<Type, Attributes, Rels, Meta, Errors, Include, Fields, Sort, PageFields>
+      : never)
+
+/**
+ * The non-empty tuple of endpoints {@link resource} returns.
+ *
+ * @since 0.1.0
+ * @category type-level
+ */
+export type ResourceEndpoints<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Errors extends ReadonlyArray<ErrorClass>,
+  Ops extends ReadonlyArray<CrudOperation>,
+  WithRelationships extends boolean,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  PageFields extends Schema.Struct.Fields | undefined,
+  FilterFields extends Schema.Struct.Fields | undefined,
+  DocMeta extends Schema.Top
+> = readonly [
+  ResourceEndpoint<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    Errors,
+    Ops,
+    WithRelationships,
+    Include,
+    Fields,
+    Sort,
+    PageFields,
+    FilterFields,
+    DocMeta
+  >,
+  ...ReadonlyArray<
+    ResourceEndpoint<
+      Type,
+      Attributes,
+      Rels,
+      Meta,
+      Errors,
+      Ops,
+      WithRelationships,
+      Include,
+      Fields,
+      Sort,
+      PageFields,
+      FilterFields,
+      DocMeta
+    >
+  >
+]
+
+/**
+ * Generates the entire JSON:API endpoint set for a resource definition — the
+ * full CRUD surface plus, for every relationship, the `related` and linkage
+ * endpoints appropriate to its kind — with `include`, `fields` and `sort`
+ * query parameters derived from the resource graph.
+ *
+ * The result is a plain tuple of `HttpApiEndpoint` values, ready to spread into
+ * {@link Group.make} (or `Group.resource`, which does exactly that). Trim or
+ * extend it like any array; override individual endpoints by replacing them.
+ *
+ * Defaults (all overridable):
+ *   - emits `fetch`, `list`, `create`, `update`, `delete` (configure with `endpoints`)
+ *   - emits every relationship's endpoints (disable with `relationships: false`)
+ *   - enables `include`, `fields` and `sort` (derived from the graph & attributes)
+ *   - leaves `page` and `filter` off (their semantics are application-defined)
+ *   - applies `errors` uniformly to every generated endpoint
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { HttpApi } from "effect/unstable/httpapi"
+ * import { ApiError, Endpoint, Group, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: {
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.paginated(() => Person)
+ *   }
+ * })
+ *
+ * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
+ *   status: 404,
+ *   fields: { id: Schema.String }
+ * }) {}
+ *
+ * // The full endpoint set, then compose it like any tuple:
+ * const articles = Group.make(
+ *   Article,
+ *   ...Endpoint.resource(Article, {
+ *     errors: [ArticleNotFound],
+ *     page: Query.Page.Offset,
+ *     filter: { author: Schema.optionalKey(Schema.String) }
+ *   })
+ * )
+ *
+ * const Api = HttpApi.make("blog").add(articles)
+ * ```
+ *
+ * @since 0.1.0
+ * @category constructors
+ */
+export const resource = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const Ops extends ReadonlyArray<CrudOperation> = DefaultCrudOperations,
+  const WithRelationships extends boolean = true,
+  const Include extends boolean = true,
+  const Fields extends boolean = true,
+  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
+  const PageFields extends Schema.Struct.Fields | undefined = undefined,
+  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
+  DocMeta extends Schema.Top = Meta
+>(
+  resource: Resource<Type, Attributes, Rels, Meta>,
+  options?: ResourceOptions<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    Errors,
+    Ops,
+    WithRelationships,
+    Include,
+    Fields,
+    Sort,
+    PageFields,
+    FilterFields,
+    DocMeta
+  >
+): ResourceEndpoints<
+  Type,
+  Attributes,
+  Rels,
+  Meta,
+  Errors,
+  Ops,
+  WithRelationships,
+  Include,
+  Fields,
+  Sort,
+  PageFields,
+  FilterFields,
+  DocMeta
+> => {
+  const ops = (options?.endpoints ?? DEFAULT_CRUD_OPERATIONS) as ReadonlyArray<CrudOperation>
+  const withRelationships = options?.relationships ?? true
+  const include = options?.include ?? true
+  const fields = options?.fields ?? true
+  const sort = options?.sort ?? true
+  const page = options?.page
+  const filter = options?.filter
+  const meta = options?.meta
+  const errors = options?.errors
+
+  // Option fragments shared across the underlying constructors.
+  const errorOpt = errors !== undefined ? { errors } : {}
+  const metaOpt = meta !== undefined ? { meta } : {}
+
+  const endpoints: Array<HttpApiEndpoint.Any> = []
+
+  if (ops.includes("fetch")) {
+    endpoints.push(fetch(resource, { include, fields, ...errorOpt, ...metaOpt } as never))
+  }
+  if (ops.includes("list")) {
+    endpoints.push(
+      list(resource, {
+        include,
+        fields,
+        sort,
+        ...(page !== undefined ? { page } : {}),
+        ...(filter !== undefined ? { filter } : {}),
+        ...errorOpt,
+        ...metaOpt
+      } as never)
+    )
+  }
+  if (ops.includes("create")) {
+    endpoints.push(create(resource, { ...errorOpt, ...metaOpt } as never))
+  }
+  if (ops.includes("update")) {
+    endpoints.push(update(resource, { ...errorOpt, ...metaOpt } as never))
+  }
+  if (ops.includes("delete")) {
+    endpoints.push(deleteEndpoint(resource, { ...errorOpt } as never))
+  }
+
+  if (withRelationships) {
+    const relationships = resource.relationships as Record<string, Relationship.Descriptor>
+    for (const name of Object.keys(relationships)) {
+      const toMany = Relationship.isToMany(relationships[name]!)
+      // For to-one relationships `sort` / `page` don't apply (the related URL
+      // serves a single resource); for to-many they do.
+      const relatedSort = sort === false ? false : true
+
+      endpoints.push(
+        related(
+          resource,
+          name as never,
+          {
+            include,
+            fields,
+            ...(toMany ? { sort: relatedSort, ...(page !== undefined ? { page } : {}) } : {}),
+            ...errorOpt
+          } as never
+        )
+      )
+      endpoints.push(
+        fetchRelationship(
+          resource,
+          name as never,
+          {
+            ...(toMany && page !== undefined ? { page } : {}),
+            ...errorOpt
+          } as never
+        )
+      )
+      endpoints.push(updateRelationship(resource, name as never, { ...errorOpt } as never))
+      if (toMany) {
+        endpoints.push(addRelationship(resource, name as never, { ...errorOpt } as never))
+        endpoints.push(removeRelationship(resource, name as never, { ...errorOpt } as never))
+      }
+    }
+  }
+
+  return endpoints as unknown as ResourceEndpoints<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    Errors,
+    Ops,
+    WithRelationships,
+    Include,
+    Fields,
+    Sort,
+    PageFields,
+    FilterFields,
+    DocMeta
+  >
+}
