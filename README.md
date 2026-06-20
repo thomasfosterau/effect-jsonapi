@@ -383,14 +383,17 @@ relationship URLs with `Handlers.relationshipLink` / `Handlers.relatedLink` /
 
 ### Heterogeneous endpoints (search, feeds)
 
-`Endpoint.search` builds collection endpoints whose `data` mixes several resource types,
-discriminated by their `type` tags — the natural fit for search results, feeds and timelines:
+`Endpoint.collection` builds collection endpoints whose `data` mixes several resource types,
+discriminated by their `type` tags — the natural fit for search results, feeds and timelines.
+A polymorphic collection has no single owning resource, so `name` and `path` are required:
 
 ```ts
 const search = Group.make(
   "search",
   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
-  Endpoint.search([Article, Person], {
+  Endpoint.collection([Article, Person], {
+    name: "search",
+    path: "/search",
     filter: { q: Schema.String },
     include: true, // include paths span both resources' graphs
     fields: true, // ?fields[articles]= and ?fields[people]=

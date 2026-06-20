@@ -300,18 +300,20 @@ describe("endpoint conventions", () => {
   })
 
   it("groups can be named directly for heterogeneous endpoints", () => {
-    const group = Group.make("search", Endpoint.search([Article, Person]))
+    const group = Group.make("search", Endpoint.collection([Article, Person], { name: "search", path: "/search" }))
     expect(group.identifier).toBe("search")
     expect(Object.keys(group.endpoints)).toEqual(["search"])
   })
 })
 
 // ---------------------------------------------------------------------------
-// Heterogeneous (search) endpoints
+// Heterogeneous (collection) endpoints
 // ---------------------------------------------------------------------------
 
-describe("Endpoint.search", () => {
-  const searchEndpoint = Endpoint.search([Article, Person], {
+describe("Endpoint.collection", () => {
+  const searchEndpoint = Endpoint.collection([Article, Person], {
+    name: "search",
+    path: "/search",
     include: true,
     fields: true,
     filter: { q: Schema.String },
@@ -319,14 +321,14 @@ describe("Endpoint.search", () => {
     meta: Schema.Struct({ total: Schema.Int })
   })
 
-  it("uses conventional name/path with GET", () => {
+  it("uses the given name/path with GET", () => {
     expect(searchEndpoint.name).toBe("search")
     expect(searchEndpoint.method).toBe("GET")
     expect(searchEndpoint.path).toBe("/search")
   })
 
-  it("allows overriding name and path (e.g. for feeds)", () => {
-    const feed = Endpoint.search([Article, Comment], { name: "feed", path: "/feed" })
+  it("names other heterogeneous collections (e.g. feeds)", () => {
+    const feed = Endpoint.collection([Article, Comment], { name: "feed", path: "/feed" })
     expect(feed.name).toBe("feed")
     expect(feed.path).toBe("/feed")
   })

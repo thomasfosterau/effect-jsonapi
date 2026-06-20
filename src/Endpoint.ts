@@ -11,7 +11,7 @@
  * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
  * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
  * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
- * | `search`             | `GET /search`                              | —                        | 200, heterogeneous doc     |
+ * | `collection`         | `GET <path>`                               | —                        | 200, heterogeneous doc     |
  * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
  * | `getRelationship`    | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
  * | `updateRelationship` | `PATCH /<type>/:id/relationships/<name>`   | linkage                  | 200, linkage doc           |
@@ -506,27 +506,30 @@ export {
 }
 
 // ---------------------------------------------------------------------------
-// search — GET <path>, heterogeneous collection
+// collection — GET <path>, heterogeneous collection
 // ---------------------------------------------------------------------------
 
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 
 /**
- * The default compound `included` union of a heterogeneous endpoint: every
- * resource directly referenced by any of the searched resources'
- * relationships.
+ * The default compound `included` union of a heterogeneous collection
+ * endpoint: every resource directly referenced by any of the member
+ * resources' relationships.
  *
  * @since 0.1.0
  * @category models
  */
-export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Schema.Union<
+export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extends Schema.Union<
   ReadonlyArray<TargetsOf<Resources[number]>>
 > {}
 
 /**
- * `GET /search` (path configurable) — a heterogeneous collection endpoint:
- * `data` is a mixed array of several resource types, discriminated by their
- * `type` tags. The natural fit for search results, feeds and timelines.
+ * A heterogeneous collection endpoint: `data` is a mixed array of several
+ * resource types, discriminated by their `type` tags. The natural fit for
+ * search results, feeds and timelines.
+ *
+ * A polymorphic collection has no single owning resource and thus no
+ * conventional route, so `name` and `path` are required rather than defaulted.
  *
  * Success is a 200 collection document whose `data` member is the union of
  * the given resources and whose `included` union spans all of their
@@ -550,7 +553,9 @@ export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Sc
  * const search = Group.make(
  *   "search",
  *   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
- *   Endpoint.search([Article, Person], {
+ *   Endpoint.collection([Article, Person], {
+ *     name: "search",
+ *     path: "/search",
  *     filter: { q: Schema.String },
  *     include: true,
  *     fields: true,
@@ -565,11 +570,11 @@ export interface SearchIncluded<Resources extends ReadonlyArray<Any>> extends Sc
  * @since 0.1.0
  * @category constructors
  */
-export const search = <
+export const collection = <
   const Resources extends ReadonlyArray<Any>,
+  const Name extends string,
+  const Path extends `/${string}`,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Name extends string = "search",
-  const Path extends `/${string}` = "/search",
   const Include extends boolean = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
@@ -578,7 +583,13 @@ export const search = <
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
   resources: Resources,
-  options?: CommonOptions<Name, Path, Errors> & {
+  options: {
+    /** Endpoint name within its group (required — a polymorphic collection has no conventional name). */
+    readonly name: Name
+    /** Route path, e.g. `/search` or `/feed` (required — a polymorphic collection has no conventional path). */
+    readonly path: Path
+    /** `ApiError` classes this endpoint can fail with. */
+    readonly errors?: Errors
     /** Enable the `?include=` query parameter (paths span all resources' graphs). */
     readonly include?: Include
     /** Enable `?fields[TYPE]=` sparse fieldsets for all resources and their targets. */
@@ -593,7 +604,7 @@ export const search = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get((options?.name ?? "search") as Name, (options?.path ?? "/search") as Path, {
+  HttpApiEndpoint.get(options.name as Name, options.path as Path, {
     query: Query.schema(
       resources as ReadonlyArray<Resources[number]>,
       queryConfig(options) as {
@@ -610,12 +621,12 @@ export const search = <
         // `Resources` is, by construction, a member of `TargetsOf<...>`.
         included: Schema.Union(
           dedupe(resources.flatMap((resource) => directTargets(resource)))
-        ) as unknown as SearchIncluded<Resources>,
-        meta: (options?.meta ?? AnyMeta) as DocMeta
+        ) as unknown as CollectionIncluded<Resources>,
+        meta: (options.meta ?? AnyMeta) as DocMeta
       })
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
+    error: wires(options.errors)
   })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)

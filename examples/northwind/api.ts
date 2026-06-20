@@ -266,7 +266,9 @@ export const orders = Group.make(
 export const search = Group.make(
   "search",
   // GET /search?filter[q]=chai&include=category&page[offset]=0&page[limit]=10
-  Endpoint.search([Product, Customer, Supplier], {
+  Endpoint.collection([Product, Customer, Supplier], {
+    name: "search",
+    path: "/search",
     filter: { q: Schema.String },
     include: true,
     fields: true,

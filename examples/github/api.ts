@@ -175,7 +175,9 @@ export const pulls = Group.make(
 export const search = Group.make(
   "search",
   // GET /search?filter[q]=hello&include=owner&page[offset]=0&page[limit]=10
-  Endpoint.search([Repository, Issue, User], {
+  Endpoint.collection([Repository, Issue, User], {
+    name: "search",
+    path: "/search",
     filter: { q: Schema.String },
     include: true,
     fields: true,
