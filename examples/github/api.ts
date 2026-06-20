@@ -37,7 +37,7 @@ export const PageMeta = Schema.Struct({
 export const users = Group.make(
   User,
   // GET /users/:id
-  Endpoint.fetch(User, {
+  Endpoint.get(User, {
     errors: [UserNotFound]
   }),
   // GET /users?sort=login&page[number]=1&page[size]=30
@@ -51,7 +51,7 @@ export const users = Group.make(
 export const repositories = Group.make(
   Repository,
   // GET /repositories/:id?include=owner&fields[repositories]=name,description
-  Endpoint.fetch(Repository, {
+  Endpoint.get(Repository, {
     include: true,
     fields: true,
     errors: [RepositoryNotFound]
@@ -89,7 +89,7 @@ export const repositories = Group.make(
 export const issues = Group.make(
   Issue,
   // GET /issues/:id?include=author,assignee,labels,repository.owner
-  Endpoint.fetch(Issue, {
+  Endpoint.get(Issue, {
     include: true,
     fields: true,
     errors: [IssueNotFound]
@@ -151,7 +151,7 @@ export const issues = Group.make(
 export const pulls = Group.make(
   PullRequest,
   // GET /pulls/:id?include=author,reviewers,repository
-  Endpoint.fetch(PullRequest, {
+  Endpoint.get(PullRequest, {
     include: true,
     errors: [PullRequestNotFound]
   }),

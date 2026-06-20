@@ -19,7 +19,7 @@ export const PageMeta = Schema.Struct({
 export const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
-  Endpoint.fetch(Article, {
+  Endpoint.get(Article, {
     include: true,
     fields: true,
     errors: [ArticleNotFound]

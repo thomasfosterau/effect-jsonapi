@@ -128,7 +128,7 @@ describe("atomic operations: creating with lids", () => {
         })
 
         const id = created["atomic:results"][0]!.data!.id
-        return yield* client.articles.fetch({ params: { id: Article.Id.make(id) }, query: {} })
+        return yield* client.articles.get({ params: { id: Article.Id.make(id) }, query: {} })
       })
     )
 
@@ -222,7 +222,7 @@ describe("atomic operations: relationship operations", () => {
         const document = yield* client.operations.operations({
           payload: Atomic.request(Atomic.updateRelationship(Article, sampleArticle.id, "tags", []))
         })
-        const after = yield* client.articles.fetch({
+        const after = yield* client.articles.get({
           params: { id: sampleArticle.id },
           query: {}
         })

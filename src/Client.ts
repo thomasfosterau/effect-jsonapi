@@ -7,7 +7,7 @@
  * ```ts
  * const include = ["author", "comments.author"] as const
  *
- * const document = yield* client.articles.fetch({
+ * const document = yield* client.articles.get({
  *   params: { id: Article.Id.make("1") },
  *   query: { include }
  * }).pipe(Client.narrowIncluded(Article, include))
@@ -82,17 +82,17 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  * // `client` is a derived `HttpApiClient` for an api containing the articles group
  * type Client = {
  *   readonly articles: {
- *     readonly fetch: (request: {
+ *     readonly get: (request: {
  *       readonly params: { readonly id: string }
  *       readonly query: { readonly include?: ReadonlyArray<Resource.IncludePath<typeof Article>> }
  *     }) => Effect.Effect<ReturnType<typeof Article.document>["Type"]>
  *   }
  * }
  *
- * const fetchArticle = (client: Client) => {
+ * const getArticle = (client: Client) => {
  *   const include = ["author", "comments.author"] as const
  *   return client.articles
- *     .fetch({ params: { id: "1" }, query: { include } })
+ *     .get({ params: { id: "1" }, query: { include } })
  *     .pipe(Client.narrowIncluded(Article, include))
  *   //   ^ Effect of a document whose `included` is narrowed to the requested
  *   //     resources — unrequested types are excluded from the type.

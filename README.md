@@ -82,7 +82,7 @@ class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound"
 // 3. Build endpoints with the JSON:API conventions baked in.
 const articles = Group.make(
   Article,
-  Endpoint.fetch(Article, { include: true, errors: [ArticleNotFound] }),
+  Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }),
   Endpoint.list(Article, { page: Query.Page.Offset })
 )
 
@@ -93,7 +93,7 @@ const Api = HttpApi.make("blog").add(articles)
 //    own data access returning `Effect`s.)
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))))
+    .handle("get", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))))
     .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => Handlers.collection(items))))
 )
 
@@ -196,7 +196,7 @@ Document.DataDocument(Article.nullable()) //            data: Option<Article>, �
 `Article.nullable()` is `Schema.OptionFromNullOr(Article)` — the spec-clean
 nullable codec (`None ⇆ null`). Avoid effect's _structural_ `Schema.Option`
 (`{ _tag, value }`): it serialises a non-conformant body, and `DataDocument`
-can't tell the two apart. `Article.document()` and `Endpoint.fetch` / `create` /
+can't tell the two apart. `Article.document()` and `Endpoint.get` / `create` /
 `update` use the non-null form; `Endpoint.related` for a to-one relationship
 keeps the nullable form (`data: target | null`) for the empty-linkage case.
 
@@ -242,7 +242,7 @@ One declaration gives you all of:
 const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
-  Endpoint.fetch(Article, {
+  Endpoint.get(Article, {
     include: true,
     fields: true,
     errors: [ArticleNotFound]
@@ -283,24 +283,41 @@ relationship, the `related` and linkage endpoints appropriate to its kind, with
 
 ```ts
 // CRUD + every relationship endpoint, fully typed — equivalent to spelling out
-// fetch / list / create / update / delete and each relationship endpoint by hand:
+// get / list / create / update / delete and each relationship endpoint by hand:
 const articles = Group.resource(Article, {
   errors: [ArticleNotFound],
   page: Query.Page.Offset,
-  filter: { author: Schema.optionalKey(Schema.String) }
+  // Per-endpoint config overrides the top-level defaults; the keys are the CRUD
+  // operations, the values a boolean (emit / omit) or that endpoint's options.
+  endpoints: {
+    create: { errors: [TitleTaken] },
+    list: { filter: { author: Schema.optionalKey(Schema.String) } }
+  }
 })
 
-// A read-only resource: just fetch + list, no relationship endpoints:
+// A read-only resource: just get + list, no relationship endpoints:
 const people = Group.resource(Person, {
-  endpoints: ["fetch", "list"],
+  endpoints: { create: false, update: false, delete: false },
   relationships: false
+})
+
+// Per-relationship config: drop one relationship, re-error another:
+const issues = Group.resource(Issue, {
+  relationships: {
+    comments: false, // omit this relationship's endpoints
+    assignee: { errors: [UserNotFound] } // configure that relationship's endpoints
+  },
+  // `meta` may be a function, *extending* the resource's base meta rather than
+  // replacing it:
+  meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int })
 })
 ```
 
 Defaults emit all five CRUD operations and every relationship's endpoints with
 `include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their
 semantics are application-defined), and `errors` is applied to every generated
-endpoint. Each option is overridable — see `Endpoint.ResourceOptions`.
+endpoint. Every default is overridable, globally or per endpoint / relationship
+— see `Endpoint.ResourceOptions`.
 
 For finer control — adding a heterogeneous `search`, dropping or replacing an
 individual endpoint — `Endpoint.resource` returns the same endpoints as a plain
@@ -538,7 +555,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       //                 ^ params.id is a branded Article id
       //                         ^ query.include / query.fields are typed & validated
       loadArticle(params.id).pipe(
@@ -599,7 +616,7 @@ import { HttpApiClient } from "effect/unstable/httpapi"
 
 const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost:3000" })
 
-const doc = yield* client.articles.fetch({
+const doc = yield* client.articles.get({
   params: { id: Article.Id.make("1") },
   query: { include: ["author"] }     // ← include paths are typed literals; typos don't compile
 }).pipe(
@@ -619,7 +636,7 @@ const include = ["author"] as const
 const doc =
   yield *
   client.articles
-    .fetch({
+    .get({
       params: { id: Article.Id.make("1") },
       query: { include }
     })

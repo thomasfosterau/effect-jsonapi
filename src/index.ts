@@ -34,7 +34,7 @@
  *
  * const articles = Group.make(
  *   Article,
- *   Endpoint.fetch(Article, { include: true }),
+ *   Endpoint.get(Article, { include: true }),
  *   Endpoint.list(Article, { page: Query.Page.Offset })
  * )
  * ```
@@ -74,7 +74,7 @@ export * as Client from "./Client.js"
 export * as Document from "./Document.js"
 
 /**
- * JSON:API endpoint constructors (`Endpoint.fetch`, `Endpoint.list`, …).
+ * JSON:API endpoint constructors (`Endpoint.get`, `Endpoint.list`, …).
  *
  * @since 0.1.0
  */

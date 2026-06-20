@@ -59,7 +59,7 @@ class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound"
 // Endpoints / group / api
 // ---------------------------------------------------------------------------
 
-const fetchArticle = Endpoint.fetch(Article, {
+const fetchArticle = Endpoint.get(Article, {
   include: true,
   fields: true,
   errors: [ArticleNotFound]
@@ -146,7 +146,7 @@ const loadArticle = (id: string): Effect.Effect<typeof Article.Type, ArticleNotF
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => ({
           data: article,
@@ -247,7 +247,7 @@ const withHandlers = <A, E>(effect: Effect.Effect<A, E, any>) =>
 
 describe("endpoint conventions", () => {
   it("derives conventional names, methods and paths", () => {
-    expect(fetchArticle.name).toBe("fetch")
+    expect(fetchArticle.name).toBe("get")
     expect(fetchArticle.method).toBe("GET")
     expect(fetchArticle.path).toBe("/articles/:id")
 
@@ -285,7 +285,7 @@ describe("endpoint conventions", () => {
   it("groups take the resource type as their identifier", () => {
     expect(articles.identifier).toBe("articles")
     expect(Object.keys(articles.endpoints)).toEqual([
-      "fetch",
+      "get",
       "list",
       "create",
       "update",
@@ -620,7 +620,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
       withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient
-          return yield* client.articles.fetch({ params: { id: Article.Id.make("1") }, query: {} })
+          return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} })
         })
       )
     )
@@ -638,7 +638,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
       withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient
-          return yield* client.articles.fetch({
+          return yield* client.articles.get({
             params: { id: Article.Id.make("1") },
             query: { include: ["author"] }
           })
@@ -736,7 +736,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
       withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient
-          return yield* client.articles.fetch({ params: { id: Article.Id.make("missing") }, query: {} })
+          return yield* client.articles.get({ params: { id: Article.Id.make("missing") }, query: {} })
         })
       )
     )
@@ -755,7 +755,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
         Effect.gen(function* () {
           const client = yield* buildClient
           return yield* client.articles
-            .fetch({ params: { id: Article.Id.make("missing") }, query: {} })
+            .get({ params: { id: Article.Id.make("missing") }, query: {} })
             .pipe(Effect.catchTag("ArticleNotFound", (error) => Effect.succeed(`not found: ${error.id}`)))
         })
       )
@@ -769,7 +769,7 @@ describe("HTTP round-trip via HttpApiTest", () => {
       withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient
-          return yield* client.articles.fetch({
+          return yield* client.articles.get({
             params: { id: Article.Id.make("1") },
             // Bypass client-side validation to test the server's response
             query: { include: ["publisher"] } as never
@@ -951,7 +951,7 @@ describe("Endpoint.resource / Group.resource", () => {
   // Article here has `author: optional(Person)` (to-one) and
   // `comments: many(Comment)` (to-many), so the full generated set is:
   const fullEndpointNames = [
-    "fetch",
+    "get",
     "list",
     "create",
     "update",
@@ -1001,14 +1001,77 @@ describe("Endpoint.resource / Group.resource", () => {
     ])
   })
 
-  it("`endpoints` selects CRUD operations; `relationships: false` drops relationship endpoints", () => {
-    const group = Group.resource(Article, { endpoints: ["fetch", "list"], relationships: false })
-    expect(Object.keys(group.endpoints)).toEqual(["fetch", "list"])
+  it("`endpoints` object omits ops set to `false`; `relationships: false` drops relationship endpoints", () => {
+    const group = Group.resource(Article, {
+      endpoints: { create: false, update: false, delete: false },
+      relationships: false
+    })
+    expect(Object.keys(group.endpoints)).toEqual(["get", "list"])
   })
 
   it("`relationships: false` keeps CRUD but drops relationship endpoints", () => {
     const group = Group.resource(Article, { relationships: false })
-    expect(Object.keys(group.endpoints)).toEqual(["fetch", "list", "create", "update", "delete"])
+    expect(Object.keys(group.endpoints)).toEqual(["get", "list", "create", "update", "delete"])
+  })
+
+  it("`endpoints` object can rename/repath and re-error individual endpoints", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        endpoints: {
+          get: { name: "show", path: "/articles/:id/full" },
+          create: { errors: [ArticleNotFound] }
+        }
+      }).map((endpoint) => [endpoint.name, endpoint])
+    )
+    expect(byName.show!.method).toBe("GET")
+    expect(byName.show!.path).toBe("/articles/:id/full")
+    // the renamed endpoint replaces the default "get" name
+    expect(byName.get).toBeUndefined()
+  })
+
+  it("`relationships` object excludes named relationships (others stay)", () => {
+    const group = Group.resource(Article, { relationships: { comments: false } })
+    const keys = Object.keys(group.endpoints)
+    // author relationship endpoints remain; comments' are gone
+    expect(keys).toContain("author")
+    expect(keys).not.toContain("comments")
+    expect(keys).not.toContain("addCommentsRelationship")
+  })
+
+  it("per-endpoint `include: false` removes `?include=` for just that endpoint", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        include: true,
+        endpoints: { get: { include: false } }
+      }).map((endpoint) => [endpoint.name, endpoint])
+    )
+    const getQuery = byName.get!.query as Schema.Codec<unknown, unknown>
+    const listQuery = byName.list!.query as Schema.Codec<unknown, unknown>
+    // list keeps `include`; get dropped it (the param is gone from get's query)
+    expect((Schema.decodeUnknownSync(listQuery)({ include: "author" }) as { include?: unknown }).include).toEqual([
+      "author"
+    ])
+    expect((Schema.decodeUnknownSync(getQuery)({ include: "author" }) as { include?: unknown }).include).toBeUndefined()
+  })
+
+  it("`meta` as a function extends the resource's base meta rather than overriding it", () => {
+    const Widget = Resource("widgets", {
+      attributes: { name: Schema.NonEmptyString },
+      meta: Schema.Struct({ revision: Schema.Int })
+    })
+    const byName = Object.fromEntries(
+      Endpoint.resource(Widget, {
+        relationships: false,
+        meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int })
+      }).map((endpoint) => [endpoint.name, endpoint])
+    )
+    // the list success document's meta now carries both the base `revision` and the added `total`
+    const successSchema = [...byName.list!.success][0]!
+    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+      data: [{ type: "widgets", id: "1", attributes: { name: "Gear" } }],
+      meta: { revision: 3, total: 1 }
+    }) as { readonly meta: { readonly revision: number; readonly total: number } }
+    expect(decoded.meta).toEqual({ revision: 3, total: 1 })
   })
 
   it("round-trips through a fully generated group (every endpoint handled & callable)", async () => {
@@ -1018,7 +1081,7 @@ describe("Endpoint.resource / Group.resource", () => {
 
     const CommentsLive = HttpApiBuilder.group(CommentApi, "comments", (handlers) =>
       handlers
-        .handle("fetch", () => Effect.succeed(Handlers.data(sampleComment)))
+        .handle("get", () => Effect.succeed(Handlers.data(sampleComment)))
         .handle("list", () => Effect.succeed(Handlers.collection([sampleComment])))
         .handle("create", ({ payload }) =>
           Effect.succeed(
@@ -1058,7 +1121,7 @@ describe("Endpoint.resource / Group.resource", () => {
       withComments(
         Effect.gen(function* () {
           const client = yield* HttpApiTest.groups(CommentApi, ["comments"])
-          const fetched = yield* client.comments.fetch({ params: { id: Comment.Id.make("5") }, query: {} })
+          const fetched = yield* client.comments.get({ params: { id: Comment.Id.make("5") }, query: {} })
           const author = yield* client.comments.author({ params: { id: Comment.Id.make("5") }, query: {} })
           const deleted = yield* client.comments.delete({ params: { id: Comment.Id.make("5") } })
           return { fetched, author, deleted }

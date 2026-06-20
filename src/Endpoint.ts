@@ -6,7 +6,7 @@
  *
  * | Constructor          | Method & path                              | Payload                  | Success                    |
  * | -------------------- | ------------------------------------------ | ------------------------ | -------------------------- |
- * | `fetch`              | `GET /<type>/:id`                          | —                        | 200, single-resource doc   |
+ * | `get`                | `GET /<type>/:id`                          | —                        | 200, single-resource doc   |
  * | `list`               | `GET /<type>`                              | —                        | 200, collection doc        |
  * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
  * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
@@ -102,7 +102,7 @@ const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors: Errors | 
  * @category models
  */
 export interface CommonOptions<Name extends string, Path extends `/${string}`, Errors> {
-  /** Endpoint name within its group. Defaults to the operation name (`"fetch"`, `"list"`, …). */
+  /** Endpoint name within its group. Defaults to the operation name (`"get"`, `"list"`, …). */
   readonly name?: Name
   /** Route path. Defaults to the conventional JSON:API path for the operation. */
   readonly path?: Path
@@ -125,7 +125,7 @@ const queryConfig = (options?: {
 })
 
 // ---------------------------------------------------------------------------
-// fetch — GET /<type>/:id
+// get — GET /<type>/:id
 // ---------------------------------------------------------------------------
 
 /**
@@ -167,7 +167,7 @@ const queryConfig = (options?: {
  * const articles = Group.make(
  *   Article,
  *   // GET /articles/:id?include=author&fields[articles]=title
- *   Endpoint.fetch(Article, {
+ *   Endpoint.get(Article, {
  *     include: true,
  *     fields: true,
  *     errors: [ArticleNotFound]
@@ -178,13 +178,13 @@ const queryConfig = (options?: {
  * @since 0.1.0
  * @category constructors
  */
-export const fetch = <
+export const get = <
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Name extends string = "fetch",
+  const Name extends string = "get",
   const Path extends `/${string}` = `/${Type}/:id`,
   const Include extends boolean = false,
   const Fields extends boolean = false,
@@ -200,7 +200,7 @@ export const fetch = <
     readonly meta?: DocMeta
   }
 ) =>
-  HttpApiEndpoint.get((options?.name ?? "fetch") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+  HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
     query: Query.schema(
       resource,
@@ -1340,28 +1340,562 @@ export const operations = <
 // ---------------------------------------------------------------------------
 
 /**
- * The CRUD operation names {@link resource} can emit, in their conventional
- * order.
+ * The CRUD operation names {@link resource} can emit.
  *
  * @since 0.1.0
  * @category models
  */
-export type CrudOperation = "fetch" | "list" | "create" | "update" | "delete"
-
-const DEFAULT_CRUD_OPERATIONS = ["fetch", "list", "create", "update", "delete"] as const
+export type CrudOperation = "get" | "list" | "create" | "update" | "delete"
 
 /**
- * The default CRUD operation set: `fetch`, `list`, `create`, `update`,
- * `delete`.
+ * A `meta` option for a generated document: a `Schema` (overriding the meta
+ * schema) or a function that builds one from the resource's base meta schema
+ * (extending rather than replacing it).
  *
  * @since 0.1.0
  * @category models
  */
-export type DefaultCrudOperations = typeof DEFAULT_CRUD_OPERATIONS
+export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => Schema.Top)
 
-// Whether the generator-level `sort` option enables sorting at all: `false`
-// only when explicitly disabled, `true` for `true` or an explicit field list.
+/**
+ * Per-endpoint configuration for the read-one (`get`) endpoint.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface GetConfig<Meta extends Schema.Top> {
+  readonly name?: string
+  readonly path?: `/${string}`
+  readonly errors?: ReadonlyArray<ErrorClass>
+  readonly include?: boolean
+  readonly fields?: boolean
+  readonly meta?: MetaOption<Meta>
+}
+
+/**
+ * Per-endpoint configuration for the collection (`list`) endpoint.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta> {
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
+  readonly page?: Schema.Struct.Fields
+  readonly filter?: Schema.Struct.Fields
+}
+
+/**
+ * Per-endpoint configuration for the `create` / `update` endpoints.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface WriteConfig<Meta extends Schema.Top> {
+  readonly name?: string
+  readonly path?: `/${string}`
+  readonly errors?: ReadonlyArray<ErrorClass>
+  readonly meta?: MetaOption<Meta>
+}
+
+/**
+ * Per-endpoint configuration for the `delete` endpoint.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface DeleteConfig {
+  readonly name?: string
+  readonly path?: `/${string}`
+  readonly errors?: ReadonlyArray<ErrorClass>
+}
+
+/**
+ * The `endpoints` option: an object keyed by CRUD operation. Each value is
+ * `true` (emit with the top-level defaults), `false` (omit), or an object
+ * configuring that endpoint (overriding the top-level defaults). Operations
+ * not mentioned are emitted with the defaults.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
+  readonly get?: boolean | GetConfig<Meta>
+  readonly list?: boolean | ListConfig<R, Meta>
+  readonly create?: boolean | WriteConfig<Meta>
+  readonly update?: boolean | WriteConfig<Meta>
+  readonly delete?: boolean | DeleteConfig
+}
+
+/**
+ * Per-relationship configuration for a relationship's generated endpoints.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export interface RelationshipConfig {
+  readonly errors?: ReadonlyArray<ErrorClass>
+  readonly include?: boolean
+  readonly fields?: boolean
+  readonly sort?: boolean
+  readonly page?: Schema.Struct.Fields
+}
+
+/**
+ * The `relationships` option: `true` (all relationships, the default) or
+ * `false` (none) as a shorthand, or an object keyed by relationship name —
+ * each `false` to exclude that relationship, or an object to configure its
+ * endpoints. Relationships not mentioned are emitted with the top-level
+ * defaults.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type RelationshipsOption<R extends Any> =
+  | boolean
+  | { readonly [K in RelationshipName<R>]?: boolean | RelationshipConfig }
+
+// --- extraction helpers (config objects are captured via `const`) ----------
+
+// The captured config object for CRUD op `Op` (or `{}` when absent / boolean).
+type ConfigObject<E, Op extends string> = E extends undefined
+  ? {}
+  : Op extends keyof E
+    ? NonNullable<E[Op]> extends infer V
+      ? V extends boolean
+        ? {}
+        : V
+      : {}
+    : {}
+
+// Field `K` of config object `C`, else fallback `F`.
+type FieldOr<C, K extends string, F> = K extends keyof C ? Exclude<C[K], undefined> : F
+
+// Whether CRUD op `Op` is emitted: absent → emit; `false` → omit; else emit.
+type EmitOp<E, Op extends string> = E extends undefined
+  ? true
+  : Op extends keyof E
+    ? NonNullable<E[Op]> extends false
+      ? false
+      : true
+    : true
+
+// The captured config object for relationship `K` (or `{}`).
+type RelConfigObject<RO, K extends string> = RO extends boolean
+  ? {}
+  : RO extends undefined
+    ? {}
+    : K extends keyof RO
+      ? NonNullable<RO[K]> extends infer V
+        ? V extends boolean
+          ? {}
+          : V
+        : {}
+      : {}
+
+// Whether relationship `K` is emitted.
+type EmitRel<RO, K extends string> = RO extends false
+  ? false
+  : RO extends true
+    ? true
+    : RO extends undefined
+      ? true
+      : K extends keyof RO
+        ? NonNullable<RO[K]> extends false
+          ? false
+          : true
+        : true
+
+// Resolve a meta option (schema or function) to its effective schema type.
+type ResolveMeta<M, Meta extends Schema.Top> = [M] extends [(...args: any) => infer Ret]
+  ? Ret extends Schema.Top
+    ? Ret
+    : Meta
+  : M extends Schema.Top
+    ? M
+    : Meta
+
+type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta", GMeta>, Meta>
+
+// Whether `sort` is enabled at all: `false` only when explicitly disabled.
 type EnabledSort<Sort> = [Sort] extends [false] ? false : true
+
+// --- the effective generated endpoint types --------------------------------
+
+type GeneratedGet<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  E,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  GInclude extends boolean,
+  GFields extends boolean,
+  GMeta,
+  C = ConfigObject<E, "get">
+> =
+  EmitOp<E, "get"> extends true
+    ? ReturnType<
+        typeof get<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "name", "get"> extends string ? FieldOr<C, "name", "get"> : "get",
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude,
+          FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields,
+          EffMeta<C, GMeta, Meta>
+        >
+      >
+    : never
+
+type GeneratedList<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  E,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  GInclude extends boolean,
+  GFields extends boolean,
+  GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  GPage extends Schema.Struct.Fields | undefined,
+  GFilter extends Schema.Struct.Fields | undefined,
+  GMeta,
+  C = ConfigObject<E, "list">
+> =
+  EmitOp<E, "list"> extends true
+    ? ReturnType<
+        typeof list<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "name", "list"> extends string ? FieldOr<C, "name", "list"> : "list",
+          FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
+          FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude,
+          FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields,
+          FieldOr<C, "sort", GSort> extends
+            | boolean
+            | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>
+            ? FieldOr<C, "sort", GSort>
+            : GSort,
+          FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage,
+          FieldOr<C, "filter", GFilter> extends Schema.Struct.Fields | undefined
+            ? FieldOr<C, "filter", GFilter>
+            : GFilter,
+          EffMeta<C, GMeta, Meta>
+        >
+      >
+    : never
+
+type GeneratedCreate<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  E,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  GMeta,
+  C = ConfigObject<E, "create">
+> =
+  EmitOp<E, "create"> extends true
+    ? ReturnType<
+        typeof create<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "name", "create"> extends string ? FieldOr<C, "name", "create"> : "create",
+          FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
+          EffMeta<C, GMeta, Meta>
+        >
+      >
+    : never
+
+type GeneratedUpdate<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  E,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  GMeta,
+  C = ConfigObject<E, "update">
+> =
+  EmitOp<E, "update"> extends true
+    ? ReturnType<
+        typeof update<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "name", "update"> extends string ? FieldOr<C, "name", "update"> : "update",
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          EffMeta<C, GMeta, Meta>
+        >
+      >
+    : never
+
+type GeneratedDelete<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  E,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  C = ConfigObject<E, "delete">
+> =
+  EmitOp<E, "delete"> extends true
+    ? ReturnType<
+        typeof deleteEndpoint<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "name", "delete"> extends string ? FieldOr<C, "name", "delete"> : "delete",
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`
+        >
+      >
+    : never
+
+// per-relationship effective option helpers
+type RelErrors<RC, GErrors extends ReadonlyArray<ErrorClass>> =
+  FieldOr<RC, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<RC, "errors", GErrors> : GErrors
+type RelInclude<RC, GInclude extends boolean> =
+  FieldOr<RC, "include", GInclude> extends boolean ? FieldOr<RC, "include", GInclude> : GInclude
+type RelFields<RC, GFields extends boolean> =
+  FieldOr<RC, "fields", GFields> extends boolean ? FieldOr<RC, "fields", GFields> : GFields
+type RelPage<RC, GPage extends Schema.Struct.Fields | undefined> =
+  FieldOr<RC, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<RC, "page", GPage> : GPage
+
+type GeneratedRelated<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  K extends RelationshipName<Resource<Type, Attributes, Rels, Meta>>,
+  RC,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  GInclude extends boolean,
+  GFields extends boolean,
+  GSort,
+  GPage extends Schema.Struct.Fields | undefined
+> =
+  Rels[K] extends Relationship.ToMany<Any>
+    ? ReturnType<
+        typeof related<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          K,
+          RelErrors<RC, GErrors>,
+          K,
+          `/${Type}/:id/${K}`,
+          RelInclude<RC, GInclude>,
+          RelFields<RC, GFields>,
+          EnabledSort<FieldOr<RC, "sort", GSort>>,
+          RelPage<RC, GPage>,
+          undefined,
+          typeof AnyMeta
+        >
+      >
+    : ReturnType<
+        typeof related<
+          Type,
+          Attributes,
+          Rels,
+          Meta,
+          K,
+          RelErrors<RC, GErrors>,
+          K,
+          `/${Type}/:id/${K}`,
+          RelInclude<RC, GInclude>,
+          RelFields<RC, GFields>,
+          false,
+          undefined,
+          undefined,
+          typeof AnyMeta
+        >
+      >
+
+type GeneratedRelationships<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  RO,
+  GErrors extends ReadonlyArray<ErrorClass>,
+  GInclude extends boolean,
+  GFields extends boolean,
+  GSort,
+  GPage extends Schema.Struct.Fields | undefined
+> =
+  | {
+      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta>>]: EmitRel<RO, K> extends true
+        ?
+            | GeneratedRelated<
+                Type,
+                Attributes,
+                Rels,
+                Meta,
+                K,
+                RelConfigObject<RO, K>,
+                GErrors,
+                GInclude,
+                GFields,
+                GSort,
+                GPage
+              >
+            | ReturnType<
+                typeof fetchRelationship<
+                  Type,
+                  Attributes,
+                  Rels,
+                  Meta,
+                  K,
+                  RelErrors<RelConfigObject<RO, K>, GErrors>,
+                  `${K}Relationship`,
+                  `/${Type}/:id/relationships/${K}`,
+                  Rels[K] extends Relationship.ToMany<Any> ? RelPage<RelConfigObject<RO, K>, GPage> : undefined,
+                  typeof AnyMeta
+                >
+              >
+            | ReturnType<
+                typeof updateRelationship<
+                  Type,
+                  Attributes,
+                  Rels,
+                  Meta,
+                  K,
+                  RelErrors<RelConfigObject<RO, K>, GErrors>,
+                  `update${Capitalize<K>}Relationship`,
+                  `/${Type}/:id/relationships/${K}`,
+                  typeof AnyMeta
+                >
+              >
+        : never
+    }[RelationshipName<Resource<Type, Attributes, Rels, Meta>>]
+  | {
+      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta>>]: EmitRel<RO, K> extends true
+        ?
+            | ReturnType<
+                typeof addRelationship<
+                  Type,
+                  Attributes,
+                  Rels,
+                  Meta,
+                  K,
+                  RelErrors<RelConfigObject<RO, K>, GErrors>,
+                  `add${Capitalize<K>}Relationship`,
+                  `/${Type}/:id/relationships/${K}`,
+                  typeof AnyMeta
+                >
+              >
+            | ReturnType<
+                typeof removeRelationship<
+                  Type,
+                  Attributes,
+                  Rels,
+                  Meta,
+                  K,
+                  RelErrors<RelConfigObject<RO, K>, GErrors>,
+                  `remove${Capitalize<K>}Relationship`,
+                  `/${Type}/:id/relationships/${K}`
+                >
+              >
+        : never
+    }[ToManyName<Resource<Type, Attributes, Rels, Meta>>]
+
+/**
+ * The union of every endpoint {@link resource} emits for a resource and its
+ * configuration.
+ *
+ * @since 0.1.0
+ * @category type-level
+ */
+export type ResourceEndpoint<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Endpoints,
+  RelationshipsOpt,
+  Errors extends ReadonlyArray<ErrorClass>,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  Page extends Schema.Struct.Fields | undefined,
+  Filter extends Schema.Struct.Fields | undefined,
+  GMeta
+> =
+  | GeneratedGet<Type, Attributes, Rels, Meta, Endpoints, Errors, Include, Fields, GMeta>
+  | GeneratedList<Type, Attributes, Rels, Meta, Endpoints, Errors, Include, Fields, Sort, Page, Filter, GMeta>
+  | GeneratedCreate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
+  | GeneratedUpdate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
+  | GeneratedDelete<Type, Attributes, Rels, Meta, Endpoints, Errors>
+  | GeneratedRelationships<Type, Attributes, Rels, Meta, RelationshipsOpt, Errors, Include, Fields, Sort, Page>
+
+/**
+ * The non-empty tuple of endpoints {@link resource} returns.
+ *
+ * @since 0.1.0
+ * @category type-level
+ */
+export type ResourceEndpoints<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Endpoints,
+  RelationshipsOpt,
+  Errors extends ReadonlyArray<ErrorClass>,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  Page extends Schema.Struct.Fields | undefined,
+  Filter extends Schema.Struct.Fields | undefined,
+  GMeta
+> = readonly [
+  ResourceEndpoint<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    Endpoints,
+    RelationshipsOpt,
+    Errors,
+    Include,
+    Fields,
+    Sort,
+    Page,
+    Filter,
+    GMeta
+  >,
+  ...ReadonlyArray<
+    ResourceEndpoint<
+      Type,
+      Attributes,
+      Rels,
+      Meta,
+      Endpoints,
+      RelationshipsOpt,
+      Errors,
+      Include,
+      Fields,
+      Sort,
+      Page,
+      Filter,
+      GMeta
+    >
+  >
+]
 
 /**
  * Configuration for {@link resource} — the whole-resource endpoint generator.
@@ -1378,21 +1912,21 @@ export interface ResourceOptions<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta>,
+  RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>>,
   Errors extends ReadonlyArray<ErrorClass>,
-  Ops extends ReadonlyArray<CrudOperation>,
-  WithRelationships extends boolean,
   Include extends boolean,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
-  PageFields extends Schema.Struct.Fields | undefined,
-  FilterFields extends Schema.Struct.Fields | undefined,
-  DocMeta extends Schema.Top
+  Page extends Schema.Struct.Fields | undefined,
+  Filter extends Schema.Struct.Fields | undefined,
+  GMeta extends Schema.Top
 > {
-  /** Which CRUD operations to emit. Defaults to all five (see {@link DefaultCrudOperations}). */
-  readonly endpoints?: Ops
-  /** Whether to emit the relationship endpoints (`related` + linkage CRUD). Defaults to `true`. */
-  readonly relationships?: WithRelationships
-  /** `ApiError` classes applied to every generated endpoint. */
+  /** Which CRUD endpoints to emit and how to configure each. Defaults to all five. */
+  readonly endpoints?: Endpoints
+  /** Which relationships' endpoints to emit. `true` (all, default) / `false` (none) or a per-relationship object. */
+  readonly relationships?: RelationshipsOpt
+  /** `ApiError` classes applied to every generated endpoint (overridable per endpoint / relationship). */
   readonly errors?: Errors
   /** Enable `?include=` on the collection-bearing endpoints. Defaults to `true`. */
   readonly include?: Include
@@ -1401,243 +1935,19 @@ export interface ResourceOptions<
   /** Enable `?sort=`: `true` for all attributes, an explicit list, or `false` to disable. Defaults to `true`. */
   readonly sort?: Sort
   /** Enable `?page[*]=` on `list`, to-many `related` and paginated-linkage endpoints (see `Query.Page`). */
-  readonly page?: PageFields
+  readonly page?: Page
   /** Enable `?filter[*]=` on `list` (user-defined fields). */
-  readonly filter?: FilterFields
-  /** Override the `meta` schema of the primary-data documents (`fetch` / `list` / `create` / `update`). */
-  readonly meta?: DocMeta
+  readonly filter?: Filter
+  /**
+   * The `meta` schema of the primary-data documents (`get` / `list` / `create`
+   * / `update`): a `Schema` (overriding it) or a function `(base) => schema`
+   * (extending the resource's base meta rather than replacing it).
+   */
+  readonly meta?: GMeta | ((base: Meta) => GMeta)
 }
 
-/**
- * The relationship endpoints {@link resource} emits for a resource: for every
- * relationship a `related` endpoint, a `fetchRelationship` (linkage) endpoint
- * and an `updateRelationship` endpoint; for to-many relationships also
- * `addRelationship` and `removeRelationship`.
- *
- * @since 0.1.0
- * @category type-level
- */
-export type RelationshipEndpoint<
-  Type extends string,
-  Attributes extends Schema.Struct.Fields,
-  Rels extends Relationships,
-  Meta extends Schema.Top,
-  Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
-  Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
-  PageFields extends Schema.Struct.Fields | undefined
-> =
-  | {
-      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta>>]:
-        | (Rels[K] extends Relationship.ToMany<Any>
-            ? ReturnType<
-                typeof related<
-                  Type,
-                  Attributes,
-                  Rels,
-                  Meta,
-                  K,
-                  Errors,
-                  K,
-                  `/${Type}/:id/${K}`,
-                  Include,
-                  Fields,
-                  EnabledSort<Sort>,
-                  PageFields,
-                  undefined,
-                  typeof AnyMeta
-                >
-              >
-            : ReturnType<
-                typeof related<
-                  Type,
-                  Attributes,
-                  Rels,
-                  Meta,
-                  K,
-                  Errors,
-                  K,
-                  `/${Type}/:id/${K}`,
-                  Include,
-                  Fields,
-                  false,
-                  undefined,
-                  undefined,
-                  typeof AnyMeta
-                >
-              >)
-        | ReturnType<
-            typeof fetchRelationship<
-              Type,
-              Attributes,
-              Rels,
-              Meta,
-              K,
-              Errors,
-              `${K}Relationship`,
-              `/${Type}/:id/relationships/${K}`,
-              Rels[K] extends Relationship.ToMany<Any> ? PageFields : undefined,
-              typeof AnyMeta
-            >
-          >
-        | ReturnType<
-            typeof updateRelationship<
-              Type,
-              Attributes,
-              Rels,
-              Meta,
-              K,
-              Errors,
-              `update${Capitalize<K>}Relationship`,
-              `/${Type}/:id/relationships/${K}`,
-              typeof AnyMeta
-            >
-          >
-    }[RelationshipName<Resource<Type, Attributes, Rels, Meta>>]
-  | {
-      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta>>]:
-        | ReturnType<
-            typeof addRelationship<
-              Type,
-              Attributes,
-              Rels,
-              Meta,
-              K,
-              Errors,
-              `add${Capitalize<K>}Relationship`,
-              `/${Type}/:id/relationships/${K}`,
-              typeof AnyMeta
-            >
-          >
-        | ReturnType<
-            typeof removeRelationship<
-              Type,
-              Attributes,
-              Rels,
-              Meta,
-              K,
-              Errors,
-              `remove${Capitalize<K>}Relationship`,
-              `/${Type}/:id/relationships/${K}`
-            >
-          >
-    }[ToManyName<Resource<Type, Attributes, Rels, Meta>>]
-
-/**
- * The union of every endpoint {@link resource} emits for a resource and its
- * configuration: the selected CRUD endpoints plus, unless disabled, the
- * relationship endpoints.
- *
- * @since 0.1.0
- * @category type-level
- */
-export type ResourceEndpoint<
-  Type extends string,
-  Attributes extends Schema.Struct.Fields,
-  Rels extends Relationships,
-  Meta extends Schema.Top,
-  Errors extends ReadonlyArray<ErrorClass>,
-  Ops extends ReadonlyArray<CrudOperation>,
-  WithRelationships extends boolean,
-  Include extends boolean,
-  Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
-  PageFields extends Schema.Struct.Fields | undefined,
-  FilterFields extends Schema.Struct.Fields | undefined,
-  DocMeta extends Schema.Top
-> =
-  | ("fetch" extends Ops[number]
-      ? ReturnType<
-          typeof fetch<Type, Attributes, Rels, Meta, Errors, "fetch", `/${Type}/:id`, Include, Fields, DocMeta>
-        >
-      : never)
-  | ("list" extends Ops[number]
-      ? ReturnType<
-          typeof list<
-            Type,
-            Attributes,
-            Rels,
-            Meta,
-            Errors,
-            "list",
-            `/${Type}`,
-            Include,
-            Fields,
-            Sort,
-            PageFields,
-            FilterFields,
-            DocMeta
-          >
-        >
-      : never)
-  | ("create" extends Ops[number]
-      ? ReturnType<typeof create<Type, Attributes, Rels, Meta, Errors, "create", `/${Type}`, DocMeta>>
-      : never)
-  | ("update" extends Ops[number]
-      ? ReturnType<typeof update<Type, Attributes, Rels, Meta, Errors, "update", `/${Type}/:id`, DocMeta>>
-      : never)
-  | ("delete" extends Ops[number]
-      ? ReturnType<typeof deleteEndpoint<Type, Attributes, Rels, Meta, Errors, "delete", `/${Type}/:id`>>
-      : never)
-  | (WithRelationships extends true
-      ? RelationshipEndpoint<Type, Attributes, Rels, Meta, Errors, Include, Fields, Sort, PageFields>
-      : never)
-
-/**
- * The non-empty tuple of endpoints {@link resource} returns.
- *
- * @since 0.1.0
- * @category type-level
- */
-export type ResourceEndpoints<
-  Type extends string,
-  Attributes extends Schema.Struct.Fields,
-  Rels extends Relationships,
-  Meta extends Schema.Top,
-  Errors extends ReadonlyArray<ErrorClass>,
-  Ops extends ReadonlyArray<CrudOperation>,
-  WithRelationships extends boolean,
-  Include extends boolean,
-  Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
-  PageFields extends Schema.Struct.Fields | undefined,
-  FilterFields extends Schema.Struct.Fields | undefined,
-  DocMeta extends Schema.Top
-> = readonly [
-  ResourceEndpoint<
-    Type,
-    Attributes,
-    Rels,
-    Meta,
-    Errors,
-    Ops,
-    WithRelationships,
-    Include,
-    Fields,
-    Sort,
-    PageFields,
-    FilterFields,
-    DocMeta
-  >,
-  ...ReadonlyArray<
-    ResourceEndpoint<
-      Type,
-      Attributes,
-      Rels,
-      Meta,
-      Errors,
-      Ops,
-      WithRelationships,
-      Include,
-      Fields,
-      Sort,
-      PageFields,
-      FilterFields,
-      DocMeta
-    >
-  >
-]
+const pick = (config: Record<string, unknown>, key: string, fallback: unknown): unknown =>
+  key in config ? config[key] : fallback
 
 /**
  * Generates the entire JSON:API endpoint set for a resource definition — the
@@ -1650,11 +1960,11 @@ export type ResourceEndpoints<
  * extend it like any array; override individual endpoints by replacing them.
  *
  * Defaults (all overridable):
- *   - emits `fetch`, `list`, `create`, `update`, `delete` (configure with `endpoints`)
- *   - emits every relationship's endpoints (disable with `relationships: false`)
+ *   - emits `get`, `list`, `create`, `update`, `delete` (configure with `endpoints`)
+ *   - emits every relationship's endpoints (configure with `relationships`)
  *   - enables `include`, `fields` and `sort` (derived from the graph & attributes)
  *   - leaves `page` and `filter` off (their semantics are application-defined)
- *   - applies `errors` uniformly to every generated endpoint
+ *   - applies `errors` to every generated endpoint, overridable per endpoint / relationship
  *
  * @example
  * ```ts
@@ -1677,14 +1987,21 @@ export type ResourceEndpoints<
  *   status: 404,
  *   fields: { id: Schema.String }
  * }) {}
+ * class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {
+ *   status: 409,
+ *   fields: { title: Schema.String }
+ * }) {}
  *
- * // The full endpoint set, then compose it like any tuple:
  * const articles = Group.make(
  *   Article,
  *   ...Endpoint.resource(Article, {
  *     errors: [ArticleNotFound],
  *     page: Query.Page.Offset,
- *     filter: { author: Schema.optionalKey(Schema.String) }
+ *     // per-endpoint config overrides the top-level defaults:
+ *     endpoints: {
+ *       create: { errors: [TitleTaken] },
+ *       list: { filter: { author: Schema.optionalKey(Schema.String) } }
+ *     }
  *   })
  * )
  *
@@ -1699,15 +2016,15 @@ export const resource = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
+  const RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Ops extends ReadonlyArray<CrudOperation> = DefaultCrudOperations,
-  const WithRelationships extends boolean = true,
   const Include extends boolean = true,
   const Fields extends boolean = true,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
-  const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
-  DocMeta extends Schema.Top = Meta
+  const Page extends Schema.Struct.Fields | undefined = undefined,
+  const Filter extends Schema.Struct.Fields | undefined = undefined,
+  const GMeta extends Schema.Top = Meta
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: ResourceOptions<
@@ -1715,80 +2032,131 @@ export const resource = <
     Attributes,
     Rels,
     Meta,
+    Endpoints,
+    RelationshipsOpt,
     Errors,
-    Ops,
-    WithRelationships,
     Include,
     Fields,
     Sort,
-    PageFields,
-    FilterFields,
-    DocMeta
+    Page,
+    Filter,
+    GMeta
   >
 ): ResourceEndpoints<
   Type,
   Attributes,
   Rels,
   Meta,
+  Endpoints,
+  RelationshipsOpt,
   Errors,
-  Ops,
-  WithRelationships,
   Include,
   Fields,
   Sort,
-  PageFields,
-  FilterFields,
-  DocMeta
+  Page,
+  Filter,
+  GMeta
 > => {
-  const ops = (options?.endpoints ?? DEFAULT_CRUD_OPERATIONS) as ReadonlyArray<CrudOperation>
-  const withRelationships = options?.relationships ?? true
-  const include = options?.include ?? true
-  const fields = options?.fields ?? true
-  const sort = options?.sort ?? true
-  const page = options?.page
-  const filter = options?.filter
-  const meta = options?.meta
-  const errors = options?.errors
+  const gInclude = options?.include ?? true
+  const gFields = options?.fields ?? true
+  const gSort = options?.sort ?? true
+  const gPage = options?.page
+  const gFilter = options?.filter
+  const gMeta = options?.meta
+  const gErrors = options?.errors
+  const endpointsOpt = options?.endpoints as Record<string, unknown> | undefined
+  const relationshipsOpt = options?.relationships ?? true
 
-  // Option fragments shared across the underlying constructors.
-  const errorOpt = errors !== undefined ? { errors } : {}
-  const metaOpt = meta !== undefined ? { meta } : {}
+  // The resource's base meta schema, for resolving `meta` functions.
+  const baseMeta = (resource.fields.meta as { readonly schema: Schema.Top }).schema
+  const resolveMeta = (value: unknown): Schema.Top | undefined =>
+    value === undefined
+      ? undefined
+      : typeof value === "function"
+        ? (value as (base: Schema.Top) => Schema.Top)(baseMeta)
+        : (value as Schema.Top)
+
+  // Emit + captured config for a CRUD op.
+  const opConfig = (op: CrudOperation): { readonly emit: boolean; readonly config: Record<string, unknown> } => {
+    if (endpointsOpt === undefined) return { emit: true, config: {} }
+    const value = endpointsOpt[op]
+    if (value === undefined || value === true) return { emit: true, config: {} }
+    if (value === false) return { emit: false, config: {} }
+    return { emit: true, config: value as Record<string, unknown> }
+  }
+
+  // The shared name / path / errors (and, optionally, meta) overrides of an op.
+  const commonOpts = (config: Record<string, unknown>, withMeta: boolean): Record<string, unknown> => {
+    const out: Record<string, unknown> = {}
+    const errors = pick(config, "errors", gErrors)
+    if (errors !== undefined) out.errors = errors
+    if ("name" in config) out.name = config.name
+    if ("path" in config) out.path = config.path
+    if (withMeta) {
+      const meta = resolveMeta(pick(config, "meta", gMeta))
+      if (meta !== undefined) out.meta = meta
+    }
+    return out
+  }
 
   const endpoints: Array<HttpApiEndpoint.Any> = []
 
-  if (ops.includes("fetch")) {
-    endpoints.push(fetch(resource, { include, fields, ...errorOpt, ...metaOpt } as never))
-  }
-  if (ops.includes("list")) {
+  const getOp = opConfig("get")
+  if (getOp.emit) {
     endpoints.push(
-      list(resource, {
-        include,
-        fields,
-        sort,
-        ...(page !== undefined ? { page } : {}),
-        ...(filter !== undefined ? { filter } : {}),
-        ...errorOpt,
-        ...metaOpt
+      get(resource, {
+        include: pick(getOp.config, "include", gInclude),
+        fields: pick(getOp.config, "fields", gFields),
+        ...commonOpts(getOp.config, true)
       } as never)
     )
   }
-  if (ops.includes("create")) {
-    endpoints.push(create(resource, { ...errorOpt, ...metaOpt } as never))
+  const listOp = opConfig("list")
+  if (listOp.emit) {
+    const page = pick(listOp.config, "page", gPage)
+    const filter = pick(listOp.config, "filter", gFilter)
+    endpoints.push(
+      list(resource, {
+        include: pick(listOp.config, "include", gInclude),
+        fields: pick(listOp.config, "fields", gFields),
+        sort: pick(listOp.config, "sort", gSort),
+        ...(page !== undefined ? { page } : {}),
+        ...(filter !== undefined ? { filter } : {}),
+        ...commonOpts(listOp.config, true)
+      } as never)
+    )
   }
-  if (ops.includes("update")) {
-    endpoints.push(update(resource, { ...errorOpt, ...metaOpt } as never))
+  const createOp = opConfig("create")
+  if (createOp.emit) {
+    endpoints.push(create(resource, commonOpts(createOp.config, true) as never))
   }
-  if (ops.includes("delete")) {
-    endpoints.push(deleteEndpoint(resource, { ...errorOpt } as never))
+  const updateOp = opConfig("update")
+  if (updateOp.emit) {
+    endpoints.push(update(resource, commonOpts(updateOp.config, true) as never))
+  }
+  const deleteOp = opConfig("delete")
+  if (deleteOp.emit) {
+    endpoints.push(deleteEndpoint(resource, commonOpts(deleteOp.config, false) as never))
   }
 
-  if (withRelationships) {
+  if (relationshipsOpt !== false) {
+    const relMap = typeof relationshipsOpt === "object" ? (relationshipsOpt as Record<string, unknown>) : undefined
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>
     for (const name of Object.keys(relationships)) {
+      let relConfig: Record<string, unknown> = {}
+      if (relMap !== undefined) {
+        const value = relMap[name]
+        if (value === false) continue
+        if (value !== undefined && value !== true) relConfig = value as Record<string, unknown>
+      }
       const toMany = Relationship.isToMany(relationships[name]!)
-      // For to-one relationships `sort` / `page` don't apply (the related URL
-      // serves a single resource); for to-many they do.
-      const relatedSort = sort === false ? false : true
+      const include = pick(relConfig, "include", gInclude)
+      const fields = pick(relConfig, "fields", gFields)
+      const sortOpt = pick(relConfig, "sort", gSort)
+      const page = pick(relConfig, "page", gPage)
+      const errors = pick(relConfig, "errors", gErrors)
+      const errorOpt = errors !== undefined ? { errors } : {}
+      const relatedSort = sortOpt === false ? false : true
 
       endpoints.push(
         related(
@@ -1825,14 +2193,14 @@ export const resource = <
     Attributes,
     Rels,
     Meta,
+    Endpoints,
+    RelationshipsOpt,
     Errors,
-    Ops,
-    WithRelationships,
     Include,
     Fields,
     Sort,
-    PageFields,
-    FilterFields,
-    DocMeta
+    Page,
+    Filter,
+    GMeta
   >
 }

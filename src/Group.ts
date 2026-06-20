@@ -7,7 +7,7 @@
  *
  * ```ts
  * const articles = Group.make(Article,
- *   Endpoint.fetch(Article, { include: true, errors: [ArticleNotFound] }),
+ *   Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }),
  *   Endpoint.list(Article, { page: Query.Page.Offset }),
  *   Endpoint.create(Article),
  *   Endpoint.update(Article, { errors: [ArticleNotFound] }),
@@ -58,7 +58,7 @@ import type { AttributeKeys, Resource } from "./Resource.js"
  * // A group named after a resource type
  * const articles = Group.make(
  *   Article,
- *   Endpoint.fetch(Article, { include: true }),
+ *   Endpoint.get(Article, { include: true }),
  *   Endpoint.list(Article, { page: Query.Page.Offset })
  * )
  *
@@ -124,12 +124,15 @@ export const make: {
  * const articles = Group.resource(Article, {
  *   errors: [ArticleNotFound],
  *   page: Query.Page.Offset,
- *   filter: { author: Schema.optionalKey(Schema.String) }
+ *   endpoints: {
+ *     // override the top-level defaults per endpoint:
+ *     list: { filter: { author: Schema.optionalKey(Schema.String) } }
+ *   }
  * })
  *
- * // A read-only resource: just fetch + list, no relationship endpoints:
+ * // A read-only resource: just get + list, no relationship endpoints:
  * const people = Group.resource(Person, {
- *   endpoints: ["fetch", "list"],
+ *   endpoints: { create: false, update: false, delete: false },
  *   relationships: false
  * })
  *
@@ -144,15 +147,15 @@ export const resource = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  const Endpoints extends Endpoint.EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
+  const RelationshipsOpt extends Endpoint.RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Errors extends ReadonlyArray<Endpoint.ErrorClass> = readonly [],
-  const Ops extends ReadonlyArray<Endpoint.CrudOperation> = Endpoint.DefaultCrudOperations,
-  const WithRelationships extends boolean = true,
   const Include extends boolean = true,
   const Fields extends boolean = true,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
-  const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
-  DocMeta extends Schema.Top = Meta
+  const Page extends Schema.Struct.Fields | undefined = undefined,
+  const Filter extends Schema.Struct.Fields | undefined = undefined,
+  const GMeta extends Schema.Top = Meta
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: Endpoint.ResourceOptions<
@@ -160,15 +163,15 @@ export const resource = <
     Attributes,
     Rels,
     Meta,
+    Endpoints,
+    RelationshipsOpt,
     Errors,
-    Ops,
-    WithRelationships,
     Include,
     Fields,
     Sort,
-    PageFields,
-    FilterFields,
-    DocMeta
+    Page,
+    Filter,
+    GMeta
   >
 ): HttpApiGroup.HttpApiGroup<
   Type,
@@ -177,15 +180,15 @@ export const resource = <
     Attributes,
     Rels,
     Meta,
+    Endpoints,
+    RelationshipsOpt,
     Errors,
-    Ops,
-    WithRelationships,
     Include,
     Fields,
     Sort,
-    PageFields,
-    FilterFields,
-    DocMeta
+    Page,
+    Filter,
+    GMeta
   >
 > =>
   make(
@@ -195,14 +198,14 @@ export const resource = <
       Attributes,
       Rels,
       Meta,
+      Endpoints,
+      RelationshipsOpt,
       Errors,
-      Ops,
-      WithRelationships,
       Include,
       Fields,
       Sort,
-      PageFields,
-      FilterFields,
-      DocMeta
+      Page,
+      Filter,
+      GMeta
     >(resource, options)
-  ) as never
+  )

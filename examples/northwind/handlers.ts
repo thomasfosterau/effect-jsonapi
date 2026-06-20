@@ -435,7 +435,7 @@ const matches = (haystack: ReadonlyArray<string | undefined>, needle: string): b
 
 export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) =>
+    .handle("get", ({ params }) =>
       loadCategory(params.id).pipe(
         Effect.map((category) => Handlers.data(category, { self: `/categories/${category.id}` }))
       )
@@ -454,7 +454,7 @@ export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers)
 
 export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) =>
+    .handle("get", ({ params }) =>
       loadSupplier(params.id).pipe(
         Effect.map((supplier) => Handlers.data(supplier, { self: `/suppliers/${supplier.id}` }))
       )
@@ -478,7 +478,7 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
 
 export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) =>
+    .handle("get", ({ params }) =>
       loadShipper(params.id).pipe(Effect.map((shipper) => Handlers.data(shipper, { self: `/shippers/${shipper.id}` })))
     )
     .handle("list", ({ query }) => {
@@ -495,7 +495,7 @@ export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
 
 export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) =>
+    .handle("get", ({ params }) =>
       loadTerritory(params.id).pipe(
         Effect.map((territory) => Handlers.data(territory, { self: `/territories/${territory.id}` }))
       )
@@ -519,7 +519,7 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
 
 export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =>
   handlers
-    .handle("fetch", ({ params }) =>
+    .handle("get", ({ params }) =>
       loadCustomer(params.id).pipe(
         Effect.map((customer) => Handlers.data(customer, { self: `/customers/${customer.id}` }))
       )
@@ -547,7 +547,7 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
 
 export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) =>
           Handlers.data(product, {
@@ -693,7 +693,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
 
 export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadEmployee(params.id).pipe(
         Effect.map((employee) =>
           Handlers.data(employee, {
@@ -802,7 +802,7 @@ const itemsFor = (orderId: string): Array<OrderItem> =>
 
 export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
   handlers
-    .handle("fetch", ({ params, query }) =>
+    .handle("get", ({ params, query }) =>
       loadOrder(params.id).pipe(
         Effect.map((order) =>
           Handlers.data(order, {
