@@ -30,7 +30,7 @@
  * @since 0.1.0
  */
 import type { Types } from "effect"
-import { Schema, SchemaTransformation } from "effect"
+import { Effect, Schema, SchemaTransformation } from "effect"
 import { CommaSeparated, flatten, nest, Sort as SortCodec } from "./internal/codecs.js"
 import type { Any, AttributeKeys, IncludePath, RelationshipTargets } from "./Resource.js"
 import { allTargets, attributeKeys, includePaths } from "./Resource.js"
@@ -49,10 +49,143 @@ import { allTargets, attributeKeys, includePaths } from "./Resource.js"
 const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 
 /**
+ * Options for the {@link Page.offset} pagination factory.
+ *
+ * Unlike the constant {@link Page.Offset}, the factory is bounded (a `maxLimit`
+ * DoS guard), can fill in decode defaults, and can decode from plain numbers
+ * (`fromString: false`) for hosts that coerce query strings at the transport
+ * layer and reuse the schema as a numeric call-site input.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export interface OffsetPageOptions {
+  /** Upper bound on `limit` (inclusive) — a DoS guard. Omit for no cap. */
+  readonly maxLimit?: number
+  /** Lower bound on `limit` (inclusive). Defaults to 1. */
+  readonly minLimit?: number
+  /** Decode default for `limit` when the wire key is absent. Omit → field stays `optionalKey`. */
+  readonly defaultLimit?: number
+  /** Decode default for `offset`. Omit → field stays `optionalKey`. */
+  readonly defaultOffset?: number
+  /**
+   * `true` (default): fields decode from query strings (`FiniteFromString`, as `Page.Offset`).
+   * `false`: plain numbers (`Schema.Number`) — for hosts that coerce strings at the transport layer
+   * and reuse the schema as a numeric input.
+   */
+  readonly fromString?: boolean
+}
+
+/**
+ * Options for the {@link Page.number} pagination factory — the page-number twin
+ * of {@link OffsetPageOptions}, with bounds and defaults applied to the `size`
+ * field and a decode default for the `number` field.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export interface NumberPageOptions {
+  /** Upper bound on `size` (inclusive) — a DoS guard. Omit for no cap. */
+  readonly maxSize?: number
+  /** Lower bound on `size` (inclusive). Defaults to 1. */
+  readonly minSize?: number
+  /** Decode default for `size` when the wire key is absent. Omit → field stays `optionalKey`. */
+  readonly defaultSize?: number
+  /** Decode default for `number`. Omit → field stays `optionalKey`. */
+  readonly defaultNumber?: number
+  /**
+   * `true` (default): fields decode from query strings (`FiniteFromString`, as `Page.Number`).
+   * `false`: plain numbers (`Schema.Number`) — for hosts that coerce strings at the transport layer.
+   */
+  readonly fromString?: boolean
+}
+
+// The leaf schema a factory field is built from: a plain number when the caller
+// opts out of string decoding, otherwise the wire-string `FiniteFromString`.
+type PageLeaf<O extends { readonly fromString?: boolean }> = O extends { readonly fromString: false }
+  ? typeof Schema.Number
+  : typeof Schema.FiniteFromString
+
+// `true` when `O` carries a concrete (non-`undefined`) value for key `K`.
+type HasDefaultKey<O, K extends PropertyKey> = K extends keyof O ? ([O[K]] extends [undefined] ? false : true) : false
+
+// A defaulted key decodes to a required value (`withDecodingDefaultKey`); an
+// un-defaulted key stays optional (`optionalKey`).
+type PageField<L extends Schema.Top, HasDefault extends boolean> = HasDefault extends true
+  ? Schema.withDecodingDefaultKey<L>
+  : Schema.optionalKey<L>
+
+/**
+ * The `{ offset, limit }` field-map produced by {@link Page.offset} for a given
+ * options object.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export type OffsetPageFields<O extends OffsetPageOptions> = {
+  readonly offset: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultOffset">>
+  readonly limit: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultLimit">>
+}
+
+/**
+ * The `{ number, size }` field-map produced by {@link Page.number} for a given
+ * options object.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export type NumberPageFields<O extends NumberPageOptions> = {
+  readonly number: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultNumber">>
+  readonly size: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultSize">>
+}
+
+// Wraps a leaf in `optionalKey`, or — when a default is supplied — in
+// `withDecodingDefaultKey`. `withDecodingDefaultKey` takes the *encoded*
+// default, so a string-coercing field needs a STRING default and a plain-number
+// field a number default.
+const withPageDefault = (leaf: Schema.Top, value: number | undefined, fromString: boolean): Schema.Top =>
+  value === undefined
+    ? Schema.optionalKey(leaf)
+    : leaf.pipe(Schema.withDecodingDefaultKey(Effect.succeed(fromString ? String(value) : value)))
+
+const offsetPage = <const O extends OffsetPageOptions = {}>(options?: O): OffsetPageFields<O> => {
+  const { maxLimit, minLimit = 1, defaultLimit, defaultOffset, fromString = true } = options ?? {}
+  const base = fromString ? Schema.FiniteFromString : Schema.Number
+  const offsetLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+  const limitLeaf =
+    maxLimit === undefined
+      ? base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minLimit))
+      : base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minLimit), Schema.isLessThanOrEqualTo(maxLimit))
+  return {
+    offset: withPageDefault(offsetLeaf, defaultOffset, fromString),
+    limit: withPageDefault(limitLeaf, defaultLimit, fromString)
+  } as OffsetPageFields<O>
+}
+
+const numberPage = <const O extends NumberPageOptions = {}>(options?: O): NumberPageFields<O> => {
+  const { maxSize, minSize = 1, defaultSize, defaultNumber, fromString = true } = options ?? {}
+  const base = fromString ? Schema.FiniteFromString : Schema.Number
+  // Page numbers are 1-based.
+  const numberLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
+  const sizeLeaf =
+    maxSize === undefined
+      ? base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minSize))
+      : base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minSize), Schema.isLessThanOrEqualTo(maxSize))
+  return {
+    number: withPageDefault(numberLeaf, defaultNumber, fromString),
+    size: withPageDefault(sizeLeaf, defaultSize, fromString)
+  } as NumberPageFields<O>
+}
+
+/**
  * Common pagination strategies, ready to pass as the `page` query option.
  * Each key becomes a `page[<key>]` query parameter, and each
  * `Page.Offset` / `Page.Number` / `Page.Cursor` value is a
  * `Schema.Struct.Fields` whose members decode from strings.
+ *
+ * For configurable offset/page-number pagination — a `maxLimit` DoS guard,
+ * decode defaults, and optional plain-number decoding — use the {@link Page.offset}
+ * and {@link Page.number} factories instead of the constants.
  *
  * Custom strategies are plain `Schema.Struct.Fields` whose values decode from
  * strings.
@@ -68,6 +201,9 @@ const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterTh
  *
  * // enable offset/limit pagination on a list endpoint
  * Endpoint.list(Article, { page: Query.Page.Offset })
+ *
+ * // ...or a bounded, defaulted variant
+ * Endpoint.list(Article, { page: Query.Page.offset({ maxLimit: 100, defaultLimit: 25 }) })
  * ```
  *
  * @since 0.1.0
@@ -88,7 +224,49 @@ export const Page = {
   Cursor: {
     cursor: Schema.optionalKey(Schema.String),
     size: Schema.optionalKey(PageInt)
-  }
+  },
+  /**
+   * A configurable `{ offset, limit }` field-map: the bounded / defaulted /
+   * coercion-flexible variant of {@link Page.Offset}.
+   *
+   * - **Bounded** — `maxLimit` caps `limit` (a DoS guard); `minLimit` (default 1) floors it.
+   * - **Defaulted** — `defaultLimit` / `defaultOffset` fill in on decode when the wire key is
+   *   absent, so downstream code sees concrete numbers; omit one to leave that field optional.
+   * - **Coercion-flexible** — `fromString: false` builds the fields from plain `Schema.Number`
+   *   (encoded = number) instead of `FiniteFromString` (encoded = string), so the same schema
+   *   works both as a numeric call-site input and behind a transport that coerces query strings.
+   *
+   * @example
+   * ```ts
+   * import { Schema } from "effect"
+   * import { Query } from "@thomasfosterau/effect-jsonapi"
+   *
+   * const page = Schema.Struct(Query.Page.offset({ maxLimit: 100, defaultLimit: 25 }))
+   * Schema.decodeUnknownSync(page)({}) // → { limit: 25 }
+   * ```
+   *
+   * @since 0.3.0
+   * @category constructors
+   */
+  offset: offsetPage,
+  /**
+   * A configurable `{ number, size }` field-map: the page-number twin of
+   * {@link Page.offset}. `maxSize` / `minSize` / `defaultSize` bound and default
+   * the page size; `defaultNumber` defaults the (1-based) page number.
+   *
+   * @example
+   * ```ts
+   * import { Schema } from "effect"
+   * import { Query } from "@thomasfosterau/effect-jsonapi"
+   *
+   * const page = Schema.Struct(Query.Page.number({ maxSize: 100, defaultSize: 25 }))
+   * Schema.decodeUnknownSync(page)({}) // → { size: 25 }
+   * ```
+   *
+   * @since 0.3.0
+   * @category constructors
+   */
+  number: numberPage
 } as const
 
 // ---------------------------------------------------------------------------

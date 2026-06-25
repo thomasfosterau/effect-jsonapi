@@ -246,3 +246,104 @@ describe("Query.Page", () => {
     expect(decoded).toEqual({ page: { cursor: "opaque-token" } })
   })
 })
+
+describe("Query.Page.offset (factory)", () => {
+  it("produces the same { offset, limit } shape as the constant", () => {
+    expect(Object.keys(Query.Page.offset())).toEqual(["offset", "limit"])
+  })
+
+  it("fromString: false decodes a plain number and rejects a numeric string", () => {
+    const page = Schema.Struct(Query.Page.offset({ fromString: false }))
+    expect(Schema.decodeUnknownSync(page)({ offset: 0, limit: 50 })).toEqual({ offset: 0, limit: 50 })
+    expect(() => Schema.decodeUnknownSync(page)({ limit: "50" })).toThrow()
+  })
+
+  it("fromString: true (default) decodes a numeric string and rejects a plain number", () => {
+    const page = Schema.Struct(Query.Page.offset())
+    expect(Schema.decodeUnknownSync(page)({ offset: "0", limit: "50" })).toEqual({ offset: 0, limit: 50 })
+    expect(() => Schema.decodeUnknownSync(page)({ limit: 50 })).toThrow()
+  })
+
+  it("maxLimit rejects maxLimit + 1 and accepts maxLimit", () => {
+    const page = Schema.Struct(Query.Page.offset({ maxLimit: 100, fromString: false }))
+    expect(Schema.decodeUnknownSync(page)({ limit: 100 })).toEqual({ limit: 100 })
+    expect(() => Schema.decodeUnknownSync(page)({ limit: 101 })).toThrow()
+  })
+
+  it("minLimit defaults to 1 (rejects 0) and is configurable", () => {
+    const dflt = Schema.Struct(Query.Page.offset({ fromString: false }))
+    expect(() => Schema.decodeUnknownSync(dflt)({ limit: 0 })).toThrow()
+    expect(Schema.decodeUnknownSync(dflt)({ limit: 1 })).toEqual({ limit: 1 })
+
+    const floored = Schema.Struct(Query.Page.offset({ minLimit: 10, fromString: false }))
+    expect(() => Schema.decodeUnknownSync(floored)({ limit: 9 })).toThrow()
+    expect(Schema.decodeUnknownSync(floored)({ limit: 10 })).toEqual({ limit: 10 })
+  })
+
+  it("defaultLimit/defaultOffset fill in on an absent key", () => {
+    const withDefaults = Schema.Struct(Query.Page.offset({ defaultLimit: 25, defaultOffset: 0, fromString: false }))
+    expect(Schema.decodeUnknownSync(withDefaults)({})).toEqual({ offset: 0, limit: 25 })
+    // a present key still wins over the default
+    expect(Schema.decodeUnknownSync(withDefaults)({ limit: 10 })).toEqual({ offset: 0, limit: 10 })
+  })
+
+  it("encodes a string default for a string-coercing field (fromString: true)", () => {
+    // withDecodingDefaultKey takes the *encoded* default, so the string field
+    // must default through a string and still decode to a number.
+    const page = Schema.Struct(Query.Page.offset({ defaultLimit: 25 }))
+    expect(Schema.decodeUnknownSync(page)({})).toEqual({ limit: 25 })
+  })
+
+  it("omitting a default leaves the field optionalKey (absent → undefined)", () => {
+    const page = Schema.Struct(Query.Page.offset({ fromString: false }))
+    expect(Schema.decodeUnknownSync(page)({})).toEqual({})
+  })
+
+  it("rejects negative offsets and non-integers on both fields", () => {
+    const page = Schema.Struct(Query.Page.offset({ fromString: false }))
+    expect(() => Schema.decodeUnknownSync(page)({ offset: -1 })).toThrow()
+    expect(() => Schema.decodeUnknownSync(page)({ offset: 1.5 })).toThrow()
+    expect(() => Schema.decodeUnknownSync(page)({ limit: 2.5 })).toThrow()
+  })
+
+  it("slots into Query.schema as a drop-in for the constant, carrying its bound", () => {
+    const query = Query.schema(Article, { page: Query.Page.offset({ maxLimit: 100 }) })
+    expect(Schema.decodeUnknownSync(query)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
+      page: { offset: 20, limit: 10 }
+    })
+    expect(() => Schema.decodeUnknownSync(query)({ "page[limit]": "101" })).toThrow()
+  })
+
+  it("types a defaulted field as required and an un-defaulted field as optional", () => {
+    const page = Schema.Struct(Query.Page.offset({ defaultLimit: 50, fromString: false }))
+    type Decoded = typeof page.Type
+    expectTypeOf<Decoded["offset"]>().toEqualTypeOf<number | undefined>()
+    expectTypeOf<Decoded["limit"]>().toEqualTypeOf<number>()
+    expectTypeOf<Decoded>().toEqualTypeOf<{ readonly offset?: number; readonly limit: number }>()
+
+    // with fromString: true the *encoded* (wire) shape is strings
+    const wire = Schema.Struct(Query.Page.offset({ defaultLimit: 50 }))
+    type Encoded = typeof wire.Encoded
+    expectTypeOf<Encoded["limit"]>().toEqualTypeOf<string | undefined>()
+  })
+})
+
+describe("Query.Page.number (factory)", () => {
+  it("produces the { number, size } shape and decodes", () => {
+    expect(Object.keys(Query.Page.number())).toEqual(["number", "size"])
+    const page = Schema.Struct(Query.Page.number({ fromString: false }))
+    expect(Schema.decodeUnknownSync(page)({ number: 2, size: 25 })).toEqual({ number: 2, size: 25 })
+  })
+
+  it("treats page numbers as 1-based (rejects 0)", () => {
+    const page = Schema.Struct(Query.Page.number({ fromString: false }))
+    expect(() => Schema.decodeUnknownSync(page)({ number: 0 })).toThrow()
+    expect(Schema.decodeUnknownSync(page)({ number: 1 })).toEqual({ number: 1 })
+  })
+
+  it("bounds and defaults the size field", () => {
+    const page = Schema.Struct(Query.Page.number({ maxSize: 50, defaultSize: 10, fromString: false }))
+    expect(Schema.decodeUnknownSync(page)({})).toEqual({ size: 10 })
+    expect(() => Schema.decodeUnknownSync(page)({ size: 51 })).toThrow()
+  })
+})

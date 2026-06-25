@@ -701,6 +701,20 @@ fails loudly instead of lying.
 Unknown include paths, unknown sparse-fieldset names and unknown sort fields fail decoding — which
 the schema-error middleware turns into a spec-compliant **400 JSON:API error document**.
 
+`Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded,
+defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination,
+`Query.Page.number(options)`): it returns the same `{ offset, limit }` field-map but lets you cap
+`limit` with `maxLimit` (a DoS guard every JSON:API server wants), fill in `defaultLimit` /
+`defaultOffset` on decode, and — with `fromString: false` — build the fields from plain
+`Schema.Number` instead of `FiniteFromString`, so the one schema works both as a numeric call-site
+input and behind a transport that coerces query strings to numbers (e.g. raw `HttpApiEndpoint`
+wrapped in `Schema.toCodecStringTree`).
+
+```ts
+// caps page size at 100, defaults to 25, still decodes from query strings
+Endpoint.list(Article, { page: Query.Page.offset({ maxLimit: 100, defaultLimit: 25 }) })
+```
+
 ## Spec compliance, by construction
 
 | JSON:API v1.1 rule                                                                                               | How it's enforced                                                                                                                                                                                      |
