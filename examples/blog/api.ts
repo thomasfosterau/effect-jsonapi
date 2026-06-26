@@ -16,6 +16,16 @@ export const PageMeta = Schema.Struct({
   total: Schema.Int
 })
 
+/**
+ * Offset/limit pagination capped at 100 rows — a shared DoS guard.
+ *
+ * `Query.Page.offset(...)` is the bounded, configurable variant of the
+ * `Query.Page.Offset` constant; defining it once and reusing it keeps the cap
+ * (and the `page[offset]` / `page[limit]` keys) consistent across every
+ * paginated endpoint, so the input and the emitted pagination links can't drift.
+ */
+export const Pagination = Query.Page.offset({ maxLimit: 100 })
+
 export const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
@@ -28,7 +38,7 @@ export const articles = Group.make(
   Endpoint.list(Article, {
     include: true,
     sort: ["createdAt", "title"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: { author: Schema.optionalKey(Schema.String) },
     meta: PageMeta
   }),
@@ -54,14 +64,14 @@ export const articles = Group.make(
   // points at
   Endpoint.related(Article, "comments", {
     include: true,
-    page: Query.Page.Offset,
+    page: Pagination,
     meta: PageMeta,
     errors: [ArticleNotFound]
   }),
   // --- Relationship (linkage) endpoints ---------------------------------------
   // GET /articles/:id/relationships/comments — comment identifiers, paginated
   Endpoint.getRelationship(Article, "comments", {
-    page: Query.Page.Offset,
+    page: Pagination,
     errors: [ArticleNotFound]
   }),
   // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
@@ -91,7 +101,7 @@ export const search = Group.make(
     filter: { q: Schema.String },
     include: true,
     fields: true,
-    page: Query.Page.Offset,
+    page: Pagination,
     meta: PageMeta
   })
 )

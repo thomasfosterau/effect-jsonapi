@@ -42,6 +42,16 @@ export const PageMeta = Schema.Struct({
   total: Schema.Int
 })
 
+/**
+ * Offset/limit pagination capped at 100 rows — a shared DoS guard.
+ *
+ * `Query.Page.offset(...)` is the bounded, configurable variant of the
+ * `Query.Page.Offset` constant; defining it once and reusing it keeps the cap
+ * (and the `page[offset]` / `page[limit]` keys) consistent across every
+ * paginated endpoint, so the input and the emitted pagination links can't drift.
+ */
+export const Pagination = Query.Page.offset({ maxLimit: 100 })
+
 export const categories = Group.make(
   Category,
   // GET /categories/:id
@@ -51,7 +61,7 @@ export const categories = Group.make(
   // GET /categories?sort=name&page[offset]=0&page[limit]=10
   Endpoint.list(Category, {
     sort: ["name"],
-    page: Query.Page.Offset,
+    page: Pagination,
     meta: PageMeta
   })
 )
@@ -65,7 +75,7 @@ export const suppliers = Group.make(
   // GET /suppliers?filter[country]=UK&sort=companyName
   Endpoint.list(Supplier, {
     sort: ["companyName", "country"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: {
       country: Schema.optionalKey(Schema.String)
     },
@@ -82,7 +92,7 @@ export const shippers = Group.make(
   // GET /shippers
   Endpoint.list(Shipper, {
     sort: ["companyName"],
-    page: Query.Page.Offset,
+    page: Pagination,
     meta: PageMeta
   })
 )
@@ -96,7 +106,7 @@ export const territories = Group.make(
   // GET /territories?filter[region]=Eastern
   Endpoint.list(Territory, {
     sort: ["description", "region"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: {
       region: Schema.optionalKey(Schema.String)
     },
@@ -113,7 +123,7 @@ export const customers = Group.make(
   // GET /customers?filter[country]=Germany&sort=companyName
   Endpoint.list(Customer, {
     sort: ["companyName", "country"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: {
       country: Schema.optionalKey(Schema.String)
     },
@@ -136,7 +146,7 @@ export const products = Group.make(
   Endpoint.list(Product, {
     include: true,
     sort: ["name", "unitPrice", "unitsInStock"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: {
       category: Schema.optionalKey(Schema.String),
       supplier: Schema.optionalKey(Schema.String),
@@ -183,7 +193,7 @@ export const employees = Group.make(
   Endpoint.list(Employee, {
     include: true,
     sort: ["lastName", "hireDate"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: {
       manager: Schema.optionalKey(Schema.String)
     },
@@ -220,7 +230,7 @@ export const orders = Group.make(
   Endpoint.list(Order, {
     include: true,
     sort: ["orderDate", "requiredDate", "freight"],
-    page: Query.Page.Offset,
+    page: Pagination,
     filter: {
       customer: Schema.optionalKey(Schema.String),
       employee: Schema.optionalKey(Schema.String),
@@ -243,7 +253,7 @@ export const orders = Group.make(
   // points at, with the line item's product brought in as a compound document
   Endpoint.related(Order, "lineItems", {
     include: true,
-    page: Query.Page.Offset,
+    page: Pagination,
     meta: PageMeta,
     errors: [OrderNotFound]
   }),
@@ -272,7 +282,7 @@ export const search = Group.make(
     filter: { q: Schema.String },
     include: true,
     fields: true,
-    page: Query.Page.Offset,
+    page: Pagination,
     meta: PageMeta
   })
 )
