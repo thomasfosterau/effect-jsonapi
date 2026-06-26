@@ -34,6 +34,22 @@ export const PageMeta = Schema.Struct({
   total: Schema.Int
 })
 
+/**
+ * GitHub-style page-number pagination with the page size capped at 100 — a
+ * shared DoS guard.
+ *
+ * `Query.Page.number(...)` is the bounded, configurable variant of the
+ * `Query.Page.Number` constant (it also treats `page[number]` as 1-based);
+ * defining it once keeps the cap and the `page[number]` / `page[size]` keys
+ * consistent across every paginated endpoint.
+ */
+export const Pagination = Query.Page.number({ maxSize: 100 })
+
+/**
+ * Offset/limit pagination for the global search endpoint, capped at 100 rows.
+ */
+export const SearchPagination = Query.Page.offset({ maxLimit: 100 })
+
 export const users = Group.make(
   User,
   // GET /users/:id
@@ -43,7 +59,7 @@ export const users = Group.make(
   // GET /users?sort=login&page[number]=1&page[size]=30
   Endpoint.list(User, {
     sort: ["login", "createdAt"],
-    page: Query.Page.Number,
+    page: Pagination,
     meta: PageMeta
   })
 )
@@ -60,7 +76,7 @@ export const repositories = Group.make(
   Endpoint.list(Repository, {
     include: true,
     sort: ["stargazerCount", "name", "createdAt"],
-    page: Query.Page.Number,
+    page: Pagination,
     filter: {
       owner: Schema.optionalKey(Schema.String),
       language: Schema.optionalKey(Schema.String),
@@ -98,7 +114,7 @@ export const issues = Group.make(
   Endpoint.list(Issue, {
     include: true,
     sort: ["number", "createdAt"],
-    page: Query.Page.Number,
+    page: Pagination,
     filter: {
       repository: Schema.optionalKey(Schema.String),
       state: Schema.optionalKey(Schema.Literals(["open", "closed"])),
@@ -120,7 +136,7 @@ export const issues = Group.make(
   // points at
   Endpoint.related(Issue, "comments", {
     include: true,
-    page: Query.Page.Number,
+    page: Pagination,
     meta: PageMeta,
     errors: [IssueNotFound]
   }),
@@ -159,7 +175,7 @@ export const pulls = Group.make(
   Endpoint.list(PullRequest, {
     include: true,
     sort: ["number", "createdAt"],
-    page: Query.Page.Number,
+    page: Pagination,
     filter: {
       repository: Schema.optionalKey(Schema.String),
       state: Schema.optionalKey(Schema.Literals(["open", "closed", "merged"]))
@@ -181,7 +197,7 @@ export const search = Group.make(
     filter: { q: Schema.String },
     include: true,
     fields: true,
-    page: Query.Page.Offset,
+    page: SearchPagination,
     meta: PageMeta
   })
 )
