@@ -132,6 +132,48 @@ export const acceptIsAcceptable = (header: string | undefined, options?: Negotia
   return false
 }
 
+/**
+ * Runs JSON:API §5 content negotiation over request headers, independent of
+ * Effect's HttpApi — for use in a plain framework hook that owns the URL
+ * (e.g. a SvelteKit hook) rather than an `HttpApi`.
+ *
+ * Returns the {@link ApiError} the spec requires when negotiation fails — a 415
+ * {@link UnsupportedMediaType} for an unacceptable `Content-Type`, or a 406
+ * {@link NotAcceptable} for an unacceptable `Accept` — or `undefined` when the
+ * request is acceptable. Render the returned error to a JSON:API error document
+ * with `ApiError.toDocument(error)`.
+ *
+ * @example
+ * ```ts
+ * import { ApiError, Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // inside a framework hook, from the request headers:
+ * const error = Middleware.negotiate({
+ *   contentType: "application/vnd.api+json",
+ *   accept: "application/vnd.api+json"
+ * })
+ * if (error !== undefined) {
+ *   // render the spec error body for the hook's response
+ *   const body = ApiError.toDocument(error)
+ *   console.log(body.errors[0]?.status)
+ * }
+ * ```
+ *
+ * @since 0.3.0
+ * @category utils
+ */
+export const negotiate = (
+  headers: {
+    readonly contentType?: string | undefined
+    readonly accept?: string | undefined
+  },
+  options?: NegotiationOptions
+): UnsupportedMediaType | NotAcceptable | undefined => {
+  if (!contentTypeIsAcceptable(headers.contentType, options)) return new UnsupportedMediaType()
+  if (!acceptIsAcceptable(headers.accept, options)) return new NotAcceptable()
+  return undefined
+}
+
 // ---------------------------------------------------------------------------
 // Middleware services
 // ---------------------------------------------------------------------------
