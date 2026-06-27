@@ -1160,6 +1160,24 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
 >
 
 /**
+ * The id schema of a resource that {@link extend}s a base whose id is `BaseId`.
+ *
+ * With `Inherit` false (the default) the child gets a fresh, independent
+ * {@link Id} brand. With `Inherit` true the child's id is the base id *branded
+ * again* with the child's type — accumulating the base's brand(s), so the child
+ * id is assignable wherever the base id is expected (a true subtype), and so on
+ * transitively through an `extend` chain.
+ *
+ * @since 0.3.0
+ * @category type-level
+ */
+export type ExtendedId<
+  BaseId extends Schema.Codec<any, string>,
+  Type extends string,
+  Inherit extends boolean
+> = Inherit extends true ? Schema.brand<BaseId, `${Type}Id`> : Id<Type>
+
+/**
  * Defines a new resource that **extends** (subtypes) an existing one: the new
  * resource inherits the base's attributes and relationships, to which `options`
  * adds more — keys present in `options` override the base's.
@@ -1169,6 +1187,13 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
  * afresh) that happens to share the base's structure — handy when several
  * resources carry a common set of attributes and relationships defined once.
  * `meta` is inherited from the base; pass `meta` to override it.
+ *
+ * By default the child gets a fresh, independent id brand, unrelated to the
+ * base's. Pass `inheritId: true` to instead brand the *base's* id schema with
+ * the child's type, so the child id accumulates the base's brand(s) and is
+ * assignable wherever the base id is expected — a true subtype relationship,
+ * transitive through an `extend` chain (`Admin.Id` ⊂ `Account.Id`, and a further
+ * extension's id ⊂ `Admin.Id` ⊂ `Account.Id`).
  *
  * @example
  * ```ts
@@ -1196,6 +1221,10 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
  *
  * Admin.type // "admins"
  * Resource.attributeKeys(Admin) // ["email", "createdAt", "permissions"]
+ *
+ * // With `inheritId`, an Admin id IS an Account id (subtype):
+ * const Manager = Resource.extend(Account, "managers", { inheritId: true })
+ * const managerId = Manager.Id.make("1") // also usable wherever an Account id is expected
  * ```
  *
  * @since 0.2.0
@@ -1209,22 +1238,32 @@ export const extend = <
   const Type extends string,
   const ExtraAttributes extends Schema.Struct.Fields = {},
   const ExtraRels extends Relationships = {},
-  Meta extends Schema.Top = BaseMeta
+  Meta extends Schema.Top = BaseMeta,
+  BaseId extends Schema.Codec<any, string> = Id<BaseType>,
+  const InheritId extends boolean = false
 >(
-  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, any>,
+  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
   options?: {
     readonly attributes?: ExtraAttributes
     readonly relationships?: ExtraRels
     readonly meta?: Meta
+    /**
+     * Brand the *base's* id schema with this resource's type instead of minting
+     * a fresh independent id, so the child id is a subtype of the base id.
+     * Defaults to `false`.
+     */
+    readonly inheritId?: InheritId
   }
 ): Resource<
   Type,
   ExtendedAttributes<BaseAttributes, ExtraAttributes>,
   ExtendedRelationships<BaseRels, ExtraRels>,
-  Meta
+  Meta,
+  ExtendedId<BaseId, Type, InheritId>
 > =>
   make(type, {
+    id: options?.inheritId === true ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`)) : undefined,
     attributes: { ...base.fields.attributes.fields, ...options?.attributes },
     relationships: { ...base.relationships, ...options?.relationships },
     meta: (options?.meta ?? base.fields.meta.schema) as Meta
@@ -1232,5 +1271,6 @@ export const extend = <
     Type,
     ExtendedAttributes<BaseAttributes, ExtraAttributes>,
     ExtendedRelationships<BaseRels, ExtraRels>,
-    Meta
+    Meta,
+    ExtendedId<BaseId, Type, InheritId>
   >

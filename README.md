@@ -207,6 +207,24 @@ The injected id flows through `identifier`, `updatePayload`, `ref`, `createInput
 the document schemas. Omit `id` and nothing changes — existing definitions keep the auto-branded id.
 `Resource.Identifier(type, id?)` accepts a custom id too, for standalone identifier schemas.
 
+**Subtype ids via `extend`.** To make a subtype's id a _subtype_ of its base's id — a `PersonId` that
+_is an_ `AgentId` _is a_ `NodeId` — pass `inheritId: true` to [`extend`](#reusing--extending-resources).
+The child's id brands the base's id schema, so it accumulates the base's brand(s) and is assignable
+wherever the base id is expected (transitively through a chain); the reverse is rejected. Effect's
+brands are intersectional, so this is just brand accumulation:
+
+```ts
+const Account = Resource.make("accounts", { attributes: { email: Schema.NonEmptyString } })
+const Manager = Resource.extend(Account, "managers", { inheritId: true })
+
+const managerId = Manager.Id.make("1")
+const asAccount: typeof Account.Id.Type = managerId // ✓ a manager id IS an account id
+// @ts-expect-error an account id is not a manager id
+const asManager: typeof Manager.Id.Type = Account.Id.make("2")
+```
+
+`inheritId` defaults to `false` — by default an extended resource gets a fresh, independent brand.
+
 ### Update payloads: set / unset / leave unchanged
 
 A PATCH must distinguish three intents per attribute. `updatePayload` models them with

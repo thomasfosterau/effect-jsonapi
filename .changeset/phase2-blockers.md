@@ -10,6 +10,11 @@ Unblock higher-level adoption with five additive features (no breaking changes):
   `updatePayload`, and the document schemas (a new, defaulted last type parameter — existing
   callers are unchanged). `Resource.Identifier(type, id?)` accepts a custom id schema too.
 
+- **Subtype ids on extend.** `Resource.extend(Base, type, { inheritId: true })` brands the base's id
+  schema with the child's type, so the child id accumulates the base's brand(s) and is assignable
+  wherever the base id is expected — a true subtype relationship, transitive through an `extend`
+  chain (`Admin.Id` ⊂ `Account.Id`). Defaults to `false` (an independent brand, as before).
+
 - **Tri-state update payloads.** A resource's `updatePayload` now models PATCH semantics distinctly
   per attribute via `Schema.optional`: an **absent** key means _leave unchanged_, an **`undefined`**
   value means _unset_, and a present value means _set_. Nullable attributes (`Schema.NullOr(...)`)

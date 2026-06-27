@@ -1113,3 +1113,50 @@ describe("Resource flat inputs", () => {
     expectTypeOf<(typeof Person.updateInput.Type)["bio"]>().toEqualTypeOf<string | null | undefined>()
   })
 })
+
+// ---------------------------------------------------------------------------
+// extend with inheritId: encode the subtype relationship in the branded id
+// ---------------------------------------------------------------------------
+
+describe("Resource.extend inheritId (subtype ids)", () => {
+  const Account = Resource("accounts", { attributes: { email: Schema.NonEmptyString } })
+
+  it("default extend keeps an independent brand — child id is NOT a base id", () => {
+    const Admin = extend(Account, "admins", { attributes: { level: Schema.Int } })
+    const adminId = Admin.Id.make("1")
+    // @ts-expect-error a default-extended admin id is not assignable to an account id
+    const asAccount: typeof Account.Id.Type = adminId
+    expect(asAccount).toBe("1")
+  })
+
+  it("inheritId makes the child id a subtype of the base id (assignable, not vice-versa)", () => {
+    const Manager = extend(Account, "managers", { inheritId: true })
+    const managerId = Manager.Id.make("1")
+    // a manager id IS an account id — this assignment compiles
+    const asAccount: typeof Account.Id.Type = managerId
+    expect(asAccount).toBe("1")
+    // ...but an account id is NOT a manager id
+    // @ts-expect-error an account id lacks the managers brand
+    const asManager: typeof Manager.Id.Type = Account.Id.make("2")
+    expect(asManager).toBe("2")
+  })
+
+  it("inheritId is transitive through an extend chain", () => {
+    const Manager = extend(Account, "managers", { inheritId: true })
+    const Director = extend(Manager, "directors", { inheritId: true, attributes: { region: Schema.String } })
+    const directorId = Director.Id.make("1")
+    const asManager: typeof Manager.Id.Type = directorId // director ⊂ manager
+    const asAccount: typeof Account.Id.Type = directorId // director ⊂ account
+    expect(asManager).toBe("1")
+    expect(asAccount).toBe("1")
+  })
+
+  it("inheritId composes with a custom base id", () => {
+    const NodeId = Schema.String.pipe(Schema.brand("NodeId"))
+    const Node = Resource("nodes", { id: NodeId, attributes: { name: Schema.String } })
+    const Person = extend(Node, "people", { inheritId: true })
+    const personId = Person.Id.make("1")
+    const asNode: typeof NodeId.Type = personId // a person id IS a node id
+    expect(asNode).toBe("1")
+  })
+})
