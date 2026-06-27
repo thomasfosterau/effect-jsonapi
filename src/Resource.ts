@@ -92,12 +92,19 @@ export const Id = <const Type extends string>(type: Type): Id<Type> =>
 /**
  * The resource-identifier schema for a resource type: `{ type, id, meta? }`.
  *
+ * `IdSchema` defaults to the auto-derived branded {@link Id}; pass a custom id
+ * schema (its `Encoded` side must stay `string` for the wire) to carry a
+ * consumer-defined id brand instead.
+ *
  * @since 0.1.0
  * @category models
  */
-export interface Identifier<Type extends string> extends Schema.Struct<{
+export interface Identifier<
+  Type extends string,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>
+> extends Schema.Struct<{
   readonly type: Schema.tag<Type>
-  readonly id: Id<Type>
+  readonly id: IdSchema
   readonly meta: Schema.optionalKey<typeof AnyMeta>
 }> {}
 
@@ -105,7 +112,9 @@ export interface Identifier<Type extends string> extends Schema.Struct<{
  * Creates the resource-identifier schema for a resource type.
  *
  * Useful standalone — e.g. to validate a `{ type, id }` linkage independently
- * of any resource definition.
+ * of any resource definition. Pass a custom `id` schema (encoding to `string`)
+ * to brand the id with the consumer's own schema instead of the default
+ * {@link Id}.
  *
  * @example
  * ```ts
@@ -119,12 +128,15 @@ export interface Identifier<Type extends string> extends Schema.Struct<{
  * @since 0.1.0
  * @category constructors
  */
-export const Identifier = <const Type extends string>(type: Type): Identifier<Type> =>
+export const Identifier = <const Type extends string, IdSchema extends Schema.Codec<any, string> = Id<Type>>(
+  type: Type,
+  id?: IdSchema
+): Identifier<Type, IdSchema> =>
   Schema.Struct({
     type: Schema.tag(type),
-    id: Id(type),
+    id: (id ?? Id(type)) as IdSchema,
     meta: Schema.optionalKey(AnyMeta)
-  })
+  }) as Identifier<Type, IdSchema>
 
 /**
  * The local-identifier schema for a resource type: `{ type, lid, meta? }`.
@@ -209,10 +221,11 @@ export type ResourceFields<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
-  Meta extends Schema.Top
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>
 > = {
   readonly type: Schema.tag<Type>
-  readonly id: Id<Type>
+  readonly id: IdSchema
   readonly attributes: Schema.Struct<Attributes>
   readonly relationships: Schema.optionalKey<Schema.Struct<RelationshipSchemas<Rels>>>
   readonly links: Schema.optionalKey<typeof ResourceLinks>
@@ -355,11 +368,29 @@ export interface CreatePayload<
 /**
  * The partial attributes of an update payload.
  *
+ * Each attribute becomes `Schema.optional`, which captures the three update
+ * states the spec's PATCH semantics require, distinctly:
+ *
+ *   - **set** — the key is present with a value;
+ *   - **unset** — the key is present as `undefined` (clear the attribute);
+ *   - **leave unchanged** — the key is absent.
+ *
+ * (`optional(S)` is `optionalKey(UndefinedOr(S))`: the `optionalKey` part models
+ * "leave unchanged", the `UndefinedOr` part models "unset". A nullable attribute
+ * — `Schema.NullOr(X)` — therefore accepts `value | null | undefined`.)
+ *
+ * **On the wire.** JSON cannot carry `undefined`, so over a JSON:API HTTP body
+ * the "unset via `undefined`" state collapses into "absent / leave unchanged";
+ * the wire-expressible way to clear a value is `null` on a nullable attribute
+ * (a non-nullable attribute therefore has no over-the-wire clear). The full
+ * three-state distinction is available in-process and for codec-based transports
+ * (RPC / remote functions) that preserve `undefined`.
+ *
  * @since 0.1.0
  * @category type-level
  */
 export type PartialAttributes<Attributes extends Schema.Struct.Fields> = {
-  readonly [K in keyof Attributes]: Schema.optionalKey<Attributes[K]>
+  readonly [K in keyof Attributes]: Schema.optional<Attributes[K]>
 }
 
 /**
@@ -388,15 +419,42 @@ export type PartialAttributes<Attributes extends Schema.Struct.Fields> = {
 export interface UpdatePayload<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
-  Rels extends Relationships
+  Rels extends Relationships,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>
 > extends Schema.Struct<{
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>
-    readonly id: Id<Type>
+    readonly id: IdSchema
     readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<Attributes>>>
     readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>>
   }>
 }> {}
+
+/**
+ * The flat ("command-style") create request shape derived from a resource: the
+ * attributes struct alone, *without* the nested
+ * `{ data: { type, attributes } }` JSON:API envelope.
+ *
+ * Useful for transports — RPC, remote functions — that carry a flat attribute
+ * payload rather than a JSON:API request body. Opt-in: a resource exposes both
+ * the spec {@link CreatePayload} and this flat projection.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Schema.Struct<Attributes> {}
+
+/**
+ * The flat ("command-style") update request shape: the resource id plus the
+ * tri-state {@link PartialAttributes}, *without* the JSON:API envelope.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export interface UpdateInput<
+  Attributes extends Schema.Struct.Fields,
+  IdSchema extends Schema.Codec<any, string>
+> extends Schema.Struct<AsFields<Omit<PartialAttributes<Attributes>, "id"> & { readonly id: IdSchema }>> {}
 
 /**
  * The default `included` union for a resource's compound documents: the
@@ -436,14 +494,15 @@ export interface Resource<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships = {},
-  Meta extends Schema.Top = typeof AnyMeta
-> extends Schema.Struct<ResourceFields<Type, Attributes, Rels, Meta>> {
+  Meta extends Schema.Top = typeof AnyMeta,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>
+> extends Schema.Struct<ResourceFields<Type, Attributes, Rels, Meta, IdSchema>> {
   /** The resource type name. */
   readonly type: Type
-  /** The branded id schema for this resource type. */
-  readonly Id: Id<Type>
+  /** The id schema for this resource type (the auto branded {@link Id}, or the injected custom id). */
+  readonly Id: IdSchema
   /** The `{ type, id }` resource-identifier schema. */
-  readonly identifier: Identifier<Type>
+  readonly identifier: Identifier<Type, IdSchema>
   /** The `{ type, lid }` local-identifier schema (for resources not yet assigned an id). */
   readonly localIdentifier: LocalIdentifier<Type>
   /** The relationship descriptors, as declared. */
@@ -451,7 +510,18 @@ export interface Resource<
   /** Request body schema for creating this resource (no `id`, optional `lid`, required `one` relationships). */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>
   /** Request body schema for updating this resource (`id` required, attributes partial). */
-  readonly updatePayload: UpdatePayload<Type, Attributes, Rels>
+  readonly updatePayload: UpdatePayload<Type, Attributes, Rels, IdSchema>
+  /**
+   * Flat ("command-style") create request schema: the attributes struct alone,
+   * without the JSON:API `{ data: { type, attributes } }` envelope — for
+   * transports that carry a flat attribute payload (RPC, remote functions).
+   */
+  readonly createInput: CreateInput<Attributes>
+  /**
+   * Flat ("command-style") update request schema: the resource id plus the
+   * tri-state partial attributes, without the JSON:API envelope.
+   */
+  readonly updateInput: UpdateInput<Attributes, IdSchema>
   /**
    * Creates a typed resource-identifier value (a "ref"): `{ type, id }` with
    * this resource's type tag and branded id.
@@ -462,7 +532,7 @@ export interface Resource<
    * relationships: { author: { data: Person.ref("9") } }
    * ```
    */
-  ref(id: string): Identifier<Type>["Type"]
+  ref(id: string): Identifier<Type, IdSchema>["Type"]
   /**
    * Creates a typed local-identifier value: `{ type, lid }` with this
    * resource's type tag — the counterpart of {@link ref} for resources that
@@ -486,7 +556,7 @@ export interface Resource<
   document<Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(options?: {
     readonly included?: Included
     readonly meta?: M
-  }): DataDocument<Resource<Type, Attributes, Rels, Meta>, Included, M>
+  }): DataDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, Included, M>
   /**
    * Collection document schema (strict array `data`). Same defaults as
    * {@link document}.
@@ -494,7 +564,7 @@ export interface Resource<
   collection<Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(options?: {
     readonly included?: Included
     readonly meta?: M
-  }): CollectionDocument<Resource<Type, Attributes, Rels, Meta>, Included, M>
+  }): CollectionDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, Included, M>
   /**
    * This resource wrapped for nullable primary `data`:
    * `Schema.OptionFromNullOr<this>`, decoding and encoding `None ⇆ null` on the
@@ -511,7 +581,7 @@ export interface Resource<
    * which would serialise a non-conformant body. For a plain `data: R | null`
    * (no `Option`), wrap with `Schema.NullOr(R)` instead.
    */
-  nullable(): Schema.OptionFromNullOr<Resource<Type, Attributes, Rels, Meta>>
+  nullable(): Schema.OptionFromNullOr<Resource<Type, Attributes, Rels, Meta, IdSchema>>
 }
 
 /**
@@ -553,6 +623,23 @@ export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["at
  * @category type-level
  */
 export type AttributesOf<R extends Any> = R["fields"]["attributes"]["fields"]
+
+/**
+ * The per-attribute annotation bags of a resource definition: for each
+ * attribute key, the annotations stamped on its schema (or `undefined` if it
+ * carries none).
+ *
+ * The annotation bag is the open Effect annotation record, so consumers stamp
+ * their own metadata — a `dbColumn` mapping, a presentation hint — onto an
+ * attribute with `schema.annotate({ ... })` and read it back via
+ * {@link attributeAnnotations}.
+ *
+ * @since 0.3.0
+ * @category type-level
+ */
+export type AttributeAnnotationsOf<R extends Any> = {
+  readonly [K in AttributeKeys<R>]: Schema.Annotations.Annotations | undefined
+}
 
 // ---------------------------------------------------------------------------
 // Relationship names & targets (type level)
@@ -729,6 +816,40 @@ export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
   resource.fields.attributes.fields as AttributesOf<R>
 
 /**
+ * The per-attribute annotation bags of a resource definition: a record from
+ * each attribute key to the annotations stamped on its schema (or `undefined`).
+ *
+ * Consumers stamp metadata onto an attribute with Effect's native
+ * `schema.annotate({ ... })` and read it back here — e.g. a database column
+ * name that rides alongside the attribute schema:
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: {
+ *     bio: Schema.NullOr(Schema.String).annotate({ dbColumn: "biography" })
+ *   }
+ * })
+ *
+ * Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
+ * ```
+ *
+ * @since 0.3.0
+ * @category accessors
+ */
+export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnotationsOf<R> => {
+  const fields = resource.fields.attributes.fields as Record<string, Schema.Top>
+  const result: Record<string, Schema.Annotations.Annotations | undefined> = {}
+  for (const key of Object.keys(fields)) {
+    result[key] = Schema.resolveAnnotations(fields[key]!)
+  }
+  return result as AttributeAnnotationsOf<R>
+}
+
+/**
  * The relationship descriptor record of a resource definition — the
  * `Relationship.Relationships` record it was defined with.
  *
@@ -867,26 +988,33 @@ export const make = <
   const Type extends string,
   const Attributes extends Schema.Struct.Fields,
   const Rels extends Relationships = {},
-  Meta extends Schema.Top = typeof AnyMeta
+  Meta extends Schema.Top = typeof AnyMeta,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>
 >(
   type: Type,
   options: {
+    /**
+     * The id schema for this resource. Any schema whose `Encoded` side is
+     * `string` (so the wire stays spec-compliant); its decoded type becomes the
+     * resource's id brand. Defaults to the auto-derived {@link Id} for `type`.
+     */
+    readonly id?: IdSchema
     readonly attributes: Attributes
     readonly relationships?: Rels
     readonly meta?: Meta
   }
-): Resource<Type, Attributes, Rels, Meta> => {
+): Resource<Type, Attributes, Rels, Meta, IdSchema> => {
   const relationships = (options.relationships ?? {}) as Rels
   const meta = (options.meta ?? AnyMeta) as Meta
-  const id = Id(type)
-  const identifier = Identifier(type)
+  const id = (options.id ?? Id(type)) as IdSchema
+  const identifier = Identifier(type, id)
   const localIdentifier = LocalIdentifier(type)
   const relationshipSchemas = Relationship.makeRelationshipSchemas(relationships)
   const schemaByKey = relationshipSchemas as Record<string, Schema.Top>
   const attributes = Schema.Struct(options.attributes)
   const relationshipsStruct = Schema.Struct(relationshipSchemas)
 
-  const fields: ResourceFields<Type, Attributes, Rels, Meta> = {
+  const fields: ResourceFields<Type, Attributes, Rels, Meta, IdSchema> = {
     type: Schema.tag(type),
     id,
     attributes,
@@ -928,16 +1056,29 @@ export const make = <
     updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!)
   }
 
+  // Tri-state partial attributes: `optional` (= `optionalKey(UndefinedOr(...))`)
+  // distinguishes set (value), unset (`undefined`), and leave-unchanged (absent).
+  const partialAttributes = Schema.Struct(
+    Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>
+  )
+
   const updatePayload = Schema.Struct({
     data: Schema.Struct({
       type: Schema.tag(type),
       id,
-      attributes: Schema.optionalKey(
-        Schema.Struct(Struct.map(Schema.optionalKey)(options.attributes) as PartialAttributes<Attributes>)
-      ),
+      attributes: Schema.optionalKey(partialAttributes),
       relationships: Schema.optionalKey(Schema.Struct(updateRelationshipFields))
     })
-  }) as unknown as UpdatePayload<Type, Attributes, Rels>
+  }) as unknown as UpdatePayload<Type, Attributes, Rels, IdSchema>
+
+  // Flat ("command-style") projections of the create/update inputs, without the
+  // JSON:API `{ data: { type, ... } }` envelope.
+  const createInput = attributes as unknown as CreateInput<Attributes>
+  const updateInput = Schema.Struct({
+    ...(Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>),
+    // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
+    id
+  }) as unknown as UpdateInput<Attributes, IdSchema>
 
   // The default `included` union: resources referenced by non-`paginated`
   // relationships. Built lazily so out-of-order / mutually recursive
@@ -953,7 +1094,7 @@ export const make = <
       )
     ) as unknown as DefaultIncluded<Rels>
 
-  const resource: Resource<Type, Attributes, Rels, Meta> = Object.assign(struct, {
+  const resource: Resource<Type, Attributes, Rels, Meta, IdSchema> = Object.assign(struct, {
     type,
     Id: id,
     identifier,
@@ -961,7 +1102,12 @@ export const make = <
     relationships,
     createPayload,
     updatePayload,
-    ref: (refId: string) => identifier.make({ id: id.make(refId) }),
+    createInput,
+    updateInput,
+    // Decode the wire string through the id schema (rather than `id.make`) so
+    // `ref` honours whatever decoded type a custom `Codec<_, string>` id carries.
+    ref: (refId: string) =>
+      identifier.make({ id: Schema.decodeUnknownSync(id)(refId) } as Identifier<Type, IdSchema>["~type.make.in"]),
     lidRef: (lid: string) => localIdentifier.make({ lid }),
     nullable: () => Schema.OptionFromNullOr(resource),
     document: <Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(opts?: {
@@ -1014,6 +1160,24 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
 >
 
 /**
+ * The id schema of a resource that {@link extend}s a base whose id is `BaseId`.
+ *
+ * With `Inherit` false (the default) the child gets a fresh, independent
+ * {@link Id} brand. With `Inherit` true the child's id is the base id *branded
+ * again* with the child's type — accumulating the base's brand(s), so the child
+ * id is assignable wherever the base id is expected (a true subtype), and so on
+ * transitively through an `extend` chain.
+ *
+ * @since 0.3.0
+ * @category type-level
+ */
+export type ExtendedId<
+  BaseId extends Schema.Codec<any, string>,
+  Type extends string,
+  Inherit extends boolean
+> = Inherit extends true ? Schema.brand<BaseId, `${Type}Id`> : Id<Type>
+
+/**
  * Defines a new resource that **extends** (subtypes) an existing one: the new
  * resource inherits the base's attributes and relationships, to which `options`
  * adds more — keys present in `options` override the base's.
@@ -1023,6 +1187,13 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
  * afresh) that happens to share the base's structure — handy when several
  * resources carry a common set of attributes and relationships defined once.
  * `meta` is inherited from the base; pass `meta` to override it.
+ *
+ * By default the child gets a fresh, independent id brand, unrelated to the
+ * base's. Pass `inheritId: true` to instead brand the *base's* id schema with
+ * the child's type, so the child id accumulates the base's brand(s) and is
+ * assignable wherever the base id is expected — a true subtype relationship,
+ * transitive through an `extend` chain (`Admin.Id` ⊂ `Account.Id`, and a further
+ * extension's id ⊂ `Admin.Id` ⊂ `Account.Id`).
  *
  * @example
  * ```ts
@@ -1050,6 +1221,10 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
  *
  * Admin.type // "admins"
  * Resource.attributeKeys(Admin) // ["email", "createdAt", "permissions"]
+ *
+ * // With `inheritId`, an Admin id IS an Account id (subtype):
+ * const Manager = Resource.extend(Account, "managers", { inheritId: true })
+ * const managerId = Manager.Id.make("1") // also usable wherever an Account id is expected
  * ```
  *
  * @since 0.2.0
@@ -1063,22 +1238,32 @@ export const extend = <
   const Type extends string,
   const ExtraAttributes extends Schema.Struct.Fields = {},
   const ExtraRels extends Relationships = {},
-  Meta extends Schema.Top = BaseMeta
+  Meta extends Schema.Top = BaseMeta,
+  BaseId extends Schema.Codec<any, string> = Id<BaseType>,
+  const InheritId extends boolean = false
 >(
-  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta>,
+  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
   options?: {
     readonly attributes?: ExtraAttributes
     readonly relationships?: ExtraRels
     readonly meta?: Meta
+    /**
+     * Brand the *base's* id schema with this resource's type instead of minting
+     * a fresh independent id, so the child id is a subtype of the base id.
+     * Defaults to `false`.
+     */
+    readonly inheritId?: InheritId
   }
 ): Resource<
   Type,
   ExtendedAttributes<BaseAttributes, ExtraAttributes>,
   ExtendedRelationships<BaseRels, ExtraRels>,
-  Meta
+  Meta,
+  ExtendedId<BaseId, Type, InheritId>
 > =>
   make(type, {
+    id: options?.inheritId === true ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`)) : undefined,
     attributes: { ...base.fields.attributes.fields, ...options?.attributes },
     relationships: { ...base.relationships, ...options?.relationships },
     meta: (options?.meta ?? base.fields.meta.schema) as Meta
@@ -1086,5 +1271,6 @@ export const extend = <
     Type,
     ExtendedAttributes<BaseAttributes, ExtraAttributes>,
     ExtendedRelationships<BaseRels, ExtraRels>,
-    Meta
+    Meta,
+    ExtendedId<BaseId, Type, InheritId>
   >

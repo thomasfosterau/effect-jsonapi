@@ -141,3 +141,35 @@ describe("standard errors", () => {
     expect(ApiError.Conflict.status).toBe(409)
   })
 })
+
+describe("ApiError.toDocument", () => {
+  it("encodes an error instance to a JSON:API error document, no HttpApi", () => {
+    const document = ApiError.toDocument(new ArticleNotFound({ id: "42" }))
+    expect(document).toEqual({
+      errors: [
+        {
+          status: "404",
+          code: "not_found",
+          title: "Resource not found",
+          detail: "Article 42 not found",
+          meta: { id: "42" }
+        }
+      ]
+    })
+  })
+
+  it("works for a standard error (e.g. for a content-negotiation failure)", () => {
+    expect(ApiError.toDocument(new ApiError.UnsupportedMediaType())).toEqual({
+      errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }]
+    })
+    expect(ApiError.toDocument(new ApiError.BadRequest({ detail: "bad query" }))).toEqual({
+      errors: [
+        { status: "400", code: "bad_request", title: "Bad Request", detail: "bad query", meta: { detail: "bad query" } }
+      ]
+    })
+  })
+
+  it("throws when given a value that is not an ApiError instance", () => {
+    expect(() => ApiError.toDocument({ notAnError: true })).toThrow()
+  })
+})

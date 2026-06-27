@@ -43,6 +43,10 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
+  - [Custom id schemas](#custom-id-schemas)
+  - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
+  - [Per-attribute annotations](#per-attribute-annotations)
+  - [Flat (command-style) payloads](#flat-command-style-payloads)
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
@@ -161,22 +165,115 @@ pointing at a paginated collection endpoint (see
 
 Everything below is **derived** — never assembled by hand:
 
-| Derived                   | What it is                                                                                                                          |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `Article`                 | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                                             |
-| `Article.Id`              | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                                             |
-| `Article.identifier`      | the `{ type: "articles", id }` resource-identifier schema                                                                           |
-| `Article.ref("1")`        | a typed identifier _value_ — handy for relationship linkage                                                                         |
-| `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                                     |
-| `Article.lidRef("a1")`    | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                                   |
-| `Article.createPayload`   | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded                 |
-| `Article.updatePayload`   | `{ data: { type, id, attributes? (partial), relationships? } }` — `paginated` excluded                                              |
-| `Article.document()`      | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships |
-| `Article.collection()`    | collection document (strict array `data`)                                                                                           |
-| `typeof Article.Type`     | the decoded TypeScript type                                                                                                         |
+| Derived                                       | What it is                                                                                                                                                       |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Article`                                     | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                                                                          |
+| `Article.Id`                                  | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                                                                          |
+| `Article.identifier`                          | the `{ type: "articles", id }` resource-identifier schema                                                                                                        |
+| `Article.ref("1")`                            | a typed identifier _value_ — handy for relationship linkage                                                                                                      |
+| `Article.localIdentifier`                     | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                                                                  |
+| `Article.lidRef("a1")`                        | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                                                                |
+| `Article.createPayload`                       | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded                                              |
+| `Article.updatePayload`                       | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` excluded |
+| `Article.createInput` / `Article.updateInput` | flat ["command-style"](#flat-command-style-payloads) request schemas — attributes (and, for update, the `id`) without the JSON:API envelope                      |
+| `Article.document()`                          | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships                              |
+| `Article.collection()`                        | collection document (strict array `data`)                                                                                                                        |
+| `typeof Article.Type`                         | the decoded TypeScript type                                                                                                                                      |
 
 Documents are not limited to one resource type — see
 [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
+
+### Custom id schemas
+
+By default a resource's id is `Resource.Id(type)` — a `string` branded by resource type. Pass your
+own `id` schema (anything whose **encoded** side stays a `string`, so the wire is spec-compliant) to
+brand ids your way — e.g. an id shared across a hierarchy of types, or one decoded to a richer value:
+
+```ts
+const PersonId = Schema.String.pipe(Schema.brand("PersonId"))
+
+const Person = Resource.make("people", {
+  id: PersonId, // default = Resource.Id("people")
+  attributes: { name: Schema.NonEmptyString }
+})
+
+Person.Id // PersonId
+// Person.identifier.Type      → { type: "people"; id: PersonId }
+// Person.updatePayload.Type   → data.id is PersonId
+// Document.DataDocument(Person).Type.data.id is PersonId
+```
+
+The injected id flows through `identifier`, `updatePayload`, `ref`, `createInput`/`updateInput` and
+the document schemas. Omit `id` and nothing changes — existing definitions keep the auto-branded id.
+`Resource.Identifier(type, id?)` accepts a custom id too, for standalone identifier schemas.
+
+**Subtype ids via `extend`.** To make a subtype's id a _subtype_ of its base's id — a `PersonId` that
+_is an_ `AgentId` _is a_ `NodeId` — pass `inheritId: true` to [`extend`](#reusing--extending-resources).
+The child's id brands the base's id schema, so it accumulates the base's brand(s) and is assignable
+wherever the base id is expected (transitively through a chain); the reverse is rejected. Effect's
+brands are intersectional, so this is just brand accumulation:
+
+```ts
+const Account = Resource.make("accounts", { attributes: { email: Schema.NonEmptyString } })
+const Manager = Resource.extend(Account, "managers", { inheritId: true })
+
+const managerId = Manager.Id.make("1")
+const asAccount: typeof Account.Id.Type = managerId // ✓ a manager id IS an account id
+// @ts-expect-error an account id is not a manager id
+const asManager: typeof Manager.Id.Type = Account.Id.make("2")
+```
+
+`inheritId` defaults to `false` — by default an extended resource gets a fresh, independent brand.
+
+### Update payloads: set / unset / leave unchanged
+
+A PATCH must distinguish three intents per attribute. `updatePayload` models them with
+`Schema.optional` (`= optionalKey(UndefinedOr(...))`), so each attribute is genuinely tri-state:
+
+| Wire / value   | Meaning           |
+| -------------- | ----------------- |
+| key **absent** | leave unchanged   |
+| key = `null`†  | unset (clear)     |
+| key = a value  | set to that value |
+
+† `null` requires a nullable attribute (`Schema.NullOr(...)`). In-process — and over codec transports
+that preserve it, like RPC / remote functions — an explicit `undefined` is also accepted as "unset".
+Over a JSON HTTP body, JSON can't carry `undefined`, so `null` is the wire clear signal and an absent
+key means "leave unchanged".
+
+```ts
+const Person = Resource.make("people", {
+  attributes: { name: Schema.NonEmptyString, bio: Schema.NullOr(Schema.String) }
+})
+
+// Person.updatePayload accepts, for `bio`: a string (set), null (clear), or omit (leave unchanged).
+// Its type is `{ name?: string; bio?: string | null | undefined }` under `data.attributes`.
+```
+
+### Per-attribute annotations
+
+Stamp metadata onto an attribute with Effect's `schema.annotate({ ... })`, and read it back per
+attribute with `Resource.attributeAnnotations` — handy for carrying, say, a database column name
+alongside the attribute schema:
+
+```ts
+const Person = Resource.make("people", {
+  attributes: { bio: Schema.NullOr(Schema.String).annotate({ dbColumn: "biography" }) }
+})
+
+Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
+```
+
+### Flat (command-style) payloads
+
+Alongside the JSON:API `{ data: { type, attributes } }` payloads, every resource exposes flat request
+schemas — the attributes alone, no envelope — for transports (RPC, remote functions) that carry a
+flat shape:
+
+```ts
+Person.createInput // { name, bio }            — flat create attributes
+Person.updateInput // { id, name?, bio? }      — id plus the same tri-state attributes
+```
 
 ### Nullable primary `data`
 
@@ -629,6 +726,11 @@ Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offs
 `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
 `next` / `last` top-level links from the request's page parameters and the total count.
 
+To name the value a builder returns — e.g. on a helper that assembles documents outside a handler —
+use `Handlers.DocumentValue<Data, Included?, Meta?>` (the runtime shape, with an optional `jsonapi`
+member) or the schema-derived `Document.Value<R, Included?, Meta?>`, instead of hand-rolling the
+`{ data, included?, links?, meta?, jsonapi? }` envelope.
+
 To serve it (with `@effect/platform-node`):
 
 ```ts
@@ -643,6 +745,22 @@ HttpApiBuilder.layer(Api).pipe(
   Layer.launch,
   NodeRuntime.runMain
 )
+```
+
+If you negotiate content outside `HttpApi` — say in a framework hook that owns the URL —
+`Middleware.negotiate(headers, options?)` runs the §5 rules standalone, returning the offending
+`ApiError` (`UnsupportedMediaType` / `NotAcceptable`) or `undefined`, and `ApiError.toDocument(error)`
+renders any `ApiError` to a JSON:API error-document value:
+
+```ts
+const error = Middleware.negotiate({
+  contentType: request.headers.get("content-type") ?? undefined,
+  accept: request.headers.get("accept") ?? undefined
+})
+if (error) {
+  const body = ApiError.toDocument(error) // { errors: [{ status, code, title }] }
+  // → respond with `Number(body.errors[0].status)` and `body`
+}
 ```
 
 And to call it — the same definitions drive a fully typed client:

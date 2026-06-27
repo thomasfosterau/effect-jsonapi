@@ -251,6 +251,36 @@ export const make =
     return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>
   }
 
+/**
+ * Encodes an {@link make} error instance to its JSON:API error-document value
+ * (`{ errors: [...] }`), independent of Effect's HttpApi.
+ *
+ * Use this to render a JSON:API error body from a plain framework hook (e.g. a
+ * SvelteKit hook) that negotiates content or validates requests outside an
+ * `HttpApi` — the same encoding the endpoint middleware applies, reachable on
+ * its own.
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const body = ApiError.toDocument(new ApiError.BadRequest({ detail: "bad query" }))
+ * // → { errors: [{ status: "400", code: "bad_request", title: "Bad Request", detail: "bad query" }] }
+ * ```
+ *
+ * @since 0.3.0
+ * @category encoding
+ */
+export const toDocument = (error: object): typeof WireDocument.Type => {
+  const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire
+  if (wire === undefined || !Schema.isSchema(wire)) {
+    throw new Error(
+      "ApiError.toDocument expects an instance of an ApiError.make(...) class (with a static `wire` schema)"
+    )
+  }
+  return Schema.encodeUnknownSync(wire as Schema.Codec<unknown, typeof WireDocument.Type>)(error)
+}
+
 // ---------------------------------------------------------------------------
 // Standard errors — the responses every JSON:API endpoint must support
 // ---------------------------------------------------------------------------

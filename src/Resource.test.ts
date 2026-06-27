@@ -3,6 +3,7 @@ import { Option, Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
 import {
+  attributeAnnotations,
   attributes as attributesOf,
   directTargets,
   extend,
@@ -909,5 +910,253 @@ describe("Resource.extend", () => {
   it("leaves the base resource unchanged", () => {
     expect(Object.keys(attributesOf(Account))).toEqual(["email", "createdAt"])
     expect(Object.keys(Account.relationships)).toEqual(["profile"])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Custom id-schema injection
+// ---------------------------------------------------------------------------
+
+describe("Resource custom id injection", () => {
+  // The consumer's own externally-defined branded id schema — here a single
+  // brand, but it could be a hierarchical multi-brand or any codec to `string`.
+  const PersonId = Schema.String.pipe(Schema.brand("PersonId"))
+  const Person = Resource("people", {
+    id: PersonId,
+    attributes: { name: Schema.NonEmptyString }
+  })
+
+  it("uses the injected id schema as the resource's Id", () => {
+    expectTypeOf<typeof Person.Id>().toEqualTypeOf<typeof PersonId>()
+    const decoded = Schema.decodeUnknownSync(Person)({
+      type: "people",
+      id: "9",
+      attributes: { name: "Dan" }
+    })
+    expect(decoded.id).toBe("9")
+    // the resource object's id carries the injected brand
+    expectTypeOf<(typeof Person.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+  })
+
+  it("threads the injected id through the identifier", () => {
+    expectTypeOf<(typeof Person.identifier.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+    const decoded = Schema.decodeUnknownSync(Person.identifier)({ type: "people", id: "9" })
+    expect(decoded).toEqual({ type: "people", id: "9" })
+  })
+
+  it("threads the injected id through the update payload and documents", () => {
+    expectTypeOf<(typeof Person.updatePayload.Type)["data"]["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+    const doc = DataDocument(Person)
+    expectTypeOf<(typeof doc.Type)["data"]["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+  })
+
+  it("ref produces a value carrying the injected brand", () => {
+    const ref = Person.ref("9")
+    expect(ref).toEqual({ type: "people", id: "9" })
+    expectTypeOf<typeof ref.id>().toEqualTypeOf<typeof PersonId.Type>()
+  })
+
+  it("Identifier accepts a custom id schema standalone", () => {
+    const PersonIdentifier = Identifier("people", PersonId)
+    const decoded = Schema.decodeUnknownSync(PersonIdentifier)({ type: "people", id: "9" })
+    expect(decoded.id).toBe("9")
+    expectTypeOf<(typeof PersonIdentifier.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+  })
+
+  it("defaults to the auto branded id when none is injected (no breaking change)", () => {
+    const Tag = Resource("tags", { attributes: { name: Schema.String } })
+    const tagId = Tag.Id.make("1")
+    expect(tagId).toBe("1")
+    // the default brand is still the per-type one
+    expectTypeOf<(typeof Tag.Type)["id"]>().toEqualTypeOf<typeof tagId>()
+  })
+
+  it("can be extended (the new type gets its own default id)", () => {
+    const Member = extend(Person, "members", { attributes: { role: Schema.String } })
+    const decoded = Schema.decodeUnknownSync(Member)({
+      type: "members",
+      id: "1",
+      attributes: { name: "Dan", role: "admin" }
+    })
+    expect(decoded.attributes.role).toBe("admin")
+  })
+
+  it("create payload still carries no id member (server-assigned), custom id or not", () => {
+    const decoded = Schema.decodeUnknownSync(Person.createPayload)({
+      data: { type: "people", attributes: { name: "Dan" } }
+    })
+    expect("id" in decoded.data).toBe(false)
+    type CreateData = (typeof Person.createPayload.Type)["data"]
+    expectTypeOf<CreateData>().not.toHaveProperty("id")
+  })
+
+  it("collection data carries the injected id brand", () => {
+    const doc = Person.collection()
+    expectTypeOf<(typeof doc.Type)["data"][number]["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Variant-aware attributes: tri-state update + per-attribute annotations
+// ---------------------------------------------------------------------------
+
+describe("Resource attribute annotations", () => {
+  const Widget = Resource("widgets", {
+    attributes: {
+      name: Schema.NonEmptyString.annotate({ dbColumn: "widget_name" }),
+      note: Schema.NullOr(Schema.String).annotate({ dbColumn: "note_text" }),
+      plain: Schema.String
+    }
+  })
+
+  it("reads per-attribute annotations off the resource", () => {
+    const annotations = attributeAnnotations(Widget)
+    expect(annotations.name?.dbColumn).toBe("widget_name")
+    expect(annotations.note?.dbColumn).toBe("note_text")
+    // an attribute with no annotations has no dbColumn
+    expect(annotations.plain?.dbColumn).toBeUndefined()
+  })
+
+  it("exposes a key for every attribute", () => {
+    expect(Object.keys(attributeAnnotations(Widget))).toEqual(["name", "note", "plain"])
+  })
+})
+
+describe("Resource.updatePayload tri-state semantics", () => {
+  const Widget = Resource("widgets", {
+    attributes: {
+      name: Schema.NonEmptyString,
+      note: Schema.NullOr(Schema.String)
+    }
+  })
+  const decode = (attributes: unknown) =>
+    Schema.decodeUnknownSync(Widget.updatePayload)({ data: { type: "widgets", id: "1", attributes } })
+
+  it("set: a present value updates the attribute", () => {
+    const decoded = decode({ note: "hello" })
+    expect(decoded.data.attributes?.note).toBe("hello")
+  })
+
+  it("unset (null): a nullable attribute accepts null to clear it", () => {
+    const decoded = decode({ note: null })
+    expect(decoded.data.attributes?.note).toBeNull()
+  })
+
+  it("unset (undefined): a present `undefined` is accepted", () => {
+    const decoded = decode({ note: undefined })
+    expect(decoded.data.attributes && "note" in decoded.data.attributes).toBe(true)
+    expect(decoded.data.attributes?.note).toBeUndefined()
+  })
+
+  it("leave unchanged: an absent key is accepted and stays absent", () => {
+    const decoded = decode({})
+    expect(decoded.data.attributes && "note" in decoded.data.attributes).toBe(false)
+  })
+
+  it("over a JSON wire: null clears a nullable attribute, absent leaves it unchanged", () => {
+    // A real HTTP body is JSON (no `undefined`): null is the wire clear signal.
+    const cleared = Schema.decodeUnknownSync(Widget.updatePayload)(
+      JSON.parse('{"data":{"type":"widgets","id":"1","attributes":{"note":null}}}')
+    )
+    expect(cleared.data.attributes?.note).toBeNull()
+    const unchanged = Schema.decodeUnknownSync(Widget.updatePayload)(
+      JSON.parse('{"data":{"type":"widgets","id":"1","attributes":{}}}')
+    )
+    expect(unchanged.data.attributes && "note" in unchanged.data.attributes).toBe(false)
+  })
+
+  it("a non-nullable attribute accepts undefined (in-process unset) but rejects null", () => {
+    const accepted = decode({ name: undefined })
+    expect(accepted.data.attributes && "name" in accepted.data.attributes).toBe(true)
+    expect(() => decode({ name: null })).toThrow()
+  })
+
+  it("types a nullable attribute as value | null | undefined", () => {
+    type Attrs = NonNullable<(typeof Widget.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>()
+    expectTypeOf<Attrs["name"]>().toEqualTypeOf<string | undefined>()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Flat ("command-style") payload projections
+// ---------------------------------------------------------------------------
+
+describe("Resource flat inputs", () => {
+  const PersonId = Schema.String.pipe(Schema.brand("PersonId"))
+  const Person = Resource("people", {
+    id: PersonId,
+    attributes: {
+      name: Schema.NonEmptyString,
+      bio: Schema.NullOr(Schema.String)
+    }
+  })
+
+  it("createInput is a flat attributes struct (no JSON:API envelope)", () => {
+    const decoded = Schema.decodeUnknownSync(Person.createInput)({ name: "Dan", bio: null })
+    expect(decoded).toEqual({ name: "Dan", bio: null })
+    expectTypeOf<typeof Person.createInput.Type>().toEqualTypeOf<{
+      readonly name: string
+      readonly bio: string | null
+    }>()
+  })
+
+  it("updateInput is flat: id plus tri-state attributes", () => {
+    const decoded = Schema.decodeUnknownSync(Person.updateInput)({ id: "1", bio: null })
+    expect(decoded.id).toBe("1")
+    expect(decoded.bio).toBeNull()
+    // omitting an attribute leaves it unchanged
+    const minimal = Schema.decodeUnknownSync(Person.updateInput)({ id: "1" })
+    expect("name" in minimal).toBe(false)
+    // the id carries the injected brand; nullable attribute is value | null | undefined
+    expectTypeOf<(typeof Person.updateInput.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+    expectTypeOf<(typeof Person.updateInput.Type)["bio"]>().toEqualTypeOf<string | null | undefined>()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// extend with inheritId: encode the subtype relationship in the branded id
+// ---------------------------------------------------------------------------
+
+describe("Resource.extend inheritId (subtype ids)", () => {
+  const Account = Resource("accounts", { attributes: { email: Schema.NonEmptyString } })
+
+  it("default extend keeps an independent brand — child id is NOT a base id", () => {
+    const Admin = extend(Account, "admins", { attributes: { level: Schema.Int } })
+    const adminId = Admin.Id.make("1")
+    // @ts-expect-error a default-extended admin id is not assignable to an account id
+    const asAccount: typeof Account.Id.Type = adminId
+    expect(asAccount).toBe("1")
+  })
+
+  it("inheritId makes the child id a subtype of the base id (assignable, not vice-versa)", () => {
+    const Manager = extend(Account, "managers", { inheritId: true })
+    const managerId = Manager.Id.make("1")
+    // a manager id IS an account id — this assignment compiles
+    const asAccount: typeof Account.Id.Type = managerId
+    expect(asAccount).toBe("1")
+    // ...but an account id is NOT a manager id
+    // @ts-expect-error an account id lacks the managers brand
+    const asManager: typeof Manager.Id.Type = Account.Id.make("2")
+    expect(asManager).toBe("2")
+  })
+
+  it("inheritId is transitive through an extend chain", () => {
+    const Manager = extend(Account, "managers", { inheritId: true })
+    const Director = extend(Manager, "directors", { inheritId: true, attributes: { region: Schema.String } })
+    const directorId = Director.Id.make("1")
+    const asManager: typeof Manager.Id.Type = directorId // director ⊂ manager
+    const asAccount: typeof Account.Id.Type = directorId // director ⊂ account
+    expect(asManager).toBe("1")
+    expect(asAccount).toBe("1")
+  })
+
+  it("inheritId composes with a custom base id", () => {
+    const NodeId = Schema.String.pipe(Schema.brand("NodeId"))
+    const Node = Resource("nodes", { id: NodeId, attributes: { name: Schema.String } })
+    const Person = extend(Node, "people", { inheritId: true })
+    const personId = Person.Id.make("1")
+    const asNode: typeof NodeId.Type = personId // a person id IS a node id
+    expect(asNode).toBe("1")
   })
 })

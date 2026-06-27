@@ -309,6 +309,26 @@ export const DataDocument = <
   })
 
 /**
+ * The decoded *value* type of a single-resource data document for `R` — the
+ * value side of {@link DataDocument}, including the optional top-level
+ * `jsonapi` member.
+ *
+ * Lets consumers name a document-assembling function's return type
+ * (`assemble(...): Document.Value<typeof Article>`) instead of hand-rolling the
+ * `{ data, included?, links?, meta?, jsonapi? }` envelope. The runtime
+ * counterpart `Handlers.DocumentValue` describes the looser shape the
+ * `Handlers.data` / `Handlers.collection` builders return.
+ *
+ * @since 0.3.0
+ * @category models
+ */
+export type Value<
+  R extends Schema.Top,
+  Included extends Schema.Top = typeof Schema.Never,
+  M extends Schema.Top = typeof AnyMeta
+> = DataDocument<R, Included, M>["Type"]
+
+/**
  * A collection document: `data` is an array of resources (possibly empty).
  *
  * @since 0.1.0

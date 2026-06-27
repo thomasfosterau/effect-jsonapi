@@ -434,7 +434,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       type: Schema.tag(resource.type),
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
-      attributes: Schema.optionalKey(Schema.Struct(Struct.map(Schema.optionalKey)(resource.fields.attributes.fields))),
+      attributes: Schema.optionalKey(Schema.Struct(Struct.map(Schema.optional)(resource.fields.attributes.fields))),
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships))
     }),
     meta: Schema.optionalKey(AnyMeta)

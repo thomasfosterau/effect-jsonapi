@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vitest"
+import { Schema } from "effect"
+import * as Document from "./Document.js"
 import * as Handlers from "./Handlers.js"
+import * as Resource from "./Resource.js"
 
 const article = {
   type: "articles",
@@ -203,5 +206,40 @@ describe("pagination links", () => {
   it("preserves existing query strings in the path", () => {
     const links = Handlers.offsetPaginationLinks("/articles?sort=-createdAt", { offset: 0, limit: 10 }, 5)
     expect(links.self).toBe("/articles?sort=-createdAt&page[offset]=0&page[limit]=10")
+  })
+})
+
+describe("Handlers.DocumentValue / Document.Value", () => {
+  const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
+  const value = Article.make({ id: Article.Id.make("1"), attributes: { title: "Hi" } })
+
+  it("DocumentValue names the value type Handlers.data returns", () => {
+    const named: Handlers.DocumentValue<typeof Article.Type> = Handlers.data(value)
+    expect(named.data.id).toBe("1")
+  })
+
+  it("DocumentValue carries an optional jsonapi member", () => {
+    const doc: Handlers.DocumentValue<typeof Article.Type> = { data: value, jsonapi: { version: "1.1" } }
+    expect(doc.jsonapi?.version).toBe("1.1")
+    expectTypeOf<Handlers.JsonApiObjectValue>().toEqualTypeOf<typeof Document.JsonApiObject.Type>()
+  })
+
+  it("Document.Value names a data-document value type", () => {
+    const doc: Document.Value<typeof Article> = {
+      data: Schema.decodeUnknownSync(Article)({ type: "articles", id: "1", attributes: { title: "Hi" } }),
+      jsonapi: { version: "1.1" }
+    }
+    expect(doc.data.id).toBe("1")
+  })
+
+  it("Document.Value carries included and meta when parameterized", () => {
+    const item = Schema.decodeUnknownSync(Article)({ type: "articles", id: "1", attributes: { title: "Hi" } })
+    const doc: Document.Value<typeof Article, typeof Article, typeof Document.AnyMeta> = {
+      data: item,
+      included: [item],
+      meta: { note: "x" }
+    }
+    expect(doc.included?.[0]?.id).toBe("1")
+    expect(doc.meta?.note).toBe("x")
   })
 })
