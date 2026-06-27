@@ -194,6 +194,22 @@ describe("operation schemas", () => {
     expect(operation.data.attributes).toEqual({ title: "Updated" })
   })
 
+  it("update operation honours the tri-state attribute semantics (set / unset / leave)", () => {
+    const Widget = Resource("widgets", { attributes: { note: Schema.NullOr(Schema.String) } })
+    const Op = Atomic.UpdateOperation(Widget) as Schema.Codec<any, unknown>
+    const decode = (attributes: unknown) =>
+      Schema.decodeUnknownSync(Op)({ op: "update", data: { type: "widgets", id: "1", attributes } }) as any
+    // present `undefined` is accepted (the runtime now matches the widened type)
+    expect("note" in decode({ note: undefined }).data.attributes).toBe(true)
+    // null clears, value sets, absent leaves unchanged
+    expect(decode({ note: null }).data.attributes.note).toBeNull()
+    expect(decode({ note: "hi" }).data.attributes.note).toBe("hi")
+    expect("note" in decode({}).data.attributes).toBe(false)
+    // the declared type advertises value | null | undefined
+    type Attrs = NonNullable<Atomic.UpdateOperation<typeof Widget>["Type"]["data"]["attributes"]>
+    expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>()
+  })
+
   it("decodes a remove operation targeted by ref", () => {
     const operation = decodeOperation({
       op: "remove",

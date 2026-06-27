@@ -980,6 +980,20 @@ describe("Resource custom id injection", () => {
     })
     expect(decoded.attributes.role).toBe("admin")
   })
+
+  it("create payload still carries no id member (server-assigned), custom id or not", () => {
+    const decoded = Schema.decodeUnknownSync(Person.createPayload)({
+      data: { type: "people", attributes: { name: "Dan" } }
+    })
+    expect("id" in decoded.data).toBe(false)
+    type CreateData = (typeof Person.createPayload.Type)["data"]
+    expectTypeOf<CreateData>().not.toHaveProperty("id")
+  })
+
+  it("collection data carries the injected id brand", () => {
+    const doc = Person.collection()
+    expectTypeOf<(typeof doc.Type)["data"][number]["id"]>().toEqualTypeOf<typeof PersonId.Type>()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1037,6 +1051,24 @@ describe("Resource.updatePayload tri-state semantics", () => {
   it("leave unchanged: an absent key is accepted and stays absent", () => {
     const decoded = decode({})
     expect(decoded.data.attributes && "note" in decoded.data.attributes).toBe(false)
+  })
+
+  it("over a JSON wire: null clears a nullable attribute, absent leaves it unchanged", () => {
+    // A real HTTP body is JSON (no `undefined`): null is the wire clear signal.
+    const cleared = Schema.decodeUnknownSync(Widget.updatePayload)(
+      JSON.parse('{"data":{"type":"widgets","id":"1","attributes":{"note":null}}}')
+    )
+    expect(cleared.data.attributes?.note).toBeNull()
+    const unchanged = Schema.decodeUnknownSync(Widget.updatePayload)(
+      JSON.parse('{"data":{"type":"widgets","id":"1","attributes":{}}}')
+    )
+    expect(unchanged.data.attributes && "note" in unchanged.data.attributes).toBe(false)
+  })
+
+  it("a non-nullable attribute accepts undefined (in-process unset) but rejects null", () => {
+    const accepted = decode({ name: undefined })
+    expect(accepted.data.attributes && "name" in accepted.data.attributes).toBe(true)
+    expect(() => decode({ name: null })).toThrow()
   })
 
   it("types a nullable attribute as value | null | undefined", () => {

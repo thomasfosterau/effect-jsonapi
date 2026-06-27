@@ -11,8 +11,8 @@ Unblock higher-level adoption with five additive features (no breaking changes):
   callers are unchanged). `Resource.Identifier(type, id?)` accepts a custom id schema too.
 
 - **Tri-state update payloads.** A resource's `updatePayload` now models PATCH semantics distinctly
-  per attribute via `Schema.optional`: an **absent** key means *leave unchanged*, an **`undefined`**
-  value means *unset*, and a present value means *set*. Nullable attributes (`Schema.NullOr(...)`)
+  per attribute via `Schema.optional`: an **absent** key means _leave unchanged_, an **`undefined`**
+  value means _unset_, and a present value means _set_. Nullable attributes (`Schema.NullOr(...)`)
   therefore accept `value | null | undefined`.
 
 - **Per-attribute annotations.** `Resource.attributeAnnotations(resource)` reads the Effect schema

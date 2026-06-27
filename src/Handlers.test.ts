@@ -231,4 +231,15 @@ describe("Handlers.DocumentValue / Document.Value", () => {
     }
     expect(doc.data.id).toBe("1")
   })
+
+  it("Document.Value carries included and meta when parameterized", () => {
+    const item = Schema.decodeUnknownSync(Article)({ type: "articles", id: "1", attributes: { title: "Hi" } })
+    const doc: Document.Value<typeof Article, typeof Article, typeof Document.AnyMeta> = {
+      data: item,
+      included: [item],
+      meta: { note: "x" }
+    }
+    expect(doc.included?.[0]?.id).toBe("1")
+    expect(doc.meta?.note).toBe("x")
+  })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { NotAcceptable, UnsupportedMediaType } from "./ApiError.js"
+import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js"
 import { acceptIsAcceptable, contentTypeIsAcceptable, negotiate } from "./Middleware.js"
 import { MEDIA_TYPE } from "./internal/media.js"
 
@@ -62,5 +62,19 @@ describe("Middleware.negotiate", () => {
     const ext = "https://jsonapi.org/ext/atomic"
     expect(negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] })).toBeUndefined()
     expect(negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(UnsupportedMediaType)
+  })
+
+  it("applies the extension list to the Accept header too", () => {
+    const ext = "https://jsonapi.org/ext/atomic"
+    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] })).toBeUndefined()
+    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(NotAcceptable)
+  })
+
+  it("composes with ApiError.toDocument to render the spec error body", () => {
+    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` })
+    expect(error).toBeInstanceOf(UnsupportedMediaType)
+    expect(toDocument(error!)).toEqual({
+      errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }]
+    })
   })
 })

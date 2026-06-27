@@ -379,6 +379,13 @@ export interface CreatePayload<
  * "leave unchanged", the `UndefinedOr` part models "unset". A nullable attribute
  * — `Schema.NullOr(X)` — therefore accepts `value | null | undefined`.)
  *
+ * **On the wire.** JSON cannot carry `undefined`, so over a JSON:API HTTP body
+ * the "unset via `undefined`" state collapses into "absent / leave unchanged";
+ * the wire-expressible way to clear a value is `null` on a nullable attribute
+ * (a non-nullable attribute therefore has no over-the-wire clear). The full
+ * three-state distinction is available in-process and for codec-based transports
+ * (RPC / remote functions) that preserve `undefined`.
+ *
  * @since 0.1.0
  * @category type-level
  */
@@ -447,7 +454,7 @@ export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Sc
 export interface UpdateInput<
   Attributes extends Schema.Struct.Fields,
   IdSchema extends Schema.Codec<any, string>
-> extends Schema.Struct<AsFields<{ readonly id: IdSchema } & PartialAttributes<Attributes>>> {}
+> extends Schema.Struct<AsFields<Omit<PartialAttributes<Attributes>, "id"> & { readonly id: IdSchema }>> {}
 
 /**
  * The default `included` union for a resource's compound documents: the
@@ -1068,8 +1075,9 @@ export const make = <
   // JSON:API `{ data: { type, ... } }` envelope.
   const createInput = attributes as unknown as CreateInput<Attributes>
   const updateInput = Schema.Struct({
-    id,
-    ...(Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>)
+    ...(Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>),
+    // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
+    id
   }) as unknown as UpdateInput<Attributes, IdSchema>
 
   // The default `included` union: resources referenced by non-`paginated`
@@ -1096,11 +1104,10 @@ export const make = <
     updatePayload,
     createInput,
     updateInput,
+    // Decode the wire string through the id schema (rather than `id.make`) so
+    // `ref` honours whatever decoded type a custom `Codec<_, string>` id carries.
     ref: (refId: string) =>
-      identifier.make({ id: id.make(refId as IdSchema["~type.make.in"]) } as Identifier<
-        Type,
-        IdSchema
-      >["~type.make.in"]),
+      identifier.make({ id: Schema.decodeUnknownSync(id)(refId) } as Identifier<Type, IdSchema>["~type.make.in"]),
     lidRef: (lid: string) => localIdentifier.make({ lid }),
     nullable: () => Schema.OptionFromNullOr(resource),
     document: <Included extends Schema.Top = DefaultIncluded<Rels>, M extends Schema.Top = Meta>(opts?: {
