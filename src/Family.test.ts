@@ -204,6 +204,36 @@ describe("Resource.family (no-base form)", () => {
     // Article {title}, Photo {url} share no attribute keys.
     expect(attributeKeys(Media)).toEqual([])
   })
+
+  it("resolves member relationships lazily — forward references don't break construction", () => {
+    // Members reference a target defined *after* the family() call.
+    const A = Resource("a-nodes", {
+      attributes: { x: Schema.String },
+      relationships: { target: Relationship.one((): typeof Late => Late) }
+    })
+    const B = Resource("b-nodes", {
+      attributes: { y: Schema.String },
+      relationships: { target: Relationship.one((): typeof Late => Late) }
+    })
+    // Must NOT throw even though `Late` is not yet defined (lazy, like the rest of the library).
+    const fam = family("ab", [A, B])
+    const Late = Resource("late", { attributes: { z: Schema.String } })
+    // The shared relationship resolves on access.
+    expect(Object.keys(fam.relationships)).toContain("target")
+    expect((fam.relationships as { readonly target: Relationship.One<typeof Late> }).target.ref().type).toBe("late")
+  })
+})
+
+describe("Resource.family edge cases", () => {
+  it("rejects an empty members array", () => {
+    expect(() => family("empty", [])).toThrow()
+  })
+
+  it("works with a single member", () => {
+    const Only = Resource("onlys", { attributes: { v: Schema.String } })
+    const Solo = family("solo", [Only])
+    expect(Schema.decodeUnknownSync(Solo)({ type: "onlys", id: "1", attributes: { v: "x" } }).type).toBe("onlys")
+  })
 })
 
 describe("isFamily", () => {

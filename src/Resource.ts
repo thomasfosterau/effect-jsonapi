@@ -1488,24 +1488,25 @@ export function family<
   members: Members
 ): Family<BaseType, Members, Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>>
 export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): Family<string, ReadonlyArray<Any>, any> {
+  if (members.length === 0) {
+    throw new Error("Resource.family requires at least one member")
+  }
   const base = typeof nameOrBase === "string" ? undefined : nameOrBase
   const name = base !== undefined ? base.type : (nameOrBase as string)
 
   const memberUnion = Schema.Union(members)
   const identifier = Schema.Union(members.map((member) => member.identifier))
   const id = base !== undefined ? base.Id : Schema.Union(members.map((member) => member.Id))
-  const relationships = base !== undefined ? base.relationships : intersectRelationships(members)
   const attributes = base !== undefined ? base.fields.attributes : Schema.Struct(intersectAttributes(members))
 
   // The default `included` union: every member's non-`paginated` targets.
   const includedUnion = () => Schema.Union(dedupe(members.flatMap(directTargets)))
 
-  return Object.assign(memberUnion, {
+  const fam = Object.assign(memberUnion, {
     type: name,
     members,
     Id: id,
     identifier,
-    relationships,
     fields: { attributes },
     document: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
       DataDocument(memberUnion, {
@@ -1518,4 +1519,17 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): F
         meta: opts?.meta ?? AnyMeta
       })
   }) as unknown as Family<string, ReadonlyArray<Any>, any>
+
+  // `relationships` is resolved lazily (memoised) so member relationship thunks
+  // resolve regardless of declaration order — the no-base intersection walks
+  // `descriptor.ref()`, which must not be forced at construction time (the rest
+  // of the library is lazy; forcing it here would reintroduce an order dependency).
+  let relationships: Relationships | undefined
+  Object.defineProperty(fam, "relationships", {
+    get: () => (relationships ??= base !== undefined ? base.relationships : intersectRelationships(members)),
+    enumerable: true,
+    configurable: true
+  })
+
+  return fam
 }
