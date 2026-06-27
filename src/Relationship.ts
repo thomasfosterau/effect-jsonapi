@@ -38,6 +38,10 @@
  * compile error and resources can reference each other regardless of
  * declaration order.
  *
+ * A target may also be a `Resource.family(...)` supertype, not just a single
+ * resource — linkage then decodes for any member of the family (keyed on the
+ * member `type` tag), since a family structurally satisfies `Resource.Any`.
+ *
  * @since 0.1.0
  */
 import { Schema } from "effect"
