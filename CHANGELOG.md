@@ -1,5 +1,80 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.5.0
+
+### Minor Changes
+
+- f5e663f: Add **polymorphic resource families** (`Resource.family`) — a supertype over a set of member
+  resources for heterogeneous "any node" use (closes #41).
+
+  A family **is** the discriminated union over its members (decoded by the `type` tag) **and**
+  structurally satisfies `Resource.Any`, so it can be used as primary `data`, as a compound
+  `included` member, and — the headline — as a **relationship target**
+  (`Relationship.one(() => family)` / `optional` / `many` / `paginated`), where linkage decodes for
+  any member (keyed on the member `type`, never the family name) with no changes to the relationship
+  machinery.
+
+  - `Resource.family(Base, [A, B])` — base-anchored (recommended): the shared `Id` /
+    `relationships` / attributes come from `Base`, so the shared id brand anchors "any member id"
+    and dotted `?include=` paths through the family are meaningful (pair with members defined as
+    `extend(Base, …, { inheritId: true })`).
+  - `Resource.family("name", [A, B])` — named, no base: the shared id is a union of the members'
+    ids and the shared relationships/attributes are the by-key intersection.
+  - `family.document()` / `family.collection()` derive documents whose `data` is the member union
+    and whose `included` spans every member's targets.
+  - `Endpoint.polymorphic(family, …)` is the single-resource `GET /family/:id` (returning any
+    member); `Endpoint.collection(family.members, …)` and `Group.make(family, …)` already cover the
+    collection and group cases.
+  - `Resource.isFamily`, `Resource.Family`, `Resource.FamilyIdentifier`,
+    `Resource.FamilyDefaultIncluded`, `Resource.FamilyIncludePath`, `Resource.FamilyIncluded`.
+
+  Strictly additive — no existing signatures change.
+
+- dbada1f: Add **per-attribute projection descriptors** — control how each attribute appears in the resource
+  object versus the four write projections (additive, no breaking changes):
+
+  - **`Resource.attribute(schema, options)`.** Declares a per-attribute projection. Options (all
+    optional; the defaults reproduce a plain `Schema` attribute):
+
+    - `resource` — presence in the resource object schema + documents: `true` (default) or
+      `"optional"` (an optional key).
+    - `create` — presence in `createPayload` / `createInput`: `"required"` (default), `"optional"`,
+      or `false` (excluded).
+    - `update` — presence in `updatePayload` / `updateInput`: `"optional"` (default, tri-state) or
+      `false` (excluded).
+    - `clearable` — whether the update projection additionally accepts `null` to clear; defaults to
+      whether the schema is `Schema.NullOr`.
+
+  - **`Resource.readOnlyAttribute(schema)`.** Shorthand for a server-set attribute —
+    `attribute(schema, { create: false, update: false })`: present in the resource object and
+    documents, excluded from every write projection. Use it for version-chain timestamps
+    (`createdAt`, `updatedAt`, …), counters and other server-computed state.
+
+    ```ts
+    const Article = Resource.make("articles", {
+      attributes: {
+        title: Schema.NonEmptyString,
+        createdAt: Resource.readOnlyAttribute(Schema.Date),
+        slug: Resource.attribute(Schema.String, { update: false }),
+        summary: Resource.attribute(Schema.NullOr(Schema.String), {
+          create: "optional",
+        }),
+      },
+    });
+
+    // Article.Type.attributes                  → { title, createdAt, slug, summary }
+    // Article.createPayload … data.attributes  → { title, slug, summary? }   (no createdAt)
+    // Article.updatePayload … data.attributes  → { title?, summary? }        (no createdAt, no slug)
+    ```
+
+  A plain `Schema` attribute keeps today's read-write behaviour, so the feature is fully opt-in. The
+  descriptor rides on the attribute's schema value, so it flows through `attributeKeys`,
+  `attributeAnnotations`, sparse `fields` and `include`, is carried through `Resource.extend`, and is
+  respected by the Atomic `add` / `update` operations — consistently with the create/update payloads.
+  The type-level projection helpers `Resource.Attribute`, `Resource.AttributeConfig`,
+  `Resource.CreateAttributes` and `Resource.UpdateAttributes` (and the runtime
+  `Resource.createAttributeFields` / `Resource.updateAttributeFields`) are exported too.
+
 ## 0.4.0
 
 ### Minor Changes
