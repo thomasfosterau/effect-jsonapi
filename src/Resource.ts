@@ -208,6 +208,367 @@ export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
 export type RefValue = { readonly type: string; readonly id: string } | { readonly type: string; readonly lid: string }
 
 // ---------------------------------------------------------------------------
+// Per-attribute projection descriptors
+// ---------------------------------------------------------------------------
+
+// The annotation key under which an attribute schema carries its projection
+// descriptor at *runtime* — stamped by `attribute`, read back by `make` and the
+// Atomic module. Namespaced so it never collides with a consumer's own
+// annotations.
+const AttributeDescriptorAnnotationId = "@thomasfosterau/effect-jsonapi/attribute"
+
+// The phantom property key carrying the descriptor config at the *type* level.
+// It is never present at runtime; it exists only so the create/update
+// projections can read an attribute's config from its schema type.
+type AttributeConfigKey = "~@thomasfosterau/effect-jsonapi/attribute"
+
+/**
+ * Whether attributes appear in a write projection (the create/update payloads
+ * and flat inputs):
+ *
+ *   - `"required"` — a required key (create only);
+ *   - `"optional"` — an optional key;
+ *   - `false` — excluded from the projection entirely.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export type AttributePresence = "required" | "optional" | false
+
+/**
+ * The type-level projection config carried by an {@link Attribute}: the base
+ * schema plus how the attribute appears in each write projection.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export interface AttributeConfig<
+  S extends Schema.Top,
+  Create extends AttributePresence,
+  Update extends "optional" | false,
+  Clearable extends boolean
+> {
+  readonly schema: S
+  readonly create: Create
+  readonly update: Update
+  readonly clearable: Clearable
+}
+
+/**
+ * Whether a schema is `Schema.NullOr<...>` (nullable) — the default for an
+ * attribute's `clearable` flag.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export type IsNullable<S extends Schema.Top> = S extends Schema.NullOr<Schema.Top> ? true : false
+
+/**
+ * The resource-object projection of an {@link Attribute}: the base schema when
+ * `Resource` is `true`, or an optional key when `Resource` is `"optional"`.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export type AttributeResourceField<
+  S extends Schema.Top,
+  Resource extends boolean | "optional"
+> = Resource extends "optional" ? Schema.optionalKey<S> : S
+
+/**
+ * A per-attribute **projection descriptor**: the resource-object schema for an
+ * attribute, tagged with a type-level marker describing how the attribute
+ * appears in each write projection. Build one with {@link attribute} (or a
+ * shorthand such as {@link readOnlyAttribute}).
+ *
+ * Structurally it *is* the resource-object schema (the base schema, or an
+ * `optionalKey` of it when `Resource` is `"optional"`), so the attribute behaves
+ * normally everywhere a resource is surfaced — the resource `Schema.Struct`, its
+ * `Document`s, {@link attributeKeys}, {@link attributeAnnotations}, sparse
+ * `fields`, `include` — and is carried through {@link extend}. The four write
+ * projections ({@link CreatePayload}, {@link UpdatePayload}, {@link CreateInput},
+ * {@link UpdateInput}) read the marker to include, exclude or re-shape the
+ * attribute.
+ *
+ * @since 0.5.0
+ * @category models
+ */
+export type Attribute<
+  S extends Schema.Top,
+  Resource extends boolean | "optional" = true,
+  Create extends AttributePresence = "required",
+  Update extends "optional" | false = "optional",
+  Clearable extends boolean = IsNullable<S>
+> = AttributeResourceField<S, Resource> & {
+  readonly [K in AttributeConfigKey]: AttributeConfig<S, Create, Update, Clearable>
+}
+
+/**
+ * A read-only (server-set) attribute — shorthand for an {@link Attribute} that
+ * is excluded from every write projection (`{ create: false, update: false }`).
+ *
+ * @since 0.5.0
+ * @category models
+ */
+export type ReadOnlyAttribute<S extends Schema.Top> = Attribute<S, true, false, false, IsNullable<S>>
+
+/**
+ * Resolves an attribute's `clearable` flag: the explicit option when given,
+ * otherwise whether the base schema is nullable.
+ */
+type ResolveClearable<S extends Schema.Top, Clearable extends boolean | undefined> = [Clearable] extends [boolean]
+  ? Clearable
+  : IsNullable<S>
+
+/**
+ * Defines a per-attribute **projection descriptor**, controlling how a single
+ * attribute appears in the resource object versus the write projections.
+ *
+ * Options (all optional; the defaults reproduce a plain `Schema` attribute):
+ *
+ *   - `resource` — presence in the resource object schema + documents:
+ *     `true` (default, required) or `"optional"` (an optional key).
+ *   - `create` — presence in `createPayload` / `createInput`: `"required"`
+ *     (default), `"optional"`, or `false` (excluded).
+ *   - `update` — presence in `updatePayload` / `updateInput`: `"optional"`
+ *     (default, tri-state) or `false` (excluded).
+ *   - `clearable` — whether the update projection additionally accepts `null`
+ *     to clear the value. Defaults to whether the schema is `Schema.NullOr`;
+ *     setting it `true` wraps a non-nullable schema in `Schema.NullOr` for the
+ *     update projection only.
+ *
+ * The descriptor rides on the attribute's schema value, so it is carried through
+ * {@link extend} and read by both {@link make} and the Atomic operations.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     // server-set: on the resource + documents, never a write input
+ *     createdAt: Resource.attribute(Schema.Date, { create: false, update: false }),
+ *     // set at create, optional thereafter, clearable on update
+ *     summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" })
+ *   }
+ * })
+ * ```
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const attribute = <
+  S extends Schema.Top,
+  const Resource extends boolean | "optional" = true,
+  const Create extends AttributePresence = "required",
+  const Update extends "optional" | false = "optional",
+  const Clearable extends boolean | undefined = undefined
+>(
+  schema: S,
+  options?: {
+    readonly resource?: Resource
+    readonly create?: Create
+    readonly update?: Update
+    readonly clearable?: Clearable
+  }
+): Attribute<S, Resource, Create, Update, ResolveClearable<S, Clearable>> => {
+  const resource = (options?.resource ?? true) as boolean | "optional"
+  const create = (options?.create ?? "required") as AttributePresence
+  const update = (options?.update ?? "optional") as "optional" | false
+  const clearable = options?.clearable ?? isNullable(schema)
+  const config: RuntimeAttributeConfig = { schema, create, update, clearable }
+  const resourceField = resource === "optional" ? Schema.optionalKey(schema) : schema
+  return resourceField.annotate({ [AttributeDescriptorAnnotationId]: config }) as unknown as Attribute<
+    S,
+    Resource,
+    Create,
+    Update,
+    ResolveClearable<S, Clearable>
+  >
+}
+
+/**
+ * Marks an attribute as **read-only** (server-set): present in the resource
+ * object schema and its documents, but excluded from the create/update payloads
+ * (`createPayload` / `updatePayload`) and the flat create/update inputs
+ * (`createInput` / `updateInput`). Shorthand for
+ * `Resource.attribute(schema, { create: false, update: false })`.
+ *
+ * Use it for attributes the server computes, assigns or derives — version-chain
+ * timestamps (`createdAt`, `updatedAt`, `publishedAt`, `deletedAt`), counters,
+ * computed state — that appear in responses but must never be accepted as client
+ * input. A plain `Schema` attribute stays read-write exactly as before, so this
+ * is fully opt-in and non-breaking.
+ *
+ * The attribute keeps the underlying schema's behaviour everywhere it is
+ * surfaced (the resource object, documents, {@link attributeKeys},
+ * {@link attributeAnnotations}, sparse `fields`, `include`) and is carried
+ * through {@link extend}.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     // on the resource + in documents, never a create/update input:
+ *     createdAt: Resource.readOnlyAttribute(Schema.Date)
+ *   }
+ * })
+ *
+ * // Article.Type.attributes                  → { title, createdAt }
+ * // Article.createPayload.Type … attributes  → { title }
+ * // Article.updatePayload.Type … attributes  → { title? }
+ * // Article.createInput.Type                 → { title }
+ * // Article.updateInput.Type                 → { id, title? }
+ * ```
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const readOnlyAttribute = <S extends Schema.Top>(schema: S): ReadOnlyAttribute<S> =>
+  attribute(schema, { create: false, update: false }) as unknown as ReadOnlyAttribute<S>
+
+// The runtime shape of an attribute's projection descriptor, stored under
+// `AttributeDescriptorAnnotationId`.
+interface RuntimeAttributeConfig {
+  readonly schema: Schema.Top
+  readonly create: AttributePresence
+  readonly update: "optional" | false
+  readonly clearable: boolean
+}
+
+// Whether a schema is a two-member `Schema.NullOr(...)` union, at runtime.
+const isNullable = (schema: Schema.Top): boolean => {
+  const members = (schema as { readonly members?: ReadonlyArray<{ readonly ast?: { readonly _tag?: string } }> })
+    .members
+  return Array.isArray(members) && members.length === 2 && members.some((member) => member?.ast?._tag === "Null")
+}
+
+// The base schema of a `Schema.NullOr(...)`, or the schema itself if it is not a
+// recognised two-member nullable union.
+const nonNullableBase = (schema: Schema.Top): Schema.Top => {
+  if (!isNullable(schema)) return schema
+  const members = (schema as unknown as { readonly members: ReadonlyArray<Schema.Top> }).members
+  const base = members.find((member) => (member as { readonly ast?: { readonly _tag?: string } }).ast?._tag !== "Null")
+  return base ?? schema
+}
+
+// Wraps a schema in `Schema.NullOr` unless it is already nullable.
+const ensureNullable = (schema: Schema.Top): Schema.Top => (isNullable(schema) ? schema : Schema.NullOr(schema))
+
+// Reads an attribute's runtime projection descriptor, or `undefined` for a plain
+// schema attribute (which projects with the read-write defaults).
+const descriptorOf = (schema: Schema.Top): RuntimeAttributeConfig | undefined =>
+  Schema.resolveAnnotations(schema)?.[AttributeDescriptorAnnotationId] as RuntimeAttributeConfig | undefined
+
+/**
+ * Builds the **create** field map for a resource's attribute fields: each
+ * attribute projected by its descriptor (`create: false` excluded, `"optional"`
+ * an optional key, `"required"` a required key); a plain schema attribute is
+ * required. Used by `createPayload` / `createInput` and the Atomic `add`
+ * operation.
+ *
+ * @since 0.5.0
+ * @category utilities
+ */
+export const createAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+  const result: Record<string, Schema.Top> = {}
+  for (const [key, field] of Object.entries(fields)) {
+    const descriptor = descriptorOf(field as Schema.Top)
+    if (!descriptor) {
+      result[key] = field as Schema.Top
+      continue
+    }
+    if (descriptor.create === false) continue
+    result[key] = descriptor.create === "optional" ? Schema.optionalKey(descriptor.schema) : descriptor.schema
+  }
+  return result
+}
+
+/**
+ * Builds the **update** field map for a resource's attribute fields: each
+ * attribute as a tri-state `Schema.optional` (`update: false` excluded),
+ * additionally accepting `null` when the descriptor is `clearable`. A plain
+ * schema attribute becomes `Schema.optional(schema)`. Used by `updatePayload` /
+ * `updateInput` and the Atomic `update` operation.
+ *
+ * @since 0.5.0
+ * @category utilities
+ */
+export const updateAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+  const result: Record<string, Schema.Top> = {}
+  for (const [key, field] of Object.entries(fields)) {
+    const descriptor = descriptorOf(field as Schema.Top)
+    if (!descriptor) {
+      result[key] = Schema.optional(field as Schema.Top)
+      continue
+    }
+    if (descriptor.update === false) continue
+    const base = descriptor.clearable ? ensureNullable(descriptor.schema) : nonNullableBase(descriptor.schema)
+    result[key] = Schema.optional(base)
+  }
+  return result
+}
+
+// ---------------------------------------------------------------------------
+// Type-level write projections
+// ---------------------------------------------------------------------------
+
+// The descriptor config carried by an attribute field, or `undefined` for a
+// plain schema attribute.
+type ConfigOf<F> = F extends { readonly [K in AttributeConfigKey]: infer C } ? C : undefined
+
+// The update value schema for a descriptor: nullable when `clearable`, the
+// non-null base otherwise.
+type UpdateValueSchema<S extends Schema.Top, Clearable extends boolean> = Clearable extends true
+  ? S extends Schema.NullOr<Schema.Top>
+    ? S
+    : Schema.NullOr<S>
+  : S extends Schema.NullOr<infer X extends Schema.Top>
+    ? X
+    : S
+
+/**
+ * The **create** attribute field map derived from a resource's attribute fields:
+ * each attribute projected by its descriptor — `create: false` removed,
+ * `"optional"` made an optional key, `"required"` (and plain schema attributes)
+ * a required key.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
+  readonly [K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly create: false } ? never : K]: ConfigOf<
+    Attributes[K]
+  > extends AttributeConfig<infer S, infer C, any, any>
+    ? C extends "optional"
+      ? Schema.optionalKey<S>
+      : S
+    : Attributes[K]
+}>
+
+/**
+ * The **update** attribute field map derived from a resource's attribute fields:
+ * each non-excluded attribute as a tri-state {@link PartialAttributes} entry
+ * (`update: false` removed), additionally accepting `null` when `clearable`.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export type UpdateAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
+  readonly [K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly update: false } ? never : K]: ConfigOf<
+    Attributes[K]
+  > extends AttributeConfig<infer S, any, "optional", infer Cl>
+    ? Schema.optional<UpdateValueSchema<S, Cl>>
+    : Schema.optional<Attributes[K]>
+}>
+
+// ---------------------------------------------------------------------------
 // The resource definition
 // ---------------------------------------------------------------------------
 
@@ -360,7 +721,7 @@ export interface CreatePayload<
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>
     readonly lid: Schema.optionalKey<Schema.String>
-    readonly attributes: Schema.Struct<Attributes>
+    readonly attributes: Schema.Struct<CreateAttributes<Attributes>>
     readonly relationships: CreateRelationshipsMember<Rels>
   }>
 }> {}
@@ -425,7 +786,7 @@ export interface UpdatePayload<
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>
     readonly id: IdSchema
-    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<Attributes>>>
+    readonly attributes: Schema.optionalKey<Schema.Struct<UpdateAttributes<Attributes>>>
     readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>>
   }>
 }> {}
@@ -442,7 +803,9 @@ export interface UpdatePayload<
  * @since 0.3.0
  * @category models
  */
-export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Schema.Struct<Attributes> {}
+export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Schema.Struct<
+  CreateAttributes<Attributes>
+> {}
 
 /**
  * The flat ("command-style") update request shape: the resource id plus the
@@ -454,7 +817,7 @@ export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Sc
 export interface UpdateInput<
   Attributes extends Schema.Struct.Fields,
   IdSchema extends Schema.Codec<any, string>
-> extends Schema.Struct<AsFields<Omit<PartialAttributes<Attributes>, "id"> & { readonly id: IdSchema }>> {}
+> extends Schema.Struct<AsFields<Omit<UpdateAttributes<Attributes>, "id"> & { readonly id: IdSchema }>> {}
 
 /**
  * The default `included` union for a resource's compound documents: the
@@ -1014,6 +1377,12 @@ export const make = <
   const attributes = Schema.Struct(options.attributes)
   const relationshipsStruct = Schema.Struct(relationshipSchemas)
 
+  // Per-attribute projections: each attribute may carry a descriptor (from
+  // `attribute` / `readOnlyAttribute`) controlling how it appears in the write
+  // projections. A plain schema attribute projects with the read-write defaults.
+  const createAttributes = Schema.Struct(createAttributeFields(options.attributes))
+  const updateAttributes = Schema.Struct(updateAttributeFields(options.attributes))
+
   const fields: ResourceFields<Type, Attributes, Rels, Meta, IdSchema> = {
     type: Schema.tag(type),
     id,
@@ -1044,7 +1413,7 @@ export const make = <
     data: Schema.Struct({
       type: Schema.tag(type),
       lid: Schema.optionalKey(Schema.String),
-      attributes,
+      attributes: createAttributes,
       relationships: hasRequiredRelationship ? createRelationshipsStruct : Schema.optionalKey(createRelationshipsStruct)
     })
   }) as unknown as CreatePayload<Type, Attributes, Rels>
@@ -1056,26 +1425,24 @@ export const make = <
     updateRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!)
   }
 
-  // Tri-state partial attributes: `optional` (= `optionalKey(UndefinedOr(...))`)
-  // distinguishes set (value), unset (`undefined`), and leave-unchanged (absent).
-  const partialAttributes = Schema.Struct(
-    Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>
-  )
-
+  // The update payload's attributes are the tri-state `Schema.optional`
+  // projection (set / unset / leave-unchanged), with per-attribute descriptors
+  // applied (excluded / clearability) — built once as `updateAttributes`.
   const updatePayload = Schema.Struct({
     data: Schema.Struct({
       type: Schema.tag(type),
       id,
-      attributes: Schema.optionalKey(partialAttributes),
+      attributes: Schema.optionalKey(updateAttributes),
       relationships: Schema.optionalKey(Schema.Struct(updateRelationshipFields))
     })
   }) as unknown as UpdatePayload<Type, Attributes, Rels, IdSchema>
 
   // Flat ("command-style") projections of the create/update inputs, without the
-  // JSON:API `{ data: { type, ... } }` envelope.
-  const createInput = attributes as unknown as CreateInput<Attributes>
+  // JSON:API `{ data: { type, ... } }` envelope. They mirror the enveloped
+  // payloads' attribute projections.
+  const createInput = createAttributes as unknown as CreateInput<Attributes>
   const updateInput = Schema.Struct({
-    ...(Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>),
+    ...(updateAttributeFields(options.attributes) as Record<string, Schema.Top>),
     // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
     id
   }) as unknown as UpdateInput<Attributes, IdSchema>

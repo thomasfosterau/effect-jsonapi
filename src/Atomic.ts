@@ -55,7 +55,7 @@
  * @see {@link https://jsonapi.org/ext/atomic/}
  * @since 0.1.0
  */
-import { Schema, Struct } from "effect"
+import { Schema } from "effect"
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js"
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js"
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js"
@@ -63,13 +63,14 @@ import * as Relationship from "./Relationship.js"
 import type { Relationships } from "./Relationship.js"
 import type {
   Any,
+  CreateAttributes,
   HasRequiredRelationship,
-  PartialAttributes,
   RefValue,
   RelationshipName,
-  ToManyName
+  ToManyName,
+  UpdateAttributes
 } from "./Resource.js"
-import { Ref } from "./Resource.js"
+import { createAttributeFields, Ref, updateAttributeFields } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Extension constants
@@ -371,7 +372,7 @@ export interface AddOperation<R extends Any> extends Schema.Struct<{
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<R["type"]>
     readonly lid: Schema.optionalKey<Schema.String>
-    readonly attributes: R["fields"]["attributes"]
+    readonly attributes: Schema.Struct<CreateAttributes<R["fields"]["attributes"]["fields"]>>
     readonly relationships: AddRelationshipsMember<R["relationships"]>
   }>
   readonly meta: Schema.optionalKey<typeof AnyMeta>
@@ -390,7 +391,7 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
     data: Schema.Struct({
       type: Schema.tag(resource.type),
       lid: Schema.optionalKey(Schema.String),
-      attributes: resource.fields.attributes,
+      attributes: Schema.Struct(createAttributeFields(resource.fields.attributes.fields)),
       relationships: required ? struct : Schema.optionalKey(struct)
     }),
     meta: Schema.optionalKey(AnyMeta)
@@ -414,7 +415,7 @@ export interface UpdateOperation<R extends Any> extends Schema.Struct<{
     readonly type: Schema.tag<R["type"]>
     readonly id: Schema.optionalKey<R["Id"]>
     readonly lid: Schema.optionalKey<Schema.String>
-    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<R["fields"]["attributes"]["fields"]>>>
+    readonly attributes: Schema.optionalKey<Schema.Struct<UpdateAttributes<R["fields"]["attributes"]["fields"]>>>
     readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<R["relationships"]>>>>
   }>
   readonly meta: Schema.optionalKey<typeof AnyMeta>
@@ -434,7 +435,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       type: Schema.tag(resource.type),
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
-      attributes: Schema.optionalKey(Schema.Struct(Struct.map(Schema.optional)(resource.fields.attributes.fields))),
+      attributes: Schema.optionalKey(Schema.Struct(updateAttributeFields(resource.fields.attributes.fields))),
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships))
     }),
     meta: Schema.optionalKey(AnyMeta)
