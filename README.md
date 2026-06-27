@@ -46,6 +46,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
+  - [Read-only (server-set) attributes](#read-only-server-set-attributes)
   - [Flat (command-style) payloads](#flat-command-style-payloads)
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
@@ -165,20 +166,20 @@ pointing at a paginated collection endpoint (see
 
 Everything below is **derived** — never assembled by hand:
 
-| Derived                                       | What it is                                                                                                                                                       |
-| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Article`                                     | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                                                                          |
-| `Article.Id`                                  | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                                                                          |
-| `Article.identifier`                          | the `{ type: "articles", id }` resource-identifier schema                                                                                                        |
-| `Article.ref("1")`                            | a typed identifier _value_ — handy for relationship linkage                                                                                                      |
-| `Article.localIdentifier`                     | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                                                                  |
-| `Article.lidRef("a1")`                        | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                                                                |
-| `Article.createPayload`                       | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` excluded                                              |
-| `Article.updatePayload`                       | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` excluded |
-| `Article.createInput` / `Article.updateInput` | flat ["command-style"](#flat-command-style-payloads) request schemas — attributes (and, for update, the `id`) without the JSON:API envelope                      |
-| `Article.document()`                          | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships                              |
-| `Article.collection()`                        | collection document (strict array `data`)                                                                                                                        |
-| `typeof Article.Type`                         | the decoded TypeScript type                                                                                                                                      |
+| Derived                                       | What it is                                                                                                                                                                                                                    |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Article`                                     | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                                                                                                                                       |
+| `Article.Id`                                  | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                                                                                                                                       |
+| `Article.identifier`                          | the `{ type: "articles", id }` resource-identifier schema                                                                                                                                                                     |
+| `Article.ref("1")`                            | a typed identifier _value_ — handy for relationship linkage                                                                                                                                                                   |
+| `Article.localIdentifier`                     | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                                                                                                                               |
+| `Article.lidRef("a1")`                        | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                                                                                                                             |
+| `Article.createPayload`                       | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` and [read-only](#read-only-server-set-attributes) attributes excluded                                              |
+| `Article.updatePayload`                       | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` and [read-only](#read-only-server-set-attributes) attributes excluded |
+| `Article.createInput` / `Article.updateInput` | flat ["command-style"](#flat-command-style-payloads) request schemas — attributes (and, for update, the `id`) without the JSON:API envelope                                                                                   |
+| `Article.document()`                          | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships                                                                                           |
+| `Article.collection()`                        | collection document (strict array `data`)                                                                                                                                                                                     |
+| `typeof Article.Type`                         | the decoded TypeScript type                                                                                                                                                                                                   |
 
 Documents are not limited to one resource type — see
 [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
@@ -263,6 +264,35 @@ const Person = Resource.make("people", {
 
 Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
 ```
+
+### Read-only (server-set) attributes
+
+Some attributes are set by the server and must never be accepted as client input — version-chain
+timestamps (`createdAt`, `updatedAt`, …), counters, computed state. Wrap such an attribute with
+`Resource.readOnlyAttribute`: it stays on the resource object and in documents, but is **excluded**
+from the create/update payloads and the flat create/update inputs.
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: {
+    title: Schema.NonEmptyString,
+    createdAt: Resource.readOnlyAttribute(Schema.Date) // resource + document only
+  }
+})
+
+// Article.Type.attributes                  → { title, createdAt }
+// Article.createPayload … data.attributes  → { title }            (no createdAt)
+// Article.updatePayload … data.attributes  → { title? }           (no createdAt)
+// Article.createInput                      → { title }            (no createdAt)
+// Article.updateInput                      → { id, title? }       (no createdAt)
+```
+
+A plain `Schema` attribute keeps its read-write behaviour, so this is fully opt-in. Read-only
+attributes still flow through `attributeKeys`, `attributeAnnotations`, sparse `fields` and
+`include`, and are carried through [`Resource.extend`](#reusing--extending-resources) (a subtype
+inherits them, still excluded from its own write projections). Apply `readOnlyAttribute` as the
+outermost wrapper — annotate the inner schema first, e.g.
+`Resource.readOnlyAttribute(Schema.Date.annotate({ dbColumn: "created_at" }))`.
 
 ### Flat (command-style) payloads
 

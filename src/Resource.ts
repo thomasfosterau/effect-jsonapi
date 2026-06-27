@@ -208,6 +208,114 @@ export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
 export type RefValue = { readonly type: string; readonly id: string } | { readonly type: string; readonly lid: string }
 
 // ---------------------------------------------------------------------------
+// Read-only (server-set) attributes
+// ---------------------------------------------------------------------------
+
+/**
+ * The annotation key marking an attribute schema as read-only — stamped by
+ * {@link readOnlyAttribute}, read back by {@link make}. Namespaced so it never
+ * collides with a consumer's own attribute annotations.
+ */
+const ReadOnlyAttributeAnnotationId = "@thomasfosterau/effect-jsonapi/readOnlyAttribute"
+
+/**
+ * A read-only (server-set) attribute: an attribute schema `S` tagged with a
+ * type-level marker so the resource derivation knows to surface it on the
+ * resource object and its documents, yet **exclude** it from the write
+ * projections.
+ *
+ * Obtain one with {@link readOnlyAttribute}. Structurally it *is* `S` (same
+ * `Type`, `Encoded`, annotations), so everywhere a resource exposes the
+ * attribute — the resource `Schema.Struct`, its `Document`s, {@link attributeKeys},
+ * {@link attributeAnnotations}, sparse `fields`, `include` — it behaves exactly
+ * like `S`; only {@link CreatePayload}, {@link UpdatePayload}, {@link CreateInput}
+ * and {@link UpdateInput} drop it.
+ *
+ * @since 0.5.0
+ * @category models
+ */
+export type ReadOnlyAttribute<S extends Schema.Top> = S & {
+  readonly "~@thomasfosterau/effect-jsonapi/readOnlyAttribute": true
+}
+
+/**
+ * Marks an attribute as **read-only** (server-set): present in the resource
+ * object schema and its documents, but excluded from the create/update payloads
+ * (`createPayload` / `updatePayload`) and the flat create/update inputs
+ * (`createInput` / `updateInput`).
+ *
+ * Use it for attributes the server computes, assigns or derives — version-chain
+ * timestamps (`createdAt`, `updatedAt`, `publishedAt`, `deletedAt`), counters,
+ * computed state — that appear in responses but must never be accepted as client
+ * input. A plain `Schema` attribute stays read-write exactly as before, so this
+ * is fully opt-in and non-breaking.
+ *
+ * The wrapped attribute keeps the underlying schema's behaviour everywhere it is
+ * surfaced (the resource object, documents, {@link attributeKeys},
+ * {@link attributeAnnotations}, sparse `fields`, `include`) and is carried
+ * through {@link extend}; only the four write projections drop it.
+ *
+ * Apply `readOnlyAttribute` as the **outermost** wrapper: annotate (or otherwise
+ * refine) the inner schema first, then wrap — e.g.
+ * `readOnlyAttribute(Schema.Date.annotate({ ... }))`. Calling a schema method
+ * such as `.annotate(...)` *on the result* rebuilds the underlying schema and
+ * drops the type-level read-only marker.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     // on the resource + in documents, never a create/update input:
+ *     createdAt: Resource.readOnlyAttribute(Schema.Date)
+ *   }
+ * })
+ *
+ * // Article.Type.attributes                  → { title, createdAt }
+ * // Article.createPayload.Type … attributes  → { title }
+ * // Article.updatePayload.Type … attributes  → { title? }
+ * // Article.createInput.Type                 → { title }
+ * // Article.updateInput.Type                 → { id, title? }
+ * ```
+ *
+ * @since 0.5.0
+ * @category constructors
+ */
+export const readOnlyAttribute = <S extends Schema.Top>(schema: S): ReadOnlyAttribute<S> =>
+  schema.annotate({ [ReadOnlyAttributeAnnotationId]: true }) as unknown as ReadOnlyAttribute<S>
+
+/**
+ * Whether an attribute schema was marked read-only by {@link readOnlyAttribute}.
+ * Drives the runtime exclusion of read-only attributes from the write
+ * projections; the {@link ReadOnlyAttribute} marker drives it at the type level.
+ */
+const isReadOnlyAttribute = (schema: Schema.Top): boolean =>
+  Schema.resolveAnnotations(schema)?.[ReadOnlyAttributeAnnotationId] === true
+
+/**
+ * The **writable** attribute field map of a resource: its declared attributes
+ * with the read-only ones ({@link readOnlyAttribute}) removed.
+ *
+ * The create/update payloads and the flat create/update inputs all derive from
+ * this projection rather than the full attribute set, so server-set attributes
+ * never appear as client input. With no read-only attributes it is the identity,
+ * preserving today's read-write behaviour.
+ *
+ * @since 0.5.0
+ * @category type-level
+ */
+export type WritableAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
+  readonly [K in keyof Attributes as Attributes[K] extends {
+    readonly "~@thomasfosterau/effect-jsonapi/readOnlyAttribute": true
+  }
+    ? never
+    : K]: Attributes[K]
+}>
+
+// ---------------------------------------------------------------------------
 // The resource definition
 // ---------------------------------------------------------------------------
 
@@ -360,7 +468,7 @@ export interface CreatePayload<
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>
     readonly lid: Schema.optionalKey<Schema.String>
-    readonly attributes: Schema.Struct<Attributes>
+    readonly attributes: Schema.Struct<WritableAttributes<Attributes>>
     readonly relationships: CreateRelationshipsMember<Rels>
   }>
 }> {}
@@ -425,7 +533,7 @@ export interface UpdatePayload<
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>
     readonly id: IdSchema
-    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<Attributes>>>
+    readonly attributes: Schema.optionalKey<Schema.Struct<PartialAttributes<WritableAttributes<Attributes>>>>
     readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<Rels>>>>
   }>
 }> {}
@@ -442,7 +550,9 @@ export interface UpdatePayload<
  * @since 0.3.0
  * @category models
  */
-export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Schema.Struct<Attributes> {}
+export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Schema.Struct<
+  WritableAttributes<Attributes>
+> {}
 
 /**
  * The flat ("command-style") update request shape: the resource id plus the
@@ -454,7 +564,9 @@ export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Sc
 export interface UpdateInput<
   Attributes extends Schema.Struct.Fields,
   IdSchema extends Schema.Codec<any, string>
-> extends Schema.Struct<AsFields<Omit<PartialAttributes<Attributes>, "id"> & { readonly id: IdSchema }>> {}
+> extends Schema.Struct<
+  AsFields<Omit<PartialAttributes<WritableAttributes<Attributes>>, "id"> & { readonly id: IdSchema }>
+> {}
 
 /**
  * The default `included` union for a resource's compound documents: the
@@ -1014,6 +1126,17 @@ export const make = <
   const attributes = Schema.Struct(options.attributes)
   const relationshipsStruct = Schema.Struct(relationshipSchemas)
 
+  // Read-only (server-set) attributes appear on the resource object and its
+  // documents, but are excluded from every write projection. Filter them out
+  // once and derive the create/update payloads and flat inputs from the rest.
+  const writableAttributeFields: Record<string, Schema.Top> = {}
+  for (const [key, schema] of Object.entries(options.attributes)) {
+    if (!isReadOnlyAttribute(schema as Schema.Top)) {
+      writableAttributeFields[key] = schema as Schema.Top
+    }
+  }
+  const writableAttributes = Schema.Struct(writableAttributeFields)
+
   const fields: ResourceFields<Type, Attributes, Rels, Meta, IdSchema> = {
     type: Schema.tag(type),
     id,
@@ -1044,7 +1167,7 @@ export const make = <
     data: Schema.Struct({
       type: Schema.tag(type),
       lid: Schema.optionalKey(Schema.String),
-      attributes,
+      attributes: writableAttributes,
       relationships: hasRequiredRelationship ? createRelationshipsStruct : Schema.optionalKey(createRelationshipsStruct)
     })
   }) as unknown as CreatePayload<Type, Attributes, Rels>
@@ -1058,8 +1181,9 @@ export const make = <
 
   // Tri-state partial attributes: `optional` (= `optionalKey(UndefinedOr(...))`)
   // distinguishes set (value), unset (`undefined`), and leave-unchanged (absent).
+  // Read-only attributes are excluded (they never appear in an update body).
   const partialAttributes = Schema.Struct(
-    Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>
+    Struct.map(Schema.optional)(writableAttributeFields) as unknown as PartialAttributes<WritableAttributes<Attributes>>
   )
 
   const updatePayload = Schema.Struct({
@@ -1072,10 +1196,13 @@ export const make = <
   }) as unknown as UpdatePayload<Type, Attributes, Rels, IdSchema>
 
   // Flat ("command-style") projections of the create/update inputs, without the
-  // JSON:API `{ data: { type, ... } }` envelope.
-  const createInput = attributes as unknown as CreateInput<Attributes>
+  // JSON:API `{ data: { type, ... } }` envelope. Read-only attributes are
+  // excluded, mirroring the enveloped payloads.
+  const createInput = writableAttributes as unknown as CreateInput<Attributes>
   const updateInput = Schema.Struct({
-    ...(Struct.map(Schema.optional)(options.attributes) as PartialAttributes<Attributes>),
+    ...(Struct.map(Schema.optional)(writableAttributeFields) as unknown as PartialAttributes<
+      WritableAttributes<Attributes>
+    >),
     // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
     id
   }) as unknown as UpdateInput<Attributes, IdSchema>

@@ -4,11 +4,13 @@ import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
 import {
   attributeAnnotations,
+  attributeKeys,
   attributes as attributesOf,
   directTargets,
   extend,
   Identifier,
   make as Resource,
+  readOnlyAttribute,
   relationships as relationshipsOf
 } from "./Resource.js"
 
@@ -1158,5 +1160,142 @@ describe("Resource.extend inheritId (subtype ids)", () => {
     const personId = Person.Id.make("1")
     const asNode: typeof NodeId.Type = personId // a person id IS a node id
     expect(asNode).toBe("1")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Read-only (server-set) attributes
+// ---------------------------------------------------------------------------
+
+describe("Resource.readOnlyAttribute", () => {
+  // `createdAt`/`updatedAt` are server-set: present on the resource and in
+  // documents, but never accepted as create/update input.
+  const Post = Resource("posts", {
+    attributes: {
+      title: Schema.NonEmptyString,
+      createdAt: readOnlyAttribute(Schema.Date),
+      // annotate the inner schema first, then wrap (readOnlyAttribute outermost)
+      updatedAt: readOnlyAttribute(Schema.NullOr(Schema.Date).annotate({ dbColumn: "updated_at" }))
+    },
+    relationships: { author: Relationship.one(() => Person) }
+  })
+
+  it("keeps read-only attributes in the resource object schema", () => {
+    const decoded = Schema.decodeUnknownSync(Post)({
+      type: "posts",
+      id: "1",
+      attributes: { title: "Hello", createdAt: new Date("2024-01-01"), updatedAt: null },
+      relationships: { author: { data: { type: "people", id: "9" } } }
+    })
+    expect(decoded.attributes.title).toBe("Hello")
+    expect(decoded.attributes.createdAt).toBeInstanceOf(Date)
+    expect(decoded.attributes.updatedAt).toBeNull()
+    expectTypeOf<(typeof Post.Type)["attributes"]["title"]>().toEqualTypeOf<string>()
+    expectTypeOf<(typeof Post.Type)["attributes"]["createdAt"]>().toEqualTypeOf<Date>()
+    expectTypeOf<(typeof Post.Type)["attributes"]["updatedAt"]>().toEqualTypeOf<Date | null>()
+  })
+
+  it("surfaces read-only attributes in attributeKeys and attributeAnnotations", () => {
+    expect(attributeKeys(Post)).toEqual(["title", "createdAt", "updatedAt"])
+    // the underlying schema's annotations still flow through
+    expect(attributeAnnotations(Post).updatedAt?.dbColumn).toBe("updated_at")
+  })
+
+  it("includes read-only attributes in the resource's documents", () => {
+    const Doc = DataDocument(Post)
+    type DocAttrs = (typeof Doc.Type)["data"]["attributes"]
+    expectTypeOf<DocAttrs["createdAt"]>().toEqualTypeOf<Date>()
+    expectTypeOf<DocAttrs["updatedAt"]>().toEqualTypeOf<Date | null>()
+    const decoded = Schema.decodeUnknownSync(Doc)({
+      data: {
+        type: "posts",
+        id: "1",
+        attributes: { title: "Hello", createdAt: new Date("2024-01-01"), updatedAt: null },
+        relationships: { author: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(decoded.data.attributes.createdAt).toBeInstanceOf(Date)
+  })
+
+  it("excludes read-only attributes from the create payload", () => {
+    type CreateAttrs = (typeof Post.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().toHaveProperty("title")
+    expectTypeOf<CreateAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<CreateAttrs>().not.toHaveProperty("updatedAt")
+    // a create body that omits the server-set attributes decodes cleanly
+    const decoded = Schema.decodeUnknownSync(Post.createPayload)({
+      data: {
+        type: "posts",
+        attributes: { title: "Hello" },
+        relationships: { author: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(decoded.data.attributes).toEqual({ title: "Hello" })
+    // a stray read-only attribute on the wire is dropped, not surfaced
+    const stray = Schema.decodeUnknownSync(Post.createPayload)({
+      data: {
+        type: "posts",
+        attributes: { title: "Hello", createdAt: new Date("2024-01-01") },
+        relationships: { author: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(stray.data.attributes).toEqual({ title: "Hello" })
+  })
+
+  it("excludes read-only attributes from the update payload", () => {
+    type UpdateAttrs = NonNullable<(typeof Post.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs>().toHaveProperty("title")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("updatedAt")
+    const decoded = Schema.decodeUnknownSync(Post.updatePayload)({
+      data: { type: "posts", id: "1", attributes: { title: "Renamed" } }
+    })
+    expect(decoded.data.attributes).toEqual({ title: "Renamed" })
+  })
+
+  it("excludes read-only attributes from the flat create and update inputs", () => {
+    type CreateIn = typeof Post.createInput.Type
+    expectTypeOf<CreateIn>().toHaveProperty("title")
+    expectTypeOf<CreateIn>().not.toHaveProperty("createdAt")
+    expectTypeOf<CreateIn>().not.toHaveProperty("updatedAt")
+
+    type UpdateIn = typeof Post.updateInput.Type
+    expectTypeOf<UpdateIn>().toHaveProperty("id")
+    expectTypeOf<UpdateIn>().toHaveProperty("title")
+    expectTypeOf<UpdateIn>().not.toHaveProperty("createdAt")
+    expectTypeOf<UpdateIn>().not.toHaveProperty("updatedAt")
+
+    const createIn = Schema.decodeUnknownSync(Post.createInput)({ title: "Hello" })
+    expect(createIn).toEqual({ title: "Hello" })
+    const updateIn = Schema.decodeUnknownSync(Post.updateInput)({ id: "1", title: "Renamed" })
+    expect(updateIn).toEqual({ id: "1", title: "Renamed" })
+  })
+
+  it("leaves a plain attribute read-write (opt-in, non-breaking)", () => {
+    const Plain = Resource("plains", { attributes: { name: Schema.NonEmptyString } })
+    type CreateAttrs = (typeof Plain.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().toHaveProperty("name")
+    expectTypeOf<typeof Plain.createInput.Type>().toEqualTypeOf<{ readonly name: string }>()
+  })
+
+  it("carries read-only attributes through Resource.extend", () => {
+    const Article = extend(Post, "articles", { attributes: { body: Schema.String } })
+    // resource projection: read-only attribute is inherited and present
+    expect(attributeKeys(Article)).toEqual(["title", "createdAt", "updatedAt", "body"])
+    expectTypeOf<(typeof Article.Type)["attributes"]["createdAt"]>().toEqualTypeOf<Date>()
+    // write projections: still excluded after extend
+    type CreateAttrs = (typeof Article.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().toHaveProperty("title")
+    expectTypeOf<CreateAttrs>().toHaveProperty("body")
+    expectTypeOf<CreateAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<CreateAttrs>().not.toHaveProperty("updatedAt")
+    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+      data: {
+        type: "articles",
+        attributes: { title: "Hello", body: "World" },
+        relationships: { author: { data: { type: "people", id: "9" } } }
+      }
+    })
+    expect(decoded.data.attributes).toEqual({ title: "Hello", body: "World" })
   })
 })
