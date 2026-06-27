@@ -3,7 +3,7 @@ import { Match, Schema } from "effect"
 import * as Atomic from "./Atomic.js"
 import * as Middleware from "./Middleware.js"
 import * as Relationship from "./Relationship.js"
-import { make as Resource, Ref } from "./Resource.js"
+import { attribute, make as Resource, readOnlyAttribute, Ref } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures — one relationship of every kind
@@ -720,5 +720,38 @@ describe("type-level guarantees", () => {
   it("add data attributes are required and typed", () => {
     // @ts-expect-error -- missing attributes
     Atomic.add(Article, {})
+  })
+})
+
+describe("per-attribute descriptors in operations", () => {
+  const Doc = Resource("docs", {
+    attributes: {
+      title: Schema.NonEmptyString,
+      createdAt: readOnlyAttribute(Schema.Date), // server-set
+      slug: attribute(Schema.String, { update: false }) // set at create only
+    }
+  })
+
+  it("excludes read-only attributes from the add operation", () => {
+    const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Doc))({
+      op: "add",
+      data: { type: "docs", attributes: { title: "Hello", slug: "hello" } }
+    })
+    expect((decoded as { data: { attributes: unknown } }).data.attributes).toEqual({ title: "Hello", slug: "hello" })
+    type AddAttrs = Atomic.AddOperation<typeof Doc>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<AddAttrs>().toHaveProperty("slug")
+  })
+
+  it("excludes read-only and non-updatable attributes from the update operation", () => {
+    const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Doc))({
+      op: "update",
+      data: { type: "docs", id: "1", attributes: { title: "Renamed" } }
+    })
+    expect((decoded as { data: { attributes: unknown } }).data.attributes).toEqual({ title: "Renamed" })
+    type UpdateAttrs = NonNullable<Atomic.UpdateOperation<typeof Doc>["Type"]["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("slug")
+    expectTypeOf<UpdateAttrs>().toHaveProperty("title")
   })
 })

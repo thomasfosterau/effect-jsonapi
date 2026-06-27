@@ -3,6 +3,7 @@ import { Option, Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
 import {
+  attribute,
   attributeAnnotations,
   attributeKeys,
   attributes as attributesOf,
@@ -1297,5 +1298,150 @@ describe("Resource.readOnlyAttribute", () => {
       }
     })
     expect(decoded.data.attributes).toEqual({ title: "Hello", body: "World" })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Per-attribute projection descriptors
+// ---------------------------------------------------------------------------
+
+describe("Resource.attribute", () => {
+  const Widget = Resource("widgets", {
+    attributes: {
+      name: Schema.NonEmptyString, // plain: create required, update optional
+      // server-set: excluded from every write projection
+      createdAt: attribute(Schema.Date, { create: false, update: false }),
+      // set at create only, never updatable
+      slug: attribute(Schema.String, { create: "required", update: false }),
+      // optional at create; clearable (nullable) on update
+      summary: attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+      // optional key in the resource object itself, optional at create
+      nickname: attribute(Schema.String, { resource: "optional", create: "optional" }),
+      // nullable schema, but update must not accept null to clear
+      status: attribute(Schema.NullOr(Schema.String), { clearable: false })
+    }
+  })
+
+  it("keeps every attribute in the resource object schema, honouring `resource`", () => {
+    expect(attributeKeys(Widget)).toEqual(["name", "createdAt", "slug", "summary", "nickname", "status"])
+    // `resource: "optional"` makes the key optional on the resource object
+    const decoded = Schema.decodeUnknownSync(Widget)({
+      type: "widgets",
+      id: "1",
+      attributes: { name: "x", createdAt: new Date("2024-01-01"), slug: "s", summary: null, status: null }
+    })
+    expect("nickname" in decoded.attributes).toBe(false)
+    expectTypeOf<(typeof Widget.Type)["attributes"]["nickname"]>().toEqualTypeOf<string | undefined>()
+  })
+
+  it("projects the create payload by each attribute's `create` setting", () => {
+    type CreateAttrs = (typeof Widget.createPayload.Type)["data"]["attributes"]
+    // excluded (create: false)
+    expectTypeOf<CreateAttrs>().not.toHaveProperty("createdAt")
+    // required
+    expectTypeOf<CreateAttrs>().toHaveProperty("name")
+    expectTypeOf<CreateAttrs>().toHaveProperty("slug")
+    expectTypeOf<CreateAttrs>().toHaveProperty("status")
+    // optional create keys may be omitted
+    expectTypeOf<CreateAttrs["summary"]>().toEqualTypeOf<string | null | undefined>()
+    expectTypeOf<CreateAttrs["nickname"]>().toEqualTypeOf<string | undefined>()
+
+    const decoded = Schema.decodeUnknownSync(Widget.createPayload)({
+      data: { type: "widgets", attributes: { name: "x", slug: "s", status: "ok" } }
+    })
+    expect(decoded.data.attributes).toEqual({ name: "x", slug: "s", status: "ok" })
+  })
+
+  it("projects the update payload by each attribute's `update` setting", () => {
+    type UpdateAttrs = NonNullable<(typeof Widget.updatePayload.Type)["data"]["attributes"]>
+    // excluded from updates
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("slug")
+    // present (tri-state)
+    expectTypeOf<UpdateAttrs>().toHaveProperty("name")
+    expectTypeOf<UpdateAttrs>().toHaveProperty("summary")
+    expectTypeOf<UpdateAttrs>().toHaveProperty("status")
+
+    const decoded = Schema.decodeUnknownSync(Widget.updatePayload)({
+      data: { type: "widgets", id: "1", attributes: { name: "y", summary: null } }
+    })
+    expect(decoded.data.attributes).toEqual({ name: "y", summary: null })
+  })
+
+  it("clears a clearable attribute with null but rejects null for a non-clearable one", () => {
+    // `summary` is clearable (nullable, default) → null accepted
+    const cleared = Schema.decodeUnknownSync(Widget.updatePayload)({
+      data: { type: "widgets", id: "1", attributes: { summary: null } }
+    })
+    expect(cleared.data.attributes?.summary).toBeNull()
+    // `status` is `clearable: false` → null rejected, value accepted
+    expect(() =>
+      Schema.decodeUnknownSync(Widget.updatePayload)({
+        data: { type: "widgets", id: "1", attributes: { status: null } }
+      })
+    ).toThrow()
+    const set = Schema.decodeUnknownSync(Widget.updatePayload)({
+      data: { type: "widgets", id: "1", attributes: { status: "active" } }
+    })
+    expect(set.data.attributes?.status).toBe("active")
+    // type-level: status update value excludes null
+    type UpdateAttrs = NonNullable<(typeof Widget.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs["status"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<UpdateAttrs["summary"]>().toEqualTypeOf<string | null | undefined>()
+  })
+
+  it("makes a non-nullable attribute clearable on update when asked", () => {
+    const R = Resource("clears", {
+      attributes: { bio: attribute(Schema.String, { clearable: true }) }
+    })
+    type UpdateAttrs = NonNullable<(typeof R.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs["bio"]>().toEqualTypeOf<string | null | undefined>()
+    const decoded = Schema.decodeUnknownSync(R.updatePayload)({
+      data: { type: "clears", id: "1", attributes: { bio: null } }
+    })
+    expect(decoded.data.attributes?.bio).toBeNull()
+  })
+
+  it("projects the flat create/update inputs the same way", () => {
+    type CreateIn = typeof Widget.createInput.Type
+    expectTypeOf<CreateIn>().not.toHaveProperty("createdAt")
+    expectTypeOf<CreateIn>().toHaveProperty("slug")
+
+    type UpdateIn = typeof Widget.updateInput.Type
+    expectTypeOf<UpdateIn>().toHaveProperty("id")
+    expectTypeOf<UpdateIn>().not.toHaveProperty("createdAt")
+    expectTypeOf<UpdateIn>().not.toHaveProperty("slug")
+
+    const createIn = Schema.decodeUnknownSync(Widget.createInput)({ name: "x", slug: "s", status: "ok" })
+    expect(createIn).toEqual({ name: "x", slug: "s", status: "ok" })
+    const updateIn = Schema.decodeUnknownSync(Widget.updateInput)({ id: "1", name: "y" })
+    expect(updateIn).toEqual({ id: "1", name: "y" })
+  })
+
+  it("readOnlyAttribute is the { create: false, update: false } shorthand", () => {
+    const A = Resource("as", { attributes: { x: Schema.String, t: readOnlyAttribute(Schema.Date) } })
+    const B = Resource("bs", {
+      attributes: { x: Schema.String, t: attribute(Schema.Date, { create: false, update: false }) }
+    })
+    type ACreate = (typeof A.createPayload.Type)["data"]["attributes"]
+    type BCreate = (typeof B.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<ACreate>().toEqualTypeOf<BCreate>()
+    expect(attributeKeys(A)).toEqual(attributeKeys(B))
+  })
+
+  it("carries descriptors through Resource.extend", () => {
+    const Child = extend(Widget, "gadgets", { attributes: { extra: Schema.String } })
+    type CreateAttrs = (typeof Child.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().not.toHaveProperty("createdAt")
+    expectTypeOf<CreateAttrs>().toHaveProperty("extra")
+    type UpdateAttrs = NonNullable<(typeof Child.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("slug")
+  })
+
+  it("leaves a plain attribute read-write (the descriptor defaults)", () => {
+    const Plain = Resource("plains", { attributes: { name: Schema.NonEmptyString } })
+    expectTypeOf<typeof Plain.createInput.Type>().toEqualTypeOf<{ readonly name: string }>()
+    type UpdateAttrs = NonNullable<(typeof Plain.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs["name"]>().toEqualTypeOf<string | undefined>()
   })
 })
