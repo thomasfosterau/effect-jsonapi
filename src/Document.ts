@@ -40,15 +40,33 @@ export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown)
 // ---------------------------------------------------------------------------
 
 /**
+ * A URI-reference, decoded to a richer type where possible.
+ *
+ * JSON:API links are URI-*references*: they may be absolute (`https://…`) or
+ * relative (`/articles/1`). The WHATWG `URL` type can only represent an
+ * absolute URL, so this codec decodes an *absolute* reference to a real `URL`
+ * and leaves a *relative* reference as a `string` — its decoded type is
+ * `URL | string`. Both encode back to the original string, so the wire format
+ * is unchanged and relative links keep working.
+ *
+ * Use this anywhere the spec calls for a URI: link targets, `describedby`, and
+ * the `jsonapi` object's `ext` / `profile` members.
+ *
+ * @since 0.6.0
+ * @category schemas
+ */
+export const Url = Schema.Union([Schema.URLFromString, Schema.String])
+
+/**
  * A link object, per https://jsonapi.org/format/1.1/#document-links
  *
  * @since 0.1.0
  * @category schemas
  */
 export const LinkObject = Schema.Struct({
-  href: Schema.String,
+  href: Url,
   rel: Schema.optionalKey(Schema.String),
-  describedby: Schema.optionalKey(Schema.String),
+  describedby: Schema.optionalKey(Url),
   title: Schema.optionalKey(Schema.String),
   type: Schema.optionalKey(Schema.String),
   hreflang: Schema.optionalKey(Schema.String),
@@ -56,12 +74,13 @@ export const LinkObject = Schema.Struct({
 })
 
 /**
- * A link: either a URL string or a {@link LinkObject}.
+ * A link: either a {@link Url} (an absolute `URL` or a relative URI-reference
+ * string) or a {@link LinkObject}.
  *
  * @since 0.1.0
  * @category schemas
  */
-export const Link = Schema.Union([Schema.String, LinkObject])
+export const Link = Schema.Union([Url, LinkObject])
 
 /**
  * A resource object's `links`: the spec standardises `self`.
@@ -140,8 +159,8 @@ export const TopLevelLinks = Schema.Struct({
  */
 export const JsonApiObject = Schema.Struct({
   version: Schema.optionalKey(Schema.Literals(["1.0", "1.1"])),
-  ext: Schema.optionalKey(Schema.Array(Schema.String)),
-  profile: Schema.optionalKey(Schema.Array(Schema.String)),
+  ext: Schema.optionalKey(Schema.Array(Url)),
+  profile: Schema.optionalKey(Schema.Array(Url)),
   meta: Schema.optionalKey(AnyMeta)
 })
 
