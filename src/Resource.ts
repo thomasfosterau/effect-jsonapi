@@ -1274,3 +1274,248 @@ export const extend = <
     Meta,
     ExtendedId<BaseId, Type, InheritId>
   >
+
+// ---------------------------------------------------------------------------
+// Polymorphic families (heterogeneous supertypes)
+// ---------------------------------------------------------------------------
+
+/**
+ * The linkage schema of a {@link Family}: a union of its members' resource
+ * identifiers, discriminated by the `type` tag. This is what makes a family a
+ * valid relationship target — linkage decodes for *any* member.
+ *
+ * @since 0.4.0
+ * @category type-level
+ */
+export interface FamilyIdentifier<Members extends ReadonlyArray<Any>> extends Schema.Union<{
+  readonly [K in keyof Members]: Members[K]["identifier"]
+}> {}
+
+// Distributes `IncludableTargets` over the member union (the non-`paginated`
+// targets of any member — what a family's compound `included` admits).
+type FamilyIncludableTargets<Members extends ReadonlyArray<Any>> = Members[number] extends infer R
+  ? R extends Any
+    ? IncludableTargets<R["relationships"]>
+    : never
+  : never
+
+/**
+ * The default `included` union for a family's compound documents: the
+ * non-`paginated` relationship targets of every member.
+ *
+ * @since 0.4.0
+ * @category models
+ */
+export interface FamilyDefaultIncluded<Members extends ReadonlyArray<Any>> extends Schema.Union<
+  ReadonlyArray<FamilyIncludableTargets<Members>>
+> {}
+
+/**
+ * A polymorphic resource family: a synthetic supertype over a set of member
+ * resource definitions.
+ *
+ * A `Family` *is* the discriminated-union schema over its members (so it decodes
+ * as primary `data`, discriminated by the `type` tag) and **also** structurally
+ * satisfies {@link Any} — exposing a `type` name, a shared `Id`, a union
+ * `identifier`, `relationships` and `fields` — so it can be used as a
+ * relationship target (`Relationship.one(() => family)`) and flows through the
+ * include machinery unchanged.
+ *
+ * Build one with {@link family}. When a `Base` is given, the shared `Id` /
+ * `relationships` / attributes come from the base; otherwise they are
+ * synthesised from the members (id-union, and the by-key intersection of the
+ * members' relationships / attributes).
+ *
+ * @since 0.4.0
+ * @category models
+ */
+export interface Family<
+  Name extends string,
+  Members extends ReadonlyArray<Any>,
+  Base extends Any | undefined = undefined
+> extends Schema.Union<Members> {
+  /** The family name (used to name groups; *not* a wire resource type). */
+  readonly type: Name
+  /** The member resource definitions. */
+  readonly members: Members
+  /** The shared id schema: the base's id, or a union of the members' ids. */
+  readonly Id: Base extends Any ? Base["Id"] : Schema.Union<{ readonly [K in keyof Members]: Members[K]["Id"] }>
+  /** The linkage schema: a union of the members' identifiers. */
+  readonly identifier: FamilyIdentifier<Members>
+  /** The shared relationships: the base's, or the by-key intersection of the members'. */
+  readonly relationships: Base extends Any ? Base["relationships"] : Relationships
+  /** The shared attributes: the base's, or the by-key intersection of the members'. */
+  readonly fields: {
+    readonly attributes: Base extends Any ? Base["fields"]["attributes"] : Schema.Struct<Schema.Struct.Fields>
+  }
+  /**
+   * Single-resource document schema whose primary `data` is the member union
+   * (discriminated by `type`); `included` defaults to every member's
+   * non-`paginated` targets.
+   */
+  document<
+    Included extends Schema.Top = FamilyDefaultIncluded<Members>,
+    M extends Schema.Top = typeof AnyMeta
+  >(options?: {
+    readonly included?: Included
+    readonly meta?: M
+  }): DataDocument<Schema.Union<Members>, Included, M>
+  /** Collection document schema (array `data`). Same defaults as {@link document}. */
+  collection<
+    Included extends Schema.Top = FamilyDefaultIncluded<Members>,
+    M extends Schema.Top = typeof AnyMeta
+  >(options?: {
+    readonly included?: Included
+    readonly meta?: M
+  }): CollectionDocument<Schema.Union<Members>, Included, M>
+}
+
+/**
+ * The legal `include` query parameter paths for a family — the union of every
+ * member's include paths.
+ *
+ * @since 0.4.0
+ * @category type-level
+ */
+export type FamilyIncludePath<F extends Family<any, ReadonlyArray<Any>, any>> = IncludePath<F["members"][number]>
+
+/**
+ * The `included` union for a family brought in by a set of include paths.
+ *
+ * @since 0.4.0
+ * @category type-level
+ */
+export type FamilyIncluded<
+  F extends Family<any, ReadonlyArray<Any>, any>,
+  Paths extends ReadonlyArray<string>
+> = IncludedFor<F["members"][number], Paths>
+
+// The by-key intersection of the members' relationships: keep a key only when
+// every member declares it with the same kind and the same target type.
+const intersectRelationships = (members: ReadonlyArray<Any>): Relationships => {
+  const [first, ...rest] = members
+  if (first === undefined) return {}
+  const result: Record<string, Relationship.Descriptor> = {}
+  for (const [key, descriptor] of Object.entries(first.relationships)) {
+    const shared = rest.every((member) => {
+      const other = member.relationships[key]
+      return other !== undefined && other.kind === descriptor.kind && other.ref().type === descriptor.ref().type
+    })
+    if (shared) result[key] = descriptor
+  }
+  return result
+}
+
+// The by-key intersection of the members' attribute fields.
+const intersectAttributes = (members: ReadonlyArray<Any>): Schema.Struct.Fields => {
+  const [first, ...rest] = members
+  if (first === undefined) return {}
+  const result: Record<string, Schema.Struct.Fields[string]> = {}
+  for (const [key, schema] of Object.entries(first.fields.attributes.fields)) {
+    if (rest.every((member) => key in member.fields.attributes.fields)) result[key] = schema
+  }
+  return result
+}
+
+/**
+ * Whether a value is a {@link Family} (as opposed to a single {@link Resource}
+ * or a plain `Schema.Union`).
+ *
+ * @since 0.4.0
+ * @category guards
+ */
+export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, any> =>
+  typeof u === "object" &&
+  u !== null &&
+  Array.isArray((u as { readonly members?: unknown }).members) &&
+  "relationships" in u &&
+  "identifier" in u
+
+/**
+ * Defines a polymorphic resource **family** — a synthetic supertype over a set
+ * of member resources, usable as primary `data`, as a compound `included`
+ * member, and as a relationship target.
+ *
+ * Two forms:
+ *
+ *   - `Resource.family("nodes", [Person, Organisation])` — a named family; the
+ *     shared `Id` / `relationships` / attributes are synthesised from the
+ *     members (id-union, and the by-key intersection of the members').
+ *   - `Resource.family(Base, [Person, Organisation])` — a base-anchored family;
+ *     the shared `Id` / `relationships` / attributes come from `Base` (the
+ *     recommended form when members are `extend(Base, …, { inheritId: true })`,
+ *     so the shared id brand anchors "any member id" and dotted `?include=`
+ *     paths through the family are meaningful).
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Node = Resource.make("nodes", { attributes: { name: Schema.NonEmptyString } })
+ * const Person = Resource.extend(Node, "people", { inheritId: true })
+ * const Organisation = Resource.extend(Node, "organisations", { inheritId: true })
+ *
+ * // A supertype over the two subtypes.
+ * const AnyNode = Resource.family(Node, [Person, Organisation])
+ *
+ * // Use it as a relationship target — linkage decodes for any member.
+ * const Edge = Resource.make("edges", {
+ *   attributes: { weight: Schema.Number },
+ *   relationships: { to: Relationship.one(() => AnyNode) }
+ * })
+ *
+ * AnyNode.document()   // data: Person | Organisation
+ * AnyNode.collection() // data: Array<Person | Organisation>
+ * ```
+ *
+ * @since 0.4.0
+ * @category constructors
+ */
+export function family<const Name extends string, const Members extends ReadonlyArray<Any>>(
+  name: Name,
+  members: Members
+): Family<Name, Members, undefined>
+export function family<
+  const BaseType extends string,
+  const BaseAttributes extends Schema.Struct.Fields,
+  const BaseRels extends Relationships,
+  BaseMeta extends Schema.Top,
+  BaseId extends Schema.Codec<any, string>,
+  const Members extends ReadonlyArray<Any>
+>(
+  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
+  members: Members
+): Family<BaseType, Members, Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>>
+export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): Family<string, ReadonlyArray<Any>, any> {
+  const base = typeof nameOrBase === "string" ? undefined : nameOrBase
+  const name = base !== undefined ? base.type : (nameOrBase as string)
+
+  const memberUnion = Schema.Union(members)
+  const identifier = Schema.Union(members.map((member) => member.identifier))
+  const id = base !== undefined ? base.Id : Schema.Union(members.map((member) => member.Id))
+  const relationships = base !== undefined ? base.relationships : intersectRelationships(members)
+  const attributes = base !== undefined ? base.fields.attributes : Schema.Struct(intersectAttributes(members))
+
+  // The default `included` union: every member's non-`paginated` targets.
+  const includedUnion = () => Schema.Union(dedupe(members.flatMap(directTargets)))
+
+  return Object.assign(memberUnion, {
+    type: name,
+    members,
+    Id: id,
+    identifier,
+    relationships,
+    fields: { attributes },
+    document: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
+      DataDocument(memberUnion, {
+        included: opts?.included ?? includedUnion(),
+        meta: opts?.meta ?? AnyMeta
+      }),
+    collection: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
+      CollectionDocument(memberUnion, {
+        included: opts?.included ?? includedUnion(),
+        meta: opts?.meta ?? AnyMeta
+      })
+  }) as unknown as Family<string, ReadonlyArray<Any>, any>
+}

@@ -54,6 +54,7 @@ import type {
   Any,
   AttributeKeys,
   DefaultIncluded,
+  Family,
   RelationshipName,
   Resource,
   Target,
@@ -627,6 +628,84 @@ export const collection = <
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options.errors)
+  })
+    .middleware(ContentNegotiation)
+    .middleware(SchemaErrors)
+
+// ---------------------------------------------------------------------------
+// polymorphic — GET /<family>/:id (single resource, any family member)
+// ---------------------------------------------------------------------------
+
+/**
+ * `GET /<family>/:id` — fetch a single resource that may be any member of a
+ * {@link Resource.family} (e.g. `GET /nodes/:id` returning a person or an
+ * organisation).
+ *
+ * Success is a 200 single-resource document whose primary `data` is the family's
+ * member union (discriminated by `type`) and whose `included` spans every
+ * member's targets. The `:id` param is the family's shared id, and `?include=` /
+ * `?fields[TYPE]=` span all members' graphs.
+ *
+ * For the collection case (`GET /nodes`) use {@link collection} with
+ * `family.members`.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Node = Resource.make("nodes", { attributes: { name: Schema.NonEmptyString } })
+ * const Person = Resource.extend(Node, "people", { inheritId: true })
+ * const Organisation = Resource.extend(Node, "organisations", { inheritId: true })
+ * const AnyNode = Resource.family(Node, [Person, Organisation])
+ *
+ * const nodes = Group.make(
+ *   AnyNode,
+ *   Endpoint.polymorphic(AnyNode, { include: true }) // GET /nodes/:id → person | organisation
+ * )
+ * ```
+ *
+ * @since 0.4.0
+ * @category constructors
+ */
+export const polymorphic = <
+  FamilyName extends string,
+  Members extends ReadonlyArray<Any>,
+  Base extends Any | undefined,
+  const Errors extends ReadonlyArray<ErrorClass> = readonly [],
+  const Name extends string = "get",
+  const Path extends `/${string}` = `/${FamilyName}/:id`,
+  const Include extends boolean = false,
+  const Fields extends boolean = false,
+  DocMeta extends Schema.Top = typeof AnyMeta
+>(
+  family: Family<FamilyName, Members, Base>,
+  options?: CommonOptions<Name, Path, Errors> & {
+    /** Enable the `?include=` query parameter (paths span all members' graphs). */
+    readonly include?: Include
+    /** Enable `?fields[TYPE]=` sparse fieldsets for all members and their targets. */
+    readonly fields?: Fields
+    /** Override the success document's `meta` schema. */
+    readonly meta?: DocMeta
+  }
+) =>
+  HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${family.type}/:id`) as Path, {
+    params: { id: family.Id },
+    query: Query.schema(
+      family.members as ReadonlyArray<Members[number]>,
+      queryConfig(options) as {
+        readonly include: Include
+        readonly fields: Fields
+        readonly sort: false
+        readonly page: undefined
+        readonly filter: undefined
+      }
+    ),
+    success: asJsonApi(
+      family.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+    ),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+    error: wires(options?.errors)
   })
     .middleware(ContentNegotiation)
     .middleware(SchemaErrors)
