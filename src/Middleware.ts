@@ -19,6 +19,13 @@
  * type level) until {@link layer} is provided — compliance cannot be
  * forgotten.
  *
+ * Both are also usable **outside** those constructors, for hosts that own the
+ * URL themselves: {@link negotiate} runs the §5 rules over plain headers and
+ * {@link schemaError} builds the request-validation 400, both rendered with
+ * `ApiError.toDocument`. And for an api built from the constructors whose host
+ * has already negotiated, {@link layerHostNegotiated} satisfies the endpoints'
+ * negotiation requirement without running §5 twice.
+ *
  * @since 0.1.0
  */
 import { Effect, Layer } from "effect"
@@ -174,6 +181,52 @@ export const negotiate = (
   return undefined
 }
 
+/**
+ * The part of a request whose decoding failed — the vocabulary
+ * `HttpApiSchemaError` uses, and the input to {@link schemaError}.
+ *
+ * @since 0.7.0
+ * @category models
+ */
+export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
+
+/**
+ * The JSON:API 400 a request-validation failure produces — the standalone form
+ * of what {@link SchemaErrorsLive} applies inside `HttpApi`.
+ *
+ * Pair it with {@link negotiate} to run the package's §5 negotiation and its
+ * request-validation error shape from a plain framework hook that owns the URL,
+ * without adopting the `Endpoint` constructors: decode with your own schemas,
+ * and render this error with `ApiError.toDocument` when decoding fails. The
+ * resulting document is byte-identical to the one an `Endpoint`-built api
+ * returns, so both halves of a shared URL space answer alike.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { ApiError, Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Query = Schema.Struct({ limit: Schema.FiniteFromString })
+ *
+ * // inside a framework hook, decoding the request yourself:
+ * const decode = (params: Record<string, string>) => {
+ *   const result = Schema.decodeUnknownExit(Query)(params)
+ *   if (result._tag === "Failure") {
+ *     const body = ApiError.toDocument(Middleware.schemaError("Query"))
+ *     return { status: 400, body }
+ *   }
+ *   return { status: 200, body: result.value }
+ * }
+ *
+ * console.log(decode({ limit: "nope" }).status) // 400
+ * ```
+ *
+ * @since 0.7.0
+ * @category utils
+ */
+export const schemaError = (part: RequestPart): BadRequest =>
+  new BadRequest({ detail: `Request ${part.toLowerCase()} failed validation` })
+
 // ---------------------------------------------------------------------------
 // Middleware services
 // ---------------------------------------------------------------------------
@@ -247,7 +300,68 @@ export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNe
  */
 export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.layerSchemaErrorTransform(
   SchemaErrors,
-  (error) => Effect.fail(new BadRequest({ detail: `Request ${error.kind.toLowerCase()} failed validation` }))
+  (error) => Effect.fail(schemaError(error.kind))
+)
+
+/**
+ * A {@link ContentNegotiation} implementation that performs **no** §5 checks —
+ * for apis whose host already negotiated content upstream.
+ *
+ * The `Endpoint` constructors attach {@link ContentNegotiation} to every
+ * endpoint, so an `HttpApi` built from them cannot be provided without it.
+ * That is the right default — compliance can't be forgotten — but it assumes
+ * the api owns negotiation. A host that serves JSON:API alongside HTML on one
+ * URL space negotiates in its own hook instead (see {@link negotiate}), and
+ * running §5 twice is at best redundant and at worst contradictory: a host that
+ * deliberately accepts `Accept: application/json` for its api would have those
+ * requests rejected with a 406 by the middleware after the hook admitted them.
+ *
+ * Providing this layer in place of {@link ContentNegotiationLive} satisfies the
+ * endpoints' requirement while leaving the host the single negotiating
+ * authority. Nothing else changes — {@link SchemaErrors} and every endpoint's
+ * schemas, errors and documents are untouched. Use
+ * {@link layerHostNegotiated} for the whole set.
+ *
+ * Reach for this only when something upstream genuinely enforces §5; on an api
+ * that owns its own URLs, {@link layer} remains the correct choice.
+ *
+ * @since 0.7.0
+ * @category layers
+ */
+export const ContentNegotiationPassthrough: Layer.Layer<ContentNegotiation> = Layer.effect(
+  ContentNegotiation,
+  Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) => httpEffect)
+)
+
+/**
+ * Everything a JSON:API api needs to run **when its host negotiates content**:
+ * {@link ContentNegotiationPassthrough} plus the live {@link SchemaErrors}.
+ *
+ * The drop-in replacement for {@link layer} in an application whose framework
+ * hook has already applied §5 — typically with {@link negotiate}, so the rules
+ * are the package's either way.
+ *
+ * @example
+ * ```ts
+ * import { Layer } from "effect"
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // `ArticlesLive` etc. are your `HttpApiBuilder.group(...)` implementations.
+ * const ArticlesLive: Layer.Layer<never> = Layer.empty
+ *
+ * // The surrounding framework hook ran `Middleware.negotiate` already, so the
+ * // api itself does not re-negotiate — it still emits JSON:API 400s.
+ * const ApiLive = Layer.mergeAll(ArticlesLive).pipe(
+ *   Layer.provideMerge(Middleware.layerHostNegotiated)
+ * )
+ * ```
+ *
+ * @since 0.7.0
+ * @category layers
+ */
+export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.mergeAll(
+  ContentNegotiationPassthrough,
+  SchemaErrorsLive
 )
 
 /**

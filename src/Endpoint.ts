@@ -28,7 +28,11 @@
  *   - exposes typed query parameters (`include`, `fields`, `sort`, `page`,
  *     `filter`) when enabled
  *
- * Names and paths follow the conventions above but can be overridden.
+ * Names and paths follow the conventions above but can be overridden, as can
+ * the write payloads: `create` / `update` default to the enveloped
+ * `createPayload` / `updatePayload`, and take a `payload` option for apis whose
+ * write contract is a flat command input (e.g. the resource's own
+ * `createInput` / `updateInput`) rather than a JSON:API document.
  *
  * For the common case, {@link resource} derives an entire endpoint set — the
  * CRUD surface plus every relationship's endpoints, with query parameters
@@ -318,9 +322,14 @@ export const list = <
 /**
  * `POST /<type>` — create a resource.
  *
- * The request payload is the resource's `createPayload` (no `id`, client may
- * send a `lid`); success is a 201 single-resource document containing the
- * created resource.
+ * The request payload defaults to the resource's `createPayload` — the nested
+ * JSON:API envelope (`{ data: { type, lid?, attributes, relationships } }`);
+ * success is a 201 single-resource document containing the created resource.
+ *
+ * Pass `payload` to override that envelope with any schema — most usefully the
+ * resource's own flat `createInput` projection, for a write contract that is a
+ * flat command input rather than a JSON:API document. Only the request body
+ * changes; the success document, path, errors and middleware are unaffected.
  *
  * @example
  * ```ts
@@ -338,8 +347,14 @@ export const list = <
  *
  * const articles = Group.make(
  *   Article,
- *   // POST /articles → 201
+ *   // POST /articles → 201, body { data: { type, attributes } }
  *   Endpoint.create(Article, { errors: [TitleTaken] })
+ * )
+ *
+ * // …or with a flat command-input body: { title, body }
+ * const flatArticles = Group.make(
+ *   Article,
+ *   Endpoint.create(Article, { payload: Article.createInput })
  * )
  * ```
  *
@@ -354,16 +369,23 @@ export const create = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "create",
   const Path extends `/${string}` = `/${Type}`,
-  DocMeta extends Schema.Top = Meta
+  DocMeta extends Schema.Top = Meta,
+  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["createPayload"]
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
+    /**
+     * Override the request payload schema. Defaults to the resource's
+     * `createPayload` (the JSON:API envelope); pass `resource.createInput` for
+     * the flat command-input shape, or any schema of your own.
+     */
+    readonly payload?: Payload
   }
 ) =>
   HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    payload: asJsonApi(resource.createPayload),
+    payload: asJsonApi((options?.payload ?? resource.createPayload) as Payload),
     success: asJsonApi(
       resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
       201
@@ -381,9 +403,15 @@ export const create = <
 /**
  * `PATCH /<type>/:id` — update a resource.
  *
- * The request payload is the resource's `updatePayload` (`id` required,
- * attributes partial); success is a 200 single-resource document containing
- * the updated resource.
+ * The request payload defaults to the resource's `updatePayload` — the nested
+ * JSON:API envelope with `id` required and attributes partial; success is a
+ * 200 single-resource document containing the updated resource.
+ *
+ * Pass `payload` to override that envelope with any schema — most usefully the
+ * resource's own flat `updateInput` projection, for a write contract that is a
+ * flat command input rather than a JSON:API document. Only the request body
+ * changes; the `:id` path param, success document, errors and middleware are
+ * unaffected.
  *
  * @example
  * ```ts
@@ -401,8 +429,14 @@ export const create = <
  *
  * const articles = Group.make(
  *   Article,
- *   // PATCH /articles/:id (partial attributes)
+ *   // PATCH /articles/:id (partial attributes), body { data: { type, id, attributes } }
  *   Endpoint.update(Article, { errors: [ArticleNotFound] })
+ * )
+ *
+ * // …or with a flat command-input body: { id, title?, body? }
+ * const flatArticles = Group.make(
+ *   Article,
+ *   Endpoint.update(Article, { payload: Article.updateInput })
  * )
  * ```
  *
@@ -417,17 +451,24 @@ export const update = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "update",
   const Path extends `/${string}` = `/${Type}/:id`,
-  DocMeta extends Schema.Top = Meta
+  DocMeta extends Schema.Top = Meta,
+  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["updatePayload"]
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
+    /**
+     * Override the request payload schema. Defaults to the resource's
+     * `updatePayload` (the JSON:API envelope); pass `resource.updateInput` for
+     * the flat command-input shape, or any schema of your own.
+     */
+    readonly payload?: Payload
   }
 ) =>
   HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    payload: asJsonApi(resource.updatePayload),
+    payload: asJsonApi((options?.payload ?? resource.updatePayload) as Payload),
     success: asJsonApi(
       resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
     ),
@@ -1485,6 +1526,12 @@ export interface WriteConfig<Meta extends Schema.Top> {
   readonly path?: `/${string}`
   readonly errors?: ReadonlyArray<ErrorClass>
   readonly meta?: MetaOption<Meta>
+  /**
+   * Override the request payload schema. Defaults to the resource's
+   * `createPayload` / `updatePayload` (the JSON:API envelope); pass the
+   * resource's flat `createInput` / `updateInput`, or any schema of your own.
+   */
+  readonly payload?: Schema.Top
 }
 
 /**
@@ -1606,6 +1653,11 @@ type ResolveMeta<M, Meta extends Schema.Top> = [M] extends [(...args: any) => in
 
 type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta", GMeta>, Meta>
 
+// The effective write payload of a `create` / `update` config: the captured
+// `payload` override, else the resource's enveloped default.
+type EffPayload<C, Default extends Schema.Top> =
+  FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default
+
 // Whether `sort` is enabled at all: `false` only when explicitly disabled.
 type EnabledSort<Sort> = [Sort] extends [false] ? false : true
 
@@ -1701,7 +1753,8 @@ type GeneratedCreate<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "create"> extends string ? FieldOr<C, "name", "create"> : "create",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
-          EffMeta<C, GMeta, Meta>
+          EffMeta<C, GMeta, Meta>,
+          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["createPayload"]>
         >
       >
     : never
@@ -1726,7 +1779,8 @@ type GeneratedUpdate<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "update"> extends string ? FieldOr<C, "name", "update"> : "update",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
-          EffMeta<C, GMeta, Meta>
+          EffMeta<C, GMeta, Meta>,
+          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["updatePayload"]>
         >
       >
     : never
@@ -2216,13 +2270,19 @@ export const resource = <
       } as never)
     )
   }
+  // A write endpoint's `payload` override is per-endpoint only: `create` and
+  // `update` have different default envelopes, so there is no sensible
+  // top-level default to fall back to.
+  const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+    config.payload !== undefined ? { payload: config.payload } : {}
+
   const createOp = opConfig("create")
   if (createOp.emit) {
-    endpoints.push(create(resource, commonOpts(createOp.config, true) as never))
+    endpoints.push(create(resource, { ...commonOpts(createOp.config, true), ...payloadOpt(createOp.config) } as never))
   }
   const updateOp = opConfig("update")
   if (updateOp.emit) {
-    endpoints.push(update(resource, commonOpts(updateOp.config, true) as never))
+    endpoints.push(update(resource, { ...commonOpts(updateOp.config, true), ...payloadOpt(updateOp.config) } as never))
   }
   const deleteOp = opConfig("delete")
   if (deleteOp.emit) {

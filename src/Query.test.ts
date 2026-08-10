@@ -347,3 +347,65 @@ describe("Query.Page.number (factory)", () => {
     expect(() => Schema.decodeUnknownSync(page)({ size: 51 })).toThrow()
   })
 })
+
+describe("Query.bracketPageKeys", () => {
+  // The flat list-input shape this combinator exists for: pagination merged
+  // alongside the consumer's own filter fields, not nested under `page`.
+  const ListArticles = Schema.Struct({
+    ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+    authorId: Schema.optionalKey(Schema.String)
+  })
+
+  it("renames only the page cursor's encoded keys, leaving other fields flat", () => {
+    const wire = Query.bracketPageKeys(ListArticles)
+    expect(Object.keys(wire.from.fields).sort()).toEqual(["authorId", "page[limit]", "page[offset]"])
+  })
+
+  it("round-trips decode → encode through the bracket keys", () => {
+    const wire = Query.bracketPageKeys(ListArticles)
+    const encoded = { "page[offset]": 20, "page[limit]": 10, authorId: "9" }
+    const decoded = Schema.decodeUnknownSync(wire)(encoded)
+
+    // The decoded shape stays flat — the whole point of the combinator.
+    expect(decoded).toEqual({ offset: 20, limit: 10, authorId: "9" })
+    expect(Schema.encodeSync(wire)(decoded)).toEqual(encoded)
+  })
+
+  it("leaves the decoded type identical to the input struct's", () => {
+    const wire = Query.bracketPageKeys(ListArticles)
+    expectTypeOf<typeof wire.Type>().toEqualTypeOf<typeof ListArticles.Type>()
+  })
+
+  it("types the encoded side with the bracket keys", () => {
+    const wire = Query.bracketPageKeys(ListArticles)
+    expectTypeOf<typeof wire.Encoded>().toEqualTypeOf<{
+      readonly "page[offset]"?: number
+      readonly "page[limit]"?: number
+      readonly authorId?: string
+    }>()
+  })
+
+  it("carries the checks of the underlying leaves through the rename", () => {
+    const wire = Query.bracketPageKeys(ListArticles)
+    expect(() => Schema.decodeUnknownSync(wire)({ "page[limit]": 101 })).toThrow()
+  })
+
+  it("bracket-keys the string-decoding Page.Offset constant too", () => {
+    const wire = Query.bracketPageKeys(Schema.Struct(Query.Page.Offset))
+    expect(Schema.decodeUnknownSync(wire)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
+      offset: 20,
+      limit: 10
+    })
+  })
+
+  it("produces the same wire keys Query.schema's page option does", () => {
+    // The two compositions differ only in nesting: `Query.schema` nests the
+    // decoded cursor under `page`, this leaves it flat. The wire keys match.
+    const composed = Query.schema(Article, { page: Query.Page.Offset })
+    const standalone = Query.bracketPageKeys(Schema.Struct(Query.Page.Offset))
+    expect(Object.keys(standalone.from.fields).sort()).toEqual(Object.keys(composed.from.fields).sort())
+    expect(Schema.decodeUnknownSync(composed)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
+      page: { offset: 20, limit: 10 }
+    })
+  })
+})
