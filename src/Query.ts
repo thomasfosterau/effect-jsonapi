@@ -270,6 +270,89 @@ export const Page = {
 } as const
 
 // ---------------------------------------------------------------------------
+// Standalone page-key bracketing
+// ---------------------------------------------------------------------------
+
+/**
+ * The struct shape {@link bracketPageKeys} accepts: any struct carrying
+ * `offset` and `limit` fields, whatever else it also carries.
+ *
+ * @since 0.7.0
+ * @category models
+ */
+export interface OffsetPageStruct extends Schema.Struct<Schema.Struct.Fields> {
+  readonly fields: {
+    readonly limit: Schema.Top
+    readonly offset: Schema.Top
+  }
+}
+
+/**
+ * The schema {@link bracketPageKeys} returns: `S` with only its `offset` /
+ * `limit` *encoded* keys renamed to the JSON:API bracket family.
+ *
+ * @since 0.7.0
+ * @category models
+ */
+export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.encodeKeys<
+  S,
+  {
+    readonly limit: "page[limit]"
+    readonly offset: "page[offset]"
+  }
+> {}
+
+/**
+ * Re-keys a **flat** query struct's page cursor to the spec-canonical JSON:API
+ * bracket family on the wire — `offset` ↔ `page[offset]`, `limit` ↔
+ * `page[limit]` — leaving the decoded type, and every other field's wire key,
+ * untouched.
+ *
+ * This is the standalone counterpart to {@link schema}'s `page` option. Where
+ * `Query.schema(resource, { page })` composes the whole query (`include` /
+ * `fields` / `sort` / `page` / `filter`) and *nests* the decoded cursor under a
+ * `page` key, this combinator only renames two encoded keys of a struct you
+ * already own — for consumers whose list-input contract merges pagination
+ * **flat** alongside their own filter fields (a `{ limit, offset, … }` the rest
+ * of their application consumes directly) rather than composing through
+ * `Query.schema`. The bracket keys are the same family
+ * {@link Handlers.offsetPaginationLinks} emits, so a client following a `next`
+ * link decodes straight back into `{ offset, limit }`.
+ *
+ * Built on `Schema.encodeKeys`, the canonical Effect key-rename: only the
+ * *encoded* side changes, so call-site inputs and handler-visible values keep
+ * the flat shape. `HttpApiEndpoint` coerces the bracket leaves to and from
+ * their string wire form, so a struct built from either {@link Page.Offset} or
+ * the plain-number `Page.offset({ fromString: false })` factory works.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // A flat list input: pagination merged alongside an application filter.
+ * const ListArticles = Schema.Struct({
+ *   ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+ *   authorId: Schema.optionalKey(Schema.String)
+ * })
+ *
+ * const wire = Query.bracketPageKeys(ListArticles)
+ *
+ * // Only the page cursor is bracketed; `authorId` keeps its flat wire key.
+ * Schema.decodeUnknownSync(wire)({ "page[offset]": 20, "page[limit]": 10, authorId: "9" })
+ * // → { offset: 20, limit: 10, authorId: "9" }
+ * ```
+ *
+ * @since 0.7.0
+ * @category combinators
+ */
+export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketPageKeys<S> =>
+  // The cast is sound: `BracketPageKeys<S>` extends exactly the `Schema.encodeKeys`
+  // instantiation this builds, and resolves to it for every concrete `S` — but
+  // the two can't be proven comparable while `S` is still generic.
+  schema.pipe(Schema.encodeKeys({ limit: "page[limit]", offset: "page[offset]" })) as unknown as BracketPageKeys<S>
+
+// ---------------------------------------------------------------------------
 // Feature schemas
 // ---------------------------------------------------------------------------
 

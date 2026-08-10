@@ -51,6 +51,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Polymorphic families (heterogeneous supertypes)](#polymorphic-families-heterogeneous-supertypes)
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
+  - [Overriding the write payload](#overriding-the-write-payload)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
@@ -58,6 +59,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
 - [Query parameters](#query-parameters)
+  - [Bracketing page keys on a query struct you own](#bracketing-page-keys-on-a-query-struct-you-own)
 - [Spec compliance, by construction](#spec-compliance-by-construction)
 - [Examples](#examples)
 - [Metadata](#metadata)
@@ -328,6 +330,10 @@ Person.createInput // { name, bio }            — flat create attributes
 Person.updateInput // { id, name?, bio? }      — id plus the same tri-state attributes
 ```
 
+These are also what the `payload` override on `Endpoint.create` / `Endpoint.update` takes, when the
+HTTP write contract itself is a flat command input rather than a JSON:API document — see
+[Overriding the write payload](#overriding-the-write-payload).
+
 ### Nullable primary `data`
 
 `Document.DataDocument` is a **pure envelope**: its `data` member is exactly the
@@ -505,6 +511,48 @@ const articles = Group.make(
 )
 
 const Api = HttpApi.make("blog").add(articles)
+```
+
+### Overriding the write payload
+
+`Endpoint.create` and `Endpoint.update` bind their request body to the resource's `createPayload` /
+`updatePayload` — the nested JSON:API envelope — which is what a spec-compliant client sends. Some
+apis deliberately keep a **flat** write contract instead: a command input carrying foreign-key ids
+or nested arrays that JSON:API's relationship-linkage model can't express, while still _answering_
+with JSON:API documents.
+
+Pass `payload` to supply that schema. It defaults to today's envelope, so existing endpoints are
+unchanged; only the request body moves — path, params, success document, errors and middleware stay
+exactly as they were.
+
+```ts
+// POST /articles with a flat body: { title, body }
+Endpoint.create(Article, { payload: Article.createInput })
+
+// PATCH /articles/:id with a flat body: { id, title?, body? }
+// (the payload's `id` stays the validation authority; the path `:id` is the routing key)
+Endpoint.update(Article, { payload: Article.updateInput, errors: [ArticleNotFound] })
+```
+
+Any schema works, not just the derived projections — reach for your own when the create needs fields
+the resource doesn't carry:
+
+```ts
+Endpoint.create(Article, {
+  payload: Schema.Struct({ title: Schema.NonEmptyString, authorId: Schema.String })
+})
+```
+
+The same option is available per-endpoint when generating a whole group, so a `Group.resource` call
+site can adopt flat writes without giving up the generated surface:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: {
+    create: { payload: Article.createInput },
+    update: { payload: Article.updateInput }
+  }
+})
 ```
 
 ### Generating a whole group from a resource
@@ -867,6 +915,41 @@ if (error) {
 }
 ```
 
+`Middleware.schemaError(part)` is the other half: the JSON:API **400** a request-validation failure
+produces, standalone. It's the same value the `SchemaErrors` middleware raises inside `HttpApi`, so a
+hook that decodes requests with its own schemas answers byte-identically to an `Endpoint`-built api:
+
+```ts
+const parsed = Schema.decodeUnknownExit(ListQuery)(params)
+if (parsed._tag === "Failure") {
+  return json(400, ApiError.toDocument(Middleware.schemaError("Query")))
+}
+```
+
+#### When the host already negotiated
+
+If you _do_ adopt the endpoint constructors but your host negotiates content upstream — a framework
+hook serving JSON:API and HTML on one URL space — the constructors' `ContentNegotiation` middleware
+would run §5 a second time. That's redundant at best, and contradictory when the host deliberately
+admits something the spec's rules reject (an api that accepts `Accept: application/json` would see
+those requests 406'd after the hook let them through).
+
+`Middleware.layerHostNegotiated` is the drop-in replacement for `Middleware.layer` in that case: it
+satisfies the endpoints' `ContentNegotiation` requirement without performing any checks, leaving the
+host the single negotiating authority, and keeps `SchemaErrors` live so request validation still
+answers with JSON:API 400s. Nothing else about the endpoints changes.
+
+```ts
+HttpApiBuilder.layer(Api).pipe(
+  Layer.provide(ArticlesLive),
+  Layer.provide(Middleware.layerHostNegotiated) // the hook ran `Middleware.negotiate` already
+)
+```
+
+Use it only when something upstream genuinely enforces §5 — for an api that owns its own URLs,
+`Middleware.layer` remains the correct choice. (`Middleware.ContentNegotiationPassthrough` is the
+negotiation half alone, for composing your own set.)
+
 And to call it — the same definitions drive a fully typed client:
 
 ```ts
@@ -935,6 +1018,30 @@ wrapped in `Schema.toCodecStringTree`).
 ```ts
 // caps page size at 100, defaults to 25, still decodes from query strings
 Endpoint.list(Article, { page: Query.Page.offset({ maxLimit: 100, defaultLimit: 25 }) })
+```
+
+### Bracketing page keys on a query struct you own
+
+`Query.schema`'s `page` option composes the whole query and **nests** the decoded cursor under a
+`page` key. Some applications instead merge pagination **flat** into their own list-input struct —
+`{ limit, offset, …filters }` — because the rest of the application consumes that flat type directly
+and shouldn't learn a transport-shaped nesting.
+
+`Query.bracketPageKeys` is the standalone rename for exactly that case: given any struct carrying
+`offset` and `limit`, it re-keys **only those two encoded keys** to `page[offset]` / `page[limit]`,
+leaving the decoded type and every other field's wire key alone. The bracket family it produces is
+the same one `Handlers.offsetPaginationLinks` emits, so following a `next` link decodes straight back
+into the flat `{ offset, limit }` the list operation reads.
+
+```ts
+const ListArticles = Schema.Struct({
+  ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+  authorId: Schema.optionalKey(Schema.String)
+})
+
+const query = Query.bracketPageKeys(ListArticles)
+// wire:    { "page[offset]": …, "page[limit]": …, authorId: … }
+// decoded: { offset, limit, authorId }   ← unchanged, still flat
 ```
 
 ## Spec compliance, by construction

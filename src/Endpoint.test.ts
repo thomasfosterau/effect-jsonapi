@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
-import { HttpApi, HttpApiBuilder, HttpApiTest } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiTest } from "effect/unstable/httpapi"
 import * as ApiError from "./ApiError.js"
 import * as Endpoint from "./Endpoint.js"
 import * as Group from "./Group.js"
@@ -1134,5 +1134,179 @@ describe("Endpoint.resource / Group.resource", () => {
     expect(result.fetched.data).toMatchObject({ type: "comments", id: "5" })
     expect(result.author.data).toMatchObject({ type: "people", id: "9" })
     expect(result.deleted).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Write-payload override (Endpoint.create / Endpoint.update)
+// ---------------------------------------------------------------------------
+
+// Reads the payload schema off a constructed endpoint, as the relationship
+// payload tests above do.
+const payloadSchemaOf = (endpoint: {
+  readonly payload: ReadonlyMap<string, { readonly schemas: ReadonlyArray<unknown> }>
+}) => [...endpoint.payload.values()][0]!.schemas[0]! as Schema.Codec<unknown, unknown>
+
+describe("Endpoint.create / Endpoint.update payload override", () => {
+  const envelopedCreate = {
+    data: { type: "articles", attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" } }
+  }
+  const flatCreate = { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+
+  it("defaults create to the JSON:API envelope (regression: unchanged without `payload`)", () => {
+    const schema = payloadSchemaOf(Endpoint.create(Article))
+    expect(Schema.decodeUnknownSync(schema)(envelopedCreate)).toMatchObject({
+      data: { type: "articles", attributes: { title: "Hello" } }
+    })
+    // …and still rejects the flat shape, exactly as before this option existed.
+    expect(() => Schema.decodeUnknownSync(schema)(flatCreate)).toThrow()
+  })
+
+  it("defaults update to the JSON:API envelope (regression: unchanged without `payload`)", () => {
+    const schema = payloadSchemaOf(Endpoint.update(Article))
+    expect(
+      Schema.decodeUnknownSync(schema)({ data: { type: "articles", id: "1", attributes: { title: "Hi" } } })
+    ).toMatchObject({ data: { type: "articles", id: "1" } })
+    expect(() => Schema.decodeUnknownSync(schema)({ id: "1", title: "Hi" })).toThrow()
+  })
+
+  it("accepts a flat command input when `payload` is supplied", () => {
+    const schema = payloadSchemaOf(Endpoint.create(Article, { payload: Article.createInput }))
+    expect(Schema.decodeUnknownSync(schema)(flatCreate)).toMatchObject({ title: "Hello", body: "World" })
+    // the envelope is no longer the contract
+    expect(() => Schema.decodeUnknownSync(schema)(envelopedCreate)).toThrow()
+  })
+
+  it("accepts a flat update input, keeping the id as the payload's validation authority", () => {
+    const schema = payloadSchemaOf(Endpoint.update(Article, { payload: Article.updateInput }))
+    expect(Schema.decodeUnknownSync(schema)({ id: "1", title: "Hi" })).toMatchObject({ id: "1", title: "Hi" })
+  })
+
+  it("changes only the payload — name, method, path, params and middleware are untouched", () => {
+    const flat = Endpoint.update(Article, { payload: Article.updateInput })
+    const enveloped = Endpoint.update(Article)
+    expect([flat.name, flat.method, flat.path]).toEqual([enveloped.name, enveloped.method, enveloped.path])
+    expect([...flat.middlewares].map((m) => m.key)).toEqual([...enveloped.middlewares].map((m) => m.key))
+  })
+
+  it("types the overridden payload as the supplied schema", () => {
+    const flat = Endpoint.create(Article, { payload: Article.createInput })
+    expectTypeOf<HttpApiEndpoint.Payload<typeof flat>["Type"]>().toEqualTypeOf<typeof Article.createInput.Type>()
+
+    const enveloped = Endpoint.create(Article)
+    expectTypeOf<HttpApiEndpoint.Payload<typeof enveloped>["Type"]>().toEqualTypeOf<typeof Article.createPayload.Type>()
+  })
+
+  it("threads through Endpoint.resource's per-endpoint create/update config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: {
+          create: { payload: Article.createInput },
+          update: { payload: Article.updateInput }
+        }
+      }).map((endpoint) => [endpoint.name, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.create!))(flatCreate)).toMatchObject({ title: "Hello" })
+    expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.update!))({ id: "1", title: "Hi" })).toMatchObject({
+      id: "1"
+    })
+  })
+
+  it("leaves Endpoint.resource's write payloads enveloped when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.name, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.create!))(envelopedCreate)).toMatchObject({
+      data: { type: "articles" }
+    })
+    expect(() => Schema.decodeUnknownSync(payloadSchemaOf(byName.create!))(flatCreate)).toThrow()
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { create: { payload: Article.createInput }, update: false, delete: false }
+    })
+    expectTypeOf<HttpApiEndpoint.Payload<typeof group.endpoints.create>["Type"]>().toEqualTypeOf<
+      typeof Article.createInput.Type
+    >()
+  })
+})
+
+describe("HTTP round-trip with a flat write payload", () => {
+  const FlatApi = HttpApi.make("flat-blog").add(
+    Group.make(
+      Article,
+      Endpoint.create(Article, { payload: Article.createInput }),
+      Endpoint.update(Article, { payload: Article.updateInput, errors: [ArticleNotFound] })
+    )
+  )
+
+  const FlatLive = HttpApiBuilder.group(FlatApi, "articles", (handlers) =>
+    handlers
+      .handle("create", ({ payload }) =>
+        Effect.succeed({
+          data: Article.make({
+            id: Article.Id.make("new-id"),
+            // `payload` is the flat attributes struct — no `.data` envelope
+            attributes: payload,
+            relationships: { author: { data: null }, comments: { data: [] } }
+          })
+        })
+      )
+      .handle("update", ({ params, payload }) =>
+        loadArticle(params.id).pipe(
+          Effect.map((article) => ({
+            data: Article.make({
+              ...article,
+              attributes: {
+                ...article.attributes,
+                ...(payload.title !== undefined ? { title: payload.title } : {})
+              }
+            })
+          }))
+        )
+      )
+  )
+
+  const run = <A, E>(effect: Effect.Effect<A, E, any>) =>
+    Effect.runPromise(
+      effect.pipe(Effect.scoped, Effect.provide(FlatLive), Effect.provide(Middleware.layer)) as Effect.Effect<
+        A,
+        E,
+        never
+      >
+    )
+
+  it("creates from a flat body and still answers with a JSON:API document (201)", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(FlatApi, ["articles"])
+        return yield* client.articles.create({
+          payload: { title: "New article", body: "Contents", createdAt: new Date("2024-06-01T00:00:00.000Z") }
+        })
+      })
+    )
+
+    expect(result.data).toMatchObject({ type: "articles", id: "new-id" })
+    expect(result.data.attributes.title).toBe("New article")
+    expect(result.data.attributes.createdAt).toBeInstanceOf(Date)
+  })
+
+  it("updates from a flat body carrying the id", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(FlatApi, ["articles"])
+        return yield* client.articles.update({
+          params: { id: Article.Id.make("1") },
+          payload: { id: Article.Id.make("1"), title: "Updated" }
+        })
+      })
+    )
+
+    expect(result.data.attributes.title).toBe("Updated")
+    // the untouched attribute survives
+    expect(result.data.attributes.body).toBe("World")
   })
 })
