@@ -75,17 +75,17 @@ import type { AttributeKeys, Resource } from "./Resource.js"
  * @category constructors
  */
 export const make: {
-  <const Type extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Any>>(
+  <const Type extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>>(
     resource: { readonly type: Type },
     ...endpoints: Endpoints
   ): HttpApiGroup.HttpApiGroup<Type, Endpoints[number]>
-  <const Name extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Any>>(
+  <const Name extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>>(
     name: Name,
     ...endpoints: Endpoints
   ): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>
-} = (nameOrResource: string | { readonly type: string }, ...endpoints: ReadonlyArray<HttpApiEndpoint.Any>) =>
+} = (nameOrResource: string | { readonly type: string }, ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>) =>
   HttpApiGroup.make(typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type).add(
-    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Any>)
+    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>)
   ) as never
 
 /**

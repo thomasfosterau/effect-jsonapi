@@ -55,7 +55,7 @@ export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fie
 > {}
 
 /**
- * The class returned by {@link make}: a `Schema.TaggedErrorClass` augmented
+ * The class returned by {@link make}: a `Schema.TaggedError` augmented
  * with the JSON:API error metadata and the derived wire schema.
  *
  * @since 0.1.0
@@ -227,9 +227,7 @@ export const make =
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
-    const Base = Schema.TaggedErrorClass<Self>(identifier)(tag, fields) as unknown as new (
-      ...args: Array<any>
-    ) => object
+    const Base = Schema.TaggedError<Self>(identifier)(tag, fields) as unknown as new (...args: Array<any>) => object
 
     class ApiErrorBase extends Base {
       static readonly status = config.status

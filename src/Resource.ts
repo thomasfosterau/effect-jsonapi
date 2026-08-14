@@ -192,7 +192,12 @@ export interface Ref<R extends Any> extends Schema.Union<
  * @category constructors
  */
 export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
-  const thunk = typeof resource === "function" ? resource : () => resource
+  // Resource definitions are themselves callable (schemas are functions), so
+  // `typeof resource === "function"` no longer distinguishes a resource from a
+  // lazy thunk. `type` is a resource-only own property (never present on a
+  // plain `() => R` thunk), so check for that instead.
+  const thunk: () => R =
+    typeof resource === "function" && !("type" in resource) ? (resource as () => R) : () => resource as R
   return Schema.Union([
     Schema.suspend(() => thunk().identifier as R["identifier"]),
     Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<R["type"]>)
@@ -1792,7 +1797,7 @@ const intersectAttributes = (members: ReadonlyArray<Any>): Schema.Struct.Fields 
  * @category guards
  */
 export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, any> =>
-  typeof u === "object" &&
+  (typeof u === "object" || typeof u === "function") &&
   u !== null &&
   Array.isArray((u as { readonly members?: unknown }).members) &&
   "relationships" in u &&

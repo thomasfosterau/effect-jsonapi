@@ -249,7 +249,7 @@ describe("family endpoints", () => {
   const fetchNode = Endpoint.polymorphic(AnyNode, { include: true })
 
   it("polymorphic: GET /<family>/:id with the JSON:API middlewares", () => {
-    expect(fetchNode.name).toBe("get")
+    expect(fetchNode.identifier).toBe("get")
     expect(fetchNode.method).toBe("GET")
     expect(fetchNode.path).toBe("/nodes/:id")
     const middlewareIds = [...fetchNode.middlewares].map((m) => m.key)
