@@ -247,30 +247,30 @@ const withHandlers = <A, E>(effect: Effect.Effect<A, E, any>) =>
 
 describe("endpoint conventions", () => {
   it("derives conventional names, methods and paths", () => {
-    expect(fetchArticle.name).toBe("get")
+    expect(fetchArticle.identifier).toBe("get")
     expect(fetchArticle.method).toBe("GET")
     expect(fetchArticle.path).toBe("/articles/:id")
 
-    expect(listArticles.name).toBe("list")
+    expect(listArticles.identifier).toBe("list")
     expect(listArticles.method).toBe("GET")
     expect(listArticles.path).toBe("/articles")
 
-    expect(createArticle.name).toBe("create")
+    expect(createArticle.identifier).toBe("create")
     expect(createArticle.method).toBe("POST")
     expect(createArticle.path).toBe("/articles")
 
-    expect(updateArticle.name).toBe("update")
+    expect(updateArticle.identifier).toBe("update")
     expect(updateArticle.method).toBe("PATCH")
     expect(updateArticle.path).toBe("/articles/:id")
 
-    expect(deleteArticle.name).toBe("delete")
+    expect(deleteArticle.identifier).toBe("delete")
     expect(deleteArticle.method).toBe("DELETE")
     expect(deleteArticle.path).toBe("/articles/:id")
   })
 
   it("allows overriding name and path", () => {
     const search = Endpoint.list(Article, { name: "search", path: "/articles/search" })
-    expect(search.name).toBe("search")
+    expect(search.identifier).toBe("search")
     expect(search.path).toBe("/articles/search")
   })
 
@@ -322,14 +322,14 @@ describe("Endpoint.collection", () => {
   })
 
   it("uses the given name/path with GET", () => {
-    expect(searchEndpoint.name).toBe("search")
+    expect(searchEndpoint.identifier).toBe("search")
     expect(searchEndpoint.method).toBe("GET")
     expect(searchEndpoint.path).toBe("/search")
   })
 
   it("names other heterogeneous collections (e.g. feeds)", () => {
     const feed = Endpoint.collection([Article, Comment], { name: "feed", path: "/feed" })
-    expect(feed.name).toBe("feed")
+    expect(feed.identifier).toBe("feed")
     expect(feed.path).toBe("/feed")
   })
 
@@ -391,29 +391,29 @@ describe("Endpoint.collection", () => {
 
 describe("relationship endpoint conventions", () => {
   it("related derives conventional names, methods and paths", () => {
-    expect(relatedAuthor.name).toBe("author")
+    expect(relatedAuthor.identifier).toBe("author")
     expect(relatedAuthor.method).toBe("GET")
     expect(relatedAuthor.path).toBe("/articles/:id/author")
 
-    expect(relatedComments.name).toBe("comments")
+    expect(relatedComments.identifier).toBe("comments")
     expect(relatedComments.method).toBe("GET")
     expect(relatedComments.path).toBe("/articles/:id/comments")
   })
 
   it("relationship endpoints derive conventional names, methods and paths", () => {
-    expect(getCommentsRelationship.name).toBe("commentsRelationship")
+    expect(getCommentsRelationship.identifier).toBe("commentsRelationship")
     expect(getCommentsRelationship.method).toBe("GET")
     expect(getCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
 
-    expect(updateAuthorRelationship.name).toBe("updateAuthorRelationship")
+    expect(updateAuthorRelationship.identifier).toBe("updateAuthorRelationship")
     expect(updateAuthorRelationship.method).toBe("PATCH")
     expect(updateAuthorRelationship.path).toBe("/articles/:id/relationships/author")
 
-    expect(addCommentsRelationship.name).toBe("addCommentsRelationship")
+    expect(addCommentsRelationship.identifier).toBe("addCommentsRelationship")
     expect(addCommentsRelationship.method).toBe("POST")
     expect(addCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
 
-    expect(removeCommentsRelationship.name).toBe("removeCommentsRelationship")
+    expect(removeCommentsRelationship.identifier).toBe("removeCommentsRelationship")
     expect(removeCommentsRelationship.method).toBe("DELETE")
     expect(removeCommentsRelationship.path).toBe("/articles/:id/relationships/comments")
   })
@@ -423,7 +423,7 @@ describe("relationship endpoint conventions", () => {
       name: "articleAuthor",
       path: "/articles/:id/writer"
     })
-    expect(custom.name).toBe("articleAuthor")
+    expect(custom.identifier).toBe("articleAuthor")
     expect(custom.path).toBe("/articles/:id/writer")
   })
 
@@ -466,7 +466,7 @@ describe("relationship endpoint conventions", () => {
 
   it("paginated relationships get related collection endpoints", () => {
     const catalog = Endpoint.related(Publisher, "catalog", { page: Query.Page.Offset })
-    expect(catalog.name).toBe("catalog")
+    expect(catalog.identifier).toBe("catalog")
     expect(catalog.method).toBe("GET")
     expect(catalog.path).toBe("/publishers/:id/catalog")
 
@@ -539,14 +539,14 @@ describe("Endpoint.operations", () => {
   })
 
   it("uses conventional name/path with POST", () => {
-    expect(operationsEndpoint.name).toBe("operations")
+    expect(operationsEndpoint.identifier).toBe("operations")
     expect(operationsEndpoint.method).toBe("POST")
     expect(operationsEndpoint.path).toBe("/operations")
   })
 
   it("allows overriding name and path", () => {
     const bulk = Endpoint.operations([Article], { name: "bulk", path: "/bulk" })
-    expect(bulk.name).toBe("bulk")
+    expect(bulk.identifier).toBe("bulk")
     expect(bulk.path).toBe("/bulk")
   })
 
@@ -970,7 +970,7 @@ describe("Endpoint.resource / Group.resource", () => {
 
   it("Endpoint.resource emits the full CRUD + relationship endpoint set in order", () => {
     const endpoints = Endpoint.resource(Article, { errors: [ArticleNotFound] })
-    expect(endpoints.map((endpoint) => endpoint.name)).toEqual(fullEndpointNames)
+    expect(endpoints.map((endpoint) => endpoint.identifier)).toEqual(fullEndpointNames)
   })
 
   it("Group.resource builds a group named after the resource with that endpoint set", () => {
@@ -984,7 +984,7 @@ describe("Endpoint.resource / Group.resource", () => {
       page: Query.Page.Offset,
       filter: { author: Schema.optionalKey(Schema.String) }
     })
-    const byName = Object.fromEntries(endpoints.map((endpoint) => [endpoint.name, endpoint]))
+    const byName = Object.fromEntries(endpoints.map((endpoint) => [endpoint.identifier, endpoint]))
     expect(byName.list!.query).toBeDefined()
     expect(byName.comments!.query).toBeDefined() // paginated related collection
     expect(byName.author!.query).toBeDefined() // include/fields on the to-one related URL
@@ -994,7 +994,7 @@ describe("Endpoint.resource / Group.resource", () => {
   })
 
   it("conventional methods and paths", () => {
-    const byName = Object.fromEntries(Endpoint.resource(Article).map((endpoint) => [endpoint.name, endpoint]))
+    const byName = Object.fromEntries(Endpoint.resource(Article).map((endpoint) => [endpoint.identifier, endpoint]))
     expect([byName.delete!.method, byName.delete!.path]).toEqual(["DELETE", "/articles/:id"])
     expect([byName.comments!.method, byName.comments!.path]).toEqual(["GET", "/articles/:id/comments"])
     expect([byName.addCommentsRelationship!.method, byName.addCommentsRelationship!.path]).toEqual([
@@ -1023,7 +1023,7 @@ describe("Endpoint.resource / Group.resource", () => {
           get: { name: "show", path: "/articles/:id/full" },
           create: { errors: [ArticleNotFound] }
         }
-      }).map((endpoint) => [endpoint.name, endpoint])
+      }).map((endpoint) => [endpoint.identifier, endpoint])
     )
     expect(byName.show!.method).toBe("GET")
     expect(byName.show!.path).toBe("/articles/:id/full")
@@ -1045,7 +1045,7 @@ describe("Endpoint.resource / Group.resource", () => {
       Endpoint.resource(Article, {
         include: true,
         endpoints: { get: { include: false } }
-      }).map((endpoint) => [endpoint.name, endpoint])
+      }).map((endpoint) => [endpoint.identifier, endpoint])
     )
     const getQuery = byName.get!.query as Schema.Codec<unknown, unknown>
     const listQuery = byName.list!.query as Schema.Codec<unknown, unknown>
@@ -1065,7 +1065,7 @@ describe("Endpoint.resource / Group.resource", () => {
       Endpoint.resource(Widget, {
         relationships: false,
         meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int })
-      }).map((endpoint) => [endpoint.name, endpoint])
+      }).map((endpoint) => [endpoint.identifier, endpoint])
     )
     // the list success document's meta now carries both the base `revision` and the added `total`
     const successSchema = [...byName.list!.success][0]!
@@ -1185,7 +1185,7 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
   it("changes only the payload — name, method, path, params and middleware are untouched", () => {
     const flat = Endpoint.update(Article, { payload: Article.updateInput })
     const enveloped = Endpoint.update(Article)
-    expect([flat.name, flat.method, flat.path]).toEqual([enveloped.name, enveloped.method, enveloped.path])
+    expect([flat.identifier, flat.method, flat.path]).toEqual([enveloped.identifier, enveloped.method, enveloped.path])
     expect([...flat.middlewares].map((m) => m.key)).toEqual([...enveloped.middlewares].map((m) => m.key))
   })
 
@@ -1205,7 +1205,7 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
           create: { payload: Article.createInput },
           update: { payload: Article.updateInput }
         }
-      }).map((endpoint) => [endpoint.name, endpoint])
+      }).map((endpoint) => [endpoint.identifier, endpoint])
     )
     expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.create!))(flatCreate)).toMatchObject({ title: "Hello" })
     expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.update!))({ id: "1", title: "Hi" })).toMatchObject({
@@ -1215,7 +1215,7 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
 
   it("leaves Endpoint.resource's write payloads enveloped when no override is given (regression)", () => {
     const byName = Object.fromEntries(
-      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.name, endpoint])
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
     )
     expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.create!))(envelopedCreate)).toMatchObject({
       data: { type: "articles" }

@@ -2243,7 +2243,7 @@ export const resource = <
     return out
   }
 
-  const endpoints: Array<HttpApiEndpoint.Any> = []
+  const endpoints: Array<HttpApiEndpoint.Top> = []
 
   const getOp = opConfig("get")
   if (getOp.emit) {

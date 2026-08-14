@@ -300,7 +300,10 @@ export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNe
  */
 export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.layerSchemaErrorTransform(
   SchemaErrors,
-  (error) => Effect.fail(schemaError(error.kind))
+  // `ResponseHeaders` failures are a server-side bug (the handler's own response
+  // doesn't satisfy its declared schema), not a client request-validation error —
+  // re-fail with the original error instead of mislabeling it a 400.
+  (error) => (error.kind === "ResponseHeaders" ? Effect.fail(error) : Effect.fail(schemaError(error.kind)))
 )
 
 /**
