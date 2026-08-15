@@ -120,13 +120,13 @@ export interface CommonOptions<Name extends string, Path extends `/${string}`, E
 }
 
 const queryConfig = (options?: {
-  readonly include?: boolean
+  readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number }
   readonly fields?: boolean
   readonly sort?: boolean | ReadonlyArray<string>
   readonly page?: Schema.Struct.Fields
   readonly filter?: Schema.Struct.Fields
 }) => ({
-  include: options?.include === true,
+  include: options?.include ?? false,
   fields: options?.fields === true,
   sort: options?.sort ?? false,
   page: options?.page,
@@ -195,7 +195,7 @@ export const get = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${Type}/:id`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta
 >(
@@ -241,7 +241,7 @@ type DefaultListQuery<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   PageFields extends Schema.Struct.Fields | undefined,
@@ -321,7 +321,7 @@ export const list = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "list",
   const Path extends `/${string}` = `/${Type}`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
@@ -725,7 +725,7 @@ export const collection = <
   const Name extends string,
   const Path extends `/${string}`,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Resources[number]> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
@@ -824,7 +824,7 @@ export const polymorphic = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${FamilyName}/:id`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Members[number]> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
@@ -1020,7 +1020,7 @@ export const related = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = Name,
   const Path extends `/${string}` = `/${Type}/:id/${Name}`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Target<Resource<Type, Attributes, Rels, Meta>, Name>> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta>, Name>>> =
     false,
@@ -1602,11 +1602,16 @@ export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => 
  * @since 0.1.0
  * @category models
  */
-export interface GetConfig<Meta extends Schema.Top> {
+export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
   readonly name?: string
   readonly path?: `/${string}`
   readonly errors?: ReadonlyArray<ErrorClass>
-  readonly include?: boolean
+  /**
+   * Enable `?include=`. `true` legalises the resource's whole relationship
+   * graph to a depth of 2; a `Query.IncludeOptions` object constrains that to
+   * an explicit `paths` allow-list and/or a `depth` bound.
+   */
+  readonly include?: Query.IncludeOption<R>
   readonly fields?: boolean
   readonly meta?: MetaOption<Meta>
 }
@@ -1617,7 +1622,7 @@ export interface GetConfig<Meta extends Schema.Top> {
  * @since 0.1.0
  * @category models
  */
-export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta> {
+export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta, R> {
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
   readonly page?: Schema.Struct.Fields
   readonly filter?: Schema.Struct.Fields
@@ -1681,7 +1686,7 @@ export interface DeleteConfig {
  * @category models
  */
 export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
-  readonly get?: boolean | GetConfig<Meta>
+  readonly get?: boolean | GetConfig<Meta, R>
   readonly list?: boolean | ListConfig<R, Meta>
   readonly create?: boolean | WriteConfig<Meta>
   readonly update?: boolean | WriteConfig<Meta>
@@ -1796,12 +1801,17 @@ type EffQuery<C, Default extends Schema.Top> =
 // Whether `sort` is enabled at all: `false` only when explicitly disabled.
 type EnabledSort<Sort> = [Sort] extends [false] ? false : true
 
+// Whether `include` is enabled at all. A `Query.IncludeOptions` object
+// constrains the *resource's own* paths, which a relationship endpoint — whose
+// graph is its target's — can't reuse; it only learns that the parameter is on.
+type EnabledInclude<Include> = [Include] extends [false] ? false : true
+
 // The effective query feature options of a `get` / `list` config: the captured
 // override, else the top-level default. Named (rather than inlined at each use
 // site) because `list` needs them twice — once as its own options, once to
 // reconstruct the query schema they compose by default.
-type ListInclude<C, GInclude extends boolean> =
-  FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude
+type ListInclude<C, R extends Any, GInclude extends Query.IncludeOption<R>> =
+  FieldOr<C, "include", GInclude> extends Query.IncludeOption<R> ? FieldOr<C, "include", GInclude> : GInclude
 type ListFields<C, GFields extends boolean> =
   FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields
 type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<R>>> =
@@ -1820,7 +1830,7 @@ type GeneratedGet<
   Meta extends Schema.Top,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
-  GInclude extends boolean,
+  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   GFields extends boolean,
   GMeta,
   C = ConfigObject<E, "get">
@@ -1835,8 +1845,8 @@ type GeneratedGet<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "get"> extends string ? FieldOr<C, "name", "get"> : "get",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
-          FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude,
-          FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+          ListFields<C, GFields>,
           EffMeta<C, GMeta, Meta>
         >
       >
@@ -1849,7 +1859,7 @@ type GeneratedList<
   Meta extends Schema.Top,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
-  GInclude extends boolean,
+  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   GFields extends boolean,
   GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   GPage extends Schema.Struct.Fields | undefined,
@@ -1867,7 +1877,7 @@ type GeneratedList<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "list"> extends string ? FieldOr<C, "name", "list"> : "list",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
-          ListInclude<C, GInclude>,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
           ListFields<C, GFields>,
           ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
           ListPage<C, GPage>,
@@ -1880,7 +1890,7 @@ type GeneratedList<
               Attributes,
               Rels,
               Meta,
-              ListInclude<C, GInclude>,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
               ListFields<C, GFields>,
               ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
               ListPage<C, GPage>,
@@ -2131,7 +2141,7 @@ export type ResourceEndpoint<
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   Page extends Schema.Struct.Fields | undefined,
@@ -2143,7 +2153,18 @@ export type ResourceEndpoint<
   | GeneratedCreate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
   | GeneratedUpdate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
   | GeneratedDelete<Type, Attributes, Rels, Meta, Endpoints, Errors>
-  | GeneratedRelationships<Type, Attributes, Rels, Meta, RelationshipsOpt, Errors, Include, Fields, Sort, Page>
+  | GeneratedRelationships<
+      Type,
+      Attributes,
+      Rels,
+      Meta,
+      RelationshipsOpt,
+      Errors,
+      EnabledInclude<Include>,
+      Fields,
+      Sort,
+      Page
+    >
 
 /**
  * The non-empty tuple of endpoints {@link resource} returns.
@@ -2159,7 +2180,7 @@ export type ResourceEndpoints<
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   Page extends Schema.Struct.Fields | undefined,
@@ -2218,7 +2239,7 @@ export interface ResourceOptions<
   Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta>,
   RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>>,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   Page extends Schema.Struct.Fields | undefined,
@@ -2231,7 +2252,13 @@ export interface ResourceOptions<
   readonly relationships?: RelationshipsOpt
   /** `ApiError` classes applied to every generated endpoint (overridable per endpoint / relationship). */
   readonly errors?: Errors
-  /** Enable `?include=` on the collection-bearing endpoints. Defaults to `true`. */
+  /**
+   * Enable `?include=` on the collection-bearing endpoints. Defaults to `true`
+   * — the resource's whole relationship graph at depth 2. A
+   * `Query.IncludeOptions` object constrains that (`paths` allow-list and/or
+   * `depth`) for `get` and `list`; the relationship endpoints, whose paths are
+   * their target's graph, only see that `include` is on.
+   */
   readonly include?: Include
   /** Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`. */
   readonly fields?: Fields
@@ -2322,7 +2349,7 @@ export const resource = <
   const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
   const RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Include extends boolean = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Fields extends boolean = true,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
@@ -2472,7 +2499,10 @@ export const resource = <
         if (value !== undefined && value !== true) relConfig = value as Record<string, unknown>
       }
       const toMany = Relationship.isToMany(relationships[name]!)
-      const include = pick(relConfig, "include", gInclude)
+      // A constrained `include` names this resource's paths, not the target's:
+      // a relationship endpoint only inherits that the parameter is on.
+      const inheritedInclude = pick(relConfig, "include", gInclude)
+      const include = typeof inheritedInclude === "object" ? true : inheritedInclude
       const fields = pick(relConfig, "fields", gFields)
       const sortOpt = pick(relConfig, "sort", gSort)
       const page = pick(relConfig, "page", gPage)

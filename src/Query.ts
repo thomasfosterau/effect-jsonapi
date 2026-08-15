@@ -32,7 +32,7 @@
 import type { Types } from "effect"
 import { Effect, Schema, SchemaTransformation } from "effect"
 import { CommaSeparated, flatten, nest, Sort as SortCodec } from "./internal/codecs.js"
-import type { Any, AttributeKeys, IncludePath, RelationshipTargets } from "./Resource.js"
+import type { Any, AttributeKeys, IncludeDepth, IncludePath, IncludePathsTo, RelationshipTargets } from "./Resource.js"
 import { allTargets, attributeKeys, includePaths } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -364,19 +364,86 @@ const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArr
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
 
 /**
+ * Constrains the `include` paths an endpoint advertises.
+ *
+ * The default derivation is the resource's whole relationship graph to a depth
+ * of 2 — a boolean "include is on". That is the right answer when every path in
+ * the graph is resolvable, and the wrong one when it isn't: advertising a path
+ * a resolver can't populate answers `200` with an empty `included`, which is
+ * less useful to a client than the `400` an unknown path already produces.
+ *
+ * Pass `paths` for an explicit allow-list, `depth` to bound the derivation
+ * (`1` — direct relationships only, `2` — the default, `3`), or both, in which
+ * case `paths` wins.
+ *
+ * @since 0.9.0
+ * @category models
+ */
+export interface IncludeOptions<R extends Any> {
+  /** The exact set of legal paths. Anything else fails decoding (→ 400). */
+  readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>
+  /** How many hops into the relationship graph to derive. Defaults to 2. */
+  readonly depth?: IncludeDepth
+}
+
+/**
+ * The `include` option of a query configuration: `true` (the full graph at
+ * depth 2), `false` (no `?include=` parameter), or an {@link IncludeOptions}
+ * object constraining the derivation.
+ *
+ * @since 0.9.0
+ * @category models
+ */
+export type IncludeOption<R extends Any> = boolean | IncludeOptions<R>
+
+/**
+ * The `include` paths an {@link IncludeOption} legalises: the explicit
+ * allow-list, else the graph derived to the requested depth, else the depth-2
+ * default.
+ *
+ * @since 0.9.0
+ * @category type-level
+ */
+export type IncludePathsOf<R extends Any, I> = Extract<
+  I extends { readonly paths: ReadonlyArray<infer P> }
+    ? P
+    : I extends { readonly depth: infer D }
+      ? D extends IncludeDepth
+        ? IncludePathsTo<R, D>
+        : IncludePath<R>
+      : IncludePath<R>,
+  string
+>
+
+/**
  * The decoded `include` schema: a comma-separated list of relationship paths,
  * typed as the resource's legal path literals (2 hops into the relationship
- * graph) and validated at decode time.
+ * graph, unless constrained) and validated at decode time.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Include<R extends Any> extends CommaSeparated<Schema.Literals<ReadonlyArray<IncludePath<R>>>> {}
+export interface Include<R extends Any, Paths extends string = IncludePath<R>> extends CommaSeparated<
+  Schema.Literals<ReadonlyArray<Paths>>
+> {}
+
+// The paths an `include` schema legalises, at runtime.
+const includePathsFor = (
+  resources: ReadonlyArray<Any>,
+  options: IncludeOptions<Any> | undefined
+): ReadonlyArray<string> =>
+  options?.paths !== undefined
+    ? dedupe(options.paths as ReadonlyArray<string>)
+    : dedupe(resources.flatMap((r) => includePaths(r, options?.depth ?? 2)))
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
- * endpoints, several). Paths are the relationship keys plus dotted paths one
- * further hop into the graph; anything else fails decoding (→ 400).
+ * endpoints, several). Paths default to the relationship keys plus dotted paths
+ * one further hop into the graph; anything else fails decoding (→ 400).
+ *
+ * Pass {@link IncludeOptions} to constrain that set — an explicit `paths`
+ * allow-list, or a `depth` bound — for resources whose graph reaches further
+ * than the endpoint can actually resolve.
  *
  * @example
  * ```ts
@@ -401,14 +468,26 @@ export interface Include<R extends Any> extends CommaSeparated<Schema.Literals<R
  * const include = Query.Include(Article)
  * Schema.decodeUnknownSync(include)("author,comments.author")
  * // → ["author", "comments.author"]
+ *
+ * // …or a deliberate subset: only the paths this endpoint can populate
+ * const shallow = Query.Include(Article, { paths: ["author", "comments"] })
+ * Schema.decodeUnknownSync(shallow)("author,comments")
+ * // → ["author", "comments"]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const Include = <R extends Any>(resource: R | ReadonlyArray<R>): Include<R> =>
+export const Include = <R extends Any, const O extends IncludeOptions<R> | undefined = undefined>(
+  resource: R | ReadonlyArray<R>,
+  options?: O
+): Include<R, IncludePathsOf<R, O>> =>
   CommaSeparated(
-    Schema.Literals(dedupe(toResources(resource).flatMap((r) => includePaths(r, 2))) as ReadonlyArray<IncludePath<R>>)
+    Schema.Literals(
+      includePathsFor(toResources(resource), options as IncludeOptions<Any> | undefined) as ReadonlyArray<
+        IncludePathsOf<R, O>
+      >
+    )
   )
 
 /**
@@ -482,10 +561,13 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
  */
 export interface Options<R extends Any> {
   /**
-   * Enable `?include=` — compound document inclusion. Paths are validated
-   * against the resource's relationship graph; unknown paths produce a 400.
+   * Enable `?include=` — compound document inclusion. `true` legalises the
+   * resource's whole relationship graph to a depth of 2; an
+   * {@link IncludeOptions} object constrains that to an explicit `paths`
+   * allow-list and/or a `depth` bound. Paths are validated against the result;
+   * unknown paths produce a 400.
    */
-  readonly include?: boolean
+  readonly include?: IncludeOption<R>
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for this resource and its
    * direct relationship targets. Unknown field names produce a 400.
@@ -520,6 +602,10 @@ export interface Options<R extends Any> {
  */
 export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]> : never
 
+// Whether an `include` option turns the parameter on: `true`, or an
+// `IncludeOptions` object. Everything else (`false`, absent) leaves it off.
+type IncludeEnabled<I> = [I] extends [true] ? true : [I] extends [object] ? true : false
+
 /**
  * The nested (decoded) struct fields of a query schema.
  *
@@ -527,7 +613,9 @@ export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipT
  * @category type-level
  */
 export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Include<R>> } : {}) &
+  (IncludeEnabled<O["include"]> extends true
+    ? { readonly include: Schema.optionalKey<Include<R, IncludePathsOf<R, O["include"]>>> }
+    : {}) &
     ([O["fields"]] extends [true]
       ? {
           readonly fields: Schema.optionalKey<
@@ -558,7 +646,7 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
  * @category type-level
  */
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  ([O["include"]] extends [true] ? { readonly include: Schema.optionalKey<Schema.String> } : {}) &
+  (IncludeEnabled<O["include"]> extends true ? { readonly include: Schema.optionalKey<Schema.String> } : {}) &
     ([O["fields"]] extends [true]
       ? {
           readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
@@ -637,8 +725,11 @@ export const schema = <R extends Any, const O extends Options<R>>(
   const nestedFields: Record<string, Schema.Top> = {}
   const flatFields: Record<string, Schema.Top> = {}
 
-  if (options.include === true) {
-    nestedFields.include = Schema.optionalKey(Include(resources))
+  const include = options.include
+  if (include === true || typeof include === "object") {
+    nestedFields.include = Schema.optionalKey(
+      Include(resources, (typeof include === "object" ? include : undefined) as never)
+    )
     flatFields.include = Schema.optionalKey(Schema.String)
   }
 

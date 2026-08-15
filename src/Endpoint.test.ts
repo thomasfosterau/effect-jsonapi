@@ -1582,3 +1582,85 @@ describe("HTTP round-trip with an overridden list query", () => {
     expect(result.meta).toEqual({ total: 3 })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Constrained include paths (Endpoint.get / Endpoint.list)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint include path constraints", () => {
+  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) => endpoint.query as Schema.Codec<any, any>
+
+  it("advertises the whole graph at depth 2 when `include: true` (regression: the default)", () => {
+    const endpoint = Endpoint.get(Article, { include: true })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author,comments,comments.author" })).toEqual({
+      include: ["author", "comments", "comments.author"]
+    })
+  })
+
+  it("narrows `get` to an explicit allow-list", () => {
+    const endpoint = Endpoint.get(Article, { include: { paths: ["author"] } })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author" })).toEqual({ include: ["author"] })
+    // the depth-2 path the resolver can't populate is a 400 now, not a 200
+    // carrying an empty `included`
+    expect(() => Schema.decodeUnknownSync(queryOf(endpoint))({ include: "comments.author" })).toThrow()
+    expectTypeOf<HttpApiEndpoint.Query<typeof endpoint>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author">
+    }>()
+  })
+
+  it("narrows `list` by depth", () => {
+    const endpoint = Endpoint.list(Article, { include: { depth: 1 } })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author,comments" })).toEqual({
+      include: ["author", "comments"]
+    })
+    expect(() => Schema.decodeUnknownSync(queryOf(endpoint))({ include: "comments.author" })).toThrow()
+    expectTypeOf<HttpApiEndpoint.Query<typeof endpoint>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author" | "comments">
+    }>()
+  })
+
+  it("threads through Endpoint.resource, per endpoint and top level", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        include: { depth: 1 },
+        endpoints: { get: { include: { paths: ["author"] } } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+
+    // the per-endpoint allow-list wins on `get`
+    expect(() => Schema.decodeUnknownSync(queryOf(byName.get!))({ include: "comments" })).toThrow()
+    // `list` inherits the top-level depth bound
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ include: "comments" })).toEqual({ include: ["comments"] })
+    expect(() => Schema.decodeUnknownSync(queryOf(byName.list!))({ include: "comments.author" })).toThrow()
+    // a relationship endpoint's paths are its *target's* graph, so it only
+    // inherits that `include` is on
+    expect(Schema.decodeUnknownSync(queryOf(byName.comments!))({ include: "author" })).toEqual({
+      include: ["author"]
+    })
+  })
+
+  it("leaves Endpoint.resource advertising the full depth-2 graph by default (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ include: "comments.author" })).toEqual({
+      include: ["comments.author"]
+    })
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      include: { paths: ["author"] },
+      endpoints: { create: false, update: false, delete: false }
+    })
+    expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.get>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author">
+      readonly fields?: {
+        readonly articles?: ReadonlyArray<"title" | "body" | "createdAt">
+        readonly people?: ReadonlyArray<"firstName" | "lastName">
+        readonly comments?: ReadonlyArray<"body">
+      }
+    }>()
+  })
+})

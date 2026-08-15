@@ -1115,6 +1115,40 @@ export type IncludePath<R extends Any> = R extends Any
   : never
 
 /**
+ * How many hops into the relationship graph an `include` path may take. The
+ * derivation defaults to 2 — the depth {@link IncludePath} models.
+ *
+ * @since 0.9.0
+ * @category type-level
+ */
+export type IncludeDepth = 1 | 2 | 3
+
+// The depth-3 walk: a relationship key, plus every depth-2 path of its target.
+type IncludePathDepth3<R extends Any> = R extends Any
+  ? {
+      [K in IncludableKeys<R>]: K | `${K}.${IncludePath<Target<R, K>>}`
+    }[IncludableKeys<R>]
+  : never
+
+/**
+ * The legal `include` query parameter paths for a resource, bounded to `Depth`
+ * hops into the relationship graph — the type-level mirror of
+ * {@link includePaths}' `maxDepth`.
+ *
+ * `IncludePathsTo<R, 2>` is {@link IncludePath}, the default derivation.
+ *
+ * @since 0.9.0
+ * @category type-level
+ */
+export type IncludePathsTo<R extends Any, Depth extends IncludeDepth> = R extends Any
+  ? [Depth] extends [1]
+    ? IncludableKeys<R>
+    : [Depth] extends [3]
+      ? IncludePathDepth3<R>
+      : IncludePath<R>
+  : never
+
+/**
  * The resource definitions brought into a compound document by one include
  * path. Dotted paths include the intermediate resources as well as the leaf,
  * per the spec.
