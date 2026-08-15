@@ -1,5 +1,49 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.9.0
+
+### Minor Changes
+
+- 58956ac: **Constrainable `include` paths.** `Query.Include` derived the resource's whole relationship graph
+  to a depth of 2, and `include` was a boolean over that set — so an endpoint advertised every path
+  the graph reaches, including ones its resolver was never written for. Advertising an unresolvable
+  path answers 200 with an empty `included`, which is strictly worse than the 400 an unknown path
+  already produces.
+
+  `Query.Include` now takes an options object — `paths` (an explicit allow-list) and/or `depth`
+  (`1` / `2` / `3`; `paths` wins when both are given) — and the same object may be passed as `include`
+  wherever a boolean was accepted: `Endpoint.get` / `list` / `related` / `collection` /
+  `polymorphic`, `Query.schema`, and `Endpoint.resource` / `Group.resource` both top-level and per
+  endpoint. The literal path type narrows with the runtime set, so an unlisted path fails to compile
+  as well as to decode. `include: true` still means today's full-graph depth-2 derivation, and the
+  relationship endpoints — whose paths are their target's graph, not the configured resource's —
+  inherit only that `include` is on.
+
+  Adds `Resource.IncludeDepth` and `Resource.IncludePathsTo<R, Depth>` (the type-level mirror of
+  `Resource.includePaths`' `maxDepth`), plus `Query.IncludeOptions` / `Query.IncludeOption` /
+  `Query.IncludePathsOf`. `Query.Include<R>` gains a second, defaulted type parameter for its path
+  set; `Endpoint.GetConfig<Meta>` gains a second, defaulted parameter for the resource it configures.
+
+- aa7784b: **`query` override on `Endpoint.list`.** The constructor composed its query schema from the
+  `include` / `fields` / `sort` / `page` / `filter` options and offered no way out of that composition,
+  which always nests what it decodes (`page: { offset, limit }`, `filter: { … }`). It now takes an
+  optional `query` schema — any `Schema.Top` — defaulting to that composition, for apis whose list
+  contract is a flat struct their own operations layer consumes: a page cursor bracket-keyed on the
+  wire but decoded flat (see `Query.bracketPageKeys`), entity foreign keys, and flags JSON:API has no
+  query family for, which `filter` would otherwise put on the wire as `filter[<name>]`. The feature
+  options are ignored once `query` is given. The option is threaded through `Endpoint.resource` /
+  `Group.resource`'s per-endpoint `list` config. Only the query changes — path, success document,
+  errors and middleware are untouched.
+- fc6c707: **`success` override on `Endpoint.delete`.** The constructor bound its response unconditionally to
+  `HttpApiSchema.NoContent`, so every generated delete was a 204 with an empty body. It now takes an
+  optional `success` schema (and a `status` for the rare non-200 case), defaulting to that 204, for
+  apis whose deletion answers with a body — a soft delete that marks the row deleted, re-reads it and
+  returns the tombstone resource document. The override is served as `application/vnd.api+json` like
+  every other body in the package. The option is threaded through `Endpoint.resource` /
+  `Group.resource`'s per-endpoint `delete` config, so a generated group can adopt tombstone deletes
+  without being spelled out by hand. Only the response changes — path, params, errors and middleware
+  are untouched.
+
 ## 0.8.0
 
 ### Minor Changes
