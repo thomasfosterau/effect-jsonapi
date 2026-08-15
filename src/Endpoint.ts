@@ -10,7 +10,7 @@
  * | `list`               | `GET /<type>`                              | —                        | 200, collection doc        |
  * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
  * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
- * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
+ * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content (`success`)|
  * | `collection`         | `GET <path>`                               | —                        | 200, heterogeneous doc     |
  * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
  * | `getRelationship`    | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
@@ -32,7 +32,9 @@
  * the write payloads: `create` / `update` default to the enveloped
  * `createPayload` / `updatePayload`, and take a `payload` option for apis whose
  * write contract is a flat command input (e.g. the resource's own
- * `createInput` / `updateInput`) rather than a JSON:API document.
+ * `createInput` / `updateInput`) rather than a JSON:API document. `delete`
+ * likewise takes a `success` option for apis whose deletion answers with a
+ * body — a soft delete returning the tombstone resource — instead of 204.
  *
  * For the common case, {@link resource} derives an entire endpoint set — the
  * CRUD surface plus every relationship's endpoints, with query parameters
@@ -482,11 +484,29 @@ export const update = <
 // delete — DELETE /<type>/:id
 // ---------------------------------------------------------------------------
 
+// The success response of a `delete` endpoint. Without an override it is the
+// spec's 204 no-content default; an override is served as a JSON:API body,
+// defaulting to 200 (the status HttpApi gives a success schema that carries
+// one).
+const deleteSuccess = (success: Schema.Top | undefined, status: number | undefined): Schema.Top =>
+  success === undefined
+    ? status === undefined
+      ? HttpApiSchema.NoContent
+      : HttpApiSchema.NoContent.pipe(HttpApiSchema.status(status))
+    : asJsonApi(success, status)
+
 /**
  * `DELETE /<type>/:id` — delete a resource.
  *
- * Success is a 204 No Content response, per the spec's recommendation for
- * deletions with no additional information to return.
+ * Success defaults to a 204 No Content response, per the spec's recommendation
+ * for deletions with no additional information to return.
+ *
+ * Pass `success` to answer with a body instead — most usefully the resource's
+ * own document, for apis whose delete is a soft delete that returns the
+ * tombstone resource. The schema is served as `application/vnd.api+json` like
+ * every other body in the package, at 200 unless `status` says otherwise. Only
+ * the response changes; the `:id` path param, errors and middleware are
+ * unaffected.
  *
  * Exported as `Endpoint.delete`. Because `delete` is a reserved word it cannot
  * be a bare `const` binding, so it is re-exported from the internal
@@ -511,6 +531,12 @@ export const update = <
  *   // DELETE /articles/:id → 204
  *   Endpoint.delete(Article, { errors: [ArticleNotFound] })
  * )
+ *
+ * // …or, for a soft delete answering with the tombstone document (200)
+ * const softDeleted = Group.make(
+ *   Article,
+ *   Endpoint.delete(Article, { success: Article.document(), errors: [ArticleNotFound] })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -523,14 +549,29 @@ const deleteEndpoint = <
   Meta extends Schema.Top,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "delete",
-  const Path extends `/${string}` = `/${Type}/:id`
+  const Path extends `/${string}` = `/${Type}/:id`,
+  Success extends Schema.Top = HttpApiSchema.NoContent
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
-  options?: CommonOptions<Name, Path, Errors>
+  options?: CommonOptions<Name, Path, Errors> & {
+    /**
+     * Override the success response schema. Defaults to
+     * `HttpApiSchema.NoContent` (204, empty body); pass the resource's
+     * `document()` for a soft delete that answers with the tombstone
+     * resource, or any schema of your own — it is served as
+     * `application/vnd.api+json`.
+     */
+    readonly success?: Success
+    /**
+     * The success status. Defaults to 204 for the no-content default, 200 for
+     * a `success` override.
+     */
+    readonly status?: number
+  }
 ) =>
   HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    success: HttpApiSchema.NoContent,
+    success: deleteSuccess(options?.success, options?.status) as Success,
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
@@ -1544,6 +1585,17 @@ export interface DeleteConfig {
   readonly name?: string
   readonly path?: `/${string}`
   readonly errors?: ReadonlyArray<ErrorClass>
+  /**
+   * Override the success response schema. Defaults to `HttpApiSchema.NoContent`
+   * (204, empty body); pass the resource's `document()` for a soft delete that
+   * answers with the tombstone resource, or any schema of your own.
+   */
+  readonly success?: Schema.Top
+  /**
+   * The success status. Defaults to 204 for the no-content default, 200 for a
+   * `success` override.
+   */
+  readonly status?: number
 }
 
 /**
@@ -1657,6 +1709,11 @@ type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta",
 // `payload` override, else the resource's enveloped default.
 type EffPayload<C, Default extends Schema.Top> =
   FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default
+
+// The effective success response of a `delete` config: the captured `success`
+// override, else the 204 no-content default.
+type EffSuccess<C, Default extends Schema.Top> =
+  FieldOr<C, "success", Default> extends infer S ? (S extends Schema.Top ? S : Default) : Default
 
 // Whether `sort` is enabled at all: `false` only when explicitly disabled.
 type EnabledSort<Sort> = [Sort] extends [false] ? false : true
@@ -1803,7 +1860,8 @@ type GeneratedDelete<
           Meta,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "delete"> extends string ? FieldOr<C, "name", "delete"> : "delete",
-          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          EffSuccess<C, HttpApiSchema.NoContent>
         >
       >
     : never
@@ -2284,9 +2342,18 @@ export const resource = <
   if (updateOp.emit) {
     endpoints.push(update(resource, { ...commonOpts(updateOp.config, true), ...payloadOpt(updateOp.config) } as never))
   }
+  // A `delete` endpoint's success override is per-endpoint only: no other
+  // generated endpoint answers with no content, so there is no sensible
+  // top-level default to fall back to.
   const deleteOp = opConfig("delete")
   if (deleteOp.emit) {
-    endpoints.push(deleteEndpoint(resource, commonOpts(deleteOp.config, false) as never))
+    endpoints.push(
+      deleteEndpoint(resource, {
+        ...commonOpts(deleteOp.config, false),
+        ...(deleteOp.config.success !== undefined ? { success: deleteOp.config.success } : {}),
+        ...(deleteOp.config.status !== undefined ? { status: deleteOp.config.status } : {})
+      } as never)
+    )
   }
 
   if (relationshipsOpt !== false) {

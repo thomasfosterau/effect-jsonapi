@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Cause, Effect, Exit, Result, Schema } from "effect"
-import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiTest } from "effect/unstable/httpapi"
+import { Cause, Effect, Exit, Layer, Result, Schema } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiSchema, HttpApiTest } from "effect/unstable/httpapi"
 import * as ApiError from "./ApiError.js"
 import * as Endpoint from "./Endpoint.js"
 import * as Group from "./Group.js"
@@ -9,6 +10,7 @@ import * as Middleware from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import { make as Resource } from "./Resource.js"
+import { MEDIA_TYPE } from "./internal/media.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1308,5 +1310,114 @@ describe("HTTP round-trip with a flat write payload", () => {
     expect(result.data.attributes.title).toBe("Updated")
     // the untouched attribute survives
     expect(result.data.attributes.body).toBe("World")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Delete success override (Endpoint.delete)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.delete success override", () => {
+  // The tombstone contract: a soft delete answers with the resource document
+  // rather than an empty 204 body.
+  const Tombstone = Article.document()
+
+  const TombstoneApi = HttpApi.make("tombstone-blog").add(
+    Group.make(Article, Endpoint.delete(Article, { success: Tombstone, errors: [ArticleNotFound] }))
+  )
+
+  const TombstoneLive = HttpApiBuilder.group(TombstoneApi, "articles", (handlers) =>
+    handlers.handle("delete", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => ({ data: article }))))
+  )
+
+  // The 204 default and a document success differ only in the response, so the
+  // assertions are on the wire: status and content type.
+  const request = async (api: unknown, live: Layer.Layer<any, any, any>, url: string) => {
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(new Request(url, { method: "DELETE" }))
+      const text = await response.text()
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        body: text === "" ? undefined : (JSON.parse(text) as any)
+      }
+    } finally {
+      await dispose()
+    }
+  }
+
+  it("answers 204 with an empty body when no `success` is given (regression: unchanged default)", async () => {
+    const response = await request(Api, ArticlesLive, "http://localhost/articles/1")
+    expect(response.status).toBe(204)
+    expect(response.body).toBeUndefined()
+  })
+
+  it("answers 200 with the tombstone document when `success` is a resource document", async () => {
+    const response = await request(TombstoneApi, TombstoneLive, "http://localhost/articles/1")
+    expect(response.status).toBe(200)
+    expect(response.contentType).toContain(MEDIA_TYPE)
+    expect(response.body.data).toMatchObject({ type: "articles", id: "1", attributes: { title: "Hello" } })
+  })
+
+  it("honours an explicit `status` alongside the overridden success schema", async () => {
+    const AcceptedApi = HttpApi.make("accepted-blog").add(
+      Group.make(Article, Endpoint.delete(Article, { success: Tombstone, status: 202 }))
+    )
+    const AcceptedLive = HttpApiBuilder.group(AcceptedApi, "articles", (handlers) =>
+      handlers.handle("delete", () => Effect.succeed({ data: sampleArticle }))
+    )
+    const response = await request(AcceptedApi, AcceptedLive, "http://localhost/articles/1")
+    expect(response.status).toBe(202)
+    expect(response.body.data).toMatchObject({ type: "articles", id: "1" })
+  })
+
+  it("types the overridden success as the supplied schema, and the default as void", () => {
+    const tombstone = Endpoint.delete(Article, { success: Tombstone })
+    expectTypeOf<HttpApiEndpoint.Success<typeof tombstone>["Type"]>().toEqualTypeOf<typeof Tombstone.Type>()
+
+    const noContent = Endpoint.delete(Article)
+    expectTypeOf<HttpApiEndpoint.Success<typeof noContent>["Type"]>().toEqualTypeOf<void>()
+  })
+
+  it("changes only the success — name, method, path and middleware are untouched", () => {
+    const tombstone = Endpoint.delete(Article, { success: Tombstone })
+    expect([tombstone.identifier, tombstone.method, tombstone.path]).toEqual([
+      deleteArticle.identifier,
+      deleteArticle.method,
+      deleteArticle.path
+    ])
+    expect([...tombstone.middlewares].map((m) => m.key)).toEqual([...deleteArticle.middlewares].map((m) => m.key))
+  })
+
+  it("threads through Endpoint.resource's per-endpoint delete config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: { delete: { success: Tombstone } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(HttpApiSchema.isNoContent([...byName.delete!.success][0]!.ast)).toBe(false)
+  })
+
+  it("leaves Endpoint.resource's delete at 204 when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(HttpApiSchema.isNoContent([...byName.delete!.success][0]!.ast)).toBe(true)
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { get: false, list: false, create: false, update: false, delete: { success: Tombstone } }
+    })
+    expectTypeOf<HttpApiEndpoint.Success<typeof group.endpoints.delete>["Type"]>().toEqualTypeOf<
+      typeof Tombstone.Type
+    >()
   })
 })

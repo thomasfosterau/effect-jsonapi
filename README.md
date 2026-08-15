@@ -52,6 +52,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
+  - [Overriding the delete response](#overriding-the-delete-response)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
@@ -552,6 +553,32 @@ const articles = Group.resource(Article, {
     create: { payload: Article.createInput },
     update: { payload: Article.updateInput }
   }
+})
+```
+
+### Overriding the delete response
+
+`Endpoint.delete` answers `204 No Content`, the spec's recommendation for a deletion with nothing
+further to say. Some apis do have something to say: a **soft delete** marks the row deleted, re-reads
+it, and returns the tombstone resource so an admin viewer can render what was removed.
+
+Pass `success` to supply that response schema — it defaults to the 204, so existing endpoints are
+unchanged. The schema is served as `application/vnd.api+json` like every other body in the package,
+at 200 unless `status` says otherwise; the `:id` path param, errors and middleware are untouched.
+
+```ts
+// DELETE /articles/:id → 200, { data: { type: "articles", ... } }
+Endpoint.delete(Article, { success: Article.document(), errors: [ArticleNotFound] })
+
+// …or an asynchronous deletion that has been accepted but not yet performed
+Endpoint.delete(Article, { success: Article.document(), status: 202 })
+```
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: { delete: { success: Article.document() } }
 })
 ```
 
