@@ -53,6 +53,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
   - [Overriding the delete response](#overriding-the-delete-response)
+  - [Overriding the list query](#overriding-the-list-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
@@ -579,6 +580,47 @@ The same option is available per-endpoint when generating a whole group:
 ```ts
 const articles = Group.resource(Article, {
   endpoints: { delete: { success: Article.document() } }
+})
+```
+
+### Overriding the list query
+
+`Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter`
+options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape
+(`page: { offset, limit }`, `filter: { … }`). That is the spec-compliant contract, and the default.
+
+Some apis want a different one — a **flat** list input their operations layer consumes directly, with
+entity foreign keys and flags JSON:API has no query family for. Forcing such a flag through `filter`
+would put it on the wire as `filter[includeDeleted]`, which is not what those clients send.
+
+Pass `query` to supply the whole schema. It defaults to today's composition, so existing endpoints
+are unchanged; the feature options are simply ignored once `query` is given, and the success
+document, path, errors and middleware stay as they were.
+
+```ts
+// GET /articles?page[offset]=20&page[limit]=10&sort=-createdAt&authorId=9&includeDeleted=true
+// …decoded flat: { offset, limit, sort?, authorId?, includeDeleted? }
+const ListArticles = Query.bracketPageKeys(
+  Schema.Struct({
+    ...Query.Page.offset({ maxLimit: 100 }),
+    sort: Schema.optionalKey(Schema.String),
+    authorId: Schema.optionalKey(Schema.String),
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+  })
+)
+
+Endpoint.list(Article, { query: ListArticles })
+```
+
+[`Query.bracketPageKeys`](#bracketing-page-keys-on-a-query-struct-you-own) is what keeps the page
+cursor spec-canonical on the wire (`page[offset]` / `page[limit]`) while the handler still sees
+`{ offset, limit }` — but any schema works, bracketed or not.
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: { list: { query: ListArticles } }
 })
 ```
 

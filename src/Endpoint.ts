@@ -34,7 +34,9 @@
  * write contract is a flat command input (e.g. the resource's own
  * `createInput` / `updateInput`) rather than a JSON:API document. `delete`
  * likewise takes a `success` option for apis whose deletion answers with a
- * body — a soft delete returning the tombstone resource — instead of 204.
+ * body — a soft delete returning the tombstone resource — instead of 204, and
+ * `list` a `query` option replacing the composed query schema wholesale, for
+ * apis whose list contract is a flat struct of their own.
  *
  * For the common case, {@link resource} derives an entire endpoint set — the
  * CRUD surface plus every relationship's endpoints, with query parameters
@@ -232,11 +234,42 @@ export const get = <
 // list — GET /<type>
 // ---------------------------------------------------------------------------
 
+// The query schema `list` composes from its own feature options — the default
+// its `query` option overrides.
+type DefaultListQuery<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Include extends boolean,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  PageFields extends Schema.Struct.Fields | undefined,
+  FilterFields extends Schema.Struct.Fields | undefined
+> = Query.QuerySchema<
+  Resource<Type, Attributes, Rels, Meta>,
+  {
+    readonly include: Include
+    readonly fields: Fields
+    readonly sort: Sort
+    readonly page: PageFields
+    readonly filter: FilterFields
+  }
+>
+
 /**
  * `GET /<type>` — list a collection of resources.
  *
  * Success is a 200 collection document (strict array `data`). Enable `sort`,
  * `page` and `filter` for the spec's collection query parameters.
+ *
+ * Those options compose the whole query schema — a flat, bracket-keyed string
+ * record on the wire that decodes to the spec's nested shape (`page: { offset,
+ * limit }`, `filter: { … }`). Pass `query` to replace that composition with any
+ * schema, for apis whose list contract is a flat struct their own operations
+ * layer consumes, or that carry parameters JSON:API has no family for. Only
+ * the query changes; the success document, path, errors and middleware are
+ * unaffected.
  *
  * @example
  * ```ts
@@ -261,6 +294,20 @@ export const get = <
  *     filter: { author: Schema.optionalKey(Schema.String) }
  *   })
  * )
+ *
+ * // …or with a query schema of your own: a flat struct, page cursor bracketed
+ * // on the wire but decoded flat, alongside parameters JSON:API has no family for
+ * const flatArticles = Group.make(
+ *   Article,
+ *   Endpoint.list(Article, {
+ *     query: Query.bracketPageKeys(
+ *       Schema.Struct({
+ *         ...Query.Page.offset({ maxLimit: 100 }),
+ *         authorId: Schema.optionalKey(Schema.String)
+ *       })
+ *     )
+ *   })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -279,7 +326,18 @@ export const list = <
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Schema.Struct.Fields | undefined = undefined,
-  DocMeta extends Schema.Top = Meta
+  DocMeta extends Schema.Top = Meta,
+  QuerySchema extends Schema.Top = DefaultListQuery<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    Include,
+    Fields,
+    Sort,
+    PageFields,
+    FilterFields
+  >
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -295,19 +353,28 @@ export const list = <
     readonly filter?: FilterFields
     /** Override the collection document's `meta` schema (e.g. pagination totals). */
     readonly meta?: DocMeta
+    /**
+     * Override the whole query schema. Defaults to the `Query.schema`
+     * composition of the `include` / `fields` / `sort` / `page` / `filter`
+     * options above (which those options are then ignored by); pass any schema
+     * for a list contract of your own — e.g. a flat struct whose page cursor is
+     * bracketed on the wire by `Query.bracketPageKeys` but decoded flat.
+     */
+    readonly query?: QuerySchema
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    query: Query.schema(
-      resource,
-      queryConfig(options) as {
-        readonly include: Include
-        readonly fields: Fields
-        readonly sort: Sort
-        readonly page: PageFields
-        readonly filter: FilterFields
-      }
-    ),
+    query: (options?.query ??
+      Query.schema(
+        resource,
+        queryConfig(options) as {
+          readonly include: Include
+          readonly fields: Fields
+          readonly sort: Sort
+          readonly page: PageFields
+          readonly filter: FilterFields
+        }
+      )) as QuerySchema,
     success: asJsonApi(
       resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
     ),
@@ -1554,6 +1621,12 @@ export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetC
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
   readonly page?: Schema.Struct.Fields
   readonly filter?: Schema.Struct.Fields
+  /**
+   * Override the whole query schema. Defaults to the `Query.schema`
+   * composition of `include` / `fields` / `sort` / `page` / `filter`; pass any
+   * schema for a list contract of your own.
+   */
+  readonly query?: Schema.Top
 }
 
 /**
@@ -1715,8 +1788,28 @@ type EffPayload<C, Default extends Schema.Top> =
 type EffSuccess<C, Default extends Schema.Top> =
   FieldOr<C, "success", Default> extends infer S ? (S extends Schema.Top ? S : Default) : Default
 
+// The effective query schema of a `list` config: the captured `query`
+// override, else the `Query.schema` composition of its feature options.
+type EffQuery<C, Default extends Schema.Top> =
+  FieldOr<C, "query", Default> extends infer Q ? (Q extends Schema.Top ? Q : Default) : Default
+
 // Whether `sort` is enabled at all: `false` only when explicitly disabled.
 type EnabledSort<Sort> = [Sort] extends [false] ? false : true
+
+// The effective query feature options of a `get` / `list` config: the captured
+// override, else the top-level default. Named (rather than inlined at each use
+// site) because `list` needs them twice — once as its own options, once to
+// reconstruct the query schema they compose by default.
+type ListInclude<C, GInclude extends boolean> =
+  FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude
+type ListFields<C, GFields extends boolean> =
+  FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields
+type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<R>>> =
+  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>> ? FieldOr<C, "sort", GSort> : GSort
+type ListPage<C, GPage extends Schema.Struct.Fields | undefined> =
+  FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage
+type ListFilter<C, GFilter extends Schema.Struct.Fields | undefined> =
+  FieldOr<C, "filter", GFilter> extends Schema.Struct.Fields | undefined ? FieldOr<C, "filter", GFilter> : GFilter
 
 // --- the effective generated endpoint types --------------------------------
 
@@ -1774,18 +1867,26 @@ type GeneratedList<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "list"> extends string ? FieldOr<C, "name", "list"> : "list",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
-          FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude,
-          FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields,
-          FieldOr<C, "sort", GSort> extends
-            | boolean
-            | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>
-            ? FieldOr<C, "sort", GSort>
-            : GSort,
-          FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage,
-          FieldOr<C, "filter", GFilter> extends Schema.Struct.Fields | undefined
-            ? FieldOr<C, "filter", GFilter>
-            : GFilter,
-          EffMeta<C, GMeta, Meta>
+          ListInclude<C, GInclude>,
+          ListFields<C, GFields>,
+          ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
+          ListPage<C, GPage>,
+          ListFilter<C, GFilter>,
+          EffMeta<C, GMeta, Meta>,
+          EffQuery<
+            C,
+            DefaultListQuery<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              ListInclude<C, GInclude>,
+              ListFields<C, GFields>,
+              ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
+              ListPage<C, GPage>,
+              ListFilter<C, GFilter>
+            >
+          >
         >
       >
     : never
@@ -2313,6 +2414,9 @@ export const resource = <
       } as never)
     )
   }
+  // A `list` endpoint's `query` override is per-endpoint only: it replaces the
+  // whole composed query, which no other generated endpoint shares, so there is
+  // no sensible top-level default to fall back to.
   const listOp = opConfig("list")
   if (listOp.emit) {
     const page = pick(listOp.config, "page", gPage)
@@ -2324,6 +2428,7 @@ export const resource = <
         sort: pick(listOp.config, "sort", gSort),
         ...(page !== undefined ? { page } : {}),
         ...(filter !== undefined ? { filter } : {}),
+        ...(listOp.config.query !== undefined ? { query: listOp.config.query } : {}),
         ...commonOpts(listOp.config, true)
       } as never)
     )

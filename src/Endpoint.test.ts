@@ -1421,3 +1421,164 @@ describe("Endpoint.delete success override", () => {
     >()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Query override (Endpoint.list)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.list query override", () => {
+  // A flat list contract: the page cursor is bracketed on the wire but decoded
+  // flat, alongside an entity filter and a flag JSON:API has no family for.
+  const FlatListQuery = Query.bracketPageKeys(
+    Schema.Struct({
+      ...Query.Page.offset({ maxLimit: 100 }),
+      sort: Schema.optionalKey(Schema.String),
+      authorId: Schema.optionalKey(Schema.String),
+      includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+    })
+  )
+
+  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) => endpoint.query as Schema.Codec<any, any>
+
+  it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
+    const endpoint = Endpoint.list(Article, {
+      include: true,
+      sort: true,
+      page: Query.Page.Offset,
+      filter: { author: Schema.optionalKey(Schema.String) }
+    })
+    // …decoding the spec's bracket families into the nested shape, as before
+    // this option existed.
+    expect(
+      Schema.decodeUnknownSync(queryOf(endpoint))({
+        include: "author",
+        sort: "-createdAt",
+        "page[offset]": "20",
+        "page[limit]": "10",
+        "filter[author]": "9"
+      })
+    ).toEqual({
+      include: ["author"],
+      sort: [{ field: "createdAt", direction: "desc" }],
+      page: { offset: 20, limit: 10 },
+      filter: { author: "9" }
+    })
+  })
+
+  it("replaces the whole composition when `query` is supplied", () => {
+    const endpoint = Endpoint.list(Article, { query: FlatListQuery })
+    expect(
+      Schema.decodeUnknownSync(queryOf(endpoint))({
+        "page[offset]": "20",
+        "page[limit]": "10",
+        sort: "-createdAt",
+        authorId: "9",
+        includeDeleted: "true"
+      })
+      // decoded flat — no `page` / `filter` nesting, and `includeDeleted`
+      // never becomes `filter[includeDeleted]`
+    ).toEqual({ offset: 20, limit: 10, sort: "-createdAt", authorId: "9", includeDeleted: "true" })
+  })
+
+  it("ignores the feature options once `query` is supplied", () => {
+    const endpoint = Endpoint.list(Article, {
+      include: true,
+      page: Query.Page.Offset,
+      filter: { author: Schema.optionalKey(Schema.String) },
+      query: FlatListQuery
+    })
+    // the package-composed families are gone: `filter[author]` is now excess
+    expect(() =>
+      Schema.decodeUnknownSync(queryOf(endpoint))({ "filter[author]": "9" }, { onExcessProperty: "error" })
+    ).toThrow()
+  })
+
+  it("changes only the query — name, method, path, success and middleware are untouched", () => {
+    const flat = Endpoint.list(Article, { query: FlatListQuery })
+    const composed = Endpoint.list(Article)
+    expect([flat.identifier, flat.method, flat.path]).toEqual([composed.identifier, composed.method, composed.path])
+    expect([...flat.middlewares].map((m) => m.key)).toEqual([...composed.middlewares].map((m) => m.key))
+  })
+
+  it("types the overridden query as the supplied schema", () => {
+    const flat = Endpoint.list(Article, { query: FlatListQuery })
+    expectTypeOf<HttpApiEndpoint.Query<typeof flat>["Type"]>().toEqualTypeOf<typeof FlatListQuery.Type>()
+
+    const composed = Endpoint.list(Article, { page: Query.Page.Offset })
+    expectTypeOf<HttpApiEndpoint.Query<typeof composed>["Type"]>().toEqualTypeOf<{
+      readonly page?: { readonly offset?: number; readonly limit?: number }
+    }>()
+  })
+
+  it("threads through Endpoint.resource's per-endpoint list config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: { list: { query: FlatListQuery } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ "page[limit]": "10", authorId: "9" })).toEqual({
+      limit: 10,
+      authorId: "9"
+    })
+  })
+
+  it("leaves Endpoint.resource's list query package-composed when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false, page: Query.Page.Offset }).map((endpoint) => [
+        endpoint.identifier,
+        endpoint
+      ])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ "page[limit]": "10", include: "author" })).toEqual({
+      page: { limit: 10 },
+      include: ["author"]
+    })
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { get: false, create: false, update: false, delete: false, list: { query: FlatListQuery } }
+    })
+    expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.list>["Type"]>().toEqualTypeOf<
+      typeof FlatListQuery.Type
+    >()
+  })
+})
+
+describe("HTTP round-trip with an overridden list query", () => {
+  const FlatListQuery = Query.bracketPageKeys(
+    Schema.Struct({
+      ...Query.Page.offset({ maxLimit: 100 }),
+      authorId: Schema.optionalKey(Schema.String)
+    })
+  )
+
+  const FlatApi = HttpApi.make("flat-list-blog").add(
+    Group.make(Article, Endpoint.list(Article, { query: FlatListQuery, meta: Schema.Struct({ total: Schema.Int }) }))
+  )
+
+  const FlatLive = HttpApiBuilder.group(FlatApi, "articles", (handlers) =>
+    handlers.handle("list", ({ query }) =>
+      Effect.succeed({
+        // the handler consumes the flat struct directly — no `query.page`
+        data: query.authorId === "9" ? [sampleArticle].slice(0, query.limit ?? 1) : [],
+        meta: { total: query.offset ?? 0 }
+      })
+    )
+  )
+
+  it("decodes the bracketed page cursor flat and serves a JSON:API collection", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(FlatApi, ["articles"])
+        return yield* client.articles.list({ query: { offset: 3, limit: 1, authorId: "9" } })
+      }).pipe(Effect.scoped, Effect.provide(FlatLive), Effect.provide(Middleware.layer)) as Effect.Effect<any>
+    )
+
+    expect(result.data).toHaveLength(1)
+    expect(result.data[0]).toMatchObject({ type: "articles", id: "1" })
+    expect(result.meta).toEqual({ total: 3 })
+  })
+})
