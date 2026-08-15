@@ -34,6 +34,7 @@ import type { NonEmptyReadonlyArray } from "effect/Array"
 import type { HttpApiEndpoint } from "effect/unstable/httpapi"
 import { HttpApiGroup } from "effect/unstable/httpapi"
 import * as Endpoint from "./Endpoint.js"
+import type * as Query from "./Query.js"
 import type { Relationships } from "./Relationship.js"
 import type { AttributeKeys, Resource } from "./Resource.js"
 
@@ -150,7 +151,7 @@ export const resource = <
   const Endpoints extends Endpoint.EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
   const RelationshipsOpt extends Endpoint.RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Errors extends ReadonlyArray<Endpoint.ErrorClass> = readonly [],
-  const Include extends boolean = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Fields extends boolean = true,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,

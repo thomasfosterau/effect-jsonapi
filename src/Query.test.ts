@@ -68,6 +68,42 @@ describe("Query.Include", () => {
     type FeedPaths = typeof feedInclude.Type
     expectTypeOf<FeedPaths>().toEqualTypeOf<ReadonlyArray<"owner">>()
   })
+
+  it("derives the whole graph at depth 2 when unconstrained (regression: the default)", () => {
+    // every path the graph reaches, and nothing further
+    expect(Schema.decodeUnknownSync(include)("author,comments,comments.author")).toEqual([
+      "author",
+      "comments",
+      "comments.author"
+    ])
+    expectTypeOf<typeof include.Type>().toEqualTypeOf<ReadonlyArray<"author" | "comments" | "comments.author">>()
+  })
+
+  it("constrains the legal paths to an explicit allow-list", () => {
+    const subset = Query.Include(Article, { paths: ["author", "comments"] })
+    expect(Schema.decodeUnknownSync(subset)("author,comments")).toEqual(["author", "comments"])
+    // a path the graph has but this endpoint can't populate is now a 400, not
+    // a 200 with an empty `included`
+    expect(() => Schema.decodeUnknownSync(subset)("comments.author")).toThrow()
+    expectTypeOf<typeof subset.Type>().toEqualTypeOf<ReadonlyArray<"author" | "comments">>()
+  })
+
+  it("bounds the derivation by depth", () => {
+    const shallow = Query.Include(Article, { depth: 1 })
+    expect(Schema.decodeUnknownSync(shallow)("author,comments")).toEqual(["author", "comments"])
+    expect(() => Schema.decodeUnknownSync(shallow)("comments.author")).toThrow()
+    expectTypeOf<typeof shallow.Type>().toEqualTypeOf<ReadonlyArray<"author" | "comments">>()
+
+    const deep = Query.Include(Article, { depth: 3 })
+    expect(Schema.decodeUnknownSync(deep)("comments.author")).toEqual(["comments.author"])
+    expectTypeOf<typeof deep.Type>().toEqualTypeOf<ReadonlyArray<"author" | "comments" | "comments.author">>()
+  })
+
+  it("lets an explicit allow-list win over a depth bound", () => {
+    const subset = Query.Include(Article, { paths: ["comments.author"], depth: 1 })
+    expect(Schema.decodeUnknownSync(subset)("comments.author")).toEqual(["comments.author"])
+    expect(() => Schema.decodeUnknownSync(subset)("author")).toThrow()
+  })
 })
 
 describe("Query.Fieldset", () => {
@@ -150,6 +186,30 @@ describe("Query.schema", () => {
 
   it("rejects unknown include paths in the combined schema", () => {
     expect(() => Schema.decodeUnknownSync(query)({ include: "publisher" })).toThrow()
+  })
+
+  it("carries a constrained include through the combined schema", () => {
+    const constrained = Query.schema(Article, { include: { paths: ["author"] }, page: Query.Page.Offset })
+    expect(Schema.decodeUnknownSync(constrained)({ include: "author", "page[limit]": "5" })).toEqual({
+      include: ["author"],
+      page: { limit: 5 }
+    })
+    expect(() => Schema.decodeUnknownSync(constrained)({ include: "comments" })).toThrow()
+    expectTypeOf<typeof constrained.Type>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author">
+      readonly page?: { readonly offset?: number; readonly limit?: number }
+    }>()
+  })
+
+  it("omits the include parameter when the option is off (regression)", () => {
+    const noInclude = Query.schema(Article, { include: false, sort: true })
+    expect(() => Schema.decodeUnknownSync(noInclude)({ include: "author" }, { onExcessProperty: "error" })).toThrow()
+    expectTypeOf<typeof noInclude.Type>().toEqualTypeOf<{
+      readonly sort?: ReadonlyArray<{
+        readonly field: "title" | "body" | "createdAt"
+        readonly direction: "asc" | "desc"
+      }>
+    }>()
   })
 
   it("rejects unknown sparse fieldsets", () => {

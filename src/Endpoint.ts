@@ -10,7 +10,7 @@
  * | `list`               | `GET /<type>`                              | —                        | 200, collection doc        |
  * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
  * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
- * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content            |
+ * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content (`success`)|
  * | `collection`         | `GET <path>`                               | —                        | 200, heterogeneous doc     |
  * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
  * | `getRelationship`    | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
@@ -32,7 +32,11 @@
  * the write payloads: `create` / `update` default to the enveloped
  * `createPayload` / `updatePayload`, and take a `payload` option for apis whose
  * write contract is a flat command input (e.g. the resource's own
- * `createInput` / `updateInput`) rather than a JSON:API document.
+ * `createInput` / `updateInput`) rather than a JSON:API document. `delete`
+ * likewise takes a `success` option for apis whose deletion answers with a
+ * body — a soft delete returning the tombstone resource — instead of 204, and
+ * `list` a `query` option replacing the composed query schema wholesale, for
+ * apis whose list contract is a flat struct of their own.
  *
  * For the common case, {@link resource} derives an entire endpoint set — the
  * CRUD surface plus every relationship's endpoints, with query parameters
@@ -116,13 +120,13 @@ export interface CommonOptions<Name extends string, Path extends `/${string}`, E
 }
 
 const queryConfig = (options?: {
-  readonly include?: boolean
+  readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number }
   readonly fields?: boolean
   readonly sort?: boolean | ReadonlyArray<string>
   readonly page?: Schema.Struct.Fields
   readonly filter?: Schema.Struct.Fields
 }) => ({
-  include: options?.include === true,
+  include: options?.include ?? false,
   fields: options?.fields === true,
   sort: options?.sort ?? false,
   page: options?.page,
@@ -191,7 +195,7 @@ export const get = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${Type}/:id`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta
 >(
@@ -230,11 +234,42 @@ export const get = <
 // list — GET /<type>
 // ---------------------------------------------------------------------------
 
+// The query schema `list` composes from its own feature options — the default
+// its `query` option overrides.
+type DefaultListQuery<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  Fields extends boolean,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  PageFields extends Schema.Struct.Fields | undefined,
+  FilterFields extends Schema.Struct.Fields | undefined
+> = Query.QuerySchema<
+  Resource<Type, Attributes, Rels, Meta>,
+  {
+    readonly include: Include
+    readonly fields: Fields
+    readonly sort: Sort
+    readonly page: PageFields
+    readonly filter: FilterFields
+  }
+>
+
 /**
  * `GET /<type>` — list a collection of resources.
  *
  * Success is a 200 collection document (strict array `data`). Enable `sort`,
  * `page` and `filter` for the spec's collection query parameters.
+ *
+ * Those options compose the whole query schema — a flat, bracket-keyed string
+ * record on the wire that decodes to the spec's nested shape (`page: { offset,
+ * limit }`, `filter: { … }`). Pass `query` to replace that composition with any
+ * schema, for apis whose list contract is a flat struct their own operations
+ * layer consumes, or that carry parameters JSON:API has no family for. Only
+ * the query changes; the success document, path, errors and middleware are
+ * unaffected.
  *
  * @example
  * ```ts
@@ -259,6 +294,20 @@ export const get = <
  *     filter: { author: Schema.optionalKey(Schema.String) }
  *   })
  * )
+ *
+ * // …or with a query schema of your own: a flat struct, page cursor bracketed
+ * // on the wire but decoded flat, alongside parameters JSON:API has no family for
+ * const flatArticles = Group.make(
+ *   Article,
+ *   Endpoint.list(Article, {
+ *     query: Query.bracketPageKeys(
+ *       Schema.Struct({
+ *         ...Query.Page.offset({ maxLimit: 100 }),
+ *         authorId: Schema.optionalKey(Schema.String)
+ *       })
+ *     )
+ *   })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -272,12 +321,23 @@ export const list = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "list",
   const Path extends `/${string}` = `/${Type}`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Schema.Struct.Fields | undefined = undefined,
-  DocMeta extends Schema.Top = Meta
+  DocMeta extends Schema.Top = Meta,
+  QuerySchema extends Schema.Top = DefaultListQuery<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    Include,
+    Fields,
+    Sort,
+    PageFields,
+    FilterFields
+  >
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -293,19 +353,28 @@ export const list = <
     readonly filter?: FilterFields
     /** Override the collection document's `meta` schema (e.g. pagination totals). */
     readonly meta?: DocMeta
+    /**
+     * Override the whole query schema. Defaults to the `Query.schema`
+     * composition of the `include` / `fields` / `sort` / `page` / `filter`
+     * options above (which those options are then ignored by); pass any schema
+     * for a list contract of your own — e.g. a flat struct whose page cursor is
+     * bracketed on the wire by `Query.bracketPageKeys` but decoded flat.
+     */
+    readonly query?: QuerySchema
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    query: Query.schema(
-      resource,
-      queryConfig(options) as {
-        readonly include: Include
-        readonly fields: Fields
-        readonly sort: Sort
-        readonly page: PageFields
-        readonly filter: FilterFields
-      }
-    ),
+    query: (options?.query ??
+      Query.schema(
+        resource,
+        queryConfig(options) as {
+          readonly include: Include
+          readonly fields: Fields
+          readonly sort: Sort
+          readonly page: PageFields
+          readonly filter: FilterFields
+        }
+      )) as QuerySchema,
     success: asJsonApi(
       resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
     ),
@@ -482,11 +551,29 @@ export const update = <
 // delete — DELETE /<type>/:id
 // ---------------------------------------------------------------------------
 
+// The success response of a `delete` endpoint. Without an override it is the
+// spec's 204 no-content default; an override is served as a JSON:API body,
+// defaulting to 200 (the status HttpApi gives a success schema that carries
+// one).
+const deleteSuccess = (success: Schema.Top | undefined, status: number | undefined): Schema.Top =>
+  success === undefined
+    ? status === undefined
+      ? HttpApiSchema.NoContent
+      : HttpApiSchema.NoContent.pipe(HttpApiSchema.status(status))
+    : asJsonApi(success, status)
+
 /**
  * `DELETE /<type>/:id` — delete a resource.
  *
- * Success is a 204 No Content response, per the spec's recommendation for
- * deletions with no additional information to return.
+ * Success defaults to a 204 No Content response, per the spec's recommendation
+ * for deletions with no additional information to return.
+ *
+ * Pass `success` to answer with a body instead — most usefully the resource's
+ * own document, for apis whose delete is a soft delete that returns the
+ * tombstone resource. The schema is served as `application/vnd.api+json` like
+ * every other body in the package, at 200 unless `status` says otherwise. Only
+ * the response changes; the `:id` path param, errors and middleware are
+ * unaffected.
  *
  * Exported as `Endpoint.delete`. Because `delete` is a reserved word it cannot
  * be a bare `const` binding, so it is re-exported from the internal
@@ -511,6 +598,12 @@ export const update = <
  *   // DELETE /articles/:id → 204
  *   Endpoint.delete(Article, { errors: [ArticleNotFound] })
  * )
+ *
+ * // …or, for a soft delete answering with the tombstone document (200)
+ * const softDeleted = Group.make(
+ *   Article,
+ *   Endpoint.delete(Article, { success: Article.document(), errors: [ArticleNotFound] })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -523,14 +616,29 @@ const deleteEndpoint = <
   Meta extends Schema.Top,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "delete",
-  const Path extends `/${string}` = `/${Type}/:id`
+  const Path extends `/${string}` = `/${Type}/:id`,
+  Success extends Schema.Top = HttpApiSchema.NoContent
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
-  options?: CommonOptions<Name, Path, Errors>
+  options?: CommonOptions<Name, Path, Errors> & {
+    /**
+     * Override the success response schema. Defaults to
+     * `HttpApiSchema.NoContent` (204, empty body); pass the resource's
+     * `document()` for a soft delete that answers with the tombstone
+     * resource, or any schema of your own — it is served as
+     * `application/vnd.api+json`.
+     */
+    readonly success?: Success
+    /**
+     * The success status. Defaults to 204 for the no-content default, 200 for
+     * a `success` override.
+     */
+    readonly status?: number
+  }
 ) =>
   HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    success: HttpApiSchema.NoContent,
+    success: deleteSuccess(options?.success, options?.status) as Success,
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
   })
@@ -617,7 +725,7 @@ export const collection = <
   const Name extends string,
   const Path extends `/${string}`,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Resources[number]> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
@@ -716,7 +824,7 @@ export const polymorphic = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${FamilyName}/:id`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Members[number]> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
@@ -912,7 +1020,7 @@ export const related = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = Name,
   const Path extends `/${string}` = `/${Type}/:id/${Name}`,
-  const Include extends boolean = false,
+  const Include extends Query.IncludeOption<Target<Resource<Type, Attributes, Rels, Meta>, Name>> = false,
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta>, Name>>> =
     false,
@@ -1494,11 +1602,16 @@ export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => 
  * @since 0.1.0
  * @category models
  */
-export interface GetConfig<Meta extends Schema.Top> {
+export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
   readonly name?: string
   readonly path?: `/${string}`
   readonly errors?: ReadonlyArray<ErrorClass>
-  readonly include?: boolean
+  /**
+   * Enable `?include=`. `true` legalises the resource's whole relationship
+   * graph to a depth of 2; a `Query.IncludeOptions` object constrains that to
+   * an explicit `paths` allow-list and/or a `depth` bound.
+   */
+  readonly include?: Query.IncludeOption<R>
   readonly fields?: boolean
   readonly meta?: MetaOption<Meta>
 }
@@ -1509,10 +1622,16 @@ export interface GetConfig<Meta extends Schema.Top> {
  * @since 0.1.0
  * @category models
  */
-export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta> {
+export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta, R> {
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
   readonly page?: Schema.Struct.Fields
   readonly filter?: Schema.Struct.Fields
+  /**
+   * Override the whole query schema. Defaults to the `Query.schema`
+   * composition of `include` / `fields` / `sort` / `page` / `filter`; pass any
+   * schema for a list contract of your own.
+   */
+  readonly query?: Schema.Top
 }
 
 /**
@@ -1544,6 +1663,17 @@ export interface DeleteConfig {
   readonly name?: string
   readonly path?: `/${string}`
   readonly errors?: ReadonlyArray<ErrorClass>
+  /**
+   * Override the success response schema. Defaults to `HttpApiSchema.NoContent`
+   * (204, empty body); pass the resource's `document()` for a soft delete that
+   * answers with the tombstone resource, or any schema of your own.
+   */
+  readonly success?: Schema.Top
+  /**
+   * The success status. Defaults to 204 for the no-content default, 200 for a
+   * `success` override.
+   */
+  readonly status?: number
 }
 
 /**
@@ -1556,7 +1686,7 @@ export interface DeleteConfig {
  * @category models
  */
 export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
-  readonly get?: boolean | GetConfig<Meta>
+  readonly get?: boolean | GetConfig<Meta, R>
   readonly list?: boolean | ListConfig<R, Meta>
   readonly create?: boolean | WriteConfig<Meta>
   readonly update?: boolean | WriteConfig<Meta>
@@ -1658,8 +1788,38 @@ type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta",
 type EffPayload<C, Default extends Schema.Top> =
   FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default
 
+// The effective success response of a `delete` config: the captured `success`
+// override, else the 204 no-content default.
+type EffSuccess<C, Default extends Schema.Top> =
+  FieldOr<C, "success", Default> extends infer S ? (S extends Schema.Top ? S : Default) : Default
+
+// The effective query schema of a `list` config: the captured `query`
+// override, else the `Query.schema` composition of its feature options.
+type EffQuery<C, Default extends Schema.Top> =
+  FieldOr<C, "query", Default> extends infer Q ? (Q extends Schema.Top ? Q : Default) : Default
+
 // Whether `sort` is enabled at all: `false` only when explicitly disabled.
 type EnabledSort<Sort> = [Sort] extends [false] ? false : true
+
+// Whether `include` is enabled at all. A `Query.IncludeOptions` object
+// constrains the *resource's own* paths, which a relationship endpoint — whose
+// graph is its target's — can't reuse; it only learns that the parameter is on.
+type EnabledInclude<Include> = [Include] extends [false] ? false : true
+
+// The effective query feature options of a `get` / `list` config: the captured
+// override, else the top-level default. Named (rather than inlined at each use
+// site) because `list` needs them twice — once as its own options, once to
+// reconstruct the query schema they compose by default.
+type ListInclude<C, R extends Any, GInclude extends Query.IncludeOption<R>> =
+  FieldOr<C, "include", GInclude> extends Query.IncludeOption<R> ? FieldOr<C, "include", GInclude> : GInclude
+type ListFields<C, GFields extends boolean> =
+  FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields
+type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<R>>> =
+  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>> ? FieldOr<C, "sort", GSort> : GSort
+type ListPage<C, GPage extends Schema.Struct.Fields | undefined> =
+  FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage
+type ListFilter<C, GFilter extends Schema.Struct.Fields | undefined> =
+  FieldOr<C, "filter", GFilter> extends Schema.Struct.Fields | undefined ? FieldOr<C, "filter", GFilter> : GFilter
 
 // --- the effective generated endpoint types --------------------------------
 
@@ -1670,7 +1830,7 @@ type GeneratedGet<
   Meta extends Schema.Top,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
-  GInclude extends boolean,
+  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   GFields extends boolean,
   GMeta,
   C = ConfigObject<E, "get">
@@ -1685,8 +1845,8 @@ type GeneratedGet<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "get"> extends string ? FieldOr<C, "name", "get"> : "get",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
-          FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude,
-          FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+          ListFields<C, GFields>,
           EffMeta<C, GMeta, Meta>
         >
       >
@@ -1699,7 +1859,7 @@ type GeneratedList<
   Meta extends Schema.Top,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
-  GInclude extends boolean,
+  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   GFields extends boolean,
   GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   GPage extends Schema.Struct.Fields | undefined,
@@ -1717,18 +1877,26 @@ type GeneratedList<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "list"> extends string ? FieldOr<C, "name", "list"> : "list",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
-          FieldOr<C, "include", GInclude> extends boolean ? FieldOr<C, "include", GInclude> : GInclude,
-          FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields,
-          FieldOr<C, "sort", GSort> extends
-            | boolean
-            | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>
-            ? FieldOr<C, "sort", GSort>
-            : GSort,
-          FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage,
-          FieldOr<C, "filter", GFilter> extends Schema.Struct.Fields | undefined
-            ? FieldOr<C, "filter", GFilter>
-            : GFilter,
-          EffMeta<C, GMeta, Meta>
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+          ListFields<C, GFields>,
+          ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
+          ListPage<C, GPage>,
+          ListFilter<C, GFilter>,
+          EffMeta<C, GMeta, Meta>,
+          EffQuery<
+            C,
+            DefaultListQuery<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+              ListFields<C, GFields>,
+              ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
+              ListPage<C, GPage>,
+              ListFilter<C, GFilter>
+            >
+          >
         >
       >
     : never
@@ -1803,7 +1971,8 @@ type GeneratedDelete<
           Meta,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "delete"> extends string ? FieldOr<C, "name", "delete"> : "delete",
-          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          EffSuccess<C, HttpApiSchema.NoContent>
         >
       >
     : never
@@ -1972,7 +2141,7 @@ export type ResourceEndpoint<
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   Page extends Schema.Struct.Fields | undefined,
@@ -1984,7 +2153,18 @@ export type ResourceEndpoint<
   | GeneratedCreate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
   | GeneratedUpdate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
   | GeneratedDelete<Type, Attributes, Rels, Meta, Endpoints, Errors>
-  | GeneratedRelationships<Type, Attributes, Rels, Meta, RelationshipsOpt, Errors, Include, Fields, Sort, Page>
+  | GeneratedRelationships<
+      Type,
+      Attributes,
+      Rels,
+      Meta,
+      RelationshipsOpt,
+      Errors,
+      EnabledInclude<Include>,
+      Fields,
+      Sort,
+      Page
+    >
 
 /**
  * The non-empty tuple of endpoints {@link resource} returns.
@@ -2000,7 +2180,7 @@ export type ResourceEndpoints<
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   Page extends Schema.Struct.Fields | undefined,
@@ -2059,7 +2239,7 @@ export interface ResourceOptions<
   Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta>,
   RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>>,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends boolean,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
   Page extends Schema.Struct.Fields | undefined,
@@ -2072,7 +2252,13 @@ export interface ResourceOptions<
   readonly relationships?: RelationshipsOpt
   /** `ApiError` classes applied to every generated endpoint (overridable per endpoint / relationship). */
   readonly errors?: Errors
-  /** Enable `?include=` on the collection-bearing endpoints. Defaults to `true`. */
+  /**
+   * Enable `?include=` on the collection-bearing endpoints. Defaults to `true`
+   * — the resource's whole relationship graph at depth 2. A
+   * `Query.IncludeOptions` object constrains that (`paths` allow-list and/or
+   * `depth`) for `get` and `list`; the relationship endpoints, whose paths are
+   * their target's graph, only see that `include` is on.
+   */
   readonly include?: Include
   /** Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`. */
   readonly fields?: Fields
@@ -2163,7 +2349,7 @@ export const resource = <
   const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
   const RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Include extends boolean = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = true,
   const Fields extends boolean = true,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
@@ -2255,6 +2441,9 @@ export const resource = <
       } as never)
     )
   }
+  // A `list` endpoint's `query` override is per-endpoint only: it replaces the
+  // whole composed query, which no other generated endpoint shares, so there is
+  // no sensible top-level default to fall back to.
   const listOp = opConfig("list")
   if (listOp.emit) {
     const page = pick(listOp.config, "page", gPage)
@@ -2266,6 +2455,7 @@ export const resource = <
         sort: pick(listOp.config, "sort", gSort),
         ...(page !== undefined ? { page } : {}),
         ...(filter !== undefined ? { filter } : {}),
+        ...(listOp.config.query !== undefined ? { query: listOp.config.query } : {}),
         ...commonOpts(listOp.config, true)
       } as never)
     )
@@ -2284,9 +2474,18 @@ export const resource = <
   if (updateOp.emit) {
     endpoints.push(update(resource, { ...commonOpts(updateOp.config, true), ...payloadOpt(updateOp.config) } as never))
   }
+  // A `delete` endpoint's success override is per-endpoint only: no other
+  // generated endpoint answers with no content, so there is no sensible
+  // top-level default to fall back to.
   const deleteOp = opConfig("delete")
   if (deleteOp.emit) {
-    endpoints.push(deleteEndpoint(resource, commonOpts(deleteOp.config, false) as never))
+    endpoints.push(
+      deleteEndpoint(resource, {
+        ...commonOpts(deleteOp.config, false),
+        ...(deleteOp.config.success !== undefined ? { success: deleteOp.config.success } : {}),
+        ...(deleteOp.config.status !== undefined ? { status: deleteOp.config.status } : {})
+      } as never)
+    )
   }
 
   if (relationshipsOpt !== false) {
@@ -2300,7 +2499,10 @@ export const resource = <
         if (value !== undefined && value !== true) relConfig = value as Record<string, unknown>
       }
       const toMany = Relationship.isToMany(relationships[name]!)
-      const include = pick(relConfig, "include", gInclude)
+      // A constrained `include` names this resource's paths, not the target's:
+      // a relationship endpoint only inherits that the parameter is on.
+      const inheritedInclude = pick(relConfig, "include", gInclude)
+      const include = typeof inheritedInclude === "object" ? true : inheritedInclude
       const fields = pick(relConfig, "fields", gFields)
       const sortOpt = pick(relConfig, "sort", gSort)
       const page = pick(relConfig, "page", gPage)

@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Cause, Effect, Exit, Result, Schema } from "effect"
-import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiTest } from "effect/unstable/httpapi"
+import { Cause, Effect, Exit, Layer, Result, Schema } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiSchema, HttpApiTest } from "effect/unstable/httpapi"
 import * as ApiError from "./ApiError.js"
 import * as Endpoint from "./Endpoint.js"
 import * as Group from "./Group.js"
@@ -9,6 +10,7 @@ import * as Middleware from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import { make as Resource } from "./Resource.js"
+import { MEDIA_TYPE } from "./internal/media.js"
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -1308,5 +1310,357 @@ describe("HTTP round-trip with a flat write payload", () => {
     expect(result.data.attributes.title).toBe("Updated")
     // the untouched attribute survives
     expect(result.data.attributes.body).toBe("World")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Delete success override (Endpoint.delete)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.delete success override", () => {
+  // The tombstone contract: a soft delete answers with the resource document
+  // rather than an empty 204 body.
+  const Tombstone = Article.document()
+
+  const TombstoneApi = HttpApi.make("tombstone-blog").add(
+    Group.make(Article, Endpoint.delete(Article, { success: Tombstone, errors: [ArticleNotFound] }))
+  )
+
+  const TombstoneLive = HttpApiBuilder.group(TombstoneApi, "articles", (handlers) =>
+    handlers.handle("delete", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => ({ data: article }))))
+  )
+
+  // The 204 default and a document success differ only in the response, so the
+  // assertions are on the wire: status and content type.
+  const request = async (api: unknown, live: Layer.Layer<any, any, any>, url: string) => {
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(new Request(url, { method: "DELETE" }))
+      const text = await response.text()
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        body: text === "" ? undefined : (JSON.parse(text) as any)
+      }
+    } finally {
+      await dispose()
+    }
+  }
+
+  it("answers 204 with an empty body when no `success` is given (regression: unchanged default)", async () => {
+    const response = await request(Api, ArticlesLive, "http://localhost/articles/1")
+    expect(response.status).toBe(204)
+    expect(response.body).toBeUndefined()
+  })
+
+  it("answers 200 with the tombstone document when `success` is a resource document", async () => {
+    const response = await request(TombstoneApi, TombstoneLive, "http://localhost/articles/1")
+    expect(response.status).toBe(200)
+    expect(response.contentType).toContain(MEDIA_TYPE)
+    expect(response.body.data).toMatchObject({ type: "articles", id: "1", attributes: { title: "Hello" } })
+  })
+
+  it("honours an explicit `status` alongside the overridden success schema", async () => {
+    const AcceptedApi = HttpApi.make("accepted-blog").add(
+      Group.make(Article, Endpoint.delete(Article, { success: Tombstone, status: 202 }))
+    )
+    const AcceptedLive = HttpApiBuilder.group(AcceptedApi, "articles", (handlers) =>
+      handlers.handle("delete", () => Effect.succeed({ data: sampleArticle }))
+    )
+    const response = await request(AcceptedApi, AcceptedLive, "http://localhost/articles/1")
+    expect(response.status).toBe(202)
+    expect(response.body.data).toMatchObject({ type: "articles", id: "1" })
+  })
+
+  it("types the overridden success as the supplied schema, and the default as void", () => {
+    const tombstone = Endpoint.delete(Article, { success: Tombstone })
+    expectTypeOf<HttpApiEndpoint.Success<typeof tombstone>["Type"]>().toEqualTypeOf<typeof Tombstone.Type>()
+
+    const noContent = Endpoint.delete(Article)
+    expectTypeOf<HttpApiEndpoint.Success<typeof noContent>["Type"]>().toEqualTypeOf<void>()
+  })
+
+  it("changes only the success — name, method, path and middleware are untouched", () => {
+    const tombstone = Endpoint.delete(Article, { success: Tombstone })
+    expect([tombstone.identifier, tombstone.method, tombstone.path]).toEqual([
+      deleteArticle.identifier,
+      deleteArticle.method,
+      deleteArticle.path
+    ])
+    expect([...tombstone.middlewares].map((m) => m.key)).toEqual([...deleteArticle.middlewares].map((m) => m.key))
+  })
+
+  it("threads through Endpoint.resource's per-endpoint delete config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: { delete: { success: Tombstone } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(HttpApiSchema.isNoContent([...byName.delete!.success][0]!.ast)).toBe(false)
+  })
+
+  it("leaves Endpoint.resource's delete at 204 when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(HttpApiSchema.isNoContent([...byName.delete!.success][0]!.ast)).toBe(true)
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { get: false, list: false, create: false, update: false, delete: { success: Tombstone } }
+    })
+    expectTypeOf<HttpApiEndpoint.Success<typeof group.endpoints.delete>["Type"]>().toEqualTypeOf<
+      typeof Tombstone.Type
+    >()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Query override (Endpoint.list)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.list query override", () => {
+  // A flat list contract: the page cursor is bracketed on the wire but decoded
+  // flat, alongside an entity filter and a flag JSON:API has no family for.
+  const FlatListQuery = Query.bracketPageKeys(
+    Schema.Struct({
+      ...Query.Page.offset({ maxLimit: 100 }),
+      sort: Schema.optionalKey(Schema.String),
+      authorId: Schema.optionalKey(Schema.String),
+      includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+    })
+  )
+
+  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) => endpoint.query as Schema.Codec<any, any>
+
+  it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
+    const endpoint = Endpoint.list(Article, {
+      include: true,
+      sort: true,
+      page: Query.Page.Offset,
+      filter: { author: Schema.optionalKey(Schema.String) }
+    })
+    // …decoding the spec's bracket families into the nested shape, as before
+    // this option existed.
+    expect(
+      Schema.decodeUnknownSync(queryOf(endpoint))({
+        include: "author",
+        sort: "-createdAt",
+        "page[offset]": "20",
+        "page[limit]": "10",
+        "filter[author]": "9"
+      })
+    ).toEqual({
+      include: ["author"],
+      sort: [{ field: "createdAt", direction: "desc" }],
+      page: { offset: 20, limit: 10 },
+      filter: { author: "9" }
+    })
+  })
+
+  it("replaces the whole composition when `query` is supplied", () => {
+    const endpoint = Endpoint.list(Article, { query: FlatListQuery })
+    expect(
+      Schema.decodeUnknownSync(queryOf(endpoint))({
+        "page[offset]": "20",
+        "page[limit]": "10",
+        sort: "-createdAt",
+        authorId: "9",
+        includeDeleted: "true"
+      })
+      // decoded flat — no `page` / `filter` nesting, and `includeDeleted`
+      // never becomes `filter[includeDeleted]`
+    ).toEqual({ offset: 20, limit: 10, sort: "-createdAt", authorId: "9", includeDeleted: "true" })
+  })
+
+  it("ignores the feature options once `query` is supplied", () => {
+    const endpoint = Endpoint.list(Article, {
+      include: true,
+      page: Query.Page.Offset,
+      filter: { author: Schema.optionalKey(Schema.String) },
+      query: FlatListQuery
+    })
+    // the package-composed families are gone: `filter[author]` is now excess
+    expect(() =>
+      Schema.decodeUnknownSync(queryOf(endpoint))({ "filter[author]": "9" }, { onExcessProperty: "error" })
+    ).toThrow()
+  })
+
+  it("changes only the query — name, method, path, success and middleware are untouched", () => {
+    const flat = Endpoint.list(Article, { query: FlatListQuery })
+    const composed = Endpoint.list(Article)
+    expect([flat.identifier, flat.method, flat.path]).toEqual([composed.identifier, composed.method, composed.path])
+    expect([...flat.middlewares].map((m) => m.key)).toEqual([...composed.middlewares].map((m) => m.key))
+  })
+
+  it("types the overridden query as the supplied schema", () => {
+    const flat = Endpoint.list(Article, { query: FlatListQuery })
+    expectTypeOf<HttpApiEndpoint.Query<typeof flat>["Type"]>().toEqualTypeOf<typeof FlatListQuery.Type>()
+
+    const composed = Endpoint.list(Article, { page: Query.Page.Offset })
+    expectTypeOf<HttpApiEndpoint.Query<typeof composed>["Type"]>().toEqualTypeOf<{
+      readonly page?: { readonly offset?: number; readonly limit?: number }
+    }>()
+  })
+
+  it("threads through Endpoint.resource's per-endpoint list config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: { list: { query: FlatListQuery } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ "page[limit]": "10", authorId: "9" })).toEqual({
+      limit: 10,
+      authorId: "9"
+    })
+  })
+
+  it("leaves Endpoint.resource's list query package-composed when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false, page: Query.Page.Offset }).map((endpoint) => [
+        endpoint.identifier,
+        endpoint
+      ])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ "page[limit]": "10", include: "author" })).toEqual({
+      page: { limit: 10 },
+      include: ["author"]
+    })
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { get: false, create: false, update: false, delete: false, list: { query: FlatListQuery } }
+    })
+    expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.list>["Type"]>().toEqualTypeOf<
+      typeof FlatListQuery.Type
+    >()
+  })
+})
+
+describe("HTTP round-trip with an overridden list query", () => {
+  const FlatListQuery = Query.bracketPageKeys(
+    Schema.Struct({
+      ...Query.Page.offset({ maxLimit: 100 }),
+      authorId: Schema.optionalKey(Schema.String)
+    })
+  )
+
+  const FlatApi = HttpApi.make("flat-list-blog").add(
+    Group.make(Article, Endpoint.list(Article, { query: FlatListQuery, meta: Schema.Struct({ total: Schema.Int }) }))
+  )
+
+  const FlatLive = HttpApiBuilder.group(FlatApi, "articles", (handlers) =>
+    handlers.handle("list", ({ query }) =>
+      Effect.succeed({
+        // the handler consumes the flat struct directly — no `query.page`
+        data: query.authorId === "9" ? [sampleArticle].slice(0, query.limit ?? 1) : [],
+        meta: { total: query.offset ?? 0 }
+      })
+    )
+  )
+
+  it("decodes the bracketed page cursor flat and serves a JSON:API collection", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(FlatApi, ["articles"])
+        return yield* client.articles.list({ query: { offset: 3, limit: 1, authorId: "9" } })
+      }).pipe(Effect.scoped, Effect.provide(FlatLive), Effect.provide(Middleware.layer)) as Effect.Effect<any>
+    )
+
+    expect(result.data).toHaveLength(1)
+    expect(result.data[0]).toMatchObject({ type: "articles", id: "1" })
+    expect(result.meta).toEqual({ total: 3 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Constrained include paths (Endpoint.get / Endpoint.list)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint include path constraints", () => {
+  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) => endpoint.query as Schema.Codec<any, any>
+
+  it("advertises the whole graph at depth 2 when `include: true` (regression: the default)", () => {
+    const endpoint = Endpoint.get(Article, { include: true })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author,comments,comments.author" })).toEqual({
+      include: ["author", "comments", "comments.author"]
+    })
+  })
+
+  it("narrows `get` to an explicit allow-list", () => {
+    const endpoint = Endpoint.get(Article, { include: { paths: ["author"] } })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author" })).toEqual({ include: ["author"] })
+    // the depth-2 path the resolver can't populate is a 400 now, not a 200
+    // carrying an empty `included`
+    expect(() => Schema.decodeUnknownSync(queryOf(endpoint))({ include: "comments.author" })).toThrow()
+    expectTypeOf<HttpApiEndpoint.Query<typeof endpoint>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author">
+    }>()
+  })
+
+  it("narrows `list` by depth", () => {
+    const endpoint = Endpoint.list(Article, { include: { depth: 1 } })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author,comments" })).toEqual({
+      include: ["author", "comments"]
+    })
+    expect(() => Schema.decodeUnknownSync(queryOf(endpoint))({ include: "comments.author" })).toThrow()
+    expectTypeOf<HttpApiEndpoint.Query<typeof endpoint>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author" | "comments">
+    }>()
+  })
+
+  it("threads through Endpoint.resource, per endpoint and top level", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        include: { depth: 1 },
+        endpoints: { get: { include: { paths: ["author"] } } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+
+    // the per-endpoint allow-list wins on `get`
+    expect(() => Schema.decodeUnknownSync(queryOf(byName.get!))({ include: "comments" })).toThrow()
+    // `list` inherits the top-level depth bound
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ include: "comments" })).toEqual({ include: ["comments"] })
+    expect(() => Schema.decodeUnknownSync(queryOf(byName.list!))({ include: "comments.author" })).toThrow()
+    // a relationship endpoint's paths are its *target's* graph, so it only
+    // inherits that `include` is on
+    expect(Schema.decodeUnknownSync(queryOf(byName.comments!))({ include: "author" })).toEqual({
+      include: ["author"]
+    })
+  })
+
+  it("leaves Endpoint.resource advertising the full depth-2 graph by default (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.list!))({ include: "comments.author" })).toEqual({
+      include: ["comments.author"]
+    })
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      include: { paths: ["author"] },
+      endpoints: { create: false, update: false, delete: false }
+    })
+    expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.get>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author">
+      readonly fields?: {
+        readonly articles?: ReadonlyArray<"title" | "body" | "createdAt">
+        readonly people?: ReadonlyArray<"firstName" | "lastName">
+        readonly comments?: ReadonlyArray<"body">
+      }
+    }>()
   })
 })

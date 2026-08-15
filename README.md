@@ -52,6 +52,8 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
+  - [Overriding the delete response](#overriding-the-delete-response)
+  - [Overriding the list query](#overriding-the-list-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
@@ -59,6 +61,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
 - [Query parameters](#query-parameters)
+  - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
   - [Bracketing page keys on a query struct you own](#bracketing-page-keys-on-a-query-struct-you-own)
 - [Spec compliance, by construction](#spec-compliance-by-construction)
 - [Examples](#examples)
@@ -555,6 +558,73 @@ const articles = Group.resource(Article, {
 })
 ```
 
+### Overriding the delete response
+
+`Endpoint.delete` answers `204 No Content`, the spec's recommendation for a deletion with nothing
+further to say. Some apis do have something to say: a **soft delete** marks the row deleted, re-reads
+it, and returns the tombstone resource so an admin viewer can render what was removed.
+
+Pass `success` to supply that response schema — it defaults to the 204, so existing endpoints are
+unchanged. The schema is served as `application/vnd.api+json` like every other body in the package,
+at 200 unless `status` says otherwise; the `:id` path param, errors and middleware are untouched.
+
+```ts
+// DELETE /articles/:id → 200, { data: { type: "articles", ... } }
+Endpoint.delete(Article, { success: Article.document(), errors: [ArticleNotFound] })
+
+// …or an asynchronous deletion that has been accepted but not yet performed
+Endpoint.delete(Article, { success: Article.document(), status: 202 })
+```
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: { delete: { success: Article.document() } }
+})
+```
+
+### Overriding the list query
+
+`Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter`
+options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape
+(`page: { offset, limit }`, `filter: { … }`). That is the spec-compliant contract, and the default.
+
+Some apis want a different one — a **flat** list input their operations layer consumes directly, with
+entity foreign keys and flags JSON:API has no query family for. Forcing such a flag through `filter`
+would put it on the wire as `filter[includeDeleted]`, which is not what those clients send.
+
+Pass `query` to supply the whole schema. It defaults to today's composition, so existing endpoints
+are unchanged; the feature options are simply ignored once `query` is given, and the success
+document, path, errors and middleware stay as they were.
+
+```ts
+// GET /articles?page[offset]=20&page[limit]=10&sort=-createdAt&authorId=9&includeDeleted=true
+// …decoded flat: { offset, limit, sort?, authorId?, includeDeleted? }
+const ListArticles = Query.bracketPageKeys(
+  Schema.Struct({
+    ...Query.Page.offset({ maxLimit: 100 }),
+    sort: Schema.optionalKey(Schema.String),
+    authorId: Schema.optionalKey(Schema.String),
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+  })
+)
+
+Endpoint.list(Article, { query: ListArticles })
+```
+
+[`Query.bracketPageKeys`](#bracketing-page-keys-on-a-query-struct-you-own) is what keeps the page
+cursor spec-canonical on the wire (`page[offset]` / `page[limit]`) while the handler still sees
+`{ offset, limit }` — but any schema works, bracketed or not.
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: { list: { query: ListArticles } }
+})
+```
+
 ### Generating a whole group from a resource
 
 Writing out every endpoint is explicit, but repetitive — a resource definition
@@ -995,16 +1065,54 @@ fails loudly instead of lying.
 
 ## Query parameters
 
-| Family         | Wire form                         | Decoded form                                                                                             |
-| -------------- | --------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `include`      | `?include=author,comments.author` | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph |
-| `fields[TYPE]` | `?fields[articles]=title,body`    | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets                        |
-| `sort`         | `?sort=-createdAt,title`          | `[{ field: "createdAt", direction: "desc" }, …]`                                                         |
-| `page[*]`      | `?page[offset]=0&page[limit]=10`  | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom)           |
-| `filter[*]`    | `?filter[author]=9`               | user-defined schema per filter key                                                                       |
+| Family         | Wire form                         | Decoded form                                                                                                                                                           |
+| -------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `include`      | `?include=author,comments.author` | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph ([constrainable](#constraining-the-advertised-include-paths)) |
+| `fields[TYPE]` | `?fields[articles]=title,body`    | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets                                                                                      |
+| `sort`         | `?sort=-createdAt,title`          | `[{ field: "createdAt", direction: "desc" }, …]`                                                                                                                       |
+| `page[*]`      | `?page[offset]=0&page[limit]=10`  | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom)                                                                         |
+| `filter[*]`    | `?filter[author]=9`               | user-defined schema per filter key                                                                                                                                     |
 
 Unknown include paths, unknown sparse-fieldset names and unknown sort fields fail decoding — which
 the schema-error middleware turns into a spec-compliant **400 JSON:API error document**.
+
+### Constraining the advertised include paths
+
+`include: true` legalises the resource's **whole relationship graph, two hops deep** — every path
+`Query.Include` can derive. That is the right default when the endpoint can resolve all of them, and
+the wrong one when it can't: a to-one relationship on a related resource makes depth 2 advertise
+paths (`release.tracks`, say) whose resolver was never written. Advertising such a path answers
+`200` with an empty `included` — strictly worse than the `400` an unknown path already produces.
+
+Pass an object instead of `true` to constrain the derivation — an explicit `paths` allow-list, a
+`depth` bound (`1` / `2` / `3`), or both, in which case `paths` wins. The literal path type narrows
+with it, so a client that asks for an unlisted path fails to compile as well as to decode:
+
+```ts
+// only the paths this endpoint actually populates
+Endpoint.get(Work, { include: { paths: ["composer", "recordings"] } })
+
+// …or just the direct relationships, whatever they are
+Endpoint.list(Track, { include: { depth: 1 } })
+
+// Query.Include takes the same options standalone
+const include = Query.Include(Article, { paths: ["author"] })
+// typeof include.Type === ReadonlyArray<"author">
+```
+
+The option is available wherever `include` is — `Endpoint.get` / `list` / `related` / `collection`,
+and `Group.resource` both top-level and per endpoint:
+
+```ts
+const works = Group.resource(Work, {
+  include: { depth: 1 },
+  endpoints: { get: { include: { paths: ["composer", "recordings"] } } }
+})
+```
+
+A top-level constraint applies to `get` and `list`. The relationship endpoints' paths are their
+_target's_ graph, not this resource's, so they inherit only that `include` is on — constrain them
+with `Endpoint.related` directly if they need it too.
 
 `Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded,
 defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination,
