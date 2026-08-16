@@ -469,3 +469,67 @@ describe("Query.bracketPageKeys", () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// Repeated `?include=` keys
+// ---------------------------------------------------------------------------
+
+describe("include: repeated keys", () => {
+  const query = Query.schema(Article, {
+    include: true,
+    fields: true,
+    sort: true,
+    page: Query.Page.Offset,
+    filter: undefined
+  })
+  const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>)
+
+  it("decodes the spec's comma grammar (regression: unchanged)", () => {
+    expect(decode({ include: "author,comments,comments.author" })).toEqual({
+      include: ["author", "comments", "comments.author"]
+    })
+  })
+
+  it("decodes the repeated-key spelling `UrlParams.toRecord` produces", () => {
+    expect(decode({ include: ["author", "comments", "comments.author"] })).toEqual({
+      include: ["author", "comments", "comments.author"]
+    })
+  })
+
+  it("treats the two spellings as the same set, including the mixed form", () => {
+    expect(decode({ include: ["author", "comments.author"] })).toEqual(decode({ include: "author,comments.author" }))
+    // a repeated key whose values are themselves comma lists
+    expect(decode({ include: ["author", "comments,comments.author"] })).toEqual({
+      include: ["author", "comments", "comments.author"]
+    })
+  })
+
+  it("still rejects an unknown path in either spelling (400, not 200-with-nothing)", () => {
+    expect(() => decode({ include: "nope" })).toThrow()
+    expect(() => decode({ include: ["author", "nope"] })).toThrow()
+  })
+
+  it("still rejects an unlisted path when the endpoint constrains `paths`", () => {
+    const constrained = Query.schema(Article, {
+      include: { paths: ["author"] },
+      fields: false,
+      sort: false,
+      page: undefined,
+      filter: undefined
+    })
+    const narrow = Schema.decodeUnknownSync(constrained as Schema.Codec<any, any>)
+    expect(narrow({ include: ["author"] })).toEqual({ include: ["author"] })
+    expect(() => narrow({ include: ["author", "comments"] })).toThrow()
+  })
+
+  it("encodes back to the single comma form (regression: the wire shape a client is handed)", () => {
+    expect(Schema.encodeUnknownSync(query as Schema.Codec<any, any>)({ include: ["author", "comments"] })).toEqual({
+      include: "author,comments"
+    })
+  })
+
+  it("leaves the other parameters alone — only `include` is repeatable", () => {
+    expect(() => decode({ sort: ["title"] })).toThrow()
+    expect(decode({ sort: "-title" })).toEqual({ sort: [{ field: "title", direction: "desc" }] })
+  })
+})

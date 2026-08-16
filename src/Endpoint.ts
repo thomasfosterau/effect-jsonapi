@@ -35,8 +35,14 @@
  * `createInput` / `updateInput`) rather than a JSON:API document. `delete`
  * likewise takes a `success` option for apis whose deletion answers with a
  * body — a soft delete returning the tombstone resource — instead of 204, and
- * `list` a `query` option replacing the composed query schema wholesale, for
- * apis whose list contract is a flat struct of their own.
+ * `get` / `list` a `query` option replacing the composed query schema
+ * wholesale, for apis whose read contract is a struct of their own.
+ *
+ * The write endpoints take a `status` option alongside, for apis whose
+ * creations answer with a status other than the spec's recommended 201 — the
+ * counterpart to the one `delete` already carries — and a `payloadMediaType`,
+ * for hosts that negotiate §6 themselves and dispatch writes to the router
+ * under a different content type than the one the api advertises.
  *
  * The primary-data endpoints take the same `success` option: `get` / `create` /
  * `update` default to the resource's `document()` and `list` to its
@@ -60,7 +66,7 @@ import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
 import * as Atomic from "./Atomic.js"
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js"
-import { asJsonApi, asJsonApiAtomic } from "./internal/media.js"
+import { asJsonApi, asJsonApiAtomic, asMediaType, MEDIA_TYPE } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
@@ -164,6 +170,27 @@ type DefaultCollection<
 // get — GET /<type>/:id
 // ---------------------------------------------------------------------------
 
+// The query schema `get` composes from its own feature options — the default
+// its `query` option overrides. A single-resource fetch carries no `sort` /
+// `page` / `filter`, so only `include` and `fields` vary.
+type DefaultGetQuery<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  Fields extends boolean
+> = Query.QuerySchema<
+  Resource<Type, Attributes, Rels, Meta>,
+  {
+    readonly include: Include
+    readonly fields: Fields
+    readonly sort: false
+    readonly page: undefined
+    readonly filter: undefined
+  }
+>
+
 /**
  * `GET /<type>/:id` — fetch a single resource.
  *
@@ -176,6 +203,11 @@ type DefaultCollection<
  * *wire* variant of the resource, for an api whose assembler emits a narrower
  * shape than the resource's own decoded types. Only the response changes; the
  * `:id` path param, query parameters, errors and middleware are unaffected.
+ *
+ * Pass `query` to replace the composed `include` / `fields` parameters with any
+ * schema, exactly as {@link list} takes one — for an api whose read contract
+ * carries parameters JSON:API has no family for, or whose `?include=` grammar
+ * is its own. Only the query changes.
  *
  * @example
  * ```ts
@@ -225,6 +257,17 @@ type DefaultCollection<
  *   Article,
  *   Endpoint.get(Article, { success: Document.DataDocument(WireArticle) })
  * )
+ *
+ * // …or with a read query of your own, replacing the composed parameters
+ * const flatArticles = Group.make(
+ *   Article,
+ *   Endpoint.get(Article, {
+ *     query: Schema.Struct({
+ *       include: Schema.optionalKey(Schema.String),
+ *       includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+ *     })
+ *   })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -241,6 +284,7 @@ export const get = <
   const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta,
+  QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, Include, Fields>,
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
@@ -251,6 +295,15 @@ export const get = <
     readonly fields?: Fields
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
+    /**
+     * Override the whole query schema. Defaults to the `Query.schema`
+     * composition of the `include` / `fields` options above (which those
+     * options are then ignored by); pass any schema for a read contract of your
+     * own — the counterpart to `list`'s `query`.
+     *
+     * @since 0.11.0
+     */
+    readonly query?: QuerySchema
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -264,16 +317,17 @@ export const get = <
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    query: Query.schema(
-      resource,
-      queryConfig(options) as {
-        readonly include: Include
-        readonly fields: Fields
-        readonly sort: false
-        readonly page: undefined
-        readonly filter: undefined
-      }
-    ),
+    query: (options?.query ??
+      Query.schema(
+        resource,
+        queryConfig(options) as {
+          readonly include: Include
+          readonly fields: Fields
+          readonly sort: false
+          readonly page: undefined
+          readonly filter: undefined
+        }
+      )) as QuerySchema,
     success: asJsonApi(
       (options?.success ??
         resource.document(
@@ -479,6 +533,18 @@ export const list = <
  * a *wire* variant of the resource, for an api whose assembler emits a narrower
  * shape than the resource's own decoded types. The two are independent.
  *
+ * Pass `status` for a creation that answers with a status other than 201 — an
+ * api whose whole write surface answers 200, say. It defaults to the spec's
+ * recommended 201, including when `success` is given.
+ *
+ * Pass `payloadMediaType` to register the request body under a media type other
+ * than `application/vnd.api+json`. The router matches a request's
+ * `Content-Type` against the registration and answers 415 on a mismatch, so a
+ * host that enforces §6 itself and hands the router a relabelled request needs
+ * to say which label it dispatches. It changes the registration only — pair it
+ * with `Middleware.layerHostNegotiated` so the package's own §6 check doesn't
+ * then reject what the host admitted.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -503,6 +569,12 @@ export const list = <
  * const flatArticles = Group.make(
  *   Article,
  *   Endpoint.create(Article, { payload: Article.createInput })
+ * )
+ *
+ * // …or answering 200 rather than 201, for an api whose writes are uniform
+ * const okArticles = Group.make(
+ *   Article,
+ *   Endpoint.create(Article, { status: 200 })
  * )
  * ```
  *
@@ -532,24 +604,44 @@ export const create = <
      */
     readonly payload?: Payload
     /**
+     * The media type the request payload is registered under, which the router
+     * matches a request's `Content-Type` against. Defaults to
+     * `application/vnd.api+json`; pass `"application/json"` for a host that
+     * negotiates §6 upstream and relabels dispatched writes.
+     *
+     * @since 0.11.0
+     */
+    readonly payloadMediaType?: string
+    /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
-     * `application/vnd.api+json`, at 201 like the default.
+     * `application/vnd.api+json`, at the same status as the default.
      *
      * @since 0.10.0
      */
     readonly success?: Success
+    /**
+     * The success status. Defaults to 201 — the spec's recommendation for a
+     * creation answering with the created resource — whether or not `success`
+     * is given. Pass 200 for an api whose creations answer with it.
+     *
+     * @since 0.11.0
+     */
+    readonly status?: number
   }
 ) =>
   HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    payload: asJsonApi((options?.payload ?? resource.createPayload) as Payload),
+    payload: asMediaType(
+      (options?.payload ?? resource.createPayload) as Payload,
+      options?.payloadMediaType ?? MEDIA_TYPE
+    ),
     success: asJsonApi(
       (options?.success ??
         resource.document(
           (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
         )) as Success,
-      201
+      options?.status ?? 201
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -577,6 +669,13 @@ export const create = <
  * Pass `success` to override the response document the same way — most usefully
  * a *wire* variant of the resource, for an api whose assembler emits a narrower
  * shape than the resource's own decoded types. The two are independent.
+ *
+ * Pass `status` for an update answering with something other than 200 — `202`
+ * for an update accepted but not yet applied, say. It defaults to today's 200.
+ *
+ * Pass `payloadMediaType` to register the request body under a media type other
+ * than `application/vnd.api+json`, for a host that enforces §6 itself and hands
+ * the router a relabelled request — see {@link create}.
  *
  * @example
  * ```ts
@@ -631,6 +730,15 @@ export const update = <
      */
     readonly payload?: Payload
     /**
+     * The media type the request payload is registered under, which the router
+     * matches a request's `Content-Type` against. Defaults to
+     * `application/vnd.api+json`; pass `"application/json"` for a host that
+     * negotiates §6 upstream and relabels dispatched writes.
+     *
+     * @since 0.11.0
+     */
+    readonly payloadMediaType?: string
+    /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
@@ -639,16 +747,27 @@ export const update = <
      * @since 0.10.0
      */
     readonly success?: Success
+    /**
+     * The success status. Defaults to 200 — the status `HttpApi` gives a
+     * success schema carrying a body — whether or not `success` is given.
+     *
+     * @since 0.11.0
+     */
+    readonly status?: number
   }
 ) =>
   HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    payload: asJsonApi((options?.payload ?? resource.updatePayload) as Payload),
+    payload: asMediaType(
+      (options?.payload ?? resource.updatePayload) as Payload,
+      options?.payloadMediaType ?? MEDIA_TYPE
+    ),
     success: asJsonApi(
       (options?.success ??
         resource.document(
           (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )) as Success
+        )) as Success,
+      options?.status
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -1724,6 +1843,14 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
   readonly fields?: boolean
   readonly meta?: MetaOption<Meta>
   /**
+   * Override the whole query schema. Defaults to the `Query.schema`
+   * composition of `include` / `fields`; pass any schema for a read contract of
+   * your own. `ListConfig` documents the collection counterpart.
+   *
+   * @since 0.11.0
+   */
+  readonly query?: Schema.Top
+  /**
    * Override the success document schema. Defaults to the resource's
    * `document()` (which `meta` then tunes); pass a wire variant of the
    * resource, or any schema of your own.
@@ -1777,6 +1904,15 @@ export interface WriteConfig<Meta extends Schema.Top> {
    */
   readonly payload?: Schema.Top
   /**
+   * The media type the request payload is registered under, which the router
+   * matches a request's `Content-Type` against. Defaults to
+   * `application/vnd.api+json`; pass `"application/json"` for a host that
+   * negotiates §6 upstream and relabels dispatched writes.
+   *
+   * @since 0.11.0
+   */
+  readonly payloadMediaType?: string
+  /**
    * Override the success document schema. Defaults to the resource's
    * `document()` (which `meta` then tunes); pass a wire variant of the
    * resource, or any schema of your own.
@@ -1784,6 +1920,13 @@ export interface WriteConfig<Meta extends Schema.Top> {
    * @since 0.10.0
    */
   readonly success?: Schema.Top
+  /**
+   * The success status. Defaults to 201 for `create` (the spec's
+   * recommendation) and 200 for `update`, whether or not `success` is given.
+   *
+   * @since 0.11.0
+   */
+  readonly status?: number
 }
 
 /**
@@ -1982,6 +2125,17 @@ type GeneratedGet<
           ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
           ListFields<C, GFields>,
           EffMeta<C, GMeta, Meta>,
+          EffQuery<
+            C,
+            DefaultGetQuery<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+              ListFields<C, GFields>
+            >
+          >,
           EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
         >
       >
@@ -2573,6 +2727,18 @@ export const resource = <
   const successOpt = (config: Record<string, unknown>): Record<string, unknown> =>
     config.success !== undefined ? { success: config.success } : {}
 
+  // Likewise `status`: each endpoint's default (201 for `create`, 200 for
+  // `update`, 204 for `delete`) is the constructor's, so an absent key must
+  // stay absent rather than resolve to some shared number here.
+  const statusOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+    config.status !== undefined ? { status: config.status } : {}
+
+  // A read endpoint's `query` override is per-endpoint only: it replaces that
+  // endpoint's whole composed query, and `get`'s and `list`'s compositions
+  // differ, so there is no sensible top-level default to fall back to.
+  const queryOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+    config.query !== undefined ? { query: config.query } : {}
+
   const endpoints: Array<HttpApiEndpoint.Top> = []
 
   const getOp = opConfig("get")
@@ -2581,14 +2747,12 @@ export const resource = <
       get(resource, {
         include: pick(getOp.config, "include", gInclude),
         fields: pick(getOp.config, "fields", gFields),
+        ...queryOpt(getOp.config),
         ...commonOpts(getOp.config, true),
         ...successOpt(getOp.config)
       } as never)
     )
   }
-  // A `list` endpoint's `query` override is per-endpoint only: it replaces the
-  // whole composed query, which no other generated endpoint shares, so there is
-  // no sensible top-level default to fall back to.
   const listOp = opConfig("list")
   if (listOp.emit) {
     const page = pick(listOp.config, "page", gPage)
@@ -2600,7 +2764,7 @@ export const resource = <
         sort: pick(listOp.config, "sort", gSort),
         ...(page !== undefined ? { page } : {}),
         ...(filter !== undefined ? { filter } : {}),
-        ...(listOp.config.query !== undefined ? { query: listOp.config.query } : {}),
+        ...queryOpt(listOp.config),
         ...commonOpts(listOp.config, true),
         ...successOpt(listOp.config)
       } as never)
@@ -2609,8 +2773,10 @@ export const resource = <
   // A write endpoint's `payload` override is per-endpoint only: `create` and
   // `update` have different default envelopes, so there is no sensible
   // top-level default to fall back to.
-  const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> =>
-    config.payload !== undefined ? { payload: config.payload } : {}
+  const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> => ({
+    ...(config.payload !== undefined ? { payload: config.payload } : {}),
+    ...(config.payloadMediaType !== undefined ? { payloadMediaType: config.payloadMediaType } : {})
+  })
 
   const createOp = opConfig("create")
   if (createOp.emit) {
@@ -2618,7 +2784,8 @@ export const resource = <
       create(resource, {
         ...commonOpts(createOp.config, true),
         ...payloadOpt(createOp.config),
-        ...successOpt(createOp.config)
+        ...successOpt(createOp.config),
+        ...statusOpt(createOp.config)
       } as never)
     )
   }
@@ -2628,7 +2795,8 @@ export const resource = <
       update(resource, {
         ...commonOpts(updateOp.config, true),
         ...payloadOpt(updateOp.config),
-        ...successOpt(updateOp.config)
+        ...successOpt(updateOp.config),
+        ...statusOpt(updateOp.config)
       } as never)
     )
   }
@@ -2638,7 +2806,7 @@ export const resource = <
       deleteEndpoint(resource, {
         ...commonOpts(deleteOp.config, false),
         ...successOpt(deleteOp.config),
-        ...(deleteOp.config.status !== undefined ? { status: deleteOp.config.status } : {})
+        ...statusOpt(deleteOp.config)
       } as never)
     )
   }

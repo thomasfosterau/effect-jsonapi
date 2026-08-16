@@ -53,8 +53,10 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
   - [Overriding the success document](#overriding-the-success-document)
+  - [Overriding the write status](#overriding-the-write-status)
+  - [Overriding the payload media type](#overriding-the-payload-media-type)
   - [Overriding the delete response](#overriding-the-delete-response)
-  - [Overriding the list query](#overriding-the-list-query)
+  - [Overriding the read query](#overriding-the-read-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
@@ -603,6 +605,71 @@ const articles = Group.resource(Article, {
 })
 ```
 
+### Overriding the write status
+
+`Endpoint.create` answers `201 Created` and `Endpoint.update` `200 OK` — the spec's recommendation
+for a creation that returns the created resource, and the status `HttpApi` gives any success schema
+carrying a body. Some apis answer their whole write surface with 200, or accept a write for later
+application and answer `202`.
+
+Pass `status` to say so. It defaults to today's 201 / 200 — including when `success` is given, which
+is otherwise re-stamped with the constructor's own — so existing endpoints are unchanged; only the
+status moves. This is the `status` `Endpoint.delete` already carries, on the write endpoints.
+
+```ts
+// POST /articles → 200, the created document
+Endpoint.create(Article, { status: 200 })
+
+// PATCH /articles/:id → 202, an update accepted but not yet applied
+Endpoint.update(Article, { status: 202, errors: [ArticleNotFound] })
+```
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: { create: { status: 200 }, update: { status: 200 } }
+})
+```
+
+### Overriding the payload media type
+
+Every body the package declares is `application/vnd.api+json`, request bodies included — and the
+router matches an incoming `Content-Type` against that registration, answering **415** on a mismatch.
+That is right for an api that owns its URLs and negotiates §6 itself.
+
+It is wrong for an api whose **host** negotiates instead. Such a host enforces §6 at its own seam —
+`Middleware.negotiate` is exactly that, reused outside the constructors — and then hands the router a
+request relabelled `application/json`, because that is what the rest of its URL space speaks. The
+request the host just admitted would then be 415'd by the router before any handler sees it.
+
+Pass `payloadMediaType` to register the request body under the label the host actually dispatches. It
+defaults to `application/vnd.api+json`, so existing endpoints are unchanged; the payload schema, the
+**response** media type, path, params, errors and middleware all stay as they were. Pair it with
+[`Middleware.layerHostNegotiated`](#4-handlers--typed-in-validated-out), or the package's own §5 check
+will reject what the host admitted:
+
+```ts
+// POST /articles with Content-Type: application/json — the label the host dispatches
+Endpoint.create(Article, { payload: Article.createInput, payloadMediaType: "application/json" })
+
+// …the response is still application/vnd.api+json
+```
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: {
+    create: { payload: Article.createInput, payloadMediaType: "application/json" },
+    update: { payload: Article.updateInput, payloadMediaType: "application/json" }
+  }
+})
+```
+
+Reach for this only when something upstream genuinely enforces §6; on an api that owns its own URLs,
+the default is the correct — and spec-compliant — choice.
+
 ### Overriding the delete response
 
 `Endpoint.delete` answers `204 No Content`, the spec's recommendation for a deletion with nothing
@@ -629,7 +696,7 @@ const articles = Group.resource(Article, {
 })
 ```
 
-### Overriding the list query
+### Overriding the read query
 
 `Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter`
 options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape
@@ -662,13 +729,30 @@ Endpoint.list(Article, { query: ListArticles })
 cursor spec-canonical on the wire (`page[offset]` / `page[limit]`) while the handler still sees
 `{ offset, limit }` — but any schema works, bracketed or not.
 
-The same option is available per-endpoint when generating a whole group:
+`Endpoint.get` takes the same option, over the `include` / `fields` parameters it composes — for a
+single-resource fetch carrying a flag JSON:API has no family for, or an `?include=` grammar the api
+owns rather than derives:
+
+```ts
+Endpoint.get(Article, {
+  query: Schema.Struct({
+    include: Schema.optionalKey(Schema.String),
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+  })
+})
+```
+
+Both are available per-endpoint when generating a whole group:
 
 ```ts
 const articles = Group.resource(Article, {
-  endpoints: { list: { query: ListArticles } }
+  endpoints: { list: { query: ListArticles }, get: { query: GetArticle } }
 })
 ```
+
+Note that the package's own `?include=` needs no escape hatch for the **repeated-key** spelling:
+`?include=author&include=comments` and `?include=author,comments` denote the same set and both
+decode to it, so a client using either is served identically. Encoding always emits the comma form.
 
 ### Generating a whole group from a resource
 

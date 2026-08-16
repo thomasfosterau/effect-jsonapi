@@ -1891,3 +1891,413 @@ describe("HTTP round-trip with a wire success document", () => {
     expect(result.data.links?.self).toBe("https://api.example.com/articles/1")
   })
 })
+
+// ---------------------------------------------------------------------------
+// Write status override (Endpoint.create / Endpoint.update)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.create / Endpoint.update status override", () => {
+  // A status is invisible in the decoded schema, so the assertions are on the
+  // wire — what a real web handler actually answers.
+  const request = async (
+    api: unknown,
+    live: Layer.Layer<any, any, any>,
+    method: string,
+    url: string,
+    body: unknown
+  ) => {
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request(url, { method, headers: { "content-type": MEDIA_TYPE }, body: JSON.stringify(body) })
+      )
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        body: (await response.json()) as any
+      }
+    } finally {
+      await dispose()
+    }
+  }
+
+  const createBody = {
+    data: {
+      type: "articles",
+      attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+    }
+  }
+  const updateBody = { data: { type: "articles", id: "1", attributes: { title: "Hello" } } }
+
+  // Every case below is the same two endpoints, differing only in the options
+  // under test; the handlers answer the resource document regardless.
+  const writesApi = (name: string, ...endpoints: readonly [any, ...ReadonlyArray<any>]) =>
+    HttpApi.make(name).add(Group.make(Article, ...endpoints))
+
+  const writesLive = (api: any): Layer.Layer<any, any, any> =>
+    HttpApiBuilder.group(api, "articles", (handlers: any) =>
+      handlers
+        .handle("create", () => Effect.succeed({ data: sampleArticle }))
+        .handle("update", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+
+  const roundTrip = async (createOptions?: any, updateOptions?: any) => {
+    const api = writesApi(
+      `writes-${JSON.stringify(createOptions ?? {})}-${JSON.stringify(updateOptions ?? {})}`,
+      Endpoint.create(Article, createOptions),
+      Endpoint.update(Article, updateOptions)
+    )
+    const live = writesLive(api)
+    return {
+      created: await request(api, live, "POST", "http://localhost/articles", createBody),
+      updated: await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)
+    }
+  }
+
+  it("answers 201 on create and 200 on update when no status is given (regression: unchanged defaults)", async () => {
+    const { created, updated } = await roundTrip()
+    expect(created.status).toBe(201)
+    expect(updated.status).toBe(200)
+    expect(created.body.data).toMatchObject({ type: "articles", id: "1" })
+  })
+
+  it("keeps those defaults when only `success` is overridden (regression)", async () => {
+    const WireDocument = Document.DataDocument(
+      Schema.Struct({
+        ...Article.fields,
+        links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+      })
+    )
+    const { created, updated } = await roundTrip({ success: WireDocument }, { success: WireDocument })
+    expect(created.status).toBe(201)
+    expect(updated.status).toBe(200)
+  })
+
+  it("answers with the supplied status instead, document and media type intact", async () => {
+    const { created, updated } = await roundTrip({ status: 200 }, { status: 202 })
+    expect(created.status).toBe(200)
+    expect(created.contentType).toContain(MEDIA_TYPE)
+    expect(created.body.data).toMatchObject({ type: "articles", id: "1" })
+    expect(updated.status).toBe(202)
+    expect(updated.body.data).toMatchObject({ type: "articles", id: "1" })
+  })
+
+  it("applies the status to an overridden success schema too", async () => {
+    const WireDocument = Document.DataDocument(
+      Schema.Struct({
+        ...Article.fields,
+        links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+      })
+    )
+    const { created } = await roundTrip({ success: WireDocument, status: 200 })
+    expect(created.status).toBe(200)
+  })
+
+  it("changes only the status — name, method, path, payload and middleware are untouched", () => {
+    const ok = Endpoint.create(Article, { status: 200 })
+    expect([ok.identifier, ok.method, ok.path]).toEqual([
+      createArticle.identifier,
+      createArticle.method,
+      createArticle.path
+    ])
+    expect([...ok.middlewares].map((m) => m.key)).toEqual([...createArticle.middlewares].map((m) => m.key))
+    expectTypeOf<HttpApiEndpoint.Payload<typeof ok>["Type"]>().toEqualTypeOf<typeof Article.createPayload.Type>()
+  })
+
+  it("threads through Endpoint.resource / Group.resource's per-endpoint create/update config", async () => {
+    const api = HttpApi.make("generated-ok-writes").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: { get: false, list: false, delete: false, create: { status: 200 }, update: { status: 202 } }
+      })
+    )
+    const live = writesLive(api)
+    expect((await request(api, live, "POST", "http://localhost/articles", createBody)).status).toBe(200)
+    expect((await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)).status).toBe(202)
+  })
+
+  it("leaves Endpoint.resource's create at 201 and update at 200 when no override is given (regression)", async () => {
+    const api = HttpApi.make("generated-default-writes").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: { get: false, list: false, delete: false }
+      })
+    )
+    const live = writesLive(api)
+    expect((await request(api, live, "POST", "http://localhost/articles", createBody)).status).toBe(201)
+    expect((await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)).status).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Payload media type (Endpoint.create / Endpoint.update)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.create / Endpoint.update payload media type", () => {
+  // The router matches a request's `Content-Type` against the payload's
+  // registration and answers 415 on a mismatch, so the only honest assertion is
+  // a real request at each label.
+  const post = async (api: unknown, live: Layer.Layer<any, any, any>, contentType: string) => {
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      // the host negotiated §6 upstream; the package's own §5 check would
+      // otherwise reject exactly the request this option exists to admit
+      Layer.provide(Middleware.layerHostNegotiated)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request("http://localhost/articles", {
+          method: "POST",
+          headers: { "content-type": contentType },
+          body: JSON.stringify({ title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" })
+        })
+      )
+      return { status: response.status, body: await response.text() }
+    } finally {
+      await dispose()
+    }
+  }
+
+  const apiWith = (name: string, options: any) => {
+    const api = HttpApi.make(name).add(
+      Group.make(Article, Endpoint.create(Article, { payload: Article.createInput, ...options }))
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers.handle("create", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    return { api, live }
+  }
+
+  it("registers the payload as application/vnd.api+json by default (regression: unchanged)", async () => {
+    const { api, live } = apiWith("default-media-blog", {})
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(201)
+    // …and the router rejects anything else, which is the behaviour the option exists to escape
+    expect((await post(api, live, "application/json")).status).toBe(415)
+  })
+
+  it("registers the payload as the supplied media type instead", async () => {
+    const { api, live } = apiWith("plain-media-blog", { payloadMediaType: "application/json" })
+    const accepted = await post(api, live, "application/json")
+    expect(accepted.status).toBe(201)
+    expect(JSON.parse(accepted.body).data).toMatchObject({ type: "articles", id: "1" })
+    // the registration moved rather than widened: the JSON:API label is now the mismatch
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(415)
+  })
+
+  it("leaves the response media type alone — only the request registration moves", async () => {
+    const api = HttpApi.make("plain-request-jsonapi-response").add(
+      Group.make(Article, Endpoint.create(Article, { payloadMediaType: "application/json" }))
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers.handle("create", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      Layer.provide(Middleware.layerHostNegotiated)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request("http://localhost/articles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            data: {
+              type: "articles",
+              attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+            }
+          })
+        })
+      )
+      expect(response.status).toBe(201)
+      expect(response.headers.get("content-type")).toContain(MEDIA_TYPE)
+    } finally {
+      await dispose()
+    }
+  })
+
+  it("changes neither the payload schema nor anything else about the endpoint", () => {
+    const plain = Endpoint.create(Article, { payloadMediaType: "application/json" })
+    expectTypeOf<HttpApiEndpoint.Payload<typeof plain>["Type"]>().toEqualTypeOf<typeof Article.createPayload.Type>()
+    expect([plain.identifier, plain.method, plain.path]).toEqual([
+      createArticle.identifier,
+      createArticle.method,
+      createArticle.path
+    ])
+    expect([...plain.middlewares].map((m) => m.key)).toEqual([...createArticle.middlewares].map((m) => m.key))
+  })
+
+  it("threads through Endpoint.resource / Group.resource's per-endpoint create/update config", async () => {
+    const api = HttpApi.make("generated-plain-media").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: {
+          get: false,
+          list: false,
+          delete: false,
+          create: { payload: Article.createInput, payloadMediaType: "application/json" },
+          update: { payload: Article.updateInput, payloadMediaType: "application/json" }
+        }
+      })
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers
+        .handle("create", () => Effect.succeed({ data: sampleArticle }))
+        .handle("update", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    expect((await post(api, live, "application/json")).status).toBe(201)
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(415)
+  })
+
+  it("leaves Endpoint.resource's writes on the JSON:API media type when no override is given (regression)", async () => {
+    const api = HttpApi.make("generated-default-media").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: { get: false, list: false, delete: false, create: { payload: Article.createInput } }
+      })
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers
+        .handle("create", () => Effect.succeed({ data: sampleArticle }))
+        .handle("update", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(201)
+    expect((await post(api, live, "application/json")).status).toBe(415)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Query override (Endpoint.get)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.get query override", () => {
+  // A read contract of the api's own: a flag JSON:API has no query family for,
+  // alongside an `include` grammar the api owns rather than derives.
+  const FlatGetQuery = Schema.Struct({
+    include: Schema.optionalKey(Schema.String),
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+  })
+
+  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) => endpoint.query as Schema.Codec<any, any>
+
+  it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
+    const endpoint = Endpoint.get(Article, { include: true, fields: true })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author", "fields[articles]": "title" })).toEqual({
+      include: ["author"],
+      fields: { articles: ["title"] }
+    })
+  })
+
+  it("replaces the whole composition when `query` is supplied", () => {
+    const endpoint = Endpoint.get(Article, { query: FlatGetQuery })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author", includeDeleted: "true" })).toEqual({
+      include: "author",
+      includeDeleted: "true"
+    })
+  })
+
+  it("ignores the feature options once `query` is supplied", () => {
+    const endpoint = Endpoint.get(Article, { include: true, fields: true, query: FlatGetQuery })
+    expect(() =>
+      Schema.decodeUnknownSync(queryOf(endpoint))({ "fields[articles]": "title" }, { onExcessProperty: "error" })
+    ).toThrow()
+  })
+
+  it("changes only the query — name, method, path, params, success and middleware are untouched", () => {
+    const flat = Endpoint.get(Article, { query: FlatGetQuery })
+    const composed = Endpoint.get(Article)
+    expect([flat.identifier, flat.method, flat.path]).toEqual([composed.identifier, composed.method, composed.path])
+    expect([...flat.middlewares].map((m) => m.key)).toEqual([...composed.middlewares].map((m) => m.key))
+    expectTypeOf<HttpApiEndpoint.Success<typeof flat>["Type"]>().toEqualTypeOf<
+      HttpApiEndpoint.Success<typeof composed>["Type"]
+    >()
+  })
+
+  it("types the overridden query as the supplied schema", () => {
+    const flat = Endpoint.get(Article, { query: FlatGetQuery })
+    expectTypeOf<HttpApiEndpoint.Query<typeof flat>["Type"]>().toEqualTypeOf<typeof FlatGetQuery.Type>()
+
+    const composed = Endpoint.get(Article, { include: true })
+    expectTypeOf<HttpApiEndpoint.Query<typeof composed>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author" | "comments" | "comments.author">
+    }>()
+  })
+
+  it("threads through Endpoint.resource's per-endpoint get config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: { get: { query: FlatGetQuery } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.get!))({ includeDeleted: "true" })).toEqual({
+      includeDeleted: "true"
+    })
+  })
+
+  it("leaves Endpoint.resource's get query package-composed when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.get!))({ include: "author" })).toEqual({ include: ["author"] })
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { list: false, create: false, update: false, delete: false, get: { query: FlatGetQuery } }
+    })
+    expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.get>["Type"]>().toEqualTypeOf<typeof FlatGetQuery.Type>()
+  })
+})
+
+describe("HTTP round-trip with repeated ?include= keys", () => {
+  const IncludeApi = HttpApi.make("repeated-include-blog").add(
+    Group.make(Article, Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }))
+  )
+
+  const IncludeLive = HttpApiBuilder.group(IncludeApi, "articles", (handlers) =>
+    handlers.handle("get", ({ query }) =>
+      Effect.succeed({
+        data: sampleArticle,
+        meta: { requested: (query.include ?? []).join("|") }
+      } as any)
+    )
+  )
+
+  const request = async (url: string) => {
+    const appLayer = HttpApiBuilder.layer(IncludeApi as never).pipe(
+      Layer.provide(IncludeLive),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }))
+      return { status: response.status, body: (await response.json()) as any }
+    } finally {
+      await dispose()
+    }
+  }
+
+  it("serves 200 for the comma grammar (regression: unchanged)", async () => {
+    const response = await request("http://localhost/articles/1?include=author,comments")
+    expect(response.status).toBe(200)
+    expect(response.body.meta.requested).toBe("author|comments")
+  })
+
+  it("serves 200 for the repeated-key spelling, decoding to the same set", async () => {
+    const response = await request("http://localhost/articles/1?include=author&include=comments")
+    expect(response.status).toBe(200)
+    expect(response.body.meta.requested).toBe("author|comments")
+  })
+
+  it("still answers 400 for an unknown path in either spelling", async () => {
+    expect((await request("http://localhost/articles/1?include=nope")).status).toBe(400)
+    expect((await request("http://localhost/articles/1?include=author&include=nope")).status).toBe(400)
+  })
+})

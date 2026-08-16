@@ -27,11 +27,16 @@
  * unknown sort fields) fail decoding, which HttpApi surfaces as a 400 — the
  * spec-compliant response.
  *
+ * `?include=` accepts both spellings of the same set: the spec's comma grammar
+ * (`?include=a,b`) and the repeated key (`?include=a&include=b`) that
+ * `UrlParams.toRecord` decodes to an array. Both decode identically; encoding
+ * always emits the comma form.
+ *
  * @since 0.1.0
  */
 import type { Types } from "effect"
 import { Effect, Schema, SchemaTransformation } from "effect"
-import { CommaSeparated, flatten, nest, Sort as SortCodec } from "./internal/codecs.js"
+import { CommaSeparated, flatten, nest, Repeatable, Sort as SortCodec } from "./internal/codecs.js"
 import type { Any, AttributeKeys, IncludeDepth, IncludePath, IncludePathsTo, RelationshipTargets } from "./Resource.js"
 import { allTargets, attributeKeys, includePaths } from "./Resource.js"
 
@@ -566,6 +571,9 @@ export interface Options<R extends Any> {
    * {@link IncludeOptions} object constrains that to an explicit `paths`
    * allow-list and/or a `depth` bound. Paths are validated against the result;
    * unknown paths produce a 400.
+   *
+   * Both wire spellings are accepted — `?include=a,b` and `?include=a&include=b`
+   * — and decode to the same set.
    */
   readonly include?: IncludeOption<R>
   /**
@@ -646,7 +654,7 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
  * @category type-level
  */
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  (IncludeEnabled<O["include"]> extends true ? { readonly include: Schema.optionalKey<Schema.String> } : {}) &
+  (IncludeEnabled<O["include"]> extends true ? { readonly include: Schema.optionalKey<Repeatable> } : {}) &
     ([O["fields"]] extends [true]
       ? {
           readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
@@ -730,7 +738,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     nestedFields.include = Schema.optionalKey(
       Include(resources, (typeof include === "object" ? include : undefined) as never)
     )
-    flatFields.include = Schema.optionalKey(Schema.String)
+    flatFields.include = Schema.optionalKey(Repeatable)
   }
 
   if (options.fields === true) {
