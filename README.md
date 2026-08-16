@@ -52,6 +52,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
+  - [Overriding the success document](#overriding-the-success-document)
   - [Overriding the delete response](#overriding-the-delete-response)
   - [Overriding the list query](#overriding-the-list-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
@@ -554,6 +555,50 @@ const articles = Group.resource(Article, {
   endpoints: {
     create: { payload: Article.createInput },
     update: { payload: Article.updateInput }
+  }
+})
+```
+
+### Overriding the success document
+
+`Endpoint.get`, `create` and `update` bind their response to the resource's `document()`, and
+`Endpoint.list` to its `collection()` — the resource is the single source of truth for what a
+handler returns. Some apis need the response to be a **wire variant** of the resource rather than the
+resource itself: the assembler stringifies every link before the document leaves the server, so
+`links.self` is a plain string on the wire, while the resource's own `links.self` is
+`Document.Link`, which decodes an absolute reference to a `URL`. A generated client then hands every
+call site a `URL` where it wants a `string`.
+
+Pass `success` to supply that schema. It defaults to today's `document()` / `collection()`, so
+existing endpoints are unchanged; only the response moves — path, params, query parameters, request
+payload, errors and middleware stay exactly as they were. Any schema works, exactly as with
+`payload`: the document envelope is untouched, so `Handlers.offsetPaginationLinks` and the rest of
+the handler helpers still apply.
+
+```ts
+// The wire variant: the resource, with its link members narrowed to plain strings
+const WireArticle = Schema.Struct({
+  ...Article.fields,
+  links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+})
+
+// GET /articles/:id → 200, { data: { …, links: { self: "https://…" } } } — `self` a string
+Endpoint.get(Article, { success: Document.DataDocument(WireArticle), errors: [ArticleNotFound] })
+
+// GET /articles → 200, the collection of the same
+Endpoint.list(Article, { success: Document.CollectionDocument(WireArticle), page: Query.Page.Offset })
+```
+
+The same option is available per-endpoint when generating a whole group, so a `Group.resource` call
+site can adopt the wire variant without giving up the generated surface:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: {
+    get: { success: Document.DataDocument(WireArticle) },
+    list: { success: Document.CollectionDocument(WireArticle) },
+    create: { success: Document.DataDocument(WireArticle) },
+    update: { success: Document.DataDocument(WireArticle) }
   }
 })
 ```

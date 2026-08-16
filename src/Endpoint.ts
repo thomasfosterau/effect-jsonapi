@@ -4,19 +4,19 @@
  * Thin, convention-baking constructors over `HttpApiEndpoint`, one per
  * JSON:API operation:
  *
- * | Constructor          | Method & path                              | Payload                  | Success                    |
- * | -------------------- | ------------------------------------------ | ------------------------ | -------------------------- |
- * | `get`                | `GET /<type>/:id`                          | —                        | 200, single-resource doc   |
- * | `list`               | `GET /<type>`                              | —                        | 200, collection doc        |
- * | `create`             | `POST /<type>`                             | `createPayload` (lid ok) | 201, single-resource doc   |
- * | `update`             | `PATCH /<type>/:id`                        | `updatePayload`          | 200, single-resource doc   |
- * | `delete`             | `DELETE /<type>/:id`                       | —                        | 204, no content (`success`)|
- * | `collection`         | `GET <path>`                               | —                        | 200, heterogeneous doc     |
- * | `related`            | `GET /<type>/:id/<name>`                   | —                        | 200, related resource(s)   |
- * | `getRelationship`    | `GET /<type>/:id/relationships/<name>`     | —                        | 200, linkage doc           |
- * | `updateRelationship` | `PATCH /<type>/:id/relationships/<name>`   | linkage                  | 200, linkage doc           |
- * | `addRelationship`    | `POST /<type>/:id/relationships/<name>`    | linkage (to-many only)   | 200, linkage doc           |
- * | `removeRelationship` | `DELETE /<type>/:id/relationships/<name>`  | linkage (to-many only)   | 204, no content            |
+ * | Constructor          | Method & path                             | Payload                  | Success                              |
+ * | -------------------- | ----------------------------------------- | ------------------------ | ------------------------------------ |
+ * | `get`                | `GET /<type>/:id`                         | —                        | 200, single-resource doc (`success`) |
+ * | `list`               | `GET /<type>`                             | —                        | 200, collection doc (`success`)      |
+ * | `create`             | `POST /<type>`                            | `createPayload` (lid ok) | 201, single-resource doc (`success`) |
+ * | `update`             | `PATCH /<type>/:id`                       | `updatePayload`          | 200, single-resource doc (`success`) |
+ * | `delete`             | `DELETE /<type>/:id`                      | —                        | 204, no content (`success`)          |
+ * | `collection`         | `GET <path>`                              | —                        | 200, heterogeneous doc               |
+ * | `related`            | `GET /<type>/:id/<name>`                  | —                        | 200, related resource(s)             |
+ * | `getRelationship`    | `GET /<type>/:id/relationships/<name>`    | —                        | 200, linkage doc                     |
+ * | `updateRelationship` | `PATCH /<type>/:id/relationships/<name>`  | linkage                  | 200, linkage doc                     |
+ * | `addRelationship`    | `POST /<type>/:id/relationships/<name>`   | linkage (to-many only)   | 200, linkage doc                     |
+ * | `removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | linkage (to-many only)   | 204, no content                      |
  *
  * Every endpoint automatically:
  *   - serves and accepts `application/vnd.api+json`
@@ -37,6 +37,13 @@
  * body — a soft delete returning the tombstone resource — instead of 204, and
  * `list` a `query` option replacing the composed query schema wholesale, for
  * apis whose list contract is a flat struct of their own.
+ *
+ * The primary-data endpoints take the same `success` option: `get` / `create` /
+ * `update` default to the resource's `document()` and `list` to its
+ * `collection()`, and any schema can replace that — most usefully a *wire*
+ * variant of the resource, for an api whose assembler emits a narrower shape
+ * than the resource's own decoded types (plain-string link members rather than
+ * `URL`, say) and whose clients must consume that shape.
  *
  * For the common case, {@link resource} derives an entire endpoint set — the
  * CRUD surface plus every relationship's endpoints, with query parameters
@@ -133,6 +140,26 @@ const queryConfig = (options?: {
   filter: options?.filter
 })
 
+// The success document the single-resource endpoints (`get`, `create`,
+// `update`) bind by default — the resource's own `document()` at the effective
+// document `meta`. The default their `success` option replaces.
+type DefaultDocument<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  DocMeta extends Schema.Top
+> = DataDocument<Resource<Type, Attributes, Rels, Meta>, DefaultIncluded<Rels>, DocMeta>
+
+// The collection counterpart, for `list` — the resource's `collection()`.
+type DefaultCollection<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  DocMeta extends Schema.Top
+> = CollectionDocument<Resource<Type, Attributes, Rels, Meta>, DefaultIncluded<Rels>, DocMeta>
+
 // ---------------------------------------------------------------------------
 // get — GET /<type>/:id
 // ---------------------------------------------------------------------------
@@ -145,10 +172,15 @@ const queryConfig = (options?: {
  * `200 { data: null }`); the compound `included` union is derived from the
  * resource's relationships.
  *
+ * Pass `success` to override that document with any schema — most usefully a
+ * *wire* variant of the resource, for an api whose assembler emits a narrower
+ * shape than the resource's own decoded types. Only the response changes; the
+ * `:id` path param, query parameters, errors and middleware are unaffected.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { ApiError, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Document, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
@@ -182,6 +214,17 @@ const queryConfig = (options?: {
  *     errors: [ArticleNotFound]
  *   })
  * )
+ *
+ * // …or answering with a wire variant of the resource: the shape the assembler
+ * // emits and the generated client consumes — `links.self` a plain string
+ * const WireArticle = Schema.Struct({
+ *   ...Article.fields,
+ *   links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+ * })
+ * const wireArticles = Group.make(
+ *   Article,
+ *   Endpoint.get(Article, { success: Document.DataDocument(WireArticle) })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -197,7 +240,8 @@ export const get = <
   const Path extends `/${string}` = `/${Type}/:id`,
   const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
-  DocMeta extends Schema.Top = Meta
+  DocMeta extends Schema.Top = Meta,
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -207,6 +251,15 @@ export const get = <
     readonly fields?: Fields
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
+    /**
+     * Override the success document schema. Defaults to the resource's
+     * `document()` (which `meta` then tunes); pass a wire variant of the
+     * resource, or any schema of your own — it is served as
+     * `application/vnd.api+json`.
+     *
+     * @since 0.10.0
+     */
+    readonly success?: Success
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
@@ -222,7 +275,10 @@ export const get = <
       }
     ),
     success: asJsonApi(
-      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+      (options?.success ??
+        resource.document(
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+        )) as Success
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -270,6 +326,12 @@ type DefaultListQuery<
  * layer consumes, or that carry parameters JSON:API has no family for. Only
  * the query changes; the success document, path, errors and middleware are
  * unaffected.
+ *
+ * Pass `success` to override the collection document itself with any schema —
+ * most usefully a *wire* variant of the resource, for an api whose assembler
+ * emits a narrower shape than the resource's own decoded types. The document
+ * envelope is unchanged, so `Handlers.offsetPaginationLinks` and friends still
+ * populate its top-level `links`.
  *
  * @example
  * ```ts
@@ -337,7 +399,8 @@ export const list = <
     Sort,
     PageFields,
     FilterFields
-  >
+  >,
+  Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, DocMeta>
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -361,6 +424,15 @@ export const list = <
      * bracketed on the wire by `Query.bracketPageKeys` but decoded flat.
      */
     readonly query?: QuerySchema
+    /**
+     * Override the success document schema. Defaults to the resource's
+     * `collection()` (which `meta` then tunes); pass a collection document over
+     * a wire variant of the resource, or any schema of your own — it is served
+     * as `application/vnd.api+json`.
+     *
+     * @since 0.10.0
+     */
+    readonly success?: Success
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
@@ -376,7 +448,10 @@ export const list = <
         }
       )) as QuerySchema,
     success: asJsonApi(
-      resource.collection((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+      (options?.success ??
+        resource.collection(
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+        )) as Success
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -399,6 +474,10 @@ export const list = <
  * resource's own flat `createInput` projection, for a write contract that is a
  * flat command input rather than a JSON:API document. Only the request body
  * changes; the success document, path, errors and middleware are unaffected.
+ *
+ * Pass `success` to override the response document the same way — most usefully
+ * a *wire* variant of the resource, for an api whose assembler emits a narrower
+ * shape than the resource's own decoded types. The two are independent.
  *
  * @example
  * ```ts
@@ -439,7 +518,8 @@ export const create = <
   const Name extends string = "create",
   const Path extends `/${string}` = `/${Type}`,
   DocMeta extends Schema.Top = Meta,
-  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["createPayload"]
+  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["createPayload"],
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -451,12 +531,24 @@ export const create = <
      * the flat command-input shape, or any schema of your own.
      */
     readonly payload?: Payload
+    /**
+     * Override the success document schema. Defaults to the resource's
+     * `document()` (which `meta` then tunes); pass a wire variant of the
+     * resource, or any schema of your own — it is served as
+     * `application/vnd.api+json`, at 201 like the default.
+     *
+     * @since 0.10.0
+     */
+    readonly success?: Success
   }
 ) =>
   HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
     payload: asJsonApi((options?.payload ?? resource.createPayload) as Payload),
     success: asJsonApi(
-      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }),
+      (options?.success ??
+        resource.document(
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+        )) as Success,
       201
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -481,6 +573,10 @@ export const create = <
  * flat command input rather than a JSON:API document. Only the request body
  * changes; the `:id` path param, success document, errors and middleware are
  * unaffected.
+ *
+ * Pass `success` to override the response document the same way — most usefully
+ * a *wire* variant of the resource, for an api whose assembler emits a narrower
+ * shape than the resource's own decoded types. The two are independent.
  *
  * @example
  * ```ts
@@ -521,7 +617,8 @@ export const update = <
   const Name extends string = "update",
   const Path extends `/${string}` = `/${Type}/:id`,
   DocMeta extends Schema.Top = Meta,
-  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["updatePayload"]
+  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["updatePayload"],
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -533,13 +630,25 @@ export const update = <
      * the flat command-input shape, or any schema of your own.
      */
     readonly payload?: Payload
+    /**
+     * Override the success document schema. Defaults to the resource's
+     * `document()` (which `meta` then tunes); pass a wire variant of the
+     * resource, or any schema of your own — it is served as
+     * `application/vnd.api+json`.
+     *
+     * @since 0.10.0
+     */
+    readonly success?: Success
   }
 ) =>
   HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
     payload: asJsonApi((options?.payload ?? resource.updatePayload) as Payload),
     success: asJsonApi(
-      resource.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
+      (options?.success ??
+        resource.document(
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+        )) as Success
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -1614,6 +1723,14 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
   readonly include?: Query.IncludeOption<R>
   readonly fields?: boolean
   readonly meta?: MetaOption<Meta>
+  /**
+   * Override the success document schema. Defaults to the resource's
+   * `document()` (which `meta` then tunes); pass a wire variant of the
+   * resource, or any schema of your own.
+   *
+   * @since 0.10.0
+   */
+  readonly success?: Schema.Top
 }
 
 /**
@@ -1632,6 +1749,14 @@ export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetC
    * schema for a list contract of your own.
    */
   readonly query?: Schema.Top
+  /**
+   * Override the success document schema. Defaults to the resource's
+   * `collection()` (which `meta` then tunes); pass a collection document over a
+   * wire variant of the resource, or any schema of your own.
+   *
+   * @since 0.10.0
+   */
+  readonly success?: Schema.Top
 }
 
 /**
@@ -1651,6 +1776,14 @@ export interface WriteConfig<Meta extends Schema.Top> {
    * resource's flat `createInput` / `updateInput`, or any schema of your own.
    */
   readonly payload?: Schema.Top
+  /**
+   * Override the success document schema. Defaults to the resource's
+   * `document()` (which `meta` then tunes); pass a wire variant of the
+   * resource, or any schema of your own.
+   *
+   * @since 0.10.0
+   */
+  readonly success?: Schema.Top
 }
 
 /**
@@ -1788,8 +1921,9 @@ type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta",
 type EffPayload<C, Default extends Schema.Top> =
   FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default
 
-// The effective success response of a `delete` config: the captured `success`
-// override, else the 204 no-content default.
+// The effective success response of an endpoint config: the captured `success`
+// override, else that endpoint's default response — the resource's document /
+// collection for the primary-data endpoints, the 204 no-content for `delete`.
 type EffSuccess<C, Default extends Schema.Top> =
   FieldOr<C, "success", Default> extends infer S ? (S extends Schema.Top ? S : Default) : Default
 
@@ -1847,7 +1981,8 @@ type GeneratedGet<
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
           ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
           ListFields<C, GFields>,
-          EffMeta<C, GMeta, Meta>
+          EffMeta<C, GMeta, Meta>,
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -1896,7 +2031,8 @@ type GeneratedList<
               ListPage<C, GPage>,
               ListFilter<C, GFilter>
             >
-          >
+          >,
+          EffSuccess<C, DefaultCollection<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -1922,7 +2058,8 @@ type GeneratedCreate<
           FieldOr<C, "name", "create"> extends string ? FieldOr<C, "name", "create"> : "create",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
           EffMeta<C, GMeta, Meta>,
-          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["createPayload"]>
+          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["createPayload"]>,
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -1948,7 +2085,8 @@ type GeneratedUpdate<
           FieldOr<C, "name", "update"> extends string ? FieldOr<C, "name", "update"> : "update",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
           EffMeta<C, GMeta, Meta>,
-          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["updatePayload"]>
+          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["updatePayload"]>,
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -2429,6 +2567,12 @@ export const resource = <
     return out
   }
 
+  // An endpoint's `success` override is per-endpoint only: the primary-data
+  // endpoints answer with a single-resource document and `list` with a
+  // collection, so there is no sensible top-level default to fall back to.
+  const successOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+    config.success !== undefined ? { success: config.success } : {}
+
   const endpoints: Array<HttpApiEndpoint.Top> = []
 
   const getOp = opConfig("get")
@@ -2437,7 +2581,8 @@ export const resource = <
       get(resource, {
         include: pick(getOp.config, "include", gInclude),
         fields: pick(getOp.config, "fields", gFields),
-        ...commonOpts(getOp.config, true)
+        ...commonOpts(getOp.config, true),
+        ...successOpt(getOp.config)
       } as never)
     )
   }
@@ -2456,7 +2601,8 @@ export const resource = <
         ...(page !== undefined ? { page } : {}),
         ...(filter !== undefined ? { filter } : {}),
         ...(listOp.config.query !== undefined ? { query: listOp.config.query } : {}),
-        ...commonOpts(listOp.config, true)
+        ...commonOpts(listOp.config, true),
+        ...successOpt(listOp.config)
       } as never)
     )
   }
@@ -2468,21 +2614,30 @@ export const resource = <
 
   const createOp = opConfig("create")
   if (createOp.emit) {
-    endpoints.push(create(resource, { ...commonOpts(createOp.config, true), ...payloadOpt(createOp.config) } as never))
+    endpoints.push(
+      create(resource, {
+        ...commonOpts(createOp.config, true),
+        ...payloadOpt(createOp.config),
+        ...successOpt(createOp.config)
+      } as never)
+    )
   }
   const updateOp = opConfig("update")
   if (updateOp.emit) {
-    endpoints.push(update(resource, { ...commonOpts(updateOp.config, true), ...payloadOpt(updateOp.config) } as never))
+    endpoints.push(
+      update(resource, {
+        ...commonOpts(updateOp.config, true),
+        ...payloadOpt(updateOp.config),
+        ...successOpt(updateOp.config)
+      } as never)
+    )
   }
-  // A `delete` endpoint's success override is per-endpoint only: no other
-  // generated endpoint answers with no content, so there is no sensible
-  // top-level default to fall back to.
   const deleteOp = opConfig("delete")
   if (deleteOp.emit) {
     endpoints.push(
       deleteEndpoint(resource, {
         ...commonOpts(deleteOp.config, false),
-        ...(deleteOp.config.success !== undefined ? { success: deleteOp.config.success } : {}),
+        ...successOpt(deleteOp.config),
         ...(deleteOp.config.status !== undefined ? { status: deleteOp.config.status } : {})
       } as never)
     )
