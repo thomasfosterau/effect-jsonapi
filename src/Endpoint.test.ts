@@ -2170,3 +2170,134 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
     expect((await post(api, live, "application/json")).status).toBe(415)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Query override (Endpoint.get)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.get query override", () => {
+  // A read contract of the api's own: a flag JSON:API has no query family for,
+  // alongside an `include` grammar the api owns rather than derives.
+  const FlatGetQuery = Schema.Struct({
+    include: Schema.optionalKey(Schema.String),
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+  })
+
+  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) => endpoint.query as Schema.Codec<any, any>
+
+  it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
+    const endpoint = Endpoint.get(Article, { include: true, fields: true })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author", "fields[articles]": "title" })).toEqual({
+      include: ["author"],
+      fields: { articles: ["title"] }
+    })
+  })
+
+  it("replaces the whole composition when `query` is supplied", () => {
+    const endpoint = Endpoint.get(Article, { query: FlatGetQuery })
+    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author", includeDeleted: "true" })).toEqual({
+      include: "author",
+      includeDeleted: "true"
+    })
+  })
+
+  it("ignores the feature options once `query` is supplied", () => {
+    const endpoint = Endpoint.get(Article, { include: true, fields: true, query: FlatGetQuery })
+    expect(() =>
+      Schema.decodeUnknownSync(queryOf(endpoint))({ "fields[articles]": "title" }, { onExcessProperty: "error" })
+    ).toThrow()
+  })
+
+  it("changes only the query — name, method, path, params, success and middleware are untouched", () => {
+    const flat = Endpoint.get(Article, { query: FlatGetQuery })
+    const composed = Endpoint.get(Article)
+    expect([flat.identifier, flat.method, flat.path]).toEqual([composed.identifier, composed.method, composed.path])
+    expect([...flat.middlewares].map((m) => m.key)).toEqual([...composed.middlewares].map((m) => m.key))
+    expectTypeOf<HttpApiEndpoint.Success<typeof flat>["Type"]>().toEqualTypeOf<
+      HttpApiEndpoint.Success<typeof composed>["Type"]
+    >()
+  })
+
+  it("types the overridden query as the supplied schema", () => {
+    const flat = Endpoint.get(Article, { query: FlatGetQuery })
+    expectTypeOf<HttpApiEndpoint.Query<typeof flat>["Type"]>().toEqualTypeOf<typeof FlatGetQuery.Type>()
+
+    const composed = Endpoint.get(Article, { include: true })
+    expectTypeOf<HttpApiEndpoint.Query<typeof composed>["Type"]>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author" | "comments" | "comments.author">
+    }>()
+  })
+
+  it("threads through Endpoint.resource's per-endpoint get config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: { get: { query: FlatGetQuery } }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.get!))({ includeDeleted: "true" })).toEqual({
+      includeDeleted: "true"
+    })
+  })
+
+  it("leaves Endpoint.resource's get query package-composed when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+    expect(Schema.decodeUnknownSync(queryOf(byName.get!))({ include: "author" })).toEqual({ include: ["author"] })
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: { list: false, create: false, update: false, delete: false, get: { query: FlatGetQuery } }
+    })
+    expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.get>["Type"]>().toEqualTypeOf<typeof FlatGetQuery.Type>()
+  })
+})
+
+describe("HTTP round-trip with repeated ?include= keys", () => {
+  const IncludeApi = HttpApi.make("repeated-include-blog").add(
+    Group.make(Article, Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }))
+  )
+
+  const IncludeLive = HttpApiBuilder.group(IncludeApi, "articles", (handlers) =>
+    handlers.handle("get", ({ query }) =>
+      Effect.succeed({
+        data: sampleArticle,
+        meta: { requested: (query.include ?? []).join("|") }
+      } as any)
+    )
+  )
+
+  const request = async (url: string) => {
+    const appLayer = HttpApiBuilder.layer(IncludeApi as never).pipe(
+      Layer.provide(IncludeLive),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }))
+      return { status: response.status, body: (await response.json()) as any }
+    } finally {
+      await dispose()
+    }
+  }
+
+  it("serves 200 for the comma grammar (regression: unchanged)", async () => {
+    const response = await request("http://localhost/articles/1?include=author,comments")
+    expect(response.status).toBe(200)
+    expect(response.body.meta.requested).toBe("author|comments")
+  })
+
+  it("serves 200 for the repeated-key spelling, decoding to the same set", async () => {
+    const response = await request("http://localhost/articles/1?include=author&include=comments")
+    expect(response.status).toBe(200)
+    expect(response.body.meta.requested).toBe("author|comments")
+  })
+
+  it("still answers 400 for an unknown path in either spelling", async () => {
+    expect((await request("http://localhost/articles/1?include=nope")).status).toBe(400)
+    expect((await request("http://localhost/articles/1?include=author&include=nope")).status).toBe(400)
+  })
+})

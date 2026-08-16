@@ -56,7 +56,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Overriding the write status](#overriding-the-write-status)
   - [Overriding the payload media type](#overriding-the-payload-media-type)
   - [Overriding the delete response](#overriding-the-delete-response)
-  - [Overriding the list query](#overriding-the-list-query)
+  - [Overriding the read query](#overriding-the-read-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
@@ -696,7 +696,7 @@ const articles = Group.resource(Article, {
 })
 ```
 
-### Overriding the list query
+### Overriding the read query
 
 `Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter`
 options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape
@@ -729,13 +729,30 @@ Endpoint.list(Article, { query: ListArticles })
 cursor spec-canonical on the wire (`page[offset]` / `page[limit]`) while the handler still sees
 `{ offset, limit }` — but any schema works, bracketed or not.
 
-The same option is available per-endpoint when generating a whole group:
+`Endpoint.get` takes the same option, over the `include` / `fields` parameters it composes — for a
+single-resource fetch carrying a flag JSON:API has no family for, or an `?include=` grammar the api
+owns rather than derives:
+
+```ts
+Endpoint.get(Article, {
+  query: Schema.Struct({
+    include: Schema.optionalKey(Schema.String),
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+  })
+})
+```
+
+Both are available per-endpoint when generating a whole group:
 
 ```ts
 const articles = Group.resource(Article, {
-  endpoints: { list: { query: ListArticles } }
+  endpoints: { list: { query: ListArticles }, get: { query: GetArticle } }
 })
 ```
+
+Note that the package's own `?include=` needs no escape hatch for the **repeated-key** spelling:
+`?include=author&include=comments` and `?include=author,comments` denote the same set and both
+decode to it, so a client using either is served identically. Encoding always emits the comma form.
 
 ### Generating a whole group from a resource
 

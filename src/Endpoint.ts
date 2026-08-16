@@ -35,8 +35,8 @@
  * `createInput` / `updateInput`) rather than a JSON:API document. `delete`
  * likewise takes a `success` option for apis whose deletion answers with a
  * body — a soft delete returning the tombstone resource — instead of 204, and
- * `list` a `query` option replacing the composed query schema wholesale, for
- * apis whose list contract is a flat struct of their own.
+ * `get` / `list` a `query` option replacing the composed query schema
+ * wholesale, for apis whose read contract is a struct of their own.
  *
  * The write endpoints take a `status` option alongside, for apis whose
  * creations answer with a status other than the spec's recommended 201 — the
@@ -170,6 +170,27 @@ type DefaultCollection<
 // get — GET /<type>/:id
 // ---------------------------------------------------------------------------
 
+// The query schema `get` composes from its own feature options — the default
+// its `query` option overrides. A single-resource fetch carries no `sort` /
+// `page` / `filter`, so only `include` and `fields` vary.
+type DefaultGetQuery<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  Fields extends boolean
+> = Query.QuerySchema<
+  Resource<Type, Attributes, Rels, Meta>,
+  {
+    readonly include: Include
+    readonly fields: Fields
+    readonly sort: false
+    readonly page: undefined
+    readonly filter: undefined
+  }
+>
+
 /**
  * `GET /<type>/:id` — fetch a single resource.
  *
@@ -182,6 +203,11 @@ type DefaultCollection<
  * *wire* variant of the resource, for an api whose assembler emits a narrower
  * shape than the resource's own decoded types. Only the response changes; the
  * `:id` path param, query parameters, errors and middleware are unaffected.
+ *
+ * Pass `query` to replace the composed `include` / `fields` parameters with any
+ * schema, exactly as {@link list} takes one — for an api whose read contract
+ * carries parameters JSON:API has no family for, or whose `?include=` grammar
+ * is its own. Only the query changes.
  *
  * @example
  * ```ts
@@ -231,6 +257,17 @@ type DefaultCollection<
  *   Article,
  *   Endpoint.get(Article, { success: Document.DataDocument(WireArticle) })
  * )
+ *
+ * // …or with a read query of your own, replacing the composed parameters
+ * const flatArticles = Group.make(
+ *   Article,
+ *   Endpoint.get(Article, {
+ *     query: Schema.Struct({
+ *       include: Schema.optionalKey(Schema.String),
+ *       includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
+ *     })
+ *   })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -247,6 +284,7 @@ export const get = <
   const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta,
+  QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, Include, Fields>,
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
 >(
   resource: Resource<Type, Attributes, Rels, Meta>,
@@ -257,6 +295,15 @@ export const get = <
     readonly fields?: Fields
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
+    /**
+     * Override the whole query schema. Defaults to the `Query.schema`
+     * composition of the `include` / `fields` options above (which those
+     * options are then ignored by); pass any schema for a read contract of your
+     * own — the counterpart to `list`'s `query`.
+     *
+     * @since 0.11.0
+     */
+    readonly query?: QuerySchema
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -270,16 +317,17 @@ export const get = <
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    query: Query.schema(
-      resource,
-      queryConfig(options) as {
-        readonly include: Include
-        readonly fields: Fields
-        readonly sort: false
-        readonly page: undefined
-        readonly filter: undefined
-      }
-    ),
+    query: (options?.query ??
+      Query.schema(
+        resource,
+        queryConfig(options) as {
+          readonly include: Include
+          readonly fields: Fields
+          readonly sort: false
+          readonly page: undefined
+          readonly filter: undefined
+        }
+      )) as QuerySchema,
     success: asJsonApi(
       (options?.success ??
         resource.document(
@@ -1795,6 +1843,14 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
   readonly fields?: boolean
   readonly meta?: MetaOption<Meta>
   /**
+   * Override the whole query schema. Defaults to the `Query.schema`
+   * composition of `include` / `fields`; pass any schema for a read contract of
+   * your own. `ListConfig` documents the collection counterpart.
+   *
+   * @since 0.11.0
+   */
+  readonly query?: Schema.Top
+  /**
    * Override the success document schema. Defaults to the resource's
    * `document()` (which `meta` then tunes); pass a wire variant of the
    * resource, or any schema of your own.
@@ -2069,6 +2125,17 @@ type GeneratedGet<
           ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
           ListFields<C, GFields>,
           EffMeta<C, GMeta, Meta>,
+          EffQuery<
+            C,
+            DefaultGetQuery<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+              ListFields<C, GFields>
+            >
+          >,
           EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
         >
       >
@@ -2666,6 +2733,12 @@ export const resource = <
   const statusOpt = (config: Record<string, unknown>): Record<string, unknown> =>
     config.status !== undefined ? { status: config.status } : {}
 
+  // A read endpoint's `query` override is per-endpoint only: it replaces that
+  // endpoint's whole composed query, and `get`'s and `list`'s compositions
+  // differ, so there is no sensible top-level default to fall back to.
+  const queryOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+    config.query !== undefined ? { query: config.query } : {}
+
   const endpoints: Array<HttpApiEndpoint.Top> = []
 
   const getOp = opConfig("get")
@@ -2674,14 +2747,12 @@ export const resource = <
       get(resource, {
         include: pick(getOp.config, "include", gInclude),
         fields: pick(getOp.config, "fields", gFields),
+        ...queryOpt(getOp.config),
         ...commonOpts(getOp.config, true),
         ...successOpt(getOp.config)
       } as never)
     )
   }
-  // A `list` endpoint's `query` override is per-endpoint only: it replaces the
-  // whole composed query, which no other generated endpoint shares, so there is
-  // no sensible top-level default to fall back to.
   const listOp = opConfig("list")
   if (listOp.emit) {
     const page = pick(listOp.config, "page", gPage)
@@ -2693,7 +2764,7 @@ export const resource = <
         sort: pick(listOp.config, "sort", gSort),
         ...(page !== undefined ? { page } : {}),
         ...(filter !== undefined ? { filter } : {}),
-        ...(listOp.config.query !== undefined ? { query: listOp.config.query } : {}),
+        ...queryOpt(listOp.config),
         ...commonOpts(listOp.config, true),
         ...successOpt(listOp.config)
       } as never)

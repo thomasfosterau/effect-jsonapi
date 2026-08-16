@@ -30,6 +30,33 @@ export const CommaSeparated = <S extends Schema.Top>(item: S): CommaSeparated<S>
   )
 
 /**
+ * The wire form of a repeatable comma-separated parameter.
+ *
+ * JSON:API's comma grammar (`?include=a,b`) and the repeated-key spelling
+ * (`?include=a&include=b`) denote the same set, and `UrlParams.toRecord`
+ * decodes a repeated key to an **array** rather than a string. Accept both:
+ * an array is joined back to the canonical comma form, which the item codec
+ * then splits exactly as before. Encoding always emits the single comma form,
+ * so nothing a client is handed changes shape.
+ */
+export interface Repeatable extends Schema.decodeTo<
+  Schema.String,
+  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>,
+  never,
+  never
+> {}
+
+export const Repeatable: Repeatable = Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
+  Schema.decodeTo(
+    Schema.String,
+    SchemaTransformation.transform<string, string | ReadonlyArray<string>>({
+      decode: (value) => (Array.isArray(value) ? value.join(",") : (value as string)),
+      encode: (value) => value
+    })
+  )
+) as Repeatable
+
+/**
  * A sort term: an attribute name and a direction.
  */
 export interface SortTerm<Field extends string> {
