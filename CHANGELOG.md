@@ -1,5 +1,84 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.11.0
+
+### Minor Changes
+
+- a7f3bbb: **Repeated `?include=` keys, and a `query` override on `Endpoint.get`.** Two halves of the same gap
+  on the read path.
+
+  `Query.schema` declared `include`'s wire form as `Schema.optionalKey(Schema.String)`, so the
+  repeated-key spelling — `?include=a&include=b`, which `UrlParams.toRecord` decodes to an **array** —
+  failed to decode and answered 400, where the comma form `?include=a,b` denoting the same set answered 200. Both spellings are now accepted and decode identically; encoding still emits the single comma
+  form, so nothing a client is handed changes shape, and an unknown or unlisted path is still the 400
+  it was in either spelling. No opt-in: this is a widening of the parameter the package composes.
+
+  `Endpoint.get` also gains the `query` override `Endpoint.list` has carried since 0.9.0 — any
+  `Schema.Top`, defaulting to today's `include` / `fields` composition, with those options ignored once
+  it is given — threaded through `Endpoint.resource` / `Group.resource`'s per-endpoint `get` config,
+  and `GetConfig` gains the matching `query` field:
+
+  ```ts
+  Endpoint.get(Article, {
+    query: Schema.Struct({
+      include: Schema.optionalKey(Schema.String),
+      includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"])),
+    }),
+  });
+
+  Group.resource(Article, { endpoints: { get: { query: GetArticle } } });
+  ```
+
+  Only the query changes; the `:id` path param, success document, errors and middleware are untouched.
+  `Endpoint.get`'s type parameter list gains `QuerySchema` before `Success`, mirroring `list` — visible
+  only to code that instantiates `typeof Endpoint.get<…>` explicitly, never to a normal call site.
+
+- 74503fd: **`status` option on `Endpoint.create` / `Endpoint.update`.** `create` stamped `201` on its success
+  schema unconditionally — re-stamping even a caller-supplied `success` — and `WriteConfig` carried no
+  `status`, so an api whose creations answer `200` could not adopt the constructors without a wire
+  change. Both constructors now take an optional `status`, defaulting to today's `201` for `create` and
+  `200` for `update` whether or not `success` is given, and it is threaded through
+  `Endpoint.resource` / `Group.resource`'s per-endpoint `create` / `update` config. This is the
+  `status` `DeleteConfig` has carried since 0.9.0, on the write endpoints:
+
+  ```ts
+  Endpoint.create(Article, { status: 200 });
+  Endpoint.update(Article, { status: 202 });
+
+  Group.resource(Article, {
+    endpoints: { create: { status: 200 }, update: { status: 200 } },
+  });
+  ```
+
+  Only the status changes; path, params, request payload, success schema, errors and middleware are
+  untouched.
+
+- 0b79079: **`payloadMediaType` option on `Endpoint.create` / `Endpoint.update`.** Both constructors wrapped
+  their `payload` — the override included — in the JSON:API media type, so the router's _request_
+  registration was always `application/vnd.api+json` with no way out. Effect's router answers 415 on a
+  mismatched request `Content-Type`, so a host that enforces §6 at its own seam and then dispatches
+  writes to the router relabelled `application/json` had every package-built write rejected before a
+  handler saw it.
+
+  Both now take an optional `payloadMediaType`, defaulting to today's `application/vnd.api+json`, and
+  it is threaded through `Endpoint.resource` / `Group.resource`'s per-endpoint `create` / `update`
+  config:
+
+  ```ts
+  Endpoint.create(Article, {
+    payload: Article.createInput,
+    payloadMediaType: "application/json",
+  });
+
+  Group.resource(Article, {
+    endpoints: { create: { payloadMediaType: "application/json" } },
+  });
+  ```
+
+  Only the request registration moves: the payload schema, the response media type, path, params,
+  errors and middleware are untouched. Pair it with `Middleware.layerHostNegotiated` — the counterpart
+  for the negotiation half — so the package's own §5 check doesn't reject what the host admitted.
+
 ## 0.10.0
 
 ### Minor Changes
