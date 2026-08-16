@@ -53,6 +53,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
   - [Overriding the success document](#overriding-the-success-document)
+  - [Overriding the write status](#overriding-the-write-status)
   - [Overriding the delete response](#overriding-the-delete-response)
   - [Overriding the list query](#overriding-the-list-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
@@ -600,6 +601,33 @@ const articles = Group.resource(Article, {
     create: { success: Document.DataDocument(WireArticle) },
     update: { success: Document.DataDocument(WireArticle) }
   }
+})
+```
+
+### Overriding the write status
+
+`Endpoint.create` answers `201 Created` and `Endpoint.update` `200 OK` — the spec's recommendation
+for a creation that returns the created resource, and the status `HttpApi` gives any success schema
+carrying a body. Some apis answer their whole write surface with 200, or accept a write for later
+application and answer `202`.
+
+Pass `status` to say so. It defaults to today's 201 / 200 — including when `success` is given, which
+is otherwise re-stamped with the constructor's own — so existing endpoints are unchanged; only the
+status moves. This is the `status` `Endpoint.delete` already carries, on the write endpoints.
+
+```ts
+// POST /articles → 200, the created document
+Endpoint.create(Article, { status: 200 })
+
+// PATCH /articles/:id → 202, an update accepted but not yet applied
+Endpoint.update(Article, { status: 202, errors: [ArticleNotFound] })
+```
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: { create: { status: 200 }, update: { status: 200 } }
 })
 ```
 

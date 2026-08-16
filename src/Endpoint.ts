@@ -38,6 +38,10 @@
  * `list` a `query` option replacing the composed query schema wholesale, for
  * apis whose list contract is a flat struct of their own.
  *
+ * The write endpoints take a `status` option alongside, for apis whose
+ * creations answer with a status other than the spec's recommended 201 — the
+ * counterpart to the one `delete` already carries.
+ *
  * The primary-data endpoints take the same `success` option: `get` / `create` /
  * `update` default to the resource's `document()` and `list` to its
  * `collection()`, and any schema can replace that — most usefully a *wire*
@@ -479,6 +483,10 @@ export const list = <
  * a *wire* variant of the resource, for an api whose assembler emits a narrower
  * shape than the resource's own decoded types. The two are independent.
  *
+ * Pass `status` for a creation that answers with a status other than 201 — an
+ * api whose whole write surface answers 200, say. It defaults to the spec's
+ * recommended 201, including when `success` is given.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -503,6 +511,12 @@ export const list = <
  * const flatArticles = Group.make(
  *   Article,
  *   Endpoint.create(Article, { payload: Article.createInput })
+ * )
+ *
+ * // …or answering 200 rather than 201, for an api whose writes are uniform
+ * const okArticles = Group.make(
+ *   Article,
+ *   Endpoint.create(Article, { status: 200 })
  * )
  * ```
  *
@@ -535,11 +549,19 @@ export const create = <
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
-     * `application/vnd.api+json`, at 201 like the default.
+     * `application/vnd.api+json`, at the same status as the default.
      *
      * @since 0.10.0
      */
     readonly success?: Success
+    /**
+     * The success status. Defaults to 201 — the spec's recommendation for a
+     * creation answering with the created resource — whether or not `success`
+     * is given. Pass 200 for an api whose creations answer with it.
+     *
+     * @since 0.11.0
+     */
+    readonly status?: number
   }
 ) =>
   HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
@@ -549,7 +571,7 @@ export const create = <
         resource.document(
           (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
         )) as Success,
-      201
+      options?.status ?? 201
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -577,6 +599,9 @@ export const create = <
  * Pass `success` to override the response document the same way — most usefully
  * a *wire* variant of the resource, for an api whose assembler emits a narrower
  * shape than the resource's own decoded types. The two are independent.
+ *
+ * Pass `status` for an update answering with something other than 200 — `202`
+ * for an update accepted but not yet applied, say. It defaults to today's 200.
  *
  * @example
  * ```ts
@@ -639,6 +664,13 @@ export const update = <
      * @since 0.10.0
      */
     readonly success?: Success
+    /**
+     * The success status. Defaults to 200 — the status `HttpApi` gives a
+     * success schema carrying a body — whether or not `success` is given.
+     *
+     * @since 0.11.0
+     */
+    readonly status?: number
   }
 ) =>
   HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
@@ -648,7 +680,8 @@ export const update = <
       (options?.success ??
         resource.document(
           (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )) as Success
+        )) as Success,
+      options?.status
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -1784,6 +1817,13 @@ export interface WriteConfig<Meta extends Schema.Top> {
    * @since 0.10.0
    */
   readonly success?: Schema.Top
+  /**
+   * The success status. Defaults to 201 for `create` (the spec's
+   * recommendation) and 200 for `update`, whether or not `success` is given.
+   *
+   * @since 0.11.0
+   */
+  readonly status?: number
 }
 
 /**
@@ -2573,6 +2613,12 @@ export const resource = <
   const successOpt = (config: Record<string, unknown>): Record<string, unknown> =>
     config.success !== undefined ? { success: config.success } : {}
 
+  // Likewise `status`: each endpoint's default (201 for `create`, 200 for
+  // `update`, 204 for `delete`) is the constructor's, so an absent key must
+  // stay absent rather than resolve to some shared number here.
+  const statusOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+    config.status !== undefined ? { status: config.status } : {}
+
   const endpoints: Array<HttpApiEndpoint.Top> = []
 
   const getOp = opConfig("get")
@@ -2618,7 +2664,8 @@ export const resource = <
       create(resource, {
         ...commonOpts(createOp.config, true),
         ...payloadOpt(createOp.config),
-        ...successOpt(createOp.config)
+        ...successOpt(createOp.config),
+        ...statusOpt(createOp.config)
       } as never)
     )
   }
@@ -2628,7 +2675,8 @@ export const resource = <
       update(resource, {
         ...commonOpts(updateOp.config, true),
         ...payloadOpt(updateOp.config),
-        ...successOpt(updateOp.config)
+        ...successOpt(updateOp.config),
+        ...statusOpt(updateOp.config)
       } as never)
     )
   }
@@ -2638,7 +2686,7 @@ export const resource = <
       deleteEndpoint(resource, {
         ...commonOpts(deleteOp.config, false),
         ...successOpt(deleteOp.config),
-        ...(deleteOp.config.status !== undefined ? { status: deleteOp.config.status } : {})
+        ...statusOpt(deleteOp.config)
       } as never)
     )
   }

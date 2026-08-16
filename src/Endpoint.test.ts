@@ -1891,3 +1891,144 @@ describe("HTTP round-trip with a wire success document", () => {
     expect(result.data.links?.self).toBe("https://api.example.com/articles/1")
   })
 })
+
+// ---------------------------------------------------------------------------
+// Write status override (Endpoint.create / Endpoint.update)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.create / Endpoint.update status override", () => {
+  // A status is invisible in the decoded schema, so the assertions are on the
+  // wire — what a real web handler actually answers.
+  const request = async (
+    api: unknown,
+    live: Layer.Layer<any, any, any>,
+    method: string,
+    url: string,
+    body: unknown
+  ) => {
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request(url, { method, headers: { "content-type": MEDIA_TYPE }, body: JSON.stringify(body) })
+      )
+      return {
+        status: response.status,
+        contentType: response.headers.get("content-type"),
+        body: (await response.json()) as any
+      }
+    } finally {
+      await dispose()
+    }
+  }
+
+  const createBody = {
+    data: {
+      type: "articles",
+      attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+    }
+  }
+  const updateBody = { data: { type: "articles", id: "1", attributes: { title: "Hello" } } }
+
+  // Every case below is the same two endpoints, differing only in the options
+  // under test; the handlers answer the resource document regardless.
+  const writesApi = (name: string, ...endpoints: readonly [any, ...ReadonlyArray<any>]) =>
+    HttpApi.make(name).add(Group.make(Article, ...endpoints))
+
+  const writesLive = (api: any): Layer.Layer<any, any, any> =>
+    HttpApiBuilder.group(api, "articles", (handlers: any) =>
+      handlers
+        .handle("create", () => Effect.succeed({ data: sampleArticle }))
+        .handle("update", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+
+  const roundTrip = async (createOptions?: any, updateOptions?: any) => {
+    const api = writesApi(
+      `writes-${JSON.stringify(createOptions ?? {})}-${JSON.stringify(updateOptions ?? {})}`,
+      Endpoint.create(Article, createOptions),
+      Endpoint.update(Article, updateOptions)
+    )
+    const live = writesLive(api)
+    return {
+      created: await request(api, live, "POST", "http://localhost/articles", createBody),
+      updated: await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)
+    }
+  }
+
+  it("answers 201 on create and 200 on update when no status is given (regression: unchanged defaults)", async () => {
+    const { created, updated } = await roundTrip()
+    expect(created.status).toBe(201)
+    expect(updated.status).toBe(200)
+    expect(created.body.data).toMatchObject({ type: "articles", id: "1" })
+  })
+
+  it("keeps those defaults when only `success` is overridden (regression)", async () => {
+    const WireDocument = Document.DataDocument(
+      Schema.Struct({
+        ...Article.fields,
+        links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+      })
+    )
+    const { created, updated } = await roundTrip({ success: WireDocument }, { success: WireDocument })
+    expect(created.status).toBe(201)
+    expect(updated.status).toBe(200)
+  })
+
+  it("answers with the supplied status instead, document and media type intact", async () => {
+    const { created, updated } = await roundTrip({ status: 200 }, { status: 202 })
+    expect(created.status).toBe(200)
+    expect(created.contentType).toContain(MEDIA_TYPE)
+    expect(created.body.data).toMatchObject({ type: "articles", id: "1" })
+    expect(updated.status).toBe(202)
+    expect(updated.body.data).toMatchObject({ type: "articles", id: "1" })
+  })
+
+  it("applies the status to an overridden success schema too", async () => {
+    const WireDocument = Document.DataDocument(
+      Schema.Struct({
+        ...Article.fields,
+        links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+      })
+    )
+    const { created } = await roundTrip({ success: WireDocument, status: 200 })
+    expect(created.status).toBe(200)
+  })
+
+  it("changes only the status — name, method, path, payload and middleware are untouched", () => {
+    const ok = Endpoint.create(Article, { status: 200 })
+    expect([ok.identifier, ok.method, ok.path]).toEqual([
+      createArticle.identifier,
+      createArticle.method,
+      createArticle.path
+    ])
+    expect([...ok.middlewares].map((m) => m.key)).toEqual([...createArticle.middlewares].map((m) => m.key))
+    expectTypeOf<HttpApiEndpoint.Payload<typeof ok>["Type"]>().toEqualTypeOf<typeof Article.createPayload.Type>()
+  })
+
+  it("threads through Endpoint.resource / Group.resource's per-endpoint create/update config", async () => {
+    const api = HttpApi.make("generated-ok-writes").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: { get: false, list: false, delete: false, create: { status: 200 }, update: { status: 202 } }
+      })
+    )
+    const live = writesLive(api)
+    expect((await request(api, live, "POST", "http://localhost/articles", createBody)).status).toBe(200)
+    expect((await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)).status).toBe(202)
+  })
+
+  it("leaves Endpoint.resource's create at 201 and update at 200 when no override is given (regression)", async () => {
+    const api = HttpApi.make("generated-default-writes").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: { get: false, list: false, delete: false }
+      })
+    )
+    const live = writesLive(api)
+    expect((await request(api, live, "POST", "http://localhost/articles", createBody)).status).toBe(201)
+    expect((await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)).status).toBe(200)
+  })
+})
