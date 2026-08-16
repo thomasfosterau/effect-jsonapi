@@ -40,7 +40,9 @@
  *
  * The write endpoints take a `status` option alongside, for apis whose
  * creations answer with a status other than the spec's recommended 201 — the
- * counterpart to the one `delete` already carries.
+ * counterpart to the one `delete` already carries — and a `payloadMediaType`,
+ * for hosts that negotiate §6 themselves and dispatch writes to the router
+ * under a different content type than the one the api advertises.
  *
  * The primary-data endpoints take the same `success` option: `get` / `create` /
  * `update` default to the resource's `document()` and `list` to its
@@ -64,7 +66,7 @@ import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
 import * as Atomic from "./Atomic.js"
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js"
-import { asJsonApi, asJsonApiAtomic } from "./internal/media.js"
+import { asJsonApi, asJsonApiAtomic, asMediaType, MEDIA_TYPE } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
@@ -487,6 +489,14 @@ export const list = <
  * api whose whole write surface answers 200, say. It defaults to the spec's
  * recommended 201, including when `success` is given.
  *
+ * Pass `payloadMediaType` to register the request body under a media type other
+ * than `application/vnd.api+json`. The router matches a request's
+ * `Content-Type` against the registration and answers 415 on a mismatch, so a
+ * host that enforces §6 itself and hands the router a relabelled request needs
+ * to say which label it dispatches. It changes the registration only — pair it
+ * with `Middleware.layerHostNegotiated` so the package's own §6 check doesn't
+ * then reject what the host admitted.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -546,6 +556,15 @@ export const create = <
      */
     readonly payload?: Payload
     /**
+     * The media type the request payload is registered under, which the router
+     * matches a request's `Content-Type` against. Defaults to
+     * `application/vnd.api+json`; pass `"application/json"` for a host that
+     * negotiates §6 upstream and relabels dispatched writes.
+     *
+     * @since 0.11.0
+     */
+    readonly payloadMediaType?: string
+    /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
@@ -565,7 +584,10 @@ export const create = <
   }
 ) =>
   HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    payload: asJsonApi((options?.payload ?? resource.createPayload) as Payload),
+    payload: asMediaType(
+      (options?.payload ?? resource.createPayload) as Payload,
+      options?.payloadMediaType ?? MEDIA_TYPE
+    ),
     success: asJsonApi(
       (options?.success ??
         resource.document(
@@ -602,6 +624,10 @@ export const create = <
  *
  * Pass `status` for an update answering with something other than 200 — `202`
  * for an update accepted but not yet applied, say. It defaults to today's 200.
+ *
+ * Pass `payloadMediaType` to register the request body under a media type other
+ * than `application/vnd.api+json`, for a host that enforces §6 itself and hands
+ * the router a relabelled request — see {@link create}.
  *
  * @example
  * ```ts
@@ -656,6 +682,15 @@ export const update = <
      */
     readonly payload?: Payload
     /**
+     * The media type the request payload is registered under, which the router
+     * matches a request's `Content-Type` against. Defaults to
+     * `application/vnd.api+json`; pass `"application/json"` for a host that
+     * negotiates §6 upstream and relabels dispatched writes.
+     *
+     * @since 0.11.0
+     */
+    readonly payloadMediaType?: string
+    /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
      * resource, or any schema of your own — it is served as
@@ -675,7 +710,10 @@ export const update = <
 ) =>
   HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: { id: resource.Id },
-    payload: asJsonApi((options?.payload ?? resource.updatePayload) as Payload),
+    payload: asMediaType(
+      (options?.payload ?? resource.updatePayload) as Payload,
+      options?.payloadMediaType ?? MEDIA_TYPE
+    ),
     success: asJsonApi(
       (options?.success ??
         resource.document(
@@ -1810,6 +1848,15 @@ export interface WriteConfig<Meta extends Schema.Top> {
    */
   readonly payload?: Schema.Top
   /**
+   * The media type the request payload is registered under, which the router
+   * matches a request's `Content-Type` against. Defaults to
+   * `application/vnd.api+json`; pass `"application/json"` for a host that
+   * negotiates §6 upstream and relabels dispatched writes.
+   *
+   * @since 0.11.0
+   */
+  readonly payloadMediaType?: string
+  /**
    * Override the success document schema. Defaults to the resource's
    * `document()` (which `meta` then tunes); pass a wire variant of the
    * resource, or any schema of your own.
@@ -2655,8 +2702,10 @@ export const resource = <
   // A write endpoint's `payload` override is per-endpoint only: `create` and
   // `update` have different default envelopes, so there is no sensible
   // top-level default to fall back to.
-  const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> =>
-    config.payload !== undefined ? { payload: config.payload } : {}
+  const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> => ({
+    ...(config.payload !== undefined ? { payload: config.payload } : {}),
+    ...(config.payloadMediaType !== undefined ? { payloadMediaType: config.payloadMediaType } : {})
+  })
 
   const createOp = opConfig("create")
   if (createOp.emit) {

@@ -48,6 +48,22 @@ const JSONAPI = { contentType: MEDIA_TYPE } as const
 const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const
 
 /**
+ * Marks a schema as a body at an arbitrary media type — the seam behind the
+ * write endpoints' `payloadMediaType` option, where a host that negotiates §6
+ * upstream needs the router's *request* registration left at the media type it
+ * actually dispatches.
+ *
+ * {@link asJsonApi} is this at the JSON:API media type; everything the package
+ * emits itself still goes through that one.
+ *
+ * @since 0.11.0
+ * @category utils
+ * @internal
+ */
+export const asMediaType = <S extends Schema.Top>(schema: S, contentType: string) =>
+  schema.pipe(HttpApiSchema.asJson({ contentType }))
+
+/**
  * Marks a schema as a JSON:API body (`application/vnd.api+json`) and
  * optionally sets its HTTP status.
  *

@@ -54,6 +54,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Overriding the write payload](#overriding-the-write-payload)
   - [Overriding the success document](#overriding-the-success-document)
   - [Overriding the write status](#overriding-the-write-status)
+  - [Overriding the payload media type](#overriding-the-payload-media-type)
   - [Overriding the delete response](#overriding-the-delete-response)
   - [Overriding the list query](#overriding-the-list-query)
   - [Generating a whole group from a resource](#generating-a-whole-group-from-a-resource)
@@ -630,6 +631,44 @@ const articles = Group.resource(Article, {
   endpoints: { create: { status: 200 }, update: { status: 200 } }
 })
 ```
+
+### Overriding the payload media type
+
+Every body the package declares is `application/vnd.api+json`, request bodies included — and the
+router matches an incoming `Content-Type` against that registration, answering **415** on a mismatch.
+That is right for an api that owns its URLs and negotiates §6 itself.
+
+It is wrong for an api whose **host** negotiates instead. Such a host enforces §6 at its own seam —
+`Middleware.negotiate` is exactly that, reused outside the constructors — and then hands the router a
+request relabelled `application/json`, because that is what the rest of its URL space speaks. The
+request the host just admitted would then be 415'd by the router before any handler sees it.
+
+Pass `payloadMediaType` to register the request body under the label the host actually dispatches. It
+defaults to `application/vnd.api+json`, so existing endpoints are unchanged; the payload schema, the
+**response** media type, path, params, errors and middleware all stay as they were. Pair it with
+[`Middleware.layerHostNegotiated`](#4-handlers--typed-in-validated-out), or the package's own §5 check
+will reject what the host admitted:
+
+```ts
+// POST /articles with Content-Type: application/json — the label the host dispatches
+Endpoint.create(Article, { payload: Article.createInput, payloadMediaType: "application/json" })
+
+// …the response is still application/vnd.api+json
+```
+
+The same option is available per-endpoint when generating a whole group:
+
+```ts
+const articles = Group.resource(Article, {
+  endpoints: {
+    create: { payload: Article.createInput, payloadMediaType: "application/json" },
+    update: { payload: Article.updateInput, payloadMediaType: "application/json" }
+  }
+})
+```
+
+Reach for this only when something upstream genuinely enforces §6; on an api that owns its own URLs,
+the default is the correct — and spec-compliant — choice.
 
 ### Overriding the delete response
 

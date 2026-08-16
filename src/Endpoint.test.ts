@@ -2032,3 +2032,141 @@ describe("Endpoint.create / Endpoint.update status override", () => {
     expect((await request(api, live, "PATCH", "http://localhost/articles/1", updateBody)).status).toBe(200)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Payload media type (Endpoint.create / Endpoint.update)
+// ---------------------------------------------------------------------------
+
+describe("Endpoint.create / Endpoint.update payload media type", () => {
+  // The router matches a request's `Content-Type` against the payload's
+  // registration and answers 415 on a mismatch, so the only honest assertion is
+  // a real request at each label.
+  const post = async (api: unknown, live: Layer.Layer<any, any, any>, contentType: string) => {
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      // the host negotiated §6 upstream; the package's own §5 check would
+      // otherwise reject exactly the request this option exists to admit
+      Layer.provide(Middleware.layerHostNegotiated)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request("http://localhost/articles", {
+          method: "POST",
+          headers: { "content-type": contentType },
+          body: JSON.stringify({ title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" })
+        })
+      )
+      return { status: response.status, body: await response.text() }
+    } finally {
+      await dispose()
+    }
+  }
+
+  const apiWith = (name: string, options: any) => {
+    const api = HttpApi.make(name).add(
+      Group.make(Article, Endpoint.create(Article, { payload: Article.createInput, ...options }))
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers.handle("create", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    return { api, live }
+  }
+
+  it("registers the payload as application/vnd.api+json by default (regression: unchanged)", async () => {
+    const { api, live } = apiWith("default-media-blog", {})
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(201)
+    // …and the router rejects anything else, which is the behaviour the option exists to escape
+    expect((await post(api, live, "application/json")).status).toBe(415)
+  })
+
+  it("registers the payload as the supplied media type instead", async () => {
+    const { api, live } = apiWith("plain-media-blog", { payloadMediaType: "application/json" })
+    const accepted = await post(api, live, "application/json")
+    expect(accepted.status).toBe(201)
+    expect(JSON.parse(accepted.body).data).toMatchObject({ type: "articles", id: "1" })
+    // the registration moved rather than widened: the JSON:API label is now the mismatch
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(415)
+  })
+
+  it("leaves the response media type alone — only the request registration moves", async () => {
+    const api = HttpApi.make("plain-request-jsonapi-response").add(
+      Group.make(Article, Endpoint.create(Article, { payloadMediaType: "application/json" }))
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers.handle("create", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    const appLayer = HttpApiBuilder.layer(api as never).pipe(
+      Layer.provide(live),
+      Layer.provide(Middleware.layerHostNegotiated)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request("http://localhost/articles", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            data: {
+              type: "articles",
+              attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" }
+            }
+          })
+        })
+      )
+      expect(response.status).toBe(201)
+      expect(response.headers.get("content-type")).toContain(MEDIA_TYPE)
+    } finally {
+      await dispose()
+    }
+  })
+
+  it("changes neither the payload schema nor anything else about the endpoint", () => {
+    const plain = Endpoint.create(Article, { payloadMediaType: "application/json" })
+    expectTypeOf<HttpApiEndpoint.Payload<typeof plain>["Type"]>().toEqualTypeOf<typeof Article.createPayload.Type>()
+    expect([plain.identifier, plain.method, plain.path]).toEqual([
+      createArticle.identifier,
+      createArticle.method,
+      createArticle.path
+    ])
+    expect([...plain.middlewares].map((m) => m.key)).toEqual([...createArticle.middlewares].map((m) => m.key))
+  })
+
+  it("threads through Endpoint.resource / Group.resource's per-endpoint create/update config", async () => {
+    const api = HttpApi.make("generated-plain-media").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: {
+          get: false,
+          list: false,
+          delete: false,
+          create: { payload: Article.createInput, payloadMediaType: "application/json" },
+          update: { payload: Article.updateInput, payloadMediaType: "application/json" }
+        }
+      })
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers
+        .handle("create", () => Effect.succeed({ data: sampleArticle }))
+        .handle("update", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    expect((await post(api, live, "application/json")).status).toBe(201)
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(415)
+  })
+
+  it("leaves Endpoint.resource's writes on the JSON:API media type when no override is given (regression)", async () => {
+    const api = HttpApi.make("generated-default-media").add(
+      Group.resource(Article, {
+        relationships: false,
+        endpoints: { get: false, list: false, delete: false, create: { payload: Article.createInput } }
+      })
+    )
+    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+      handlers
+        .handle("create", () => Effect.succeed({ data: sampleArticle }))
+        .handle("update", () => Effect.succeed({ data: sampleArticle }))
+    ) as Layer.Layer<any, any, any>
+    expect((await post(api, live, MEDIA_TYPE)).status).toBe(201)
+    expect((await post(api, live, "application/json")).status).toBe(415)
+  })
+})
