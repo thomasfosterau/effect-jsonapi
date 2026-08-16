@@ -3,6 +3,7 @@ import { Cause, Effect, Exit, Layer, Result, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiSchema, HttpApiTest } from "effect/unstable/httpapi"
 import * as ApiError from "./ApiError.js"
+import * as Document from "./Document.js"
 import * as Endpoint from "./Endpoint.js"
 import * as Group from "./Group.js"
 import * as Handlers from "./Handlers.js"
@@ -1662,5 +1663,231 @@ describe("Endpoint include path constraints", () => {
         readonly comments?: ReadonlyArray<"body">
       }
     }>()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Success document override (Endpoint.get / list / create / update)
+// ---------------------------------------------------------------------------
+
+// Reads the success schema off a constructed endpoint.
+const successSchemaOf = (endpoint: { readonly success: Iterable<unknown> }) =>
+  [...endpoint.success][0]! as Schema.Codec<any, any>
+
+describe("primary-data success override", () => {
+  // The wire variant of the resource: identical but for its link members, which
+  // are plain strings. A resource's own `links.self` is `Document.Link`, so it
+  // decodes an absolute reference to a `URL` — the right model of the spec, and
+  // the wrong type for an api whose assembler stringifies every link before the
+  // document leaves the server, and whose generated client consumes strings.
+  const WireArticle = Schema.Struct({
+    ...Article.fields,
+    links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+  })
+  const WireDocument = Document.DataDocument(WireArticle)
+  const WireCollection = Document.CollectionDocument(WireArticle)
+
+  // Today's defaults, which the option must leave undisturbed.
+  const StandardDocument = Article.document()
+  const StandardCollection = Article.collection()
+
+  const wireArticle = {
+    type: "articles",
+    id: "1",
+    attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+    links: { self: "https://api.example.com/articles/1" }
+  }
+
+  it("decodes `links.self` as a URL by default (regression: unchanged without `success`)", () => {
+    const decoded = Schema.decodeUnknownSync(successSchemaOf(fetchArticle))({ data: wireArticle })
+    expect(decoded.data.links.self).toBeInstanceOf(URL)
+  })
+
+  it("decodes `links.self` as a plain string when `success` is the wire variant", () => {
+    const wire = Endpoint.get(Article, { success: WireDocument })
+    const decoded = Schema.decodeUnknownSync(successSchemaOf(wire))({ data: wireArticle })
+    expect(decoded.data.links.self).toBe("https://api.example.com/articles/1")
+    expect(decoded.data.links.self).not.toBeInstanceOf(URL)
+  })
+
+  it("types the overridden success as the supplied schema, and the default as the resource document", () => {
+    const wire = Endpoint.get(Article, { success: WireDocument })
+    expectTypeOf<HttpApiEndpoint.Success<typeof wire>["Type"]>().toEqualTypeOf<typeof WireDocument.Type>()
+
+    const standard = Endpoint.get(Article)
+    expectTypeOf<HttpApiEndpoint.Success<typeof standard>["Type"]>().toEqualTypeOf<typeof StandardDocument.Type>()
+  })
+
+  it("types list's overridden success as the supplied collection, and the default as the resource collection", () => {
+    const wire = Endpoint.list(Article, { success: WireCollection })
+    expectTypeOf<HttpApiEndpoint.Success<typeof wire>["Type"]>().toEqualTypeOf<typeof WireCollection.Type>()
+
+    const standard = Endpoint.list(Article)
+    expectTypeOf<HttpApiEndpoint.Success<typeof standard>["Type"]>().toEqualTypeOf<typeof StandardCollection.Type>()
+  })
+
+  it("types create's and update's overridden success, leaving their payloads alone", () => {
+    const created = Endpoint.create(Article, { success: WireDocument })
+    expectTypeOf<HttpApiEndpoint.Success<typeof created>["Type"]>().toEqualTypeOf<typeof WireDocument.Type>()
+    expectTypeOf<HttpApiEndpoint.Payload<typeof created>["Type"]>().toEqualTypeOf<typeof Article.createPayload.Type>()
+
+    // …and the two overrides compose: a flat command input in, a wire document out
+    const flat = Endpoint.update(Article, { payload: Article.updateInput, success: WireDocument })
+    expectTypeOf<HttpApiEndpoint.Success<typeof flat>["Type"]>().toEqualTypeOf<typeof WireDocument.Type>()
+    expectTypeOf<HttpApiEndpoint.Payload<typeof flat>["Type"]>().toEqualTypeOf<typeof Article.updateInput.Type>()
+  })
+
+  it("changes only the success — name, method, path and middleware are untouched", () => {
+    const wire = Endpoint.list(Article, { success: WireCollection })
+    const standard = Endpoint.list(Article)
+    expect([wire.identifier, wire.method, wire.path]).toEqual([standard.identifier, standard.method, standard.path])
+    expect([...wire.middlewares].map((m) => m.key)).toEqual([...standard.middlewares].map((m) => m.key))
+  })
+
+  it("threads through Endpoint.resource's per-endpoint get/list/create/update config", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, {
+        relationships: false,
+        endpoints: {
+          get: { success: WireDocument },
+          list: { success: WireCollection },
+          create: { success: WireDocument },
+          update: { success: WireDocument }
+        }
+      }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+
+    for (const name of ["get", "create", "update"]) {
+      const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]!))({ data: wireArticle })
+      expect(decoded.data.links.self).toBe("https://api.example.com/articles/1")
+    }
+    const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list!))({ data: [wireArticle] })
+    expect(listed.data[0].links.self).toBe("https://api.example.com/articles/1")
+  })
+
+  it("leaves Endpoint.resource's documents at the resource's own when no override is given (regression)", () => {
+    const byName = Object.fromEntries(
+      Endpoint.resource(Article, { relationships: false }).map((endpoint) => [endpoint.identifier, endpoint])
+    )
+
+    for (const name of ["get", "create", "update"]) {
+      const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]!))({ data: wireArticle })
+      expect(decoded.data.links.self).toBeInstanceOf(URL)
+    }
+    const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list!))({ data: [wireArticle] })
+    expect(listed.data[0].links.self).toBeInstanceOf(URL)
+  })
+
+  it("threads through Group.resource, typed end to end", () => {
+    const group = Group.resource(Article, {
+      relationships: false,
+      endpoints: {
+        get: { success: WireDocument },
+        list: { success: WireCollection },
+        create: false,
+        update: false,
+        delete: false
+      }
+    })
+    expectTypeOf<HttpApiEndpoint.Success<typeof group.endpoints.get>["Type"]>().toEqualTypeOf<
+      typeof WireDocument.Type
+    >()
+    expectTypeOf<HttpApiEndpoint.Success<typeof group.endpoints.list>["Type"]>().toEqualTypeOf<
+      typeof WireCollection.Type
+    >()
+  })
+})
+
+describe("HTTP round-trip with a wire success document", () => {
+  const WireArticle = Schema.Struct({
+    ...Article.fields,
+    links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
+  })
+  const WireDocument = Document.DataDocument(WireArticle)
+  const WireCollection = Document.CollectionDocument(WireArticle, {
+    meta: Schema.Struct({ total: Schema.Int })
+  })
+
+  const WireApi = HttpApi.make("wire-blog").add(
+    Group.make(
+      Article,
+      Endpoint.get(Article, { success: WireDocument, errors: [ArticleNotFound] }),
+      Endpoint.list(Article, { page: Query.Page.Offset, success: WireCollection }),
+      Endpoint.create(Article, { success: WireDocument })
+    )
+  )
+
+  // The assembler: every link stringified before the document leaves the server.
+  const assemble = (article: typeof Article.Type) => ({
+    ...article,
+    links: { self: `https://api.example.com/articles/${article.id}` }
+  })
+
+  const WireLive = HttpApiBuilder.group(WireApi, "articles", (handlers) =>
+    handlers
+      .handle("get", ({ params }) => loadArticle(params.id).pipe(Effect.map((a) => ({ data: assemble(a) }))))
+      .handle("list", ({ query }) =>
+        Effect.succeed({
+          data: [assemble(sampleArticle)],
+          meta: { total: 1 },
+          // the document envelope is untouched, so the pagination helpers still apply
+          links: Handlers.offsetPaginationLinks("/articles", query.page ?? {}, 1)
+        })
+      )
+      .handle("create", () => Effect.succeed({ data: assemble(sampleArticle) }))
+  )
+
+  const run = <A, E>(effect: Effect.Effect<A, E, any>) =>
+    Effect.runPromise(
+      effect.pipe(Effect.scoped, Effect.provide(WireLive), Effect.provide(Middleware.layer)) as Effect.Effect<
+        A,
+        E,
+        never
+      >
+    )
+
+  it("answers `get` with the wire document — links.self is a string on the client", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(WireApi, ["articles"])
+        return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} })
+      })
+    )
+
+    expect(result.data).toMatchObject({ type: "articles", id: "1" })
+    expect(result.data.links?.self).toBe("https://api.example.com/articles/1")
+    expectTypeOf(result.data.links?.self).toEqualTypeOf<string | undefined>()
+  })
+
+  it("answers `list` with the wire collection, pagination links included", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(WireApi, ["articles"])
+        return yield* client.articles.list({ query: { page: { offset: 0, limit: 10 } } })
+      })
+    )
+
+    expect(result.data[0]!.links?.self).toBe("https://api.example.com/articles/1")
+    expect(result.meta).toEqual({ total: 1 })
+    expect(result.links?.first).toBe("/articles?page[offset]=0&page[limit]=10")
+    expect(result.links?.next).toBeNull()
+  })
+
+  it("answers `create` with the wire document, still at 201", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const client = yield* HttpApiTest.groups(WireApi, ["articles"])
+        return yield* client.articles.create({
+          payload: {
+            data: {
+              type: "articles",
+              attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01T00:00:00.000Z") }
+            }
+          }
+        })
+      })
+    )
+
+    expect(result.data.links?.self).toBe("https://api.example.com/articles/1")
   })
 })
