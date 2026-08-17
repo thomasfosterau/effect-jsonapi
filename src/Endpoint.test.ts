@@ -2301,3 +2301,135 @@ describe("HTTP round-trip with repeated ?include= keys", () => {
     expect((await request("http://localhost/articles/1?include=author&include=nope")).status).toBe(400)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Injected id schemas
+// ---------------------------------------------------------------------------
+
+describe("Endpoint constructors with an injected id schema", () => {
+  // The consumer's own id vocabulary — here a hierarchical multi-brand, the
+  // case `Resource.make`'s `id` option was added for.
+  const AccountId = Schema.String.pipe(Schema.brand("AccountId"))
+  const LineId = Schema.String.pipe(Schema.brand("AccountId"), Schema.brand("LineId"))
+  const InvoiceId = Schema.String.pipe(Schema.brand("AccountId"), Schema.brand("InvoiceId"))
+
+  const Account = Resource("accounts", {
+    id: AccountId,
+    attributes: { name: Schema.NonEmptyString }
+  })
+  const Line = Resource("lines", {
+    id: LineId,
+    attributes: { amount: Schema.Number }
+  })
+  const Invoice = Resource("invoices", {
+    id: InvoiceId,
+    attributes: { total: Schema.Number },
+    relationships: {
+      account: Relationship.one(() => Account),
+      lines: Relationship.many(() => Line)
+    }
+  })
+
+  // The assertions below are the point of the suite: each constructor is
+  // called with `Invoice` *uncast*, so every one of these lines is itself a
+  // compile-time test that the resource is assignable.
+  it("takes a custom-id resource uncast, threading the brand into the :id param", () => {
+    const get = Endpoint.get(Invoice)
+    const update = Endpoint.update(Invoice)
+    const del = Endpoint.delete(Invoice)
+
+    expectTypeOf<HttpApiEndpoint.Params<typeof get>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof update>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof del>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+
+    // …and the paths are the conventional ones, unchanged by the injection.
+    expect([get.path, update.path, del.path]).toEqual(["/invoices/:id", "/invoices/:id", "/invoices/:id"])
+  })
+
+  it("threads the brand into the default success documents", () => {
+    const get = Endpoint.get(Invoice)
+    const list = Endpoint.list(Invoice)
+    const create = Endpoint.create(Invoice)
+    const update = Endpoint.update(Invoice)
+
+    expectTypeOf<HttpApiEndpoint.Success<typeof get>["Type"]["data"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Success<typeof list>["Type"]["data"][number]["id"]>().toEqualTypeOf<
+      typeof InvoiceId.Type
+    >()
+    expectTypeOf<HttpApiEndpoint.Success<typeof create>["Type"]["data"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Payload<typeof update>["Type"]["data"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+  })
+
+  it("takes a custom-id resource on the relationship constructors", () => {
+    const related = Endpoint.related(Invoice, "lines")
+    const linkage = Endpoint.getRelationship(Invoice, "account")
+    const replace = Endpoint.updateRelationship(Invoice, "account")
+    const add = Endpoint.addRelationship(Invoice, "lines")
+    const remove = Endpoint.removeRelationship(Invoice, "lines")
+
+    expectTypeOf<HttpApiEndpoint.Params<typeof related>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof linkage>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof replace>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof add>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof remove>["Type"]["id"]>().toEqualTypeOf<typeof InvoiceId.Type>()
+    // the linkage they carry is the *target's* id, threaded the same way
+    expectTypeOf<HttpApiEndpoint.Success<typeof linkage>["Type"]["data"]["id"]>().toEqualTypeOf<typeof AccountId.Type>()
+  })
+
+  it("takes a custom-id resource on Endpoint.resource / Group.resource", () => {
+    const endpoints = Endpoint.resource(Invoice)
+    const group = Group.resource(Invoice)
+
+    expect(endpoints.map((endpoint) => endpoint.identifier)).toContain("get")
+    expectTypeOf<HttpApiEndpoint.Params<typeof group.endpoints.get>["Type"]["id"]>().toEqualTypeOf<
+      typeof InvoiceId.Type
+    >()
+    expectTypeOf<HttpApiEndpoint.Success<typeof group.endpoints.list>["Type"]["data"][number]["id"]>().toEqualTypeOf<
+      typeof InvoiceId.Type
+    >()
+  })
+
+  it("still infers the derived id when none is injected (no breaking change)", () => {
+    const get = Endpoint.get(Article)
+    const group = Group.resource(Article, { relationships: false })
+
+    expectTypeOf<HttpApiEndpoint.Params<typeof get>["Type"]["id"]>().toEqualTypeOf<typeof Article.Id.Type>()
+    expectTypeOf<HttpApiEndpoint.Success<typeof get>["Type"]["data"]["id"]>().toEqualTypeOf<typeof Article.Id.Type>()
+    expectTypeOf<HttpApiEndpoint.Params<typeof group.endpoints.update>["Type"]["id"]>().toEqualTypeOf<
+      typeof Article.Id.Type
+    >()
+  })
+
+  it("routes and decodes the branded :id exactly as the derived one does", async () => {
+    const InvoiceApi = HttpApi.make("invoices-api").add(Group.resource(Invoice, { relationships: false }))
+    const InvoiceLive = HttpApiBuilder.group(InvoiceApi, "invoices", (handlers) =>
+      handlers
+        .handle("get", ({ params }) =>
+          Effect.succeed({ data: { type: "invoices", id: params.id, attributes: { total: 10 } } } as any)
+        )
+        .handle("list", () => Effect.succeed({ data: [] } as any))
+        .handle("create", () =>
+          Effect.succeed({ data: { type: "invoices", id: "1", attributes: { total: 1 } } } as any)
+        )
+        .handle("update", () =>
+          Effect.succeed({ data: { type: "invoices", id: "1", attributes: { total: 1 } } } as any)
+        )
+        .handle("delete", () => Effect.void)
+    )
+
+    const appLayer = HttpApiBuilder.layer(InvoiceApi as never).pipe(
+      Layer.provide(InvoiceLive),
+      Layer.provide(Middleware.layer)
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+    try {
+      const response = await handler(
+        new Request("http://localhost/invoices/inv_1", { headers: { accept: MEDIA_TYPE } })
+      )
+      expect(response.status).toBe(200)
+      expect(((await response.json()) as any).data.id).toBe("inv_1")
+    } finally {
+      await dispose()
+    }
+  })
+})
