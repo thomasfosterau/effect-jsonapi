@@ -51,6 +51,13 @@
  * than the resource's own decoded types (plain-string link members rather than
  * `URL`, say) and whose clients must consume that shape.
  *
+ * A resource carrying an injected id — `Resource.make`'s `id` option, for an
+ * api whose ids are its own branded vocabulary rather than the derived
+ * `Id<Type>` — is taken by every constructor as it stands, with no cast: the id
+ * schema is a type parameter of each, inferred from the resource it is given
+ * and threaded into the `:id` path parameter and the documents the endpoint
+ * declares.
+ *
  * For the common case, {@link resource} derives an entire endpoint set — the
  * CRUD surface plus every relationship's endpoints, with query parameters
  * derived from the resource graph — from a single resource definition (and
@@ -76,6 +83,7 @@ import type {
   AttributeKeys,
   DefaultIncluded,
   Family,
+  Id,
   RelationshipName,
   Resource,
   Target,
@@ -154,8 +162,9 @@ type DefaultDocument<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   DocMeta extends Schema.Top
-> = DataDocument<Resource<Type, Attributes, Rels, Meta>, DefaultIncluded<Rels>, DocMeta>
+> = DataDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, DefaultIncluded<Rels>, DocMeta>
 
 // The collection counterpart, for `list` — the resource's `collection()`.
 type DefaultCollection<
@@ -163,8 +172,9 @@ type DefaultCollection<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   DocMeta extends Schema.Top
-> = CollectionDocument<Resource<Type, Attributes, Rels, Meta>, DefaultIncluded<Rels>, DocMeta>
+> = CollectionDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, DefaultIncluded<Rels>, DocMeta>
 
 // ---------------------------------------------------------------------------
 // get — GET /<type>/:id
@@ -178,10 +188,11 @@ type DefaultGetQuery<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  IdSchema extends Schema.Codec<any, string>,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean
 > = Query.QuerySchema<
-  Resource<Type, Attributes, Rels, Meta>,
+  Resource<Type, Attributes, Rels, Meta, IdSchema>,
   {
     readonly include: Include
     readonly fields: Fields
@@ -278,16 +289,17 @@ export const get = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${Type}/:id`,
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta,
-  QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, Include, Fields>,
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
+  QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Enable the `?include=` query parameter. */
     readonly include?: Include
@@ -351,13 +363,14 @@ type DefaultListQuery<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  IdSchema extends Schema.Codec<any, string>,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   PageFields extends Schema.Struct.Fields | undefined,
   FilterFields extends Schema.Struct.Fields | undefined
 > = Query.QuerySchema<
-  Resource<Type, Attributes, Rels, Meta>,
+  Resource<Type, Attributes, Rels, Meta, IdSchema>,
   {
     readonly include: Include
     readonly fields: Fields
@@ -434,12 +447,13 @@ export const list = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "list",
   const Path extends `/${string}` = `/${Type}`,
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = false,
   const Fields extends boolean = false,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = false,
+  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Schema.Struct.Fields | undefined = undefined,
   DocMeta extends Schema.Top = Meta,
@@ -448,15 +462,16 @@ export const list = <
     Attributes,
     Rels,
     Meta,
+    IdSchema,
     Include,
     Fields,
     Sort,
     PageFields,
     FilterFields
   >,
-  Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, DocMeta>
+  Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Enable the `?include=` query parameter. */
     readonly include?: Include
@@ -586,14 +601,15 @@ export const create = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "create",
   const Path extends `/${string}` = `/${Type}`,
   DocMeta extends Schema.Top = Meta,
-  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["createPayload"],
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
+  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
@@ -712,14 +728,15 @@ export const update = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "update",
   const Path extends `/${string}` = `/${Type}/:id`,
   DocMeta extends Schema.Top = Meta,
-  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta>["updatePayload"],
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, DocMeta>
+  Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"],
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
@@ -842,12 +859,13 @@ const deleteEndpoint = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "delete",
   const Path extends `/${string}` = `/${Type}/:id`,
   Success extends Schema.Top = HttpApiSchema.NoContent
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /**
      * Override the success response schema. Defaults to
@@ -1244,19 +1262,21 @@ export const related = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = Name,
   const Path extends `/${string}` = `/${Type}/:id/${Name}`,
-  const Include extends Query.IncludeOption<Target<Resource<Type, Attributes, Rels, Meta>, Name>> = false,
+  const Include extends Query.IncludeOption<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>> = false,
   const Fields extends boolean = false,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta>, Name>>> =
-    false,
+  const Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Schema.Struct.Fields | undefined = undefined,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Enable the `?include=` query parameter (paths span the *target's* graph). */
@@ -1273,7 +1293,7 @@ export const related = <
     readonly meta?: DocMeta
   }
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta>
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
   const descriptor = descriptorFor(resource, name)
   const target = descriptor.ref()
   const included = Schema.Union(directTargets(target))
@@ -1371,6 +1391,7 @@ export const getRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `${Name}Relationship`,
@@ -1378,7 +1399,7 @@ export const getRelationship = <
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Enable `?page[*]=` pagination of the identifier collection (to-many linkage). */
@@ -1387,7 +1408,7 @@ export const getRelationship = <
     readonly meta?: DocMeta
   }
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta>
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
   const descriptor = descriptorFor(resource, name)
   const target = descriptor.ref()
   // The cast is sound: `linkageData` mirrors `LinkageData` kind by kind.
@@ -1486,20 +1507,21 @@ export const updateRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `update${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Override the linkage document's `meta` schema. */
     readonly meta?: DocMeta
   }
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta>
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
   const descriptor = descriptorFor(resource, name)
   const target = descriptor.ref()
   const data = linkageData(descriptor, target)
@@ -1583,20 +1605,21 @@ export const addRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta>>,
+  IdSchema extends Schema.Codec<any, string>,
+  const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `add${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Override the linkage document's `meta` schema. */
     readonly meta?: DocMeta
   }
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta>
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
   const descriptor = descriptorFor(resource, name)
   const target = descriptor.ref()
   const data = Schema.Array(target.identifier)
@@ -1679,16 +1702,17 @@ export const removeRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta>>,
+  IdSchema extends Schema.Codec<any, string>,
+  const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors>
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta>
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
   const descriptor = descriptorFor(resource, name)
   const target = descriptor.ref()
   // The cast is sound: to-many linkage is always an identifier array.
@@ -2105,9 +2129,10 @@ type GeneratedGet<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
-  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   GFields extends boolean,
   GMeta,
   C = ConfigObject<E, "get">
@@ -2119,10 +2144,11 @@ type GeneratedGet<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "get"> extends string ? FieldOr<C, "name", "get"> : "get",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
-          ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
           ListFields<C, GFields>,
           EffMeta<C, GMeta, Meta>,
           EffQuery<
@@ -2132,11 +2158,12 @@ type GeneratedGet<
               Attributes,
               Rels,
               Meta,
-              ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+              IdSchema,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
               ListFields<C, GFields>
             >
           >,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -2146,11 +2173,12 @@ type GeneratedList<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
-  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   GFields extends boolean,
-  GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   GPage extends Schema.Struct.Fields | undefined,
   GFilter extends Schema.Struct.Fields | undefined,
   GMeta,
@@ -2163,12 +2191,13 @@ type GeneratedList<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "list"> extends string ? FieldOr<C, "name", "list"> : "list",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
-          ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+          ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
           ListFields<C, GFields>,
-          ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
+          ListSort<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GSort>,
           ListPage<C, GPage>,
           ListFilter<C, GFilter>,
           EffMeta<C, GMeta, Meta>,
@@ -2179,14 +2208,15 @@ type GeneratedList<
               Attributes,
               Rels,
               Meta,
-              ListInclude<C, Resource<Type, Attributes, Rels, Meta>, GInclude>,
+              IdSchema,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
               ListFields<C, GFields>,
-              ListSort<C, Resource<Type, Attributes, Rels, Meta>, GSort>,
+              ListSort<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GSort>,
               ListPage<C, GPage>,
               ListFilter<C, GFilter>
             >
           >,
-          EffSuccess<C, DefaultCollection<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
+          EffSuccess<C, DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -2196,6 +2226,7 @@ type GeneratedCreate<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
@@ -2208,12 +2239,13 @@ type GeneratedCreate<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "create"> extends string ? FieldOr<C, "name", "create"> : "create",
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
           EffMeta<C, GMeta, Meta>,
-          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["createPayload"]>,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
+          EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"]>,
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -2223,6 +2255,7 @@ type GeneratedUpdate<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
@@ -2235,12 +2268,13 @@ type GeneratedUpdate<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "update"> extends string ? FieldOr<C, "name", "update"> : "update",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
           EffMeta<C, GMeta, Meta>,
-          EffPayload<C, Resource<Type, Attributes, Rels, Meta>["updatePayload"]>,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, EffMeta<C, GMeta, Meta>>>
+          EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"]>,
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
         >
       >
     : never
@@ -2250,6 +2284,7 @@ type GeneratedDelete<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   C = ConfigObject<E, "delete">
@@ -2261,6 +2296,7 @@ type GeneratedDelete<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "delete"> extends string ? FieldOr<C, "name", "delete"> : "delete",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
@@ -2284,7 +2320,8 @@ type GeneratedRelated<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  K extends RelationshipName<Resource<Type, Attributes, Rels, Meta>>,
+  IdSchema extends Schema.Codec<any, string>,
+  K extends RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   RC,
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends boolean,
@@ -2299,6 +2336,7 @@ type GeneratedRelated<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           K,
           RelErrors<RC, GErrors>,
           K,
@@ -2317,6 +2355,7 @@ type GeneratedRelated<
           Attributes,
           Rels,
           Meta,
+          IdSchema,
           K,
           RelErrors<RC, GErrors>,
           K,
@@ -2335,6 +2374,7 @@ type GeneratedRelationships<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   RO,
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends boolean,
@@ -2343,13 +2383,14 @@ type GeneratedRelationships<
   GPage extends Schema.Struct.Fields | undefined
 > =
   | {
-      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta>>]: EmitRel<RO, K> extends true
+      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<RO, K> extends true
         ?
             | GeneratedRelated<
                 Type,
                 Attributes,
                 Rels,
                 Meta,
+                IdSchema,
                 K,
                 RelConfigObject<RO, K>,
                 GErrors,
@@ -2364,6 +2405,7 @@ type GeneratedRelationships<
                   Attributes,
                   Rels,
                   Meta,
+                  IdSchema,
                   K,
                   RelErrors<RelConfigObject<RO, K>, GErrors>,
                   `${K}Relationship`,
@@ -2378,6 +2420,7 @@ type GeneratedRelationships<
                   Attributes,
                   Rels,
                   Meta,
+                  IdSchema,
                   K,
                   RelErrors<RelConfigObject<RO, K>, GErrors>,
                   `update${Capitalize<K>}Relationship`,
@@ -2386,9 +2429,9 @@ type GeneratedRelationships<
                 >
               >
         : never
-    }[RelationshipName<Resource<Type, Attributes, Rels, Meta>>]
+    }[RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]
   | {
-      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta>>]: EmitRel<RO, K> extends true
+      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<RO, K> extends true
         ?
             | ReturnType<
                 typeof addRelationship<
@@ -2396,6 +2439,7 @@ type GeneratedRelationships<
                   Attributes,
                   Rels,
                   Meta,
+                  IdSchema,
                   K,
                   RelErrors<RelConfigObject<RO, K>, GErrors>,
                   `add${Capitalize<K>}Relationship`,
@@ -2409,6 +2453,7 @@ type GeneratedRelationships<
                   Attributes,
                   Rels,
                   Meta,
+                  IdSchema,
                   K,
                   RelErrors<RelConfigObject<RO, K>, GErrors>,
                   `remove${Capitalize<K>}Relationship`,
@@ -2416,7 +2461,7 @@ type GeneratedRelationships<
                 >
               >
         : never
-    }[ToManyName<Resource<Type, Attributes, Rels, Meta>>]
+    }[ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]
 
 /**
  * The union of every endpoint {@link resource} emits for a resource and its
@@ -2430,26 +2475,28 @@ export type ResourceEndpoint<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Schema.Struct.Fields | undefined,
   GMeta
 > =
-  | GeneratedGet<Type, Attributes, Rels, Meta, Endpoints, Errors, Include, Fields, GMeta>
-  | GeneratedList<Type, Attributes, Rels, Meta, Endpoints, Errors, Include, Fields, Sort, Page, Filter, GMeta>
-  | GeneratedCreate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
-  | GeneratedUpdate<Type, Attributes, Rels, Meta, Endpoints, Errors, GMeta>
-  | GeneratedDelete<Type, Attributes, Rels, Meta, Endpoints, Errors>
+  | GeneratedGet<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, GMeta>
+  | GeneratedList<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, Sort, Page, Filter, GMeta>
+  | GeneratedCreate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta>
+  | GeneratedUpdate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta>
+  | GeneratedDelete<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors>
   | GeneratedRelationships<
       Type,
       Attributes,
       Rels,
       Meta,
+      IdSchema,
       RelationshipsOpt,
       Errors,
       EnabledInclude<Include>,
@@ -2469,12 +2516,13 @@ export type ResourceEndpoints<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Schema.Struct.Fields | undefined,
   GMeta
@@ -2484,6 +2532,7 @@ export type ResourceEndpoints<
     Attributes,
     Rels,
     Meta,
+    IdSchema,
     Endpoints,
     RelationshipsOpt,
     Errors,
@@ -2500,6 +2549,7 @@ export type ResourceEndpoints<
       Attributes,
       Rels,
       Meta,
+      IdSchema,
       Endpoints,
       RelationshipsOpt,
       Errors,
@@ -2528,12 +2578,13 @@ export interface ResourceOptions<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta>,
-  RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>>,
+  IdSchema extends Schema.Codec<any, string>,
+  Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta>,
+  RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Errors extends ReadonlyArray<ErrorClass>,
-  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>>,
+  Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>>,
+  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Schema.Struct.Fields | undefined,
   GMeta extends Schema.Top
@@ -2638,22 +2689,24 @@ export const resource = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
-  const RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> = {},
+  const RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
   const Fields extends boolean = true,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
+  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
   const Filter extends Schema.Struct.Fields | undefined = undefined,
   const GMeta extends Schema.Top = Meta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: ResourceOptions<
     Type,
     Attributes,
     Rels,
     Meta,
+    IdSchema,
     Endpoints,
     RelationshipsOpt,
     Errors,
@@ -2669,6 +2722,7 @@ export const resource = <
   Attributes,
   Rels,
   Meta,
+  IdSchema,
   Endpoints,
   RelationshipsOpt,
   Errors,
@@ -2868,6 +2922,7 @@ export const resource = <
     Attributes,
     Rels,
     Meta,
+    IdSchema,
     Endpoints,
     RelationshipsOpt,
     Errors,

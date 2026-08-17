@@ -36,7 +36,7 @@ import { HttpApiGroup } from "effect/unstable/httpapi"
 import * as Endpoint from "./Endpoint.js"
 import type * as Query from "./Query.js"
 import type { Relationships } from "./Relationship.js"
-import type { AttributeKeys, Resource } from "./Resource.js"
+import type { AttributeKeys, Id, Resource } from "./Resource.js"
 
 /**
  * Creates an `HttpApiGroup` named after a resource's type — or after a plain
@@ -148,22 +148,24 @@ export const resource = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  const Endpoints extends Endpoint.EndpointsOption<Resource<Type, Attributes, Rels, Meta>, Meta> = {},
-  const RelationshipsOpt extends Endpoint.RelationshipsOption<Resource<Type, Attributes, Rels, Meta>> = true,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  const Endpoints extends Endpoint.EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> = {},
+  const RelationshipsOpt extends Endpoint.RelationshipsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
   const Errors extends ReadonlyArray<Endpoint.ErrorClass> = readonly [],
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta>> = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
   const Fields extends boolean = true,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta>>> = true,
+  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
   const Filter extends Schema.Struct.Fields | undefined = undefined,
   const GMeta extends Schema.Top = Meta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta>,
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: Endpoint.ResourceOptions<
     Type,
     Attributes,
     Rels,
     Meta,
+    IdSchema,
     Endpoints,
     RelationshipsOpt,
     Errors,
@@ -181,6 +183,7 @@ export const resource = <
     Attributes,
     Rels,
     Meta,
+    IdSchema,
     Endpoints,
     RelationshipsOpt,
     Errors,
@@ -199,6 +202,7 @@ export const resource = <
       Attributes,
       Rels,
       Meta,
+      IdSchema,
       Endpoints,
       RelationshipsOpt,
       Errors,
