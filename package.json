@@ -60,7 +60,7 @@
     "@changesets/cli": "^2.29.8",
     "@effect/docgen": "^0.5.2",
     "@types/node": "^25.1.0",
-    "effect": "4.0.0-beta.107",
+    "effect": "4.0.0-rc.109",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
     "tsx": "^4.22.4",
