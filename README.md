@@ -1,10 +1,12 @@
-# effect-jsonapi
+# `@thomasfosterau/effect-jsonapi`, a JSON:API package for Effect
 
-Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) on [Effect](https://effect.website)'s HttpApi.
+Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) implement built on top of [Effect](https://effect.website)’s `HttpApi`, `Schema`, etc.
 
 [![CI](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml/badge.svg)](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@thomasfosterau/effect-jsonapi.svg)](https://www.npmjs.com/package/@thomasfosterau/effect-jsonapi)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**Disclaimer:** This repository and package have been created using Claude Code. The package’s API and functionality is in flux, so expect churn and breaking changes.
 
 ## Installation
 
@@ -16,7 +18,7 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 ## Overview
 
-`effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
+`@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
 is a property of the construction, not of developer discipline:
 
 - Define each **resource once**; identifiers, create/update payloads, documents, query parameters
@@ -355,19 +357,11 @@ Document.DataDocument(Schema.NullOr(Article)) //        data: Article | null
 Document.DataDocument(Article.nullable()) //            data: Option<Article>, ⇆ null on the wire
 ```
 
-`Article.nullable()` is `Schema.OptionFromNullOr(Article)` — the spec-clean
-nullable codec (`None ⇆ null`). Avoid effect's _structural_ `Schema.Option`
-(`{ _tag, value }`): it serialises a non-conformant body, and `DataDocument`
-can't tell the two apart. `Article.document()` and `Endpoint.get` / `create` /
-`update` use the non-null form; `Endpoint.related` for a to-one relationship
-keeps the nullable form (`data: target | null`) for the empty-linkage case.
+`Article.nullable()` is `Schema.OptionFromNullOr(Article)` — the spec-clean nullable codec (`None ⇆ null`). Avoid effect's _structural_ `Schema.Option` (`{ _tag, value }`): it serialises a non-conformant body, and `DataDocument` can't tell the two apart. `Article.document()` and `Endpoint.get` / `create` / `update` use the non-null form; `Endpoint.related` for a to-one relationship keeps the nullable form (`data: target | null`) for the empty-linkage case.
 
 ### Reusing & extending resources
 
-When several resources share a set of attributes or relationships, define them
-once and reuse them. `Resource.attributes` / `Resource.relationships` extract a
-resource's field map and descriptor record so you can spread them into another
-definition:
+When several resources share a set of attributes or relationships, define them once and reuse them. `Resource.attributes` / `Resource.relationships` extract a resource's field map and descriptor record so you can spread them into another definition:
 
 ```ts
 const Profile = Resource.make("profiles", {
@@ -375,11 +369,7 @@ const Profile = Resource.make("profiles", {
 })
 ```
 
-`Resource.extend` does the same wholesale — a **subtype** that inherits the
-base's attributes _and_ relationships, adding (or overriding) its own. JSON:API
-has no native subtyping, so the result is a _distinct_ resource type: its own
-`type` tag and branded id, with payloads and documents derived afresh. `meta` is
-inherited unless overridden.
+`Resource.extend` does the same wholesale — a **subtype** that inherits the base's attributes _and_ relationships, adding (or overriding) its own. JSON:API has no native subtyping, so the result is a _distinct_ resource type: its own `type` tag and branded id, with payloads and documents derived afresh. `meta` is inherited unless overridden.
 
 ```ts
 const Account = Resource.make("accounts", {
