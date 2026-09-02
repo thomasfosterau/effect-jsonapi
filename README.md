@@ -494,6 +494,8 @@ const articles = Group.make(
     errors: [ArticleNotFound]
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
+  // (`filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` an operator —
+  //  the filter grammar, docs/filter-grammar.md)
   Endpoint.list(Article, {
     include: true,
     sort: ["createdAt", "title"],
