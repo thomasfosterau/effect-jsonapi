@@ -84,7 +84,7 @@ describe("Resource.filterable / Resource.sortable", () => {
 
   it("rejects an attribute operator outside the closed core at definition time", () => {
     expect(() => attribute(Schema.String, { filter: ["eq", "like" as never] })).toThrow(
-      /unknown filter operator "like"/
+      /declares filter operator "like"; expected one of eq, ne/
     )
   })
 
@@ -401,6 +401,75 @@ describe("Resource.filterable / Resource.sortable", () => {
           attributes: { when: attribute(Schema.Date, { sort: true }), tags: Schema.Array(Schema.String) }
         })
       ).not.toThrow()
+    })
+  })
+
+  describe("definition-time guards", () => {
+    it("rejects an empty operator list on an attribute and on a relationship", () => {
+      expect(() => attribute(Schema.String, { filter: [] })).toThrow(/declares filter: \[\]/)
+      expect(() =>
+        Resource("empty-rel", {
+          attributes: {},
+          relationships: { supplier: Relationship.one(() => Supplier, { filter: [] }) }
+        })
+      ).toThrow(/relationship "supplier" declares filter: \[\]/)
+    })
+
+    it("rejects `filterLiteral` without `filter`", () => {
+      const PointFromString = Schema.String.pipe(
+        Schema.decodeTo(Schema.Number, {
+          decode: SchemaGetter.transform((s: string) => Number(s)),
+          encode: SchemaGetter.transform((n: number) => String(n))
+        })
+      )
+      expect(() => attribute(Schema.Number, { filterLiteral: PointFromString })).toThrow(
+        /`filterLiteral` given without `filter`/
+      )
+    })
+
+    it("ignores a descriptor stamped without the filter/sort fields (older or hand-made annotations)", () => {
+      const legacy = Schema.Date.annotate({
+        "@thomasfosterau/effect-jsonapi/attribute": {
+          schema: Schema.Date,
+          create: false,
+          update: false,
+          clearable: false
+        }
+      })
+      const Legacy = Resource("legacy", { attributes: { when: legacy } })
+      expect(filterable(Legacy)).toEqual({})
+      expect(sortable(Legacy)).toEqual([])
+    })
+
+    it("admits a template-literal attribute as a string literal", () => {
+      const Coded = Resource("coded", {
+        attributes: { code: attribute(Schema.TemplateLiteral(["X-", Schema.Number]), { filter: ["eq"] }) }
+      })
+      const literal = filterable(Coded).code.literal
+      expect(Schema.decodeUnknownSync(literal)("X-12")).toBe("X-12")
+      expect(() => Schema.decodeUnknownSync(literal)("Y-12")).toThrow()
+    })
+
+    it("refuses to encode a non-finite number, so decode ∘ encode stays total", () => {
+      const literal = filterable(Product).stock.literal
+      expect(() => Schema.encodeUnknownSync(literal)(Number.NaN)).toThrow()
+      expect(() => Schema.encodeUnknownSync(literal)(Number.POSITIVE_INFINITY)).toThrow()
+      expect(Schema.encodeUnknownSync(literal)(1.5)).toBe("1.5")
+    })
+
+    it("lets readOnlyAttribute carry filter and sort declarations", () => {
+      const Stamped = Resource("stamped", {
+        attributes: {
+          title: Schema.String,
+          createdAt: readOnlyAttribute(Schema.DateFromString, { filter: ["gte", "lt"], sort: true })
+        }
+      })
+      expect(filterable(Stamped).createdAt.operators).toEqual(["gte", "lt"])
+      expect(sortable(Stamped)).toEqual(["createdAt"])
+      expectTypeOf<FilterOperators<typeof Stamped, "createdAt">>().toEqualTypeOf<"gte" | "lt">()
+      expectTypeOf<SortableKeys<typeof Stamped>>().toEqualTypeOf<"createdAt">()
+      // still excluded from the write projections
+      expectTypeOf<keyof typeof Stamped.createInput.Type>().toEqualTypeOf<"title">()
     })
   })
 })

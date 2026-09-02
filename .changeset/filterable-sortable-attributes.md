@@ -24,7 +24,8 @@ Endpoint.list(Product, { sort: Resource.sortable(Product) })
 ```
 
 - `filter` is `true` (the whole operator core), an operator subset, or absent (not filterable — the
-  default fails closed, like `include` / `fields` / `sort`). The core is the closed set named by the
+  default fails closed, like `include` / `fields` / `sort`). `Resource.readOnlyAttribute` takes the
+  same `filter` / `filterLiteral` / `sort` options, since server-set timestamps are the usual sort keys. The core is the closed set named by the
   new `Filter` module: `Filter.operators` (`eq ne lt lte gt gte in nin isnull`), `Filter.Operator`
   and `Filter.isOperator`.
 - Each filterable attribute gets a **literal codec** (`Schema.Codec<Type, string>`) derived from its

@@ -1213,7 +1213,8 @@ const Product = Resource.make("products", {
     priceCents: Resource.attribute(Schema.Int, { filter: ["eq", "gt", "lt"], sort: true }),
     // the whole core: eq ne lt lte gt gte in nin isnull (`Filter.operators`)
     discontinued: Resource.attribute(Schema.Boolean, { filter: true }),
-    createdAt: Resource.attribute(Schema.DateFromString, { create: false, update: false, sort: true })
+    // server-set, so read-only — and the usual sort key
+    createdAt: Resource.readOnlyAttribute(Schema.DateFromString, { filter: ["gte", "lt"], sort: true })
   },
   relationships: {
     // a to-one relationship is a filter field too, valued by the related id
@@ -1222,7 +1223,7 @@ const Product = Resource.make("products", {
 })
 
 Resource.filterable(Product)
-// → { priceCents: { operators: ["eq", "gt", "lt"], literal }, discontinued: { … }, supplier: { … } }
+// → { priceCents: { operators: ["eq", "gt", "lt"], literal }, discontinued: { … }, createdAt: { … }, supplier: { … } }
 Resource.sortable(Product) // → ["priceCents", "createdAt"]
 ```
 

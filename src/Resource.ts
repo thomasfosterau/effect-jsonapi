@@ -336,7 +336,11 @@ export type Attribute<
  * @since 0.5.0
  * @category models
  */
-export type ReadOnlyAttribute<S extends Schema.Top> = Attribute<S, true, false, false, IsNullable<S>>
+export type ReadOnlyAttribute<
+  S extends Schema.Top,
+  FilterDecl extends FilterDeclaration = false,
+  Sort extends boolean = false
+> = Attribute<S, true, false, false, IsNullable<S>, FilterDecl, Sort>
 
 /**
  * Resolves an attribute's `clearable` flag: the explicit option when given,
@@ -428,7 +432,12 @@ export const attribute = <
   const create = (options?.create ?? "required") as AttributePresence
   const update = (options?.update ?? "optional") as "optional" | false
   const clearable = options?.clearable ?? isNullable(schema)
-  const filter = resolveFilterDeclaration(options?.filter)
+  const filter = resolveOperators(options?.filter, Filter.operators, "Resource.attribute")
+  if (filter === false && options?.filterLiteral !== undefined) {
+    throw new Error(
+      "Resource.attribute: `filterLiteral` given without `filter`; declare the operators the literal is for"
+    )
+  }
   const sort = (options?.sort ?? false) as boolean
   const config: RuntimeAttributeConfig = {
     schema,
@@ -451,21 +460,30 @@ export const attribute = <
   >
 }
 
-// Normalises a `filter` option to the operator list it declares: `true` is the
-// whole core, an array is itself (deduplicated, order kept), `false` / absent is
-// `false`. An array naming something outside the closed core is a definition
-// error, not a wire error.
-const resolveFilterDeclaration = (filter: FilterDeclaration | undefined): ReadonlyArray<Filter.Operator> | false => {
+// Normalises a `filter` declaration to the operator list it declares: `true` is
+// every operator in `allowed`, an array is itself (deduplicated, order kept),
+// `false` / absent is `false`. An empty array, or one naming an operator outside
+// `allowed` (the closed core for an attribute, the id-comparison subset for a
+// relationship), is a definition error, not a wire error; `subject` names the
+// declaration in the message.
+const resolveOperators = <Op extends Filter.Operator>(
+  filter: FilterDeclaration | undefined,
+  allowed: ReadonlyArray<Op>,
+  subject: string
+): ReadonlyArray<Op> | false => {
   if (filter === undefined || filter === false) return false
-  if (filter === true) return Filter.operators
+  if (filter === true) return allowed
+  if (filter.length === 0) {
+    throw new Error(`${subject} declares filter: [] — no operators; omit \`filter\` (or pass false) instead`)
+  }
   for (const operator of filter) {
-    if (!Filter.isOperator(operator)) {
+    if (!(allowed as ReadonlyArray<string>).includes(operator)) {
       throw new Error(
-        `Resource.attribute: unknown filter operator ${JSON.stringify(operator)}; expected one of ${Filter.operators.join(", ")}`
+        `${subject} declares filter operator ${JSON.stringify(operator)}; expected one of ${allowed.join(", ")}`
       )
     }
   }
-  return dedupe(filter)
+  return dedupe(filter) as ReadonlyArray<Op>
 }
 
 /**
@@ -486,6 +504,10 @@ const resolveFilterDeclaration = (filter: FilterDeclaration | undefined): Readon
  * {@link attributeAnnotations}, sparse `fields`, `include`) and is carried
  * through {@link extend}.
  *
+ * Server-set timestamps are the attributes most often filtered and sorted on,
+ * so the `filter` / `filterLiteral` / `sort` options of {@link attribute} are
+ * accepted here too.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -495,7 +517,7 @@ const resolveFilterDeclaration = (filter: FilterDeclaration | undefined): Readon
  *   attributes: {
  *     title: Schema.NonEmptyString,
  *     // on the resource + in documents, never a create/update input:
- *     createdAt: Resource.readOnlyAttribute(Schema.Date)
+ *     createdAt: Resource.readOnlyAttribute(Schema.DateFromString, { filter: ["gte", "lt"], sort: true })
  *   }
  * })
  *
@@ -504,13 +526,25 @@ const resolveFilterDeclaration = (filter: FilterDeclaration | undefined): Readon
  * // Article.updatePayload.Type … attributes  → { title? }
  * // Article.createInput.Type                 → { title }
  * // Article.updateInput.Type                 → { id, title? }
+ * Resource.sortable(Article) // ["createdAt"]
  * ```
  *
  * @since 0.5.0
  * @category constructors
  */
-export const readOnlyAttribute = <S extends Schema.Top>(schema: S): ReadOnlyAttribute<S> =>
-  attribute(schema, { create: false, update: false }) as unknown as ReadOnlyAttribute<S>
+export const readOnlyAttribute = <
+  S extends Schema.Top,
+  const FilterDecl extends FilterDeclaration = false,
+  const Sort extends boolean = false
+>(
+  schema: S,
+  options?: {
+    readonly filter?: FilterDecl
+    readonly filterLiteral?: Schema.Codec<FilterLiteralType<S>, string>
+    readonly sort?: Sort
+  }
+): ReadOnlyAttribute<S, FilterDecl, Sort> =>
+  attribute(schema, { ...options, create: false, update: false }) as unknown as ReadOnlyAttribute<S, FilterDecl, Sort>
 
 // The runtime shape of an attribute's descriptor, stored under
 // `AttributeDescriptorAnnotationId`. `filter` is already normalised to the
@@ -1597,6 +1631,10 @@ const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
         kinds.add(kind)
         return true
       }
+      case "TemplateLiteral":
+        // Encodes as a plain string; the template's own check applies on decode.
+        kinds.add("string")
+        return true
       case "Union":
         return node.types.every(visit)
       case "Suspend":
@@ -1650,8 +1688,10 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
               )
             : Effect.succeed(value)
         },
+        // `NaN` / `Infinity` are numbers `Schema.Number` admits but the decoder
+        // above rejects; refusing them here keeps `decode ∘ encode` total.
         encode: (value, options) =>
-          typeof value === kind
+          typeof value === kind && (kind !== "number" || Number.isFinite(value))
             ? Effect.succeed(String(value))
             : Effect.fail(
                 new SchemaIssue.InvalidValue(
@@ -1690,26 +1730,6 @@ interface RuntimeFilterable {
   readonly literal: Schema.Codec<unknown, string>
 }
 
-// Normalises a to-one relationship's `filter` declaration to its operator list,
-// or throws when it names an operator a relationship cannot admit (ordering
-// makes no sense for an id).
-const relationshipFilterOperators = (
-  type: string,
-  key: string,
-  filter: Relationship.FilterDeclaration
-): ReadonlyArray<Relationship.FilterOperator> => {
-  if (filter === true) return Relationship.filterOperators
-  for (const operator of filter as ReadonlyArray<string>) {
-    if (!(Relationship.filterOperators as ReadonlyArray<string>).includes(operator)) {
-      throw new Error(
-        `Resource.make("${type}"): relationship "${key}" declares filter operator ${JSON.stringify(operator)}; ` +
-          `a relationship admits only ${Relationship.filterOperators.join(", ")}`
-      )
-    }
-  }
-  return dedupe(filter as ReadonlyArray<Relationship.FilterOperator>)
-}
-
 // Builds the filterable record for a resource: each declared attribute with its
 // derived (or explicit `filterLiteral`) codec, then each declared to-one
 // relationship with the target's `Id` schema as its literal codec. The target
@@ -1721,18 +1741,27 @@ const filterableFields = (
   relationships: Relationships
 ): Record<string, RuntimeFilterable> => {
   const result: Record<string, RuntimeFilterable> = {}
+  // `!filter` (not `=== false`) so a descriptor without the field — one stamped
+  // by hand under the public annotation id, or by an older copy of the package
+  // in a duplicated dependency tree — reads as undeclared rather than crashing.
   for (const [key, field] of Object.entries(fields)) {
     const descriptor = descriptorOf(field as Schema.Top)
-    if (!descriptor || descriptor.filter === false) continue
+    if (!descriptor?.filter) continue
     result[key] = {
       operators: descriptor.filter,
       literal: descriptor.filterLiteral ?? deriveFilterLiteral(type, key, descriptor.schema)
     }
   }
   for (const [key, descriptor] of Object.entries(relationships)) {
-    if (!Relationship.isToOne(descriptor) || descriptor.filter === false) continue
+    if (!Relationship.isToOne(descriptor) || !descriptor.filter) continue
+    const operators = resolveOperators(
+      descriptor.filter,
+      Relationship.filterOperators,
+      `Resource.make("${type}"): relationship "${key}"`
+    )
+    if (operators === false) continue
     result[key] = {
-      operators: relationshipFilterOperators(type, key, descriptor.filter),
+      operators,
       literal: Schema.suspend(() => descriptor.ref().Id) as unknown as Schema.Codec<unknown, string>
     }
   }

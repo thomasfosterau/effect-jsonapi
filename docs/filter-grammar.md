@@ -26,7 +26,7 @@ Settled in #82, not reopened here:
 - Ships as a documented profile URI, not an `ext` extension.
 
 Two things below go further than the issue text and are called out where they occur:
-[§1.2](#12-fields) proposes admitting to-one relationship names as fields, and
+[§1.2](#12-fields) admits to-one relationship names as fields (decided with #84), and
 [§7](#7-error-pointers) records that the error middleware needs extending before `source.parameter`
 can be emitted.
 
