@@ -53,27 +53,59 @@ import type { Any } from "./Resource.js"
 // ---------------------------------------------------------------------------
 
 /**
+ * The filter operators a to-one relationship may declare: equality and list
+ * membership against the related resource's id, plus the null test. Ordering
+ * operators make no sense for an id, so `lt` / `lte` / `gt` / `gte` are
+ * excluded; declaring one is a definition-time error in `Resource.make`.
+ *
+ * @since 0.13.0
+ * @category constants
+ */
+export const filterOperators = ["eq", "ne", "in", "nin", "isnull"] as const
+
+/**
+ * A filter operator a to-one relationship may declare — one of
+ * {@link filterOperators}.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export type FilterOperator = (typeof filterOperators)[number]
+
+/**
+ * How a to-one relationship is declared filterable (`Relationship.one(ref, { filter })`):
+ * `true` (every operator in {@link filterOperators}), a subset of them, or
+ * `false` (the default) — not filterable.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>
+
+/**
  * A required to-one relationship: linkage is always a single resource
- * identifier, never `null`.
+ * identifier, never `null`. `F` records its `filter` declaration.
  *
  * @since 0.1.0
  * @category models
  */
-export interface One<R extends Any> {
+export interface One<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
   readonly kind: "one"
   readonly ref: () => R
+  readonly filter: F
 }
 
 /**
  * An optional (nullable) to-one relationship: linkage is a single resource
- * identifier or `null`.
+ * identifier or `null`. `F` records its `filter` declaration.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Optional<R extends Any> {
+export interface Optional<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
   readonly kind: "optional"
   readonly ref: () => R
+  readonly filter: F
 }
 
 /**
@@ -154,6 +186,12 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  * declaration order (mutually recursive definitions may require an explicit
  * type annotation on one side).
  *
+ * Pass `filter` to make the relationship a filterable field of its resource
+ * (`?filter[author]=9`), valued by the related resource's id: `true` admits
+ * every operator in {@link filterOperators}, an array admits that subset. The
+ * declaration is read by `Resource.filterable`; the literal codec is the
+ * target's `Id` schema, resolved lazily.
+ *
  * @example
  * ```ts
  * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
@@ -165,18 +203,30 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { author: Relationship.one(() => Person) }
+ *   relationships: { author: Relationship.one(() => Person, { filter: ["eq", "in"] }) }
  * })
+ *
+ * Resource.filterable(Article).author.operators // ["eq", "in"]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const one = <R extends Any>(ref: () => R): One<R> => ({ kind: "one", ref })
+// `NoInfer` keeps `F` from being inferred off the *contextual* return type
+// (`Relationships` widens it to the whole `FilterDeclaration` inside a
+// `Resource.make` call); it is inferred from `options.filter` alone, and
+// defaults to `false`.
+export const one = <R extends Any, const F extends FilterDeclaration = false>(
+  ref: () => R,
+  options?: { readonly filter?: F }
+): One<R, NoInfer<F>> => ({ kind: "one", ref, filter: (options?.filter ?? false) as F })
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
  * identifier or `null`.
+ *
+ * Takes the same `filter` option as {@link one}; `isnull` is the natural
+ * operator here (`?filter[assignee][isnull]=true`).
  *
  * @example
  * ```ts
@@ -189,14 +239,19 @@ export const one = <R extends Any>(ref: () => R): One<R> => ({ kind: "one", ref 
  *
  * const Issue = Resource.make("issues", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { assignee: Relationship.optional(() => Person) }
+ *   relationships: { assignee: Relationship.optional(() => Person, { filter: true }) }
  * })
+ *
+ * Resource.filterable(Issue).assignee.operators // ["eq", "ne", "in", "nin", "isnull"]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const optional = <R extends Any>(ref: () => R): Optional<R> => ({ kind: "optional", ref })
+export const optional = <R extends Any, const F extends FilterDeclaration = false>(
+  ref: () => R,
+  options?: { readonly filter?: F }
+): Optional<R, NoInfer<F>> => ({ kind: "optional", ref, filter: (options?.filter ?? false) as F })
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of

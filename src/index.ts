@@ -11,6 +11,7 @@
  *   Client,
  *   Document,
  *   Endpoint,
+ *   Filter,
  *   Group,
  *   Handlers,
  *   Lid,
@@ -79,6 +80,14 @@ export * as Document from "./Document.js"
  * @since 0.1.0
  */
 export * as Endpoint from "./Endpoint.js"
+
+/**
+ * The `filter` query family's operator vocabulary (`Filter.operators`,
+ * `Filter.isOperator`).
+ *
+ * @since 0.13.0
+ */
+export * as Filter from "./Filter.js"
 
 /**
  * JSON:API resource groups (`Group.make`).
