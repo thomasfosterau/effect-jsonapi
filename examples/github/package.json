@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@thomasfosterau/effect-jsonapi": "workspace:*",
-    "effect": "4.0.0-rc.111"
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
     "vitest": "^4.0.18"
