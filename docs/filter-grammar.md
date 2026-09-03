@@ -26,7 +26,7 @@ Settled in #82, not reopened here:
 - Ships as a documented profile URI, not an `ext` extension.
 
 Two things below go further than the issue text and are called out where they occur:
-[§1.2](#12-fields) proposes admitting to-one relationship names as fields, and
+[§1.2](#12-fields) admits to-one relationship names as fields (decided with #84), and
 [§7](#7-error-pointers) records that the error middleware needs extending before `source.parameter`
 can be emitted.
 
@@ -79,17 +79,18 @@ shorthand with one key decodes to that bare condition ([§2.2](#22-shorthand)).
 
 A field is a **declared name on the primary resource** (#84). No dotted paths, no traversal.
 
-> **Proposed widening (needs a decision).** #83 says "attribute names of the primary resource
-> only". The code argues for also admitting **to-one relationship names**, valued by the target's
-> `id` string: the README's canonical example is `filter[author]=9`
-> (`README.md:496-501`); `examples/northwind` models reverse relationships as `filter[category]`,
-> `filter[customer]`, `filter[manager]` endpoints; the JSON:API recommendation itself is
-> `GET /comments?filter[post]=1`; and the empirical table in legation#148 (16 `eq`, values are ids)
-> is mostly foreign keys, which a JSON:API resource exposes as relationships, not attributes. This
-> is not traversal: there is no path, the literal is the related id, and only `eq ne in nin isnull`
-> apply. If rejected, consumers must expose each foreign key as a read-only attribute as well as a
-> relationship, and `filter[author]=9` in the README example moves to the escape hatch. The rest of
-> this note is unaffected either way; "attribute" below reads as "declared field".
+**Decision (accepted, #84).** Fields are the resource's declared attributes
+(`schema.pipe(Filter.able(...))`, or the `Resource.attribute(schema, { filter })` sugar for it)
+**plus its declared to-one relationship names**
+(`Relationship.one(ref, { filter })` / `Relationship.optional(ref, { filter })`), the latter valued
+by the related resource's id and admitting `eq ne in nin isnull` only — ordering operators make no
+sense for an id, and declaring one is a definition-time error. This is not traversal: there is no
+path and the literal is the related id, decoded through the target's `Id` schema. It keeps the
+README's canonical `filter[author]=9`, `examples/northwind`'s `filter[category]` / `filter[customer]`
+/ `filter[manager]` endpoints and the JSON:API recommendation `GET /comments?filter[post]=1`
+expressible without exposing foreign keys as attributes, and it covers the empirical table in
+legation#148 (16 `eq`, values are ids), which is mostly foreign keys. To-many relationships are not
+fields. "Attribute" below reads as "declared field".
 
 ### 1.3 What the AST does not carry
 
@@ -423,7 +424,8 @@ Unknown field, undeclared operator and bad literal are three distinct failures w
   (`README.md:705-707`); an endpoint uses one or the other. Heterogeneous endpoints (several
   resources) keep the escape hatch in phase 1.
 - Default is off: an undeclared attribute is not filterable, matching `include` / `fields` / `sort`.
-- `sort: true` keeps meaning "every attribute"; the declared sortable set is an allow-list a
+- `sort: true` keeps meaning "every attribute"; the declared sortable set — the attributes piped
+  through `Sort.able()` (or `Resource.attribute(schema, { sort: true })`) — is an allow-list a
   consumer passes explicitly (`sort: Resource.sortable(Article)`), so no existing endpoint changes
   behaviour.
 - The flat-key reshaper (`src/internal/codecs.ts:115-147`) handles one bracket level. `filter[*]`

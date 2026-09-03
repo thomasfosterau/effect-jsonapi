@@ -1197,6 +1197,91 @@ fails loudly instead of lying.
 Unknown include paths, unknown sparse-fieldset names and unknown sort fields fail decoding — which
 the schema-error middleware turns into a spec-compliant **400 JSON:API error document**.
 
+### Declaring filterable and sortable attributes
+
+Filterability is a per-resource property, declared per attribute: which attributes, which operators,
+and (from the attribute's own schema) what literal type. The declaration lives on the attribute
+schema itself: pipe it through `Filter.able` / `Sort.able` — Effect-native combinators in the manner
+of `Schema.brand` — and it rides with the schema as an annotation (`Filter.AnnotationId` /
+`Sort.AnnotationId`), the single source of truth `Resource.filterable` / `Resource.sortable` read
+back. An attribute declared with neither — or a plain `Schema` attribute — is not filterable and not
+sortable, so the declaration fails closed the way `include` / `fields` / `sort` already do.
+
+```ts
+import { Filter, Relationship, Resource, Sort } from "@thomasfosterau/effect-jsonapi"
+
+const Product = Resource.make("products", {
+  attributes: {
+    name: Schema.NonEmptyString, // neither filterable nor sortable
+    // a subset of the operator core, spelt as constants, and sortable
+    priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt]), Sort.able()),
+    // the whole core: eq ne lt lte gt gte in nin isnull (`Filter.operators`)
+    discontinued: Schema.Boolean.pipe(Filter.able()),
+    // server-set, so read-only — and the usual sort key
+    createdAt: Resource.readOnlyAttribute(Schema.DateFromString.pipe(Filter.able(["gte", "lt"]), Sort.able())),
+    // nullable: declare the member and wrap it — `isnull` names NULL, the literal is the number
+    rating: Schema.NullOr(Schema.Number.pipe(Filter.able(["gte", "isnull"])))
+  },
+  relationships: {
+    // a to-one relationship is a filter field too, valued by the related id
+    supplier: Relationship.one(() => Supplier, { filter: ["eq", "in"] })
+  }
+})
+
+Resource.filterable(Product)
+// → { priceCents: { operators: ["eq", "gt", "lt"], literal }, discontinued: { … }, createdAt: { … }, rating: { … }, supplier: { … } }
+Resource.sortable(Product) // → ["priceCents", "createdAt"]
+```
+
+`Resource.attribute`'s `filter` / `filterLiteral` / `sort` options are sugar for exactly those calls
+on the inner schema — handy when the attribute takes a projection descriptor anyway — and stamp
+nothing else, so the two spellings are indistinguishable downstream, at runtime and in the types:
+
+```ts
+priceCents: Resource.attribute(Schema.Int, { create: "optional", filter: ["eq", "gt", "lt"], sort: true })
+// ≡ Resource.attribute(Schema.Int.pipe(Filter.able(["eq", "gt", "lt"]), Sort.able()), { create: "optional" })
+```
+
+The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` over the closed core,
+from which `Filter.operators` and `Filter.isOperator` derive — and `Filter.Op` spells it as typed
+constants (`Filter.Op.gt` is the literal `"gt"`), so a typo is a compile error while plain strings
+stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: the runtime declaration
+survives a later `.check(...)`, `.annotate(...)` or `Schema.brand`, but any rebuild drops the
+type-level marker (`Resource.FilterableKeys` / `SortableKeys` stop naming the attribute); wrapping
+the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both.
+
+`Resource.filterable(R)` is a read-only record keyed by the declared fields (undeclared ones are
+absent, so `Object.keys` is the filterable set); each entry carries the declared `operators` and a
+`literal` codec, `Schema.Codec<Type, string>`. For an attribute the codec is derived from the
+schema's encoded form — `string`, `number`, `boolean`, or `Schema.NullOr` of one. A wire string is
+parsed strictly as that scalar (`number` accepts only a finite decimal, `boolean` only `true` /
+`false`) and then decoded through the attribute schema itself, so refinements, brands, literal
+unions and `DateFromString` all apply: `filter[priceCents][gt]=abc` fails decoding rather than
+silently matching nothing. An attribute whose encoded form is not a scalar cannot be declared
+filterable (`Resource.make` throws, naming it) unless the declaration supplies an explicit codec:
+`Filter.able(["eq"], { literal: PointFromString })` (or the `filterLiteral` option).
+
+To-one relationships (`Relationship.one` / `Relationship.optional`) take a `filter` option and
+become filter fields valued by the related resource's id — `filter[supplier]=9` — with the target's
+`Id` schema as the literal codec, so the decoded literal is the branded id. Only `eq ne in nin isnull`
+apply to a relationship (`Relationship.FilterOperator`, a narrowing of `Filter.Operator`);
+`filter: true` means those five, and declaring an ordering operator is a definition-time error.
+To-many relationships are not fields.
+
+`Resource.sortable(R)` returns the declared attribute keys (attributes only), typed as their literal
+union, so it is the natural `sort` allow-list for an endpoint; `sort: true` keeps meaning "every
+attribute":
+
+```ts
+Endpoint.list(Product, { sort: Resource.sortable(Product), page: Query.Page.Offset })
+// ?sort=-createdAt,priceCents decodes; ?sort=name is a 400
+```
+
+The `filter` query codec over this declaration — the grammar in
+[`docs/filter-grammar.md`](./docs/filter-grammar.md), with `filter[f]=v` as `eq`, `filter[f]=a,b`
+as `in` and `filter[f][gt]=v` for the other operators — lands separately; until then `filter` on an
+endpoint remains the per-key escape hatch above.
+
 ### Constraining the advertised include paths
 
 `include: true` legalises the resource's **whole relationship graph, two hops deep** — every path

@@ -43,10 +43,13 @@
  *
  * @since 0.1.0
  */
-import { Schema, Struct } from "effect"
+import { Effect, Schema, SchemaAST, SchemaIssue, SchemaTransformation, Struct } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js"
+import * as Filter from "./Filter.js"
+import { resolveOperators } from "./internal/operators.js"
 import * as Relationship from "./Relationship.js"
 import type { Relationships, RelationshipSchemas } from "./Relationship.js"
+import * as Sort from "./Sort.js"
 
 // The relationship descriptor types (`Descriptor`, `Relationships`,
 // `RelationshipSchemas`) are part of the public API under the `Relationship`
@@ -241,8 +244,23 @@ type AttributeConfigKey = "~@thomasfosterau/effect-jsonapi/attribute"
 export type AttributePresence = "required" | "optional" | false
 
 /**
- * The type-level projection config carried by an {@link Attribute}: the base
- * schema plus how the attribute appears in each write projection.
+ * The `filter` option of {@link attribute} / {@link readOnlyAttribute} — sugar
+ * for `Filter.able`:
+ *
+ *   - `true` — every operator in the core (`Filter.operators`);
+ *   - an array of operator names — that subset, in the order given;
+ *   - `false` (the default) — not filterable.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type FilterDeclaration = boolean | ReadonlyArray<Filter.Operator>
+
+/**
+ * The type-level config carried by an {@link Attribute}: the base schema and
+ * how the attribute appears in each write projection. (The `filter` / `sort`
+ * declarations are not here — they ride on the schema itself, as `Filter.able`
+ * / `Sort.able` markers.)
  *
  * @since 0.5.0
  * @category type-level
@@ -293,7 +311,9 @@ export type AttributeResourceField<
  * `fields`, `include` — and is carried through {@link extend}. The four write
  * projections ({@link CreatePayload}, {@link UpdatePayload}, {@link CreateInput},
  * {@link UpdateInput}) read the marker to include, exclude or re-shape the
- * attribute.
+ * attribute. A `filter` / `sort` declaration is not part of the descriptor: it
+ * rides on `S` itself (`Filter.able` / `Sort.able`), and {@link filterable} /
+ * {@link sortable} read it through the descriptor.
  *
  * @since 0.5.0
  * @category models
@@ -325,6 +345,68 @@ type ResolveClearable<S extends Schema.Top, Clearable extends boolean | undefine
   ? Clearable
   : IsNullable<S>
 
+// The `filter` / `sort` sugar of `attribute` at the type level: the same markers
+// `Filter.able` / `Sort.able` stamp, applied in that order, so both spellings
+// produce one type. `false` (the default) leaves the schema untouched.
+type WithFilter<S extends Schema.Top, D extends FilterDeclaration, Literal> = [D] extends [false]
+  ? S
+  : Filter.Declared<S, DeclaredOperators<D, Filter.Operator>, Literal>
+type WithSort<S extends Schema.Top, Sortable extends boolean> = [Sortable] extends [true] ? Sort.Declared<S> : S
+type Declare<S extends Schema.Top, D extends FilterDeclaration, Sortable extends boolean, Literal> = WithSort<
+  WithFilter<S, D, Literal>,
+  Sortable
+>
+
+// Refuses, at the type level, a schema that already carries the marker the
+// sugar would stamp again (`never` makes the `schema` argument unassignable).
+type NotAlready<S, Key extends string, Given> = [Given] extends [false]
+  ? unknown
+  : S extends { readonly [K in Key]: unknown }
+    ? never
+    : unknown
+
+// The `filter` / `sort` sugar at runtime: `Filter.able` then `Sort.able` on the
+// inner schema — the annotation is the only record of the declaration. A schema
+// that already carries the declaration the sugar would stamp is refused: the
+// sugar would silently override it (and the type-level markers would clash).
+const declare = (
+  schema: Schema.Top,
+  options:
+    | {
+        readonly filter?: FilterDeclaration | undefined
+        readonly filterLiteral?: Schema.Codec<unknown, string> | undefined
+        readonly sort?: boolean | undefined
+      }
+    | undefined
+): Schema.Top => {
+  let declared = schema
+  const filter = options?.filter
+  if (filter !== undefined && filter !== false) {
+    if (annotationAt(schema.ast, Filter.AnnotationId) !== undefined) {
+      throw new Error(
+        "Resource.attribute: the schema is already Filter.able; drop the `filter` option or the pipe, not both"
+      )
+    }
+    declared =
+      options?.filterLiteral === undefined
+        ? Filter.able(filter)(declared)
+        : Filter.able(filter, { literal: options.filterLiteral })(declared)
+  } else if (options?.filterLiteral !== undefined) {
+    throw new Error(
+      "Resource.attribute: `filterLiteral` given without `filter`; declare the operators the literal is for"
+    )
+  }
+  if (options?.sort === true) {
+    if (annotationAt(schema.ast, Sort.AnnotationId) !== undefined) {
+      throw new Error(
+        "Resource.attribute: the schema is already Sort.able; drop the `sort` option or the pipe, not both"
+      )
+    }
+    declared = Sort.able()(declared)
+  }
+  return declared
+}
+
 /**
  * Defines a per-attribute **projection descriptor**, controlling how a single
  * attribute appears in the resource object versus the write projections.
@@ -342,13 +424,26 @@ type ResolveClearable<S extends Schema.Top, Clearable extends boolean | undefine
  *     setting it `true` wraps a non-nullable schema in `Schema.NullOr` for the
  *     update projection only.
  *
+ * Whether the attribute may appear in `?filter[...]=` / `?sort=` is declared on
+ * the schema itself, by piping it through `Filter.able` / `Sort.able` — see
+ * {@link filterable} and {@link sortable}. Three further options are sugar for
+ * exactly those calls on the inner schema, and stamp nothing else:
+ *
+ *   - `filter` — `true` (every operator in `Filter.operators`), an array of
+ *     operator names (that subset), or `false` (default); `Filter.able(filter)`.
+ *   - `filterLiteral` — an explicit `Codec<Type, string>` for the wire literal,
+ *     for the rare attribute whose encoded form is not a JSON scalar;
+ *     `Filter.able(filter, { literal })`.
+ *   - `sort` — `true` to allow `?sort=`; `Sort.able()`.
+ *
  * The descriptor rides on the attribute's schema value, so it is carried through
- * {@link extend} and read by both {@link make} and the Atomic operations.
+ * {@link extend} and read by {@link make}, the Atomic operations and the
+ * {@link filterable} / {@link sortable} accessors.
  *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Filter, Resource, Sort } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
  *   attributes: {
@@ -356,9 +451,18 @@ type ResolveClearable<S extends Schema.Top, Clearable extends boolean | undefine
  *     // server-set: on the resource + documents, never a write input
  *     createdAt: Resource.attribute(Schema.Date, { create: false, update: false }),
  *     // set at create, optional thereafter, clearable on update
- *     summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" })
+ *     summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+ *     // filterable with a subset of operators, and sortable — declared on the schema
+ *     priceCents: Resource.attribute(Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt]), Sort.able()), {
+ *       create: "optional"
+ *     }),
+ *     // the same declaration, as sugar: `filter` / `sort` apply Filter.able / Sort.able
+ *     status: Resource.attribute(Schema.Literals(["draft", "published"]), { filter: true, sort: true })
  *   }
  * })
+ *
+ * Object.keys(Resource.filterable(Article)) // ["priceCents", "status"]
+ * Resource.sortable(Article) // ["priceCents", "status"]
  * ```
  *
  * @since 0.5.0
@@ -369,24 +473,35 @@ export const attribute = <
   const Resource extends boolean | "optional" = true,
   const Create extends AttributePresence = "required",
   const Update extends "optional" | false = "optional",
-  const Clearable extends boolean | undefined = undefined
+  const Clearable extends boolean | undefined = undefined,
+  const FilterDecl extends FilterDeclaration = false,
+  const Sortable extends boolean = false,
+  Literal = FilterLiteralType<S>
 >(
-  schema: S,
+  // `Literal` is inferred from `filterLiteral` and, as for `Filter.able`, the
+  // schema's `Type` must fit it; a schema already `Filter.able` / `Sort.able`
+  // is refused when the corresponding sugar option is given.
+  schema: S & { readonly Type: NoInfer<Literal> | null } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
+    NotAlready<S, Sort.MarkerKey, Sortable>,
   options?: {
     readonly resource?: Resource
     readonly create?: Create
     readonly update?: Update
     readonly clearable?: Clearable
+    readonly filter?: FilterDecl
+    readonly filterLiteral?: Schema.Codec<Literal, string>
+    readonly sort?: Sortable
   }
-): Attribute<S, Resource, Create, Update, ResolveClearable<S, Clearable>> => {
+): Attribute<Declare<S, FilterDecl, Sortable, Literal>, Resource, Create, Update, ResolveClearable<S, Clearable>> => {
   const resource = (options?.resource ?? true) as boolean | "optional"
   const create = (options?.create ?? "required") as AttributePresence
   const update = (options?.update ?? "optional") as "optional" | false
   const clearable = options?.clearable ?? isNullable(schema)
-  const config: RuntimeAttributeConfig = { schema, create, update, clearable }
-  const resourceField = resource === "optional" ? Schema.optionalKey(schema) : schema
+  const declared = declare(schema, options)
+  const config: RuntimeAttributeConfig = { schema: declared, create, update, clearable }
+  const resourceField = resource === "optional" ? Schema.optionalKey(declared) : declared
   return resourceField.annotate({ [AttributeDescriptorAnnotationId]: config }) as unknown as Attribute<
-    S,
+    Declare<S, FilterDecl, Sortable, Literal>,
     Resource,
     Create,
     Update,
@@ -412,16 +527,21 @@ export const attribute = <
  * {@link attributeAnnotations}, sparse `fields`, `include`) and is carried
  * through {@link extend}.
  *
+ * Server-set timestamps are the attributes most often filtered and sorted on:
+ * declare that on the schema with `Filter.able` / `Sort.able` (or the
+ * equivalent `filter` / `filterLiteral` / `sort` sugar of {@link attribute},
+ * accepted here too).
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Filter, Resource, Sort } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
  *   attributes: {
  *     title: Schema.NonEmptyString,
  *     // on the resource + in documents, never a create/update input:
- *     createdAt: Resource.readOnlyAttribute(Schema.Date)
+ *     createdAt: Resource.readOnlyAttribute(Schema.DateFromString.pipe(Filter.able(["gte", "lt"]), Sort.able()))
  *   }
  * })
  *
@@ -430,16 +550,38 @@ export const attribute = <
  * // Article.updatePayload.Type … attributes  → { title? }
  * // Article.createInput.Type                 → { title }
  * // Article.updateInput.Type                 → { id, title? }
+ * Resource.filterable(Article).createdAt.operators // ["gte", "lt"]
+ * Resource.sortable(Article) // ["createdAt"]
  * ```
  *
  * @since 0.5.0
  * @category constructors
  */
-export const readOnlyAttribute = <S extends Schema.Top>(schema: S): ReadOnlyAttribute<S> =>
-  attribute(schema, { create: false, update: false }) as unknown as ReadOnlyAttribute<S>
+export const readOnlyAttribute = <
+  S extends Schema.Top,
+  const FilterDecl extends FilterDeclaration = false,
+  const Sortable extends boolean = false,
+  Literal = FilterLiteralType<S>
+>(
+  schema: S & { readonly Type: NoInfer<Literal> | null } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
+    NotAlready<S, Sort.MarkerKey, Sortable>,
+  options?: {
+    readonly filter?: FilterDecl
+    readonly filterLiteral?: Schema.Codec<Literal, string>
+    readonly sort?: Sortable
+  }
+): ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>> =>
+  attribute(schema as Schema.Top, {
+    ...options,
+    filterLiteral: options?.filterLiteral as Schema.Codec<unknown, string> | undefined,
+    create: false,
+    update: false
+  }) as unknown as ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>>
 
-// The runtime shape of an attribute's projection descriptor, stored under
-// `AttributeDescriptorAnnotationId`.
+// The runtime shape of an attribute's descriptor, stored under
+// `AttributeDescriptorAnnotationId`. `schema` is the inner (declared) schema:
+// the `filter` / `sort` declarations are its own `Filter.able` / `Sort.able`
+// annotations, not descriptor fields.
 interface RuntimeAttributeConfig {
   readonly schema: Schema.Top
   readonly create: AttributePresence
@@ -447,20 +589,25 @@ interface RuntimeAttributeConfig {
   readonly clearable: boolean
 }
 
-// Whether a schema is a two-member `Schema.NullOr(...)` union, at runtime.
-const isNullable = (schema: Schema.Top): boolean => {
-  const members = (schema as { readonly members?: ReadonlyArray<{ readonly ast?: { readonly _tag?: string } }> })
-    .members
-  return Array.isArray(members) && members.length === 2 && members.some((member) => member?.ast?._tag === "Null")
-}
+// The non-null member of a `Schema.NullOr(...)` — a two-member union with a
+// `Null` member — at the AST level; `undefined` for anything else. The one
+// definition of "nullable" the runtime shares: `isNullable`, `nonNullableBase`
+// and the declaration readers all go through it.
+const nullableBaseAst = (ast: SchemaAST.AST): SchemaAST.AST | undefined =>
+  ast._tag === "Union" && ast.types.length === 2 && ast.types.some((member) => member._tag === "Null")
+    ? ast.types.find((member) => member._tag !== "Null")
+    : undefined
 
-// The base schema of a `Schema.NullOr(...)`, or the schema itself if it is not a
-// recognised two-member nullable union.
+// Whether a schema is a two-member `Schema.NullOr(...)` union, at runtime.
+const isNullable = (schema: Schema.Top): boolean => nullableBaseAst(schema.ast) !== undefined
+
+// The base schema of a `Schema.NullOr(...)` — the member whose AST is the
+// non-null one — or the schema itself if it is not a nullable union.
 const nonNullableBase = (schema: Schema.Top): Schema.Top => {
-  if (!isNullable(schema)) return schema
-  const members = (schema as unknown as { readonly members: ReadonlyArray<Schema.Top> }).members
-  const base = members.find((member) => (member as { readonly ast?: { readonly _tag?: string } }).ast?._tag !== "Null")
-  return base ?? schema
+  const baseAst = nullableBaseAst(schema.ast)
+  if (baseAst === undefined) return schema
+  const members = (schema as { readonly members?: ReadonlyArray<Schema.Top> }).members
+  return members?.find((member) => member.ast === baseAst) ?? schema
 }
 
 // Wraps a schema in `Schema.NullOr` unless it is already nullable.
@@ -1352,6 +1499,569 @@ export const includePaths = (resource: Any, maxDepth: number = 3): ReadonlyArray
 }
 
 // ---------------------------------------------------------------------------
+// Filterable and sortable attributes
+// ---------------------------------------------------------------------------
+
+// The type-level marker `Filter.able` / `Sort.able` leave under `Key`, read off
+// an attribute field: on the field itself, through an `optionalKey` wrapper,
+// through a `Schema.NullOr` union (the non-null member — NULL is never a literal
+// and never a sort key), or through the descriptor's inner schema. `never` when
+// the field carries none. (`Schema.suspend` is opaque at the type level; the
+// runtime readers below follow its thunk.)
+type MarkerOf<F, Key extends string> = F extends { readonly [K in Key]: infer M }
+  ? M
+  : F extends Schema.optionalKey<infer X>
+    ? MarkerOf<X, Key>
+    : F extends Schema.NullOr<infer X>
+      ? MarkerOf<X, Key>
+      : ConfigOf<F> extends { readonly schema: infer X }
+        ? MarkerOf<X, Key>
+        : never
+
+// The `Filter.able` declaration of an attribute field (`never` when undeclared)
+// and whether the field is `Sort.able`.
+type FilterMarkerOf<F> =
+  MarkerOf<F, Filter.MarkerKey> extends infer M extends Filter.Marker<Filter.Operator, unknown> ? M : never
+// (`never` — no marker — must be caught first: it satisfies any `extends`.)
+type SortDeclarationOf<F> = [MarkerOf<F, Sort.MarkerKey>] extends [never]
+  ? false
+  : MarkerOf<F, Sort.MarkerKey> extends true
+    ? true
+    : false
+
+// The `filter` declaration of a to-one relationship descriptor; `false` for
+// to-many descriptors, which cannot be filter fields.
+type RelationshipFilterDeclarationOf<D> = D extends {
+  readonly kind: "one" | "optional"
+  readonly filter: infer F extends Relationship.FilterDeclaration
+}
+  ? F
+  : false
+
+// The relationship keys declared filterable. A resource whose relationship
+// names are not statically known (`Relationships` itself, as on a name-only
+// family) declares none.
+type FilterableRelationshipKeys<R extends Any> =
+  string extends RelationshipName<R>
+    ? never
+    : {
+        [K in RelationshipName<R>]: RelationshipFilterDeclarationOf<R["relationships"][K]> extends false ? never : K
+      }[RelationshipName<R>]
+
+// The operators a declaration admits: the whole set for `true`, the subset
+// otherwise.
+type DeclaredOperators<D, All extends string> = D extends true
+  ? All
+  : D extends ReadonlyArray<infer Op extends All>
+    ? Op
+    : never
+
+/**
+ * The keys of a resource declared filterable, as a union of string literals:
+ * attributes whose schema is `Filter.able` (piped, or via the `filter` sugar of
+ * `Resource.attribute`) and to-one relationships declared with
+ * `Relationship.one(ref, { filter })` / `Relationship.optional(ref, { filter })`.
+ * A plain schema attribute, a to-many relationship, or anything declared
+ * without `filter`, is not filterable — the declaration fails closed, like
+ * `include` / `fields` / `sort`.
+ *
+ * Resolved from the `Filter.able` marker alone, looked for on the attribute
+ * schema itself and through `Schema.optionalKey` / `Schema.NullOr` around it.
+ *
+ * Distributes over unions of resource definitions.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type FilterableKeys<R extends Any> = R extends Any
+  ?
+      | {
+          [K in AttributeKeys<R>]: [FilterMarkerOf<AttributesOf<R>[K]>] extends [never] ? never : K
+        }[AttributeKeys<R>]
+      | FilterableRelationshipKeys<R>
+  : never
+
+/**
+ * The operators a filterable key admits, as a union of string literals: for
+ * `Filter.able()` / `filter: true`, every `Filter.Operator` on an attribute or
+ * every `Relationship.FilterOperator` on a to-one relationship; otherwise
+ * exactly the declared subset.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type FilterOperators<R extends Any, K extends FilterableKeys<R>> =
+  K extends AttributeKeys<R>
+    ? FilterMarkerOf<AttributesOf<R>[K]>["operators"]
+    : K extends RelationshipName<R>
+      ? DeclaredOperators<RelationshipFilterDeclarationOf<R["relationships"][K]>, Relationship.FilterOperator>
+      : never
+
+/**
+ * The attribute keys of a resource declared sortable — whose schema is
+ * `Sort.able` (piped, or via the `sort: true` sugar of `Resource.attribute`) —
+ * as a union of string literals. A plain schema attribute is not sortable.
+ *
+ * Distributes over unions of resource definitions.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type SortableKeys<R extends Any> = R extends Any
+  ? {
+      [K in AttributeKeys<R>]: SortDeclarationOf<AttributesOf<R>[K]> extends true ? K : never
+    }[AttributeKeys<R>]
+  : never
+
+/**
+ * The decoded type of a filter literal for an attribute schema: the schema's
+ * own `Type`, minus `null` — `NULL` is never a literal (`isnull` names it), so
+ * a `Schema.NullOr(X)` attribute's literals are `X`. An alias of
+ * `Filter.LiteralType`.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type FilterLiteralType<S extends { readonly Type: unknown }> = Filter.LiteralType<S>
+
+/**
+ * One entry of {@link Filterable}: the operators a filterable key admits and
+ * the codec between the wire literal (a string) and its decoded type — the
+ * attribute's `Type` for an attribute, the target's id `Type` for a to-one
+ * relationship.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface FilterableField<Op extends Filter.Operator, Literal, RD = never, RE = never> {
+  /** The declared operators, in declaration order (the whole set for `filter: true`). */
+  readonly operators: ReadonlyArray<Op>
+  /**
+   * The literal codec: decodes a wire string to the field's `Type` (through the
+   * attribute schema, so refinements and brands apply — or through the target's
+   * `Id` schema for a relationship) and encodes it back.
+   */
+  readonly literal: Schema.Codec<Literal, string, RD, RE>
+}
+
+/**
+ * The filterable fields of a resource definition: a record from each declared
+ * key — attributes and to-one relationships alike — to its
+ * {@link FilterableField}. Undeclared keys are absent, so the keys are exactly
+ * {@link FilterableKeys}.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type Filterable<R extends Any> = {
+  readonly [K in FilterableKeys<R>]: K extends AttributeKeys<R>
+    ? FilterableField<
+        FilterOperators<R, K>,
+        FilterMarkerOf<AttributesOf<R>[K]>["literal"],
+        AttributesOf<R>[K]["DecodingServices"],
+        AttributesOf<R>[K]["EncodingServices"]
+      >
+    : FilterableField<FilterOperators<R, K>, Target<R, K>["Id"]["Type"]>
+}
+
+// The JSON scalar kinds a filter literal can take on the wire.
+type ScalarKind = "string" | "number" | "boolean"
+
+// Classifies the encoded (wire) form of an attribute schema as one JSON scalar
+// kind, looking through `NullOr` unions (NULL is never a literal), literal
+// unions and suspensions. `undefined` when the form is not a scalar (a struct,
+// an array, a `Date` declaration, …) or mixes kinds.
+const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
+  const kinds = new Set<ScalarKind>()
+  const visit = (node: SchemaAST.AST): boolean => {
+    switch (node._tag) {
+      case "String":
+        kinds.add("string")
+        return true
+      case "Number":
+        kinds.add("number")
+        return true
+      case "Boolean":
+        kinds.add("boolean")
+        return true
+      case "Null":
+        return true
+      case "Literal": {
+        const kind = typeof node.literal
+        if (kind !== "string" && kind !== "number" && kind !== "boolean") return false
+        kinds.add(kind)
+        return true
+      }
+      case "TemplateLiteral":
+        // Encodes as a plain string; the template's own check applies on decode.
+        kinds.add("string")
+        return true
+      case "Union":
+        return node.types.every(visit)
+      case "Suspend":
+        return visit(node.thunk())
+      default:
+        return false
+    }
+  }
+  if (!visit(ast) || kinds.size !== 1) return undefined
+  return [...kinds][0]
+}
+
+// A strict decimal: an optional sign, digits with an optional fraction (or a
+// bare fraction), an optional exponent. Deliberately narrower than `Number()`,
+// which also accepts `""`, whitespace, hex, binary and octal forms.
+const DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+
+// Parses a wire literal as one scalar kind; `undefined` when it is not one.
+const parseScalar = (kind: ScalarKind, input: string): string | number | boolean | undefined => {
+  switch (kind) {
+    case "string":
+      return input
+    case "number": {
+      if (!DECIMAL.test(input)) return undefined
+      const value = Number(input)
+      return Number.isFinite(value) ? value : undefined
+    }
+    case "boolean":
+      return input === "true" ? true : input === "false" ? false : undefined
+  }
+}
+
+// The literal codec for an attribute whose encoded form is `kind`: wire string
+// → scalar (strictly) → the attribute schema's own decoder, and the reverse on
+// encode. `target` is the attribute schema with any `NullOr` stripped, so the
+// codec's `Type` never includes `null`.
+const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unknown, string> =>
+  Schema.String.pipe(
+    Schema.decodeTo(
+      target,
+      SchemaTransformation.transformOrFail<unknown, string>({
+        decode: (input, options) => {
+          const value = parseScalar(kind, input)
+          return value === undefined
+            ? Effect.fail(
+                new SchemaIssue.InvalidValue(
+                  { message: `Expected a ${kind} filter literal, got ${JSON.stringify(input)}` },
+                  input,
+                  options
+                )
+              )
+            : Effect.succeed(value)
+        },
+        // `NaN` / `Infinity` are numbers `Schema.Number` admits but the decoder
+        // above rejects; refusing them here keeps `decode ∘ encode` total.
+        encode: (value, options) =>
+          typeof value === kind && (kind !== "number" || Number.isFinite(value))
+            ? Effect.succeed(String(value))
+            : Effect.fail(
+                new SchemaIssue.InvalidValue(
+                  {
+                    message:
+                      value === null
+                        ? "NULL is not a filter literal (use the isnull operator)"
+                        : `Expected a ${kind} to encode as a filter literal, got ${JSON.stringify(value)}`
+                  },
+                  value,
+                  options
+                )
+              )
+      })
+    )
+  ) as unknown as Schema.Codec<unknown, string>
+
+// Derives the literal codec for a filterable attribute from its schema, or
+// throws when the schema's encoded form is not a JSON scalar. Called from
+// `make`, so a bad declaration fails at definition time, naming the attribute.
+const deriveFilterLiteral = (type: string, key: string, schema: Schema.Top): Schema.Codec<unknown, string> => {
+  const base = nonNullableBase(schema)
+  const kind = scalarKindOf(SchemaAST.toEncoded(base.ast))
+  if (kind === undefined) {
+    throw new Error(
+      `Resource.make("${type}"): attribute "${key}" is declared filterable but its encoded form is not a JSON scalar ` +
+        "(string, number, boolean, or Schema.NullOr of one); pass `filterLiteral` to supply the literal codec explicitly"
+    )
+  }
+  return scalarLiteral(kind, base)
+}
+
+// The annotation under `id` on a schema node itself. Effect's `annotate` stamps
+// the node's *last* check when it has checks (the node otherwise), and a later
+// `.check(...)` appends a new last check without touching the earlier ones — so
+// the declaration may sit on any check or on the node. Scan them all, most
+// recent first, rather than only what `Schema.resolveAnnotations` reads.
+const ownAnnotationAt = (ast: SchemaAST.AST, id: string): unknown => {
+  if (ast.checks) {
+    for (let index = ast.checks.length - 1; index >= 0; index--) {
+      const found = ast.checks[index]?.annotations?.[id]
+      if (found !== undefined) return found
+    }
+  }
+  return ast.annotations?.[id]
+}
+
+// Resolves the annotation under `id` from an AST, looking through the wrappers
+// an attribute schema may carry: a `Schema.suspend` (its thunk) and a
+// `Schema.NullOr` union (the non-null member — NULL is never a literal and never
+// a sort key). `optionalKey` needs no case: it keeps the wrapped schema's
+// annotations.
+const annotationAt = (ast: SchemaAST.AST, id: string): unknown => {
+  const own = ownAnnotationAt(ast, id)
+  if (own !== undefined) return own
+  if (ast._tag === "Suspend") return annotationAt(ast.thunk(), id)
+  const base = nullableBaseAst(ast)
+  return base === undefined ? undefined : annotationAt(base, id)
+}
+
+// Reads a declaration (`Filter.able` / `Sort.able`) off an attribute field via
+// its annotations — on the field itself (the descriptor's `annotate` merges
+// with, never replaces, the declaration's), else through the wrappers above,
+// else on the descriptor's inner schema (a descriptor stamped by hand).
+const declarationOf = (field: Schema.Top, id: string): unknown => {
+  const found = annotationAt(field.ast, id)
+  if (found !== undefined) return found
+  const inner = descriptorOf(field)?.schema
+  return inner === undefined ? undefined : annotationAt(inner.ast, id)
+}
+
+// The schema an attribute field wraps, for deriving its literal codec: the
+// descriptor's inner schema for a field built by `attribute`, the wrapped
+// schema of a bare `Schema.optionalKey`, otherwise the field itself.
+const attributeSchemaOf = (field: Schema.Top): Schema.Top => {
+  const descriptor = descriptorOf(field)
+  if (descriptor !== undefined) return descriptor.schema
+  const wrapped = (field as { readonly schema?: Schema.Top }).schema
+  return wrapped !== undefined && field.ast.context?.isOptional === true ? wrapped : field
+}
+
+// Whether a value read from under `Filter.AnnotationId` is a well-formed
+// declaration: a non-empty list of operators from the closed core, and a
+// literal that is absent or a schema.
+const isFilterAnnotation = (u: unknown): u is Filter.Annotation => {
+  if (typeof u !== "object" || u === null) return false
+  const { operators, literal } = u as { readonly operators?: unknown; readonly literal?: unknown }
+  return (
+    Array.isArray(operators) &&
+    operators.length > 0 &&
+    operators.every(Filter.isOperator) &&
+    (literal === undefined || Schema.isSchema(literal))
+  )
+}
+
+// The sortable keys of a resource's attribute fields, in declaration order. A
+// present-but-malformed sort annotation (anything but `true`) is a definition
+// error naming the attribute, as a malformed filter annotation is.
+const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray<string> => {
+  const keys: Array<string> = []
+  for (const [key, field] of Object.entries(fields)) {
+    const declaration = declarationOf(field as Schema.Top, Sort.AnnotationId)
+    if (declaration === undefined) continue
+    if (declaration !== true) {
+      throw new Error(
+        `Resource.make("${type}"): attribute "${key}" carries a malformed sort declaration under ` +
+          `"${Sort.AnnotationId}"; declare it with Sort.able`
+      )
+    }
+    keys.push(key)
+  }
+  return keys
+}
+
+// The sortable keys of each resource, built once by `make` (where a malformed
+// declaration throws) and shared by the accessor; keyed like `filterableCache`.
+const sortableCache = new WeakMap<object, ReadonlyArray<string>>()
+
+// The runtime shape of one `filterable` entry.
+interface RuntimeFilterable {
+  readonly operators: ReadonlyArray<Filter.Operator>
+  readonly literal: Schema.Codec<unknown, string>
+}
+
+// Builds the filterable record for a resource: each attribute carrying a
+// `Filter.able` annotation with its derived (or explicit `literal`) codec, then
+// each declared to-one relationship with the target's `Id` schema as its
+// literal codec. The target is resolved lazily (`Schema.suspend` over the
+// descriptor's thunk), never here: definitions can be mutually recursive and
+// out of order.
+const filterableFields = (
+  type: string,
+  fields: Schema.Struct.Fields,
+  relationships: Relationships
+): Record<string, RuntimeFilterable> => {
+  const result: Record<string, RuntimeFilterable> = {}
+  for (const [key, field] of Object.entries(fields)) {
+    const declaration = declarationOf(field as Schema.Top, Filter.AnnotationId)
+    if (declaration === undefined) continue
+    if (!isFilterAnnotation(declaration)) {
+      throw new Error(
+        `Resource.make("${type}"): attribute "${key}" carries a malformed filter declaration under ` +
+          `"${Filter.AnnotationId}"; declare it with Filter.able`
+      )
+    }
+    result[key] = {
+      operators: declaration.operators,
+      literal: declaration.literal ?? deriveFilterLiteral(type, key, attributeSchemaOf(field as Schema.Top))
+    }
+  }
+  for (const [key, descriptor] of Object.entries(relationships)) {
+    if (!Relationship.isToOne(descriptor) || !descriptor.filter) continue
+    result[key] = {
+      operators: resolveOperators(
+        descriptor.filter,
+        Relationship.FilterOperator,
+        `Resource.make("${type}"): relationship "${key}"`
+      ),
+      literal: Schema.suspend(() => descriptor.ref().Id) as unknown as Schema.Codec<unknown, string>
+    }
+  }
+  return result
+}
+
+// The filterable record of each resource, built once by `make` (which is where
+// a bad declaration throws) and shared by the accessor. Keyed by the attribute
+// struct so a base-anchored family (whose attributes *are* its base's, as are
+// its relationships) reads the base's declaration.
+const filterableCache = new WeakMap<object, Record<string, RuntimeFilterable>>()
+
+// The attribute structs of name-only families: synthesised by intersection, so
+// they carry no declaration of their own — nothing is filterable or sortable.
+const nameOnlyFamilyAttributes = new WeakSet<object>()
+
+/**
+ * The filterable fields of a resource definition, at runtime: a read-only
+ * record from each key declared filterable — an attribute whose schema is
+ * `Filter.able` (piped, or via the `filter` sugar of {@link attribute}), a
+ * to-one relationship via `Relationship.one(ref, { filter })` /
+ * `Relationship.optional(ref, { filter })` — to its operator list and literal
+ * codec. Undeclared keys are absent, so `Object.keys` is the filterable set —
+ * empty when nothing is declared.
+ *
+ * The declaration is read from the attribute schema's `Filter.AnnotationId`
+ * annotation, the single source of truth: on the schema itself (its node and
+ * every check, so a `.check(...)` applied after `Filter.able` does not hide it),
+ * and through a `Schema.optionalKey` wrapper, a `Schema.NullOr` union (its
+ * non-null member), a `Schema.suspend`, or the descriptor an {@link attribute}
+ * carries. Annotate last for the types: any rebuild drops the type-level marker
+ * (see `Filter.able`).
+ *
+ * An attribute's literal codec is derived from its schema's encoded form: a wire
+ * string is parsed strictly as that scalar (`number` accepts only a finite
+ * decimal, `boolean` only `true` / `false`) and then decoded through the
+ * attribute schema itself, so refinements, brands, literal unions and
+ * `DateFromString` all apply, and `filter[priceCents][gt]=abc` fails decoding.
+ * Encoding runs the reverse. A `Schema.NullOr` attribute's literals are the
+ * non-null member's (`NULL` is never a literal).
+ *
+ * A relationship's literal codec is the related resource's `Id` schema, so
+ * `filter[author]=9` decodes to the target's branded id. The target is resolved
+ * lazily, so declaration order does not matter.
+ *
+ * Downstream consumers read this to validate and plan filters; the `filter`
+ * URL codec over the declaration lands in a follow-up.
+ *
+ * For a base-anchored {@link family} the base's declaration is reported; a
+ * name-only family declares nothing.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Filter, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Supplier = Resource.make("suppliers", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ *
+ * const Product = Resource.make("products", {
+ *   attributes: {
+ *     name: Schema.NonEmptyString,
+ *     priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt])),
+ *     discontinued: Schema.Boolean.pipe(Filter.able()),
+ *     // the same declaration as sugar on a projection descriptor
+ *     sku: Resource.attribute(Schema.String, { create: "required", update: false, filter: ["eq"] })
+ *   },
+ *   relationships: {
+ *     supplier: Relationship.one(() => Supplier, { filter: ["eq", "in"] })
+ *   }
+ * })
+ *
+ * const filterable = Resource.filterable(Product)
+ * Object.keys(filterable) // ["priceCents", "discontinued", "sku", "supplier"]
+ * filterable.priceCents.operators // ["eq", "gt", "lt"]
+ * Schema.decodeUnknownSync(filterable.priceCents.literal)("1250") // 1250
+ * Schema.encodeUnknownSync(filterable.discontinued.literal)(true) // "true"
+ * Schema.decodeUnknownSync(filterable.supplier.literal)("9") // "9", branded as a Supplier id
+ * ```
+ *
+ * @since 0.13.0
+ * @category accessors
+ */
+export const filterable = <R extends Any>(resource: R): Filterable<R> => {
+  const attributes = resource.fields.attributes
+  if (nameOnlyFamilyAttributes.has(attributes)) return {} as Filterable<R>
+  let result = filterableCache.get(attributes)
+  if (result === undefined) {
+    result = filterableFields(resource.type, attributes.fields, resource.relationships)
+    filterableCache.set(attributes, result)
+  }
+  return { ...result } as unknown as Filterable<R>
+}
+
+/**
+ * The sortable attributes of a resource definition, at runtime: the keys whose
+ * schema is `Sort.able` (piped, or via the `sort: true` sugar of
+ * {@link attribute}), in declaration order — empty when nothing is declared.
+ *
+ * The declaration is read from the attribute schema's `Sort.AnnotationId`
+ * annotation, through the same wrappers as {@link filterable} (`optionalKey`,
+ * `NullOr`, `suspend`, the descriptor; a later `.check(...)` does not hide it).
+ * Annotate last for the types (see `Sort.able`).
+ *
+ * The result is typed as the literal key union, so it drops straight into the
+ * `sort` allow-list of `Query.schema` / `Endpoint.list`:
+ * `Endpoint.list(R, { sort: Resource.sortable(R) })`. (`sort: true` keeps
+ * meaning "every attribute".)
+ *
+ * For a base-anchored {@link family} the base's declaration is reported; a
+ * name-only family declares nothing.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query, Resource, Sort } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString.pipe(Sort.able()),
+ *     body: Schema.String,
+ *     createdAt: Resource.readOnlyAttribute(Schema.DateFromString.pipe(Sort.able())),
+ *     // the same declaration as sugar
+ *     updatedAt: Resource.attribute(Schema.DateFromString, { create: false, sort: true })
+ *   }
+ * })
+ *
+ * Resource.sortable(Article) // ["title", "createdAt", "updatedAt"]
+ *
+ * // the declared set as the endpoint's sort allow-list
+ * const query = Query.schema(Article, { sort: Resource.sortable(Article) })
+ * Schema.decodeUnknownSync(query)({ sort: "-createdAt" })
+ * // → { sort: [{ field: "createdAt", direction: "desc" }] }
+ * ```
+ *
+ * @since 0.13.0
+ * @category accessors
+ */
+export const sortable = <R extends Any>(resource: R): ReadonlyArray<SortableKeys<R>> => {
+  const attributes = resource.fields.attributes
+  if (nameOnlyFamilyAttributes.has(attributes)) return []
+  let keys = sortableCache.get(attributes)
+  if (keys === undefined) {
+    keys = sortableKeys(resource.type, attributes.fields)
+    sortableCache.set(attributes, keys)
+  }
+  return [...keys] as unknown as ReadonlyArray<SortableKeys<R>>
+}
+
+// ---------------------------------------------------------------------------
 // The Resource constructor
 // ---------------------------------------------------------------------------
 
@@ -1421,6 +2131,12 @@ export const make = <
   // projections. A plain schema attribute projects with the read-write defaults.
   const createAttributes = Schema.Struct(createAttributeFields(options.attributes))
   const updateAttributes = Schema.Struct(updateAttributeFields(options.attributes))
+
+  // Filter declarations are checked now, not on first use: an attribute declared
+  // filterable whose encoded form has no literal codec, or a relationship
+  // declaring an operator it cannot admit, throws here, naming the key.
+  filterableCache.set(attributes, filterableFields(type, options.attributes, relationships))
+  sortableCache.set(attributes, sortableKeys(type, options.attributes))
 
   const fields: ResourceFields<Type, Attributes, Rels, Meta, IdSchema> = {
     type: Schema.tag(type),
@@ -1904,6 +2620,9 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): F
   const identifier = Schema.Union(members.map((member) => member.identifier))
   const id = base !== undefined ? base.Id : Schema.Union(members.map((member) => member.Id))
   const attributes = base !== undefined ? base.fields.attributes : Schema.Struct(intersectAttributes(members))
+  // A name-only family's attributes are synthesised, not declared: nothing is
+  // filterable or sortable through it (a base-anchored family reads its base's).
+  if (base === undefined) nameOnlyFamilyAttributes.add(attributes)
 
   // The default `included` union: every member's non-`paginated` targets.
   const includedUnion = () => Schema.Union(dedupe(members.flatMap(directTargets)))
