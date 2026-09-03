@@ -1186,16 +1186,20 @@ fails loudly instead of lying.
 
 ## Query parameters
 
-| Family         | Wire form                         | Decoded form                                                                                                                                                           |
-| -------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `include`      | `?include=author,comments.author` | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph ([constrainable](#constraining-the-advertised-include-paths)) |
-| `fields[TYPE]` | `?fields[articles]=title,body`    | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets                                                                                      |
-| `sort`         | `?sort=-createdAt,title`          | `[{ field: "createdAt", direction: "desc" }, …]`                                                                                                                       |
-| `page[*]`      | `?page[offset]=0&page[limit]=10`  | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom)                                                                         |
-| `filter[*]`    | `?filter[author]=9`               | user-defined schema per filter key                                                                                                                                     |
+| Family         | Wire form                                 | Decoded form                                                                                                                                                                                                                             |
+| -------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `include`      | `?include=author,comments.author`         | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph ([constrainable](#constraining-the-advertised-include-paths))                                                                   |
+| `fields[TYPE]` | `?fields[articles]=title,body`            | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets                                                                                                                                                        |
+| `sort`         | `?sort=-createdAt,title`                  | `[{ field: "createdAt", direction: "desc" }, …]`                                                                                                                                                                                         |
+| `page[*]`      | `?page[offset]=0&page[limit]=10`          | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom)                                                                                                                                           |
+| `filter[*]`    | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](./docs/filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
 
-Unknown include paths, unknown sparse-fieldset names and unknown sort fields fail decoding — which
-the schema-error middleware turns into a spec-compliant **400 JSON:API error document**.
+Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar —
+unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error
+middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry
+`source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`). HttpApi decodes a
+request with `errors: "first"`, so a query yields one error object — except the `filter` family,
+whose codec reports every offending key together.
 
 ### Declaring filterable and sortable attributes
 
@@ -1277,10 +1281,37 @@ Endpoint.list(Product, { sort: Resource.sortable(Product), page: Query.Page.Offs
 // ?sort=-createdAt,priceCents decodes; ?sort=name is a 400
 ```
 
-The `filter` query codec over this declaration — the grammar in
-[`docs/filter-grammar.md`](./docs/filter-grammar.md), with `filter[f]=v` as `eq`, `filter[f]=a,b`
-as `in` and `filter[f][gt]=v` for the other operators — lands separately; until then `filter` on an
-endpoint remains the per-key escape hatch above.
+`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the
+grammar in [`docs/filter-grammar.md`](./docs/filter-grammar.md). `filter[f]=v` is `eq`,
+`filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form
+(`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and
+repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node,
+with `field` narrowed to the declared names and every literal decoded through its attribute schema:
+
+```ts
+Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Query.Page.Offset })
+
+// GET /products?filter[priceCents][lt]=1000&filter[supplier]=9&filter[discontinued]=false
+// → query.filter:
+// { _tag: "And", members: [
+//     { _tag: "Compare", op: "eq", field: "discontinued", value: false },
+//     { _tag: "Compare", op: "lt", field: "priceCents", value: 1000 },
+//     { _tag: "Compare", op: "eq", field: "supplier", value: "9" } ] }   // a branded Supplier id
+```
+
+`filter[name]=x` (undeclared), `filter[priceCents][gte]=1` (undeclared operator) and
+`filter[priceCents][lt]=cheap` (bad literal) are each a 400 whose `source.parameter` names the key.
+`Query.Filter(resource)` is the codec on its own (`Schema.Codec<Filter.Ast, Record<string, string>>`);
+encoding always emits the canonical form (§3 of the grammar: sorted, deduplicated, ids reassigned),
+and `Filter.normalise` puts a hand-built tree in the same normal form. The per-key map
+(`filter: { q: Schema.String }`) remains the escape hatch for flags JSON:API has no family for; an
+endpoint uses one or the other.
+
+The grammar is a JSON:API **profile**, `Filter.PROFILE_URI`
+(`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the
+media type of responses from endpoints that speak it —
+`Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the
+same way, since unknown profiles are ignored, never rejected.
 
 ### Constraining the advertised include paths
 

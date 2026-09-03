@@ -13,8 +13,11 @@
  * {@link AnnotationId} — the single source of truth `Resource.filterable` reads
  * back. `Resource.attribute(schema, { filter })` is sugar for the same call.
  *
- * The filter AST and the `filter[*]` URL codec (design §1 and §2) land in this
- * module in a follow-up.
+ * It also holds the filter **AST** (design §1) — {@link Ast}, its node
+ * types and constructors, the runtime {@link Ast} schema — its normal form
+ * ({@link normalise}, design §3.2) and the grammar's profile URI
+ * ({@link PROFILE_URI}). The URL codec over a resource's declaration is
+ * `Query.Filter(resource)`.
  *
  * @example
  * ```ts
@@ -37,7 +40,9 @@
  * @since 0.13.0
  */
 import { Schema } from "effect"
-import { resolveOperators } from "./internal/operators.js"
+import type { FieldCodecs } from "./internal/filter.js"
+import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
+import { compareOperators, operators as vocabulary, resolveOperators } from "./internal/operators.js"
 
 // ---------------------------------------------------------------------------
 // The vocabulary
@@ -69,7 +74,9 @@ import { resolveOperators } from "./internal/operators.js"
  * @since 0.13.0
  * @category schemas
  */
-export const Operator = Schema.Literals(["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull"])
+// The tuple lives in `internal/operators.ts` so the URL grammar engine reads
+// the same list without importing this module (a cycle at module init).
+export const Operator = Schema.Literals(vocabulary)
 
 /**
  * A filter operator name — the decoded type of the {@link Operator} schema.
@@ -317,3 +324,428 @@ export function able(
   }
   return (self) => self.annotate({ [AnnotationId]: annotation })
 }
+
+// ---------------------------------------------------------------------------
+// The AST (design §1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The operators of a {@link Compare} node: the six comparisons against one
+ * literal.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export type CompareOperator = (typeof compareOperators)[number]
+
+/**
+ * The field vocabulary a filter AST is typed over: each declared field name to
+ * its decoded literal type. `Query.Filter(resource)` builds it from
+ * `Resource.filterable`; the untyped {@link Node} uses the widest one.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface FieldTypes {
+  readonly [field: string]: unknown
+}
+
+/**
+ * A comparison of one field against one typed literal.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface Compare<Field extends string = string, Literal = unknown> {
+  readonly _tag: "Compare"
+  readonly op: CompareOperator
+  readonly field: Field
+  readonly value: Literal
+}
+
+/**
+ * Membership of one field's value in a non-empty list of typed literals.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface In<Field extends string = string, Literal = unknown> {
+  readonly _tag: "In"
+  readonly field: Field
+  readonly values: readonly [Literal, ...Array<Literal>]
+}
+
+/**
+ * Non-membership of one field's value in a non-empty list of typed literals.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface NotIn<Field extends string = string, Literal = unknown> {
+  readonly _tag: "NotIn"
+  readonly field: Field
+  readonly values: readonly [Literal, ...Array<Literal>]
+}
+
+/**
+ * The null test: `IS NULL` (`negated: false`) or `IS NOT NULL` (`negated:
+ * true`). `NULL` is never a literal, so this is the only way to name it.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface IsNull<Field extends string = string> {
+  readonly _tag: "IsNull"
+  readonly field: Field
+  readonly negated: boolean
+}
+
+/**
+ * A conjunction. Members are a set: order carries no meaning, and the codec
+ * sorts them. `And([])` is "true".
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface And<Fields extends FieldTypes = FieldTypes> {
+  readonly _tag: "And"
+  readonly members: ReadonlyArray<Ast<Fields>>
+}
+
+/**
+ * A disjunction. Members are a set: order carries no meaning, and the codec
+ * sorts them. `Or([])` is "false".
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface Or<Fields extends FieldTypes = FieldTypes> {
+  readonly _tag: "Or"
+  readonly members: ReadonlyArray<Ast<Fields>>
+}
+
+/**
+ * A negation of exactly one member of any kind. `Not(Not(x))` is a legal tree
+ * and encodes as two nested groups; the codec does not simplify it.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface Not<Fields extends FieldTypes = FieldTypes> {
+  readonly _tag: "Not"
+  readonly member: Ast<Fields>
+}
+
+/**
+ * The condition nodes of a filter AST over a field vocabulary: for each
+ * declared field, a {@link Compare}, {@link In}, {@link NotIn} or
+ * {@link IsNull} whose `field` is that name and whose literals are that
+ * field's type.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export type Condition<Fields extends FieldTypes = FieldTypes> = {
+  readonly [F in keyof Fields & string]: Compare<F, Fields[F]> | In<F, Fields[F]> | NotIn<F, Fields[F]> | IsNull<F>
+}[keyof Fields & string]
+
+/**
+ * The filter AST: an initial encoding — plain data, no methods — that every
+ * consumer pattern-matches on. `Fields` narrows `field` to the declared names
+ * and each literal to its field's decoded type, so over a resource the type is
+ * `Compare<"age", number> | Compare<"title", string> | …`. The decoded
+ * `filter` of a query is one root node.
+ *
+ * The AST carries no semantics: what a tree *means* (NULL handling,
+ * collation, coercion) is the interpreter's business.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export type Ast<Fields extends FieldTypes = FieldTypes> = Condition<Fields> | And<Fields> | Or<Fields> | Not<Fields>
+
+/**
+ * The untyped filter AST: any field name, any literal. What the runtime
+ * {@link Ast} schema validates.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export type Node = Ast<FieldTypes>
+
+const Literal = Schema.Unknown
+const NodeSchema: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast)
+const CompareSchema = Schema.TaggedStruct("Compare", {
+  op: Schema.Literals(compareOperators),
+  field: Schema.String,
+  value: Literal
+})
+const InSchema = Schema.TaggedStruct("In", { field: Schema.String, values: Schema.NonEmptyArray(Literal) })
+const NotInSchema = Schema.TaggedStruct("NotIn", { field: Schema.String, values: Schema.NonEmptyArray(Literal) })
+const IsNullSchema = Schema.TaggedStruct("IsNull", { field: Schema.String, negated: Schema.Boolean })
+const AndSchema = Schema.TaggedStruct("And", { members: Schema.Array(NodeSchema) })
+const OrSchema = Schema.TaggedStruct("Or", { members: Schema.Array(NodeSchema) })
+const NotSchema = Schema.TaggedStruct("Not", { member: NodeSchema })
+
+/**
+ * The runtime schema of the untyped AST ({@link Node}): validates a tree's
+ * shape — tags, operators, non-empty `In` / `NotIn` lists, recursion — with
+ * literals left open, since their types come from the resource declaration.
+ * Use it to validate a tree from an untrusted source before interpreting it;
+ * `Query.Filter(resource)` is the typed codec.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Schema.decodeUnknownSync(Filter.Ast)({ _tag: "Compare", op: "gt", field: "age", value: 18 })
+ * // → { _tag: "Compare", op: "gt", field: "age", value: 18 }
+ * Schema.is(Filter.Ast)({ _tag: "In", field: "status", values: [] }) // false — lists are non-empty
+ * ```
+ *
+ * @since 0.13.0
+ * @category schemas
+ */
+export const Ast: Schema.Codec<Node> = Schema.Union([
+  CompareSchema,
+  InSchema,
+  NotInSchema,
+  IsNullSchema,
+  AndSchema,
+  OrSchema,
+  NotSchema
+]) as unknown as Schema.Codec<Node>
+
+// ---------------------------------------------------------------------------
+// Constructors
+// ---------------------------------------------------------------------------
+
+const compare =
+  <Op extends CompareOperator>(op: Op) =>
+  <const Field extends string, const Literal>(field: Field, value: Literal): Compare<Field, Literal> => ({
+    _tag: "Compare",
+    op,
+    field,
+    value
+  })
+
+/**
+ * `field = value`.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Filter.eq("status", "open") // { _tag: "Compare", op: "eq", field: "status", value: "open" }
+ * ```
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const eq = compare("eq")
+
+/**
+ * `field ≠ value`.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const ne = compare("ne")
+
+/**
+ * `field < value`.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const lt = compare("lt")
+
+/**
+ * `field ≤ value`.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const lte = compare("lte")
+
+/**
+ * `field > value`.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const gt = compare("gt")
+
+/**
+ * `field ≥ value`.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const gte = compare("gte")
+
+/**
+ * `field IN (values)` — at least one value.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Filter.isIn("priority", [1, 2]) // { _tag: "In", field: "priority", values: [1, 2] }
+ * ```
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const isIn = <const Field extends string, const Literal>(
+  field: Field,
+  values: readonly [Literal, ...Array<Literal>]
+): In<Field, Literal> => ({ _tag: "In", field, values })
+
+/**
+ * `field NOT IN (values)` — at least one value.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const notIn = <const Field extends string, const Literal>(
+  field: Field,
+  values: readonly [Literal, ...Array<Literal>]
+): NotIn<Field, Literal> => ({ _tag: "NotIn", field, values })
+
+/**
+ * `field IS NULL`, or `IS NOT NULL` when `negated`.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const isNull = <const Field extends string>(field: Field, negated: boolean = false): IsNull<Field> => ({
+  _tag: "IsNull",
+  field,
+  negated
+})
+
+/**
+ * A conjunction of any number of members. The members' own types are kept, so
+ * the result is an {@link And} of whichever field vocabulary they draw on.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Filter.and(Filter.eq("status", "open"), Filter.gt("age", 18))
+ * // { _tag: "And", members: [ …eq…, …gt… ] }
+ * ```
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const and = <const Members extends ReadonlyArray<Node>>(
+  ...members: Members
+): { readonly _tag: "And"; readonly members: Members } => ({ _tag: "And", members })
+
+/**
+ * A disjunction of any number of members.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const or = <const Members extends ReadonlyArray<Node>>(
+  ...members: Members
+): { readonly _tag: "Or"; readonly members: Members } => ({ _tag: "Or", members })
+
+/**
+ * The negation of one member.
+ *
+ * @since 0.13.0
+ * @category constructors
+ */
+export const not = <const Member extends Node>(member: Member): { readonly _tag: "Not"; readonly member: Member } => ({
+  _tag: "Not",
+  member
+})
+
+// ---------------------------------------------------------------------------
+// Normal form (design §3.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-field literal codecs {@link normalise} sorts by: what
+ * `Resource.filterable(resource)` returns, or any record of `{ literal }`
+ * entries whose `literal` encodes the field's decoded literal to its wire
+ * string.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface LiteralCodecs {
+  readonly [field: string]: {
+    readonly literal: Schema.Top
+    /** When present, each condition's operator is checked against it. */
+    readonly operators?: ReadonlyArray<string> | undefined
+  }
+}
+
+/**
+ * Puts a tree in normal form: `In` / `NotIn` values sorted by their encoded
+ * wire string (code-point order) and deduplicated, `And` / `Or` members sorted
+ * by the node order — conditions before groups; conditions by field, operator,
+ * then encoded value; groups by conjunction (`AND` < `NOT` < `OR`), then
+ * members pairwise — and deduplicated. The literal codecs come from the
+ * resource's declaration, since the order is over *encoded* strings.
+ *
+ * Decoding always returns normal form, and encoding normalises first, so a
+ * hand-built tree encodes canonically without calling this; it is for
+ * comparing trees structurally. Throws for an unknown field, an operator the
+ * field does not declare (when the record carries `operators`, as
+ * `Resource.filterable` does), a literal the codec refuses, or an empty `In` /
+ * `NotIn` list.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Filter, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     status: Resource.attribute(Schema.String, { filter: true }),
+ *     age: Resource.attribute(Schema.Number, { filter: true })
+ *   }
+ * })
+ *
+ * Filter.normalise(
+ *   Filter.and(Filter.eq("status", "open"), Filter.isIn("age", [3, 1, 3])),
+ *   Resource.filterable(Article)
+ * )
+ * // → And([In("age", [1, 3]), Compare(eq, "status", "open")])
+ * ```
+ *
+ * @since 0.13.0
+ * @category combinators
+ */
+export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
+  prepare(node, literalEncoder(fields as FieldCodecs), operatorCheck(fields)).node as N
+
+// ---------------------------------------------------------------------------
+// Profile (design §5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The JSON:API profile URI of the filter grammar, version 1. Servers that
+ * implement the grammar advertise it on the media type of their responses:
+ * `Content-Type: application/vnd.api+json; profile="…"`. Nothing about request
+ * handling keys off it — an endpoint declared with `filter: true` speaks the
+ * grammar whether or not the client names the profile.
+ *
+ * @example
+ * ```ts
+ * import { Filter } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const contentType = `application/vnd.api+json; profile="${Filter.PROFILE_URI}"`
+ * ```
+ *
+ * @since 0.13.0
+ * @category constants
+ */
+export const PROFILE_URI = "https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1"

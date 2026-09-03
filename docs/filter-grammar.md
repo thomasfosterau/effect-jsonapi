@@ -7,10 +7,11 @@ grammar meaning live in Legation
 the part both sides must agree on byte for byte: the AST, the operator core, the URL surface, the
 canonical encoding and the profile URI.
 
-**Status:** draft for review. Implemented by
-[#84](https://github.com/thomasfosterau/effect-jsonapi/issues/84) (per-attribute declaration),
-[#86](https://github.com/thomasfosterau/effect-jsonapi/issues/86) (codec) and
-[#85](https://github.com/thomasfosterau/effect-jsonapi/issues/85) (canonical `self` string).
+**Status:** implemented. [#84](https://github.com/thomasfosterau/effect-jsonapi/issues/84)
+(per-attribute declaration, `Resource.filterable`) and
+[#86](https://github.com/thomasfosterau/effect-jsonapi/issues/86) (the AST `Filter.Ast`, the codec
+`Query.Filter` / `filter: true`, the error pointers) are in the package;
+[#85](https://github.com/thomasfosterau/effect-jsonapi/issues/85) (the canonical `self` string) follows.
 
 ## 0. Scope and decisions already taken
 
@@ -27,8 +28,8 @@ Settled in #82, not reopened here:
 
 Two things below go further than the issue text and are called out where they occur:
 [§1.2](#12-fields) admits to-one relationship names as fields (decided with #84), and
-[§7](#7-error-pointers) records that the error middleware needs extending before `source.parameter`
-can be emitted.
+[§7](#7-error-pointers) records how the error middleware was extended so `source.parameter` is
+emitted.
 
 ## 1. The AST
 
@@ -205,8 +206,12 @@ Decoding:
   conditions.
 
 Every 400 carries `source.parameter` set to the flat key that failed
-(`filter[c][condition][operator]`, say); a structural failure (a dangling `memberOf`) points at the
-key that names the missing target.
+(`filter[c][condition][operator]`, say); a structural failure (a dangling `memberOf`, a cycle) points
+at the `memberOf` key that names the missing target (for a cycle, the first cycle member's in input
+order); a missing required member points at the key that is missing
+(`filter[c][condition][operator]` when a condition has no operator); an id used as both a group and
+a condition points at the first key of the second kind; a `NOT` with the wrong arity at its
+`conjunction` key.
 
 ## 3. Canonical encoding
 
@@ -224,7 +229,10 @@ Shorthand is emitted when, and only when, it decodes back to the same tree:
   pairs are pairwise distinct.
 
 Everything else (any `Or` or `Not`, any nested group, an `And` with one member or with a repeated
-`(field, operator)` pair, a bare `And([])`) is emitted in the group form. `And` with one member and
+`(field, operator)` pair, a bare `And([])`) is emitted in the group form. So is the one case where
+distinct `(field, operator)` pairs would still share a shorthand key: an `eq` and a two-or-more-value
+`In` on the same field are both written bare (`filter[f]=…`), so an `And` holding both takes the
+group form — the test is that the shorthand keys are pairwise distinct. `And` with one member and
 that member on its own are different trees and get different strings; `decode ∘ encode` is
 identity.
 
@@ -380,15 +388,15 @@ structure. Servers advertise it on the media type of responses to endpoints that
 Content-Type: application/vnd.api+json; profile="https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1"
 ```
 
-- The URI is exported as a constant (`Query.FILTER_PROFILE_URI`, #86) and is a version of this
-  document. `v1` is this note; an incompatible change (a new operator, a changed canonical rule)
-  is `v2`.
+- The URI is exported as a constant (`Filter.PROFILE_URI`, also `Query.FILTER_PROFILE_URI`) and is
+  a version of this document. `v1` is this note; an incompatible change (a new operator, a changed
+  canonical rule) is `v2`.
 - Per the spec, unknown profiles in `Accept` are ignored, never rejected; the existing negotiation
   middleware already does this (`src/Middleware.ts:83`). Nothing about request handling keys off
   the profile parameter: an endpoint declared with `filter: true` speaks the grammar whether or not
   the client names it.
-- The host is a placeholder pending a decision; the URI must be stable once published, so it is
-  fixed in the #86 PR, not here.
+- The URI above is final: `https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`.
+  It must stay stable now that it is published.
 
 ## 6. Where semantics live
 
@@ -405,14 +413,17 @@ ADR-0028.
 
 Every rejection is one JSON:API error object with `status: "400"` and
 `source: { parameter: "<flat key>" }`, where the flat key is the bracketed wire key as received
-(`filter[age][gt]`, `filter[c][condition][operator]`). The existing `SchemaErrors` middleware turns
-request-validation failures into 400 documents, but today with `detail` only
-(`src/Middleware.ts:301-307`; `ApiError.BadRequest` carries no `source`). #86 therefore also:
-
-- raises codec failures as `SchemaIssue.Pointer([flatKey], issue)` so the path names the key;
-- extends `BadRequest` (or the middleware's mapping) to emit `source.parameter` from a `Query`
-  / `Params` issue path and `source.pointer` from a `Body` path;
-- tests the rendered document, not only the thrown issue.
+(`filter[age][gt]`, `filter[c][condition][operator]`). The codec raises each failure as a
+`SchemaIssue.Pointer([flatKey], issue)` — several failing keys as a `Composite` of them — so the
+issue path names the key, and the `SchemaErrors` middleware (`Middleware.schemaErrorDocument`)
+renders one error object per issue leaf: `detail` is the issue's message and `source` is derived
+from the part that failed and the leaf's path — `source.parameter` for a query (a nested path is
+re-bracketed, `["page", "limit"]` → `page[limit]`, so the grammar's single-segment keys pass through
+unchanged) or path parameter, `source.header` for a header, `source.pointer` (a JSON Pointer) for a
+body. When no source can be derived the document is the single-error one of before. HttpApi decodes
+each request part with the default parse options (`errors: "first"`), so outside the `filter`
+family — whose codec composites every offending key itself — a part yields one error object. The
+documents are tested end to end, not only the thrown issues.
 
 Unknown field, undeclared operator and bad literal are three distinct failures with three distinct
 `detail` strings and the same `source.parameter` shape (#84, #86 acceptance).
@@ -429,7 +440,11 @@ Unknown field, undeclared operator and bad literal are three distinct failures w
   consumer passes explicitly (`sort: Resource.sortable(Article)`), so no existing endpoint changes
   behaviour.
 - The flat-key reshaper (`src/internal/codecs.ts:115-147`) handles one bracket level. `filter[*]`
-  keys are routed to a dedicated reshaper ahead of it, so `page[*]` and `fields[*]` are untouched.
+  keys are routed to the grammar (`src/internal/filter.ts`) ahead of it, so `page[*]` and
+  `fields[*]` are untouched. On the wire side of `Query.schema` they are an index-signature rest
+  (`Query.FilterRest`) of the flat struct, since the group form admits any id.
+- Literal codecs run synchronously in the codec; a codec that needs an asynchronous service fails
+  decoding rather than being awaited.
 
 ## 9. Reviewed against usage
 

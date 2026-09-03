@@ -149,13 +149,21 @@ const makeWire = (
       Schema.decodeTo(
         klass as unknown as Schema.Top,
         SchemaTransformation.transform<unknown, WireDocumentType>({
-          // document -> class encoded form ({ _tag, ...fields })
+          // document -> class encoded form ({ _tag, ...fields }). A field the
+          // document's `meta` does not carry is left absent (not `undefined`),
+          // so an optional field decodes from a document another server wrote
+          // without `meta`; a `detail` field falls back to the error object's
+          // own `detail` — the source-bearing 400s of the schema-error
+          // middleware carry it there and nowhere else.
           decode: (doc) => {
-            const meta = doc.errors[0]?.meta ?? {}
-            return {
-              _tag: options.tag,
-              ...Object.fromEntries(options.fieldKeys.map((key) => [key, meta[key]]))
+            const first = doc.errors[0]
+            const meta = first?.meta ?? {}
+            const fields: Record<string, unknown> = {}
+            for (const key of options.fieldKeys) {
+              if (key in meta) fields[key] = meta[key]
+              else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail
             }
+            return { _tag: options.tag, ...fields }
           },
           // class encoded form -> document
           encode: (encoded) => {
