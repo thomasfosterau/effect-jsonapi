@@ -1245,9 +1245,10 @@ priceCents: Resource.attribute(Schema.Int, { create: "optional", filter: ["eq", 
 The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` over the closed core,
 from which `Filter.operators` and `Filter.isOperator` derive — and `Filter.Op` spells it as typed
 constants (`Filter.Op.gt` is the literal `"gt"`), so a typo is a compile error while plain strings
-stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: a later `.check(...)`
-hides the annotation, and any rebuild (`.check`, `.annotate`, `Schema.brand`) drops the type-level
-marker; wrapping the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards is fine.
+stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: the runtime declaration
+survives a later `.check(...)`, `.annotate(...)` or `Schema.brand`, but any rebuild drops the
+type-level marker (`Resource.FilterableKeys` / `SortableKeys` stop naming the attribute); wrapping
+the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both.
 
 `Resource.filterable(R)` is a read-only record keyed by the declared fields (undeclared ones are
 absent, so `Object.keys` is the filterable set); each entry carries the declared `operators` and a

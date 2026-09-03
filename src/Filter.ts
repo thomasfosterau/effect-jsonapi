@@ -270,13 +270,13 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  * Definition-time errors: an empty array, and an operator outside the core
  * (also a compile error).
  *
- * **Annotate last.** Effect stores annotations on the schema's last check when
- * it has checks, so a further `.check(...)` after `Filter.able` hides the
- * declaration; and any rebuild — `.check`, `.annotate`, `Schema.brand` — yields
- * the base schema type, dropping the type-level marker. Apply `Filter.able` /
+ * **Annotate last, for the types.** The runtime declaration survives any later
+ * rebuild — `.check(...)`, `.annotate(...)`, `Schema.brand` — but a rebuild
+ * yields the base schema *type*, dropping the type-level marker, so
+ * `Resource.FilterableKeys` no longer names the attribute. Apply `Filter.able` /
  * `Sort.able` as the final step of the pipe; wrapping the declared schema in
- * `Schema.NullOr` or `Schema.optionalKey` afterwards is fine (the readers look
- * through both).
+ * `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both (the readers
+ * look through both).
  *
  * @example
  * ```ts

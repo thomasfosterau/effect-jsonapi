@@ -698,14 +698,29 @@ describe("Resource.filterable / Resource.sortable", () => {
         expectTypeOf<SortableKeys<typeof R>>().toEqualTypeOf<"price">()
       })
 
-      it("`.check(...)` after declaring hides it, at runtime and at the type level: annotate last", () => {
+      it("`.check(...)` after declaring keeps it at runtime (the type-level marker is dropped: annotate last)", () => {
+        // Effect's `annotate` stamps the last check and a later `.check` appends
+        // a new one, so `Schema.resolveAnnotations` no longer sees the
+        // declaration — the accessors scan every check and still do.
         const s = declared.check(Schema.isGreaterThan(0))
         expect(annotationsOf(s)).toEqual({ filter: undefined, sort: undefined })
         const R = Resource("checked-after", { attributes: { price: s } })
-        expect(keysOf(R)).toEqual({ filterable: [], sortable: [] })
+        expect(keysOf(R)).toEqual({ filterable: ["price"], sortable: ["price"] })
+        const entries = filterable(R) as Record<
+          string,
+          { readonly operators: ReadonlyArray<string>; readonly literal: Schema.Codec<unknown, string> }
+        >
+        expect(entries.price?.operators).toEqual(["eq", "gt"])
+        // the new check applies to the literal too
+        expect(() => Schema.decodeUnknownSync(entries.price!.literal)("-1")).toThrow()
         expectTypeOf<FilterableKeys<typeof R>>().toEqualTypeOf<never>()
         expectTypeOf<SortableKeys<typeof R>>().toEqualTypeOf<never>()
-        // the other way round keeps both, and the check still applies to the literal
+        // a second check after that still finds it, as does one before and one after
+        const twice = Resource("checked-twice", {
+          attributes: { price: s.check(Schema.isLessThan(1_000_000)) }
+        })
+        expect(keysOf(twice)).toEqual({ filterable: ["price"], sortable: ["price"] })
+        // the other way round keeps both levels, and the check still applies to the literal
         const Ok = Resource("checked-first", {
           attributes: { price: Schema.Int.check(Schema.isGreaterThan(0)).pipe(Filter.able(["eq", "gt"]), Sort.able()) }
         })
@@ -734,6 +749,106 @@ describe("Resource.filterable / Resource.sortable", () => {
       expect(Object.keys(filterable(Extended))).toEqual(["n", "s"])
       expect(sortable(Extended)).toEqual(["n", "t"])
       expectTypeOf<SortableKeys<typeof Extended>>().toEqualTypeOf<"n" | "t">()
+    })
+
+    it("constrains an explicit literal codec the same way in both spellings: the schema's Type must fit it", () => {
+      const Status = Schema.Literals(["a", "b"])
+      // wider than the attribute: accepted by both, and the literal Type is the codec's
+      const Wide: Schema.Codec<string, string> = Schema.String
+      // narrower than the attribute: a valid value `"b"` could not be filtered on — rejected by both
+      const Narrow = Schema.String.pipe(
+        Schema.decodeTo(Schema.Literals(["a"]), {
+          decode: SchemaGetter.transform((s: string) => s as "a"),
+          encode: SchemaGetter.transform((a: "a") => a)
+        })
+      )
+      const R = Resource("literal-direction", {
+        attributes: {
+          piped: Status.pipe(Filter.able(["eq"], { literal: Wide })),
+          sugared: attribute(Status, { filter: ["eq"], filterLiteral: Wide }),
+          readOnly: readOnlyAttribute(Status, { filter: ["eq"], filterLiteral: Wide })
+        }
+      })
+      expect(filterable(R).piped.literal).toBe(Wide)
+      expect(filterable(R).sugared.literal).toBe(Wide)
+      expectTypeOf(filterable(R).piped.literal.Type).toEqualTypeOf<string>()
+      expectTypeOf(filterable(R).sugared.literal.Type).toEqualTypeOf<string>()
+      expectTypeOf(filterable(R).readOnly.literal.Type).toEqualTypeOf<string>()
+      expectTypeOf(filterable(R).piped).toEqualTypeOf(filterable(R).sugared)
+      // @ts-expect-error a codec narrower than the attribute does not fit (pipeable form)
+      void Status.pipe(Filter.able(["eq"], { literal: Narrow }))
+      // @ts-expect-error a codec narrower than the attribute does not fit (sugar)
+      void attribute(Status, { filter: ["eq"], filterLiteral: Narrow })
+      // @ts-expect-error a codec narrower than the attribute does not fit (read-only sugar)
+      void readOnlyAttribute(Status, { filter: ["eq"], filterLiteral: Narrow })
+      // @ts-expect-error a codec for another type does not fit (sugar)
+      void attribute(Schema.Number, { filter: ["eq"], filterLiteral: Wide })
+      // without an override the literal type is still the attribute's own
+      expectTypeOf(
+        filterable(Resource("own", { attributes: { s: attribute(Status, { filter: true }) } })).s.literal.Type
+      ).toEqualTypeOf<"a" | "b">()
+    })
+
+    it("rejects a hand-stamped filter annotation whose literal is not a schema", () => {
+      const bad = Schema.Number.annotate({ [Filter.AnnotationId]: { operators: ["eq"], literal: "nope" } })
+      expect(() => Resource("bad-literal", { attributes: { n: bad } })).toThrow(
+        /Resource\.make\("bad-literal"\): attribute "n" carries a malformed filter declaration/
+      )
+      // a schema literal is fine
+      const ok = Schema.Number.annotate({ [Filter.AnnotationId]: { operators: ["eq"], literal: Schema.String } })
+      expect(filterable(Resource("ok-literal", { attributes: { n: ok } }))).toHaveProperty("n")
+    })
+
+    it("recognises the nullable union once, so a re-annotated NullOr still reads through", () => {
+      // rebuilt after wrapping: the union node is new, its non-null member still carries the declaration
+      const s = Schema.NullOr(Schema.Number.pipe(Filter.able(["eq"]), Sort.able())).annotate({ title: "rating" })
+      const R = Resource("nullable-annotated", { attributes: { rating: attribute(s, { clearable: undefined }) } })
+      expect(Object.keys(filterable(R))).toEqual(["rating"])
+      expect(sortable(R)).toEqual(["rating"])
+      // the literal is the non-null member's: never null
+      expect(Schema.decodeUnknownSync(filterable(R).rating.literal)("1")).toBe(1)
+      expect(() => Schema.decodeUnknownSync(filterable(R).rating.literal)("null")).toThrow()
+      // and the same recognition drives the `clearable` default of the descriptor
+      expect(Schema.decodeUnknownSync(R.updateInput)({ id: "1", rating: null })).toEqual({ id: "1", rating: null })
+    })
+
+    it("rejects a malformed hand-stamped sort annotation at Resource.make", () => {
+      const bad = Schema.Number.annotate({ [Sort.AnnotationId]: "yes" })
+      expect(() => Resource("bad-sort", { attributes: { n: bad } })).toThrow(
+        /Resource\.make\("bad-sort"\): attribute "n" carries a malformed sort declaration/
+      )
+      const falsy = Schema.Number.annotate({ [Sort.AnnotationId]: false })
+      expect(() => Resource("false-sort", { attributes: { n: falsy } })).toThrow(/malformed sort declaration/)
+    })
+
+    it("refuses the sugar on a schema already declared, rather than overriding it", () => {
+      const filterDeclared = Schema.Number.pipe(Filter.able(["eq"]))
+      const sortDeclared = Schema.Number.pipe(Sort.able())
+      // a compile error at the `schema` argument, and a definition-time throw
+      // @ts-expect-error a schema already Filter.able cannot take the `filter` sugar
+      expect(() => attribute(filterDeclared, { filter: ["gt"] })).toThrow(
+        /Resource\.attribute: the schema is already Filter\.able/
+      )
+      // @ts-expect-error a schema already Sort.able cannot take the `sort` sugar
+      expect(() => attribute(sortDeclared, { sort: true })).toThrow(
+        /Resource\.attribute: the schema is already Sort\.able/
+      )
+      // @ts-expect-error nor can readOnlyAttribute
+      expect(() => readOnlyAttribute(filterDeclared, { filter: true })).toThrow(/already Filter\.able/)
+      // through a NullOr wrapper too
+      expect(() => attribute(Schema.NullOr(filterDeclared) as Schema.Top, { filter: true })).toThrow(
+        /already Filter\.able/
+      )
+      // the other option is still fine on a declared schema, and so is a descriptor without either
+      expect(sortable(Resource("mixed", { attributes: { n: attribute(filterDeclared, { sort: true }) } }))).toEqual([
+        "n"
+      ])
+      expect(
+        Object.keys(filterable(Resource("kept", { attributes: { n: attribute(sortDeclared, { filter: true }) } })))
+      ).toEqual(["n"])
+      expect(Object.keys(filterable(Resource("plain", { attributes: { n: attribute(filterDeclared) } })))).toEqual([
+        "n"
+      ])
     })
   })
 })

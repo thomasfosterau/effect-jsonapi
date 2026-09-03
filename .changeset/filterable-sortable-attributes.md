@@ -30,8 +30,9 @@ Endpoint.list(Product, { sort: Resource.sortable(Product) })
 - `Filter.able()` admits the whole operator core, `Filter.able([...])` a subset in the order given;
   `Sort.able()` allows `?sort=`. Absent means not filterable / not sortable — the default fails
   closed, like `include` / `fields` / `sort`. An empty list or an operator outside the core is a
-  compile error and a definition-time throw. Annotate last: a later `.check(...)` hides the
-  annotation, and any rebuild drops the type-level marker.
+  compile error and a definition-time throw. Annotate last, for the types: the runtime declaration
+  survives a later `.check` / `.annotate` / `Schema.brand`, but any rebuild drops the type-level
+  marker.
 - `Resource.attribute(schema, { filter, filterLiteral, sort })` (and `Resource.readOnlyAttribute`)
   are **sugar** for those calls on the inner schema and stamp nothing else, so both spellings are
   indistinguishable to the accessors and to the types.

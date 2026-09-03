@@ -77,10 +77,11 @@ export type Declared<S extends Schema.Top> = S & { readonly [K in MarkerKey]: tr
  * which `Resource.sortable` / `Resource.SortableKeys` resolve.
  * `Resource.attribute(schema, { sort: true })` is sugar for this call.
  *
- * **Annotate last.** As for `Filter.able`: a further `.check(...)` hides the
- * annotation, and any rebuild (`.check`, `.annotate`, `Schema.brand`) drops the
- * type-level marker, so apply `Sort.able` as the final step of the pipe.
- * `Schema.NullOr` / `Schema.optionalKey` around the declared schema are fine.
+ * **Annotate last, for the types.** As for `Filter.able`: the runtime
+ * declaration survives a later `.check`, `.annotate` or `Schema.brand`, but any
+ * rebuild drops the type-level marker, so apply `Sort.able` as the final step of
+ * the pipe. `Schema.NullOr` / `Schema.optionalKey` around the declared schema
+ * keep both.
  *
  * @example
  * ```ts
