@@ -145,7 +145,7 @@ const queryConfig = (options?: {
   readonly fields?: boolean
   readonly sort?: boolean | ReadonlyArray<string>
   readonly page?: Schema.Struct.Fields
-  readonly filter?: Schema.Struct.Fields
+  readonly filter?: Query.FilterOption
 }) => ({
   include: options?.include ?? false,
   fields: options?.fields === true,
@@ -368,7 +368,7 @@ type DefaultListQuery<
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   PageFields extends Schema.Struct.Fields | undefined,
-  FilterFields extends Schema.Struct.Fields | undefined
+  FilterFields extends Query.FilterOption | undefined
 > = Query.QuerySchema<
   Resource<Type, Attributes, Rels, Meta, IdSchema>,
   {
@@ -388,11 +388,17 @@ type DefaultListQuery<
  *
  * Those options compose the whole query schema — a flat, bracket-keyed string
  * record on the wire that decodes to the spec's nested shape (`page: { offset,
- * limit }`, `filter: { … }`). Pass `query` to replace that composition with any
- * schema, for apis whose list contract is a flat struct their own operations
- * layer consumes, or that carry parameters JSON:API has no family for. Only
- * the query changes; the success document, path, errors and middleware are
- * unaffected.
+ * limit }`, `filter: …`). `filter: true` turns on the filter grammar
+ * (`docs/filter-grammar.md`) over the resource's declared filterable fields
+ * (`Resource.attribute(schema, { filter })`, `Relationship.one(ref, { filter })`):
+ * `?filter[status]=open&filter[age][gt]=18` decodes to a `Filter.Ast` root
+ * node, and an unknown field, undeclared operator or bad literal is a 400
+ * whose `source.parameter` names the key. A field map (`filter: { q:
+ * Schema.String }`) is the open per-key escape hatch for flags JSON:API has no
+ * family for. Pass `query` to replace the composition with any schema, for apis
+ * whose list contract is a flat struct their own operations layer consumes.
+ * Only the query changes; the success document, path, errors and middleware
+ * are unaffected.
  *
  * Pass `success` to override the collection document itself with any schema —
  * most usefully a *wire* variant of the resource, for an api whose assembler
@@ -422,6 +428,20 @@ type DefaultListQuery<
  *     page: Query.Page.Offset,
  *     filter: { author: Schema.optionalKey(Schema.String) }
  *   })
+ * )
+ *
+ * // …or the filter grammar over a declared resource
+ * const Product = Resource.make("products", {
+ *   attributes: {
+ *     name: Schema.NonEmptyString,
+ *     priceCents: Resource.attribute(Schema.Int, { filter: ["eq", "gt", "lt"], sort: true })
+ *   }
+ * })
+ * const products = Group.make(
+ *   Product,
+ *   // GET /products?filter[priceCents][lt]=1000 → query.filter is
+ *   //   { _tag: "Compare", op: "lt", field: "priceCents", value: 1000 }
+ *   Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Query.Page.Offset })
  * )
  *
  * // …or with a query schema of your own: a flat struct, page cursor bracketed
@@ -455,7 +475,7 @@ export const list = <
   const Fields extends boolean = false,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
+  const FilterFields extends Query.FilterOption | undefined = undefined,
   DocMeta extends Schema.Top = Meta,
   QuerySchema extends Schema.Top = DefaultListQuery<
     Type,
@@ -481,7 +501,12 @@ export const list = <
     readonly sort?: Sort
     /** Enable `?page[*]=` pagination (see `Query.Page` for ready-made strategies). */
     readonly page?: PageFields
-    /** Enable `?filter[*]=` filtering (user-defined fields). */
+    /**
+     * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
+     * (`docs/filter-grammar.md`) over the resource's declared filterable
+     * fields, decoding to a `Filter.Ast`; a field map (`{ q: Schema.String }`)
+     * is the open per-key escape hatch, each key becoming `filter[<key>]`.
+     */
     readonly filter?: FilterFields
     /** Override the collection document's `meta` schema (e.g. pagination totals). */
     readonly meta?: DocMeta
@@ -1273,7 +1298,7 @@ export const related = <
     | boolean
     | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  const FilterFields extends Schema.Struct.Fields | undefined = undefined,
+  const FilterFields extends Query.FilterOption | undefined = undefined,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
@@ -1287,7 +1312,7 @@ export const related = <
     readonly sort?: Sort
     /** Enable `?page[*]=` pagination (to-many relationships; see `Query.Page`). */
     readonly page?: PageFields
-    /** Enable `?filter[*]=` filtering (user-defined fields). */
+    /** Enable `?filter[*]=` filtering: `true` for the grammar over the *target's* declaration, or a field map. */
     readonly filter?: FilterFields
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
@@ -1893,7 +1918,8 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
 export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta, R> {
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
   readonly page?: Schema.Struct.Fields
-  readonly filter?: Schema.Struct.Fields
+  /** `true` for the filter grammar over the resource's declaration, or a per-key field map. */
+  readonly filter?: Query.FilterOption
   /**
    * Override the whole query schema. Defaults to the `Query.schema`
    * composition of `include` / `fields` / `sort` / `page` / `filter`; pass any
@@ -2119,8 +2145,8 @@ type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeK
   FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>> ? FieldOr<C, "sort", GSort> : GSort
 type ListPage<C, GPage extends Schema.Struct.Fields | undefined> =
   FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage
-type ListFilter<C, GFilter extends Schema.Struct.Fields | undefined> =
-  FieldOr<C, "filter", GFilter> extends Schema.Struct.Fields | undefined ? FieldOr<C, "filter", GFilter> : GFilter
+type ListFilter<C, GFilter extends Query.FilterOption | undefined> =
+  FieldOr<C, "filter", GFilter> extends Query.FilterOption | undefined ? FieldOr<C, "filter", GFilter> : GFilter
 
 // --- the effective generated endpoint types --------------------------------
 
@@ -2180,7 +2206,7 @@ type GeneratedList<
   GFields extends boolean,
   GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   GPage extends Schema.Struct.Fields | undefined,
-  GFilter extends Schema.Struct.Fields | undefined,
+  GFilter extends Query.FilterOption | undefined,
   GMeta,
   C = ConfigObject<E, "list">
 > =
@@ -2483,7 +2509,7 @@ export type ResourceEndpoint<
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
-  Filter extends Schema.Struct.Fields | undefined,
+  Filter extends Query.FilterOption | undefined,
   GMeta
 > =
   | GeneratedGet<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, GMeta>
@@ -2524,7 +2550,7 @@ export type ResourceEndpoints<
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
-  Filter extends Schema.Struct.Fields | undefined,
+  Filter extends Query.FilterOption | undefined,
   GMeta
 > = readonly [
   ResourceEndpoint<
@@ -2586,7 +2612,7 @@ export interface ResourceOptions<
   Fields extends boolean,
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
-  Filter extends Schema.Struct.Fields | undefined,
+  Filter extends Query.FilterOption | undefined,
   GMeta extends Schema.Top
 > {
   /** Which CRUD endpoints to emit and how to configure each. Defaults to all five. */
@@ -2697,7 +2723,7 @@ export const resource = <
   const Fields extends boolean = true,
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
-  const Filter extends Schema.Struct.Fields | undefined = undefined,
+  const Filter extends Query.FilterOption | undefined = undefined,
   const GMeta extends Schema.Top = Meta
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,

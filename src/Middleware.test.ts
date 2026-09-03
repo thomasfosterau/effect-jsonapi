@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Schema, SchemaIssue } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js"
@@ -12,7 +12,8 @@ import {
   layer,
   layerHostNegotiated,
   negotiate,
-  schemaError
+  schemaError,
+  schemaErrorDocument
 } from "./Middleware.js"
 import * as Query from "./Query.js"
 import { make as Resource } from "./Resource.js"
@@ -112,6 +113,71 @@ describe("Middleware.schemaError", () => {
   })
 })
 
+describe("Middleware.schemaErrorDocument", () => {
+  const failure = <S extends Schema.Top>(schema: S, input: unknown) => {
+    const result = Schema.decodeUnknownResult(schema as unknown as Schema.Codec<unknown, unknown>)(input, {
+      errors: "all"
+    })
+    if (result._tag === "Success") throw new Error("expected a failure")
+    return result.failure
+  }
+  const bad = (detail: string, source: object) => ({
+    status: "400",
+    code: "bad_request",
+    title: "Bad Request",
+    detail,
+    source
+  })
+
+  it("names a query parameter, re-bracketing a nested path and dropping list indices", () => {
+    const Query = Schema.Struct({
+      page: Schema.Struct({ limit: Schema.FiniteFromString }),
+      sort: Schema.Array(Schema.Literals(["a", "b"]))
+    })
+    expect(schemaErrorDocument("Query", failure(Query, { page: { limit: "x" }, sort: ["a", "c"] }))).toEqual({
+      errors: [
+        bad("Expected a finite number", { parameter: "page[limit]" }),
+        bad('Expected "a" | "b"', { parameter: "sort" })
+      ]
+    })
+    // a grammar key is already one segment
+    const issue = new SchemaIssue.Pointer(["filter[age][gt]"], new SchemaIssue.InvalidValue({ message: "nope" }))
+    expect(schemaErrorDocument("Query", issue)).toEqual({ errors: [bad("nope", { parameter: "filter[age][gt]" })] })
+    // segments after a list index are inside the decoded value, not the wire key
+    const inside = new SchemaIssue.Pointer(["sort", 0, "field"], new SchemaIssue.InvalidValue({ message: "nope" }))
+    expect(schemaErrorDocument("Query", inside)).toEqual({ errors: [bad("nope", { parameter: "sort" })] })
+  })
+
+  it("names a path parameter and a header", () => {
+    const Params = Schema.Struct({ id: Schema.String })
+    expect(schemaErrorDocument("Params", failure(Params, { id: 1 }))).toEqual({
+      errors: [bad("Expected string", { parameter: "id" })]
+    })
+    expect(schemaErrorDocument("Headers", failure(Params, {}))).toEqual({
+      errors: [bad("Missing key", { header: "id" })]
+    })
+  })
+
+  it("points into a body with a JSON Pointer", () => {
+    const Body = Schema.Struct({
+      data: Schema.Struct({ attributes: Schema.Struct({ title: Schema.NonEmptyString, "a/b~c": Schema.String }) })
+    })
+    expect(schemaErrorDocument("Payload", failure(Body, { data: { attributes: { title: "", "a/b~c": 1 } } }))).toEqual({
+      errors: [
+        bad("Expected a value with a length of at least 1", { pointer: "/data/attributes/title" }),
+        bad("Expected string", { pointer: "/data/attributes/a~1b~0c" })
+      ]
+    })
+  })
+
+  it("falls back to the single-error document when no source can be derived", () => {
+    expect(schemaErrorDocument("Query", failure(Schema.Struct({ limit: Schema.String }), "not an object"))).toEqual(
+      toDocument(schemaError("Query"))
+    )
+    expect(schemaErrorDocument("Body", failure(Schema.String, 1))).toEqual(toDocument(schemaError("Body")))
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Host-negotiated apis: the endpoint constructors without the package's §5
 // ---------------------------------------------------------------------------
@@ -119,7 +185,7 @@ describe("Middleware.schemaError", () => {
 const Article = Resource("articles", { attributes: { title: Schema.NonEmptyString } })
 
 const Api = HttpApi.make("blog").add(
-  Group.make(Article, Endpoint.get(Article), Endpoint.list(Article, { page: Query.Page.Offset }))
+  Group.make(Article, Endpoint.get(Article), Endpoint.list(Article, { page: Query.Page.Offset, sort: true }))
 )
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
@@ -185,13 +251,21 @@ describe("Middleware.layerHostNegotiated", () => {
           status: "400",
           code: "bad_request",
           title: "Bad Request",
-          detail: "Request query failed validation",
-          meta: { detail: "Request query failed validation" }
+          detail: "Expected a finite number",
+          source: { parameter: "page[limit]" }
         }
       ]
     })
     // byte-identical to what the fully-negotiating layer returns
     expect(hostNegotiated).toEqual(await request(layer, bad))
+  })
+
+  it("names the whole parameter for a failure inside a decoded value", async () => {
+    // the sort codec fails at ["sort", 0, "field"]; the wire key is `sort`
+    const response = await request(layer, "http://localhost/articles?sort=nope")
+    expect(response.status).toBe(400)
+    expect(response.body.errors).toHaveLength(1)
+    expect(response.body.errors[0].source).toEqual({ parameter: "sort" })
   })
 
   it("serves ordinary JSON:API requests identically to Middleware.layer", async () => {

@@ -1,9 +1,30 @@
 /**
- * Normalising a `filter` declaration against a closed operator vocabulary.
+ * The filter operator vocabulary — named once, here, so `Filter.Operator`
+ * (the public schema) and the URL grammar engine (`internal/filter.ts`) read
+ * the same list without a module cycle — and the normalisation of a `filter`
+ * declaration against it.
  *
  * @internal
  */
 import { Schema } from "effect"
+
+/** The six comparison operators: one literal against the field. */
+export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const
+
+/** The two list-membership operators: a non-empty literal list. */
+export const listOperators = ["in", "nin"] as const
+
+/** The null test. */
+export const nullOperator = "isnull"
+
+/**
+ * The closed operator core, in the grammar's order. `Filter.Operator` is the
+ * `Schema.Literals` over exactly this tuple.
+ */
+export const operators = [...compareOperators, ...listOperators, nullOperator] as const
+
+/** The conjunctions of the group form. */
+export const conjunctions = ["AND", "OR", "NOT"] as const
 
 /**
  * Normalises a `filter` declaration to the operator list it declares, checked

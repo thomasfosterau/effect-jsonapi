@@ -12,7 +12,13 @@
  *         type carries such parameters → 406 Not Acceptable
  *   - {@link SchemaErrors} — converts request validation failures (malformed
  *     query parameters, payloads, path parameters) into spec-compliant
- *     JSON:API 400 error documents instead of the default HttpApi error shape.
+ *     JSON:API 400 error documents instead of the default HttpApi error shape:
+ *     an error object per reported issue, each with a `detail` and a `source`
+ *     naming the offending `parameter` (`filter[age][gt]`, `page[limit]`),
+ *     `pointer` (`/data/attributes/title`) or `header`. HttpApi decodes each
+ *     request part with the default parse options (`errors: "first"`), so a
+ *     part yields one error object — except the `filter` family, whose codec
+ *     reports every offending key together.
  *
  * Both middlewares are attached automatically by the `Endpoint` constructors,
  * so any `HttpApi` containing JSON:API endpoints will fail to build (at the
@@ -21,17 +27,22 @@
  *
  * Both are also usable **outside** those constructors, for hosts that own the
  * URL themselves: {@link negotiate} runs the §5 rules over plain headers and
- * {@link schemaError} builds the request-validation 400, both rendered with
- * `ApiError.toDocument`. And for an api built from the constructors whose host
- * has already negotiated, {@link layerHostNegotiated} satisfies the endpoints'
- * negotiation requirement without running §5 twice.
+ * {@link schemaError} builds the request-validation 400 (and
+ * {@link schemaErrorDocument} the source-bearing document from the decoding
+ * failure itself), both rendered with `ApiError.toDocument`. And for an api
+ * built from the constructors whose host has already negotiated,
+ * {@link layerHostNegotiated} satisfies the endpoints' negotiation
+ * requirement without running §5 twice.
  *
  * @since 0.1.0
  */
-import { Effect, Layer } from "effect"
+import type { Schema } from "effect"
+import { Effect, Layer, SchemaIssue } from "effect"
 import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { BadRequest, NotAcceptable, UnsupportedMediaType } from "./ApiError.js"
+import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
+import type { ErrorSource } from "./Document.js"
 import { MEDIA_TYPE } from "./internal/media.js"
 
 // ---------------------------------------------------------------------------
@@ -227,6 +238,111 @@ export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
 export const schemaError = (part: RequestPart): BadRequest =>
   new BadRequest({ detail: `Request ${part.toLowerCase()} failed validation` })
 
+// A JSON Pointer (RFC 6901) from an issue path.
+const jsonPointer = (path: ReadonlyArray<string | number>): string =>
+  "/" + path.map((segment) => String(segment).replace(/~/g, "~0").replace(/\//g, "~1")).join("/")
+
+// The `source` of one error object, from the part that failed and the issue's
+// path: query keys are re-bracketed (`["page", "limit"]` → `page[limit]`; a
+// grammar key like `filter[age][gt]` is already one segment) up to the first
+// list index — everything after an index is inside a decoded value (the sort
+// codec's `["sort", 0, "field"]`), not part of the wire key; path params and
+// headers take the first segment; bodies take the JSON Pointer.
+const sourceOf = (part: RequestPart, path: ReadonlyArray<string | number>): typeof ErrorSource.Type | undefined => {
+  switch (part) {
+    case "Query": {
+      const keys: Array<string> = []
+      for (const segment of path) {
+        if (typeof segment !== "string") break
+        keys.push(segment)
+      }
+      if (keys.length === 0) return undefined
+      return {
+        parameter:
+          keys[0]! +
+          keys
+            .slice(1)
+            .map((key) => `[${key}]`)
+            .join("")
+      }
+    }
+    case "Params": {
+      const key = path.find((segment): segment is string => typeof segment === "string")
+      return key === undefined ? undefined : { parameter: key }
+    }
+    case "Headers": {
+      const key = path.find((segment): segment is string => typeof segment === "string")
+      return key === undefined ? undefined : { header: key }
+    }
+    case "Body":
+    case "Payload":
+      return path.length === 0 ? undefined : { pointer: jsonPointer(path) }
+  }
+}
+
+/**
+ * The JSON:API 400 document for a request-validation failure, from the
+ * failure itself: one error object per issue the failure reports, each with
+ * `status` `"400"`, `code` `"bad_request"`, `title` `"Bad Request"`, the
+ * issue's message as `detail`, and a `source` naming what failed —
+ * `source.parameter` for a query (`page[limit]`, `filter[age][gt]`) or path
+ * parameter, `source.header` for a header, `source.pointer` (a JSON Pointer,
+ * `/data/attributes/title`) for a body. When no source can be derived (the
+ * whole part is malformed) it is the single-error document of
+ * {@link schemaError}.
+ *
+ * How many issues a failure reports is the decoder's choice: HttpApi decodes
+ * with the default parse options (`errors: "first"`), so inside
+ * {@link SchemaErrorsLive} a part yields one error object, except the `filter`
+ * family, whose codec reports every offending key together. Decode with
+ * `errors: "all"` yourself to get every failing value.
+ *
+ * This is what {@link SchemaErrorsLive} answers with; reach for it directly
+ * from a plain framework hook that decodes requests itself.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Query = Schema.Struct({ limit: Schema.FiniteFromString })
+ *
+ * const result = Schema.decodeUnknownResult(Query)({ limit: "nope" })
+ * if (result._tag === "Failure") {
+ *   Middleware.schemaErrorDocument("Query", result.failure)
+ *   // → { errors: [{ status: "400", code: "bad_request", title: "Bad Request",
+ *   //                detail: "Expected a finite number", source: { parameter: "limit" } }] }
+ * }
+ * ```
+ *
+ * @since 0.13.0
+ * @category utils
+ */
+export const schemaErrorDocument = (
+  part: RequestPart,
+  error: Schema.SchemaError | SchemaIssue.Issue
+): typeof WireDocument.Type => {
+  const issue = SchemaIssue.isIssue(error) ? error : error.issue
+  const leaves = SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues
+  const errors = leaves.map((leaf) => {
+    const path = (leaf.path ?? []).flatMap((segment) => {
+      const key = typeof segment === "object" ? segment.key : segment
+      return typeof key === "string" || typeof key === "number" ? [key] : []
+    })
+    return { detail: leaf.message, source: sourceOf(part, path) }
+  })
+  if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part))
+  return {
+    errors: errors.map(({ detail, source }) => ({
+      status: String(BadRequest.status),
+      code: BadRequest.code,
+      ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
+      detail,
+      ...(source !== undefined ? { source } : {})
+    }))
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Middleware services
 // ---------------------------------------------------------------------------
@@ -292,8 +408,12 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
 export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNegotiationLayer()
 
 /**
- * The live {@link SchemaErrors} implementation: rewraps every request
- * validation failure as a JSON:API 400 error document.
+ * The live {@link SchemaErrors} implementation: answers every request
+ * validation failure with the JSON:API 400 error document of
+ * {@link schemaErrorDocument} — an error object per reported issue (one per
+ * request part under HttpApi's `errors: "first"`, every offending key for the
+ * `filter` family), each with a `detail` and a `source` naming the offending
+ * parameter, header or body member.
  *
  * @since 0.1.0
  * @category layers
@@ -303,7 +423,15 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
   // `ResponseHeaders` failures are a server-side bug (the handler's own response
   // doesn't satisfy its declared schema), not a client request-validation error —
   // re-fail with the original error instead of mislabeling it a 400.
-  (error) => (error.kind === "ResponseHeaders" ? Effect.fail(error) : Effect.fail(schemaError(error.kind)))
+  (error) =>
+    error.kind === "ResponseHeaders"
+      ? Effect.fail(error)
+      : Effect.succeed(
+          HttpServerResponse.jsonUnsafe(schemaErrorDocument(error.kind, error.cause), {
+            status: BadRequest.status,
+            contentType: MEDIA_TYPE
+          })
+        )
 )
 
 /**

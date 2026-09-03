@@ -122,6 +122,27 @@ describe("standard errors", () => {
     })
   })
 
+  it("BadRequest decodes a document carrying detail on the error object but no meta", () => {
+    // the schema-error middleware's source-bearing 400s, and any other server's
+    const decoded = Schema.decodeUnknownSync(ApiError.BadRequest.wire)({
+      errors: [
+        {
+          status: "400",
+          code: "bad_request",
+          title: "Bad Request",
+          detail: 'Unknown filter field "body"',
+          source: { parameter: "filter[body]" }
+        }
+      ]
+    })
+    expect(decoded).toBeInstanceOf(ApiError.BadRequest)
+    expect(decoded.detail).toBe('Unknown filter field "body"')
+    // without detail anywhere the field is simply absent
+    expect(
+      Schema.decodeUnknownSync(ApiError.BadRequest.wire)({ errors: [{ status: "400", code: "bad_request" }] }).detail
+    ).toBeUndefined()
+  })
+
   it("BadRequest omits detail when not provided", () => {
     const wire = Schema.encodeUnknownSync(ApiError.BadRequest.wire)(new ApiError.BadRequest({}))
     expect(wire).toEqual({

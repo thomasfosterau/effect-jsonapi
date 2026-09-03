@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema, SchemaGetter } from "effect"
 import * as Filter from "./Filter.js"
 import * as Relationship from "./Relationship.js"
+import { attribute, filterable, make as Resource } from "./Resource.js"
 
 describe("Filter", () => {
   it("names the closed operator core in the grammar's order, as a schema", () => {
@@ -105,5 +106,111 @@ describe("Filter", () => {
       // @ts-expect-error a literal codec for another type does not fit the schema
       void Schema.String.pipe(Filter.able(["eq"], { literal: PointFromString }))
     })
+  })
+})
+
+describe("Filter AST", () => {
+  it("builds plain data with the constructors", () => {
+    expect(Filter.eq("status", "open")).toEqual({ _tag: "Compare", op: "eq", field: "status", value: "open" })
+    expect(Filter.ne("a", 1)).toEqual({ _tag: "Compare", op: "ne", field: "a", value: 1 })
+    expect(Filter.lt("a", 1).op).toBe("lt")
+    expect(Filter.lte("a", 1).op).toBe("lte")
+    expect(Filter.gt("a", 1).op).toBe("gt")
+    expect(Filter.gte("a", 1).op).toBe("gte")
+    expect(Filter.isIn("priority", [1, 2])).toEqual({ _tag: "In", field: "priority", values: [1, 2] })
+    expect(Filter.notIn("priority", [1])).toEqual({ _tag: "NotIn", field: "priority", values: [1] })
+    expect(Filter.isNull("deletedAt")).toEqual({ _tag: "IsNull", field: "deletedAt", negated: false })
+    expect(Filter.isNull("deletedAt", true).negated).toBe(true)
+    expect(Filter.and(Filter.eq("a", 1), Filter.gt("b", 2))).toEqual({
+      _tag: "And",
+      members: [Filter.eq("a", 1), Filter.gt("b", 2)]
+    })
+    expect(Filter.or()).toEqual({ _tag: "Or", members: [] })
+    expect(Filter.not(Filter.eq("a", 1))).toEqual({ _tag: "Not", member: Filter.eq("a", 1) })
+  })
+
+  it("types the constructors over the field names and literals", () => {
+    expectTypeOf(Filter.eq("age", 18)).toEqualTypeOf<Filter.Compare<"age", 18>>()
+    expectTypeOf(Filter.eq("age", 18)).toMatchTypeOf<Filter.Compare<"age", number>>()
+    expectTypeOf(Filter.isIn("status", ["a", "b"])).toEqualTypeOf<Filter.In<"status", "a" | "b">>()
+    expectTypeOf(Filter.isNull("deletedAt")).toEqualTypeOf<Filter.IsNull<"deletedAt">>()
+    // a typed tree over a field vocabulary
+    type Fields = { readonly age: number; readonly status: "open" | "done" }
+    const tree: Filter.Ast<Fields> = Filter.and(Filter.gt("age", 18), Filter.eq("status", "open"))
+    expectTypeOf(tree).toMatchTypeOf<Filter.Ast<Fields>>()
+    expectTypeOf(Filter.not(Filter.or())).toMatchTypeOf<Filter.Not<Fields>>()
+    // @ts-expect-error an undeclared field is not a node of the tree
+    const bad: Filter.Ast<Fields> = Filter.eq("title", "x")
+    void bad
+    // @ts-expect-error a literal of the wrong type is not a node of the tree
+    const badLiteral: Filter.Ast<Fields> = Filter.eq("age", "18")
+    void badLiteral
+    // the untyped Node admits anything
+    expectTypeOf(Filter.eq("anything", new Date())).toMatchTypeOf<Filter.Node>()
+    expectTypeOf<Filter.Node>().toEqualTypeOf<Filter.Ast>()
+  })
+
+  it("validates a tree's shape with the runtime Ast schema", () => {
+    const is = Schema.is(Filter.Ast)
+    expect(is({ _tag: "Compare", op: "gt", field: "age", value: 18 })).toBe(true)
+    expect(is({ _tag: "In", field: "status", values: ["a"] })).toBe(true)
+    expect(is({ _tag: "And", members: [{ _tag: "Not", member: { _tag: "IsNull", field: "x", negated: true } }] })).toBe(
+      true
+    )
+    expect(is({ _tag: "Or", members: [] })).toBe(true)
+    // literals are open: their types come from the resource declaration
+    expect(is({ _tag: "Compare", op: "eq", field: "when", value: new Date() })).toBe(true)
+    // …but the shape is closed
+    expect(is({ _tag: "Compare", op: "like", field: "age", value: 18 })).toBe(false)
+    expect(is({ _tag: "In", field: "status", values: [] })).toBe(false)
+    expect(is({ _tag: "Not", member: undefined })).toBe(false)
+    expect(is({ _tag: "Between", field: "age" })).toBe(false)
+    expect(is({ _tag: "And", members: [{ _tag: "Compare", op: "eq", field: 1, value: 1 }] })).toBe(false)
+    expect(Schema.decodeUnknownSync(Filter.Ast)({ _tag: "Compare", op: "gt", field: "age", value: 18 })).toEqual(
+      Filter.gt("age", 18)
+    )
+    expectTypeOf<typeof Filter.Ast.Type>().toEqualTypeOf<Filter.Node>()
+  })
+
+  describe("normalise", () => {
+    const Article = Resource("articles", {
+      attributes: {
+        status: attribute(Schema.String, { filter: true }),
+        age: attribute(Schema.Number, { filter: true }),
+        when: attribute(Schema.DateFromString, { filter: ["eq", "in"] })
+      }
+    })
+    const fields = filterable(Article)
+
+    it("sorts and deduplicates In values by encoded string, members by the node order", () => {
+      expect(Filter.normalise(Filter.isIn("age", [3, 1, 3, 10]), fields)).toEqual(Filter.isIn("age", [1, 10, 3]))
+      expect(
+        Filter.normalise(
+          Filter.and(Filter.eq("status", "open"), Filter.isIn("age", [3, 1, 3]), Filter.eq("status", "open")),
+          fields
+        )
+      ).toEqual(Filter.and(Filter.isIn("age", [1, 3]), Filter.eq("status", "open")))
+      // dates sort by their ISO encoding
+      const a = new Date("2026-01-01T00:00:00.000Z")
+      const b = new Date("2025-01-01T00:00:00.000Z")
+      expect(Filter.normalise(Filter.isIn("when", [a, b, a]), fields)).toEqual(Filter.isIn("when", [b, a]))
+    })
+
+    it("keeps the type of the tree", () => {
+      const tree = Filter.and(Filter.eq("status", "open"))
+      expectTypeOf(Filter.normalise(tree, fields)).toEqualTypeOf<typeof tree>()
+    })
+
+    it("throws for an unknown field, a refused literal or an empty list", () => {
+      expect(() => Filter.normalise(Filter.eq("nope", 1), fields)).toThrow(/Unknown filter field "nope"/)
+      expect(() => Filter.normalise(Filter.eq("age", "abc" as never), fields)).toThrow()
+      expect(() => Filter.normalise({ _tag: "In", field: "age", values: [] as never }, fields)).toThrow(
+        /at least one value/
+      )
+    })
+  })
+
+  it("fixes the profile URI", () => {
+    expect(Filter.PROFILE_URI).toBe("https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1")
   })
 })

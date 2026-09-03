@@ -84,8 +84,10 @@ export * as Endpoint from "./Endpoint.js"
 
 /**
  * The `filter` query family: the operator vocabulary (`Filter.Operator`,
- * `Filter.Op`, `Filter.isOperator`) and the per-attribute declaration
- * (`Filter.able`).
+ * `Filter.Op`, `Filter.isOperator`), the per-attribute declaration
+ * (`Filter.able`), the filter AST (`Filter.Ast` and its constructors), its
+ * normal form (`Filter.normalise`) and the grammar's profile URI
+ * (`Filter.PROFILE_URI`). The URL codec is `Query.Filter(resource)`.
  *
  * @since 0.13.0
  */
