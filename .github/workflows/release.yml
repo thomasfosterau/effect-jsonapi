@@ -62,13 +62,17 @@ jobs:
       # trusted publishing — there is no NPM_TOKEN to steal; provenance is
       # attached automatically) and then `changeset tag`. The action parses the
       # "New tag:" output, pushes the tags and creates the GitHub releases.
+      #
+      # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
+      # devDependencies) and renamed its inputs from v1's `version` / `publish`
+      # / `commit` / `title`.
       - name: Create release PR or publish to npm
         uses: changesets/action@8488615a623b1b9c987934bb89eae8af6a946ac1 # v2.1.1
         with:
-          version: pnpm run version
-          publish: pnpm run release
-          commit: "chore: version packages"
-          title: "chore: version packages"
+          version-script: pnpm run version
+          publish-script: pnpm run release
+          commit-message: "chore: version packages"
+          pr-title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
