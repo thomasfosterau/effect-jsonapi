@@ -24,6 +24,8 @@
  * @since 0.1.0
  */
 import type { JsonApiObject } from "./Document.js"
+import { serialise, withPagePairs } from "./internal/canonical.js"
+import type { Pair } from "./Query.js"
 
 /**
  * The top-level `jsonapi` object *value* (`{ version?, ext?, profile?, meta? }`).
@@ -188,6 +190,36 @@ export type DocumentValue<Data, Included extends ResourceValue = never, M extend
     ([M] extends [never] ? {} : { readonly meta?: M })
 >
 
+// Appends a query string (no leading `?`) to a path, whichever separator the
+// path needs; a path with no query is returned as is.
+const withQuery = (path: string, query: string): string =>
+  query === "" ? path : path.includes("?") ? `${path}&${query}` : `${path}?${query}`
+
+// A request's canonical query, however it was handed over.
+const queryString = (query: string | ReadonlyArray<Pair>): string =>
+  typeof query === "string" ? query : serialise(query)
+
+// A link with a query string appended, in either link spelling.
+const linkWithQuery = (link: LinkValue, query: string): LinkValue =>
+  typeof link === "string" ? withQuery(link, query) : { ...link, href: withQuery(link.href, query) }
+
+// The top-level links of a document: `links.self` wins over the `self`
+// option, and `query` is appended to whichever `self` the document ends up
+// with — a `query` with no self link to carry it is a programming error.
+const buildLinks = (options: {
+  readonly self?: string
+  readonly query?: string | ReadonlyArray<Pair>
+  readonly links?: LinksValue
+}): LinksValue | undefined => {
+  const links: LinksValue | undefined =
+    options.self !== undefined ? { self: options.self, ...options.links } : options.links
+  if (options.query === undefined) return links
+  if (links?.self === undefined) {
+    throw new Error("Handlers.collection: `query` needs a self link to be appended to — pass `self` or `links.self`")
+  }
+  return { ...links, self: linkWithQuery(links.self, queryString(options.query)) }
+}
+
 const build = (
   data: unknown,
   primary: ReadonlyArray<ResourceValue>,
@@ -196,13 +228,13 @@ const build = (
         readonly included?: ReadonlyArray<ResourceValue>
         readonly meta?: MetaValue
         readonly self?: string
+        readonly query?: string | ReadonlyArray<Pair>
         readonly links?: LinksValue
         readonly checkLinkage?: boolean
       }
     | undefined
 ) => {
-  const links: LinksValue | undefined =
-    options?.self !== undefined ? { self: options.self, ...options?.links } : options?.links
+  const links = options === undefined ? undefined : buildLinks(options)
   const included =
     options?.included !== undefined && options.included.length > 0
       ? buildIncluded(primary, options.included, options)
@@ -293,18 +325,27 @@ export const data = <
  *
  * Included resources are deduplicated and checked for full linkage.
  *
+ * JSON:API 1.1 requires a collection's `self` link to carry the query
+ * parameters the client provided. Pass `query` — the request's canonical
+ * query, from `Query.canonicalPairs(listQuery)(query)` or the
+ * `Query.canonical(listQuery)(query)` string — and it is appended to the
+ * document's `self` link, whether that is the `self` option or `links.self`
+ * (which wins when both are given); `query` without either throws. A
+ * paginated collection gets that for free from the link builders' own
+ * `query` option instead ({@link offsetPaginationLinks}): pass the pairs
+ * there, not here.
+ *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Handlers, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
  * })
+ * const listQuery = Query.schema(Article, { sort: true, page: Query.Page.Offset })
  *
  * const total = 42
- * const offset = 0
- * const limit = 10
  * const page = [
  *   Article.make({ id: Article.Id.make("1"), attributes: { title: "Hi", body: "..." } })
  * ]
@@ -312,16 +353,28 @@ export const data = <
  * // build a paginated collection response document in a handler (`handlers`
  * // comes from HttpApiBuilder.group)
  * const listHandler = (handlers: {
- *   handle: (name: string, handler: (request: { readonly query: unknown }) => Effect.Effect<unknown>) => void
+ *   handle: (
+ *     name: string,
+ *     handler: (request: { readonly query: typeof listQuery.Type }) => Effect.Effect<unknown>
+ *   ) => void
  * }) =>
  *   handlers.handle("list", ({ query }) =>
  *     Effect.succeed(
  *       Handlers.collection(page, {
  *         meta: { total },
- *         links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total)
+ *         links: Handlers.offsetPaginationLinks("/articles", query.page ?? {}, total, {
+ *           query: Query.canonicalPairs(listQuery)(query)
+ *         })
  *       })
  *     )
  *   )
+ *
+ * // …or, unpaginated, the canonical query on the collection's own `self` link
+ * Handlers.collection(page, {
+ *   self: "/articles",
+ *   query: Query.canonicalPairs(listQuery)({ sort: [{ field: "title", direction: "desc" }] })
+ * })
+ * // → { data: [...], links: { self: "/articles?sort=-title" } }
  * ```
  *
  * @since 0.1.0
@@ -337,6 +390,14 @@ export const collection = <
     readonly included?: ReadonlyArray<Included>
     readonly meta?: M
     readonly self?: string
+    /**
+     * The request's canonical query — `Query.canonicalPairs(schema)(query)`
+     * or the `Query.canonical(schema)(query)` string — appended to the
+     * document's `self` link (`self`, or `links.self`); throws without one.
+     *
+     * @since 0.13.0
+     */
+    readonly query?: string | ReadonlyArray<Pair>
     readonly links?: LinksValue
     /** Disable the full-linkage check (it is on by default). */
     readonly checkLinkage?: boolean
@@ -505,20 +566,61 @@ export const linkage = <const Data extends LinkageValue, const M extends MetaVal
 // Pagination links
 // ---------------------------------------------------------------------------
 
-const withPage = (path: string, params: Record<string, number>): string => {
-  const query = Object.entries(params)
-    .map(([k, v]) => `page[${k}]=${v}`)
-    .join("&")
-  return path.includes("?") ? `${path}&${query}` : `${path}?${query}`
+/**
+ * Options of the pagination link builders.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface PaginationLinksOptions {
+  /**
+   * The request's canonical query pairs — `Query.canonicalPairs(listQuery)(query)`
+   * — so every link carries the client's `include` / `fields` / `filter` /
+   * `sort` alongside its page cursor. The pairs are already in canonical
+   * order; each link's `page[*]` pairs take the place of any the list
+   * carries.
+   */
+  readonly query?: ReadonlyArray<Pair>
 }
+
+// A link to one page: the cursor's `page[*]` pairs, slotted into the
+// request's other canonical pairs when given, serialised canonically.
+const withPage = (path: string, page: Record<string, number>, query: ReadonlyArray<Pair> | undefined): string => {
+  const cursor: ReadonlyArray<Pair> = Object.entries(page).map(([key, value]) => [`page[${key}]`, String(value)])
+  return withQuery(path, serialise(query === undefined ? cursor : withPagePairs(query, cursor)))
+}
+
+// The links of an unpageable collection (a non-positive page size, which
+// `page[limit]=0` can request): `self` keeps the request's canonical pairs as
+// sent, its own `page[*]` included; nothing else can be linked.
+const unpageable = (path: string, query: ReadonlyArray<Pair> | undefined): LinksValue => ({
+  self: query === undefined ? path : withQuery(path, serialise(query)),
+  first: null,
+  prev: null,
+  next: null,
+  last: null
+})
 
 /**
  * Builds the spec's pagination links (`self` / `first` / `prev` / `next` /
  * `last`) for offset/limit pagination.
  *
+ * Links are serialised canonically (`Query.serialise`). Pass the request's
+ * canonical pairs as `query` and every link carries them, each page cursor
+ * slotted into the `page[*]` position (replacing the request's own), so
+ * `next` / `prev` / `first` / `last` are the same query on another page and
+ * `self` carries the **effective page window**: the request's canonical
+ * string with the page defaults the server applied filled in. A request
+ * without page keys (`?sort=-title`) canonicalises to `sort=-title`, while
+ * its `self` is `sort=-title&page[offset]=0&page[limit]=<total>` — the
+ * window the document actually covers. When the window is unpageable
+ * (`limit <= 0`) `self` is the request's pairs as sent and the other links
+ * are `null`.
+ *
  * @example
  * ```ts
- * import { Handlers } from "@thomasfosterau/effect-jsonapi"
+ * import { Schema } from "effect"
+ * import { Handlers, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * Handlers.offsetPaginationLinks("/articles", { offset: 0, limit: 10 }, 35)
  * // → { self: "/articles?page[offset]=0&page[limit]=10",
@@ -526,6 +628,26 @@ const withPage = (path: string, params: Record<string, number>): string => {
  * //     prev: null,
  * //     next: "/articles?page[offset]=10&page[limit]=10",
  * //     last: "/articles?page[offset]=30&page[limit]=10" }
+ *
+ * // …carrying the request's full query
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ * const listQuery = Query.schema(Article, { fields: true, sort: true, page: Query.Page.Offset })
+ * const query: typeof listQuery.Type = {
+ *   fields: { articles: ["title"] },
+ *   sort: [{ field: "title", direction: "desc" }],
+ *   page: { offset: 10, limit: 10 }
+ * }
+ *
+ * Handlers.offsetPaginationLinks("/articles", query.page ?? {}, 35, {
+ *   query: Query.canonicalPairs(listQuery)(query)
+ * })
+ * // → { self: "/articles?fields[articles]=title&sort=-title&page[offset]=10&page[limit]=10",
+ * //     first: "/articles?fields[articles]=title&sort=-title&page[offset]=0&page[limit]=10",
+ * //     prev: "/articles?fields[articles]=title&sort=-title&page[offset]=0&page[limit]=10",
+ * //     next: "/articles?fields[articles]=title&sort=-title&page[offset]=20&page[limit]=10",
+ * //     last: "/articles?fields[articles]=title&sort=-title&page[offset]=30&page[limit]=10" }
  * ```
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-pagination}
@@ -535,23 +657,29 @@ const withPage = (path: string, params: Record<string, number>): string => {
 export const offsetPaginationLinks = (
   path: string,
   page: { readonly offset?: number; readonly limit?: number },
-  total: number
+  total: number,
+  options?: PaginationLinksOptions
 ): LinksValue => {
   const limit = page.limit ?? total
   const offset = page.offset ?? 0
-  if (limit <= 0) return { self: path, first: null, prev: null, next: null, last: null }
+  const query = options?.query
+  if (limit <= 0) return unpageable(path, query)
   const lastOffset = Math.floor(Math.max(total - 1, 0) / limit) * limit
   return {
-    self: withPage(path, { offset, limit }),
-    first: withPage(path, { offset: 0, limit }),
-    prev: offset > 0 ? withPage(path, { offset: Math.max(offset - limit, 0), limit }) : null,
-    next: offset + limit < total ? withPage(path, { offset: offset + limit, limit }) : null,
-    last: withPage(path, { offset: lastOffset, limit })
+    self: withPage(path, { offset, limit }, query),
+    first: withPage(path, { offset: 0, limit }, query),
+    prev: offset > 0 ? withPage(path, { offset: Math.max(offset - limit, 0), limit }, query) : null,
+    next: offset + limit < total ? withPage(path, { offset: offset + limit, limit }, query) : null,
+    last: withPage(path, { offset: lastOffset, limit }, query)
   }
 }
 
 /**
  * Builds the spec's pagination links for page-number/size pagination.
+ *
+ * Links are serialised canonically (`Query.serialise`); pass the request's
+ * canonical pairs as `query` and every link carries them, `self` with the
+ * effective page window — see {@link offsetPaginationLinks}.
  *
  * @example
  * ```ts
@@ -563,6 +691,10 @@ export const offsetPaginationLinks = (
  * //     prev: "/articles?page[number]=1&page[size]=10",
  * //     next: "/articles?page[number]=3&page[size]=10",
  * //     last: "/articles?page[number]=4&page[size]=10" }
+ *
+ * // …carrying the request's other canonical pairs
+ * Handlers.numberPaginationLinks("/articles", { number: 2, size: 10 }, 35, { query: [["sort", "-title"]] })
+ * // → { self: "/articles?sort=-title&page[number]=2&page[size]=10", … }
  * ```
  *
  * @since 0.1.0
@@ -571,17 +703,19 @@ export const offsetPaginationLinks = (
 export const numberPaginationLinks = (
   path: string,
   page: { readonly number?: number; readonly size?: number },
-  total: number
+  total: number,
+  options?: PaginationLinksOptions
 ): LinksValue => {
   const size = page.size ?? total
   const number = page.number ?? 1
-  if (size <= 0) return { self: path, first: null, prev: null, next: null, last: null }
+  const query = options?.query
+  if (size <= 0) return unpageable(path, query)
   const lastPage = Math.max(Math.ceil(total / size), 1)
   return {
-    self: withPage(path, { number, size }),
-    first: withPage(path, { number: 1, size }),
-    prev: number > 1 ? withPage(path, { number: number - 1, size }) : null,
-    next: number < lastPage ? withPage(path, { number: number + 1, size }) : null,
-    last: withPage(path, { number: lastPage, size })
+    self: withPage(path, { number, size }, query),
+    first: withPage(path, { number: 1, size }, query),
+    prev: number > 1 ? withPage(path, { number: number - 1, size }, query) : null,
+    next: number < lastPage ? withPage(path, { number: number + 1, size }, query) : null,
+    last: withPage(path, { number: lastPage, size }, query)
   }
 }

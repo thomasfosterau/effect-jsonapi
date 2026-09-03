@@ -35,12 +35,20 @@
  * `UrlParams.toRecord` decodes to an array. Both decode identically; encoding
  * always emits the comma form.
  *
+ * A decoded query has exactly one wire spelling, the **canonical query
+ * string** ({@link canonical}): the families in a fixed order, each key
+ * sorted or in its codec's canonical order, RFC 3986 percent-encoded. It is
+ * what a collection document's `self` link carries and what a consumer can
+ * use as the identity of a query.
+ *
  * @since 0.1.0
  */
 import type { SchemaAST, Types } from "effect"
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
 import type { Ast, Node } from "./Filter.js"
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js"
+import type { Pair as CanonicalPair } from "./internal/canonical.js"
+import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js"
 import { CommaSeparated, flatten, nest, Repeatable, Sort as SortCodec } from "./internal/codecs.js"
 import type { FieldCodecs } from "./internal/filter.js"
 import { decodeFilter, encodeFilter, isFilterKey, literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
@@ -1096,4 +1104,176 @@ export const schema = <R extends Any, const O extends Options<R>>(
           })
     )
   ) as unknown as QuerySchema<R, O>
+}
+
+// ---------------------------------------------------------------------------
+// The canonical query string
+// ---------------------------------------------------------------------------
+
+/**
+ * One flat `(key, value)` query pair, both sides un-encoded — what
+ * {@link canonicalPairs} produces and {@link serialise} consumes.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export type Pair = CanonicalPair
+
+/**
+ * A query schema {@link canonical} accepts: any codec whose encoded (wire)
+ * side is a flat, string-keyed record and whose encoder needs no services —
+ * a {@link schema} result, or a consumer's own flat query struct
+ * ({@link bracketPageKeys}, say).
+ *
+ * Each encoded value must have a wire form that decodes back through the
+ * same schema: a string, or something `String()` renders faithfully (a
+ * number, a boolean). An array is emitted as the repeated key, one pair per
+ * item (`tag=a&tag=b`, which `UrlParams.toRecord` decodes back to an
+ * array), except `include`, whose comma form is its own encoding. `null`
+ * has no wire form and is omitted, like `undefined` — a nullable field
+ * round-trips only if its schema decodes an absent key to `null`.
+ *
+ * @since 0.13.0
+ * @category models
+ */
+export interface FlatQuerySchema extends Schema.Codec<unknown, { readonly [key: string]: unknown }, unknown, never> {}
+
+/**
+ * Serialises ordered query pairs to a query string (no leading `?`): every
+ * key and value RFC 3986 percent-encoded with `encodeURIComponent` — spaces
+ * are `%20`, never `+`; commas `%2C` — except that `[` and `]` are left
+ * readable in keys, and pairs joined with `&`. The result is what
+ * `Handlers.offsetPaginationLinks` and its siblings emit:
+ * `page[offset]=0&page[limit]=10`.
+ *
+ * Commas are encoded even where they separate a list (`include=a%2Cb`,
+ * `filter[f]=a%2Cb`) and where the filter grammar escapes one (`\,` is
+ * `%5C%2C`): the encoding is uniform and `URLSearchParams` / `UrlParams`
+ * decode it back to the same record byte for byte, so the string decodes
+ * through the same query schema.
+ *
+ * @example
+ * ```ts
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Query.serialise([
+ *   ["include", "author,comments"],
+ *   ["filter[title]", "Hello, world"],
+ *   ["page[offset]", "0"]
+ * ])
+ * // → "include=author%2Ccomments&filter[title]=Hello%2C%20world&page[offset]=0"
+ * ```
+ *
+ * @since 0.13.0
+ * @category utils
+ */
+export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs
+
+/**
+ * The canonically ordered flat pairs of a decoded query — {@link canonical}
+ * before serialisation, for callers that assemble the string themselves
+ * (the pagination link builders take these as their `query` option and slot
+ * the page cursor in).
+ *
+ * The query is encoded through `schema`, then its pairs are ordered by one
+ * rule:
+ *
+ * 1. `include`
+ * 2. `fields[*]`, sorted by type (code-point order)
+ * 3. `filter[*]`, in the filter grammar's canonical order (`docs/filter-grammar.md`
+ *    §3.3): shorthand keys sorted by key (code-point order), which is also
+ *    how the per-key `filter: { … }` escape hatch is ordered; the group form
+ *    in the encoder's pre-order, whose ids are meaningful and never re-sorted
+ * 4. `sort`
+ * 5. `page[*]`, in the order the page strategy declares its keys — `offset,
+ *    limit` / `number, size` / `cursor, size` — the order the pagination link
+ *    builders emit, so a `self` link and the canonical string agree
+ * 6. any other key (a consumer's own flat schema), sorted by key
+ *
+ * An absent (`undefined` or `null`) value is omitted, an empty string is
+ * kept (`key=`), and an array is the repeated key, one pair per item in
+ * order (`include` excepted: its comma form) — see {@link FlatQuerySchema}.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ * const query = Query.schema(Article, { fields: true, sort: true, page: Query.Page.Offset })
+ *
+ * Query.canonicalPairs(query)({
+ *   page: { limit: 10, offset: 0 },
+ *   sort: [{ field: "title", direction: "desc" }],
+ *   fields: { articles: ["title"] }
+ * })
+ * // → [["fields[articles]", "title"], ["sort", "-title"], ["page[offset]", "0"], ["page[limit]", "10"]]
+ * ```
+ *
+ * @since 0.13.0
+ * @category utils
+ */
+export const canonicalPairs = <S extends FlatQuerySchema>(schema: S): ((decoded: S["Type"]) => ReadonlyArray<Pair>) => {
+  const encode = Schema.encodeSync(schema)
+  const declared = declaredKeys(schema.ast)
+  return (decoded) => orderPairs(encode(decoded) as { readonly [key: string]: unknown }, declared)
+}
+
+/**
+ * The canonical query string of a decoded query: encoded through `schema`,
+ * ordered by {@link canonicalPairs}'s one rule (`include`, `fields[*]`,
+ * `filter[*]`, `sort`, `page[*]`, then anything else) and serialised by
+ * {@link serialise}.
+ *
+ * Two decoded queries that are equal produce byte-identical strings whatever
+ * the wire spelling they came from — key order, `?include=a&include=b`
+ * against `?include=a,b`, `filter[f][eq]=v` against `filter[f]=v` — and the
+ * string decodes back to the same query through the same schema (an array
+ * value is the repeated key, `null` is omitted; see {@link FlatQuerySchema}).
+ * It is what a collection document's `self` link carries (JSON:API 1.1
+ * requires the query parameters the client provided) and a stable identity
+ * for a query: a subscription, a cache tag. A paginated `self` link also
+ * carries the page defaults the server applied — the effective page window —
+ * see `Handlers.offsetPaginationLinks`.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     status: Resource.attribute(Schema.Literals(["open", "done"]), { filter: true })
+ *   }
+ * })
+ * const query = Query.schema(Article, { fields: true, sort: true, page: Query.Page.Offset, filter: true })
+ * const canonical = Query.canonical(query)
+ *
+ * canonical({
+ *   page: { limit: 10, offset: 0 },
+ *   filter: { _tag: "Compare", op: "eq", field: "status", value: "open" },
+ *   sort: [{ field: "title", direction: "desc" }]
+ * })
+ * // → "filter[status]=open&sort=-title&page[offset]=0&page[limit]=10"
+ *
+ * // the same query decoded from any spelling canonicalises identically
+ * const decoded = Schema.decodeUnknownSync(query)({
+ *   "page[limit]": "10",
+ *   sort: "-title",
+ *   "filter[status][eq]": "open",
+ *   "page[offset]": "0"
+ * })
+ * canonical(decoded)
+ * // → "filter[status]=open&sort=-title&page[offset]=0&page[limit]=10"
+ * ```
+ *
+ * @since 0.13.0
+ * @category utils
+ */
+export const canonical = <S extends FlatQuerySchema>(schema: S): ((decoded: S["Type"]) => string) => {
+  const pairs = canonicalPairs(schema)
+  return (decoded) => serialisePairs(pairs(decoded))
 }

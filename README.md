@@ -1067,7 +1067,9 @@ included resource must be referenced in the document).
 
 Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and
 `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
-`next` / `last` top-level links from the request's page parameters and the total count.
+`next` / `last` top-level links from the request's page parameters and the total count. Pass the
+request's other query parameters as `{ query: Query.canonicalPairs(listQuery)(query) }` and every
+link carries them too ([the canonical query string](#the-canonical-query-string)).
 
 To name the value a builder returns — e.g. on a helper that assembles documents outside a handler —
 use `Handlers.DocumentValue<Data, Included?, Meta?>` (the runtime shape, with an optional `jsonapi`
@@ -1312,6 +1314,62 @@ The grammar is a JSON:API **profile**, `Filter.PROFILE_URI`
 media type of responses from endpoints that speak it —
 `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the
 same way, since unknown profiles are ignored, never rejected.
+
+### The canonical query string
+
+JSON:API 1.1 requires a collection document's `self` link to carry the query parameters the client
+provided. `Query.canonical(schema)` turns a decoded query into its **one** wire spelling: encoded
+through the schema, ordered by one rule, RFC 3986 percent-encoded. Two equal decoded queries produce
+byte-identical strings whatever spelling they came from — key order, `?include=a&include=b` against
+`?include=a,b`, `filter[f][eq]=v` against `filter[f]=v` — and the string decodes back to the same
+query through the same schema, which makes it a stable identity for a query (a subscription, a
+cache tag) as well as a `self` link.
+
+```ts
+const listQuery = Query.schema(Article, {
+  include: true,
+  fields: true,
+  sort: true,
+  page: Query.Page.Offset,
+  filter: true
+})
+const canonical = Query.canonical(listQuery)
+
+canonical(query)
+// → "include=author&fields[articles]=title&filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
+```
+
+The order is `include`; `fields[*]` sorted by type; `filter[*]` in [the grammar's canonical
+order](./docs/filter-grammar.md#33-key-order-and-ids) (shorthand sorted by key, the group form in
+the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit`
+— what the link builders emit); then any other key, sorted. Keys and values go through
+`encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,`
+alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result
+back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and
+`Query.serialise(pairs)` the encoding on its own.
+
+The pagination link builders serialise the same way and take the other pairs as an option, so every
+link carries the full query with its page cursor slotted in:
+
+```ts
+handlers.handle("list", ({ query }) =>
+  listArticles(query).pipe(
+    Effect.map(({ items, total }) =>
+      Handlers.collection(items, {
+        meta: { total },
+        links: Handlers.offsetPaginationLinks("/articles", query.page ?? {}, total, {
+          query: Query.canonicalPairs(listQuery)(query)
+        })
+        // self: "/articles?filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
+        // next: "/articles?filter[status]=open&sort=-createdAt&page[offset]=10&page[limit]=10"
+      })
+    )
+  )
+)
+
+// unpaginated: the canonical query on the collection's own `self`
+Handlers.collection(items, { self: "/articles", query: Query.canonicalPairs(listQuery)(query) })
+```
 
 ### Constraining the advertised include paths
 
