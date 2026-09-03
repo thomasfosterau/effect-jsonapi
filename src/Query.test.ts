@@ -533,3 +533,181 @@ describe("include: repeated keys", () => {
     expect(decode({ sort: "-title" })).toEqual({ sort: [{ field: "title", direction: "desc" }] })
   })
 })
+
+// ---------------------------------------------------------------------------
+// The canonical query string
+// ---------------------------------------------------------------------------
+
+describe("Query.canonical", () => {
+  const query = Query.schema(Article, {
+    include: true,
+    fields: true,
+    sort: true,
+    page: Query.Page.Offset,
+    filter: { author: Schema.String, q: Schema.String }
+  })
+  const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>) as (
+    input: Record<string, unknown>
+  ) => typeof query.Type
+  const canonical = Query.canonical(query)
+  const pairs = Query.canonicalPairs(query)
+  // `URLSearchParams` is what a client (and `UrlParams.toRecord`) parses the
+  // string with; repeated keys never occur in canonical output.
+  const parse = (s: string): Record<string, string> => Object.fromEntries(new URLSearchParams(s))
+
+  const expected =
+    "include=author%2Ccomments.author&fields[articles]=title%2Cbody&fields[people]=firstName" +
+    "&filter[author]=9&filter[q]=hello%20world&sort=-createdAt%2Ctitle&page[offset]=20&page[limit]=10"
+
+  it("emits the families in one order: include, fields, filter, sort, page", () => {
+    expect(
+      canonical({
+        page: { limit: 10, offset: 20 },
+        sort: [
+          { field: "createdAt", direction: "desc" },
+          { field: "title", direction: "asc" }
+        ],
+        filter: { q: "hello world", author: "9" },
+        fields: { people: ["firstName"], articles: ["title", "body"] },
+        include: ["author", "comments.author"]
+      })
+    ).toBe(expected)
+  })
+
+  it("is byte-identical for equal queries whatever the wire spelling: key order and repeated include", () => {
+    const spellings: ReadonlyArray<Record<string, unknown>> = [
+      {
+        include: "author,comments.author",
+        "fields[articles]": "title,body",
+        "fields[people]": "firstName",
+        "filter[author]": "9",
+        "filter[q]": "hello world",
+        sort: "-createdAt,title",
+        "page[offset]": "20",
+        "page[limit]": "10"
+      },
+      {
+        "page[limit]": "10",
+        sort: "-createdAt,title",
+        "filter[q]": "hello world",
+        "fields[people]": "firstName",
+        "page[offset]": "20",
+        "filter[author]": "9",
+        "fields[articles]": "title,body",
+        include: "author,comments.author"
+      },
+      {
+        "filter[author]": "9",
+        "fields[people]": "firstName",
+        include: ["author", "comments.author"], // ?include=author&include=comments.author
+        "page[offset]": "20",
+        "fields[articles]": "title,body",
+        "page[limit]": "10",
+        "filter[q]": "hello world",
+        sort: "-createdAt,title"
+      }
+    ]
+    const strings = spellings.map((spelling) => canonical(decode(spelling)))
+    expect(new Set(strings).size).toBe(1)
+    expect(strings[0]).toBe(expected)
+    // and the ordered pairs behind the string are the same list
+    expect(pairs(decode(spellings[2]!))).toEqual(pairs(decode(spellings[0]!)))
+  })
+
+  it("decodes back to the same query through URLSearchParams and the same schema", () => {
+    const decoded = decode({
+      include: ["comments.author", "author"],
+      "fields[articles]": "body",
+      "filter[q]": "a,b & c=d?é\\,",
+      "filter[author]": "",
+      sort: "title",
+      "page[limit]": "5"
+    })
+    const s = canonical(decoded)
+    expect(s).toBe(
+      "include=comments.author%2Cauthor&fields[articles]=body&filter[author]=&filter[q]=a%2Cb%20%26%20c%3Dd%3F%C3%A9%5C%2C&sort=title&page[limit]=5"
+    )
+    const params = new URLSearchParams(s)
+    expect([...params.keys()].length).toBe(new Set(params.keys()).size)
+    expect(decode(parse(s))).toEqual(decoded)
+    expect(canonical(decode(parse(s)))).toBe(s)
+  })
+
+  it("omits absent values, keeps an empty string as `key=`, and is empty for an empty query", () => {
+    expect(canonical({})).toBe("")
+    expect(canonical({ include: [], filter: { author: "", q: "x" } })).toBe("include=&filter[author]=&filter[q]=x")
+    expect(pairs({ page: { limit: 1 } })).toEqual([["page[limit]", "1"]])
+  })
+
+  it("sorts fields[*] by type and the escape hatch's filter[*] by key, code-point order", () => {
+    const Zed = Resource("zeds", { attributes: { n: Schema.String } })
+    const Amp = Resource("amps", {
+      attributes: { v: Schema.String },
+      relationships: { zed: Relationship.one(() => Zed), article: Relationship.one(() => Article) }
+    })
+    const q = Query.schema(Amp, { fields: true, filter: { z: Schema.String, a: Schema.String, B: Schema.String } })
+    expect(Query.canonical(q)({ fields: { zeds: ["n"], amps: ["v"], articles: ["title"] } })).toBe(
+      "fields[amps]=v&fields[articles]=title&fields[zeds]=n"
+    )
+    // uppercase sorts before lowercase by code point, whatever the map declared
+    expect(Query.canonical(q)({ filter: { z: "1", a: "2", B: "3" } })).toBe("filter[B]=3&filter[a]=2&filter[z]=1")
+  })
+
+  it("orders page[*] as the page strategy declares its keys, the order the link builders emit", () => {
+    expect(canonical({ page: { limit: 10, offset: 0 } })).toBe("page[offset]=0&page[limit]=10")
+    const number = Query.schema(Article, { page: Query.Page.Number })
+    expect(Query.canonical(number)({ page: { size: 25, number: 2 } })).toBe("page[number]=2&page[size]=25")
+    const cursor = Query.schema(Article, { page: Query.Page.Cursor })
+    expect(Query.canonical(cursor)({ page: { size: 25, cursor: "opaque token" } })).toBe(
+      "page[cursor]=opaque%20token&page[size]=25"
+    )
+  })
+
+  it("accepts a consumer's own flat schema, its other keys sorted after the families", () => {
+    const wire = Query.bracketPageKeys(
+      Schema.Struct({
+        ...Query.Page.offset({ fromString: false }),
+        zone: Schema.optionalKey(Schema.String),
+        authorId: Schema.optionalKey(Schema.String)
+      })
+    )
+    const flat = Query.canonical(wire)
+    expect(flat({ zone: "au", limit: 10, authorId: "9", offset: 20 })).toBe(
+      "page[offset]=20&page[limit]=10&authorId=9&zone=au"
+    )
+    // page keys in the struct's declared order, even though the values are plain numbers here
+    expect(parse(flat({ limit: 10, offset: 20 }))).toEqual({ "page[offset]": "20", "page[limit]": "10" })
+  })
+
+  it("serialise: RFC 3986 percent-encoding, brackets readable in keys, spaces %20, commas %2C", () => {
+    expect(
+      Query.serialise([
+        ["include", "author,comments"],
+        ["filter[title]", "Hello, world"],
+        ["filter[c0][condition][value]", "a\\,b+c/d"],
+        ["fields[a b]", ""],
+        ["page[offset]", "0"]
+      ])
+    ).toBe(
+      "include=author%2Ccomments&filter[title]=Hello%2C%20world&filter[c0][condition][value]=a%5C%2Cb%2Bc%2Fd&fields[a%20b]=&page[offset]=0"
+    )
+    expect(Query.serialise([])).toBe("")
+    expect(parse(Query.serialise([["k", "a\\,b+c/d é"]]))).toEqual({ k: "a\\,b+c/d é" })
+  })
+
+  it("accepts exactly the schema's decoded type", () => {
+    expectTypeOf(canonical).parameter(0).toEqualTypeOf<typeof query.Type>()
+    expectTypeOf(pairs).parameter(0).toEqualTypeOf<typeof query.Type>()
+    expectTypeOf(canonical).returns.toEqualTypeOf<string>()
+    expectTypeOf(pairs).returns.toEqualTypeOf<ReadonlyArray<Query.Pair>>()
+    const rejected = () => {
+      // @ts-expect-error — `limit` is a number once decoded
+      canonical({ page: { limit: "10" } })
+      // @ts-expect-error — not a legal include path
+      canonical({ include: ["publisher"] })
+      // @ts-expect-error — `filter` is the escape-hatch struct, not a tree
+      canonical({ filter: { status: "open" } })
+    }
+    expect(rejected).toBeTypeOf("function")
+  })
+})

@@ -272,7 +272,10 @@ decode(canonical(u)) == decode(u)
 ### 3.3 Key order and ids
 
 The canonical form is an ordered list of `(key, value)` pairs. Percent-encoding, bracket escaping
-and joining with `&` are #85's job and identical for every family.
+and joining with `&` are `Query.canonical`'s job (#85) and identical for every family: it places
+the `filter[*]` pairs, in exactly this order, between `fields[*]` and `sort`, and serialises with
+`Query.serialise` (RFC 3986 percent-encoding via `encodeURIComponent`, `[` / `]` left readable in
+keys, so `\,` is `%5C%2C` and a list's separating comma `%2C`).
 
 - **Shorthand:** pairs sorted by key, code-point order. Because `filter[age]` sorts before
   `filter[age][gt]` and operator names are compared as text, this is "by field, then operator"

@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
 import * as Document from "./Document.js"
 import * as Handlers from "./Handlers.js"
+import * as Query from "./Query.js"
 import * as Resource from "./Resource.js"
 
 const article = {
@@ -93,6 +94,30 @@ describe("Handlers.collection", () => {
 
   it("builds an empty collection", () => {
     expect(Handlers.collection([])).toEqual({ data: [] })
+  })
+
+  it("appends the request's canonical query to the self link", () => {
+    const pairs: ReadonlyArray<Query.Pair> = [
+      ["filter[status]", "open"],
+      ["sort", "-createdAt"]
+    ]
+    expect(Handlers.collection([article], { self: "/articles", query: pairs }).links).toEqual({
+      self: "/articles?filter[status]=open&sort=-createdAt"
+    })
+    // …or the already serialised string, and onto a path that has a query
+    expect(Handlers.collection([article], { self: "/articles?x=1", query: "sort=-createdAt" }).links).toEqual({
+      self: "/articles?x=1&sort=-createdAt"
+    })
+    // an empty query leaves the path alone; a query without `self` sets no link
+    expect(Handlers.collection([article], { self: "/articles", query: [] }).links).toEqual({ self: "/articles" })
+    expect(Handlers.collection([article], { query: pairs })).toEqual({ data: [article] })
+    // pagination links, which carry their own self, still win
+    const doc = Handlers.collection([article], {
+      self: "/articles",
+      query: pairs,
+      links: Handlers.offsetPaginationLinks("/articles", { offset: 0, limit: 10 }, 1, { query: pairs })
+    })
+    expect(doc.links?.self).toBe("/articles?filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10")
   })
 })
 
@@ -206,6 +231,96 @@ describe("pagination links", () => {
   it("preserves existing query strings in the path", () => {
     const links = Handlers.offsetPaginationLinks("/articles?sort=-createdAt", { offset: 0, limit: 10 }, 5)
     expect(links.self).toBe("/articles?sort=-createdAt&page[offset]=0&page[limit]=10")
+  })
+
+  describe("with the request's canonical query", () => {
+    const Article = Resource.make("articles", {
+      attributes: {
+        title: Schema.NonEmptyString,
+        status: Resource.attribute(Schema.Literals(["open", "done"]), { filter: true })
+      }
+    })
+    const listQuery = Query.schema(Article, { fields: true, sort: true, page: Query.Page.Offset, filter: true })
+    const numberQuery = Query.schema(Article, { fields: true, sort: true, page: Query.Page.Number, filter: true })
+    const query: typeof listQuery.Type = {
+      page: { offset: 10, limit: 10 },
+      sort: [{ field: "title", direction: "desc" }],
+      filter: { _tag: "Compare", op: "eq", field: "status", value: "open" },
+      fields: { articles: ["title"] }
+    }
+    const others = "fields[articles]=title&filter[status]=open&sort=-title"
+
+    it("offset: every link carries the full ordered query with its own page cursor slotted in", () => {
+      const pairs = Query.canonicalPairs(listQuery)(query)
+      const links = Handlers.offsetPaginationLinks("/articles", query.page ?? {}, 35, { query: pairs })
+      expect(links).toEqual({
+        self: `/articles?${others}&page[offset]=10&page[limit]=10`,
+        first: `/articles?${others}&page[offset]=0&page[limit]=10`,
+        prev: `/articles?${others}&page[offset]=0&page[limit]=10`,
+        next: `/articles?${others}&page[offset]=20&page[limit]=10`,
+        last: `/articles?${others}&page[offset]=30&page[limit]=10`
+      })
+      // `self` is exactly the canonical string of the request
+      expect(links.self).toBe(`/articles?${Query.canonical(listQuery)(query)}`)
+      // pairs carrying the request's own page cursor are replaced, not duplicated
+      expect(Handlers.offsetPaginationLinks("/articles", { offset: 0, limit: 10 }, 35, { query: pairs }).self).toBe(
+        `/articles?${others}&page[offset]=0&page[limit]=10`
+      )
+    })
+
+    it("number: the same, for page-number pagination", () => {
+      const q: typeof numberQuery.Type = { ...query, page: { number: 2, size: 10 } }
+      const links = Handlers.numberPaginationLinks("/articles", q.page ?? {}, 35, {
+        query: Query.canonicalPairs(numberQuery)(q)
+      })
+      expect(links).toEqual({
+        self: `/articles?${others}&page[number]=2&page[size]=10`,
+        first: `/articles?${others}&page[number]=1&page[size]=10`,
+        prev: `/articles?${others}&page[number]=1&page[size]=10`,
+        next: `/articles?${others}&page[number]=3&page[size]=10`,
+        last: `/articles?${others}&page[number]=4&page[size]=10`
+      })
+      expect(links.self).toBe(`/articles?${Query.canonical(numberQuery)(q)}`)
+    })
+
+    it("slots the page cursor before a consumer's own keys and after the families", () => {
+      const pairs: ReadonlyArray<Query.Pair> = [
+        ["include", "author"],
+        ["sort", "-title"],
+        ["zone", "au"]
+      ]
+      expect(Handlers.offsetPaginationLinks("/articles", { offset: 0, limit: 10 }, 5, { query: pairs }).self).toBe(
+        "/articles?include=author&sort=-title&page[offset]=0&page[limit]=10&zone=au"
+      )
+      // values are percent-encoded on the way out
+      expect(
+        Handlers.numberPaginationLinks("/articles", { number: 1, size: 5 }, 5, { query: [["filter[title]", "a, b"]] })
+          .self
+      ).toBe("/articles?filter[title]=a%2C%20b&page[number]=1&page[size]=5")
+    })
+
+    it("keeps the request's other parameters on `self` when the collection is unpageable", () => {
+      expect(Handlers.offsetPaginationLinks("/articles", { limit: 0 }, 5, { query: [["sort", "-title"]] })).toEqual({
+        self: "/articles?sort=-title",
+        first: null,
+        prev: null,
+        next: null,
+        last: null
+      })
+      expect(Handlers.numberPaginationLinks("/articles", { size: 0 }, 5, { query: [] }).self).toBe("/articles")
+      // regression: without the option the bare path, as before
+      expect(Handlers.offsetPaginationLinks("/articles", { limit: 0 }, 5).self).toBe("/articles")
+    })
+
+    it("an empty query option is byte-identical to no option", () => {
+      const page = { offset: 10, limit: 10 }
+      expect(Handlers.offsetPaginationLinks("/articles", page, 35, { query: [] })).toEqual(
+        Handlers.offsetPaginationLinks("/articles", page, 35)
+      )
+      expect(Handlers.numberPaginationLinks("/articles?x=1", { number: 2, size: 10 }, 35, {})).toEqual(
+        Handlers.numberPaginationLinks("/articles?x=1", { number: 2, size: 10 }, 35)
+      )
+    })
   })
 })
 

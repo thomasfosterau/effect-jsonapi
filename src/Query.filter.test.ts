@@ -597,8 +597,10 @@ const mulberry32 = (seed: number) => (): number => {
 const SEED = 20260903
 const CASES = 400
 
-describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, () => {
-  const random = mulberry32(SEED)
+// A seeded generator of filter trees over the fixture, shared by the codec's
+// round trips and the canonical query string's.
+const filterGenerator = (seed: number) => {
+  const random = mulberry32(seed)
   const int = (max: number): number => Math.floor(random() * max)
   const pick = <A>(items: ReadonlyArray<A>): A => items[int(items.length)]!
 
@@ -645,6 +647,12 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
     return { _tag: kind === 0 ? "And" : "Or", members }
   }
 
+  return { random, int, pick, node }
+}
+
+describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, () => {
+  const { node } = filterGenerator(SEED)
+
   const cases = Array.from({ length: CASES }, (_, i) => [i, node(0)] as const)
 
   it.each(cases)(
@@ -687,6 +695,137 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
     expect(
       has((n) => n._tag === "Not" && n.member._tag === "Or" && n.member.members.some((m) => m._tag === "And"))
     ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The canonical query string over the grammar (#85)
+// ---------------------------------------------------------------------------
+
+const CANONICAL_SEED = 20260985
+const CANONICAL_CASES = 300
+
+describe("Query.canonical with filter: true", () => {
+  const query = Query.schema(Article, {
+    include: true,
+    fields: true,
+    sort: true,
+    page: Query.Page.Offset,
+    filter: true
+  })
+  type Decoded = typeof query.Type
+  const decodeQuery = Schema.decodeUnknownSync(query as Schema.Codec<any, any>) as (
+    input: Record<string, unknown>
+  ) => Decoded
+  const canonical = Query.canonical(query)
+  const parse = (s: string): Record<string, string> => Object.fromEntries(new URLSearchParams(s))
+
+  it("places the grammar's pairs between fields and sort, in the encoder's order", () => {
+    expect(
+      canonical({
+        page: { limit: 10, offset: 0 },
+        sort: [{ field: "age", direction: "desc" }],
+        filter: Filter.and(eq("status", "open"), gt("age", 18), eq("title", "Hello, world")),
+        include: ["author"],
+        fields: { articles: ["title"] }
+      })
+    ).toBe(
+      "include=author&fields[articles]=title&filter[age][gt]=18&filter[status]=open&filter[title]=Hello%5C%2C%20world&sort=-age&page[offset]=0&page[limit]=10"
+    )
+    // the group form keeps its pre-order: ids are meaningful
+    expect(canonical({ filter: Filter.or(eq("status", "open"), Filter.isNull("deletedAt")), page: { limit: 1 } })).toBe(
+      "filter[g0][group][conjunction]=OR" +
+        "&filter[c0][condition][path]=deletedAt&filter[c0][condition][operator]=isnull&filter[c0][condition][value]=true&filter[c0][condition][memberOf]=g0" +
+        "&filter[c1][condition][path]=status&filter[c1][condition][operator]=eq&filter[c1][condition][value]=open&filter[c1][condition][memberOf]=g0" +
+        "&page[limit]=1"
+    )
+  })
+
+  it("is byte-identical for the two-condition filter written three ways, in any key order", () => {
+    const spellings: ReadonlyArray<Record<string, unknown>> = [
+      { "filter[status]": "open", "filter[age][gt]": "18", sort: "title", include: "author" },
+      { include: ["author"], "filter[age][gt]": "18", sort: "title", "filter[status][eq]": "open" },
+      {
+        sort: "title",
+        "filter[c1][condition][path]": "status",
+        "filter[c1][condition][operator]": "eq",
+        "filter[c1][condition][value]": "open",
+        include: "author",
+        "filter[x][condition][path]": "age",
+        "filter[x][condition][operator]": "gt",
+        "filter[x][condition][value]": "18"
+      }
+    ]
+    const strings = spellings.map((spelling) => canonical(decodeQuery(spelling)))
+    expect(new Set(strings).size).toBe(1)
+    expect(strings[0]).toBe("include=author&filter[age][gt]=18&filter[status]=open&sort=title")
+  })
+
+  describe(`generated round trips (seed ${CANONICAL_SEED}, ${CANONICAL_CASES} cases)`, () => {
+    const { random, int, pick, node } = filterGenerator(CANONICAL_SEED)
+    const subset = <A>(items: ReadonlyArray<A>): Array<A> => items.filter(() => random() < 0.5)
+    const attributes = [
+      "status",
+      "age",
+      "priority",
+      "title",
+      "deletedAt",
+      "createdAt",
+      "flag",
+      "limit",
+      "body"
+    ] as const
+
+    // A decoded query with any combination of the families; `fields` and
+    // `page` are never empty objects (an empty group has no wire form and
+    // decodes as absent).
+    const decodedQuery = (): Decoded => {
+      const q: Record<string, unknown> = {}
+      if (random() < 0.7) q.include = subset(["author", "editor", "comments"] as const)
+      if (random() < 0.7) {
+        const fields: Record<string, unknown> = {}
+        if (random() < 0.7) fields.articles = subset(attributes)
+        if (random() < 0.5 || Object.keys(fields).length === 0) fields.people = subset(["name"] as const)
+        q.fields = fields
+      }
+      if (random() < 0.7) {
+        q.sort = subset(attributes).map((field) => ({ field, direction: pick(["asc", "desc"] as const) }))
+      }
+      if (random() < 0.7) {
+        const page: Record<string, number> = {}
+        if (random() < 0.7) page.offset = int(1000)
+        if (random() < 0.7 || Object.keys(page).length === 0) page.limit = int(100)
+        q.page = page
+      }
+      if (random() < 0.8) q.filter = Filter.normalise(node(0) as Ast, fields)
+      return q as Decoded
+    }
+
+    const cases = Array.from({ length: CANONICAL_CASES }, (_, i) => [i, decodedQuery()] as const)
+
+    it.each(cases)("case %i: decode ∘ parse ∘ canonical is identity, and canonical is idempotent", (_, q) => {
+      const s = canonical(q)
+      const params = new URLSearchParams(s)
+      // canonical output never repeats a key, so a record parse is lossless
+      expect([...params.keys()].length).toBe(new Set(params.keys()).size)
+      const back = decodeQuery(parse(s))
+      expect(back).toEqual(q)
+      expect(canonical(back)).toBe(s)
+    })
+
+    it("covers every family, both filter forms, and a value that needs escaping", () => {
+      const queries = cases.map(([, q]) => q)
+      const strings = cases.map(([, q]) => canonical(q))
+      expect(queries.some((q) => q.include !== undefined && q.include.length > 0)).toBe(true)
+      expect(queries.some((q) => q.fields?.articles !== undefined && q.fields.people !== undefined)).toBe(true)
+      expect(queries.some((q) => q.sort !== undefined && q.sort.length > 1)).toBe(true)
+      expect(queries.some((q) => q.page?.offset !== undefined && q.page.limit !== undefined)).toBe(true)
+      expect(queries.some((q) => q.filter !== undefined)).toBe(true)
+      expect(strings.some((s) => s.includes("[group][conjunction]"))).toBe(true)
+      expect(strings.some((s) => /&filter\[[a-zA-Z]+\]=/.test(s) && !s.includes("[condition]"))).toBe(true)
+      expect(strings.some((s) => s.includes("%5C%2C"))).toBe(true)
+      expect(queries.some((q) => Object.keys(q).length === 5 && q.include!.length > 0 && q.sort!.length > 0)).toBe(true)
+    })
   })
 })
 
