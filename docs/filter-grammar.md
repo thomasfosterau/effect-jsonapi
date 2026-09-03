@@ -80,7 +80,8 @@ shorthand with one key decodes to that bare condition ([§2.2](#22-shorthand)).
 A field is a **declared name on the primary resource** (#84). No dotted paths, no traversal.
 
 **Decision (accepted, #84).** Fields are the resource's declared attributes
-(`Resource.attribute(schema, { filter })`) **plus its declared to-one relationship names**
+(`schema.pipe(Filter.able(...))`, or the `Resource.attribute(schema, { filter })` sugar for it)
+**plus its declared to-one relationship names**
 (`Relationship.one(ref, { filter })` / `Relationship.optional(ref, { filter })`), the latter valued
 by the related resource's id and admitting `eq ne in nin isnull` only — ordering operators make no
 sense for an id, and declaring one is a definition-time error. This is not traversal: there is no
@@ -423,7 +424,8 @@ Unknown field, undeclared operator and bad literal are three distinct failures w
   (`README.md:705-707`); an endpoint uses one or the other. Heterogeneous endpoints (several
   resources) keep the escape hatch in phase 1.
 - Default is off: an undeclared attribute is not filterable, matching `include` / `fields` / `sort`.
-- `sort: true` keeps meaning "every attribute"; the declared sortable set is an allow-list a
+- `sort: true` keeps meaning "every attribute"; the declared sortable set — the attributes piped
+  through `Sort.able()` (or `Resource.attribute(schema, { sort: true })`) — is an allow-list a
   consumer passes explicitly (`sort: Resource.sortable(Article)`), so no existing endpoint changes
   behaviour.
 - The flat-key reshaper (`src/internal/codecs.ts:115-147`) handles one bracket level. `filter[*]`

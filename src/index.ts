@@ -18,7 +18,8 @@
  *   Middleware,
  *   Query,
  *   Relationship,
- *   Resource
+ *   Resource,
+ *   Sort
  * } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
@@ -82,8 +83,9 @@ export * as Document from "./Document.js"
 export * as Endpoint from "./Endpoint.js"
 
 /**
- * The `filter` query family's operator vocabulary (`Filter.operators`,
- * `Filter.isOperator`).
+ * The `filter` query family: the operator vocabulary (`Filter.Operator`,
+ * `Filter.Op`, `Filter.isOperator`) and the per-attribute declaration
+ * (`Filter.able`).
  *
  * @since 0.13.0
  */
@@ -138,6 +140,13 @@ export * as Relationship from "./Relationship.js"
  * @since 0.1.0
  */
 export * as Resource from "./Resource.js"
+
+/**
+ * The `sort` query family's per-attribute declaration (`Sort.able`).
+ *
+ * @since 0.13.0
+ */
+export * as Sort from "./Sort.js"
 
 /**
  * The JSON:API media type, `"application/vnd.api+json"`.

@@ -46,6 +46,7 @@
  */
 import { Schema } from "effect"
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js"
+import type { Operator } from "./Filter.js"
 import type { Any } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
@@ -53,24 +54,49 @@ import type { Any } from "./Resource.js"
 // ---------------------------------------------------------------------------
 
 /**
- * The filter operators a to-one relationship may declare: equality and list
+ * The filter operators a to-one relationship may declare, as a schema: a
+ * `Schema.Literals` narrowing `Filter.Operator` to equality and list
  * membership against the related resource's id, plus the null test. Ordering
  * operators make no sense for an id, so `lt` / `lte` / `gt` / `gte` are
  * excluded; declaring one is a definition-time error in `Resource.make`.
  *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Relationship } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Relationship.FilterOperator.literals // ["eq", "ne", "in", "nin", "isnull"]
+ * Schema.is(Relationship.FilterOperator)("gt") // false
+ * ```
+ *
  * @since 0.13.0
- * @category constants
+ * @category schemas
  */
-export const filterOperators = ["eq", "ne", "in", "nin", "isnull"] as const
+export const FilterOperator = Schema.Literals([
+  "eq",
+  "ne",
+  "in",
+  "nin",
+  "isnull"
+] as const satisfies ReadonlyArray<Operator>)
 
 /**
- * A filter operator a to-one relationship may declare — one of
- * {@link filterOperators}.
+ * A filter operator a to-one relationship may declare — the decoded type of
+ * the {@link FilterOperator} schema, a subset of `Filter.Operator`.
  *
  * @since 0.13.0
  * @category models
  */
-export type FilterOperator = (typeof filterOperators)[number]
+export type FilterOperator = typeof FilterOperator.Type
+
+/**
+ * Every relationship filter operator, in order — the literals of the
+ * {@link FilterOperator} schema.
+ *
+ * @since 0.13.0
+ * @category constants
+ */
+export const filterOperators: typeof FilterOperator.literals = FilterOperator.literals
 
 /**
  * How a to-one relationship is declared filterable (`Relationship.one(ref, { filter })`):
