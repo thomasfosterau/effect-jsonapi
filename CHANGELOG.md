@@ -1,5 +1,151 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.13.0
+
+### Minor Changes
+
+- 555802f: **The canonical query string: `Query.canonical(schema)`, with the pagination link builders and
+  `Handlers.collection` carrying the request's full query.** JSON:API 1.1 requires a collection
+  document's `self` link to carry the query parameters the client provided; a decoded query now has
+  exactly one wire spelling, produced by one function with one ordering rule.
+  
+  ```ts
+  const listQuery = Query.schema(Article, {
+    include: true,
+    fields: true,
+    sort: true,
+    page: Query.Page.Offset,
+    filter: true
+  })
+  const canonical = Query.canonical(listQuery)
+  
+  canonical(query)
+  // → "include=author&fields[articles]=title&filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
+  ```
+  
+  - **One order.** `include`; `fields[*]` sorted by type; `filter[*]` in the filter grammar's
+    canonical order (shorthand sorted by key, the group form in the encoder's pre-order); `sort`;
+    `page[*]` in the page strategy's declared order (`offset, limit` — what the link builders already
+    emit); then any other key sorted. Two equal decoded queries produce byte-identical strings whatever
+    spelling they came from (key order, `?include=a&include=b` against `?include=a,b`,
+    `filter[f][eq]=v` against `filter[f]=v`), and the string decodes back to the same query.
+  - **One encoding.** `Query.serialise(pairs)`: RFC 3986 percent-encoding via `encodeURIComponent`
+    (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,` alike), `[` / `]` left
+    readable in keys, pairs joined with `&`. `URLSearchParams` / `UrlParams` decode it back
+    identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation.
+  - **Link builders.** `Handlers.offsetPaginationLinks` / `numberPaginationLinks` now serialise
+    through `Query.serialise` (their output is unchanged) and take an optional fourth argument
+    `{ query: Query.canonicalPairs(listQuery)(query) }` — the request's other canonical pairs, into
+    which each page cursor is slotted — so `self` / `first` / `prev` / `next` / `last` carry the
+    full `include` / `fields` / `filter` / `sort`.
+  - **`Handlers.collection`** takes a `query` option (the canonical pairs or string) appended to its
+    `self` link, for collections that are not paginated.
+- f59b77c: **The `filter` URL codec: `filter: true`, `Query.Filter(resource)` and the `Filter.Ast`.**
+  The filter grammar in `docs/filter-grammar.md` is implemented over the per-attribute declaration.
+  `Endpoint.list(R, { filter: true })` (and `Query.schema(R, { filter: true })`) decodes the
+  `filter[...]` family to one normalised `Filter.Ast` root node, typed over the declared fields, and
+  encodes a tree back to its canonical wire form.
+  
+  ```ts
+  const Product = Resource.make("products", {
+    attributes: {
+      priceCents: Resource.attribute(Schema.Int, { filter: ["eq", "gt", "lt"] }),
+      status: Resource.attribute(Schema.Literals(["draft", "live"]), { filter: true })
+    }
+  })
+  
+  Endpoint.list(Product, { filter: true })
+  // GET /products?filter[status]=live&filter[priceCents][lt]=1000
+  // → query.filter = And([Compare(lt, priceCents, 1000), Compare(eq, status, "live")])
+  ```
+  
+  - **Surface.** `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][op]=v` any of the closed
+    core `eq ne lt lte gt gte in nin isnull`; the Drupal-style group form
+    (`filter[g][group][conjunction]=OR`, `filter[c][condition][path|operator|value|memberOf]`) spells
+    `OR`, `NOT`, nesting and repeated `(field, operator)` pairs. Literals are decoded through the
+    attribute's literal codec, with `\,` and `\\` as the only escapes.
+  - **AST.** `Filter.Ast<Fields>` — `Compare`, `In`, `NotIn`, `IsNull`, `And`, `Or`, `Not` — plus the
+    untyped `Filter.Node`, a runtime `Filter.Ast` schema, dumb constructors (`Filter.eq`, `Filter.isIn`,
+    `Filter.and`, …) and `Filter.normalise`. `Query.FilterAst<R>` narrows `field` to the declared names
+    and each literal to its field's type.
+  - **Canonical form.** Decoding normalises (values and members sorted and deduplicated); encoding
+    emits the shorthand when it round-trips and the group form with pre-order ids otherwise, so the
+    canonical string is a function of the tree alone. `Filter.PROFILE_URI` (also
+    `Query.FILTER_PROFILE_URI`) is the grammar's profile URI.
+  - **Errors.** Every rejection — unknown field, undeclared operator, bad literal, malformed key,
+    repeated key, and each structural fault of the group form — is one issue whose path is the
+    offending flat key, and the schema-error middleware now renders a request-validation failure as an
+    error object per reported issue, with `source.parameter` (`filter[age][gt]`, `page[limit]`),
+    `source.header` or `source.pointer` (`/data/attributes/title`) and the issue's message as `detail`
+    (`Middleware.schemaErrorDocument`). HttpApi decodes with `errors: "first"`, so a request part yields
+    one error object; the `filter` family is the exception, its codec reporting every offending key
+    together. A failure with no derivable source keeps the previous single-error document.
+  - The per-key `filter: { q: Schema.String }` map is unchanged and remains the escape hatch; a
+    heterogeneous endpoint must use it (`filter: true` throws at definition time).
+  - `ApiError` wire schemas now decode an error document whose `meta` omits an optional field, instead
+    of failing on the absent key.
+- 8164019: **Per-attribute `filter` / `sort` declarations — `Filter.able` / `Sort.able` — with `Resource.filterable`
+  and `Resource.sortable`.** Filterability is now declared on the resource, per attribute, rather than
+  left to an open per-endpoint `filter: { key: Schema }` map. The declaration is made on the attribute
+  schema itself, with pipeable, Effect-native combinators, and rides with it as a schema annotation
+  (`Filter.AnnotationId` / `Sort.AnnotationId`) — the single source of truth the accessors read back —
+  so it is carried through `Resource.extend`, `Resource.attributes` spreads, `resource: "optional"`,
+  `Schema.NullOr` and `Schema.optionalKey`.
+  
+  ```ts
+  import { Filter, Resource, Sort } from "@thomasfosterau/effect-jsonapi"
+  
+  const Product = Resource.make("products", {
+    attributes: {
+      name: Schema.NonEmptyString, // neither filterable nor sortable
+      priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt]), Sort.able()),
+      discontinued: Schema.Boolean.pipe(Filter.able()), // the whole operator core
+      createdAt: Resource.readOnlyAttribute(Schema.DateFromString.pipe(Sort.able()))
+    }
+  })
+  
+  Resource.filterable(Product) // { priceCents: { operators, literal }, discontinued: { … } }
+  Resource.sortable(Product) // ["priceCents", "createdAt"]
+  Endpoint.list(Product, { sort: Resource.sortable(Product) })
+  ```
+  
+  - `Filter.able()` admits the whole operator core, `Filter.able([...])` a subset in the order given;
+    `Sort.able()` allows `?sort=`. Absent means not filterable / not sortable — the default fails
+    closed, like `include` / `fields` / `sort`. An empty list or an operator outside the core is a
+    compile error and a definition-time throw. Annotate last, for the types: the runtime declaration
+    survives a later `.check` / `.annotate` / `Schema.brand`, but any rebuild drops the type-level
+    marker.
+  - `Resource.attribute(schema, { filter, filterLiteral, sort })` (and `Resource.readOnlyAttribute`)
+    are **sugar** for those calls on the inner schema and stamp nothing else, so both spellings are
+    indistinguishable to the accessors and to the types.
+  - The operator vocabulary is **schema-backed, not stringly typed**: `Filter.Operator` is a
+    `Schema.Literals` over `eq ne lt lte gt gte in nin isnull`, from which `Filter.operators` and
+    `Filter.isOperator` derive; `Filter.Op` spells the operators as typed constants (`Filter.Op.gt` is
+    `"gt"`), so a typo is a compile error while plain strings stay accepted.
+  - Each filterable attribute gets a **literal codec** (`Schema.Codec<Type, string>`) derived from its
+    schema's encoded form — `string`, `number`, `boolean`, or `Schema.NullOr` of one. The wire string is
+    parsed strictly (`number` accepts only a finite decimal, `boolean` only `true` / `false`) and then
+    decoded through the attribute schema itself, so refinements, brands, literal unions and
+    `DateFromString` apply and `filter[priceCents][gt]=abc` fails decoding. An attribute whose encoded
+    form is not a scalar cannot be declared filterable — `Resource.make` throws, naming it — unless the
+    declaration supplies an explicit codec: `Filter.able(ops, { literal })`.
+  - To-one relationships are filter fields too: `Relationship.one(ref, { filter })` and
+    `Relationship.optional(ref, { filter })` admit `eq ne in nin isnull` — `Relationship.FilterOperator`,
+    a `Schema.Literals` narrowing `Filter.Operator` (`true` means those five, an ordering operator is a
+    definition-time error) — valued by the related resource's id: the literal codec is the target's `Id`
+    schema, resolved lazily, so `filter[author]=9` decodes to the branded id. `Resource.filterable(R)`
+    lists them alongside the attributes; `Resource.sortable` stays attributes only.
+  - `Resource.sortable(R)` is typed as the literal key union, so it drops straight into
+    `Query.schema(R, { sort: Resource.sortable(R) })` and `Endpoint.list(R, { sort: … })`. `sort: true`
+    keeps meaning "every attribute".
+  - Type-level: `Resource.FilterableKeys<R>`, `Resource.FilterOperators<R, K>`, `Resource.SortableKeys<R>`,
+    `Resource.Filterable<R>`, `Resource.FilterLiteralType<S>` (alias of `Filter.LiteralType`),
+    `Filter.Declared<S, Op>` / `Sort.Declared<S>` (the phantom-marked schema types) and
+    `Resource.FilterDeclaration` (the `filter` sugar's shape).
+  
+  `Query.schema` is unchanged in this release; the `filter` URL codec over the declaration (the
+  grammar in `docs/filter-grammar.md`) follows separately.
+
 ## 0.12.0
 
 ### Minor Changes
