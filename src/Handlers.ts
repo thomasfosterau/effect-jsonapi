@@ -199,6 +199,27 @@ const withQuery = (path: string, query: string): string =>
 const queryString = (query: string | ReadonlyArray<Pair>): string =>
   typeof query === "string" ? query : serialise(query)
 
+// A link with a query string appended, in either link spelling.
+const linkWithQuery = (link: LinkValue, query: string): LinkValue =>
+  typeof link === "string" ? withQuery(link, query) : { ...link, href: withQuery(link.href, query) }
+
+// The top-level links of a document: `links.self` wins over the `self`
+// option, and `query` is appended to whichever `self` the document ends up
+// with — a `query` with no self link to carry it is a programming error.
+const buildLinks = (options: {
+  readonly self?: string
+  readonly query?: string | ReadonlyArray<Pair>
+  readonly links?: LinksValue
+}): LinksValue | undefined => {
+  const links: LinksValue | undefined =
+    options.self !== undefined ? { self: options.self, ...options.links } : options.links
+  if (options.query === undefined) return links
+  if (links?.self === undefined) {
+    throw new Error("Handlers.collection: `query` needs a self link to be appended to — pass `self` or `links.self`")
+  }
+  return { ...links, self: linkWithQuery(links.self, queryString(options.query)) }
+}
+
 const build = (
   data: unknown,
   primary: ReadonlyArray<ResourceValue>,
@@ -213,11 +234,7 @@ const build = (
       }
     | undefined
 ) => {
-  const self =
-    options?.self !== undefined && options.query !== undefined
-      ? withQuery(options.self, queryString(options.query))
-      : options?.self
-  const links: LinksValue | undefined = self !== undefined ? { self, ...options?.links } : options?.links
+  const links = options === undefined ? undefined : buildLinks(options)
   const included =
     options?.included !== undefined && options.included.length > 0
       ? buildIncluded(primary, options.included, options)
@@ -311,10 +328,12 @@ export const data = <
  * JSON:API 1.1 requires a collection's `self` link to carry the query
  * parameters the client provided. Pass `query` — the request's canonical
  * query, from `Query.canonicalPairs(listQuery)(query)` or the
- * `Query.canonical(listQuery)(query)` string — and it is appended to `self`.
- * A paginated collection gets that for free from the link builders' own
- * `query` option instead ({@link offsetPaginationLinks}), whose `self` wins
- * over this one.
+ * `Query.canonical(listQuery)(query)` string — and it is appended to the
+ * document's `self` link, whether that is the `self` option or `links.self`
+ * (which wins when both are given); `query` without either throws. A
+ * paginated collection gets that for free from the link builders' own
+ * `query` option instead ({@link offsetPaginationLinks}): pass the pairs
+ * there, not here.
  *
  * @example
  * ```ts
@@ -373,7 +392,8 @@ export const collection = <
     readonly self?: string
     /**
      * The request's canonical query — `Query.canonicalPairs(schema)(query)`
-     * or the `Query.canonical(schema)(query)` string — appended to `self`.
+     * or the `Query.canonical(schema)(query)` string — appended to the
+     * document's `self` link (`self`, or `links.self`); throws without one.
      *
      * @since 0.13.0
      */
@@ -570,10 +590,11 @@ const withPage = (path: string, page: Record<string, number>, query: ReadonlyArr
   return withQuery(path, serialise(query === undefined ? cursor : withPagePairs(query, cursor)))
 }
 
-// The links of an unpageable collection (a non-positive page size): `self`
-// keeps the request's other parameters, nothing else can be linked.
+// The links of an unpageable collection (a non-positive page size, which
+// `page[limit]=0` can request): `self` keeps the request's canonical pairs as
+// sent, its own `page[*]` included; nothing else can be linked.
 const unpageable = (path: string, query: ReadonlyArray<Pair> | undefined): LinksValue => ({
-  self: query === undefined ? path : withQuery(path, serialise(withPagePairs(query, []))),
+  self: query === undefined ? path : withQuery(path, serialise(query)),
   first: null,
   prev: null,
   next: null,
@@ -585,10 +606,16 @@ const unpageable = (path: string, query: ReadonlyArray<Pair> | undefined): Links
  * `last`) for offset/limit pagination.
  *
  * Links are serialised canonically (`Query.serialise`). Pass the request's
- * other canonical pairs as `query` and every link carries them, each page
- * cursor slotted into its canonical position, so `self` is exactly
- * `Query.canonical(listQuery)(query)` and `next` / `prev` / `first` / `last`
- * are the same query on another page.
+ * canonical pairs as `query` and every link carries them, each page cursor
+ * slotted into the `page[*]` position (replacing the request's own), so
+ * `next` / `prev` / `first` / `last` are the same query on another page and
+ * `self` carries the **effective page window**: the request's canonical
+ * string with the page defaults the server applied filled in. A request
+ * without page keys (`?sort=-title`) canonicalises to `sort=-title`, while
+ * its `self` is `sort=-title&page[offset]=0&page[limit]=<total>` — the
+ * window the document actually covers. When the window is unpageable
+ * (`limit <= 0`) `self` is the request's pairs as sent and the other links
+ * are `null`.
  *
  * @example
  * ```ts
@@ -651,8 +678,8 @@ export const offsetPaginationLinks = (
  * Builds the spec's pagination links for page-number/size pagination.
  *
  * Links are serialised canonically (`Query.serialise`); pass the request's
- * other canonical pairs as `query` and every link carries them — see
- * {@link offsetPaginationLinks}.
+ * canonical pairs as `query` and every link carries them, `self` with the
+ * effective page window — see {@link offsetPaginationLinks}.
  *
  * @example
  * ```ts

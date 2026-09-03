@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Schema } from "effect"
+import { UrlParams } from "effect/unstable/http"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import { make as Resource } from "./Resource.js"
@@ -677,6 +678,28 @@ describe("Query.canonical", () => {
     )
     // page keys in the struct's declared order, even though the values are plain numbers here
     expect(parse(flat({ limit: 10, offset: 20 }))).toEqual({ "page[offset]": "20", "page[limit]": "10" })
+  })
+
+  it("emits an array value as the repeated key and omits null, so a consumer schema decodes back", () => {
+    const wire = Schema.Struct({
+      tag: Schema.optionalKey(Schema.Array(Schema.String)),
+      flag: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      ...Query.Page.Offset
+    }).pipe(Schema.encodeKeys({ limit: "page[limit]", offset: "page[offset]" }))
+    const flat = Query.canonical(wire)
+    const s = flat({ tag: ["b", "a", "a"], flag: null, limit: 5 })
+    expect(s).toBe("page[limit]=5&tag=b&tag=a&tag=a")
+    // `UrlParams.toRecord` (what HttpApi hands the query schema) turns the repeated key back into the array
+    const record = UrlParams.toRecord(UrlParams.fromInput(new URLSearchParams(s)))
+    expect(record).toEqual({ "page[limit]": "5", tag: ["b", "a", "a"] })
+    expect(Schema.decodeUnknownSync(wire)(record)).toEqual({ tag: ["b", "a", "a"], limit: 5 })
+    // a lone item is one pair, and decodes back through the same schema as a one-element array
+    expect(Query.canonicalPairs(wire)({ tag: ["only"] })).toEqual([["tag", "only"]])
+    expect(flat({ tag: [] })).toBe("")
+    // `include` keeps its comma form, which is what the query schema itself encodes
+    const withInclude = Schema.Struct({ include: Schema.optionalKey(Schema.Array(Schema.String)) })
+    expect(Query.canonical(withInclude)({ include: ["author", "comments"] })).toBe("include=author%2Ccomments")
+    expect(canonical(decode({ include: ["author", "comments"] }))).toBe("include=author%2Ccomments")
   })
 
   it("serialise: RFC 3986 percent-encoding, brackets readable in keys, spaces %20, commas %2C", () => {

@@ -46,10 +46,19 @@ export const declaredKeys = (ast: SchemaAST.AST): ReadonlyArray<string> => {
   return encoded._tag === "Objects" ? encoded.propertySignatures.map((signature) => String(signature.name)) : []
 }
 
-// The wire string of one encoded value: an array (only a repeated `include`
-// can be one, and the query schema already joins it) is the comma form.
-const stringify = (value: unknown): string =>
-  typeof value === "string" ? value : Array.isArray(value) ? value.map(String).join(",") : String(value)
+// The pairs of one encoded key: a scalar is one pair; an array is one pair
+// per item — the repeated-key spelling `UrlParams.toRecord` decodes back to
+// an array — except `include`, whose comma form is the schema's own encoding
+// of the set (the query schema already joins it; a consumer's flat schema
+// may not have). `undefined` and `null` have no wire form and are omitted.
+const pairsOf = (key: string, value: unknown): ReadonlyArray<Pair> => {
+  if (value === undefined || value === null) return []
+  if (typeof value === "string") return [[key, value]]
+  if (Array.isArray(value)) {
+    return key === "include" ? [[key, value.map(String).join(",")]] : value.map((item) => [key, String(item)])
+  }
+  return [[key, String(value)]]
+}
 
 /**
  * Orders the pairs of an encoded flat query canonically:
@@ -66,7 +75,10 @@ const stringify = (value: unknown): string =>
  *    link builders emit), keys the schema does not declare after them, sorted
  * 6. everything else (a consumer's own flat keys), sorted by key
  *
- * `undefined` values are omitted; an empty string is kept (`key=`).
+ * `undefined` and `null` values are omitted; an empty string is kept
+ * (`key=`); an array is the repeated key, one pair per item in order
+ * (`include` excepted: the comma form). Sorting is stable, so a repeated
+ * key's items keep their order.
  */
 export const orderPairs = (
   flat: { readonly [key: string]: unknown },
@@ -74,8 +86,7 @@ export const orderPairs = (
 ): ReadonlyArray<Pair> => {
   const families: Array<Array<Pair>> = [[], [], [], [], [], []]
   for (const [key, value] of Object.entries(flat)) {
-    if (value === undefined) continue
-    families[rank(key)]!.push([key, stringify(value)])
+    families[rank(key)]!.push(...pairsOf(key, value))
   }
   const [include, fields, filter, sort, page, other] = families as [
     Array<Pair>,

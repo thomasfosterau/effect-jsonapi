@@ -108,16 +108,33 @@ describe("Handlers.collection", () => {
     expect(Handlers.collection([article], { self: "/articles?x=1", query: "sort=-createdAt" }).links).toEqual({
       self: "/articles?x=1&sort=-createdAt"
     })
-    // an empty query leaves the path alone; a query without `self` sets no link
+    // an empty query leaves the path alone
     expect(Handlers.collection([article], { self: "/articles", query: [] }).links).toEqual({ self: "/articles" })
-    expect(Handlers.collection([article], { query: pairs })).toEqual({ data: [article] })
-    // pagination links, which carry their own self, still win
-    const doc = Handlers.collection([article], {
-      self: "/articles",
-      query: pairs,
-      links: Handlers.offsetPaginationLinks("/articles", { offset: 0, limit: 10 }, 1, { query: pairs })
+  })
+
+  it("appends the query to links.self too, which wins over the self option", () => {
+    const pairs: ReadonlyArray<Query.Pair> = [["sort", "-createdAt"]]
+    expect(Handlers.collection([article], { links: { self: "/articles" }, query: pairs }).links).toEqual({
+      self: "/articles?sort=-createdAt"
     })
-    expect(doc.links?.self).toBe("/articles?filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10")
+    expect(
+      Handlers.collection([article], { links: { self: { href: "/articles" }, next: null }, query: pairs }).links
+    ).toEqual({ self: { href: "/articles?sort=-createdAt" }, next: null })
+    // both spellings: links.self wins (as before), and the query lands on it once
+    expect(
+      Handlers.collection([article], { self: "/ignored", links: { self: "/articles" }, query: "sort=-createdAt" }).links
+    ).toEqual({ self: "/articles?sort=-createdAt" })
+    // regression: without a query the precedence is unchanged
+    expect(Handlers.collection([article], { self: "/ignored", links: { self: "/articles" } }).links).toEqual({
+      self: "/articles"
+    })
+  })
+
+  it("throws for a query with no self link to carry it", () => {
+    expect(() => Handlers.collection([article], { query: [["sort", "-createdAt"]] })).toThrow(/self link/)
+    expect(() => Handlers.collection([article], { links: { next: null }, query: "sort=-createdAt" })).toThrow(
+      /self link/
+    )
   })
 })
 
@@ -299,14 +316,43 @@ describe("pagination links", () => {
       ).toBe("/articles?filter[title]=a%2C%20b&page[number]=1&page[size]=5")
     })
 
-    it("keeps the request's other parameters on `self` when the collection is unpageable", () => {
-      expect(Handlers.offsetPaginationLinks("/articles", { limit: 0 }, 5, { query: [["sort", "-title"]] })).toEqual({
-        self: "/articles?sort=-title",
+    it("self carries the effective page window: the canonical string plus the defaults the server applied", () => {
+      // ?sort=-title — no page keys sent; the builder fills in offset 0 and the total as the limit
+      const request: typeof listQuery.Type = { sort: [{ field: "title", direction: "desc" }] }
+      const canonical = Query.canonical(listQuery)(request)
+      expect(canonical).toBe("sort=-title")
+      const links = Handlers.offsetPaginationLinks("/articles", request.page ?? {}, 35, {
+        query: Query.canonicalPairs(listQuery)(request)
+      })
+      expect(links.self).toBe("/articles?sort=-title&page[offset]=0&page[limit]=35")
+      expect(links.self).not.toBe(`/articles?${canonical}`)
+      expect(links).toEqual({
+        self: "/articles?sort=-title&page[offset]=0&page[limit]=35",
+        first: "/articles?sort=-title&page[offset]=0&page[limit]=35",
+        prev: null,
+        next: null,
+        last: "/articles?sort=-title&page[offset]=0&page[limit]=35"
+      })
+    })
+
+    it("keeps the request's pairs, its own page[*] included, on `self` when the window is unpageable", () => {
+      // ?sort=-title&page[limit]=0 — `PageInt` admits 0, so the request decodes and nothing can be paged
+      const request = Schema.decodeUnknownSync(listQuery as Schema.Codec<any, any>)({
+        sort: "-title",
+        "page[limit]": "0"
+      }) as typeof listQuery.Type
+      expect(request).toEqual({ sort: [{ field: "title", direction: "desc" }], page: { limit: 0 } })
+      const pairs = Query.canonicalPairs(listQuery)(request)
+      expect(Handlers.offsetPaginationLinks("/articles", request.page ?? {}, 5, { query: pairs })).toEqual({
+        self: "/articles?sort=-title&page[limit]=0",
         first: null,
         prev: null,
         next: null,
         last: null
       })
+      expect(Handlers.numberPaginationLinks("/articles", { size: 0 }, 5, { query: [["page[size]", "0"]] }).self).toBe(
+        "/articles?page[size]=0"
+      )
       expect(Handlers.numberPaginationLinks("/articles", { size: 0 }, 5, { query: [] }).self).toBe("/articles")
       // regression: without the option the bare path, as before
       expect(Handlers.offsetPaginationLinks("/articles", { limit: 0 }, 5).self).toBe("/articles")

@@ -1125,6 +1125,14 @@ export type Pair = CanonicalPair
  * a {@link schema} result, or a consumer's own flat query struct
  * ({@link bracketPageKeys}, say).
  *
+ * Each encoded value must have a wire form that decodes back through the
+ * same schema: a string, or something `String()` renders faithfully (a
+ * number, a boolean). An array is emitted as the repeated key, one pair per
+ * item (`tag=a&tag=b`, which `UrlParams.toRecord` decodes back to an
+ * array), except `include`, whose comma form is its own encoding. `null`
+ * has no wire form and is omitted, like `undefined` — a nullable field
+ * round-trips only if its schema decodes an absent key to `null`.
+ *
  * @since 0.13.0
  * @category models
  */
@@ -1182,8 +1190,9 @@ export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs
  *    builders emit, so a `self` link and the canonical string agree
  * 6. any other key (a consumer's own flat schema), sorted by key
  *
- * An absent (`undefined`) value is omitted, an empty string is kept
- * (`key=`), and an array (a repeated `include`) is the comma form.
+ * An absent (`undefined` or `null`) value is omitted, an empty string is
+ * kept (`key=`), and an array is the repeated key, one pair per item in
+ * order (`include` excepted: its comma form) — see {@link FlatQuerySchema}.
  *
  * @example
  * ```ts
@@ -1221,10 +1230,13 @@ export const canonicalPairs = <S extends FlatQuerySchema>(schema: S): ((decoded:
  * Two decoded queries that are equal produce byte-identical strings whatever
  * the wire spelling they came from — key order, `?include=a&include=b`
  * against `?include=a,b`, `filter[f][eq]=v` against `filter[f]=v` — and the
- * string decodes back to the same query through the same schema. It is what
- * a collection document's `self` link carries (JSON:API 1.1 requires the
- * query parameters the client provided) and a stable identity for a query:
- * a subscription, a cache tag.
+ * string decodes back to the same query through the same schema (an array
+ * value is the repeated key, `null` is omitted; see {@link FlatQuerySchema}).
+ * It is what a collection document's `self` link carries (JSON:API 1.1
+ * requires the query parameters the client provided) and a stable identity
+ * for a query: a subscription, a cache tag. A paginated `self` link also
+ * carries the page defaults the server applied — the effective page window —
+ * see `Handlers.offsetPaginationLinks`.
  *
  * @example
  * ```ts
