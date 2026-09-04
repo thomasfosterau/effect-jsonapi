@@ -385,6 +385,16 @@ const Admin = Resource.extend(Account, "admins", {
 Resource.attributeKeys(Admin) // ["email", "createdAt", "permissions"]
 ```
 
+`extend` accepts a custom `id` schema exactly as `Resource.make` does, for a consumer that keys its subtypes with its own brand catalogue (branding at the row-mapping seam via `AdminId.make(row.id)`). The subtype's id is then that schema and nothing else — no package brand is added — and it flows through `identifier`, `ref`, the payloads and the documents as usual. `id` and `inheritId: true` are contradictory, so passing both is a type error and throws at definition time.
+
+```ts
+const AdminId = Schema.String.pipe(Schema.brand("AdminId"))
+const Admin = Resource.extend(Account, "admins", { id: AdminId })
+
+Admin.Id.make("1") // string & Brand<"AdminId">
+Admin.ref("1") // { type: "admins", id: string & Brand<"AdminId"> }
+```
+
 ### Polymorphic families (heterogeneous supertypes)
 
 `Resource.family` defines a **supertype** over a set of member resources — for a

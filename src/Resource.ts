@@ -2290,14 +2290,24 @@ export type ExtendedRelationships<Base extends Relationships, Extra extends Rela
  * id is assignable wherever the base id is expected (a true subtype), and so on
  * transitively through an `extend` chain.
  *
+ * With `Custom` given (the `id` option of {@link extend}) the child's id is
+ * exactly that schema — the consumer's own brand, with no package brand added —
+ * taking precedence over both of the above.
+ *
  * @since 0.3.0
  * @category type-level
  */
 export type ExtendedId<
   BaseId extends Schema.Codec<any, string>,
   Type extends string,
-  Inherit extends boolean
-> = Inherit extends true ? Schema.brand<BaseId, `${Type}Id`> : Id<Type>
+  Inherit extends boolean,
+  Custom extends Schema.Codec<any, string> | undefined = undefined
+> =
+  Custom extends Schema.Codec<any, string>
+    ? Custom
+    : Inherit extends true
+      ? Schema.brand<BaseId, `${Type}Id`>
+      : Id<Type>
 
 /**
  * Defines a new resource that **extends** (subtypes) an existing one: the new
@@ -2316,6 +2326,14 @@ export type ExtendedId<
  * assignable wherever the base id is expected — a true subtype relationship,
  * transitive through an `extend` chain (`Admin.Id` ⊂ `Account.Id`, and a further
  * extension's id ⊂ `Admin.Id` ⊂ `Account.Id`).
+ *
+ * Alternatively pass your own `id` schema — exactly as {@link make}'s `id`
+ * option — and the child's id is that schema and nothing else: no package brand
+ * is added, so a consumer that keys its subtypes with its own brand catalogue
+ * (branding at the row-mapping seam via `AdminId.make(row.id)`) can use
+ * `extend` for subtype chains too. `id` and `inheritId: true` are contradictory
+ * (one names the id schema outright, the other derives it from the base), so
+ * passing both is a type error and throws at definition time.
  *
  * @example
  * ```ts
@@ -2347,6 +2365,11 @@ export type ExtendedId<
  * // With `inheritId`, an Admin id IS an Account id (subtype):
  * const Manager = Resource.extend(Account, "managers", { inheritId: true })
  * const managerId = Manager.Id.make("1") // also usable wherever an Account id is expected
+ *
+ * // With `id`, the subtype carries the consumer's own brand and nothing else:
+ * const AuditorId = Schema.String.pipe(Schema.brand("AuditorId"))
+ * const Auditor = Resource.extend(Account, "auditors", { id: AuditorId })
+ * const auditorId = Auditor.Id.make("1") // string & Brand<"AuditorId">
  * ```
  *
  * @since 0.2.0
@@ -2362,7 +2385,8 @@ export const extend = <
   const ExtraRels extends Relationships = {},
   Meta extends Schema.Top = BaseMeta,
   BaseId extends Schema.Codec<any, string> = Id<BaseType>,
-  const InheritId extends boolean = false
+  const InheritId extends boolean = false,
+  IdSchema extends Schema.Codec<any, string> | undefined = undefined
 >(
   base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
@@ -2371,21 +2395,39 @@ export const extend = <
     readonly relationships?: ExtraRels
     readonly meta?: Meta
     /**
+     * The id schema for this resource, exactly as {@link make}'s `id` option:
+     * any schema whose `Encoded` side is `string`, whose decoded type becomes
+     * the resource's id brand with no package brand added. Contradicts
+     * `inheritId: true`. Defaults to the id {@link ExtendedId} derives.
+     *
+     * @since 0.14.0
+     */
+    readonly id?: IdSchema
+    /**
      * Brand the *base's* id schema with this resource's type instead of minting
      * a fresh independent id, so the child id is a subtype of the base id.
-     * Defaults to `false`.
+     * Defaults to `false`. Not admitted alongside `id`.
      */
-    readonly inheritId?: InheritId
+    readonly inheritId?: [IdSchema] extends [undefined] ? InheritId : false
   }
 ): Resource<
   Type,
   ExtendedAttributes<BaseAttributes, ExtraAttributes>,
   ExtendedRelationships<BaseRels, ExtraRels>,
   Meta,
-  ExtendedId<BaseId, Type, InheritId>
-> =>
-  make(type, {
-    id: options?.inheritId === true ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`)) : undefined,
+  ExtendedId<BaseId, Type, InheritId, IdSchema>
+> => {
+  if (options?.id !== undefined && options.inheritId === true) {
+    throw new Error(
+      "Resource.extend: `id` and `inheritId: true` are contradictory; pass a custom `id` schema or `inheritId: true`, not both"
+    )
+  }
+  // A custom id wins (the same rule `make` applies); otherwise inherit the
+  // base's brand, or leave it to `make` to mint a fresh one.
+  const id =
+    options?.id ?? (options?.inheritId === true ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`)) : undefined)
+  return make(type, {
+    id,
     attributes: { ...base.fields.attributes.fields, ...options?.attributes },
     relationships: { ...base.relationships, ...options?.relationships },
     meta: (options?.meta ?? base.fields.meta.schema) as Meta
@@ -2394,8 +2436,9 @@ export const extend = <
     ExtendedAttributes<BaseAttributes, ExtraAttributes>,
     ExtendedRelationships<BaseRels, ExtraRels>,
     Meta,
-    ExtendedId<BaseId, Type, InheritId>
+    ExtendedId<BaseId, Type, InheritId, IdSchema>
   >
+}
 
 // ---------------------------------------------------------------------------
 // Polymorphic families (heterogeneous supertypes)

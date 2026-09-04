@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Option, Schema } from "effect"
+import { Brand, Option, Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
 import * as Relationship from "./Relationship.js"
 import {
@@ -1161,6 +1161,105 @@ describe("Resource.extend inheritId (subtype ids)", () => {
     const personId = Person.Id.make("1")
     const asNode: typeof NodeId.Type = personId // a person id IS a node id
     expect(asNode).toBe("1")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// extend with a custom id: the subtype carries the consumer's own brand (#49)
+// ---------------------------------------------------------------------------
+
+describe("Resource.extend custom id injection", () => {
+  // The consumer's own brand catalogue: the subtype's id is branded at the
+  // row-mapping seam (`AdminId.make(row.id)`), so `extend` must use it as-is.
+  const AdminId = Schema.String.pipe(Schema.brand("AdminId"))
+  const Account = Resource("accounts", {
+    attributes: { email: Schema.NonEmptyString },
+    relationships: { organisation: Relationship.one(() => Person) }
+  })
+  const Admin = extend(Account, "admins", { id: AdminId, attributes: { level: Schema.Int } })
+
+  it("uses the injected id schema as the subtype's Id, with no package brand added", () => {
+    expectTypeOf<typeof Admin.Id>().toEqualTypeOf<typeof AdminId>()
+    expectTypeOf<typeof Admin.Id.Type>().toEqualTypeOf<typeof AdminId.Type>()
+    expectTypeOf<(typeof Admin.Type)["id"]>().toEqualTypeOf<typeof AdminId.Type>()
+    expect(Admin.Id).toBe(AdminId)
+    // an externally branded id is accepted where the subtype's id is expected
+    const asAdmin: typeof Admin.Id.Type = AdminId.make("1")
+    expect(asAdmin).toBe("1")
+    // ...and the subtype id is neither the base's auto id nor the auto `adminsId`
+    // @ts-expect-error a consumer-branded admin id is not an account id
+    const asAccount: typeof Account.Id.Type = Admin.Id.make("1")
+    expect(asAccount).toBe("1")
+  })
+
+  it("still inherits the base's attributes and relationships", () => {
+    expect(attributeKeys(Admin)).toEqual(["email", "level"])
+    expect(Object.keys(Admin.relationships)).toEqual(["organisation"])
+    const decoded = Schema.decodeUnknownSync(Admin)({
+      type: "admins",
+      id: "1",
+      attributes: { email: "a@example.com", level: 3 },
+      relationships: { organisation: { data: { type: "people", id: "9" } } }
+    })
+    expect(decoded.id).toBe("1")
+    expect(decoded.attributes.level).toBe(3)
+  })
+
+  it("ref produces a value carrying the consumer brand", () => {
+    const ref = Admin.ref("1")
+    expect(ref).toEqual({ type: "admins", id: "1" })
+    expectTypeOf<typeof ref.id>().toEqualTypeOf<typeof AdminId.Type>()
+  })
+
+  it("threads the injected id through the identifier, update payload and documents", () => {
+    expectTypeOf<(typeof Admin.identifier.Type)["id"]>().toEqualTypeOf<typeof AdminId.Type>()
+    const identifier = Schema.decodeUnknownSync(Admin.identifier)({ type: "admins", id: "1" })
+    expect(identifier).toEqual({ type: "admins", id: "1" })
+
+    expectTypeOf<(typeof Admin.updatePayload.Type)["data"]["id"]>().toEqualTypeOf<typeof AdminId.Type>()
+    const update = Schema.decodeUnknownSync(Admin.updatePayload)({
+      data: { type: "admins", id: "1", attributes: { level: 4 } }
+    })
+    expect(update.data.id).toBe("1")
+
+    const doc = Admin.document()
+    expectTypeOf<(typeof doc.Type)["data"]["id"]>().toEqualTypeOf<typeof AdminId.Type>()
+    const decoded = Schema.decodeUnknownSync(doc)({
+      data: { type: "admins", id: "1", attributes: { email: "a@example.com", level: 3 } }
+    })
+    expect(decoded.data.id).toBe("1")
+    const collection = Admin.collection()
+    expectTypeOf<(typeof collection.Type)["data"][number]["id"]>().toEqualTypeOf<typeof AdminId.Type>()
+  })
+
+  it("composes through an extend chain: each level takes its own custom id", () => {
+    const SuperAdminId = Schema.String.pipe(Schema.brand("SuperAdminId"))
+    const SuperAdmin = extend(Admin, "superadmins", { id: SuperAdminId, attributes: { scope: Schema.String } })
+    expectTypeOf<typeof SuperAdmin.Id.Type>().toEqualTypeOf<typeof SuperAdminId.Type>()
+    expect(attributeKeys(SuperAdmin)).toEqual(["email", "level", "scope"])
+    expect(SuperAdmin.ref("7")).toEqual({ type: "superadmins", id: "7" })
+    // a super-admin id is the consumer's brand only — not an admin id
+    // @ts-expect-error SuperAdminId is not AdminId
+    const asAdmin: typeof Admin.Id.Type = SuperAdmin.Id.make("7")
+    expect(asAdmin).toBe("7")
+  })
+
+  it("a chain from a custom-id subtype may still inherit or mint a default id", () => {
+    const Inherited = extend(Admin, "auditors", { inheritId: true })
+    const asAdmin: typeof Admin.Id.Type = Inherited.Id.make("2") // an auditor id IS an admin id
+    expect(asAdmin).toBe("2")
+    const Fresh = extend(Admin, "reviewers", { attributes: { queue: Schema.String } })
+    expectTypeOf<typeof Fresh.Id.Type>().toEqualTypeOf<string & Brand.Brand<"reviewersId">>()
+  })
+
+  it("rejects `id` together with `inheritId: true` — at the type level and at definition time", () => {
+    expect(() =>
+      // @ts-expect-error `id` and `inheritId: true` are contradictory
+      extend(Account, "contradictory", { id: AdminId, inheritId: true })
+    ).toThrow("Resource.extend: `id` and `inheritId: true` are contradictory")
+    // `inheritId: false` alongside `id` is redundant but not contradictory
+    const Explicit = extend(Account, "explicit", { id: AdminId, inheritId: false })
+    expectTypeOf<typeof Explicit.Id.Type>().toEqualTypeOf<typeof AdminId.Type>()
   })
 })
 
