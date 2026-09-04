@@ -1814,4 +1814,67 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     })
     expect(Schema.decodeUnknownSync(Note.updateInput)({ id: "1", summary: null })).toEqual({ id: "1", summary: null })
   })
+
+  it("widens a bare Schema.optionalKey attribute the same way; a bare Schema.optional stays as declared", () => {
+    const Profile = Resource("profiles", {
+      attributes: {
+        handle: Schema.NonEmptyString,
+        bio: Schema.optionalKey(Schema.String),
+        motto: Schema.optional(Schema.String)
+      }
+    })
+    // type: `bio` is `Schema.optional<String>` at create, as it is at update
+    expectTypeOf(Profile.createInput.fields.bio).toEqualTypeOf<Schema.optional<Schema.String>>()
+    expectTypeOf<(typeof Profile.createInput.fields.bio)["Type"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<(typeof Profile.createInput.fields.bio)["Type"]>().toEqualTypeOf<
+      (typeof Profile.updateInput.fields.bio)["Type"]
+    >()
+    type CreateAttrs = (typeof Profile.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().toEqualTypeOf<{
+      readonly handle: string
+      readonly bio?: string | undefined
+      readonly motto?: string | undefined
+    }>()
+    // `motto` was already `Schema.optional`: not wrapped again
+    expect(Profile.createInput.fields.motto).toBe(Profile.fields.attributes.fields.motto)
+    // the resource object itself keeps the strict `optionalKey`
+    expectTypeOf<(typeof Profile.Type)["attributes"]>().toEqualTypeOf<{
+      readonly handle: string
+      readonly bio?: string
+      readonly motto?: string | undefined
+    }>()
+
+    // runtime: absent, a value, an explicit undefined
+    expect(Schema.decodeUnknownSync(Profile.createInput)({ handle: "h" })).toEqual({ handle: "h" })
+    expect(Schema.decodeUnknownSync(Profile.createInput)({ handle: "h", bio: "b" })).toEqual({ handle: "h", bio: "b" })
+    const explicit = Schema.decodeUnknownSync(Profile.createInput)({ handle: "h", bio: undefined })
+    expect(explicit).toEqual({ handle: "h", bio: undefined })
+    expect("bio" in explicit).toBe(true)
+    expect(
+      Schema.decodeUnknownSync(Profile.createPayload)({
+        data: { type: "profiles", attributes: { handle: "h", bio: undefined, motto: undefined } }
+      }).data.attributes
+    ).toEqual({ handle: "h", bio: undefined, motto: undefined })
+    // the resource object still refuses an explicit undefined for the strict key
+    expect(() =>
+      Schema.decodeUnknownSync(Profile)({ type: "profiles", id: "1", attributes: { handle: "h", bio: undefined } })
+    ).toThrow()
+  })
+})
+
+describe("Resource.attribute `resource` option", () => {
+  it("accepts the literals and refuses a non-literal boolean", () => {
+    const hidden = Math.random() > 2 // `boolean`, not a literal
+    // @ts-expect-error -- a non-literal boolean cannot decide the resource-object type
+    attribute(Schema.String, { resource: hidden })
+    const shown = attribute(Schema.String, { resource: true })
+    const optional = attribute(Schema.String, { resource: "optional" })
+    const inputOnly = attribute(Schema.String, { resource: false })
+    const R = Resource("literals", { attributes: { shown, optional, inputOnly } })
+    expect(attributeKeys(R)).toEqual(["shown", "optional"])
+    expectTypeOf<(typeof R.Type)["attributes"]>().toEqualTypeOf<{
+      readonly shown: string
+      readonly optional?: string
+    }>()
+  })
 })

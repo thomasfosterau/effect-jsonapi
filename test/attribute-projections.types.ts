@@ -133,6 +133,41 @@ const addWithMaybe = Atomic.add(Upload, {
 // `create: "required"` (the default) is untouched: no `undefined`.
 const fileNameIsRequired: Equals<(typeof Upload.createInput.fields.fileName)["Type"], string> = true
 
+// A bare `Schema.optionalKey(S)` attribute (no descriptor) is widened the same
+// way at create — the update side already was — while a bare `Schema.optional(S)`
+// is already that shape and stays as declared.
+const Profile = Resource.make("profiles", {
+  attributes: {
+    handle: Schema.NonEmptyString,
+    bio: Schema.optionalKey(Schema.String),
+    motto: Schema.optional(Schema.String)
+  }
+})
+const bioIsOptional: Equals<(typeof Profile.createInput.fields.bio)["Type"], string | undefined> = true
+const bioMatchesUpdate: Equals<
+  (typeof Profile.createInput.fields.bio)["Type"],
+  (typeof Profile.updateInput.fields.bio)["Type"]
+> = true
+const bioInAdd: Equals<Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"]["bio"], string | undefined> =
+  true
+const mottoUnchanged: Equals<typeof Profile.createInput.fields.motto, typeof Profile.fields.attributes.fields.motto> =
+  true
+declare const maybeBio: string | undefined
+const profileCreate: typeof Profile.createInput.Type = { handle: "h", bio: maybeBio }
+const profileAdd = Atomic.add(Profile, { attributes: { handle: "h", bio: maybeBio } })
+
+// ---------------------------------------------------------------------------
+// `resource` must be a literal
+// ---------------------------------------------------------------------------
+
+declare const hidden: boolean
+// @ts-expect-error -- a non-literal boolean cannot decide the resource-object type
+Resource.attribute(Schema.String, { resource: hidden })
+// the literals are all fine, including through a `const` context
+const shown = Resource.attribute(Schema.String, { resource: true })
+const optionalOnResource = Resource.attribute(Schema.String, { resource: "optional" })
+const inputOnly = Resource.attribute(Schema.String, { resource: false })
+
 // ---------------------------------------------------------------------------
 // `extend` inherits input-only attributes
 // ---------------------------------------------------------------------------
@@ -151,6 +186,9 @@ export {
   addWithMaybe,
   badField,
   badKey,
+  bioInAdd,
+  bioIsOptional,
+  bioMatchesUpdate,
   captionInAdd,
   captionInPayload,
   captionIsOptional,
@@ -164,8 +202,14 @@ export {
   fileNameIsRequired,
   imageCreate,
   imageCreateMissingFile,
+  inputOnly,
   key,
+  mottoUnchanged,
   notOnResource,
+  optionalOnResource,
+  profileAdd,
+  profileCreate,
+  shown,
   updateInput,
   updateWithFile,
   updateWithMaybe

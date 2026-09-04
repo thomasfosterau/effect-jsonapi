@@ -38,6 +38,11 @@
   `exactOptionalPropertyTypes` as it already did against `updateInput`. This is a **type widening** of
   `createInput` / `createPayload` (and the atomic `add` operation) for optional attributes: the field
   schema is `Schema.optional<S>` rather than `Schema.optionalKey<S>`, so its `Type` is
-  `S["Type"] | undefined`. On a JSON wire an explicit `undefined` and an absent key are the same
-  thing. Code that pinned the `optionalKey` shape needs the wider type; nothing that decoded before
-  is rejected now.
+  `S["Type"] | undefined`. The same widening applies to a **bare `Schema.optionalKey(S)` attribute**
+  (no descriptor), which the update side already widened; a bare `Schema.optional(S)` attribute is
+  unchanged. On a JSON wire an explicit `undefined` and an absent key are the same thing. Code that
+  pinned the `optionalKey` shape needs the wider type; nothing that decoded before is rejected now.
+
+- `Resource.attribute`'s `resource` option must be a literal (`true`, `false` or `"optional"`): a
+  non-literal `boolean` is now a compile error, since the resource-object type cannot be decided from
+  it.

@@ -375,6 +375,12 @@ type NotAlready<S, Key extends string, Given> = [Given] extends [false]
     ? never
     : unknown
 
+// Refuses, at the type level, a `resource` option that is not a literal: a
+// plain `boolean` would leave the attribute on the resource-object *type* while
+// the runtime dropped it (`ResourceAttributes` reads the literal off the
+// config), so the option must be `true`, `false` or `"optional"` statically.
+type LiteralResource<R> = boolean extends R ? never : unknown
+
 // The `filter` / `sort` sugar at runtime: `Filter.able` then `Sort.able` on the
 // inner schema — the annotation is the only record of the declaration. A schema
 // that already carries the declaration the sugar would stamp is refused: the
@@ -423,8 +429,10 @@ const declare = (
  *
  * Options (all optional; the defaults reproduce a plain `Schema` attribute):
  *
- *   - `resource` — presence in the resource object schema + documents:
- *     `true` (default, required), `"optional"` (an optional key), or `false`
+ *   - `resource` — presence in the resource object schema + documents, as a
+ *     literal (a non-literal `boolean` is a compile error — the resource-object
+ *     type has to be decided statically): `true` (default, required),
+ *     `"optional"` (an optional key), or `false`
  *     (**input-only**: absent from the resource object, its documents,
  *     {@link attributeKeys}, sparse `fields` and the {@link filterable} /
  *     {@link sortable} accessors, yet still projected into the write inputs
@@ -508,7 +516,9 @@ export const attribute = <
   schema: S & { readonly Type: NoInfer<Literal> | null } & NotAlready<S, Filter.MarkerKey, FilterDecl> &
     NotAlready<S, Sort.MarkerKey, Sortable>,
   options?: {
-    readonly resource?: Resource
+    // A literal only: a non-literal `boolean` cannot decide, at the type level,
+    // whether the attribute is on the resource object.
+    readonly resource?: Resource & LiteralResource<Resource>
     readonly create?: Create
     readonly update?: Update
     readonly clearable?: Clearable
@@ -649,17 +659,12 @@ const descriptorOf = (schema: Schema.Top): RuntimeAttributeConfig | undefined =>
 // the write projections, absent from the resource object.
 const isInputOnly = (field: Schema.Top): boolean => descriptorOf(field)?.resource === false
 
-/**
- * Builds the **resource-object** field map for a resource's declared attribute
- * fields: every attribute except the input-only ones (`resource: false`), each
- * kept as declared (a plain schema, or the descriptor's resource-object field —
- * the base schema, or an `optionalKey` of it for `resource: "optional"`). Used
- * by {@link make} for the resource `Schema.Struct`.
- *
- * @since 0.13.0
- * @category utilities
- */
-export const resourceAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+// Builds the resource-object field map for a resource's declared attribute
+// fields: every attribute except the input-only ones (`resource: false`), each
+// kept as declared (a plain schema, or the descriptor's resource-object field —
+// the base schema, or an `optionalKey` of it for `resource: "optional"`). Used
+// by `make` for the resource `Schema.Struct`.
+const resourceAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
   const result: Record<string, Schema.Top> = {}
   for (const [key, field] of Object.entries(fields)) {
     if (isInputOnly(field as Schema.Top)) continue
@@ -668,13 +673,28 @@ export const resourceAttributeFields = (fields: Schema.Struct.Fields): Record<st
   return result
 }
 
+// The schema a bare `Schema.optionalKey(S)` attribute wraps (`S`), or
+// `undefined` for anything else — a required field, or a field that already
+// admits `undefined` (`Schema.optional(S)` is `optionalKey(UndefinedOr(S))`),
+// which needs no widening.
+const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
+  if (field.ast.context?.isOptional !== true) return undefined
+  const wrapped = (field as { readonly schema?: Schema.Top }).schema
+  if (wrapped === undefined) return undefined
+  const ast = wrapped.ast
+  const admitsUndefined = ast._tag === "Union" && ast.types.some((member) => member._tag === "Undefined")
+  return admitsUndefined ? undefined : wrapped
+}
+
 /**
  * Builds the **create** field map for a resource's attribute fields: each
  * attribute projected by its descriptor (`create: false` excluded, `"optional"`
  * a `Schema.optional` — the key may be absent or its value `undefined`, as in
- * the update projection — `"required"` a required key); a plain schema
- * attribute is required. Used by `createPayload` / `createInput` and the
- * Atomic `add` operation.
+ * the update projection — `"required"` a required key). A plain schema
+ * attribute is required, except a bare `Schema.optionalKey(S)`, which projects
+ * as `Schema.optional(S)` too (the update projection already widens it, so the
+ * same `{ x: maybeUndefined }` input fits both). Used by `createPayload` /
+ * `createInput` and the Atomic `add` operation.
  *
  * @since 0.5.0
  * @category utilities
@@ -684,7 +704,8 @@ export const createAttributeFields = (fields: Schema.Struct.Fields): Record<stri
   for (const [key, field] of Object.entries(fields)) {
     const descriptor = descriptorOf(field as Schema.Top)
     if (!descriptor) {
-      result[key] = field as Schema.Top
+      const inner = strictOptionalInner(field as Schema.Top)
+      result[key] = inner === undefined ? (field as Schema.Top) : Schema.optional(inner)
       continue
     }
     if (descriptor.create === false) continue
@@ -745,7 +766,7 @@ type UpdateValueSchema<S extends Schema.Top, Clearable extends boolean> = Cleara
  * (with the input-only attributes) stays reachable as
  * {@link DeclaredAttributesOf} / `declaredAttributes`.
  *
- * @since 0.13.0
+ * @since 0.14.0
  * @category type-level
  */
 export type ResourceAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
@@ -760,7 +781,9 @@ export type ResourceAttributes<Attributes extends Schema.Struct.Fields> = AsFiel
  * `"optional"` made a `Schema.optional` (the key may be absent, or present as
  * `undefined` — the same shape {@link UpdateAttributes} gives every attribute,
  * so a caller building `{ x: maybeUndefined }` type-checks against both),
- * `"required"` (and plain schema attributes) a required key.
+ * `"required"` (and plain schema attributes) a required key. A bare
+ * `Schema.optionalKey<S>` attribute is widened to `Schema.optional<S>` the same
+ * way; a bare `Schema.optional<S>` already is one and stays as declared.
  *
  * **On the wire.** JSON cannot carry `undefined`, so over a JSON:API HTTP body an
  * explicit `undefined` and an absent key are the same thing — the attribute is
@@ -778,7 +801,11 @@ export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields
     ? C extends "optional"
       ? Schema.optional<S>
       : S
-    : Attributes[K]
+    : Attributes[K] extends Schema.optional<any>
+      ? Attributes[K]
+      : Attributes[K] extends Schema.optionalKey<infer S extends Schema.Top>
+        ? Schema.optional<S>
+        : Attributes[K]
 }>
 
 /**
@@ -1237,7 +1264,7 @@ export type AttributesOf<R extends Any> = R["fields"]["attributes"]["fields"]
  * A {@link Family} declares nothing itself: its declared map is its
  * resource-object map.
  *
- * @since 0.13.0
+ * @since 0.14.0
  * @category type-level
  */
 export type DeclaredAttributesOf<R extends Any> = R extends {
@@ -1501,7 +1528,7 @@ export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
  * Object.keys(Resource.declaredAttributes(Upload)) // ["fileName", "file"]
  * ```
  *
- * @since 0.13.0
+ * @since 0.14.0
  * @category accessors
  */
 export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttributesOf<R> =>

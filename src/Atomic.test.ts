@@ -838,4 +838,21 @@ describe("optional create attributes in the add operation", () => {
     const op = Atomic.add(Note, { attributes: { title: "t", body: undefined } })
     expect(op.data.attributes).toEqual({ title: "t", body: undefined })
   })
+
+  it("widens a bare Schema.optionalKey attribute the same way", () => {
+    const Profile = Resource("profiles", {
+      attributes: { handle: Schema.NonEmptyString, bio: Schema.optionalKey(Schema.String) }
+    })
+    const Add = Atomic.AddOperation(Profile)
+    type AddAttrs = Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs["bio"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.bio)["Type"]>().toEqualTypeOf<string | undefined>()
+    const decode = (attributes: unknown) =>
+      Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "profiles", attributes } }).data.attributes
+    expect(decode({ handle: "h" })).toEqual({ handle: "h" })
+    expect(decode({ handle: "h", bio: "b" })).toEqual({ handle: "h", bio: "b" })
+    expect(decode({ handle: "h", bio: undefined })).toEqual({ handle: "h", bio: undefined })
+    const op = Atomic.add(Profile, { attributes: { handle: "h", bio: undefined } })
+    expect(op.data.attributes).toEqual({ handle: "h", bio: undefined })
+  })
 })
