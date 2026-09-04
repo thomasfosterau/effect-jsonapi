@@ -64,13 +64,14 @@ import type { Relationships } from "./Relationship.js"
 import type {
   Any,
   CreateAttributes,
+  DeclaredAttributesOf,
   HasRequiredRelationship,
   RefValue,
   RelationshipName,
   ToManyName,
   UpdateAttributes
 } from "./Resource.js"
-import { createAttributeFields, Ref, updateAttributeFields } from "./Resource.js"
+import { createAttributeFields, declaredAttributes, Ref, updateAttributeFields } from "./Resource.js"
 
 // ---------------------------------------------------------------------------
 // Extension constants
@@ -372,7 +373,7 @@ export interface AddOperation<R extends Any> extends Schema.Struct<{
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<R["type"]>
     readonly lid: Schema.optionalKey<Schema.String>
-    readonly attributes: Schema.Struct<CreateAttributes<R["fields"]["attributes"]["fields"]>>
+    readonly attributes: Schema.Struct<CreateAttributes<DeclaredAttributesOf<R>>>
     readonly relationships: AddRelationshipsMember<R["relationships"]>
   }>
   readonly meta: Schema.optionalKey<typeof AnyMeta>
@@ -391,7 +392,9 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
     data: Schema.Struct({
       type: Schema.tag(resource.type),
       lid: Schema.optionalKey(Schema.String),
-      attributes: Schema.Struct(createAttributeFields(resource.fields.attributes.fields)),
+      // From the *declared* map, so input-only attributes (`resource: false`)
+      // are accepted here exactly as in `createPayload`.
+      attributes: Schema.Struct(createAttributeFields(declaredAttributes(resource))),
       relationships: required ? struct : Schema.optionalKey(struct)
     }),
     meta: Schema.optionalKey(AnyMeta)
@@ -415,7 +418,7 @@ export interface UpdateOperation<R extends Any> extends Schema.Struct<{
     readonly type: Schema.tag<R["type"]>
     readonly id: Schema.optionalKey<R["Id"]>
     readonly lid: Schema.optionalKey<Schema.String>
-    readonly attributes: Schema.optionalKey<Schema.Struct<UpdateAttributes<R["fields"]["attributes"]["fields"]>>>
+    readonly attributes: Schema.optionalKey<Schema.Struct<UpdateAttributes<DeclaredAttributesOf<R>>>>
     readonly relationships: Schema.optionalKey<Schema.Struct<AsFields<UpdateRelationshipFields<R["relationships"]>>>>
   }>
   readonly meta: Schema.optionalKey<typeof AnyMeta>
@@ -435,7 +438,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       type: Schema.tag(resource.type),
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
-      attributes: Schema.optionalKey(Schema.Struct(updateAttributeFields(resource.fields.attributes.fields))),
+      attributes: Schema.optionalKey(Schema.Struct(updateAttributeFields(declaredAttributes(resource)))),
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships))
     }),
     meta: Schema.optionalKey(AnyMeta)

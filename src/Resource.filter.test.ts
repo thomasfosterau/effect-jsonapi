@@ -552,7 +552,7 @@ describe("Resource.filterable / Resource.sortable", () => {
       const descriptor = Schema.resolveAnnotations(field)?.[AttributeDescriptorAnnotationId] as {
         readonly schema: Schema.Top
       }
-      expect(Object.keys(descriptor)).toEqual(["schema", "create", "update", "clearable"])
+      expect(Object.keys(descriptor)).toEqual(["schema", "resource", "create", "update", "clearable"])
       expect(annotationsOf(descriptor.schema)).toEqual({
         filter: { operators: ["eq"], literal: undefined },
         sort: true

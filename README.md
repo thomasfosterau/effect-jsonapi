@@ -303,11 +303,18 @@ const Article = Resource.make("articles", {
 // Article.updatePayload … data.attributes  → { title?, summary? }        (no createdAt, no slug)
 ```
 
+An optional create attribute (`create: "optional"`, or a bare `Schema.optionalKey(...)` attribute)
+projects as `Schema.optional`, exactly as every update attribute does: the key may be absent, or
+present with a value or an explicit `undefined`. So a caller that builds
+`{ summary: input.summary?.trim() || undefined }` type-checks against `createInput` and
+`updateInput` alike (also under `exactOptionalPropertyTypes`). On a JSON wire an explicit `undefined`
+and an absent key are the same thing — the attribute is not supplied.
+
 The descriptor options (all optional; the defaults reproduce a plain `Schema` attribute):
 
 | option      | values                                          | controls                                                             |
 | ----------- | ----------------------------------------------- | -------------------------------------------------------------------- |
-| `resource`  | `true` (default) · `"optional"`                 | presence in the resource object schema + documents                   |
+| `resource`  | `true` (default) · `"optional"` · `false`       | presence in the resource object schema + documents                   |
 | `create`    | `"required"` (default) · `"optional"` · `false` | presence in `createPayload` / `createInput`                          |
 | `update`    | `"optional"` (default) · `false`                | presence in `updatePayload` / `updateInput` (tri-state when present) |
 | `clearable` | `boolean` (default: nullable?)                  | whether the update projection additionally accepts `null` to clear   |
@@ -318,6 +325,40 @@ The descriptor rides on the attribute's schema value, so it flows through `attri
 [atomic operations](#atomic-operations) (`add` mirrors create, `update` mirrors update) — all
 consistently with the create/update payloads.
 
+#### Write-only (input-only) attributes
+
+`resource: false` declares an attribute that is **accepted as input but never on the resource
+object** — an upload's binary, a password, a one-time token. It is absent from the resource `Struct`,
+the documents, `attributeKeys`, sparse `fields`, `filterable` and `sortable`, yet still projected
+into `createPayload` / `createInput` and `updatePayload` / `updateInput` per its `create` / `update`
+settings (and into the atomic `add` / `update` operations), so a write-only field stays declared in
+one place:
+
+```ts
+const FileSchema = Schema.Uint8Array // or any `Schema.declare`d binary
+
+const Upload = Resource.make("uploads", {
+  attributes: {
+    fileName: Schema.NonEmptyString,
+    contentType: Schema.NonEmptyString,
+    // create-only binary: in `createInput`, never on the resource object
+    file: Resource.attribute(FileSchema, { resource: false, update: false })
+  }
+})
+
+// Upload.Type.attributes   → { fileName, contentType }              (no file)
+// Upload.createInput.Type  → { fileName, contentType, file }
+// Upload.updateInput.Type  → { id, fileName?, contentType? }        (no file — update: false)
+Resource.attributeKeys(Upload) // ["fileName", "contentType"]
+```
+
+An input-only attribute must keep at least one write projection (`resource: false` with both
+`create: false` and `update: false` declares nothing) and cannot carry a `filter` / `sort`
+declaration (it is not on the resource object to filter or sort by); `Resource.make` throws on
+either, naming the attribute. `Resource.attributes(R)` returns the resource-object map, without
+input-only attributes; `Resource.declaredAttributes(R)` returns the map as declared, and that is
+what `Resource.extend` inherits — so a subtype of `Upload` accepts `file` at create too.
+
 The common helpers compose from a single `attribute(...)` call, so you can define your own sugar:
 
 ```ts
@@ -325,6 +366,7 @@ const computed = <S extends Schema.Top>(s: S) => Resource.attribute(s, { create:
 const createOnly = <S extends Schema.Top>(s: S) => Resource.attribute(s, { update: false })
 const defaulted = <S extends Schema.Top>(s: S) => Resource.attribute(s, { create: "optional" })
 const optional = <S extends Schema.Top>(s: S) => Resource.attribute(s, { resource: "optional", create: "optional" })
+const inputOnly = <S extends Schema.Top>(s: S) => Resource.attribute(s, { resource: false, update: false })
 ```
 
 ### Flat (command-style) payloads

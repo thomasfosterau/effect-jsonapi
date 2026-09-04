@@ -755,3 +755,104 @@ describe("per-attribute descriptors in operations", () => {
     expectTypeOf<UpdateAttrs>().toHaveProperty("title")
   })
 })
+
+describe("input-only attributes in operations", () => {
+  const Upload = Resource("uploads", {
+    attributes: {
+      fileName: Schema.NonEmptyString,
+      // accepted at create only, never on the resource object
+      file: attribute(Schema.Uint8Array, { resource: false, update: false }),
+      // accepted at create and update, never on the resource object
+      secret: attribute(Schema.String, { resource: false })
+    }
+  })
+  const bytes = new Uint8Array([1, 2, 3])
+
+  it("accepts input-only attributes in the add operation", () => {
+    type AddAttrs = Atomic.AddOperation<typeof Upload>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs>().toEqualTypeOf<{
+      readonly fileName: string
+      readonly file: Uint8Array
+      readonly secret: string
+    }>()
+    const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
+      op: "add",
+      data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } }
+    })
+    expect(decoded.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" })
+    // required: the add operation demands `file`, as `createPayload` does
+    expect(() =>
+      Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
+        op: "add",
+        data: { type: "uploads", attributes: { fileName: "a.png", secret: "s" } }
+      })
+    ).toThrow()
+    // the constructor is typed from the declared map too
+    const op = Atomic.add(Upload, { attributes: { fileName: "a.png", file: bytes, secret: "s" } })
+    expectTypeOf(op.data.attributes.file).toEqualTypeOf<Uint8Array>()
+  })
+
+  it("projects input-only attributes into the update operation per `update`", () => {
+    type UpdateAttrs = NonNullable<Atomic.UpdateOperation<typeof Upload>["Type"]["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs>().toHaveProperty("secret")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("file")
+    const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Upload))({
+      op: "update",
+      data: { type: "uploads", id: "1", attributes: { secret: "t", file: bytes } }
+    })
+    // `secret` is accepted; `file` (update: false) is dropped, not an error
+    expect(decoded.data.attributes).toEqual({ secret: "t" })
+  })
+})
+
+describe("optional create attributes in the add operation", () => {
+  const Note = Resource("notes", {
+    attributes: {
+      title: Schema.NonEmptyString,
+      body: attribute(Schema.String, { create: "optional" })
+    }
+  })
+  const Add = Atomic.AddOperation(Note)
+
+  it("accepts an absent key, a value, or an explicit undefined (Schema.optional, as update does)", () => {
+    type AddAttrs = Atomic.AddOperation<typeof Note>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs["body"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<AddAttrs>().toEqualTypeOf<{ readonly title: string; readonly body?: string | undefined }>()
+    // the field schema itself is `Schema.optional`, so its own `Type` admits `undefined`
+    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.body)["Type"]>().toEqualTypeOf<string | undefined>()
+
+    const absent = Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "notes", attributes: { title: "t" } } })
+    expect(absent.data.attributes).toEqual({ title: "t" })
+    const present = Schema.decodeUnknownSync(Add)({
+      op: "add",
+      data: { type: "notes", attributes: { title: "t", body: "b" } }
+    })
+    expect(present.data.attributes).toEqual({ title: "t", body: "b" })
+    const explicit = Schema.decodeUnknownSync(Add)({
+      op: "add",
+      data: { type: "notes", attributes: { title: "t", body: undefined } }
+    })
+    expect(explicit.data.attributes).toEqual({ title: "t", body: undefined })
+
+    // the constructor accepts the explicit undefined too
+    const op = Atomic.add(Note, { attributes: { title: "t", body: undefined } })
+    expect(op.data.attributes).toEqual({ title: "t", body: undefined })
+  })
+
+  it("widens a bare Schema.optionalKey attribute the same way", () => {
+    const Profile = Resource("profiles", {
+      attributes: { handle: Schema.NonEmptyString, bio: Schema.optionalKey(Schema.String) }
+    })
+    const Add = Atomic.AddOperation(Profile)
+    type AddAttrs = Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs["bio"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.bio)["Type"]>().toEqualTypeOf<string | undefined>()
+    const decode = (attributes: unknown) =>
+      Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "profiles", attributes } }).data.attributes
+    expect(decode({ handle: "h" })).toEqual({ handle: "h" })
+    expect(decode({ handle: "h", bio: "b" })).toEqual({ handle: "h", bio: "b" })
+    expect(decode({ handle: "h", bio: undefined })).toEqual({ handle: "h", bio: undefined })
+    const op = Atomic.add(Profile, { attributes: { handle: "h", bio: undefined } })
+    expect(op.data.attributes).toEqual({ handle: "h", bio: undefined })
+  })
+})
