@@ -1,19 +1,26 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { Brand, Option, Schema } from "effect"
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js"
+import * as Filter from "./Filter.js"
+import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import {
   attribute,
   attributeAnnotations,
   attributeKeys,
   attributes as attributesOf,
+  declaredAttributes,
   directTargets,
   extend,
+  family,
+  filterable,
   Identifier,
   make as Resource,
   readOnlyAttribute,
-  relationships as relationshipsOf
+  relationships as relationshipsOf,
+  sortable
 } from "./Resource.js"
+import * as Sort from "./Sort.js"
 
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
@@ -1542,5 +1549,198 @@ describe("Resource.attribute", () => {
     expectTypeOf<typeof Plain.createInput.Type>().toEqualTypeOf<{ readonly name: string }>()
     type UpdateAttrs = NonNullable<(typeof Plain.updatePayload.Type)["data"]["attributes"]>
     expectTypeOf<UpdateAttrs["name"]>().toEqualTypeOf<string | undefined>()
+  })
+})
+
+describe("Resource.attribute with resource: false (input-only)", () => {
+  // An upload: the binary `file` is accepted at create and never on the
+  // resource object; `secret` is accepted at create and update, never shown.
+  const Upload = Resource("uploads", {
+    attributes: {
+      fileName: attribute(Schema.NonEmptyString, { filter: true, sort: true }),
+      file: attribute(Schema.Uint8Array, { resource: false, update: false }),
+      secret: attribute(Schema.String, { resource: false }),
+      note: attribute(Schema.String, { resource: false, create: "optional", update: false })
+    }
+  })
+  const bytes = new Uint8Array([1, 2, 3])
+
+  it("omits input-only attributes from the resource object schema", () => {
+    expect(attributeKeys(Upload)).toEqual(["fileName"])
+    expect(Object.keys(Upload.fields.attributes.fields)).toEqual(["fileName"])
+    expectTypeOf<(typeof Upload.Type)["attributes"]>().toEqualTypeOf<{ readonly fileName: string }>()
+    expectTypeOf<(typeof Upload.Type)["attributes"]>().not.toHaveProperty("file")
+    // `Schema.Struct` drops unknown keys: a `file` on the wire is not an error,
+    // it is simply not part of the decoded resource object
+    const decoded = Schema.decodeUnknownSync(Upload)({
+      type: "uploads",
+      id: "1",
+      attributes: { fileName: "a.png", file: bytes, secret: "s" }
+    })
+    expect(decoded.attributes).toEqual({ fileName: "a.png" })
+    expect("file" in decoded.attributes).toBe(false)
+  })
+
+  it("omits input-only attributes from the documents", () => {
+    const document = Schema.decodeUnknownSync(Upload.document())({
+      data: { type: "uploads", id: "1", attributes: { fileName: "a.png", file: bytes } }
+    })
+    expect(document.data.attributes).toEqual({ fileName: "a.png" })
+    type DocumentAttrs = ReturnType<typeof Upload.document>["Type"]["data"]["attributes"]
+    expectTypeOf<DocumentAttrs>().not.toHaveProperty("file")
+    // encoding a resource object never needs the input-only attribute
+    const encoded = Schema.encodeUnknownSync(Upload)({
+      type: "uploads",
+      id: Upload.Id.make("1"),
+      attributes: { fileName: "a.png" }
+    })
+    expect(encoded.attributes).toEqual({ fileName: "a.png" })
+  })
+
+  it("projects input-only attributes into createPayload / createInput per `create`", () => {
+    type CreateIn = typeof Upload.createInput.Type
+    expectTypeOf<CreateIn>().toEqualTypeOf<{
+      readonly fileName: string
+      readonly file: Uint8Array
+      readonly secret: string
+      readonly note?: string
+    }>()
+    type CreateAttrs = (typeof Upload.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().toEqualTypeOf<CreateIn>()
+
+    const input = Schema.decodeUnknownSync(Upload.createInput)({ fileName: "a.png", file: bytes, secret: "s" })
+    expect(input).toEqual({ fileName: "a.png", file: bytes, secret: "s" })
+    // required: `file` cannot be omitted
+    expect(() => Schema.decodeUnknownSync(Upload.createInput)({ fileName: "a.png", secret: "s" })).toThrow()
+    // optional (`create: "optional"`): `note` may be present or absent
+    const withNote = Schema.decodeUnknownSync(Upload.createInput)({
+      fileName: "a.png",
+      file: bytes,
+      secret: "s",
+      note: "n"
+    })
+    expect(withNote.note).toBe("n")
+
+    const payload = Schema.decodeUnknownSync(Upload.createPayload)({
+      data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } }
+    })
+    expect(payload.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" })
+  })
+
+  it("projects input-only attributes into updatePayload / updateInput per `update`", () => {
+    type UpdateIn = typeof Upload.updateInput.Type
+    // `update: "optional"` (the default) keeps `secret` as a tri-state key
+    expectTypeOf<UpdateIn>().toHaveProperty("secret")
+    expectTypeOf<UpdateIn["secret"]>().toEqualTypeOf<string | undefined>()
+    // `update: false` excludes `file` and `note`
+    expectTypeOf<UpdateIn>().not.toHaveProperty("file")
+    expectTypeOf<UpdateIn>().not.toHaveProperty("note")
+    type UpdateAttrs = NonNullable<(typeof Upload.updatePayload.Type)["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs>().toHaveProperty("secret")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("file")
+
+    const input = Schema.decodeUnknownSync(Upload.updateInput)({ id: "1", secret: "t" })
+    expect(input).toEqual({ id: "1", secret: "t" })
+    // `file` on the wire is dropped, not accepted
+    const dropped = Schema.decodeUnknownSync(Upload.updateInput)({ id: "1", file: bytes })
+    expect("file" in dropped).toBe(false)
+    const payload = Schema.decodeUnknownSync(Upload.updatePayload)({
+      data: { type: "uploads", id: "1", attributes: { secret: "t" } }
+    })
+    expect(payload.data.attributes).toEqual({ secret: "t" })
+  })
+
+  it("keeps input-only attributes out of attributeKeys, attributeAnnotations, filterable and sortable", () => {
+    expect(attributeKeys(Upload)).toEqual(["fileName"])
+    expect(Object.keys(attributeAnnotations(Upload))).toEqual(["fileName"])
+    expect(Object.keys(filterable(Upload))).toEqual(["fileName"])
+    expect(sortable(Upload)).toEqual(["fileName"])
+  })
+
+  it("keeps input-only attributes out of sparse fieldsets", () => {
+    const fieldset = Query.Fieldset(Upload)
+    expectTypeOf<typeof fieldset.Type>().toEqualTypeOf<ReadonlyArray<"fileName">>()
+    expect(Schema.decodeUnknownSync(fieldset)("fileName")).toEqual(["fileName"])
+    expect(() => Schema.decodeUnknownSync(fieldset)("file")).toThrow()
+
+    const query = Query.schema(Upload, { fields: true })
+    expect(Schema.decodeUnknownSync(query)({ "fields[uploads]": "fileName" })).toEqual({
+      fields: { uploads: ["fileName"] }
+    })
+    expect(() => Schema.decodeUnknownSync(query)({ "fields[uploads]": "fileName,file" })).toThrow()
+  })
+
+  it("exposes the declared map through declaredAttributes, the resource-object map through attributes", () => {
+    expect(Object.keys(attributesOf(Upload))).toEqual(["fileName"])
+    expect(Object.keys(declaredAttributes(Upload))).toEqual(["fileName", "file", "secret", "note"])
+    expect(Upload.declaredAttributes).toBe(declaredAttributes(Upload))
+    expectTypeOf(declaredAttributes(Upload)).toHaveProperty("file")
+    expectTypeOf(attributesOf(Upload)).not.toHaveProperty("file")
+    // a plain resource's declared map is its resource-object map
+    expect(declaredAttributes(Person)).toEqual(attributesOf(Person))
+  })
+
+  it("is inherited through Resource.extend", () => {
+    const Image = extend(Upload, "images", { attributes: { width: Schema.Int } })
+    expect(attributeKeys(Image)).toEqual(["fileName", "width"])
+    expect(Object.keys(declaredAttributes(Image))).toEqual(["fileName", "file", "secret", "note", "width"])
+    type CreateIn = typeof Image.createInput.Type
+    expectTypeOf<CreateIn>().toHaveProperty("file")
+    expectTypeOf<CreateIn["file"]>().toEqualTypeOf<Uint8Array>()
+    expectTypeOf<CreateIn>().toHaveProperty("width")
+    expectTypeOf<(typeof Image.Type)["attributes"]>().not.toHaveProperty("file")
+    const input = Schema.decodeUnknownSync(Image.createInput)({ fileName: "a.png", file: bytes, secret: "s", width: 4 })
+    expect(input).toEqual({ fileName: "a.png", file: bytes, secret: "s", width: 4 })
+    expect(() => Schema.decodeUnknownSync(Image.createInput)({ fileName: "a.png", secret: "s", width: 4 })).toThrow()
+    // the child may override the inherited descriptor
+    const Shown = extend(Upload, "shown", { attributes: { file: Schema.Uint8Array } })
+    expect(attributeKeys(Shown)).toEqual(["fileName", "file"])
+  })
+
+  it("families see only the resource-object attributes", () => {
+    const Image = extend(Upload, "images", { inheritId: true, attributes: { width: Schema.Int } })
+    // base-anchored: the base's resource-object attributes
+    const Anchored = family(Upload, [Image])
+    expect(Object.keys(Anchored.fields.attributes.fields)).toEqual(["fileName"])
+    expect(attributeKeys(Anchored)).toEqual(["fileName"])
+    // name-only: the by-key intersection of the members' resource-object fields
+    const Named = family("blobs", [Upload, Image])
+    expect(Object.keys(Named.fields.attributes.fields)).toEqual(["fileName"])
+    // a family declares nothing itself: its declared map is its resource-object map
+    expect(declaredAttributes(Named)).toBe(Named.fields.attributes.fields)
+    expect(declaredAttributes(Anchored)).toBe(Anchored.fields.attributes.fields)
+  })
+
+  it("refuses an input-only attribute that declares no write projection", () => {
+    expect(() =>
+      Resource("ghosts", {
+        attributes: { ghost: attribute(Schema.String, { resource: false, create: false, update: false }) }
+      })
+    ).toThrow(/attribute "ghost" declares resource: false with create: false and update: false/)
+  })
+
+  it("refuses an input-only attribute declared filterable or sortable", () => {
+    // the sugar options
+    expect(() =>
+      Resource("uploads", {
+        attributes: { file: attribute(Schema.String, { resource: false, filter: true }) }
+      })
+    ).toThrow(/attribute "file" is input-only \(resource: false\) but declared filterable/)
+    expect(() =>
+      Resource("uploads", {
+        attributes: { file: attribute(Schema.String, { resource: false, sort: true }) }
+      })
+    ).toThrow(/attribute "file" is input-only \(resource: false\) but declared sortable/)
+    // the piped declarations
+    expect(() =>
+      Resource("uploads", {
+        attributes: { file: attribute(Schema.String.pipe(Filter.able(["eq"])), { resource: false }) }
+      })
+    ).toThrow(/attribute "file" is input-only \(resource: false\) but declared filterable/)
+    expect(() =>
+      Resource("uploads", {
+        attributes: { file: attribute(Schema.String.pipe(Sort.able()), { resource: false }) }
+      })
+    ).toThrow(/attribute "file" is input-only \(resource: false\) but declared sortable/)
   })
 })

@@ -257,10 +257,11 @@ export type AttributePresence = "required" | "optional" | false
 export type FilterDeclaration = boolean | ReadonlyArray<Filter.Operator>
 
 /**
- * The type-level config carried by an {@link Attribute}: the base schema and
- * how the attribute appears in each write projection. (The `filter` / `sort`
- * declarations are not here — they ride on the schema itself, as `Filter.able`
- * / `Sort.able` markers.)
+ * The type-level config carried by an {@link Attribute}: the base schema, how
+ * the attribute appears in each write projection, and whether it appears on the
+ * resource object at all (`resource: false` marks an **input-only** attribute).
+ * (The `filter` / `sort` declarations are not here — they ride on the schema
+ * itself, as `Filter.able` / `Sort.able` markers.)
  *
  * @since 0.5.0
  * @category type-level
@@ -269,9 +270,11 @@ export interface AttributeConfig<
   S extends Schema.Top,
   Create extends AttributePresence,
   Update extends "optional" | false,
-  Clearable extends boolean
+  Clearable extends boolean,
+  Resource extends boolean | "optional" = true
 > {
   readonly schema: S
+  readonly resource: Resource
   readonly create: Create
   readonly update: Update
   readonly clearable: Clearable
@@ -289,6 +292,8 @@ export type IsNullable<S extends Schema.Top> = S extends Schema.NullOr<Schema.To
 /**
  * The resource-object projection of an {@link Attribute}: the base schema when
  * `Resource` is `true`, or an optional key when `Resource` is `"optional"`.
+ * (An input-only attribute — `Resource` `false` — is left as the base schema
+ * here; {@link ResourceAttributes} drops it from the resource object.)
  *
  * @since 0.5.0
  * @category type-level
@@ -311,9 +316,12 @@ export type AttributeResourceField<
  * `fields`, `include` — and is carried through {@link extend}. The four write
  * projections ({@link CreatePayload}, {@link UpdatePayload}, {@link CreateInput},
  * {@link UpdateInput}) read the marker to include, exclude or re-shape the
- * attribute. A `filter` / `sort` declaration is not part of the descriptor: it
- * rides on `S` itself (`Filter.able` / `Sort.able`), and {@link filterable} /
- * {@link sortable} read it through the descriptor.
+ * attribute. An **input-only** attribute (`Resource` `false`) is the exception:
+ * {@link ResourceAttributes} drops it from the resource object altogether, so it
+ * exists only in the write projections its `create` / `update` settings admit.
+ * A `filter` / `sort` declaration is not part of the descriptor: it rides on `S`
+ * itself (`Filter.able` / `Sort.able`), and {@link filterable} / {@link sortable}
+ * read it through the descriptor.
  *
  * @since 0.5.0
  * @category models
@@ -325,7 +333,7 @@ export type Attribute<
   Update extends "optional" | false = "optional",
   Clearable extends boolean = IsNullable<S>
 > = AttributeResourceField<S, Resource> & {
-  readonly [K in AttributeConfigKey]: AttributeConfig<S, Create, Update, Clearable>
+  readonly [K in AttributeConfigKey]: AttributeConfig<S, Create, Update, Clearable, Resource>
 }
 
 /**
@@ -414,7 +422,14 @@ const declare = (
  * Options (all optional; the defaults reproduce a plain `Schema` attribute):
  *
  *   - `resource` — presence in the resource object schema + documents:
- *     `true` (default, required) or `"optional"` (an optional key).
+ *     `true` (default, required), `"optional"` (an optional key), or `false`
+ *     (**input-only**: absent from the resource object, its documents,
+ *     {@link attributeKeys}, sparse `fields` and the {@link filterable} /
+ *     {@link sortable} accessors, yet still projected into the write inputs
+ *     per `create` / `update` — an upload's file, a password, a one-time
+ *     token). An input-only attribute must keep at least one write projection,
+ *     and cannot carry a `filter` / `sort` declaration; {@link make} throws
+ *     otherwise, naming the attribute.
  *   - `create` — presence in `createPayload` / `createInput`: `"required"`
  *     (default), `"optional"`, or `false` (excluded).
  *   - `update` — presence in `updatePayload` / `updateInput`: `"optional"`
@@ -452,6 +467,8 @@ const declare = (
  *     createdAt: Resource.attribute(Schema.Date, { create: false, update: false }),
  *     // set at create, optional thereafter, clearable on update
  *     summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+ *     // input-only: accepted at create, never on the resource object
+ *     coverUpload: Resource.attribute(Schema.Uint8Array, { resource: false, update: false }),
  *     // filterable with a subset of operators, and sortable — declared on the schema
  *     priceCents: Resource.attribute(Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt]), Sort.able()), {
  *       create: "optional"
@@ -461,6 +478,8 @@ const declare = (
  *   }
  * })
  *
+ * Resource.attributeKeys(Article) // ["title", "createdAt", "summary", "priceCents", "status"] — no coverUpload
+ * Object.keys(Article.createInput.fields) // ["title", "summary", "coverUpload", "priceCents", "status"]
  * Object.keys(Resource.filterable(Article)) // ["priceCents", "status"]
  * Resource.sortable(Article) // ["priceCents", "status"]
  * ```
@@ -498,7 +517,9 @@ export const attribute = <
   const update = (options?.update ?? "optional") as "optional" | false
   const clearable = options?.clearable ?? isNullable(schema)
   const declared = declare(schema, options)
-  const config: RuntimeAttributeConfig = { schema: declared, create, update, clearable }
+  const config: RuntimeAttributeConfig = { schema: declared, resource, create, update, clearable }
+  // An input-only attribute (`resource: false`) still has to be *some* schema
+  // value in the declared map — `make` drops it from the resource object.
   const resourceField = resource === "optional" ? Schema.optionalKey(declared) : declared
   return resourceField.annotate({ [AttributeDescriptorAnnotationId]: config }) as unknown as Attribute<
     Declare<S, FilterDecl, Sortable, Literal>,
@@ -584,6 +605,7 @@ export const readOnlyAttribute = <
 // annotations, not descriptor fields.
 interface RuntimeAttributeConfig {
   readonly schema: Schema.Top
+  readonly resource: boolean | "optional"
   readonly create: AttributePresence
   readonly update: "optional" | false
   readonly clearable: boolean
@@ -617,6 +639,29 @@ const ensureNullable = (schema: Schema.Top): Schema.Top => (isNullable(schema) ?
 // schema attribute (which projects with the read-write defaults).
 const descriptorOf = (schema: Schema.Top): RuntimeAttributeConfig | undefined =>
   Schema.resolveAnnotations(schema)?.[AttributeDescriptorAnnotationId] as RuntimeAttributeConfig | undefined
+
+// Whether an attribute field is input-only (`resource: false`): declared for
+// the write projections, absent from the resource object.
+const isInputOnly = (field: Schema.Top): boolean => descriptorOf(field)?.resource === false
+
+/**
+ * Builds the **resource-object** field map for a resource's declared attribute
+ * fields: every attribute except the input-only ones (`resource: false`), each
+ * kept as declared (a plain schema, or the descriptor's resource-object field —
+ * the base schema, or an `optionalKey` of it for `resource: "optional"`). Used
+ * by {@link make} for the resource `Schema.Struct`.
+ *
+ * @since 0.13.0
+ * @category utilities
+ */
+export const resourceAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+  const result: Record<string, Schema.Top> = {}
+  for (const [key, field] of Object.entries(fields)) {
+    if (isInputOnly(field as Schema.Top)) continue
+    result[key] = field as Schema.Top
+  }
+  return result
+}
 
 /**
  * Builds the **create** field map for a resource's attribute fields: each
@@ -686,6 +731,24 @@ type UpdateValueSchema<S extends Schema.Top, Clearable extends boolean> = Cleara
     : S
 
 /**
+ * The **resource-object** attribute field map derived from a resource's declared
+ * attribute fields: every attribute except the input-only ones (`resource:
+ * false`), each as declared. This is what the resource `Schema.Struct` carries
+ * under `attributes`, so it is also what {@link AttributeKeys},
+ * {@link AttributesOf}, sparse fieldsets and the documents see; the declared map
+ * (with the input-only attributes) stays reachable as
+ * {@link DeclaredAttributesOf} / `declaredAttributes`.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type ResourceAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
+  readonly [K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly resource: false }
+    ? never
+    : K]: Attributes[K]
+}>
+
+/**
  * The **create** attribute field map derived from a resource's attribute fields:
  * each attribute projected by its descriptor — `create: false` removed,
  * `"optional"` made an optional key, `"required"` (and plain schema attributes)
@@ -697,7 +760,7 @@ type UpdateValueSchema<S extends Schema.Top, Clearable extends boolean> = Cleara
 export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
   readonly [K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly create: false } ? never : K]: ConfigOf<
     Attributes[K]
-  > extends AttributeConfig<infer S, infer C, any, any>
+  > extends AttributeConfig<infer S, infer C, any, any, any>
     ? C extends "optional"
       ? Schema.optionalKey<S>
       : S
@@ -715,7 +778,7 @@ export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields
 export type UpdateAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
   readonly [K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly update: false } ? never : K]: ConfigOf<
     Attributes[K]
-  > extends AttributeConfig<infer S, any, "optional", infer Cl>
+  > extends AttributeConfig<infer S, any, "optional", infer Cl, any>
     ? Schema.optional<UpdateValueSchema<S, Cl>>
     : Schema.optional<Attributes[K]>
 }>
@@ -725,7 +788,9 @@ export type UpdateAttributes<Attributes extends Schema.Struct.Fields> = AsFields
 // ---------------------------------------------------------------------------
 
 /**
- * The field map of a resource object schema.
+ * The field map of a resource object schema. `attributes` is the
+ * {@link ResourceAttributes} projection of the declared map: input-only
+ * attributes (`resource: false`) are not on the resource object.
  *
  * @since 0.1.0
  * @category type-level
@@ -739,7 +804,7 @@ export type ResourceFields<
 > = {
   readonly type: Schema.tag<Type>
   readonly id: IdSchema
-  readonly attributes: Schema.Struct<Attributes>
+  readonly attributes: Schema.Struct<ResourceAttributes<Attributes>>
   readonly relationships: Schema.optionalKey<Schema.Struct<RelationshipSchemas<Rels>>>
   readonly links: Schema.optionalKey<typeof ResourceLinks>
   readonly meta: Schema.optionalKey<Meta>
@@ -1022,6 +1087,13 @@ export interface Resource<
   readonly localIdentifier: LocalIdentifier<Type>
   /** The relationship descriptors, as declared. */
   readonly relationships: Rels
+  /**
+   * The attribute field map **as declared** — including input-only attributes
+   * (`resource: false`), which the resource object's `fields.attributes` omits.
+   * This is the map the write projections are derived from, and what
+   * {@link extend} inherits.
+   */
+  readonly declaredAttributes: Attributes
   /** Request body schema for creating this resource (no `id`, optional `lid`, required `one` relationships). */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>
   /** Request body schema for updating this resource (`id` required, attributes partial). */
@@ -1128,16 +1200,37 @@ export interface Any extends Schema.Top {
 export type AttributeKeys<R extends Any> = R extends Any ? keyof R["fields"]["attributes"]["fields"] & string : never
 
 /**
- * The attribute field map of a resource definition — the `Schema.Struct.Fields`
- * record it was defined with.
+ * The attribute field map of a resource definition's **resource object** — the
+ * `Schema.Struct.Fields` record under its `attributes` member: every declared
+ * attribute except the input-only ones (`resource: false`).
  *
  * The type-level counterpart of {@link attributes}; spread the runtime value
  * into another resource's `attributes` to reuse a resource's attribute schemas.
+ * For the map *as declared*, input-only attributes included, see
+ * {@link DeclaredAttributesOf}.
  *
  * @since 0.2.0
  * @category type-level
  */
 export type AttributesOf<R extends Any> = R["fields"]["attributes"]["fields"]
+
+/**
+ * The attribute field map of a resource definition **as declared** — the record
+ * passed to {@link make}, including input-only attributes (`resource: false`)
+ * that {@link AttributesOf} omits. The map the write projections and the Atomic
+ * `add` / `update` operations derive from.
+ *
+ * A {@link Family} declares nothing itself: its declared map is its
+ * resource-object map.
+ *
+ * @since 0.13.0
+ * @category type-level
+ */
+export type DeclaredAttributesOf<R extends Any> = R extends {
+  readonly declaredAttributes: infer Declared extends Schema.Struct.Fields
+}
+  ? Declared
+  : AttributesOf<R>
 
 /**
  * The per-attribute annotation bags of a resource definition: for each
@@ -1335,13 +1428,16 @@ export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<Attribu
   Object.keys(resource.fields.attributes.fields) as unknown as ReadonlyArray<AttributeKeys<R>>
 
 /**
- * The attribute field map of a resource definition — the `Schema.Struct.Fields`
- * record it was defined with.
+ * The attribute field map of a resource definition's **resource object** — the
+ * `Schema.Struct.Fields` record under its `attributes` member. Every declared
+ * attribute is here except the input-only ones (`resource: false`), which are
+ * not on the resource object; {@link declaredAttributes} returns the map as
+ * declared, those included.
  *
  * Spread the result into another resource's `attributes` to reuse a resource's
  * attribute schemas (the runtime counterpart of {@link AttributesOf}). To
- * inherit a resource's attributes *and* relationships wholesale, reach for
- * {@link extend} instead.
+ * inherit a resource's attributes *and* relationships wholesale — input-only
+ * attributes included — reach for {@link extend} instead.
  *
  * @example
  * ```ts
@@ -1363,6 +1459,40 @@ export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<Attribu
  */
 export const attributes = <R extends Any>(resource: R): AttributesOf<R> =>
   resource.fields.attributes.fields as AttributesOf<R>
+
+/**
+ * The attribute field map of a resource definition **as declared** — the record
+ * passed to {@link make}, including input-only attributes (`resource: false`)
+ * that {@link attributes} omits because they are not on the resource object.
+ * The runtime counterpart of {@link DeclaredAttributesOf}; what {@link extend}
+ * inherits and the Atomic `add` / `update` operations project from.
+ *
+ * For a {@link Family}, which declares nothing itself, this is its resource-object
+ * map.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Upload = Resource.make("uploads", {
+ *   attributes: {
+ *     fileName: Schema.NonEmptyString,
+ *     // input-only: accepted at create, never on the resource object
+ *     file: Resource.attribute(Schema.Uint8Array, { resource: false, update: false })
+ *   }
+ * })
+ *
+ * Object.keys(Resource.attributes(Upload)) // ["fileName"]
+ * Object.keys(Resource.declaredAttributes(Upload)) // ["fileName", "file"]
+ * ```
+ *
+ * @since 0.13.0
+ * @category accessors
+ */
+export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttributesOf<R> =>
+  ((resource as { readonly declaredAttributes?: Schema.Struct.Fields }).declaredAttributes ??
+    resource.fields.attributes.fields) as DeclaredAttributesOf<R>
 
 /**
  * The per-attribute annotation bags of a resource definition: a record from
@@ -2061,6 +2191,36 @@ export const sortable = <R extends Any>(resource: R): ReadonlyArray<SortableKeys
   return [...keys] as unknown as ReadonlyArray<SortableKeys<R>>
 }
 
+// Refuses, at definition time and naming the attribute, an input-only
+// descriptor (`resource: false`) that declares nothing — excluded from the
+// resource object *and* every write projection — or that declares a `filter` /
+// `sort`: an attribute absent from the resource object cannot be filtered or
+// sorted on.
+const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void => {
+  for (const [key, field] of Object.entries(fields)) {
+    const descriptor = descriptorOf(field as Schema.Top)
+    if (descriptor === undefined || descriptor.resource !== false) continue
+    if (descriptor.create === false && descriptor.update === false) {
+      throw new Error(
+        `Resource.make("${type}"): attribute "${key}" declares resource: false with create: false and update: false, ` +
+          "so it would appear nowhere; keep a create or update projection, or drop the attribute"
+      )
+    }
+    if (declarationOf(field as Schema.Top, Filter.AnnotationId) !== undefined) {
+      throw new Error(
+        `Resource.make("${type}"): attribute "${key}" is input-only (resource: false) but declared filterable; ` +
+          "an attribute absent from the resource object cannot be filtered on"
+      )
+    }
+    if (declarationOf(field as Schema.Top, Sort.AnnotationId) !== undefined) {
+      throw new Error(
+        `Resource.make("${type}"): attribute "${key}" is input-only (resource: false) but declared sortable; ` +
+          "an attribute absent from the resource object cannot be sorted on"
+      )
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The Resource constructor
 // ---------------------------------------------------------------------------
@@ -2123,20 +2283,27 @@ export const make = <
   const localIdentifier = LocalIdentifier(type)
   const relationshipSchemas = Relationship.makeRelationshipSchemas(relationships)
   const schemaByKey = relationshipSchemas as Record<string, Schema.Top>
-  const attributes = Schema.Struct(options.attributes)
+  // The resource object carries the declared attributes minus the input-only
+  // ones (`resource: false`); a descriptor that declares nothing anywhere, or
+  // declares an input-only attribute filterable / sortable, is refused here.
+  validateDescriptors(type, options.attributes)
+  const attributes = Schema.Struct(resourceAttributeFields(options.attributes)) as unknown as Schema.Struct<
+    ResourceAttributes<Attributes>
+  >
   const relationshipsStruct = Schema.Struct(relationshipSchemas)
 
   // Per-attribute projections: each attribute may carry a descriptor (from
   // `attribute` / `readOnlyAttribute`) controlling how it appears in the write
   // projections. A plain schema attribute projects with the read-write defaults.
+  // They derive from the *declared* map, so input-only attributes project too.
   const createAttributes = Schema.Struct(createAttributeFields(options.attributes))
   const updateAttributes = Schema.Struct(updateAttributeFields(options.attributes))
 
   // Filter declarations are checked now, not on first use: an attribute declared
   // filterable whose encoded form has no literal codec, or a relationship
   // declaring an operator it cannot admit, throws here, naming the key.
-  filterableCache.set(attributes, filterableFields(type, options.attributes, relationships))
-  sortableCache.set(attributes, sortableKeys(type, options.attributes))
+  filterableCache.set(attributes, filterableFields(type, attributes.fields, relationships))
+  sortableCache.set(attributes, sortableKeys(type, attributes.fields))
 
   const fields: ResourceFields<Type, Attributes, Rels, Meta, IdSchema> = {
     type: Schema.tag(type),
@@ -2222,6 +2389,7 @@ export const make = <
     identifier,
     localIdentifier,
     relationships,
+    declaredAttributes: options.attributes,
     createPayload,
     updatePayload,
     createInput,
@@ -2428,7 +2596,9 @@ export const extend = <
     options?.id ?? (options?.inheritId === true ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`)) : undefined)
   return make(type, {
     id,
-    attributes: { ...base.fields.attributes.fields, ...options?.attributes },
+    // The *declared* map, so the base's input-only attributes are inherited too
+    // (the resource-object fields would have dropped them).
+    attributes: { ...base.declaredAttributes, ...options?.attributes },
     relationships: { ...base.relationships, ...options?.relationships },
     meta: (options?.meta ?? base.fields.meta.schema) as Meta
   }) as unknown as Resource<

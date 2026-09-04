@@ -755,3 +755,52 @@ describe("per-attribute descriptors in operations", () => {
     expectTypeOf<UpdateAttrs>().toHaveProperty("title")
   })
 })
+
+describe("input-only attributes in operations", () => {
+  const Upload = Resource("uploads", {
+    attributes: {
+      fileName: Schema.NonEmptyString,
+      // accepted at create only, never on the resource object
+      file: attribute(Schema.Uint8Array, { resource: false, update: false }),
+      // accepted at create and update, never on the resource object
+      secret: attribute(Schema.String, { resource: false })
+    }
+  })
+  const bytes = new Uint8Array([1, 2, 3])
+
+  it("accepts input-only attributes in the add operation", () => {
+    type AddAttrs = Atomic.AddOperation<typeof Upload>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs>().toEqualTypeOf<{
+      readonly fileName: string
+      readonly file: Uint8Array
+      readonly secret: string
+    }>()
+    const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
+      op: "add",
+      data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } }
+    })
+    expect(decoded.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" })
+    // required: the add operation demands `file`, as `createPayload` does
+    expect(() =>
+      Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
+        op: "add",
+        data: { type: "uploads", attributes: { fileName: "a.png", secret: "s" } }
+      })
+    ).toThrow()
+    // the constructor is typed from the declared map too
+    const op = Atomic.add(Upload, { attributes: { fileName: "a.png", file: bytes, secret: "s" } })
+    expectTypeOf(op.data.attributes.file).toEqualTypeOf<Uint8Array>()
+  })
+
+  it("projects input-only attributes into the update operation per `update`", () => {
+    type UpdateAttrs = NonNullable<Atomic.UpdateOperation<typeof Upload>["Type"]["data"]["attributes"]>
+    expectTypeOf<UpdateAttrs>().toHaveProperty("secret")
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("file")
+    const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Upload))({
+      op: "update",
+      data: { type: "uploads", id: "1", attributes: { secret: "t", file: bytes } }
+    })
+    // `secret` is accepted; `file` (update: false) is dropped, not an error
+    expect(decoded.data.attributes).toEqual({ secret: "t" })
+  })
+})
