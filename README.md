@@ -303,6 +303,12 @@ const Article = Resource.make("articles", {
 // Article.updatePayload … data.attributes  → { title?, summary? }        (no createdAt, no slug)
 ```
 
+An optional create attribute (`create: "optional"`) projects as `Schema.optional`, exactly as every
+update attribute does: the key may be absent, or present with a value or an explicit `undefined`. So
+a caller that builds `{ summary: input.summary?.trim() || undefined }` type-checks against
+`createInput` and `updateInput` alike (also under `exactOptionalPropertyTypes`). On a JSON wire an
+explicit `undefined` and an absent key are the same thing — the attribute is not supplied.
+
 The descriptor options (all optional; the defaults reproduce a plain `Schema` attribute):
 
 | option      | values                                          | controls                                                             |

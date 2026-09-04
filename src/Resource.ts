@@ -235,7 +235,9 @@ type AttributeConfigKey = "~@thomasfosterau/effect-jsonapi/attribute"
  * and flat inputs):
  *
  *   - `"required"` — a required key (create only);
- *   - `"optional"` — an optional key;
+ *   - `"optional"` — a `Schema.optional` key: absent, or present with a value
+ *     or `undefined` (an explicit `undefined` is "not supplied", and collapses
+ *     into an absent key on a JSON wire);
  *   - `false` — excluded from the projection entirely.
  *
  * @since 0.5.0
@@ -431,7 +433,10 @@ const declare = (
  *     and cannot carry a `filter` / `sort` declaration; {@link make} throws
  *     otherwise, naming the attribute.
  *   - `create` — presence in `createPayload` / `createInput`: `"required"`
- *     (default), `"optional"`, or `false` (excluded).
+ *     (default), `"optional"` (a `Schema.optional` key — absent, a value, or an
+ *     explicit `undefined`, matching the update projection's shape so the same
+ *     `{ x: maybeUndefined }` input fits both; on a JSON wire `undefined` and
+ *     absent are the same), or `false` (excluded).
  *   - `update` — presence in `updatePayload` / `updateInput`: `"optional"`
  *     (default, tri-state) or `false` (excluded).
  *   - `clearable` — whether the update projection additionally accepts `null`
@@ -666,9 +671,10 @@ export const resourceAttributeFields = (fields: Schema.Struct.Fields): Record<st
 /**
  * Builds the **create** field map for a resource's attribute fields: each
  * attribute projected by its descriptor (`create: false` excluded, `"optional"`
- * an optional key, `"required"` a required key); a plain schema attribute is
- * required. Used by `createPayload` / `createInput` and the Atomic `add`
- * operation.
+ * a `Schema.optional` — the key may be absent or its value `undefined`, as in
+ * the update projection — `"required"` a required key); a plain schema
+ * attribute is required. Used by `createPayload` / `createInput` and the
+ * Atomic `add` operation.
  *
  * @since 0.5.0
  * @category utilities
@@ -682,7 +688,7 @@ export const createAttributeFields = (fields: Schema.Struct.Fields): Record<stri
       continue
     }
     if (descriptor.create === false) continue
-    result[key] = descriptor.create === "optional" ? Schema.optionalKey(descriptor.schema) : descriptor.schema
+    result[key] = descriptor.create === "optional" ? Schema.optional(descriptor.schema) : descriptor.schema
   }
   return result
 }
@@ -751,8 +757,16 @@ export type ResourceAttributes<Attributes extends Schema.Struct.Fields> = AsFiel
 /**
  * The **create** attribute field map derived from a resource's attribute fields:
  * each attribute projected by its descriptor — `create: false` removed,
- * `"optional"` made an optional key, `"required"` (and plain schema attributes)
- * a required key.
+ * `"optional"` made a `Schema.optional` (the key may be absent, or present as
+ * `undefined` — the same shape {@link UpdateAttributes} gives every attribute,
+ * so a caller building `{ x: maybeUndefined }` type-checks against both),
+ * `"required"` (and plain schema attributes) a required key.
+ *
+ * **On the wire.** JSON cannot carry `undefined`, so over a JSON:API HTTP body an
+ * explicit `undefined` and an absent key are the same thing — the attribute is
+ * simply not supplied. The distinction exists in-process and for codec-based
+ * transports (RPC / remote functions) that preserve `undefined`, exactly as for
+ * {@link PartialAttributes}.
  *
  * @since 0.5.0
  * @category type-level
@@ -762,7 +776,7 @@ export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields
     Attributes[K]
   > extends AttributeConfig<infer S, infer C, any, any, any>
     ? C extends "optional"
-      ? Schema.optionalKey<S>
+      ? Schema.optional<S>
       : S
     : Attributes[K]
 }>

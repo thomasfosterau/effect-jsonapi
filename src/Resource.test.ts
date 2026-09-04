@@ -1603,7 +1603,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
       readonly fileName: string
       readonly file: Uint8Array
       readonly secret: string
-      readonly note?: string
+      readonly note?: string | undefined
     }>()
     type CreateAttrs = (typeof Upload.createPayload.Type)["data"]["attributes"]
     expectTypeOf<CreateAttrs>().toEqualTypeOf<CreateIn>()
@@ -1742,5 +1742,76 @@ describe("Resource.attribute with resource: false (input-only)", () => {
         attributes: { file: attribute(Schema.String.pipe(Sort.able()), { resource: false }) }
       })
     ).toThrow(/attribute "file" is input-only \(resource: false\) but declared sortable/)
+  })
+})
+
+describe('Resource.attribute with create: "optional" (Schema.optional, as update)', () => {
+  const Note = Resource("notes", {
+    attributes: {
+      title: Schema.NonEmptyString,
+      body: attribute(Schema.String, { create: "optional" }),
+      summary: attribute(Schema.NullOr(Schema.String), { create: "optional" })
+    }
+  })
+
+  it("types the optional create field as value | undefined, matching updateInput", () => {
+    type CreateIn = typeof Note.createInput.Type
+    expectTypeOf<CreateIn>().toEqualTypeOf<{
+      readonly title: string
+      readonly body?: string | undefined
+      readonly summary?: string | null | undefined
+    }>()
+    // the field schema itself is `Schema.optional` (a strict `optionalKey` would type as `string`)
+    expectTypeOf<(typeof Note.createInput.fields.body)["Type"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf(Note.createInput.fields.body).toEqualTypeOf<Schema.optional<Schema.String>>()
+    // the same shape as the update projection gives the attribute
+    expectTypeOf<(typeof Note.createInput.fields.body)["Type"]>().toEqualTypeOf<
+      (typeof Note.updateInput.fields.body)["Type"]
+    >()
+    // an explicit `undefined` is assignable — the form-adapter case of the issue
+    const maybe: string | undefined = undefined
+    const input: CreateIn = { title: "t", body: maybe }
+    expect(input.body).toBeUndefined()
+    // a required attribute is untouched
+    expectTypeOf<(typeof Note.createInput.fields.title)["Type"]>().toEqualTypeOf<string>()
+  })
+
+  it("decodes an absent key, a value, and an explicit undefined through createInput", () => {
+    expect(Schema.decodeUnknownSync(Note.createInput)({ title: "t" })).toEqual({ title: "t" })
+    expect(Schema.decodeUnknownSync(Note.createInput)({ title: "t", body: "b" })).toEqual({ title: "t", body: "b" })
+    const explicit = Schema.decodeUnknownSync(Note.createInput)({ title: "t", body: undefined })
+    expect(explicit).toEqual({ title: "t", body: undefined })
+    expect("body" in explicit).toBe(true)
+    // the nullable one still takes null
+    expect(Schema.decodeUnknownSync(Note.createInput)({ title: "t", summary: null })).toEqual({
+      title: "t",
+      summary: null
+    })
+  })
+
+  it("decodes the same three states through createPayload", () => {
+    type CreateAttrs = (typeof Note.createPayload.Type)["data"]["attributes"]
+    expectTypeOf<CreateAttrs>().toEqualTypeOf<typeof Note.createInput.Type>()
+    const decode = Schema.decodeUnknownSync(Note.createPayload)
+    expect(decode({ data: { type: "notes", attributes: { title: "t" } } }).data.attributes).toEqual({ title: "t" })
+    expect(decode({ data: { type: "notes", attributes: { title: "t", body: "b" } } }).data.attributes).toEqual({
+      title: "t",
+      body: "b"
+    })
+    expect(decode({ data: { type: "notes", attributes: { title: "t", body: undefined } } }).data.attributes).toEqual({
+      title: "t",
+      body: undefined
+    })
+  })
+
+  it("leaves updateInput / updatePayload unchanged", () => {
+    type UpdateIn = typeof Note.updateInput.Type
+    expectTypeOf<UpdateIn["body"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<UpdateIn["summary"]>().toEqualTypeOf<string | null | undefined>()
+    expect(Schema.decodeUnknownSync(Note.updateInput)({ id: "1", body: undefined })).toEqual({
+      id: "1",
+      body: undefined
+    })
+    expect(Schema.decodeUnknownSync(Note.updateInput)({ id: "1", summary: null })).toEqual({ id: "1", summary: null })
   })
 })

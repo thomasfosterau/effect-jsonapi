@@ -804,3 +804,38 @@ describe("input-only attributes in operations", () => {
     expect(decoded.data.attributes).toEqual({ secret: "t" })
   })
 })
+
+describe("optional create attributes in the add operation", () => {
+  const Note = Resource("notes", {
+    attributes: {
+      title: Schema.NonEmptyString,
+      body: attribute(Schema.String, { create: "optional" })
+    }
+  })
+  const Add = Atomic.AddOperation(Note)
+
+  it("accepts an absent key, a value, or an explicit undefined (Schema.optional, as update does)", () => {
+    type AddAttrs = Atomic.AddOperation<typeof Note>["Type"]["data"]["attributes"]
+    expectTypeOf<AddAttrs["body"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<AddAttrs>().toEqualTypeOf<{ readonly title: string; readonly body?: string | undefined }>()
+    // the field schema itself is `Schema.optional`, so its own `Type` admits `undefined`
+    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.body)["Type"]>().toEqualTypeOf<string | undefined>()
+
+    const absent = Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "notes", attributes: { title: "t" } } })
+    expect(absent.data.attributes).toEqual({ title: "t" })
+    const present = Schema.decodeUnknownSync(Add)({
+      op: "add",
+      data: { type: "notes", attributes: { title: "t", body: "b" } }
+    })
+    expect(present.data.attributes).toEqual({ title: "t", body: "b" })
+    const explicit = Schema.decodeUnknownSync(Add)({
+      op: "add",
+      data: { type: "notes", attributes: { title: "t", body: undefined } }
+    })
+    expect(explicit.data.attributes).toEqual({ title: "t", body: undefined })
+
+    // the constructor accepts the explicit undefined too
+    const op = Atomic.add(Note, { attributes: { title: "t", body: undefined } })
+    expect(op.data.attributes).toEqual({ title: "t", body: undefined })
+  })
+})
