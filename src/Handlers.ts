@@ -170,24 +170,34 @@ type Simplify<T> = { readonly [K in keyof T]: T[K] } & {}
  * {@link collection} return, named so consumers can annotate their own
  * document-assembling functions instead of hand-rolling the envelope type.
  *
- * The optional `jsonapi` member (the top-level `jsonapi` object) is included so
- * a builder that stamps it still conforms; the {@link data}/{@link collection}
- * builders themselves omit it.
+ * The `jsonapi` member is *conditional* on `J`, the same way `included` is
+ * conditional on `Included` and `meta` on `M`: it is present (and required,
+ * not optional — a builder that infers `J` from an argument has one to put
+ * there) only when a caller actually passed the `jsonapi` option, so the
+ * return type of `Handlers.data(article, { jsonapi: Document.v1_1 })` carries
+ * `jsonapi: Document.JsonApiObjectValue` and the return type of
+ * `Handlers.data(article)` has no `jsonapi` member at all — no cast needed
+ * either way.
  *
  * The type stays *conditional* on its generics so TypeScript only infers
- * `Included` / `M` from arguments — never from the expected (contextual) return
- * type of a handler, which breaks down inside `pipe(Effect.map(...))` chains.
+ * `Included` / `M` / `J` from arguments — never from the expected (contextual)
+ * return type of a handler, which breaks down inside `pipe(Effect.map(...))`
+ * chains.
  *
  * @since 0.3.0
  * @category models
  */
-export type DocumentValue<Data, Included extends ResourceValue = never, M extends MetaValue = never> = Simplify<
-  { readonly data: Data; readonly links?: LinksValue; readonly jsonapi?: JsonApiObjectValue } & ([Included] extends [
-    never
-  ]
+export type DocumentValue<
+  Data,
+  Included extends ResourceValue = never,
+  M extends MetaValue = never,
+  J extends JsonApiObjectValue = never
+> = Simplify<
+  { readonly data: Data; readonly links?: LinksValue } & ([Included] extends [never]
     ? {}
     : { readonly included?: ReadonlyArray<Included> }) &
-    ([M] extends [never] ? {} : { readonly meta?: M })
+    ([M] extends [never] ? {} : { readonly meta?: M }) &
+    ([J] extends [never] ? {} : { readonly jsonapi: J })
 >
 
 // Appends a query string (no leading `?`) to a path, whichever separator the
@@ -227,6 +237,7 @@ const build = (
     | {
         readonly included?: ReadonlyArray<ResourceValue>
         readonly meta?: MetaValue
+        readonly jsonapi?: JsonApiObjectValue
         readonly self?: string
         readonly query?: string | ReadonlyArray<Pair>
         readonly links?: LinksValue
@@ -243,19 +254,33 @@ const build = (
     data,
     ...(included !== undefined ? { included } : {}),
     ...(links !== undefined ? { links } : {}),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {})
+    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {})
   }
 }
 
 /**
- * Builds a single-resource document value: `{ data, included?, links?, meta? }`.
+ * Builds a single-resource document value: `{ data, included?, links?, meta?, jsonapi? }`.
  *
  * Included resources are deduplicated and checked for full linkage.
+ *
+ * Pass `jsonapi` to stamp the top-level `jsonapi` object — `Document.v1_1` to
+ * advertise JSON:API 1.1, or `Atomic.jsonapi` for the atomic-operations
+ * extension — and the return type carries `jsonapi` (typed as
+ * {@link JsonApiObjectValue}) only when you actually pass it, so no cast is
+ * needed at the call site either way.
+ *
+ * **Not emitted by default.** A JSON:API 1.1 server arguably should advertise
+ * the version it implements on every document, but defaulting it here would
+ * silently add a member to every response body this library already produces
+ * — a behavioural change disguised as a bug fix. Advertising the version is
+ * therefore opt-in: pass `jsonapi: Document.v1_1` on the responses where you
+ * want it.
  *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
@@ -293,6 +318,7 @@ const build = (
  *       Effect.map((article) =>
  *         Handlers.data(article, {
  *           included: query.include?.includes("author") ? [author] : [],
+ *           jsonapi: Document.v1_1,
  *           self: `/articles/${article.id}`
  *         })
  *       )
@@ -306,22 +332,25 @@ const build = (
 export const data = <
   R extends ResourceValue | null,
   const Included extends ResourceValue = never,
-  const M extends MetaValue = never
+  const M extends MetaValue = never,
+  const J extends JsonApiObjectValue = never
 >(
   resource: R,
   options?: {
     readonly included?: ReadonlyArray<Included>
     readonly meta?: M
+    /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
+    readonly jsonapi?: J
     readonly self?: string
     readonly links?: LinksValue
     /** Disable the full-linkage check (it is on by default). */
     readonly checkLinkage?: boolean
   }
-): DocumentValue<R, Included, M> =>
-  build(resource, resource === null ? [] : [resource], options) as DocumentValue<R, Included, M>
+): DocumentValue<R, Included, M, J> =>
+  build(resource, resource === null ? [] : [resource], options) as DocumentValue<R, Included, M, J>
 
 /**
- * Builds a collection document value: `{ data: [...], included?, links?, meta? }`.
+ * Builds a collection document value: `{ data: [...], included?, links?, meta?, jsonapi? }`.
  *
  * Included resources are deduplicated and checked for full linkage.
  *
@@ -335,10 +364,14 @@ export const data = <
  * `query` option instead ({@link offsetPaginationLinks}): pass the pairs
  * there, not here.
  *
+ * As with {@link data}, `jsonapi` (e.g. `Document.v1_1`) is only emitted, and
+ * only narrows into the return type, when you pass it — see {@link data} for
+ * why it is opt-in rather than a default.
+ *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Handlers, Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Handlers, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
@@ -369,12 +402,14 @@ export const data = <
  *     )
  *   )
  *
- * // …or, unpaginated, the canonical query on the collection's own `self` link
+ * // …or, unpaginated, the canonical query on the collection's own `self` link,
+ * // advertising the JSON:API version this server implements
  * Handlers.collection(page, {
+ *   jsonapi: Document.v1_1,
  *   self: "/articles",
  *   query: Query.canonicalPairs(listQuery)({ sort: [{ field: "title", direction: "desc" }] })
  * })
- * // → { data: [...], links: { self: "/articles?sort=-title" } }
+ * // → { data: [...], links: { self: "/articles?sort=-title" }, jsonapi: { version: "1.1" } }
  * ```
  *
  * @since 0.1.0
@@ -383,12 +418,15 @@ export const data = <
 export const collection = <
   R extends ResourceValue,
   const Included extends ResourceValue = never,
-  const M extends MetaValue = never
+  const M extends MetaValue = never,
+  const J extends JsonApiObjectValue = never
 >(
   resources: ReadonlyArray<R>,
   options?: {
     readonly included?: ReadonlyArray<Included>
     readonly meta?: M
+    /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
+    readonly jsonapi?: J
     readonly self?: string
     /**
      * The request's canonical query — `Query.canonicalPairs(schema)(query)`
@@ -402,8 +440,8 @@ export const collection = <
     /** Disable the full-linkage check (it is on by default). */
     readonly checkLinkage?: boolean
   }
-): DocumentValue<ReadonlyArray<R>, Included, M> =>
-  build(resources, resources, options) as DocumentValue<ReadonlyArray<R>, Included, M>
+): DocumentValue<ReadonlyArray<R>, Included, M, J> =>
+  build(resources, resources, options) as DocumentValue<ReadonlyArray<R>, Included, M, J>
 
 // ---------------------------------------------------------------------------
 // Relationship linkage & links
@@ -484,14 +522,18 @@ export type LinkageValue = ResourceIdentifierValue | ReadonlyArray<ResourceIdent
 
 // The builder's return type is conditional on its generics for the same
 // reason as `DocumentValue` above.
-type LinkageDocumentValue<Data, M extends MetaValue> = Simplify<
-  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never] ? {} : { readonly meta?: M })
+type LinkageDocumentValue<Data, M extends MetaValue, J extends JsonApiObjectValue = never> = Simplify<
+  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never] ? {} : { readonly meta?: M }) &
+    ([J] extends [never] ? {} : { readonly jsonapi: J })
 >
 
 /**
  * Builds a relationship-linkage document value — what relationship-endpoint
  * handlers (`fetchRelationship` / `updateRelationship` / `addRelationship`)
- * return: `{ data, links?, meta? }` where `data` is resource linkage.
+ * return: `{ data, links?, meta?, jsonapi? }` where `data` is resource linkage.
+ *
+ * As with {@link data}, `jsonapi` is only emitted, and only narrows into the
+ * return type, when you pass it — see {@link data} for why it is opt-in.
  *
  * @example
  * ```ts
@@ -538,15 +580,21 @@ type LinkageDocumentValue<Data, M extends MetaValue> = Simplify<
  * @since 0.1.0
  * @category constructors
  */
-export const linkage = <const Data extends LinkageValue, const M extends MetaValue = never>(
+export const linkage = <
+  const Data extends LinkageValue,
+  const M extends MetaValue = never,
+  const J extends JsonApiObjectValue = never
+>(
   data: Data,
   options?: {
     readonly meta?: M
+    /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
+    readonly jsonapi?: J
     readonly self?: string
     readonly related?: string
     readonly links?: LinksValue
   }
-): LinkageDocumentValue<Data, M> => {
+): LinkageDocumentValue<Data, M, J> => {
   const links: LinksValue | undefined =
     options?.self !== undefined || options?.related !== undefined
       ? {
@@ -558,8 +606,9 @@ export const linkage = <const Data extends LinkageValue, const M extends MetaVal
   return {
     data,
     ...(links !== undefined ? { links } : {}),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {})
-  } as LinkageDocumentValue<Data, M>
+    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {})
+  } as LinkageDocumentValue<Data, M, J>
 }
 
 // ---------------------------------------------------------------------------
