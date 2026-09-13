@@ -45,6 +45,7 @@
  */
 import type { SchemaAST, Types } from "effect"
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
+import * as ApiError from "./ApiError.js"
 import type { Ast, Node } from "./Filter.js"
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js"
 import type { Pair as CanonicalPair } from "./internal/canonical.js"
@@ -517,6 +518,103 @@ export const Include = <R extends Any, const O extends IncludeOptions<R> | undef
         IncludePathsOf<R, O>
       >
     )
+  )
+
+/**
+ * One requested `include` path, already split on `.` into its segments — the
+ * parse {@link validateIncludePaths} performs once, so a caller walking the
+ * relationship graph (a resolver) doesn't re-tokenise a path it already
+ * validated.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface IncludePathSegments {
+  /** The path as requested, e.g. `"comments.author"`. */
+  readonly path: string
+  /** The path split on `.`, e.g. `["comments", "author"]`. */
+  readonly segments: ReadonlyArray<string>
+}
+
+/**
+ * Options for {@link validateIncludePaths}: the paths actually supported, and
+ * the maximum number of hops a path may have.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface ValidateIncludePathsOptions {
+  /** The whole set of supported paths, matched against the full dotted path. */
+  readonly includable: ReadonlyArray<string>
+  /** The maximum number of `.`-separated hops a path may have. */
+  readonly maxDepth: number
+}
+
+/**
+ * Validates requested `include` paths against a runtime whitelist and depth
+ * cap, failing with {@link ApiError.UnsupportedIncludeDepth} or
+ * {@link ApiError.UnsupportedIncludePath}.
+ *
+ * Depth is checked before membership: an over-deep path fails with
+ * `UnsupportedIncludeDepth` even when it also isn't in `includable`, since
+ * depth and membership answer different questions — a caller that asked for
+ * one legal hop too many needs to be told about the cap, not told its path
+ * doesn't exist. Membership is matched against the whole dotted path, not
+ * just its first segment, so `"comments.author"` is only legal when the
+ * *whole* path is includable, not merely `"comments"`.
+ *
+ * Unlike {@link Include} — a closed `Schema.Literals` derived once, at
+ * schema-build time, from a resource's relationship graph — this validates a
+ * *runtime* list of requested paths against a runtime whitelist, for a
+ * resolver that walks arbitrary requested paths rather than a fixed schema.
+ * It returns each path's already-split segments so that walk doesn't
+ * re-tokenise a path it just validated.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const validated = Query.validateIncludePaths(["author", "comments.author"], {
+ *   includable: ["author", "comments", "comments.author"],
+ *   maxDepth: 2
+ * }).pipe(Effect.runSync)
+ * // → [
+ * //     { path: "author", segments: ["author"] },
+ * //     { path: "comments.author", segments: ["comments", "author"] }
+ * //   ]
+ *
+ * // an over-deep path fails with UnsupportedIncludeDepth even though it also
+ * // isn't in `includable` — depth is checked first
+ * const rejected = Query.validateIncludePaths(["comments.author.employer"], {
+ *   includable: ["author", "comments"],
+ *   maxDepth: 2
+ * }).pipe(Effect.flip, Effect.runSync)
+ * // → UnsupportedIncludeDepth({ path: "comments.author.employer", maxDepth: 2 })
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const validateIncludePaths = (
+  requested: ReadonlyArray<string>,
+  options: ValidateIncludePathsOptions
+): Effect.Effect<
+  ReadonlyArray<IncludePathSegments>,
+  ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath
+> =>
+  Effect.forEach(
+    requested,
+    (path): Effect.Effect<IncludePathSegments, ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath> => {
+      const segments = path.split(".")
+      if (segments.length > options.maxDepth) {
+        return Effect.fail(new ApiError.UnsupportedIncludeDepth({ path, maxDepth: options.maxDepth }))
+      }
+      if (!options.includable.includes(path)) {
+        return Effect.fail(new ApiError.UnsupportedIncludePath({ path, includablePaths: options.includable }))
+      }
+      return Effect.succeed({ path, segments })
+    }
   )
 
 /**
