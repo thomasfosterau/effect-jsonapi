@@ -538,7 +538,9 @@ describe("blog example: spec compliance on the wire", () => {
       })
     ).toBe(true)
     // Accept in which every JSON:API instance has non-ext/profile parameters → 406
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(false)
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json; charset=utf-8")).toBe(false)
+    // `q` is the entry's weight (RFC 9110 §12.4.2), not a media type parameter
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(true)
     expect(Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true)
     expect(Middleware.acceptIsAcceptable("*/*")).toBe(true)
   })
