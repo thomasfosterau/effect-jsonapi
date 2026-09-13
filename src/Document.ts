@@ -83,6 +83,47 @@ export const LinkObject = Schema.Struct({
 export const Link = Schema.Union([Url, LinkObject])
 
 /**
+ * The decoded type of a {@link Link}.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export type Link = typeof Link.Type
+
+/**
+ * Extracts the wire string from a {@link Link}: a `string` passes through, a
+ * `URL` becomes its `.href`, and a {@link LinkObject} recurses on its own
+ * `href` member. Also accepts `undefined` so it composes directly with an
+ * optional link (`resource.links?.self`) without a separate guard.
+ *
+ * The decoded type of any link is `string | URL | LinkObject` — every
+ * resource derived from `Resource.make` inherits it — so code that only wants
+ * the URI a link points at otherwise has to re-derive this narrowing itself.
+ * `href` is that narrowing, done once.
+ *
+ * @example
+ * ```ts
+ * import { Document } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Document.href("/articles/1") // "/articles/1"
+ * Document.href(new URL("https://example.com/articles/1")) // "https://example.com/articles/1"
+ * Document.href({ href: "https://example.com/articles/1" }) // "https://example.com/articles/1"
+ * Document.href(undefined) // undefined
+ * ```
+ *
+ * @since 0.15.0
+ * @category accessors
+ */
+export function href(link: Link): string
+export function href(link: Link | undefined): string | undefined
+export function href(link: Link | undefined): string | undefined {
+  if (link === undefined) return undefined
+  if (typeof link === "string") return link
+  if (link instanceof URL) return link.href
+  return href(link.href)
+}
+
+/**
  * A resource object's `links`: the spec standardises `self`.
  *
  * @since 0.1.0

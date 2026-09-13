@@ -69,6 +69,39 @@ describe("links decode URLs", () => {
 })
 
 // ---------------------------------------------------------------------------
+// href narrows a Link to its wire string
+// ---------------------------------------------------------------------------
+
+describe("href", () => {
+  it("returns a string as-is", () => {
+    expect(Document.href("/articles/1")).toBe("/articles/1")
+  })
+
+  it("reads a URL's .href", () => {
+    expect(Document.href(new URL("https://example.com/articles/1"))).toBe("https://example.com/articles/1")
+  })
+
+  it("reads a LinkObject's href, string or URL", () => {
+    expect(Document.href({ href: "https://example.com/articles/1" })).toBe("https://example.com/articles/1")
+    expect(Document.href({ href: new URL("https://example.com/articles/1") })).toBe("https://example.com/articles/1")
+    expect(Document.href({ href: "/articles/1" })).toBe("/articles/1")
+  })
+
+  it("passes undefined through", () => {
+    expect(Document.href(undefined)).toBeUndefined()
+  })
+
+  it("narrows a decoded TopLevelLinks member regardless of which arm it decoded to", () => {
+    const links = Schema.decodeUnknownSync(Document.TopLevelLinks)({
+      self: "/articles?page[offset]=0",
+      related: "https://example.com/articles"
+    })
+    expect(Document.href(links.self)).toBe("/articles?page[offset]=0")
+    expect(Document.href(links.related)).toBe("https://example.com/articles")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // jsonapi object ext / profile are URIs
 // ---------------------------------------------------------------------------
 
