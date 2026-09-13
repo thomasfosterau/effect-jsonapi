@@ -16,6 +16,34 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 `effect` is a peer dependency (`>=4.0.0-beta.104`). Node.js 20 or newer is required.
 
+### Importing without the HTTP surface
+
+The package root exports everything and is the import you want by default. It reaches
+`effect/unstable/httpapi`, because the error classes, endpoints, groups and middleware are built on
+Effect's `HttpApi`.
+
+Consumers that only want JSON:API's **wire types without the server** — a client decoding documents,
+a loader mapping them into something else, a CLI or code generator producing them — can import the
+same modules from a schema-only subpath whose single peer is `effect`:
+
+```ts
+import { Document, Query, Resource } from "@thomasfosterau/effect-jsonapi/schema"
+```
+
+`/schema` re-exports `Atomic`, `Client`, `Document`, `Filter`, `Handlers`, `Lid`, `Query`,
+`Relationship`, `Resource`, `Sort` and `MEDIA_TYPE` — the modules whose import graph is `effect`
+alone. It leaves out the four that bind JSON:API to `HttpApi`: `ApiError`, `Endpoint`, `Group` and
+`Middleware`. Error _documents_ are still covered, since `Document.ErrorDocument` and
+`Document.ErrorObject` are document schemas; it is `ApiError`'s error _classes_ that carry HTTP
+status and content-type annotations.
+
+This matters beyond bundle size. `effect/unstable/*` is pre-stable, so an unnecessary unstable peer
+is a version-compatibility surface: tree-shaking may drop the code, but it cannot drop the peer —
+only an entry point can.
+
+It is a packaging seam, not a second API. Every symbol is the same object under both imports, the
+root import is unchanged, and nothing in the documentation below needs to know the subpath exists.
+
 ## Overview
 
 `@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
@@ -42,6 +70,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 
 ## Contents
 
+- [Importing without the HTTP surface](#importing-without-the-http-surface)
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
