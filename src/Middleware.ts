@@ -9,7 +9,9 @@
  *         type parameters other than `ext` / `profile` (or unsupported
  *         extension URIs) → 415 Unsupported Media Type
  *       - an `Accept` header in which every instance of the JSON:API media
- *         type carries such parameters → 406 Not Acceptable
+ *         type carries such parameters, or is weighted `q=0`, → 406 Not
+ *         Acceptable (the `q` weight itself is not a media type parameter,
+ *         per RFC 9110 §12.4.2, so it never counts against the whitelist)
  *   - {@link SchemaErrors} — converts request validation failures (malformed
  *     query parameters, payloads, path parameters) into spec-compliant
  *     JSON:API 400 error documents instead of the default HttpApi error shape:
@@ -67,25 +69,47 @@ export interface NegotiationOptions {
 }
 
 /**
- * Splits one media type entry into its (lowercased) base type and its
- * parameters.
+ * Splits one media type entry into its (lowercased) base type, its media type
+ * parameters, and its weight.
+ *
+ * Per RFC 9110 §12.4.2, `q` is not a media type parameter: it is the weight
+ * of an `Accept` entry, and it terminates the media type's parameter list.
+ * Everything before `q` is a media type parameter (subject to the ext/profile
+ * whitelist); `q` itself and everything after it are accept-extension
+ * parameters that belong to the header field, not the media type, and are
+ * never checked against that whitelist. Splitting is therefore positional,
+ * not a name-based filter: `;profile="…";q=0.8` has one media type parameter;
+ * `;q=0.8;foo=bar` has none.
+ *
+ * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`.
  */
 const parseMediaType = (
   entry: string
-): { readonly base: string; readonly parameters: ReadonlyArray<readonly [name: string, value: string]> } => {
+): {
+  readonly base: string
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>
+  readonly weight: number
+} => {
   const [first, ...rest] = entry.split(";")
-  return {
-    base: (first ?? "").trim().toLowerCase(),
-    parameters: rest.map((part) => {
-      const eq = part.indexOf("=")
-      if (eq === -1) return [part.trim().toLowerCase(), ""] as const
-      const name = part.slice(0, eq).trim().toLowerCase()
-      const value = part.slice(eq + 1).trim()
-      // Parameter values may be quoted (ext / profile URI lists always are).
-      const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
-      return [name, unquoted] as const
-    })
+  const parameters: Array<readonly [name: string, value: string]> = []
+  let weight = 1
+  let pastWeight = false
+  for (const part of rest) {
+    const eq = part.indexOf("=")
+    const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase()
+    if (pastWeight) continue
+    const value = eq === -1 ? "" : part.slice(eq + 1).trim()
+    if (name === "q") {
+      const parsed = Number(value)
+      weight = Number.isFinite(parsed) ? parsed : 0
+      pastWeight = true
+      continue
+    }
+    // Parameter values may be quoted (ext / profile URI lists always are).
+    const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
+    parameters.push([name, unquoted] as const)
   }
+  return { base: (first ?? "").trim().toLowerCase(), parameters, weight }
 }
 
 /**
@@ -114,7 +138,10 @@ const parametersAreAcceptable = (
  * JSON:API §5: the server MUST respond with 415 if the request `Content-Type`
  * is the JSON:API media type with any media type parameters other than `ext`
  * or `profile`, or with an `ext` parameter carrying unsupported extension
- * URIs.
+ * URIs. A `q` parameter (and anything after it) is an accept-extension
+ * parameter, not a media type parameter, so it never counts against this rule
+ * — `Content-Type` has no meaningful use for it, but the split is positional
+ * regardless of which header carries it.
  *
  * Other content types are left to the downstream payload decoder.
  *
@@ -134,6 +161,12 @@ export const contentTypeIsAcceptable = (header: string | undefined, options?: Ne
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
  * `*​/*` or `application/*` always satisfies the rule.
  *
+ * A `q` parameter is a weight on the `Accept` entry (RFC 9110 §12.4.2), not a
+ * media type parameter, so it never counts against the ext/profile rule. An
+ * entry weighted `q=0` is an explicit refusal of that representation and is
+ * skipped rather than treated as acceptable; any non-zero weight is treated
+ * the same as an entry with no weight at all.
+ *
  * @since 0.1.0
  * @category utils
  */
@@ -142,9 +175,10 @@ export const acceptIsAcceptable = (header: string | undefined, options?: Negotia
   const entries = header.split(",").map((entry) => entry.trim())
   for (const entry of entries) {
     if (entry === "") continue
-    const { base, parameters } = parseMediaType(entry)
+    const { base, parameters, weight } = parseMediaType(entry)
     if (base === "*/*" || base === "application/*") return true
     if (base !== MEDIA_TYPE) continue
+    if (weight <= 0) continue
     if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true
   }
   return false
