@@ -299,8 +299,132 @@ export const Page = {
 } as const
 
 // ---------------------------------------------------------------------------
-// Standalone page-key bracketing
+// General key bracketing
 // ---------------------------------------------------------------------------
+
+// Marker recording, for a schema `bracketKeys` produced, the *original* flat
+// struct it was built from and every rename applied to it so far — named in
+// the library's own `~`-prefixed style for a non-public protocol member (see
+// `decodeTo`'s `"~type.make.in"` etc.). Kept as the base (never the previous
+// call's own wire struct) so a further `bracketKeys` call always renames a
+// stable set of decoded field names, and re-derives the *whole* wire shape in
+// one `Schema.encodeKeys` pass rather than nesting renames — nesting would
+// require iterating a previous call's already-renamed keys, silently losing
+// its bracketing the moment a later mapping didn't happen to repeat it.
+const BRACKETED = "~bracketed" as const
+
+interface BracketedState<S extends Schema.Struct<Schema.Struct.Fields>> {
+  readonly struct: S
+  readonly mapping: { readonly [key: string]: string }
+}
+
+/**
+ * The schema {@link bracketKeys} returns: `S` with the given keys' *encoded*
+ * form renamed under a bracket prefix, carrying enough of the composition —
+ * the original struct and every rename applied to it so far — that a further
+ * {@link bracketKeys} call composes onto it correctly.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface BracketedKeys<
+  S extends Schema.Struct<Schema.Struct.Fields>,
+  Mapping extends { readonly [K in keyof S["fields"]]?: string }
+> extends Schema.encodeKeys<S, Mapping> {
+  readonly [BRACKETED]: BracketedState<S>
+}
+
+// The struct a (possibly already-bracketed) schema was built from.
+type BracketedBase<S> =
+  S extends BracketedKeys<infer B, any> ? B : S extends Schema.Struct<Schema.Struct.Fields> ? S : never
+
+// The rename mapping a (possibly already-bracketed) schema carries so far.
+type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : {}
+
+// The mapping one `bracketKeys(prefix, keys)` call itself contributes.
+type PrefixMapping<Prefix extends string, Keys extends ReadonlyArray<PropertyKey>> = {
+  readonly [K in Keys[number] as K extends string ? K : never]: `${Prefix}[${K & string}]`
+}
+
+/**
+ * Re-keys an arbitrary set of a **flat** query struct's *encoded* keys under a
+ * bracket prefix — `Query.bracketKeys("page", ["offset", "limit"])` renames
+ * `offset` ↔ `page[offset]`, `limit` ↔ `page[limit]` — leaving the decoded
+ * type, and every other field's wire key, untouched. It is the general form
+ * of {@link bracketPageKeys}: any prefix (`page`, `filter`, `fields`, or one
+ * of your own) and any subset of the struct's keys, not just `offset` /
+ * `limit`.
+ *
+ * This is the standalone counterpart to {@link schema}'s family options.
+ * Where `Query.schema(resource, { page, filter })` composes the whole query
+ * and *nests* each family under its own key, this combinator only renames
+ * keys of a struct you already own — for consumers whose list-input contract
+ * merges several families **flat** into one struct (a `{ limit, offset,
+ * status, … }` the rest of their application consumes directly) rather than
+ * composing through `Query.schema`.
+ *
+ * **Composing several prefixes onto one struct.** Pipe more than one call:
+ * each renames a disjoint subset of the *original* struct's keys, and the
+ * result's decoded and encoded types reflect every rename applied so far —
+ * `.pipe(Query.bracketKeys("page", [...]), Query.bracketKeys("filter", [...]))`
+ * is not `Schema.Top`, it is the struct with both families bracketed.
+ *
+ * Built on `Schema.encodeKeys`, the canonical Effect key-rename: only the
+ * *encoded* side changes, so call-site inputs and handler-visible values keep
+ * the flat shape. `HttpApiEndpoint` coerces the bracket leaves to and from
+ * their string wire form, so fields built from either the `Query.Page`
+ * constants or a plain-number factory (`fromString: false`) work.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // A flat list input: pagination and a filter merged alongside each other.
+ * const ListArticles = Schema.Struct({
+ *   ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+ *   authorId: Schema.optionalKey(Schema.String),
+ *   status: Schema.optionalKey(Schema.String)
+ * })
+ *
+ * const wire = ListArticles.pipe(
+ *   Query.bracketKeys("page", ["offset", "limit"]),
+ *   Query.bracketKeys("filter", ["status"])
+ * )
+ *
+ * // Only `offset`/`limit` and `status` are bracketed; `authorId` stays flat.
+ * Schema.decodeUnknownSync(wire)({
+ *   "page[offset]": 20,
+ *   "page[limit]": 10,
+ *   "filter[status]": "open",
+ *   authorId: "9"
+ * })
+ * // → { offset: 20, limit: 10, status: "open", authorId: "9" }
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const bracketKeys =
+  <
+    S extends Schema.Struct<Schema.Struct.Fields> | BracketedKeys<any, any>,
+    const Prefix extends string,
+    const Keys extends ReadonlyArray<Extract<keyof BracketedBase<S>["fields"], string>>
+  >(
+    prefix: Prefix,
+    keys: Keys
+  ) =>
+  (schema: S): BracketedKeys<BracketedBase<S>, BracketedMapping<S> & PrefixMapping<Prefix, Keys>> => {
+    const state = (schema as { readonly [BRACKETED]?: BracketedState<Schema.Struct<Schema.Struct.Fields>> })[BRACKETED]
+    const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>)
+    const mapping: Record<string, string> = { ...state?.mapping }
+    for (const key of keys) mapping[key] = `${prefix}[${key}]`
+    const wire = struct.pipe(Schema.encodeKeys(mapping))
+    return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
+      BracketedBase<S>,
+      BracketedMapping<S> & PrefixMapping<Prefix, Keys>
+    >
+  }
 
 /**
  * The struct shape {@link bracketPageKeys} accepts: any struct carrying
@@ -348,11 +472,11 @@ export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.enco
  * {@link Handlers.offsetPaginationLinks} emits, so a client following a `next`
  * link decodes straight back into `{ offset, limit }`.
  *
- * Built on `Schema.encodeKeys`, the canonical Effect key-rename: only the
- * *encoded* side changes, so call-site inputs and handler-visible values keep
- * the flat shape. `HttpApiEndpoint` coerces the bracket leaves to and from
- * their string wire form, so a struct built from either {@link Page.Offset} or
- * the plain-number `Page.offset({ fromString: false })` factory works.
+ * A thin, pre-0.15 specialisation of the general {@link bracketKeys} —
+ * `Query.bracketPageKeys(s)` is exactly `s.pipe(Query.bracketKeys("page", ["offset", "limit"]))`.
+ * Reach for {@link bracketKeys} directly when you need a different prefix, a
+ * different key set, or to compose more than one bracketed family onto the
+ * same struct.
  *
  * @example
  * ```ts
@@ -376,10 +500,14 @@ export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.enco
  * @category combinators
  */
 export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketPageKeys<S> =>
-  // The cast is sound: `BracketPageKeys<S>` extends exactly the `Schema.encodeKeys`
-  // instantiation this builds, and resolves to it for every concrete `S` — but
-  // the two can't be proven comparable while `S` is still generic.
-  schema.pipe(Schema.encodeKeys({ limit: "page[limit]", offset: "page[offset]" })) as unknown as BracketPageKeys<S>
+  // The casts are sound: `BracketPageKeys<S>` extends exactly the
+  // `Schema.encodeKeys` instantiation `bracketKeys("page", ["offset", "limit"])`
+  // builds, and resolves to it for every concrete `S` — but the two can't be
+  // proven comparable while `S` is still generic, nor can `bracketKeys`'s own
+  // key-membership check run against a struct type that is itself still generic.
+  (schema as unknown as Schema.Struct<Schema.Struct.Fields>).pipe(
+    bracketKeys("page", ["offset", "limit"])
+  ) as unknown as BracketPageKeys<S>
 
 // ---------------------------------------------------------------------------
 // Feature schemas
