@@ -22,12 +22,18 @@
  * The declared `fields` are round-tripped through the error object's `meta`
  * member, so clients can reconstruct the typed error from the wire document.
  *
+ * `source` (identifying which part of the request an error is about) can be
+ * declared too — constant, or a function of the fields for a per-instance
+ * pointer/parameter/header. See {@link Config.source} and
+ * `Document.pointer` for building `source.pointer` values.
+ *
  * @since 0.1.0
  */
 import type { Cause } from "effect"
 import { Schema, SchemaTransformation } from "effect"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 import { ErrorDocument, ErrorObject } from "./Document.js"
+import type { ErrorSource } from "./Document.js"
 import { asJsonApi } from "./internal/media.js"
 
 /**
@@ -106,6 +112,20 @@ export interface Config<Fields extends Schema.Struct.Fields> {
    * occurrence. Either a constant string or a function of the (encoded) fields.
    */
   readonly detail?: string | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | undefined)
+  /**
+   * JSON:API error `source`: identifies what in the request caused this
+   * error — `source.pointer` (a JSON Pointer into the request document, e.g.
+   * `/data/attributes/title` — build one with `Document.pointer`),
+   * `source.parameter` (a query parameter name) or `source.header` (a header
+   * name).
+   *
+   * Either a constant (the same source on every occurrence) or a function of
+   * the (encoded) fields — the usual case, since e.g. a validation error's
+   * pointer depends on which field failed.
+   */
+  readonly source?:
+    | typeof ErrorSource.Type
+    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => typeof ErrorSource.Type | undefined)
 }
 
 const snakeCase = (tag: string): string =>
@@ -127,6 +147,7 @@ const makeWire = (
     readonly title: string | undefined
     readonly fieldKeys: ReadonlyArray<string>
     readonly detail: ((fields: any) => string | undefined) | undefined
+    readonly source: ((fields: any) => typeof ErrorSource.Type | undefined) | undefined
   }
 ) => {
   const cached = wireCache.get(klass)
@@ -169,6 +190,7 @@ const makeWire = (
           encode: (encoded) => {
             const fields = encoded as Record<string, unknown>
             const detail = options.detail?.(fields)
+            const source = options.source?.(fields)
             return {
               errors: [
                 {
@@ -176,6 +198,7 @@ const makeWire = (
                   code: options.code,
                   ...(options.title !== undefined ? { title: options.title } : {}),
                   ...(detail !== undefined ? { detail } : {}),
+                  ...(source !== undefined ? { source } : {}),
                   ...(options.fieldKeys.length > 0
                     ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
                     : {})
@@ -212,6 +235,18 @@ const makeWire = (
  *
  * // in a handler:   Effect.fail(new ArticleNotFound({ id: "42" }))
  * // in a client:    Effect.catchTag("ArticleNotFound", (e) => ...)
+ *
+ * // a field-scoped validation error: `source` is a function of the fields,
+ * // since which query parameter it names depends on the instance
+ * class BadFilter extends ApiError.make<BadFilter>()("BadFilter", {
+ *   status: 400,
+ *   fields: { field: Schema.String },
+ *   detail: (e) => `Unknown filter field "${e.field}"`,
+ *   source: (e) => ({ parameter: `filter[${e.field}]` })
+ * }) {}
+ *
+ * console.log(ApiError.toDocument(new BadFilter({ field: "body" })).errors[0]?.source)
+ * // → { parameter: "filter[body]" }
  * ```
  *
  * @since 0.1.0
@@ -232,6 +267,12 @@ export const make =
         : config.detail !== undefined
           ? () => config.detail as string
           : undefined
+    const source =
+      typeof config.source === "function"
+        ? config.source
+        : config.source !== undefined
+          ? () => config.source as typeof ErrorSource.Type
+          : undefined
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
@@ -249,7 +290,8 @@ export const make =
           code,
           title: config.title,
           fieldKeys,
-          detail
+          detail,
+          source
         })
       }
     }

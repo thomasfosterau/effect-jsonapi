@@ -18,7 +18,7 @@
  *
  * @since 0.1.0
  */
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
 // Meta
@@ -188,6 +188,163 @@ export const ErrorSource = Schema.Union([
   Schema.Struct({ parameter: Schema.String }),
   Schema.Struct({ header: Schema.String })
 ])
+
+// RFC 6901 escaping: encode order is `~` → `~0` then `/` → `~1` (so a literal
+// `~1` in a name round-trips: it becomes `~01`, which decoding's `~1`-first
+// pass does not touch, then its `~0` untouches to `~`).
+const escapeSegment = (segment: string): string => segment.replace(/~/g, "~0").replace(/\//g, "~1")
+const unescapeSegment = (segment: string): string => segment.replace(/~1/g, "/").replace(/~0/g, "~")
+
+const memberPointer =
+  (kind: "attributes" | "relationships") =>
+  (name: string, options?: { readonly index?: number }): string =>
+    options?.index !== undefined
+      ? `/data/${options.index}/${kind}/${escapeSegment(name)}`
+      : `/data/${kind}/${escapeSegment(name)}`
+
+/**
+ * JSON Pointer (RFC 6901) constructors for the `source.pointer` a JSON:API
+ * error carries — build one here rather than string-concatenating
+ * `/data/attributes/<name>` at each call site declaring an `ApiError` (see
+ * its `source` option).
+ *
+ * `attribute` / `relationship` point at a resource's own member;
+ * `{ index }` gives the equivalent pointer inside a collection payload's
+ * `data` array. `escape` is the RFC 6901 escaping (`~` → `~0`, `/` → `~1`)
+ * the constructors already apply to `name` — reach for it only when a
+ * pointer segment is built by hand.
+ *
+ * @example
+ * ```ts
+ * import { Document } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Document.pointer.attribute("title")
+ * Document.pointer.relationship("author")
+ * Document.pointer.attribute("title", { index: 2 })
+ * Document.pointer.escape("a/b")
+ * ```
+ *
+ * @since 0.15.0
+ * @category constructors
+ */
+export const pointer = {
+  /**
+   * A JSON Pointer to a resource's attribute member:
+   * `/data/attributes/<name>`, or `/data/<index>/attributes/<name>` inside a
+   * collection payload's `data` array.
+   *
+   * @example
+   * ```ts
+   * import { Document } from "@thomasfosterau/effect-jsonapi"
+   *
+   * Document.pointer.attribute("title") // "/data/attributes/title"
+   * Document.pointer.attribute("title", { index: 2 }) // "/data/2/attributes/title"
+   * ```
+   *
+   * @since 0.15.0
+   * @category constructors
+   */
+  attribute: memberPointer("attributes"),
+  /**
+   * A JSON Pointer to a resource's relationship member:
+   * `/data/relationships/<name>`, or `/data/<index>/relationships/<name>`
+   * inside a collection payload's `data` array.
+   *
+   * @example
+   * ```ts
+   * import { Document } from "@thomasfosterau/effect-jsonapi"
+   *
+   * Document.pointer.relationship("author") // "/data/relationships/author"
+   * Document.pointer.relationship("author", { index: 2 }) // "/data/2/relationships/author"
+   * ```
+   *
+   * @since 0.15.0
+   * @category constructors
+   */
+  relationship: memberPointer("relationships"),
+  /**
+   * RFC 6901-escapes one JSON Pointer segment: `~` → `~0`, `/` → `~1`. The
+   * {@link pointer.attribute} / {@link pointer.relationship} constructors
+   * already apply this to `name` — reach for it directly only when building
+   * a pointer segment that isn't a plain member name.
+   *
+   * @example
+   * ```ts
+   * import { Document } from "@thomasfosterau/effect-jsonapi"
+   *
+   * Document.pointer.escape("a/b") // "a~1b"
+   * Document.pointer.escape("a~b") // "a~0b"
+   * ```
+   *
+   * @since 0.15.0
+   * @category constructors
+   */
+  escape: escapeSegment
+} as const
+
+/**
+ * The member a JSON Pointer built by {@link pointer} — or parsed by
+ * {@link parsePointer} — names: a resource's attribute or relationship,
+ * optionally scoped to a collection payload's `data` array element (`index`).
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface PointerMember {
+  readonly _tag: "attribute" | "relationship"
+  readonly name: string
+  readonly index?: number
+}
+
+/**
+ * Parses a JSON Pointer back into the resource member it names — the inverse
+ * of {@link pointer}, with RFC 6901 unescaping (`~1` → `/`, `~0` → `~`)
+ * applied to the member name.
+ *
+ * Returns `None` for anything that isn't an attribute or relationship
+ * pointer under `/data` (or `/data/<index>`) — including a pointer whose
+ * final segment is empty (`/data/attributes/`), which real servers emit and
+ * which a hand-rolled parser has to special-case.
+ *
+ * @example
+ * ```ts
+ * import { Option } from "effect"
+ * import { Document } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Document.parsePointer("/data/attributes/title")
+ * // → Option.some({ _tag: "attribute", name: "title" })
+ *
+ * Document.parsePointer("/data/2/relationships/author")
+ * // → Option.some({ _tag: "relationship", name: "author", index: 2 })
+ *
+ * Document.parsePointer("/data/id") // → Option.none() — not a member pointer
+ * Document.parsePointer("/data/attributes/") // → Option.none() — empty name
+ *
+ * console.log(Option.isSome(Document.parsePointer("/data/attributes/title")))
+ * ```
+ *
+ * @since 0.15.0
+ * @category utils
+ */
+export const parsePointer = (value: string): Option.Option<PointerMember> => {
+  if (!value.startsWith("/")) return Option.none()
+  const segments = value.split("/").slice(1).map(unescapeSegment)
+  if (segments[0] !== "data") return Option.none()
+  let rest = segments.slice(1)
+  let index: number | undefined
+  if (rest.length === 3 && /^\d+$/.test(rest[0]!)) {
+    index = Number(rest[0])
+    rest = rest.slice(1)
+  }
+  if (rest.length !== 2) return Option.none()
+  const [kind, name] = rest as [string, string]
+  if (name === "") return Option.none()
+  if (kind === "attributes") return Option.some({ _tag: "attribute", name, ...(index !== undefined ? { index } : {}) })
+  if (kind === "relationships") {
+    return Option.some({ _tag: "relationship", name, ...(index !== undefined ? { index } : {}) })
+  }
+  return Option.none()
+}
 
 const errorLinks = Schema.Struct({
   about: Schema.optionalKey(Link),

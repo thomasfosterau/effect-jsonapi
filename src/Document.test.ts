@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 import * as Document from "./Document.js"
 
 // ---------------------------------------------------------------------------
@@ -87,5 +87,111 @@ describe("JsonApiObject ext/profile", () => {
       ext: ["https://jsonapi.org/ext/atomic"],
       profile: ["https://example.com/profiles/timestamps"]
     })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// JSON Pointer (RFC 6901) construction and parsing
+// ---------------------------------------------------------------------------
+
+describe("Document.pointer", () => {
+  it("builds an attribute pointer", () => {
+    expect(Document.pointer.attribute("title")).toBe("/data/attributes/title")
+  })
+
+  it("builds a relationship pointer", () => {
+    expect(Document.pointer.relationship("author")).toBe("/data/relationships/author")
+  })
+
+  it("builds an indexed attribute pointer for a collection payload", () => {
+    expect(Document.pointer.attribute("title", { index: 2 })).toBe("/data/2/attributes/title")
+  })
+
+  it("builds an indexed relationship pointer for a collection payload", () => {
+    expect(Document.pointer.relationship("author", { index: 0 })).toBe("/data/0/relationships/author")
+  })
+
+  it("escapes ~ and / per RFC 6901", () => {
+    expect(Document.pointer.escape("a~b")).toBe("a~0b")
+    expect(Document.pointer.escape("a/b")).toBe("a~1b")
+    expect(Document.pointer.escape("a~/b")).toBe("a~0~1b")
+  })
+
+  it("escapes a literal / in an attribute name", () => {
+    expect(Document.pointer.attribute("a/b")).toBe("/data/attributes/a~1b")
+  })
+})
+
+describe("Document.parsePointer", () => {
+  it("parses an attribute pointer", () => {
+    expect(Document.parsePointer("/data/attributes/title")).toEqual(Option.some({ _tag: "attribute", name: "title" }))
+  })
+
+  it("parses a relationship pointer", () => {
+    expect(Document.parsePointer("/data/relationships/author")).toEqual(
+      Option.some({ _tag: "relationship", name: "author" })
+    )
+  })
+
+  it("parses an indexed attribute pointer", () => {
+    expect(Document.parsePointer("/data/2/attributes/title")).toEqual(
+      Option.some({ _tag: "attribute", name: "title", index: 2 })
+    )
+  })
+
+  it("parses an indexed relationship pointer", () => {
+    expect(Document.parsePointer("/data/0/relationships/author")).toEqual(
+      Option.some({ _tag: "relationship", name: "author", index: 0 })
+    )
+  })
+
+  it("round-trips every pointer() output back to the member it names", () => {
+    expect(Document.parsePointer(Document.pointer.attribute("title"))).toEqual(
+      Option.some({ _tag: "attribute", name: "title" })
+    )
+    expect(Document.parsePointer(Document.pointer.relationship("author", { index: 3 }))).toEqual(
+      Option.some({ _tag: "relationship", name: "author", index: 3 })
+    )
+  })
+
+  it("round-trips a field name containing a literal /, correctly unescaped", () => {
+    const pointer = Document.pointer.attribute("a/b")
+    expect(pointer).toBe("/data/attributes/a~1b")
+    expect(Document.parsePointer(pointer)).toEqual(Option.some({ _tag: "attribute", name: "a/b" }))
+  })
+
+  it("round-trips a field name containing a literal ~", () => {
+    const pointer = Document.pointer.attribute("a~b")
+    expect(Document.parsePointer(pointer)).toEqual(Option.some({ _tag: "attribute", name: "a~b" }))
+  })
+
+  it("round-trips a field name containing both ~ and /, order-sensitively", () => {
+    // `~1` must decode before `~0`, or a literal "~1" (tilde-one, not an
+    // escape) would be misread as an escaped "/".
+    const pointer = Document.pointer.attribute("~1")
+    expect(pointer).toBe("/data/attributes/~01")
+    expect(Document.parsePointer(pointer)).toEqual(Option.some({ _tag: "attribute", name: "~1" }))
+  })
+
+  it("returns None for a pointer with an empty final segment", () => {
+    expect(Document.parsePointer("/data/attributes/")).toEqual(Option.none())
+    expect(Document.parsePointer("/data/relationships/")).toEqual(Option.none())
+  })
+
+  it("returns None for non-member pointers", () => {
+    expect(Document.parsePointer("/data/id")).toEqual(Option.none())
+    expect(Document.parsePointer("/data/type")).toEqual(Option.none())
+    expect(Document.parsePointer("/data")).toEqual(Option.none())
+    expect(Document.parsePointer("/")).toEqual(Option.none())
+    expect(Document.parsePointer("/meta/total")).toEqual(Option.none())
+  })
+
+  it("returns None for a pointer not starting with /", () => {
+    expect(Document.parsePointer("data/attributes/title")).toEqual(Option.none())
+    expect(Document.parsePointer("")).toEqual(Option.none())
+  })
+
+  it("returns None for a malformed indexed pointer", () => {
+    expect(Document.parsePointer("/data/attributes/2/title")).toEqual(Option.none())
   })
 })
