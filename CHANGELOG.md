@@ -1,5 +1,92 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.15.0
+
+### Minor Changes
+
+- 78657c9: Raise the Effect peer dependency floor from `>=4.0.0-beta.104` to `>=4.0.0-rc.112`. This is a breaking change for consumers resolving Effect below the new floor, which was necessary because semver sorts `rc` versions above `beta` versions. The previous range allowed applications to land on a version that sibling libraries (effect-auth, legation) cannot co-install with.
+- d066d53: Declare `sideEffects: false` in package.json for better bundler tree-shaking. Remove `src/` from published files — the package now only ships `dist/`, `README.md`, and `LICENSE`, matching the structure of sibling libraries. Disable declaration maps and source maps in `tsconfig.json` to avoid references to unpublished source files.
+- 4b443ef: **`Handlers.data` / `Handlers.collection` / `Handlers.linkage` accept a `jsonapi` option.**
+  
+  `Handlers.DocumentValue` declared an optional top-level `jsonapi?: JsonApiObjectValue` member, but
+  no builder accepted or emitted it — the type promised a member the implementation could never
+  produce, so the only way to attach the top-level `jsonapi` object to a built document was a cast
+  (#103).
+  
+  ```ts
+  Handlers.data(article, { jsonapi: Document.v1_1, self: `/articles/${article.id}` })
+  Handlers.collection(items, { jsonapi: Document.v1_1, links, meta })
+  ```
+  
+  `data` / `collection` / `linkage` now each take a `jsonapi` option and stamp it onto the built
+  document, with the return type narrowing on whether the option was passed: `jsonapi` is present
+  (and required, not merely optional) when you pass one, and absent from the type entirely when you
+  don't — reading `.jsonapi` back off the result needs no cast in either direction. This follows the
+  same conditional-generic pattern the builders already use for `included` and `meta`, adding a
+  fourth type parameter (`J extends JsonApiObjectValue = never`) to `DocumentValue` — an additive
+  change to a type most callers only accept from a builder's return value, not one they parameterize
+  by hand.
+  
+  **Not emitted by default.** A JSON:API 1.1 server arguably should advertise the version it
+  implements on every document, but defaulting it here would silently add a `jsonapi` member to
+  every response body every existing caller of `Handlers.data` / `Handlers.collection` /
+  `Handlers.linkage` already produces — a behavioural change riding along on a bug fix, not
+  something a type/implementation mismatch fix should decide on a consumer's behalf. Advertising the
+  version stays opt-in: pass `jsonapi: Document.v1_1` (or `Atomic.jsonapi` under the atomic-operations
+  extension) on the responses where you want it.
+- c66f143: Add `Document.href`, an accessor that narrows a `Link` (`string | URL | LinkObject`, undefined-safe)
+  to its wire string. Every link on a resource derived from `Resource.make` decodes to this union so
+  that relative URI-references (which `URL` cannot represent) still parse absolute ones to a real
+  `URL`; reading a link as a plain string previously meant re-deriving this narrowing per project.
+  `Document.href` does it once: `Document.href(resource.links?.self)` — no resource redeclaration
+  needed to get the string a wire response actually carries.
+  
+  The permissive `Document.Url` / `Document.Link` union is unchanged and stays the default — this is
+  purely additive, so nothing that decodes or encodes links today changes behavior.
+- d13d8fa: Make `asJsonApi` and `asMediaType` public via new `MediaType` namespace module
+  
+  Expose media type annotation combinators as a public `MediaType` module for developers writing hand-rolled endpoints with `HttpApiEndpoint`. Previously only available as `@internal` functions, `asJsonApi` marks schemas as JSON:API bodies and `asMediaType` marks them with arbitrary media types — the same annotations the package's own `Endpoint` constructors use internally.
+  
+  The `asJsonApiAtomic` combinator remains internal as it is specialized to the atomic operations extension.
+- 4c1eabf: Add the standard JSON:API query-parameter errors: `ApiError.UnsupportedIncludePath`, `ApiError.UnsupportedIncludeDepth`, `ApiError.UnsupportedSortField` and `ApiError.UnsupportedFieldsetMember` (grouped as `ApiError.QueryParameterErrors`), each carrying what the endpoint _does_ support in `meta` (`includablePaths`, `sortableFields`, `attributes`) so a rejection tells a client the legal set without a second request.
+  
+  Also adds `Query.validateIncludePaths`, a runtime validator (depth checked before membership, matching the whole dotted path) for resolvers that walk a whitelist not fully expressible as `Query.Include`'s closed schema.
+  
+  `UnsupportedSortField` and `UnsupportedFieldsetMember` are standalone declarations for now: `Query.schema`'s `sort` and `fields[TYPE]` codecs already validate against a closed, schema-build-time `Schema.Literals` set, so there's no dynamic "requested vs. supported" check point analogous to `include`'s (open-ended, resolver-validated) paths for them to be wired into yet.
+  
+  None of the four set `source.parameter` — `ApiError.Config` has no way to declare a `source` yet (tracked separately); once it does, these four are the natural first adopters.
+- cb97cd1: **`Query.bracketKeys`: the general form of `Query.bracketPageKeys`.** Re-keys an arbitrary set of a
+  flat query struct's encoded keys under an arbitrary bracket prefix — `page`, `filter`, `fields`, or
+  one of your own — not just `offset` / `limit` under `page`. Composes when piped more than once onto
+  the same struct, so a consumer-owned flat query struct can bracket several families at once without
+  losing any of them (#111).
+  
+  ```ts
+  const ListArticles = Schema.Struct({
+    ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+    authorId: Schema.optionalKey(Schema.String),
+    status: Schema.optionalKey(Schema.String)
+  })
+  
+  const wire = ListArticles.pipe(Query.bracketKeys("page", ["offset", "limit"]), Query.bracketKeys("filter", ["status"]))
+  // wire:    { "page[offset]": …, "page[limit]": …, "filter[status]": …, authorId: … }
+  // decoded: { offset, limit, status, authorId }   ← unchanged, still flat
+  ```
+  
+  `Query.bracketPageKeys` is unchanged and now built on top of `bracketKeys` —
+  `Query.bracketPageKeys(s)` is exactly `s.pipe(Query.bracketKeys("page", ["offset", "limit"]))`.
+
+### Patch Changes
+
+- 4471f9f: Fixed `Middleware.acceptIsAcceptable` and `Middleware.contentTypeIsAcceptable` (and the
+  `Middleware.negotiate` predicate they back) incorrectly treating an `Accept` entry's `q` weight as a
+  media type parameter. Per RFC 9110 §12.4.2, `q` terminates a media type's parameter list — it and
+  anything after it are accept-extension parameters, not subject to JSON:API §5's ext/profile
+  whitelist. Previously `application/vnd.api+json;q=0.9` was rejected outright, and a low-weighted
+  JSON:API entry alongside a higher-weighted non-JSON:API one (e.g.
+  `text/html;q=0.9, application/vnd.api+json;q=0.8`) produced a spurious 406. An entry weighted
+  `q=0` is now correctly treated as an explicit refusal rather than a malformed parameter.
+
 ## 0.14.0
 
 ### Minor Changes
