@@ -412,9 +412,42 @@ describe("Query.Filter: rejections name the offending key", () => {
     expect(failures({ "filter[flag]": "1" })[0]?.key).toBe("filter[flag]")
   })
 
-  it("rejects a repeated key (only include is repeatable)", () => {
-    expect(failures({ "filter[status]": ["open", "done"] })).toEqual([
-      { key: "filter[status]", message: 'Repeated filter key "filter[status]"; a filter key may appear once' }
+  it("accepts a repeated key at a list-valued position, decoding like the comma form", () => {
+    // shorthand field key
+    expect(decode({ "filter[status]": ["open", "done"] })).toEqual(decode({ "filter[status]": "open,done" }))
+    // field + explicit operator
+    expect(decode({ "filter[priority][in]": ["1", "2"] })).toEqual(decode({ "filter[priority][in]": "1,2" }))
+    // a group form condition's `value` member
+    expect(
+      decode({
+        "filter[c][condition][path]": "priority",
+        "filter[c][condition][operator]": "in",
+        "filter[c][condition][value]": ["1", "2"]
+      })
+    ).toEqual(decode({ "filter[priority][in]": "1,2" }))
+  })
+
+  it("round-trips a repeated key through encode to the canonical comma form", () => {
+    expect(encode(decode({ "filter[priority]": ["1", "2"] }))).toEqual({ "filter[priority]": "1,2" })
+  })
+
+  it("rejects a repeated key where no list operator is declared, the same as the comma form", () => {
+    expect(failures({ "filter[flag]": ["true", "false"] })).toEqual(failures({ "filter[flag]": "true,false" }))
+    expect(failures({ "filter[flag]": ["true", "false"] })[0]?.message).toMatch(/Operator "in" is not declared/)
+  })
+
+  it("rejects a repeated key at a scalar-only position (a condition's path, not its value)", () => {
+    expect(
+      failures({
+        "filter[c][condition][path]": ["age", "status"],
+        "filter[c][condition][operator]": "eq",
+        "filter[c][condition][value]": "1"
+      })
+    ).toEqual([
+      {
+        key: "filter[c][condition][path]",
+        message: 'Repeated filter key "filter[c][condition][path]"; a filter key may appear once'
+      }
     ])
   })
 
@@ -1058,10 +1091,25 @@ describe("Endpoint.list with filter: true, end to end", () => {
     })
   })
 
-  it("answers 400 with source.parameter for a repeated key", async () => {
+  it("accepts a repeated filter key at a list-valued position (200, decoding to `in`)", async () => {
     const response = await request("http://localhost/articles?filter[status]=open&filter[status]=done")
+    expect(response.status).toBe(200)
+    // `In` values are normalised (sorted, deduplicated) on decode — see `prepare`
+    expect(received.at(-1)).toEqual(Filter.isIn("status", ["done", "open"]))
+  })
+
+  it("still answers 400 with source.parameter for a repeated key at a scalar-only position", async () => {
+    const response = await request(
+      "http://localhost/articles?filter[c][condition][path]=age&filter[c][condition][path]=status" +
+        "&filter[c][condition][operator]=gt&filter[c][condition][value]=1"
+    )
     expect(response.body).toEqual({
-      errors: [error('Repeated filter key "filter[status]"; a filter key may appear once', "filter[status]")]
+      errors: [
+        error(
+          'Repeated filter key "filter[c][condition][path]"; a filter key may appear once',
+          "filter[c][condition][path]"
+        )
+      ]
     })
   })
 

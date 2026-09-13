@@ -110,7 +110,12 @@ Two forms, one AST. Every `filter[...]` key is classified by its bracket depth:
 | `filter[id][group][…]` / `[condition][…]` | group form                            |
 | anything else                             | 400, `source.parameter` names the key |
 
-A repeated key (`filter[a]=1&filter[a]=2`, which `UrlParams.toRecord` surfaces as an array) is a 400. Only `include` is repeatable in this library.
+A repeated key (`filter[a]=1&filter[a]=2`, which `UrlParams.toRecord` surfaces as an array) is
+accepted at the three list-valued positions — shorthand `filter[a]`, `filter[a][op]`, and a group
+form condition's `[value]` member — denoting the same set the comma form does: `filter[a]=1&filter[a]=2`
+decodes identically to `filter[a]=1,2`, and is rejected the same way when `a` has no list operator
+declared (§2.1). Everywhere else — a group's `[conjunction]`, any `[memberOf]`, a condition's
+`[path]` / `[operator]` — a repeated key is a 400: those positions take exactly one scalar.
 
 ### 2.1 Operators
 

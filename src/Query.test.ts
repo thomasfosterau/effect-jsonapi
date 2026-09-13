@@ -472,7 +472,7 @@ describe("Query.bracketPageKeys", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Repeated `?include=` keys
+// Repeated keys: every comma-separated family, not just `?include=`
 // ---------------------------------------------------------------------------
 
 describe("include: repeated keys", () => {
@@ -528,10 +528,96 @@ describe("include: repeated keys", () => {
       include: "author,comments"
     })
   })
+})
 
-  it("leaves the other parameters alone — only `include` is repeatable", () => {
-    expect(() => decode({ sort: ["title"] })).toThrow()
-    expect(decode({ sort: "-title" })).toEqual({ sort: [{ field: "title", direction: "desc" }] })
+describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
+  const query = Query.schema(Article, {
+    include: true,
+    fields: true,
+    sort: true,
+    page: Query.Page.Offset,
+    filter: undefined
+  })
+  const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>)
+
+  it("?sort=-createdAt&sort=title decodes the same as ?sort=-createdAt,title", () => {
+    expect(decode({ sort: ["-createdAt", "title"] })).toEqual(decode({ sort: "-createdAt,title" }))
+    expect(decode({ sort: ["-createdAt", "title"] })).toEqual({
+      sort: [
+        { field: "createdAt", direction: "desc" },
+        { field: "title", direction: "asc" }
+      ]
+    })
+  })
+
+  it("?fields[articles]=title&fields[articles]=body decodes the same as the comma form", () => {
+    expect(decode({ "fields[articles]": ["title", "body"] })).toEqual(decode({ "fields[articles]": "title,body" }))
+    expect(decode({ "fields[articles]": ["title", "body"] })).toEqual({ fields: { articles: ["title", "body"] } })
+  })
+
+  it("accepts the mixed form for sort and fields too", () => {
+    expect(decode({ sort: ["title", "-createdAt"] })).toEqual({
+      sort: [
+        { field: "title", direction: "asc" },
+        { field: "createdAt", direction: "desc" }
+      ]
+    })
+    expect(decode({ "fields[articles]": ["title,body"] })).toEqual({ fields: { articles: ["title", "body"] } })
+  })
+
+  it("still rejects an unknown sort field or attribute name in either spelling", () => {
+    expect(() => decode({ sort: ["nope"] })).toThrow()
+    expect(() => decode({ "fields[articles]": ["secret"] })).toThrow()
+  })
+
+  it("encodes both back to the single comma form", () => {
+    const encoded = Schema.encodeUnknownSync(query as Schema.Codec<any, any>)({
+      sort: [{ field: "createdAt", direction: "desc" }],
+      fields: { articles: ["title", "body"] }
+    })
+    expect(encoded).toMatchObject({ sort: "-createdAt", "fields[articles]": "title,body" })
+  })
+})
+
+describe("Query.Include / Query.Fieldset / Query.Sort: the standalone constructors compose Repeatable too", () => {
+  it("Query.Include accepts the repeated-key spelling directly", () => {
+    const include = Query.Include(Article)
+    expect(Schema.decodeUnknownSync(include)(["author", "comments"])).toEqual(["author", "comments"])
+  })
+
+  it("Query.Fieldset accepts the repeated-key spelling directly", () => {
+    const fieldset = Query.Fieldset(Article)
+    expect(Schema.decodeUnknownSync(fieldset)(["title", "body"])).toEqual(["title", "body"])
+  })
+
+  it("Query.Sort accepts the repeated-key spelling directly", () => {
+    const sort = Query.Sort(["createdAt", "title"])
+    expect(Schema.decodeUnknownSync(sort)(["-createdAt", "title"])).toEqual([
+      { field: "createdAt", direction: "desc" },
+      { field: "title", direction: "asc" }
+    ])
+  })
+})
+
+describe("empty comma segments: normalised away, not treated as an item", () => {
+  it("a double comma and a trailing comma both drop the empty segment", () => {
+    const include = Query.Include(Article)
+    expect(Schema.decodeUnknownSync(include)("author,,comments")).toEqual(["author", "comments"])
+    expect(Schema.decodeUnknownSync(include)("author,comments,")).toEqual(["author", "comments"])
+    expect(Schema.decodeUnknownSync(include)(",author")).toEqual(["author"])
+  })
+
+  it("the whole-string empty case still decodes to an empty list", () => {
+    const include = Query.Include(Article)
+    expect(Schema.decodeUnknownSync(include)("")).toEqual([])
+  })
+
+  it("applies to Sort too: an empty term between commas is dropped, not a bad sort term", () => {
+    const sort = Query.Sort(["createdAt", "title"])
+    expect(Schema.decodeUnknownSync(sort)("-createdAt,,title")).toEqual([
+      { field: "createdAt", direction: "desc" },
+      { field: "title", direction: "asc" }
+    ])
   })
 })
 
@@ -606,6 +692,17 @@ describe("Query.canonical", () => {
         "page[limit]": "10",
         "filter[q]": "hello world",
         sort: "-createdAt,title"
+      },
+      {
+        // repeated keys for `sort` and `fields[articles]` too — issue #102
+        "filter[author]": "9",
+        "fields[people]": "firstName",
+        include: "author,comments.author",
+        "page[offset]": "20",
+        "fields[articles]": ["title", "body"], // ?fields[articles]=title&fields[articles]=body
+        "page[limit]": "10",
+        "filter[q]": "hello world",
+        sort: ["-createdAt", "title"] // ?sort=-createdAt&sort=title
       }
     ]
     const strings = spellings.map((spelling) => canonical(decode(spelling)))
@@ -613,6 +710,7 @@ describe("Query.canonical", () => {
     expect(strings[0]).toBe(expected)
     // and the ordered pairs behind the string are the same list
     expect(pairs(decode(spellings[2]!))).toEqual(pairs(decode(spellings[0]!)))
+    expect(pairs(decode(spellings[3]!))).toEqual(pairs(decode(spellings[0]!)))
   })
 
   it("decodes back to the same query through URLSearchParams and the same schema", () => {

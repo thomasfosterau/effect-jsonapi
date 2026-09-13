@@ -30,10 +30,14 @@
  * literals) fail decoding, which HttpApi surfaces as a 400 — the
  * spec-compliant response.
  *
- * `?include=` accepts both spellings of the same set: the spec's comma grammar
- * (`?include=a,b`) and the repeated key (`?include=a&include=b`) that
- * `UrlParams.toRecord` decodes to an array. Both decode identically; encoding
- * always emits the comma form.
+ * Every comma-separated family — `include`, `fields[TYPE]`, `sort` — accepts
+ * both spellings of the same set: the spec's comma grammar (`?include=a,b`)
+ * and the repeated key (`?include=a&include=b`) that `UrlParams.toRecord`
+ * decodes to an array, in any mix. Both decode identically; encoding always
+ * emits the comma form. `filter[*]` accepts the repeated key too, at the
+ * grammar's list-valued positions (`docs/filter-grammar.md` §2). An empty
+ * segment from a stray comma (`?include=a,,b`, `?include=a,b,`) is dropped
+ * rather than treated as an item: both decode as `["a", "b"]`.
  *
  * A decoded query has exactly one wire spelling, the **canonical query
  * string** ({@link canonical}): the families in a fixed order, each key
@@ -49,7 +53,7 @@ import type { Ast, Node } from "./Filter.js"
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js"
 import type { Pair as CanonicalPair } from "./internal/canonical.js"
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js"
-import { CommaSeparated, flatten, nest, Repeatable, Sort as SortCodec } from "./internal/codecs.js"
+import { CommaSeparated, flatten, nest, Repeatable, repeatable, Sort as SortCodec } from "./internal/codecs.js"
 import type { FieldCodecs } from "./internal/filter.js"
 import { decodeFilter, encodeFilter, isFilterKey, literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
 import type {
@@ -447,13 +451,18 @@ export type IncludePathsOf<R extends Any, I> = Extract<
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
  * typed as the resource's legal path literals (2 hops into the relationship
- * graph, unless constrained) and validated at decode time.
+ * graph, unless constrained) and validated at decode time. Accepts both the
+ * comma form (`"a,b"`) and the repeated-key spelling (`["a", "b"]`,
+ * `UrlParams.toRecord`'s shape for a repeated key) and any mix of the two.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Include<R extends Any, Paths extends string = IncludePath<R>> extends CommaSeparated<
-  Schema.Literals<ReadonlyArray<Paths>>
+export interface Include<R extends Any, Paths extends string = IncludePath<R>> extends Schema.decodeTo<
+  CommaSeparated<Schema.Literals<ReadonlyArray<Paths>>>,
+  Repeatable,
+  never,
+  never
 > {}
 
 // The paths an `include` schema legalises, at runtime.
@@ -473,6 +482,11 @@ const includePathsFor = (
  * Pass {@link IncludeOptions} to constrain that set — an explicit `paths`
  * allow-list, or a `depth` bound — for resources whose graph reaches further
  * than the endpoint can actually resolve.
+ *
+ * Decodes either wire spelling of the same set — the comma form (`"a,b"`) or
+ * the repeated-key spelling (`["a", "b"]`, `UrlParams.toRecord`'s shape for a
+ * repeated key) — and any mix of the two; encoding always emits the comma
+ * form.
  *
  * @example
  * ```ts
@@ -498,6 +512,10 @@ const includePathsFor = (
  * Schema.decodeUnknownSync(include)("author,comments.author")
  * // → ["author", "comments.author"]
  *
+ * // the repeated-key spelling decodes to the same set
+ * Schema.decodeUnknownSync(include)(["author", "comments.author"])
+ * // → ["author", "comments.author"]
+ *
  * // …or a deliberate subset: only the paths this endpoint can populate
  * const shallow = Query.Include(Article, { paths: ["author", "comments"] })
  * Schema.decodeUnknownSync(shallow)("author,comments")
@@ -511,22 +529,31 @@ export const Include = <R extends Any, const O extends IncludeOptions<R> | undef
   resource: R | ReadonlyArray<R>,
   options?: O
 ): Include<R, IncludePathsOf<R, O>> =>
-  CommaSeparated(
-    Schema.Literals(
-      includePathsFor(toResources(resource), options as IncludeOptions<Any> | undefined) as ReadonlyArray<
-        IncludePathsOf<R, O>
-      >
+  repeatable(
+    CommaSeparated(
+      Schema.Literals(
+        includePathsFor(toResources(resource), options as IncludeOptions<Any> | undefined) as ReadonlyArray<
+          IncludePathsOf<R, O>
+        >
+      )
     )
-  )
+  ) as Include<R, IncludePathsOf<R, O>>
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
  * list of attribute names, validated against the closed attribute set.
+ * Accepts both the comma form and the repeated-key spelling (`["title",
+ * "body"]`), and any mix of the two.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Literals<ReadonlyArray<Field>>> {}
+export interface Fieldset<Field extends string> extends Schema.decodeTo<
+  CommaSeparated<Schema.Literals<ReadonlyArray<Field>>>,
+  Repeatable,
+  never,
+  never
+> {}
 
 /**
  * Creates the sparse-fieldset schema for one resource type.
@@ -543,21 +570,30 @@ export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Li
  * const fieldset = Query.Fieldset(Article)
  * Schema.decodeUnknownSync(fieldset)("title,body")
  * // → ["title", "body"]
+ *
+ * // the repeated-key spelling (`?fields[articles]=title&fields[articles]=body`,
+ * // which `UrlParams.toRecord` surfaces as an array) decodes to the same set
+ * Schema.decodeUnknownSync(fieldset)(["title", "body"])
+ * // → ["title", "body"]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
 export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
-  CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>))
+  repeatable(CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>))) as Fieldset<
+    AttributeKeys<R>
+  >
 
 /**
- * The decoded `sort` schema: a list of `{ field, direction }` terms.
+ * The decoded `sort` schema: a list of `{ field, direction }` terms. Accepts
+ * both the comma form and the repeated-key spelling (`["-createdAt",
+ * "title"]`), and any mix of the two.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Sort<Field extends string> extends SortCodec<Field> {}
+export interface Sort<Field extends string> extends Schema.decodeTo<SortCodec<Field>, Repeatable, never, never> {}
 
 /**
  * Creates the `sort` schema for a set of sortable fields.
@@ -571,12 +607,18 @@ export interface Sort<Field extends string> extends SortCodec<Field> {}
  * Schema.decodeUnknownSync(sort)("-createdAt,title")
  * // → [{ field: "createdAt", direction: "desc" },
  * //    { field: "title", direction: "asc" }]
+ *
+ * // the repeated-key spelling (`?sort=-createdAt&sort=title`) decodes to the same list
+ * Schema.decodeUnknownSync(sort)(["-createdAt", "title"])
+ * // → [{ field: "createdAt", direction: "desc" },
+ * //    { field: "title", direction: "asc" }]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => SortCodec(fields)
+export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> =>
+  repeatable(SortCodec(fields)) as Sort<Field>
 
 // ---------------------------------------------------------------------------
 // The filter codec (docs/filter-grammar.md)
@@ -739,6 +781,14 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * (§3): shorthand when it round-trips, the group form with pre-order ids
  * otherwise; the returned record's insertion order is the canonical order.
  *
+ * The repeated-key spelling (`filter[f]=a&filter[f]=b`, which
+ * `UrlParams.toRecord` surfaces as an array) is accepted wherever the comma
+ * form is: `filter[f]`, `filter[f][op]`, and a group form condition's
+ * `[value]` member — decoding identically to the comma form, and rejected the
+ * same way when the field has no list operator declared. Everywhere else — a
+ * group's `[conjunction]`, any `[memberOf]`, a condition's `[path]` /
+ * `[operator]` — a repeated key is a 400 (`docs/filter-grammar.md` §2).
+ *
  * The record must carry at least one `filter[...]` key — an absent `filter`
  * is `Query.schema`'s concern, not the codec's. Literal codecs are run
  * synchronously.
@@ -819,11 +869,17 @@ export interface Options<R extends Any> {
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for this resource and its
    * direct relationship targets. Unknown field names produce a 400.
+   *
+   * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
+   * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
    */
   readonly fields?: boolean
   /**
    * Enable `?sort=` — `true` allows sorting on every attribute; pass an array
    * of attribute names to restrict the sortable set. Unknown fields produce a 400.
+   *
+   * Both wire spellings are accepted — `?sort=-createdAt,title` and
+   * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
   /**
@@ -909,10 +965,10 @@ export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true ? { readonly include: Schema.optionalKey<Repeatable> } : {}) &
     ([O["fields"]] extends [true]
       ? {
-          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
+          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Repeatable>
         }
       : {}) &
-    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Schema.String> } : {}) &
+    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Repeatable> } : {}) &
     (O["page"] extends Schema.Struct.Fields
       ? {
           readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
@@ -1019,7 +1075,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     const fieldsetFields: Record<string, Schema.Top> = {}
     for (const target of dedupe([...resources, ...resources.flatMap(allTargets)])) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target))
-      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Schema.String)
+      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable)
     }
     nestedFields.fields = Schema.optionalKey(Schema.Struct(fieldsetFields))
   }
@@ -1030,7 +1086,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
         ? dedupe(resources.flatMap((r) => attributeKeys(r)))
         : (options.sort as ReadonlyArray<string>)
     nestedFields.sort = Schema.optionalKey(Sort(sortable))
-    flatFields.sort = Schema.optionalKey(Schema.String)
+    flatFields.sort = Schema.optionalKey(Repeatable)
   }
 
   if (options.page !== undefined) {

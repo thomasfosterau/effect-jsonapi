@@ -10,6 +10,14 @@ import { Schema, SchemaTransformation } from "effect"
  *
  * Item validation (e.g. closed literal sets) is performed by the item schema
  * after splitting.
+ *
+ * An empty segment — the whole string (`""`), a double comma (`"a,,b"`), or a
+ * leading/trailing comma (`",a"` / `"a,"`) — is dropped rather than handed to
+ * the item schema as an item: `"a,,b"` and `"a,b,"` both decode as `["a",
+ * "b"]`. The comma grammar has no way to spell an intentional empty item, so
+ * a gap reads as a client's stray separator, not as a member of the set; the
+ * alternative (handing the item schema `""`) would just fail with "not a
+ * valid item name" for what is really a formatting slip.
  */
 export interface CommaSeparated<S extends Schema.Top> extends Schema.decodeTo<
   Schema.$Array<S>,
@@ -23,7 +31,7 @@ export const CommaSeparated = <S extends Schema.Top>(item: S): CommaSeparated<S>
     Schema.decodeTo(
       Schema.Array(item),
       SchemaTransformation.transform<ReadonlyArray<S["Encoded"]>, string>({
-        decode: (value) => (value === "" ? [] : value.split(",")) as ReadonlyArray<S["Encoded"]>,
+        decode: (value) => value.split(",").filter((segment) => segment !== "") as ReadonlyArray<S["Encoded"]>,
         encode: (items) => items.map(String).join(",")
       })
     )
@@ -55,6 +63,23 @@ export const Repeatable: Repeatable = Schema.Union([Schema.String, Schema.Array(
     })
   )
 ) as Repeatable
+
+/**
+ * Composes {@link Repeatable} under a comma-list item codec — the result of
+ * {@link CommaSeparated} or {@link Sort} — so the composite accepts either
+ * wire spelling of the same list (`"a,b"` or `["a", "b"]`) and always encodes
+ * back to the single canonical comma form.
+ *
+ * `Repeatable` alone is applied at the *flat* wire struct in `Query.schema`
+ * (paired there with a separate, plain `CommaSeparated` / `Sort` field on the
+ * *nested* side — the flat/nested split already normalises the repeated-key
+ * spelling to a comma string before the nested field ever sees it). The
+ * standalone constructors (`Query.Include`, `Query.Fieldset`, `Query.Sort`)
+ * have no such split — they are one schema, decoded directly from the wire
+ * value — so they compose `Repeatable` under their item codec here instead.
+ */
+export const repeatable = <S extends Schema.Top>(item: S): Schema.decodeTo<S, Repeatable, never, never> =>
+  Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>
 
 /**
  * A sort term: an attribute name and a direction.
@@ -97,11 +122,14 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
       Schema.Array(item),
       SchemaTransformation.transform<Encoded, string>({
         decode: (value) =>
-          (value === "" ? [] : value.split(",")).map((term) =>
-            term.startsWith("-")
-              ? { field: term.slice(1), direction: "desc" as const }
-              : { field: term, direction: "asc" as const }
-          ) as unknown as Encoded,
+          value
+            .split(",")
+            .filter((term) => term !== "")
+            .map((term) =>
+              term.startsWith("-")
+                ? { field: term.slice(1), direction: "desc" as const }
+                : { field: term, direction: "asc" as const }
+            ) as unknown as Encoded,
         encode: (terms) => terms.map((term) => (term.direction === "desc" ? `-${term.field}` : term.field)).join(",")
       })
     )

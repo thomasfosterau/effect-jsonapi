@@ -142,6 +142,16 @@ const isListOperator = (operator: string): boolean => (listOperators as Readonly
 const isConjunction = (value: string): value is (typeof conjunctions)[number] =>
   (conjunctions as ReadonlyArray<string>).includes(value)
 
+// The `filter[...]` positions that admit a comma list: the shorthand field
+// key, `field][operator]`, and a condition's `value` member — where a
+// repeated key means what the comma form does. Every other position (a
+// group's `conjunction`, any `memberOf`, a condition's `path` / `operator`)
+// takes exactly one scalar, so a repeated key there is rejected outright.
+const isListPosition = (segments: ReadonlyArray<string>): boolean =>
+  segments.length === 1 ||
+  segments.length === 2 ||
+  (segments.length === 3 && segments[1] === "condition" && segments[2] === "value")
+
 // ---------------------------------------------------------------------------
 // Decoding (§2.2, §2.4)
 // ---------------------------------------------------------------------------
@@ -242,26 +252,34 @@ export const decodeFilter = (fields: FieldCodecs, input: { readonly [key: string
 
   for (const [key, value] of Object.entries(input)) {
     if (value === undefined) continue
-    if (typeof value !== "string") {
-      fail(
-        key,
-        Array.isArray(value)
-          ? `Repeated filter key ${quote(key)}; a filter key may appear once`
-          : `Expected a string, got ${quote(value)}`,
-        value
-      )
+    const segments = keySegments(key)
+    let raw: string
+    if (typeof value === "string") {
+      raw = value
+    } else if (!Array.isArray(value)) {
+      fail(key, `Expected a string, got ${quote(value)}`, value)
+      continue
+    } else if (segments !== undefined && isListPosition(segments)) {
+      // The repeated-key spelling of a comma list: `filter[f]=a&filter[f]=b`
+      // is `filter[f]=a,b`. Each occurrence's raw value is preserved as-is —
+      // one that is itself a comma list, or carries an escaped comma, still
+      // means what it would in the single-value spelling; whether the result
+      // is legal (a list operator declared, or none at all) is exactly the
+      // check the comma form already goes through below.
+      raw = value.join(",")
+    } else {
+      fail(key, `Repeated filter key ${quote(key)}; a filter key may appear once`, value)
       continue
     }
-    const segments = keySegments(key)
     if (segments === undefined) {
       fail(key, MALFORMED_KEY)
       continue
     }
     if (segments.length === 1) {
-      const node = condition({ field: key, operator: key, value: key }, segments[0]!, undefined, value)
+      const node = condition({ field: key, operator: key, value: key }, segments[0]!, undefined, raw)
       if (node !== undefined) roots.push(node)
     } else if (segments.length === 2) {
-      const node = condition({ field: key, operator: key, value: key }, segments[0]!, segments[1]!, value)
+      const node = condition({ field: key, operator: key, value: key }, segments[0]!, segments[1]!, raw)
       if (node !== undefined) roots.push(node)
     } else if (segments.length === 3 && (segments[1] === "group" || segments[1] === "condition")) {
       const [id, kind, member] = segments as [string, "group" | "condition", string]
@@ -281,7 +299,7 @@ export const decodeFilter = (fields: FieldCodecs, input: { readonly [key: string
         }
         continue
       }
-      draft.members.set(member, { key, value })
+      draft.members.set(member, { key, value: raw })
     } else {
       fail(key, MALFORMED_KEY)
     }
