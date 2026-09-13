@@ -1499,6 +1499,26 @@ const query = Query.bracketPageKeys(ListArticles)
 // decoded: { offset, limit, authorId }   ← unchanged, still flat
 ```
 
+`Query.bracketKeys(prefix, keys)` is the general form `bracketPageKeys` is built on — any bracket
+prefix (`page`, `filter`, `fields`, or one of your own), any subset of the struct's own keys, and it
+**composes**: pipe it more than once to bracket several families onto the same flat struct, and the
+decoded/encoded types reflect every rename applied so far, not just the last one.
+
+```ts
+const ListArticles2 = Schema.Struct({
+  ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+  authorId: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.String)
+})
+
+const query2 = ListArticles2.pipe(
+  Query.bracketKeys("page", ["offset", "limit"]),
+  Query.bracketKeys("filter", ["status"])
+)
+// wire:    { "page[offset]": …, "page[limit]": …, "filter[status]": …, authorId: … }
+// decoded: { offset, limit, status, authorId }   ← unchanged, still flat
+```
+
 ## Spec compliance, by construction
 
 | JSON:API v1.1 rule                                                                                               | How it's enforced                                                                                                                                                                                      |

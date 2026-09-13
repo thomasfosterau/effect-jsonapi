@@ -472,6 +472,93 @@ describe("Query.bracketPageKeys", () => {
   })
 })
 
+describe("Query.bracketKeys", () => {
+  // The general form: any prefix, any subset of the struct's own keys.
+  const ListArticles = Schema.Struct({
+    ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+    authorId: Schema.optionalKey(Schema.String),
+    status: Schema.optionalKey(Schema.String)
+  })
+
+  it("renames only the given keys under the given prefix, leaving the rest flat", () => {
+    const wire = ListArticles.pipe(Query.bracketKeys("filter", ["status"]))
+    expect(Object.keys(wire.from.fields).sort()).toEqual(["authorId", "filter[status]", "limit", "offset"])
+  })
+
+  it("round-trips decode → encode through the bracket keys", () => {
+    const wire = ListArticles.pipe(Query.bracketKeys("filter", ["status"]))
+    const encoded = { "filter[status]": "open", offset: 20, limit: 10, authorId: "9" }
+    const decoded = Schema.decodeUnknownSync(wire)(encoded)
+    expect(decoded).toEqual({ status: "open", offset: 20, limit: 10, authorId: "9" })
+    expect(Schema.encodeSync(wire)(decoded)).toEqual(encoded)
+  })
+
+  it("reproduces bracketPageKeys' exact behaviour", () => {
+    const wire = ListArticles.pipe(Query.bracketKeys("page", ["offset", "limit"]))
+    const viaBracketPageKeys = Query.bracketPageKeys(ListArticles)
+    expect(Object.keys(wire.from.fields).sort()).toEqual(Object.keys(viaBracketPageKeys.from.fields).sort())
+    const encoded = { "page[offset]": 20, "page[limit]": 10, authorId: "9", status: "open" }
+    expect(Schema.decodeUnknownSync(wire)(encoded)).toEqual(Schema.decodeUnknownSync(viaBracketPageKeys)(encoded))
+  })
+
+  describe("composition", () => {
+    const wire = ListArticles.pipe(
+      Query.bracketKeys("page", ["offset", "limit"]),
+      Query.bracketKeys("filter", ["authorId", "status"])
+    )
+
+    it("bracket-keys every family applied so far, not just the last one", () => {
+      expect(Object.keys(wire.from.fields).sort()).toEqual([
+        "filter[authorId]",
+        "filter[status]",
+        "page[limit]",
+        "page[offset]"
+      ])
+    })
+
+    it("round-trips decode → encode with both families bracketed", () => {
+      const encoded = { "page[offset]": 20, "page[limit]": 10, "filter[authorId]": "9", "filter[status]": "open" }
+      const decoded = Schema.decodeUnknownSync(wire)(encoded)
+      expect(decoded).toEqual({ offset: 20, limit: 10, authorId: "9", status: "open" })
+      expect(Schema.encodeSync(wire)(decoded)).toEqual(encoded)
+    })
+
+    it("types the decoded and encoded sides with every rename, not `Schema.Top`", () => {
+      expectTypeOf<typeof wire.Type>().toEqualTypeOf<typeof ListArticles.Type>()
+      expectTypeOf<typeof wire.Encoded>().toEqualTypeOf<{
+        readonly "page[offset]"?: number
+        readonly "page[limit]"?: number
+        readonly "filter[authorId]"?: string
+        readonly "filter[status]"?: string
+      }>()
+    })
+
+    it("keys pass through Query.canonical in the fixed family order, whichever call bracketed them", () => {
+      const flat = Query.canonical(wire)
+      const keysOf = (s: string): ReadonlyArray<string> => s.split("&").map((pair) => pair.split("=")[0]!)
+      expect(keysOf(flat({ offset: 20, limit: 10, authorId: "9", status: "open" }))).toEqual([
+        "filter[authorId]",
+        "filter[status]",
+        "page[offset]",
+        "page[limit]"
+      ])
+    })
+
+    it("order does not depend on which prefix was bracketed first", () => {
+      const reversed = ListArticles.pipe(
+        Query.bracketKeys("filter", ["authorId", "status"]),
+        Query.bracketKeys("page", ["offset", "limit"])
+      )
+      expect(Object.keys(reversed.from.fields).sort()).toEqual(Object.keys(wire.from.fields).sort())
+    })
+  })
+
+  it("carries the checks of the underlying leaves through the rename", () => {
+    const wire = ListArticles.pipe(Query.bracketKeys("page", ["limit"]))
+    expect(() => Schema.decodeUnknownSync(wire)({ "page[limit]": 101 })).toThrow()
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Repeated `?include=` keys
 // ---------------------------------------------------------------------------
