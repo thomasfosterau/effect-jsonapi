@@ -64,6 +64,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
   - [Atomic operations](#atomic-operations)
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
+  - [Resolving `included` — one batch per level](#resolving-included--one-batch-per-level)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
@@ -1087,11 +1088,13 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       //                 ^ params.id is a branded Article id
       //                         ^ query.include / query.fields are typed & validated
       loadArticle(params.id).pipe(
-        Effect.map((article) =>
-          Handlers.data(article, {
-            included: resolveIncluded(article, query.include),
-            self: `/articles/${article.id}`
-          })
+        Effect.flatMap((article) =>
+          // walks `?include=` one level at a time, batched per type
+          Handlers.resolveIncluded(article, query.include, targets).pipe(
+            Effect.map((included) =>
+              Handlers.data(article, { included, self: `/articles/${article.id}` })
+            )
+          )
         )
       ))
     .handle("list", ({ query }) =>
@@ -1116,6 +1119,46 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules
 at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every
 included resource must be referenced in the document).
+
+### Resolving `included` — one batch per level
+
+`Handlers.resolveIncluded` is the other half: the walk that _produces_ `included` from the paths the
+client requested. It takes the primary data (one resource, or a whole page), the validated `include`
+paths, and a registry of **batch loaders keyed by resource type** — and nothing else. There is no
+service to provide and no runtime to set up; it is a plain `Effect` a handler composes.
+
+```ts
+// One loader per type. Each is called once per level, with every id that level
+// collected — so each is a single `WHERE id IN (…)`, never a lookup per row.
+const targets = {
+  people: (ids: ReadonlyArray<string>) => db.people.byIds(ids),
+  tags: (ids: ReadonlyArray<string>) => db.tags.byIds(ids),
+  comments: (ids: ReadonlyArray<string>) => db.comments.byIds(ids)
+}
+
+Handlers.resolveIncluded(page, query.include, targets, { concurrency: 4, depth: 2 })
+// → Effect<ReadonlyArray<Person | Tag | Comment> | undefined, …>
+```
+
+What it guarantees, and why each one matters:
+
+| Property                         | What it means                                                                                                                                                                                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Batched per level**            | Every parent's references for the current segment are collected first, then handed to the loaders as one batch per type. `?include=author.employer` over a 50-article page is **2** loader calls, not 100 — the N+1 this exists to prevent                  |
+| **Deduplicated by `(type, id)`** | `included` is a set of resources, not of references: two paths or two rows reaching the same resource contribute it once, a shared path prefix costs no second query, and a resource already in the primary `data` is never duplicated into `included`      |
+| **Walk order**                   | Emission follows the traversal, so `get` and `list` agree and the array is stable whatever order the batches complete in                                                                                                                                    |
+| **Cycles terminate**             | A graph that loops (`articles → comments → articles`) revisits resources the document already holds, which are never re-loaded                                                                                                                              |
+| **Depth-capped**                 | `depth` (default `3`, the deepest path `Query.Include` legalises) bounds the number of hops. §7.1 leaves the bound implementation-defined and each hop is another round of loader calls, so this is a denial-of-service boundary, not just an ergonomic one |
+| **Unresolvable refs dropped**    | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document                                                           |
+| **`undefined` when unasked**     | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing"                                                                                                                                                             |
+
+Because every resource is reached _through_ a document resource's linkage, full linkage holds by
+construction — the builders' check becomes a guard rather than a live constraint. Per-viewer
+visibility rides along for free: every hop loads through the same authorised loader, so the deepest
+hop of an anonymous caller's walk excludes exactly what their direct read would.
+
+`paginated` relationships carry no inline linkage, so they contribute nothing to a walk — which is
+why they are excluded from `?include=` paths to begin with.
 
 Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and
 `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
@@ -1514,7 +1557,7 @@ const query = Query.bracketPageKeys(ListArticles)
 | Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                                                                     |
 | Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships                                                  |
 | Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many                                                                   |
-| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.data` / `Handlers.collection` builders (runtime check)                                                                                                                                       |
+| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so linkage holds by construction; `Handlers.data` / `Handlers.collection` re-check (runtime check)            |
 | Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                                                                    |
 | `errors` array is never empty                                                                                    | non-empty check on the error document schema                                                                                                                                                           |
 | 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                                                                       |
