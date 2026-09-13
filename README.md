@@ -48,6 +48,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
+  - [Resource-level metadata & introspection](#resource-level-metadata--introspection)
   - [Read-only & per-attribute projections](#read-only--per-attribute-projections)
   - [Flat (command-style) payloads](#flat-command-style-payloads)
   - [Polymorphic families (heterogeneous supertypes)](#polymorphic-families-heterogeneous-supertypes)
@@ -175,6 +176,33 @@ repositories): the relationship object carries only a required `related` link
 pointing at a paginated collection endpoint (see
 [Relationship & related endpoints](#relationship--related-endpoints)).
 
+Paging is only well defined over a stable total order — `first` / `prev` /
+`next` / `last` denote a sequence of pages, and a cursor _is_ a position in an
+order — so a `paginated` relationship can declare the **canonical order** its
+related collection is paged in, in the same `{ field, direction }` terms
+`?sort=` decodes into:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.NonEmptyString },
+  relationships: {
+    comments: Relationship.paginated(() => Comment, {
+      // newest first, `id` breaking ties so the order — and any cursor into it — is total
+      order: [
+        { field: "postedAt", direction: "desc" },
+        { field: "id", direction: "asc" }
+      ]
+    })
+  }
+})
+
+Resource.relationships(Article).comments.order // the declared terms
+```
+
+Each term names an attribute of the **related** resource, or its `id`; anything
+else is a compile error, and an empty or repeating order is refused at
+definition time.
+
 Everything below is **derived** — never assembled by hand:
 
 | Derived                                       | What it is                                                                                                                                                                                                                                                     |
@@ -275,6 +303,77 @@ const Person = Resource.make("people", {
 
 Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
 ```
+
+### Resource-level metadata & introspection
+
+A resource definition is also the natural single source of truth for things
+_outside_ the HTTP layer — database columns, form descriptors, a sync engine's
+node definitions. Two accessors make deriving from one a supported thing to do.
+
+**Metadata rides the resource.** A definition _is_ a `Schema.Struct` with its
+derived members assigned onto it, so Effect's own `resource.annotate({ ... })`
+rebuilds the schema and returns a plain struct with `type`, `document()`,
+`createPayload` and the rest gone — no longer a resource, and no longer a valid
+relationship target. `Resource.annotate` is the seam that keeps it one:
+
+```ts
+const TableName = "acme/table" // namespace your keys
+
+const Person = Resource.annotate(Resource.make("people", { attributes: { name: Schema.NonEmptyString } }), {
+  [TableName]: "people"
+})
+
+Person.type // "people" — still a complete resource
+Resource.annotations(Person)[TableName] // "people"
+
+// still a relationship target, resolved lazily and by identity:
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.NonEmptyString },
+  relationships: { author: Relationship.one(() => Person) }
+})
+```
+
+Annotations are inherited by `Resource.extend` (the child's own keys winning),
+and can be declared up front with `Resource.make`'s `annotations` option — the
+better spelling when other definitions already point at the resource, since
+like `Schema.annotate` this returns a _new_ definition rather than mutating the
+one given.
+
+**Attribute shape is readable.** `Resource.attributeDescriptors` reports what
+the declaration already knows about each attribute, in declaration order, as
+plain data — no reaching into `resource.fields.attributes.ast`, no widening the
+definition through `unknown`, no running a decoder against sentinel values:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: {
+    title: Schema.NonEmptyString,
+    summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+    createdAt: Resource.readOnlyAttribute(Schema.DateFromString),
+    draftBody: Resource.attribute(Schema.String, { resource: false, update: false })
+  }
+})
+
+Resource.attributeDescriptors(Article)
+// [{ key: "title",     schema, resource: "required", create: "required", update: "optional",
+//    clearable: false, nullable: false, readOnly: false, annotations },
+//  { key: "summary",   …, create: "optional", nullable: true,  clearable: true },
+//  { key: "createdAt", …, create: false, update: false, readOnly: true },
+//  { key: "draftBody", …, resource: false }]  // input-only: declared, never on the resource object
+```
+
+**What belongs in an annotation, and what doesn't.** Annotations are for
+vocabulary JSON:API has no opinion about — a storage table or column name, a
+sync-engine node kind, an admin-UI label — so that foreign vocabulary stays out
+of this package. Metadata that _is_ JSON:API's business gets a declaration
+instead, because the package has to act on it: filterability is `Filter.able`,
+sortability is `Sort.able`, and a paginated relationship's
+[canonical order](#relationship-kinds) is `Relationship.paginated(ref, { order })`
+— without a stable order the pagination links that relationship advertises are
+unsound, which is a defect in the document itself. A storage column name, by
+contrast, has no wire representation at all: two servers that disagree about it
+serve byte-identical JSON:API documents. That is the test — if changing it
+changes nothing a client can observe, it is an annotation.
 
 ### Read-only & per-attribute projections
 

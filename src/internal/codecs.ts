@@ -4,6 +4,7 @@
  * @internal
  */
 import { Schema, SchemaTransformation } from "effect"
+import type { Term } from "../Sort.js"
 
 /**
  * A comma-separated list codec: `"a,b,c"` ↔ `["a", "b", "c"]`.
@@ -57,12 +58,9 @@ export const Repeatable: Repeatable = Schema.Union([Schema.String, Schema.Array(
 ) as Repeatable
 
 /**
- * A sort term: an attribute name and a direction.
+ * A sort term: an attribute name and a direction — the public `Sort.Term`.
  */
-export interface SortTerm<Field extends string> {
-  readonly field: Field
-  readonly direction: "asc" | "desc"
-}
+export type SortTerm<Field extends string> = Term<Field>
 
 /**
  * The schema of a decoded sort list.

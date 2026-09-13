@@ -249,3 +249,81 @@ describe("relationship kinds in resource objects", () => {
     expectTypeOf<Rels["editor"]["data"]>().toEqualTypeOf<typeof Person.identifier.Type | null>()
   })
 })
+
+// ---------------------------------------------------------------------------
+// The canonical order of a paginated relationship (#113)
+// ---------------------------------------------------------------------------
+
+describe("Relationship.paginated `order`", () => {
+  const Revision = Resource("revisions", {
+    attributes: { note: Schema.NonEmptyString, createdAt: Schema.DateFromString }
+  })
+
+  it("carries the declared order on the descriptor, typed as sort terms", () => {
+    const Page = Resource("pages", {
+      attributes: { title: Schema.NonEmptyString },
+      relationships: {
+        revisions: Relationship.paginated(() => Revision, {
+          order: [
+            { field: "createdAt", direction: "desc" },
+            { field: "id", direction: "asc" }
+          ]
+        })
+      }
+    })
+
+    expect(Page.relationships.revisions.order).toEqual([
+      { field: "createdAt", direction: "desc" },
+      { field: "id", direction: "asc" }
+    ])
+    expectTypeOf(Page.relationships.revisions.order).toEqualTypeOf<
+      readonly [
+        { readonly field: "createdAt"; readonly direction: "desc" },
+        { readonly field: "id"; readonly direction: "asc" }
+      ]
+    >()
+  })
+
+  it("is `undefined` when no order is declared", () => {
+    expect(Relationship.paginated(() => Revision).order).toBeUndefined()
+    expect(Article.relationships.revisions.order).toBeUndefined()
+  })
+
+  it("orders only by the related resource's attributes, or its id", () => {
+    // @ts-expect-error -- "note" is Revision's, but "title" is not
+    Relationship.paginated(() => Revision, { order: [{ field: "title", direction: "asc" }] })
+    // the negative control: a real attribute of the *related* resource compiles
+    expect(Relationship.paginated(() => Revision, { order: [{ field: "note", direction: "asc" }] }).order).toEqual([
+      { field: "note", direction: "asc" }
+    ])
+
+    // @ts-expect-error -- "sideways" is not a direction
+    Relationship.paginated(() => Revision, { order: [{ field: "id", direction: "sideways" }] })
+  })
+
+  it("refuses an order that declares nothing, or orders twice by one field", () => {
+    expect(() => Relationship.paginated(() => Revision, { order: [] })).toThrow(/declares no terms/)
+    expect(() =>
+      Relationship.paginated(() => Revision, {
+        order: [
+          { field: "createdAt", direction: "asc" },
+          { field: "createdAt", direction: "desc" }
+        ]
+      })
+    ).toThrow(/more than once/)
+  })
+
+  it("leaves the relationship's wire schema untouched — an order is not linkage", () => {
+    const Page = Resource("ordered-pages", {
+      attributes: { title: Schema.NonEmptyString },
+      relationships: {
+        revisions: Relationship.paginated(() => Revision, { order: [{ field: "id", direction: "asc" }] })
+      }
+    })
+    const schema = Relationship.schemaFor(Page.relationships.revisions)
+    expect(Object.keys(schema.fields)).toEqual(["links", "meta"])
+    expect(Schema.decodeUnknownSync(schema)({ links: { related: "/pages/1/revisions" } })).toEqual({
+      links: { related: "/pages/1/revisions" }
+    })
+  })
+})

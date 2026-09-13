@@ -47,7 +47,8 @@
 import { Schema } from "effect"
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js"
 import type { Operator } from "./Filter.js"
-import type { Any } from "./Resource.js"
+import type { Any, AttributeKeys } from "./Resource.js"
+import type * as Sort from "./Sort.js"
 
 // ---------------------------------------------------------------------------
 // Descriptors
@@ -147,16 +148,49 @@ export interface Many<R extends Any> {
 }
 
 /**
+ * The **canonical order** of a paginated relationship: a non-empty list of
+ * {@link Sort.Term}s over the related resource's attributes, or its `id`.
+ *
+ * Ordering is part of a paginated relationship's wire contract, not a storage
+ * detail. A `paginated` relationship carries no inline linkage, so its members
+ * are reachable *only* through `links.related` — a paginated collection whose
+ * `first` / `prev` / `next` / `last` links only denote a well-defined sequence
+ * of pages if the collection has a total order. Without one, paging the same
+ * relationship twice may repeat or skip members, and the pagination links the
+ * document itself advertises are unsound. Cursor pagination makes this sharpest:
+ * a cursor *is* a position in an order.
+ *
+ * The declaration is spelled in the package's own sort vocabulary
+ * ({@link Sort.Term}, what `Query.Sort` decodes `?sort=` into), so it is
+ * directly the order the relationship's `Endpoint.related` collection is to be
+ * served in when the client asks for no `sort` of its own. Declaring it is what
+ * this package does; serving it is the handler's job — nothing here reorders a
+ * collection on your behalf.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "id">>
+
+/**
  * An unbounded to-many relationship with *no* inline linkage: the relationship
  * object carries only a required `related` link pointing at a paginated
- * collection endpoint.
+ * collection endpoint. `O` records its declared canonical {@link Order}
+ * (`undefined` when none is declared).
  *
  * @since 0.1.0
  * @category models
  */
-export interface Paginated<R extends Any> {
+export interface Paginated<R extends Any, O extends Order<R> | undefined = Order<R> | undefined> {
   readonly kind: "paginated"
   readonly ref: () => R
+  /**
+   * The declared canonical {@link Order} of the related collection, or
+   * `undefined` when the relationship declares none.
+   *
+   * @since 0.15.0
+   */
+  readonly order: O
 }
 
 /**
@@ -312,25 +346,65 @@ export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", r
  * `included` unions and create/update payloads — they are read and written
  * through their own endpoints.
  *
+ * Pass `order` to declare the relationship's canonical {@link Order} — the
+ * total order its `links.related` collection is paged in. Paging is only
+ * well-defined over a stable order (see {@link Order}), so this is a property of
+ * the relationship's wire contract, and it is read straight off the descriptor:
+ * `Resource.relationships(Article).comments.order`. Each term names an attribute
+ * of the *related* resource, or its `id`; a term naming anything else is a
+ * compile error, and an empty or repeating order is refused at definition time.
+ *
  * @example
  * ```ts
  * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
  * const Comment = Resource.make("comments", {
- *   attributes: { body: Schema.NonEmptyString }
+ *   attributes: { body: Schema.NonEmptyString, createdAt: Schema.DateFromString }
  * })
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { comments: Relationship.paginated(() => Comment) }
+ *   relationships: {
+ *     // newest first, `id` breaking ties so the order is total (and so a
+ *     // cursor into it is stable)
+ *     comments: Relationship.paginated(() => Comment, {
+ *       order: [{ field: "createdAt", direction: "desc" }, { field: "id", direction: "asc" }]
+ *     })
+ *   }
  * })
+ *
+ * Resource.relationships(Article).comments.order
+ * // [{ field: "createdAt", direction: "desc" }, { field: "id", direction: "asc" }]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const paginated = <R extends Any>(ref: () => R): Paginated<R> => ({ kind: "paginated", ref })
+// `NoInfer` keeps `O` from being inferred off the *contextual* return type (the
+// `Relationships` record of a `Resource.make` call widens it); it is inferred
+// from `options.order` alone, and defaults to `undefined` — no declared order.
+export const paginated = <R extends Any, const O extends Order<R> | undefined = undefined>(
+  ref: () => R,
+  options?: { readonly order?: O }
+): Paginated<R, NoInfer<O>> => {
+  const order = options?.order
+  if (order !== undefined) {
+    if (order.length === 0) {
+      throw new Error("Relationship.paginated: `order` declares no terms; name at least one, or omit the option")
+    }
+    const seen = new Set<string>()
+    for (const term of order) {
+      if (seen.has(term.field)) {
+        throw new Error(
+          `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`
+        )
+      }
+      seen.add(term.field)
+    }
+  }
+  return { kind: "paginated", ref, order: order as NoInfer<O> }
+}
 
 // ---------------------------------------------------------------------------
 // Predicates

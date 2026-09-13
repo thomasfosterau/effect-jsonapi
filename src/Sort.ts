@@ -71,6 +71,37 @@ export type MarkerKey = "~@thomasfosterau/effect-jsonapi/sort"
 export type Declared<S extends Schema.Top> = S & { readonly [K in MarkerKey]: true }
 
 /**
+ * One term of an order: a field and the direction it is ordered in — the
+ * decoded shape of a single `?sort=` term (`-createdAt` is
+ * `{ field: "createdAt", direction: "desc" }`, per
+ * {@link https://jsonapi.org/format/1.1/#fetching-sorting | JSON:API sorting}).
+ *
+ * This is the package's one vocabulary for "an order": it is what `Query.Sort`
+ * decodes a `sort` query parameter into, and what a paginated relationship's
+ * canonical order (`Relationship.paginated(ref, { order })`) is declared as.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query, Sort } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // The wire form decodes into exactly these terms.
+ * const terms: ReadonlyArray<Sort.Term<"createdAt" | "title">> = Schema.decodeUnknownSync(
+ *   Query.Sort(["createdAt", "title"])
+ * )("-createdAt,title")
+ *
+ * terms // [{ field: "createdAt", direction: "desc" }, { field: "title", direction: "asc" }]
+ * ```
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface Term<Field extends string = string> {
+  readonly field: Field
+  readonly direction: "asc" | "desc"
+}
+
+/**
  * Declares an attribute sortable (`?sort=`) — a pipeable combinator on the
  * attribute's schema, in the manner of `Schema.brand`. The declaration is a
  * schema annotation under {@link AnnotationId} and a type-level marker, from
