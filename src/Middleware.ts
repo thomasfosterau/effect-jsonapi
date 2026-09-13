@@ -42,6 +42,7 @@ import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
+import { pointer } from "./Document.js"
 import type { ErrorSource } from "./Document.js"
 import { MEDIA_TYPE } from "./internal/media.js"
 
@@ -238,9 +239,10 @@ export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
 export const schemaError = (part: RequestPart): BadRequest =>
   new BadRequest({ detail: `Request ${part.toLowerCase()} failed validation` })
 
-// A JSON Pointer (RFC 6901) from an issue path.
+// A JSON Pointer (RFC 6901) from an issue path, reusing `Document.pointer`'s
+// escaping so this spelling can't drift from the public constructors'.
 const jsonPointer = (path: ReadonlyArray<string | number>): string =>
-  "/" + path.map((segment) => String(segment).replace(/~/g, "~0").replace(/\//g, "~1")).join("/")
+  "/" + path.map((segment) => pointer.escape(String(segment))).join("/")
 
 // The `source` of one error object, from the part that failed and the issue's
 // path: query keys are re-bracketed (`["page", "limit"]` → `page[limit]`; a
