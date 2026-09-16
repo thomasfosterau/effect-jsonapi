@@ -32,6 +32,12 @@ describe("contentTypeIsAcceptable", () => {
   it("leaves other content types to the downstream decoder", () => {
     expect(contentTypeIsAcceptable("application/json; charset=utf-8")).toBe(true)
   })
+
+  it("splits the media type parameter list positionally at q, same as Accept", () => {
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8`)).toBe(true)
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true)
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
+  })
 })
 
 describe("acceptIsAcceptable", () => {
@@ -42,6 +48,32 @@ describe("acceptIsAcceptable", () => {
 
   it("rejects when every JSON:API instance carries bad parameters", () => {
     expect(acceptIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false)
+  })
+
+  it("treats q as the entry's weight, not a media type parameter", () => {
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.9`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1`)).toBe(true)
+    // whitespace before the parameter name
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}; q=1`)).toBe(true)
+    // a weight of exactly zero is an explicit refusal, not a bad parameter
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0`)).toBe(false)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.000`)).toBe(false)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1.0`)).toBe(true)
+  })
+
+  it("weighs each Accept entry independently — a low-weight JSON:API instance is still acceptable", () => {
+    expect(acceptIsAcceptable(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}, text/html;q=0.9`)).toBe(true)
+  })
+
+  it("splits the media type parameter list positionally at q", () => {
+    // one media type parameter (profile) plus a weight: acceptable
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};profile="https://example.com/p";q=0.8`)).toBe(true)
+    // no media type parameters — everything after q is an accept-extension
+    // parameter and must not be checked against the ext/profile whitelist
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true)
+    // a real bad media type parameter (before q) is still rejected
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
   })
 })
 
