@@ -43,7 +43,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
 import type { ErrorSource } from "./Document.js"
-import { MEDIA_TYPE } from "./internal/media.js"
+import { baseMediaType, MEDIA_TYPE } from "./internal/media.js"
 
 // ---------------------------------------------------------------------------
 // Content negotiation predicates (JSON:API §5)
@@ -75,7 +75,7 @@ const parseMediaType = (
 ): { readonly base: string; readonly parameters: ReadonlyArray<readonly [name: string, value: string]> } => {
   const [first, ...rest] = entry.split(";")
   return {
-    base: (first ?? "").trim().toLowerCase(),
+    base: baseMediaType(first ?? ""),
     parameters: rest.map((part) => {
       const eq = part.indexOf("=")
       if (eq === -1) return [part.trim().toLowerCase(), ""] as const

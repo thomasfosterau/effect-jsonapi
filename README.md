@@ -1198,9 +1198,9 @@ negotiation half alone, for composing your own set.)
 And to call it — the same definitions drive a fully typed client:
 
 ```ts
-import { HttpApiClient } from "effect/unstable/httpapi"
+import { Client } from "@thomasfosterau/effect-jsonapi"
 
-const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost:3000" })
+const client = yield* Client.make(Api, { baseUrl: "http://localhost:3000" })
 
 const doc = yield* client.articles.get({
   params: { id: Article.Id.make("1") },
@@ -1210,6 +1210,53 @@ const doc = yield* client.articles.get({
 )
 // doc.data.attributes.createdAt is a Date; doc.included is typed
 ```
+
+`Client.make` is `HttpApiClient.make` with JSON:API content negotiation applied: `Accept:
+application/vnd.api+json` on every request, and `Content-Type` on every mutating one — including a
+bodyless `DELETE`, which carries no body to label but is still negotiated on. A client derived by
+`HttpApiClient.make` alone sends neither, so it does not meet the spec's client responsibilities and
+a host serving HTML and JSON:API on one origin has nothing to select on. An api using extensions
+takes the same `extensions` value the server's `Middleware.layerWith` is given:
+
+```ts
+const client =
+  yield *
+  Client.make(Api, {
+    baseUrl: "http://localhost:3000",
+    extensions: [Atomic.EXTENSION_URI] // ← the same value `Middleware.layerWith` gets
+  })
+```
+
+The pieces are public individually, for transports that are not a derived client:
+`Client.transform` applies the negotiation to any `HttpClient`, `Client.jsonApiHeaders` to a single
+request, `Client.mediaType(options)` builds the header value, and `Client.isMutatingMethod` is the
+`POST` / `PATCH` / `PUT` / `DELETE` predicate — exported because which requests carry a
+`Content-Type` is a correctness detail that a façade and a server must not answer differently.
+
+### Reading error documents
+
+A failure the api declares arrives as its typed error (`Effect.catchTag` above). A failure it does
+not — an opaque 5xx, a gateway's HTML, a truncated body — arrives as an `HttpClientError`, and
+`Client.errorDocument` reads whatever JSON:API error document it carries:
+
+```ts
+const message =
+  yield *
+  Effect.map(Client.errorDocument(cause), (document) =>
+    Option.match(document, {
+      onNone: () => "The server could not be reached",
+      onSome: Client.errorMessage // first `detail`, else `title`, else a constant
+    })
+  )
+```
+
+The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than
+throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same
+decoder reached from a **body** rather than a response — a supported entry point, not an internal
+of the cause-based one — so a façade that synthesises responses locally and never holds an
+`HttpClientError` decodes through exactly the same seam as the network transport. That is what makes
+a façade-served error and a network-served error for the same URL indistinguishable to the client.
+A worked client is in [`examples/blog/client.ts`](./examples/blog/client.ts).
 
 ### Narrowing `included` by the requested include paths
 
