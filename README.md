@@ -64,6 +64,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
   - [Atomic operations](#atomic-operations)
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
+  - [The per-resource transform pass (`onResource`)](#the-per-resource-transform-pass-onresource)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
@@ -1115,7 +1116,9 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 
 The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules
 at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every
-included resource must be referenced in the document).
+included resource must be referenced in the document). Their `onResource` option applies
+per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document
+([below](#the-per-resource-transform-pass-onresource)).
 
 Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and
 `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
@@ -1210,6 +1213,96 @@ const doc = yield* client.articles.get({
 )
 // doc.data.attributes.createdAt is a Date; doc.included is typed
 ```
+
+### The per-resource transform pass (`onResource`)
+
+A document carries the same resource type in more than one slot: primary `data`, every `included`
+member, the identifiers of a relationship document. Per-resource processing that only reaches one of
+them — a sparse fieldset projected out of `data` but not out of `included`, per-viewer `meta`
+stamped on one but not the other — leaves a document describing one type two different ways. Sparse
+fieldsets in particular are specified to apply to **every** resource of that type in the document.
+
+`onResource` is one pass over all of them:
+
+```ts
+Handlers.data(article, {
+  included,
+  self: `/articles/${article.id}`,
+  onResource: Handlers.compose(
+    Handlers.project(query.fields), // ?fields[articles]=title
+    Handlers.withMeta((r) => permissions(viewer, r)) // { canEdit, canDelete }
+  )
+})
+```
+
+It runs **once per resource** — after `included` is deduplicated (so once per distinct resource, not
+once per occurrence) and before the full-linkage check (so the check sees what the document actually
+emits). A resource reached in two slots is shaped once and that result reused, so it cannot come out
+two ways. Transforms must therefore be pure functions of the resource, and must not change its
+`type` or `id`.
+
+The same option is on `Handlers.collection`, on `Handlers.linkage` (where it reaches the resource
+identifiers §8.4 makes a relationship document's primary data), and on `Handlers.buildIncluded`.
+
+| Transform                         | What it does                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `Handlers.project(fields)`        | Sparse fieldsets: narrows `attributes` to the names requested for the resource's type. |
+| `Handlers.withMeta(compute)`      | Merges computed `meta` over the resource's own.                                        |
+| `Handlers.compose(first, second)` | One pass doing both.                                                                   |
+| `Handlers.transform<Lambda>(f)`   | Anything else, with its type-level effect declared.                                    |
+
+`Handlers.project` also has a data-first form, `Handlers.project(resource, fields)`, for projecting
+one resource directly. Two behaviours make it safe to run over a whole document: a type with **no
+requested set** (absent, or an empty `?fields[TYPE]=`) is returned unchanged — the spec's default of
+"every field", not "no field" — and only `attributes` is projected, so `relationships`, `links` and
+`meta` survive and a resource identifier (no attributes at all) passes through untouched.
+
+`Handlers.withMeta` merges the computed members over whatever `meta` the resource already carries,
+and emits **no** `meta` member when the merged result is empty: to the spec an empty `meta` object is
+a present-but-empty meta, which says something different from saying nothing.
+
+#### The effect stays in the type
+
+The builders' return type is computed from the transform rather than widened:
+
+```ts
+const document = Handlers.data(article, {
+  included: [otherArticle],
+  onResource: Handlers.project({ articles: ["title"] })
+})
+
+document.data.attributes // { title: string } — `body` is gone
+document.included?.[0]?.attributes // { title: string } — and gone here too, identically
+```
+
+A fieldset known only at runtime (`query.fields`) can be any subset of the selectable names, so each
+projected attribute is typed as optional — honest in both directions rather than claiming a
+selection the request may not have made.
+
+Because one transform is applied at several types in a single document, its effect cannot be a
+single inferred return type; it is carried by a type-level function. To write your own, declare the
+lambda and hand it to `Handlers.transform`:
+
+```ts
+interface SelfLinkLambda extends Handlers.TransformLambda {
+  readonly Out: this["In"] & { readonly links: { readonly self: string } }
+}
+
+const withSelfLink = Handlers.transform<SelfLinkLambda>((resource) => ({
+  ...resource,
+  links: { self: `/${resource.type}/${resource.id}` }
+}))
+```
+
+A plain function is accepted too, and is checked against `Handlers.IdentityLambda`: it must hand back
+the resource's own type, which is exactly the guarantee a shape-preserving transform makes.
+
+One consequence is worth stating plainly: a projected document is deliberately _not_ the endpoint's
+default response-document type. A resource with attributes removed no longer satisfies a schema that
+requires them, and the type says so rather than pretending otherwise. An endpoint that projects needs
+a success document that admits the projection — see
+[Overriding the success document](#overriding-the-success-document) — built over a resource variant
+whose attributes are optional.
 
 ### Narrowing `included` by the requested include paths
 
@@ -1558,9 +1651,13 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 
 ## Limitations
 
-- **Sparse fieldsets are advisory**: `?fields[TYPE]=` is decoded, validated and handed to your
-  handler, but attribute projection in responses is handler logic (automatic projection would
-  require post-processing responses against request state).
+- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed
+  to your handler, and the builders project it when you ask them to —
+  `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })`
+  ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is
+  projected behind your back; the builders don't post-process responses against request state on
+  their own. Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is
+  built from the resource's attributes, so a relationship name cannot be requested.
 - **Include paths are typed to a depth of 2 hops** (`"comments.author"` works,
   `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off. The runtime
   validation matches the same set.

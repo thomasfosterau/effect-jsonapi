@@ -191,6 +191,232 @@ describe("Handlers.linkage", () => {
   })
 })
 
+// A resource type that appears on both sides of a compound document: an
+// article whose `related` relationship points at other articles. This is the
+// shape the per-resource transform exists for — one type, two slots.
+const primaryArticle = {
+  type: "articles",
+  id: "1",
+  attributes: { title: "Hi", body: "the body", draft: false },
+  relationships: { related: { data: [{ type: "articles", id: "2" }] } }
+}
+const relatedArticle = {
+  type: "articles",
+  id: "2",
+  attributes: { title: "Yo", body: "another body", draft: true }
+}
+
+describe("Handlers.project", () => {
+  it("projects `attributes` to the requested set", () => {
+    expect(Handlers.project(relatedArticle, { articles: ["title"] })).toEqual({
+      type: "articles",
+      id: "2",
+      attributes: { title: "Yo" }
+    })
+  })
+
+  it("is identity when the type has no requested set", () => {
+    // absent entirely…
+    expect(Handlers.project(relatedArticle, { people: ["firstName"] })).toBe(relatedArticle)
+    expect(Handlers.project(relatedArticle, undefined)).toBe(relatedArticle)
+    // …present but empty (`?fields[articles]=`): still "every field", not "no field"
+    expect(Handlers.project(relatedArticle, { articles: [] })).toBe(relatedArticle)
+  })
+
+  it("projects `attributes` only — relationships, links and meta are left alone", () => {
+    const decorated = { ...primaryArticle, links: { self: "/articles/1" }, meta: { views: 3 } }
+    expect(Handlers.project(decorated, { articles: ["title"] })).toEqual({
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hi" },
+      relationships: { related: { data: [{ type: "articles", id: "2" }] } },
+      links: { self: "/articles/1" },
+      meta: { views: 3 }
+    })
+  })
+
+  it("leaves a resource with no attributes (a resource identifier) alone", () => {
+    const identifier = { type: "articles", id: "2" }
+    expect(Handlers.project(identifier, { articles: ["title"] })).toBe(identifier)
+  })
+
+  it("ignores requested names the resource doesn't carry", () => {
+    expect(Handlers.project(relatedArticle, { articles: ["title", "nope"] }).attributes).toEqual({ title: "Yo" })
+  })
+
+  it("data-last builds the transform the builders take", () => {
+    const onResource = Handlers.project({ articles: ["title"] })
+    expect(onResource(relatedArticle)).toEqual({ type: "articles", id: "2", attributes: { title: "Yo" } })
+  })
+})
+
+describe("Handlers.withMeta", () => {
+  it("merges the computed members over the resource's own meta", () => {
+    const stamp = Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }))
+    expect(stamp({ ...relatedArticle, meta: { views: 3 } }).meta).toEqual({ views: 3, href: "/articles/2" })
+    expect(stamp(relatedArticle).meta).toEqual({ href: "/articles/2" })
+  })
+
+  it("computed members win over the resource's own", () => {
+    const stamp = Handlers.withMeta(() => ({ views: 0 }))
+    expect(stamp({ ...relatedArticle, meta: { views: 3 } }).meta).toEqual({ views: 0 })
+  })
+
+  it("emits no `meta` member when the merged result is empty", () => {
+    // an empty `meta` object is a *present* meta to the spec — not the same
+    // statement as having none
+    expect(Handlers.withMeta(() => ({}))(relatedArticle)).not.toHaveProperty("meta")
+    expect(Handlers.withMeta(() => undefined)(relatedArticle)).toBe(relatedArticle)
+    // …including when the resource arrived carrying an empty one
+    expect(Handlers.withMeta(() => undefined)({ ...relatedArticle, meta: {} })).not.toHaveProperty("meta")
+  })
+
+  it("computes per resource, over every type in the document", () => {
+    const stamp = Handlers.withMeta((resource) => (resource.type === "articles" ? { kind: "article" } : undefined))
+    expect(stamp(relatedArticle).meta).toEqual({ kind: "article" })
+    expect(stamp(author)).not.toHaveProperty("meta")
+  })
+})
+
+describe("Handlers.compose", () => {
+  it("applies the first transform, then the second", () => {
+    const onResource = Handlers.compose(
+      Handlers.project({ articles: ["title"] }),
+      Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }))
+    )
+    expect(onResource(relatedArticle)).toEqual({
+      type: "articles",
+      id: "2",
+      attributes: { title: "Yo" },
+      meta: { href: "/articles/2" }
+    })
+  })
+})
+
+describe("Handlers.transform", () => {
+  it("wraps a runtime function as a transform", () => {
+    const withSelfLink = Handlers.transform<Handlers.IdentityLambda>((resource) => ({
+      ...resource,
+      links: { self: `/${resource.type}/${resource.id}` }
+    }))
+    expect(Handlers.data(relatedArticle, { onResource: withSelfLink }).data).toEqual({
+      ...relatedArticle,
+      links: { self: "/articles/2" }
+    })
+  })
+})
+
+describe("the per-resource transform pass", () => {
+  it("shapes a type identically wherever it appears — primary and included", () => {
+    // The regression this hook exists to prevent: a sparse fieldset applied to
+    // the primary data but not to `included` leaves one document describing
+    // "articles" two different ways.
+    const document = Handlers.data(primaryArticle, {
+      included: [relatedArticle],
+      onResource: Handlers.project({ articles: ["title"] })
+    })
+
+    expect(document.data.attributes).toEqual({ title: "Hi" })
+    expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" })
+    // the assertion that matters: one type, one shape
+    expect(Object.keys(document.data.attributes)).toEqual(Object.keys(document.included![0]!.attributes))
+    // …and the relationships that carry the linkage survived in both slots
+    expect(document.data.relationships).toEqual(primaryArticle.relationships)
+  })
+
+  it("applies to a collection's `data` and `included` alike", () => {
+    const document = Handlers.collection([primaryArticle], {
+      included: [relatedArticle],
+      onResource: Handlers.project({ articles: ["title"] })
+    })
+    expect(document.data[0]?.attributes).toEqual({ title: "Hi" })
+    expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" })
+    expect(Object.keys(document.data[0]!.attributes)).toEqual(Object.keys(document.included![0]!.attributes))
+  })
+
+  it("leaves types with no requested set untouched, in either slot", () => {
+    const document = Handlers.data(article, {
+      included: [author, comment],
+      onResource: Handlers.project({ articles: ["title"] })
+    })
+    expect(document.data.attributes).toEqual({ title: "Hello" })
+    expect(document.included).toEqual([author, comment])
+  })
+
+  it("runs after dedup: once per distinct included resource, not once per occurrence", () => {
+    const seen: Array<string> = []
+    const document = Handlers.data(article, {
+      included: [author, author, comment],
+      onResource: (resource) => {
+        seen.push(`${resource.type}:${resource.id}`)
+        return resource
+      }
+    })
+    expect(document.included).toEqual([author, comment])
+    expect(seen).toEqual(["articles:1", "people:9", "comments:5"])
+  })
+
+  it("runs at most once per (type, id), even for a resource landing in two slots", () => {
+    // Not a document the builders police, but the transform still cannot
+    // produce two shapes for one resource: the second slot reuses the first
+    // slot's result.
+    const selfReferential = {
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hi" },
+      relationships: { related: { data: [{ type: "articles", id: "1" }] } }
+    }
+    let runs = 0
+    const document = Handlers.data(selfReferential, {
+      included: [selfReferential],
+      onResource: (resource) => {
+        runs += 1
+        return resource
+      }
+    })
+    expect(runs).toBe(1)
+    expect(document.included?.[0]).toBe(document.data)
+  })
+
+  it("runs before the full-linkage check — a transform that breaks linkage is caught", () => {
+    const stripRelationships = Handlers.transform<Handlers.IdentityLambda>(
+      ({ relationships: _relationships, ...rest }) => rest
+    )
+    expect(() => Handlers.data(primaryArticle, { included: [relatedArticle], onResource: stripRelationships })).toThrow(
+      /full linkage/
+    )
+    // …and the check is still skippable
+    expect(
+      Handlers.data(primaryArticle, {
+        included: [relatedArticle],
+        onResource: stripRelationships,
+        checkLinkage: false
+      }).included
+    ).toEqual([{ type: "articles", id: "2", attributes: relatedArticle.attributes }])
+  })
+
+  it("buildIncluded applies it to the deduplicated members", () => {
+    expect(
+      Handlers.buildIncluded([article], [author, author], {
+        onResource: Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }))
+      })
+    ).toEqual([{ ...author, meta: { href: "/people/9" } }])
+  })
+
+  it("applies to a linkage document's resource identifiers", () => {
+    const document = Handlers.linkage([{ type: "comments", id: "5" }], {
+      self: "/articles/1/relationships/comments",
+      onResource: Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }))
+    })
+    expect(document.data).toEqual([{ type: "comments", id: "5", meta: { href: "/comments/5" } }])
+    // a to-one identifier, and an empty to-one which has nothing to shape
+    expect(
+      Handlers.linkage({ type: "people", id: "9" }, { onResource: Handlers.withMeta(() => ({ canEdit: true })) }).data
+    ).toEqual({ type: "people", id: "9", meta: { canEdit: true } })
+    expect(Handlers.linkage(null, { onResource: Handlers.withMeta(() => ({ canEdit: true })) }).data).toBeNull()
+  })
+})
+
 describe("relationship URL helpers", () => {
   it("relationshipLink builds the relationship-endpoint URL", () => {
     expect(Handlers.relationshipLink("articles", "1", "comments")).toBe("/articles/1/relationships/comments")
