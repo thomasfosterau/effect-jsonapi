@@ -38,10 +38,32 @@ export const MEDIA_TYPE = "application/vnd.api+json"
 export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic"
 
 /**
+ * The JSON:API media type with `ext` / `profile` parameters, in the spelling
+ * §5 requires: each parameter's URIs space-separated inside one quoted value.
+ *
+ * The one place this string is built. The server parses these parameters
+ * (`Middleware.acceptIsAcceptable`) and the client emits them
+ * (`Client.jsonApiHeaders`), so both sides have to agree byte for byte on the
+ * spelling, and they agree by sharing this.
+ *
+ * @since 0.15.0
+ * @category constants
+ * @internal
+ */
+export const mediaType = (options?: {
+  readonly extensions?: ReadonlyArray<string> | undefined
+  readonly profiles?: ReadonlyArray<string> | undefined
+}): string => {
+  const parameter = (name: string, uris: ReadonlyArray<string> | undefined): string =>
+    uris === undefined || uris.length === 0 ? "" : `;${name}="${uris.join(" ")}"`
+  return `${MEDIA_TYPE}${parameter("ext", options?.extensions)}${parameter("profile", options?.profiles)}`
+}
+
+/**
  * The JSON:API media type carrying the atomic operations `ext` parameter.
  *
  * @since 0.1.0
  * @category constants
  * @internal
  */
-export const ATOMIC_MEDIA_TYPE = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`
+export const ATOMIC_MEDIA_TYPE = mediaType({ extensions: [ATOMIC_EXTENSION_URI] })

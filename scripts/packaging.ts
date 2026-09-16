@@ -49,7 +49,6 @@ if (!existsSync(dist)) {
 // 1. Each schema-only subpath bundles without the HTTP surface.
 const SCHEMA_ONLY = [
   "Atomic",
-  "Client",
   "Document",
   "Filter",
   "Handlers",

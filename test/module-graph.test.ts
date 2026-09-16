@@ -26,9 +26,14 @@ const src = resolve(root, "src")
  */
 const TIERS = {
   /** `effect` is the only peer. Importable by a client, a document consumer or a non-HTTP producer. */
-  schema: ["Atomic", "Client", "Document", "Filter", "Handlers", "Lid", "Query", "Relationship", "Resource", "Sort"],
-  /** Builds on `effect/unstable/httpapi` — the server surface. */
-  http: ["ApiError", "Endpoint", "Group", "Middleware"]
+  schema: ["Atomic", "Document", "Filter", "Handlers", "Lid", "Query", "Relationship", "Resource", "Sort"],
+  /**
+   * Builds on `effect/unstable/httpapi`. `Client` is here rather than in the
+   * schema tier because it generates and negotiates real HTTP requests; the
+   * error-document decoding a consumer wants *without* a transport is
+   * `Document.decodeErrorDocument`, which stays schema-only.
+   */
+  http: ["ApiError", "Client", "Endpoint", "Group", "Middleware"]
 } as const
 
 const UNSTABLE = "effect/unstable/"

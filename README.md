@@ -18,7 +18,7 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 Every module is reachable from the package root, which is how the rest of this
 document imports them. Each is also published at its own subpath
-(`@thomasfosterau/effect-jsonapi/Document`), which matters for the ten modules
+(`@thomasfosterau/effect-jsonapi/Document`), which matters for the nine modules
 that need `effect` and nothing else: reached that way they don't resolve
 `effect/unstable/httpapi`, so a client, a document consumer or a code generator
 needn't carry a pre-stable peer it has no use for. Same files either way — see
@@ -75,6 +75,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Atomic operations](#atomic-operations)
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
+- [5. Clients — negotiation and error documents](#5-clients--negotiation-and-error-documents)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
   - [Bracketing page keys on a query struct you own](#bracketing-page-keys-on-a-query-struct-you-own)
@@ -1338,6 +1339,67 @@ requesting nothing narrows `included` to `never`. This is a type-level operation
 cost; the response is still decoded against the endpoint's full schema, so a non-compliant server
 fails loudly instead of lying.
 
+## 5. Clients — negotiation and error documents
+
+`HttpApiClient.make` sends `Accept: application/json` and
+`Content-Type: application/json`, so a client generated from an api built with this package is
+rejected by this package's own content-negotiation middleware. `Client.make` is `HttpApiClient.make`
+with that fixed — the same options, plus the `ext` / `profile` parameters to advertise:
+
+```ts
+const program = Effect.gen(function* () {
+  const client = yield* Client.make(Api, { baseUrl: "https://example.com" })
+  return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} })
+}).pipe(Effect.provide(FetchHttpClient.layer))
+```
+
+For a client you assemble yourself, the pieces are separate. `Client.transform(client, options?)` is
+the `HttpClient` transform; `Client.jsonApiHeaders(request, options?)` is the per-request function
+behind it — `Accept` on everything, `Content-Type` on the mutating methods, body bytes untouched:
+
+```ts
+Client.jsonApiHeaders(HttpClientRequest.post("/articles"), { extensions: [Atomic.EXTENSION_URI] })
+// accept:       application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
+// content-type: application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"
+```
+
+`Client.isMutatingMethod(method)` is the POST/PUT/PATCH/DELETE predicate, exported because it is a
+correctness detail rather than sugar: `DELETE` is in the list, since a JSON:API `DELETE` may carry a
+body and a bodyless one still has to declare what it would send. A client, a façade and a server
+that disagree about which requests are mutating disagree about which requests negotiate.
+
+### Reading the error document off a failure
+
+A call that fails with a status the endpoint did not declare surfaces as an `HttpClientError`
+carrying a response. `Client.errorDocument(cause)` recovers the JSON:API error document from it, and
+`Document.errorMessage(document)` turns that into a sentence (`detail`, else `title`, else a
+fallback):
+
+```ts
+const describe = (cause: unknown) =>
+  Client.errorDocument(cause).pipe(
+    Effect.map(
+      Option.match({
+        onNone: () => "Request could not be completed",
+        onSome: Document.errorMessage
+      })
+    )
+  )
+```
+
+The recovery is **total**: a transport fault with no response, an opaque 5xx, an HTML error page
+from a proxy, a truncated body — all `None`. An error path that can throw its own error is worse
+than no error path.
+
+`Document.decodeErrorDocument(body)` is the same decode without a response, so it is reachable from
+anywhere: a façade synthesising a failure locally from a replica, a fixture, a test double. It lives
+in `Document` rather than `Client` so a consumer can have it with `effect` as its only peer — see
+[the tier table](./PUBLISHING.md#entry-points).
+
+[`examples/blog/client.ts`](./examples/blog/client.ts) is all of this end to end against the blog
+server, in memory: a generated client negotiating through the server's own middleware, and a 404
+round-tripping back as a decoded error document.
+
 ## Query parameters
 
 | Family         | Wire form                                 | Decoded form                                                                                                                                                                                                                             |
@@ -1671,7 +1733,7 @@ can lift any one out as a starting point. Run them all from the repo root with
 
 | Example                                      | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Test                                          |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| [`examples/blog`](./examples/blog)           | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution                                                                                                                                                                                                                                                                                                                                                                                                                      | [`blog/test`](./examples/blog/test)           |
+| [`examples/blog`](./examples/blog)           | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution; a client (`client.ts`) negotiating JSON:API against the server in memory and round-tripping an error document back                                                                                                                                                                                                                                                                                                  | [`blog/test`](./examples/blog/test)           |
 | [`examples/github`](./examples/github)       | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types                                                                                                                                                                                                            | [`github/test`](./examples/github/test)       |
 | [`examples/northwind`](./examples/northwind) | A Northwind Traders e-commerce API: categories, suppliers, shippers, customers, territories, employees, products, orders and line items; all four relationship kinds laid out as an acyclic graph (required `category`/`supplier`/`customer`/`employee`, nullable `shipper`, inlined `territories`, a paginated line-item feed); the reverse directions (a category's products, a customer's orders) and the self-referential reporting hierarchy modelled as `filter[…]` collection endpoints; product CRUD with typed numeric price-range filters; offset/limit pagination; territory assignment and order shipping via relationship endpoints; 404/409 domain errors; global catalog search across three resource types | [`northwind/test`](./examples/northwind/test) |
 

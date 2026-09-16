@@ -18,7 +18,7 @@
  *
  * @since 0.1.0
  */
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
 // Meta
@@ -560,3 +560,91 @@ export const Document = <
     ErrorDocument(options?.error),
     MetaDocument(options?.meta)
   ])
+
+// ---------------------------------------------------------------------------
+// Reading an error document back
+// ---------------------------------------------------------------------------
+
+/**
+ * The decoded value of a standard JSON:API error document — what
+ * {@link decodeErrorDocument} produces.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export type ErrorDocumentValue = ErrorDocument["Type"]
+
+// One schema, decoded once at module load: the standard error document, which
+// is the shape every JSON:API server's failures share regardless of the api
+// that produced them.
+const decodeStandardErrorDocument = Schema.decodeUnknownOption(ErrorDocument() as Schema.Codec<ErrorDocumentValue>)
+
+/**
+ * Best-effort decode of an arbitrary body into a JSON:API error document.
+ *
+ * **Never throws and never fails**: a body that is not a conformant error
+ * document — a network fault's empty body, an opaque 5xx from a proxy, a
+ * truncated response, HTML from a load balancer — is `None`, and the caller
+ * falls back to a status-only message. That is the whole contract, and it is
+ * what makes this usable inside an error path, where throwing a second error
+ * loses the first.
+ *
+ * This is the seam every transport should share, so error-shape handling
+ * cannot drift between them. It takes a body rather than a response on
+ * purpose: it is equally reachable from a failed HTTP call
+ * (`Client.errorDocument`), from a response synthesised locally by a façade
+ * that never made one, and from a fixture.
+ *
+ * @example
+ * ```ts
+ * import { Option } from "effect"
+ * import { Document } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const decoded = Document.decodeErrorDocument({
+ *   errors: [{ status: "404", title: "Not Found", detail: "No article with id 1" }]
+ * })
+ * Option.isSome(decoded) // true
+ *
+ * Document.decodeErrorDocument("<html>502 Bad Gateway</html>") // None
+ * Document.decodeErrorDocument(undefined) // None
+ * ```
+ *
+ * @since 0.15.0
+ * @category utils
+ */
+export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocumentValue> => {
+  try {
+    return decodeStandardErrorDocument(body)
+  } catch {
+    // The contract is total. A decoder that throws rather than returning None
+    // (a custom codec raising, say) must not take the error path down with it.
+    return Option.none()
+  }
+}
+
+/**
+ * The human-readable message of an error document: the first error's `detail`,
+ * else its `title`, else a generic fallback.
+ *
+ * The order is the spec's own reading of the two members — `title` is "a short,
+ * human-readable summary … that SHOULD NOT change from occurrence to
+ * occurrence", `detail` "a human-readable explanation specific to this
+ * occurrence" — so `detail` is the more informative when present.
+ *
+ * @example
+ * ```ts
+ * import { Document } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Document.errorMessage({ errors: [{ title: "Not Found", detail: "No article with id 1" }] })
+ * // "No article with id 1"
+ * Document.errorMessage({ errors: [{ title: "Not Found" }] }) // "Not Found"
+ * Document.errorMessage({ errors: [{ status: "500" }] }) // "Request could not be completed"
+ * ```
+ *
+ * @since 0.15.0
+ * @category utils
+ */
+export const errorMessage = (document: ErrorDocumentValue): string => {
+  const first = document.errors[0]
+  return first?.detail ?? first?.title ?? "Request could not be completed"
+}

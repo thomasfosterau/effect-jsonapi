@@ -47,22 +47,28 @@ referentially identical to the same definition imported through the other —
 which matters, because `Relationship.one(() => Resource)` resolves its target by
 identity.
 
-Subpaths exist for one reason: **ten of the fourteen modules need `effect` and
+Subpaths exist for one reason: **nine of the fourteen modules need `effect` and
 nothing else**, and reaching them through the root barrel drags
 `effect/unstable/httpapi` in with them. While `effect/unstable/*` is pre-stable,
 that is a version-compatibility surface a client, a document consumer or a code
 generator has no reason to carry — and tree-shaking cannot help, because a
 bundler may drop the code but cannot drop the peer.
 
-| Tier        | Modules                                                                                                  | Resolves                             |
-| ----------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------ |
-| Schema-only | `Atomic`, `Client`, `Document`, `Filter`, `Handlers`, `Lid`, `Query`, `Relationship`, `Resource`, `Sort` | `effect`                             |
-| HTTP        | `ApiError`, `Endpoint`, `Group`, `Middleware`                                                            | `effect` + `effect/unstable/httpapi` |
+| Tier        | Modules                                                                                        | Resolves                             |
+| ----------- | ---------------------------------------------------------------------------------------------- | ------------------------------------ |
+| Schema-only | `Atomic`, `Document`, `Filter`, `Handlers`, `Lid`, `Query`, `Relationship`, `Resource`, `Sort` | `effect`                             |
+| HTTP        | `ApiError`, `Client`, `Endpoint`, `Group`, `Middleware`                                        | `effect` + `effect/unstable/httpapi` |
 
 The tier table is pinned in [`test/module-graph.test.ts`](./test/module-graph.test.ts)
 and asserted in both directions, so moving a module between tiers fails the test
 and has to be a decision rather than a drift. `src/internal/` is deliberately not
 exported.
+
+`Client` is in the HTTP tier because it generates and negotiates real HTTP
+requests. The half of the client story that a consumer may want _without_ a
+transport — best-effort error-document decoding, for a façade synthesising a
+response locally or for a fixture — is `Document.decodeErrorDocument` and
+`Document.errorMessage`, which stay schema-only.
 
 ### `sideEffects: false`
 

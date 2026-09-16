@@ -64,7 +64,12 @@ export * as ApiError from "./ApiError.js"
 export * as Atomic from "./Atomic.js"
 
 /**
- * Client-side helpers (`Client.narrowIncluded`).
+ * The client side: JSON:API content negotiation (`Client.make`,
+ * `Client.transform`, `Client.jsonApiHeaders`, `Client.isMutatingMethod`),
+ * recovering the error document a failed call carries
+ * (`Client.errorDocument`), and `Client.narrowIncluded`. Decoding an error
+ * document you already hold, with no transport in sight, is
+ * `Document.decodeErrorDocument`.
  *
  * @since 0.1.0
  */
@@ -72,7 +77,8 @@ export * as Client from "./Client.js"
 
 /**
  * JSON:API document-level schemas (links, meta, error objects, document
- * shapes).
+ * shapes), and best-effort error-document reading
+ * (`Document.decodeErrorDocument`, `Document.errorMessage`).
  *
  * @since 0.1.0
  */
