@@ -225,6 +225,12 @@ export type RefValue = { readonly type: string; readonly id: string } | { readon
 // annotations.
 const AttributeDescriptorAnnotationId = "@thomasfosterau/effect-jsonapi/attribute"
 
+// The annotation key under which a resource carries its resource-level
+// annotation bag. One key holding the whole bag, rather than the consumer's
+// keys stamped directly onto the schema, so `extend` inherits exactly the
+// resource metadata and nothing of Effect's own schema annotations.
+const ResourceAnnotationsId = "@thomasfosterau/effect-jsonapi/resource"
+
 // The phantom property key carrying the descriptor config at the *type* level.
 // It is never present at runtime; it exists only so the create/update
 // projections can read an attribute's config from its schema type.
@@ -1290,6 +1296,29 @@ export type AttributeAnnotationsOf<R extends Any> = {
   readonly [K in AttributeKeys<R>]: Schema.Annotations.Annotations | undefined
 }
 
+/**
+ * A resource's **resource-level** annotation bag: open metadata a consumer
+ * attaches to a whole resource definition, as {@link attributeAnnotations} is
+ * for a single attribute.
+ *
+ * A `Resource.make` definition is the natural single source of truth for more
+ * than the HTTP layer — database columns, form descriptors, search indexes,
+ * admin UI — and deriving one of those needs somewhere to put the part the
+ * JSON:API declaration doesn't cover. That is what this is for.
+ *
+ * **Namespace your keys.** The bag is shared by every consumer that derives
+ * from the resource, so a key should name its owner (`"@acme/storage"`,
+ * `"@legation/node"`) rather than claim a bare word. Vocabulary specific to one
+ * downstream library belongs under that library's namespace, not in this
+ * package's own surface.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface Annotations {
+  readonly [key: string]: unknown
+}
+
 // ---------------------------------------------------------------------------
 // Relationship names & targets (type level)
 // ---------------------------------------------------------------------------
@@ -1302,6 +1331,111 @@ export type AttributeAnnotationsOf<R extends Any> = {
  * @category type-level
  */
 export type RelationshipName<R extends Any> = keyof R["relationships"] & string
+
+/**
+ * One attribute's declared shape, as {@link attributeDescriptors} reports it.
+ *
+ * Everything here is fixed at declaration time by {@link attribute} /
+ * {@link readOnlyAttribute} (or by the defaults a plain schema attribute
+ * carries). It is stated rather than inferred: a consumer deriving from a
+ * resource should not have to reach into `fields.attributes.ast`, cast through
+ * `unknown`, or run a decoder against sentinel values to learn any of it.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface AttributeDescriptor<Key extends string = string> {
+  /** The attribute key, as declared. */
+  readonly key: Key
+  /**
+   * The attribute's own schema — the inner one, with any `Filter.able` /
+   * `Sort.able` declaration on it, and without the `optionalKey` wrapper a
+   * `resource: "optional"` projection adds.
+   */
+  readonly schema: Schema.Top
+  /**
+   * Presence on the **resource object**: `"required"`, `"optional"` (an
+   * optional key), or `false` for an input-only attribute, which appears in
+   * write projections only.
+   */
+  readonly resource: AttributePresence
+  /** Presence in `createPayload` / `createInput`. */
+  readonly create: AttributePresence
+  /** Presence in `updatePayload` / `updateInput` — never `"required"`. */
+  readonly update: AttributePresence
+  /** Whether the update projection additionally accepts `null`, to clear the value. */
+  readonly clearable: boolean
+  /** Whether the attribute's own schema is `Schema.NullOr(...)`. */
+  readonly nullable: boolean
+  /** Whether the attribute is excluded from *both* write projections (server-set). */
+  readonly readOnly: boolean
+  /** The annotations stamped on the attribute's schema, as {@link attributeAnnotations} reports them. */
+  readonly annotations: Schema.Annotations.Annotations | undefined
+}
+
+/**
+ * Every declared attribute's shape, in declaration order — presence across the
+ * three projections, clearability, nullability, read-only-ness, the schema and
+ * its annotations.
+ *
+ * Covers the map **as declared**, like {@link declaredAttributes}: input-only
+ * attributes are included, reported as `resource: false`. ({@link attributeKeys}
+ * lists the resource object's keys, which omits them.)
+ *
+ * This is the supported route to an attribute's projected shape. The package
+ * knows all of it by declaration; before this accessor the only ways to recover
+ * it from outside were reading `resource.fields.attributes.ast` through a cast
+ * or running decode probes against sentinel values, neither of which is an API.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     title: Schema.NonEmptyString,
+ *     summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+ *     createdAt: Resource.readOnlyAttribute(Schema.DateFromString)
+ *   }
+ * })
+ *
+ * const descriptors = Resource.attributeDescriptors(Article)
+ * descriptors.map((descriptor) => descriptor.key) // ["title", "summary", "createdAt"]
+ * descriptors[1]?.nullable // true
+ * descriptors[1]?.clearable // true — nullable schemas are clearable by default
+ * descriptors[2]?.readOnly // true
+ * ```
+ *
+ * @since 0.15.0
+ * @category accessors
+ */
+export const attributeDescriptors = <R extends Any>(
+  resource: R
+): ReadonlyArray<AttributeDescriptor<keyof DeclaredAttributesOf<R> & string>> => {
+  const fields = declaredAttributes(resource) as unknown as Record<string, Schema.Top>
+  return Object.entries(fields).map(([key, field]) => {
+    const config = descriptorOf(field)
+    // A plain schema attribute carries no descriptor: it projects with the
+    // read-write defaults, and is its own schema.
+    const schema = config?.schema ?? field
+    const create = config?.create ?? "required"
+    const update = config?.update ?? "optional"
+    return {
+      key: key as keyof DeclaredAttributesOf<R> & string,
+      schema,
+      // `true` is the resource object's "required" — normalised so all three
+      // projections speak one vocabulary.
+      resource: config === undefined ? "required" : config.resource === true ? "required" : config.resource,
+      create,
+      update,
+      clearable: config?.clearable ?? isNullable(field),
+      nullable: isNullable(schema),
+      readOnly: create === false && update === false,
+      annotations: Schema.resolveAnnotations(field)
+    }
+  })
+}
 
 /**
  * The relationship descriptor record of a resource definition — the
@@ -2315,6 +2449,12 @@ export const make = <
     readonly attributes: Attributes
     readonly relationships?: Rels
     readonly meta?: Meta
+    /**
+     * Resource-level metadata, readable with {@link annotations} and inherited
+     * by {@link extend}. Attach it after the fact — preserving the resource —
+     * with {@link annotate}.
+     */
+    readonly annotations?: Annotations
   }
 ): Resource<Type, Attributes, Rels, Meta, IdSchema> => {
   const relationships = (options.relationships ?? {}) as Rels
@@ -2355,7 +2495,16 @@ export const make = <
     meta: Schema.optionalKey(meta)
   }
 
-  const struct = Schema.Struct(fields)
+  // The bag rides the struct's own annotations, so anything that preserves a
+  // schema's annotations preserves it. Left off entirely when empty, so a
+  // resource that declares none is byte-for-byte what it was before.
+  const declaredAnnotations = options.annotations
+  const struct =
+    declaredAnnotations === undefined || Object.keys(declaredAnnotations).length === 0
+      ? Schema.Struct(fields)
+      : (Schema.Struct(fields).annotate({ [ResourceAnnotationsId]: declaredAnnotations }) as unknown as Schema.Struct<
+          ResourceFields<Type, Attributes, Rels, Meta, IdSchema>
+        >)
 
   // Create payload relationships: `one` required, `optional`/`many` optional,
   // `paginated` excluded. The member itself is required iff a `one` exists.
@@ -2604,6 +2753,13 @@ export const extend = <
     readonly relationships?: ExtraRels
     readonly meta?: Meta
     /**
+     * Resource-level metadata for the child, merged over the base's (the
+     * child's keys winning). See {@link annotate}.
+     *
+     * @since 0.15.0
+     */
+    readonly annotations?: Annotations
+    /**
      * The id schema for this resource, exactly as {@link make}'s `id` option:
      * any schema whose `Encoded` side is `string`, whose decoded type becomes
      * the resource's id brand with no package brand added. Contradicts
@@ -2641,7 +2797,11 @@ export const extend = <
     // (the resource-object fields would have dropped them).
     attributes: { ...base.declaredAttributes, ...options?.attributes },
     relationships: { ...base.relationships, ...options?.relationships },
-    meta: (options?.meta ?? base.fields.meta.schema) as Meta
+    meta: (options?.meta ?? base.fields.meta.schema) as Meta,
+    // Resource-level metadata is inherited like everything else, the child's
+    // own keys winning. A consumer deriving from a subtype sees the base's
+    // declaration without restating it.
+    annotations: { ...annotations(base), ...options?.annotations }
   }) as unknown as Resource<
     Type,
     ExtendedAttributes<BaseAttributes, ExtraAttributes>,
@@ -2650,6 +2810,97 @@ export const extend = <
     ExtendedId<BaseId, Type, InheritId, IdSchema>
   >
 }
+
+// ---------------------------------------------------------------------------
+// Resource-level annotations
+// ---------------------------------------------------------------------------
+
+/**
+ * Attaches resource-level metadata to a resource definition, returning a
+ * resource — every derived property intact.
+ *
+ * `Schema.Top#annotate` cannot be used for this. {@link make} assembles its
+ * result with `Object.assign`, attaching `Id`, `identifier`, `relationships`,
+ * `declaredAttributes`, `createPayload`, `ref`, `document()` and the rest onto
+ * the schema, and `annotate` returns a plain new schema carrying none of them.
+ * This rebuilds the resource around the annotated schema instead, so the result
+ * is a complete resource: a valid `Relationship.one(() => …)` target, a valid
+ * {@link extend} base, and identical to the original in every respect but the
+ * bag.
+ *
+ * Annotations merge, the new keys winning, and are inherited by {@link extend}.
+ * Read them back with {@link annotations}. Prefer namespaced keys — see
+ * {@link Annotations}.
+ *
+ * Annotate a resource **where it is defined**, before wiring it into a
+ * relationship graph. The result is a new resource value; a
+ * `Relationship.one(() => Person)` thunk written against the un-annotated
+ * `Person` keeps returning that one. Passing the annotations to {@link make}
+ * directly does the same job in one step.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.annotate(
+ *   Resource.make("people", { attributes: { firstName: Schema.NonEmptyString } }),
+ *   { "@acme/storage": { table: "people" } }
+ * )
+ *
+ * Resource.annotations(Person)["@acme/storage"] // { table: "people" }
+ * // …and it is still a resource:
+ * Person.type // "people"
+ * Object.keys(Person.createPayload.fields) // ["data"]
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const annotate = <
+  const Type extends string,
+  const Attributes extends Schema.Struct.Fields,
+  const Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>
+>(
+  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  toAdd: Annotations
+): Resource<Type, Attributes, Rels, Meta, IdSchema> =>
+  make(resource.type, {
+    // The resource's own id schema, so no fresh brand is minted.
+    id: resource.Id,
+    // The *declared* map, so input-only attributes survive the round trip.
+    attributes: resource.declaredAttributes,
+    relationships: resource.relationships,
+    meta: resource.fields.meta.schema as Meta,
+    annotations: { ...annotations(resource), ...toAdd }
+  })
+
+/**
+ * The resource-level annotation bag of a resource definition — what
+ * {@link annotate} (or {@link make}'s `annotations` option) attached, and what
+ * {@link extend} inherited. An empty object when the resource carries none.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString },
+ *   annotations: { "@acme/search": { index: "people-v2" } }
+ * })
+ *
+ * Resource.annotations(Person)["@acme/search"] // { index: "people-v2" }
+ * Resource.annotations(Resource.extend(Person, "staff"))["@acme/search"] // inherited
+ * ```
+ *
+ * @since 0.15.0
+ * @category accessors
+ */
+export const annotations = (resource: Any): Annotations =>
+  (Schema.resolveAnnotations(resource)?.[ResourceAnnotationsId] as Annotations | undefined) ?? {}
 
 // ---------------------------------------------------------------------------
 // Polymorphic families (heterogeneous supertypes)

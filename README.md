@@ -56,6 +56,8 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
+  - [Resource-level annotations](#resource-level-annotations)
+  - [Reading an attribute's declared shape](#reading-an-attributes-declared-shape)
   - [Read-only & per-attribute projections](#read-only--per-attribute-projections)
   - [Flat (command-style) payloads](#flat-command-style-payloads)
   - [Polymorphic families (heterogeneous supertypes)](#polymorphic-families-heterogeneous-supertypes)
@@ -283,6 +285,76 @@ const Person = Resource.make("people", {
 
 Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
 ```
+
+### Resource-level annotations
+
+A `Resource.make` definition is the natural single source of truth for more than the HTTP layer —
+database columns, form descriptors, search indexes, admin UI — and deriving one of those needs
+somewhere to put the part the JSON:API declaration doesn't cover. `Resource.annotate` attaches that
+metadata to a whole resource and `Resource.annotations` reads it back:
+
+```ts
+const Person = Resource.annotate(Resource.make("people", { attributes: { firstName: Schema.NonEmptyString } }), {
+  "@acme/storage": { table: "people" }
+})
+
+Resource.annotations(Person)["@acme/storage"] // { table: "people" }
+```
+
+Effect's own `schema.annotate({ ... })` cannot do this job: `Resource.make` assembles its result
+with `Object.assign`, attaching `Id`, `identifier`, `relationships`, `declaredAttributes`,
+`createPayload`, `ref`, `document()` and the rest onto the schema, and `annotate` returns a plain new
+schema carrying none of them. `Resource.annotate` rebuilds the resource around the annotated schema,
+so what comes back is a complete resource — a valid `Relationship.one(() => …)` target, a valid
+`Resource.extend` base, identical to the original in every respect but the bag.
+
+The same bag can be declared inline, which is the spelling to prefer when you have it at hand:
+
+```ts
+const Person = Resource.make("people", {
+  attributes: { firstName: Schema.NonEmptyString },
+  annotations: { "@acme/search": { index: "people-v2" } }
+})
+```
+
+Annotations merge (new keys winning) and are inherited by `Resource.extend`, the child's keys
+winning. **Namespace your keys** — the bag is shared by every consumer deriving from the resource,
+so a key should name its owner (`"@acme/storage"`) rather than claim a bare word.
+
+`Resource.annotate` is a function, not a mutation, so annotate a resource where it is defined,
+before wiring it into a relationship graph: a `Relationship.one(() => Person)` thunk written against
+the un-annotated `Person` keeps returning that one.
+
+### Reading an attribute's declared shape
+
+`Resource.attributeDescriptors` reports what each attribute was declared to be — its presence across
+the three projections, clearability, nullability, read-only-ness, its schema and its annotations —
+in declaration order:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: {
+    title: Schema.NonEmptyString,
+    summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+    createdAt: Resource.readOnlyAttribute(Schema.DateFromString)
+  }
+})
+
+Resource.attributeDescriptors(Article)
+// [
+//   { key: "title",     resource: "required", create: "required",  update: "optional", nullable: false, clearable: false, readOnly: false, … },
+//   { key: "summary",   resource: "required", create: "optional",  update: "optional", nullable: true,  clearable: true,  readOnly: false, … },
+//   { key: "createdAt", resource: "required", create: false,       update: false,      nullable: false, clearable: false, readOnly: true,  … }
+// ]
+```
+
+It covers the map **as declared**, like `Resource.declaredAttributes`: input-only attributes are
+included, reported as `resource: false`. (`Resource.attributeKeys` lists the resource object's keys,
+which omits them.)
+
+All of it is fixed at declaration time, so this is the supported route to it — a consumer deriving
+from a resource should never need to reach into `resource.fields.attributes.ast`, cast through
+`unknown`, or run a decoder against sentinel values to ask a schema about itself.
 
 ### Read-only & per-attribute projections
 
