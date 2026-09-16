@@ -36,7 +36,11 @@
  *
  * References are lazy thunks (`() => Person`), so a typo'd reference is a
  * compile error and resources can reference each other regardless of
- * declaration order.
+ * declaration order — including in a **cycle** (`Article` ⇄ `Comment`),
+ * which needs one interface annotation per resource in the cycle; see
+ * `Resource.make`. The lowercase {@link one} / {@link optional} / {@link many}
+ * / {@link paginated} descriptor types are there to write those annotations
+ * with.
  *
  * A target may also be a `Resource.family(...)` supertype, not just a single
  * resource — linkage then decodes for any member of the family (keyed on the
@@ -118,6 +122,12 @@ export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>
 export interface One<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
   readonly kind: "one"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
   readonly filter: F
 }
 
@@ -131,6 +141,12 @@ export interface One<R extends Any, F extends FilterDeclaration = FilterDeclarat
 export interface Optional<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
   readonly kind: "optional"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
   readonly filter: F
 }
 
@@ -144,6 +160,12 @@ export interface Optional<R extends Any, F extends FilterDeclaration = FilterDec
 export interface Many<R extends Any> {
   readonly kind: "many"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
 }
 
 /**
@@ -157,7 +179,60 @@ export interface Many<R extends Any> {
 export interface Paginated<R extends Any> {
   readonly kind: "paginated"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
 }
+
+/**
+ * The type of `Relationship.one(ref)` — {@link One} with the `filter`
+ * declaration defaulted the way the constructor defaults it (`false`, not
+ * filterable), rather than to the whole {@link FilterDeclaration} union.
+ *
+ * Reach for it when writing the interface annotation that makes a
+ * mutually-recursive resource graph authorable (see `Resource.make`): a
+ * resource definition is **invariant** in its relationship record, so the
+ * annotation has to name the same type the constructor produced.
+ * `Relationship.one<Comment>` is that type, and reads like the declaration it
+ * annotates. For a filterable relationship, pass the declaration as the
+ * `const` tuple the constructor infers:
+ * `Relationship.one<Comment, readonly ["eq", "in"]>`.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface one<R extends Any, F extends FilterDeclaration = false> extends One<R, F> {}
+
+/**
+ * The type of `Relationship.optional(ref)` — {@link Optional} with the
+ * `filter` declaration defaulted to `false`, as the constructor defaults it.
+ * The {@link one} note on annotating recursive definitions applies here too.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface optional<R extends Any, F extends FilterDeclaration = false> extends Optional<R, F> {}
+
+/**
+ * The type of `Relationship.many(ref)` — {@link Many}, named to read like the
+ * declaration it annotates in a recursive resource definition.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface many<R extends Any> extends Many<R> {}
+
+/**
+ * The type of `Relationship.paginated(ref)` — {@link Paginated}, named to read
+ * like the declaration it annotates in a recursive resource definition.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface paginated<R extends Any> extends Paginated<R> {}
 
 /**
  * Any relationship descriptor.
@@ -209,8 +284,9 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  * identifier, never `null`. Required in create payloads.
  *
  * The reference is a thunk so resources can reference each other regardless of
- * declaration order (mutually recursive definitions may require an explicit
- * type annotation on one side).
+ * declaration order, cycles included; a mutually-recursive pair needs an
+ * explicit interface annotation on each definition in the cycle (see
+ * `Resource.make`).
  *
  * Pass `filter` to make the relationship a filterable field of its resource
  * (`?filter[author]=9`), valued by the related resource's id: `true` admits
@@ -242,10 +318,12 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
 // (`Relationships` widens it to the whole `FilterDeclaration` inside a
 // `Resource.make` call); it is inferred from `options.filter` alone, and
 // defaults to `false`.
+// The cast on each constructor's result is for the descriptors' phantom
+// `~target` member, which is type-level only and has no runtime counterpart.
 export const one = <R extends Any, const F extends FilterDeclaration = false>(
   ref: () => R,
   options?: { readonly filter?: F }
-): One<R, NoInfer<F>> => ({ kind: "one", ref, filter: (options?.filter ?? false) as F })
+): One<R, NoInfer<F>> => ({ kind: "one", ref, filter: options?.filter ?? false }) as unknown as One<R, NoInfer<F>>
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
@@ -277,7 +355,8 @@ export const one = <R extends Any, const F extends FilterDeclaration = false>(
 export const optional = <R extends Any, const F extends FilterDeclaration = false>(
   ref: () => R,
   options?: { readonly filter?: F }
-): Optional<R, NoInfer<F>> => ({ kind: "optional", ref, filter: (options?.filter ?? false) as F })
+): Optional<R, NoInfer<F>> =>
+  ({ kind: "optional", ref, filter: options?.filter ?? false }) as unknown as Optional<R, NoInfer<F>>
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
@@ -301,7 +380,7 @@ export const optional = <R extends Any, const F extends FilterDeclaration = fals
  * @since 0.1.0
  * @category constructors
  */
-export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", ref })
+export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", ref }) as unknown as Many<R>
 
 /**
  * Declares an unbounded to-many relationship with no inline linkage: the
@@ -330,7 +409,8 @@ export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", r
  * @since 0.1.0
  * @category constructors
  */
-export const paginated = <R extends Any>(ref: () => R): Paginated<R> => ({ kind: "paginated", ref })
+export const paginated = <R extends Any>(ref: () => R): Paginated<R> =>
+  ({ kind: "paginated", ref }) as unknown as Paginated<R>
 
 // ---------------------------------------------------------------------------
 // Predicates
@@ -446,21 +526,40 @@ const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
   })
 
 /**
+ * The resource a relationship descriptor points at — the return type of its
+ * `ref` thunk.
+ *
+ * Reads the target off the descriptor's one structural member rather than
+ * matching the descriptor against `One<infer R>` / `Many<infer R>` / …: a
+ * whole-descriptor `infer` has to relate the *target resource* to each
+ * candidate interface, which is a loop TypeScript cannot close when the
+ * resource graph is cyclic (see {@link SchemaFor}).
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type TargetOf<D extends Descriptor> = D["~target"]
+
+/**
  * The wire schema of a single relationship descriptor.
+ *
+ * Selected by the descriptor's `kind` tag — a plain indexed access — rather
+ * than by a chain of `D extends One<infer R> ? …` conditionals. The two agree
+ * on every descriptor, but only this one survives a **cyclic** resource graph:
+ * matching `D` against `One<infer R>` makes TypeScript relate the target
+ * resource to the descriptor interfaces, and in an `Article` ⇄ `Comment`
+ * cycle that relation re-enters the very mapped type it is computing
+ * (`TS2615`).
  *
  * @since 0.1.0
  * @category type-level
  */
-export type SchemaFor<D extends Descriptor> =
-  D extends One<infer R>
-    ? OneSchema<R>
-    : D extends Optional<infer R>
-      ? OptionalSchema<R>
-      : D extends Many<infer R>
-        ? ManySchema<R>
-        : D extends Paginated<Any>
-          ? PaginatedSchema
-          : never
+export type SchemaFor<D extends Descriptor> = {
+  readonly one: OneSchema<TargetOf<D>>
+  readonly optional: OptionalSchema<TargetOf<D>>
+  readonly many: ManySchema<TargetOf<D>>
+  readonly paginated: PaginatedSchema
+}[D["kind"]]
 
 /**
  * Creates the wire schema for a relationship descriptor.

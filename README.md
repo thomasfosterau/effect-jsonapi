@@ -45,6 +45,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
+  - [Mutually recursive resources](#mutually-recursive-resources)
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
@@ -194,6 +195,71 @@ Everything below is **derived** — never assembled by hand:
 
 Documents are not limited to one resource type — see
 [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
+
+### Mutually recursive resources
+
+Relationship references are thunks, so the graph they describe may contain **cycles** — articles
+linking to their comments and each comment linking back to its article is ordinary JSON:API, and
+the runtime has always resolved it. What such a pair needs is an explicit **type annotation**:
+`Resource.make`'s return type is inferred, so without one each definition's type would depend on
+the other's and TypeScript refuses both (`TS7022`).
+
+The annotation is the same escape Effect's recursive schemas use, and this is all of it — one
+`interface` per resource in the cycle, naming the relationship record. Hoist the attributes to a
+`const` so no attribute schema is restated, and give the value the interface of the same name:
+
+```ts
+import { Schema } from "effect"
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+
+const articleAttributes = { title: Schema.NonEmptyString }
+const commentAttributes = { body: Schema.NonEmptyString }
+
+interface Article extends Resource.Resource<
+  "articles",
+  typeof articleAttributes,
+  {
+    readonly comments: Relationship.many<Comment>
+  }
+> {}
+
+interface Comment extends Resource.Resource<
+  "comments",
+  typeof commentAttributes,
+  {
+    readonly article: Relationship.one<Article>
+  }
+> {}
+
+const Article: Article = Resource.make("articles", {
+  attributes: articleAttributes,
+  relationships: { comments: Relationship.many(() => Comment) }
+})
+
+const Comment: Comment = Resource.make("comments", {
+  attributes: commentAttributes,
+  relationships: { article: Relationship.one(() => Article) }
+})
+```
+
+The lowercase `Relationship.one` / `optional` / `many` / `paginated` **types** used in the
+annotation mirror the constructors of the same name, defaults included (`one` and `optional` default
+to not filterable, exactly as the constructors do). A resource definition is invariant in its
+relationship record, so the annotation has to name the type the constructor produced; these are
+that type. A filterable relationship carries its declaration, as the `const` tuple the constructor infers:
+`Relationship.one<Article, readonly ["eq", "in"]>`.
+
+Self-references work the same way (`parent: Relationship.optional<Category>` on `Category`), and
+all four relationship kinds may take part in a cycle.
+
+Everything derived from the definitions keeps working, and a cycle cannot make any of it infinite:
+
+| Derived                                    | Behaviour in a cycle                                                                                                         |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Article.document()`                       | the `included` union is **one hop** wide — the targets of `Article`'s own linkable relationships, not the transitive closure |
+| `?include=` paths                          | bounded by the derivation depth (2 by default, `includePaths(R, n)` at runtime), not by the graph                            |
+| `createPayload` / `updatePayload`          | unchanged on both sides — a required `one` across the cycle is still required                                                |
+| `Endpoint.get` / `list` / `Group.resource` | derive their paths and documents from the resource's own type tag                                                            |
 
 ### Custom id schemas
 
@@ -1569,10 +1635,10 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   via `Client.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document
   meta are typed via options.
-- **Mutually recursive resources** (A ↔ B) are not supported: TypeScript cannot infer two resource
-  types that reference each other. Model one direction as a relationship and the reverse direction
-  as a filtered collection endpoint (e.g. `GET /articles?filter[author]=9`) or a related endpoint
-  on the side that owns the relationship.
+- **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the
+  cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each
+  other. See [Mutually recursive resources](#mutually-recursive-resources) for the pattern;
+  everything derived from the definitions is unaffected.
 - **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
   responses by include paths is not yet supported.
 - **Atomic operations requests are accepted with or without the `ext` media type parameter**:
