@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20.x, 22.x]
+        node-version: [20.x, 22.x, 24.x]
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -60,6 +60,12 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      # publint + arethetypeswrong over the real tarball, plus the bundler
+      # assertions behind the subpath exports (a schema-only subpath must not
+      # pull in effect/unstable/httpapi). Needs the build above.
+      - name: Check the publishable artifact
+        run: pnpm run check:packaging
 
       # Type-checks AND runs every JSDoc @example, and generates the API docs.
       - name: Verify documentation examples (docgen)

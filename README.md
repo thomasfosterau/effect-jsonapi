@@ -16,6 +16,14 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 `effect` is a peer dependency (`>=4.0.0-rc.112`). Node.js 20 or newer is required.
 
+Every module is reachable from the package root, which is how the rest of this
+document imports them. Each is also published at its own subpath
+(`@thomasfosterau/effect-jsonapi/Document`), which matters for the ten modules
+that need `effect` and nothing else: reached that way they don't resolve
+`effect/unstable/httpapi`, so a client, a document consumer or a code generator
+needn't carry a pre-stable peer it has no use for. Same files either way — see
+[PUBLISHING.md](./PUBLISHING.md#entry-points) for the tier table.
+
 ## Overview
 
 `@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance

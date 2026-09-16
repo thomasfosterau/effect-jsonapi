@@ -19,23 +19,81 @@
   "author": "Thomas Foster",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thomasfosterau/effect-jsonapi.git"
+    "url": "git+https://github.com/thomasfosterau/effect-jsonapi.git"
   },
   "files": [
     "dist",
     "src",
     "!src/**/*.test.ts",
     "README.md",
-    "LICENSE"
+    "LICENSE.md"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./ApiError": {
+      "types": "./dist/ApiError.d.ts",
+      "default": "./dist/ApiError.js"
+    },
+    "./Atomic": {
+      "types": "./dist/Atomic.d.ts",
+      "default": "./dist/Atomic.js"
+    },
+    "./Client": {
+      "types": "./dist/Client.d.ts",
+      "default": "./dist/Client.js"
+    },
+    "./Document": {
+      "types": "./dist/Document.d.ts",
+      "default": "./dist/Document.js"
+    },
+    "./Endpoint": {
+      "types": "./dist/Endpoint.d.ts",
+      "default": "./dist/Endpoint.js"
+    },
+    "./Filter": {
+      "types": "./dist/Filter.d.ts",
+      "default": "./dist/Filter.js"
+    },
+    "./Group": {
+      "types": "./dist/Group.d.ts",
+      "default": "./dist/Group.js"
+    },
+    "./Handlers": {
+      "types": "./dist/Handlers.d.ts",
+      "default": "./dist/Handlers.js"
+    },
+    "./Lid": {
+      "types": "./dist/Lid.d.ts",
+      "default": "./dist/Lid.js"
+    },
+    "./Middleware": {
+      "types": "./dist/Middleware.d.ts",
+      "default": "./dist/Middleware.js"
+    },
+    "./Query": {
+      "types": "./dist/Query.d.ts",
+      "default": "./dist/Query.js"
+    },
+    "./Relationship": {
+      "types": "./dist/Relationship.d.ts",
+      "default": "./dist/Relationship.js"
+    },
+    "./Resource": {
+      "types": "./dist/Resource.d.ts",
+      "default": "./dist/Resource.js"
+    },
+    "./Sort": {
+      "types": "./dist/Sort.d.ts",
+      "default": "./dist/Sort.js"
+    },
+    "./package.json": "./package.json"
   },
   "publishConfig": {
     "access": "public"
@@ -43,11 +101,12 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc -p tsconfig.test.json && pnpm --filter \"./examples/*\" run typecheck",
-    "lint": "oxlint --deny-warnings src test examples",
-    "lint:fix": "oxlint --fix src test examples",
+    "lint": "oxlint --deny-warnings src test examples scripts",
+    "lint:fix": "oxlint --fix src test examples scripts",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "test": "vitest run && pnpm --filter \"./examples/*\" run test",
+    "check:packaging": "publint --strict && attw --pack . --profile esm-only && tsx scripts/packaging.ts",
     "test:watch": "vitest",
     "docgen": "docgen",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test",
@@ -57,12 +116,15 @@
     "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@changesets/cli": "^3.0.1",
     "@effect/docgen": "^0.5.2",
     "@types/node": "^25.1.0",
     "effect": "4.0.0-rc.112",
+    "esbuild": "^0.28.2",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
+    "publint": "^0.3.24",
     "tsx": "^4.22.4",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"

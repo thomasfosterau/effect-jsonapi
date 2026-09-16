@@ -2,7 +2,10 @@
  * effect-jsonapi — Type-safe, spec-compliant JSON:API v1.1 on Effect's HttpApi.
  *
  * Every module is exported as a namespace from the package root, following the
- * convention of `effect` and `@effect/platform`:
+ * convention of `effect` and `@effect/platform`, and each is also published at
+ * its own subpath (`@thomasfosterau/effect-jsonapi/Document`) — the same file,
+ * reachable without the modules it doesn't need. See `PUBLISHING.md` for which
+ * modules resolve `effect/unstable/httpapi` and which resolve only `effect`.
  *
  * ```ts
  * import {
