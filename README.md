@@ -1,6 +1,6 @@
 # `@thomasfosterau/effect-jsonapi`, a JSON:API package for Effect
 
-Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) implement built on top of [Effect](https://effect.website)’s `HttpApi`, `Schema`, etc.
+Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) built on top of [Effect](https://effect.website)’s `HttpApi`, `Schema`, etc.
 
 [![CI](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml/badge.svg)](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/@thomasfosterau/effect-jsonapi.svg)](https://www.npmjs.com/package/@thomasfosterau/effect-jsonapi)
@@ -18,32 +18,21 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 ## Overview
 
-`@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
-is a property of the construction, not of developer discipline:
+`@thomasfosterau/effect-jsonapi` makes it **easy to create an API which complies with the JSON:API spec**.
 
-- Define each **resource once**; identifiers, create/update payloads, documents, query parameters
-  and endpoints are all derived from that single definition.
-- Declare each **error once**; you get a tagged Effect error whose wire encoding _is_ a
-  spec-compliant JSON:API error document with the right HTTP status.
+Things this library tries to make it easy to do:
+- Define each resource once, and then identifiers, create/update payloads, documents, query parameters and endpoints are all derived from that single definition.
+- Declare each error once and you get a tagged Effect error whose wire encoding _is_ a spec-compliant JSON:API error document with the right HTTP status.
 - **Endpoints** bake in the conventions: the `application/vnd.api+json` media type, conventional
   paths, spec status codes (200/201/204), typed `include` / `fields[TYPE]` / `sort` / `page[*]` /
   `filter[*]` query parameters, and content-negotiation rules (406/415).
 - Everything is a plain Effect `Schema` / `HttpApiEndpoint` / `HttpApiGroup`, so it composes with
   `HttpApi`, `HttpApiBuilder`, `HttpApiClient`, `HttpApiTest` and `OpenApi` untouched.
 
-```ts
-import { Schema } from "effect"
-import { HttpApi } from "effect/unstable/httpapi"
-import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
-```
-
-> **Status**: built against `effect@>=4.0.0-beta.104` (the v4 beta). The
-> `effect/unstable/httpapi` surface may shift between betas.
-
 ## Contents
 
 - [Quick start](#quick-start)
-- [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
+- [1. Resources](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
@@ -52,7 +41,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Flat (command-style) payloads](#flat-command-style-payloads)
   - [Polymorphic families (heterogeneous supertypes)](#polymorphic-families-heterogeneous-supertypes)
 - [2. Errors — declared once, spec-compliant forever](#2-errors--declared-once-spec-compliant-forever)
-- [3. Endpoints & groups — conventions baked in](#3-endpoints--groups--conventions-baked-in)
+- [3. Endpoints & groups](#3-endpoints--groups--conventions-baked-in)
   - [Overriding the write payload](#overriding-the-write-payload)
   - [Overriding the success document](#overriding-the-success-document)
   - [Overriding the write status](#overriding-the-write-status)
@@ -113,12 +102,11 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => Handlers.collection(items))))
 )
 
-// 5. Wire it up — the api won't build unless the JSON:API middleware is
-//    provided, so spec compliance can't be forgotten.
+// 5. Wire it up.
 const ApiLive = HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive), Layer.provide(Middleware.layer))
 ```
 
-## 1. Resources — the single source of truth
+## 1. Resources
 
 ```ts
 const Person = Resource.make("people", {
@@ -1557,8 +1545,7 @@ can lift any one out as a starting point. Run them all from the repo root with
 
 ## Metadata
 
-`meta` is free-form by spec, so every `meta` member accepts arbitrary records by default. Tighten
-any of them by passing a schema:
+`meta` is free-form by spec, so every `meta` member accepts arbitrary records by default. Tighten any of them by passing a schema:
 
 ```ts
 // Resource-level meta (on every resource object)
