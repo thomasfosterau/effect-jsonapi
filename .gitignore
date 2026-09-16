@@ -142,3 +142,4 @@ vite.config.ts.timestamp-*
 # notes in docs/ are tracked explicitly.
 /docs/*
 !/docs/filter-grammar.md
+!/docs/idempotency.md

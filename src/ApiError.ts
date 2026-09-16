@@ -27,7 +27,7 @@
 import type { Cause } from "effect"
 import { Schema, SchemaTransformation } from "effect"
 import { HttpApiSchema } from "effect/unstable/httpapi"
-import { ErrorDocument, ErrorObject } from "./Document.js"
+import { ErrorDocument, ErrorObject, type ErrorSource } from "./Document.js"
 import { asJsonApi } from "./internal/media.js"
 
 /**
@@ -106,6 +106,17 @@ export interface Config<Fields extends Schema.Struct.Fields> {
    * occurrence. Either a constant string or a function of the (encoded) fields.
    */
   readonly detail?: string | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | undefined)
+  /**
+   * JSON:API error `source`: what in the request caused the error — a
+   * `pointer` into the document (`/data/attributes/title`), a query or path
+   * `parameter`, or a request `header`. Constant across occurrences of this
+   * error, so it belongs on the declaration rather than the instance; the
+   * per-issue sources of request-validation failures come from
+   * `Middleware.schemaErrorDocument` instead.
+   *
+   * @since 0.15.0
+   */
+  readonly source?: typeof ErrorSource.Type
 }
 
 const snakeCase = (tag: string): string =>
@@ -127,6 +138,7 @@ const makeWire = (
     readonly title: string | undefined
     readonly fieldKeys: ReadonlyArray<string>
     readonly detail: ((fields: any) => string | undefined) | undefined
+    readonly source: typeof ErrorSource.Type | undefined
   }
 ) => {
   const cached = wireCache.get(klass)
@@ -176,6 +188,7 @@ const makeWire = (
                   code: options.code,
                   ...(options.title !== undefined ? { title: options.title } : {}),
                   ...(detail !== undefined ? { detail } : {}),
+                  ...(options.source !== undefined ? { source: options.source } : {}),
                   ...(options.fieldKeys.length > 0
                     ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
                     : {})
@@ -249,7 +262,8 @@ export const make =
           code,
           title: config.title,
           fieldKeys,
-          detail
+          detail,
+          source: config.source
         })
       }
     }
