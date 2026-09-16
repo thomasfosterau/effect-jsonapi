@@ -1,11 +1,15 @@
 # Filter grammar
 
-Design note for the `filter` query family. Tracks [#83](https://github.com/thomasfosterau/effect-jsonapi/issues/83)
-(epic [#82](https://github.com/thomasfosterau/effect-jsonapi/issues/82)). The interpreters that give the
-grammar meaning live in Legation
-([thomasfosterau/legation#148](https://github.com/thomasfosterau/legation/issues/148)); this note fixes
-the part both sides must agree on byte for byte: the AST, the operator core, the URL surface, the
-canonical encoding and the profile URI.
+The specification of the `filter` query family. Tracks [#83](https://github.com/thomasfosterau/effect-jsonapi/issues/83)
+(epic [#82](https://github.com/thomasfosterau/effect-jsonapi/issues/82)) and
+[#116](https://github.com/thomasfosterau/effect-jsonapi/issues/116).
+
+This document **is** the profile published at
+`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`, and it is complete:
+the AST, the operator core, the URL surface, the canonical encoding, the
+[semantics](#6-semantics) and the profile URI. A third-party implementer needs nothing but this
+document to answer `filter[status][eq]=draft` the same way this package does — which is the whole
+point of shipping a profile rather than an implementation-defined `filter`.
 
 **Status:** implemented. [#84](https://github.com/thomasfosterau/effect-jsonapi/issues/84)
 (per-attribute declaration, `Resource.filterable`) and
@@ -21,9 +25,9 @@ Settled in #82, not reopened here:
   traversal, no pattern matching, no text search.
 - Shorthand desugars into the group form. `filter[f]=v` stays `eq`, `filter[f]=a,b` stays `in`.
 - Literals are typed by the attribute schema. `NULL` is not a literal; use `isnull`.
-- Semantics are Postgres-normative and three-valued, recorded in Legation's ADR-0028
-  ([thomasfosterau/legation#151](https://github.com/thomasfosterau/legation/issues/151)). The AST
-  carries no semantics.
+- Semantics are three-valued. #82 settled that much and left the rules unwritten;
+  [§6](#6-semantics) writes them, which
+  [#116](https://github.com/thomasfosterau/effect-jsonapi/issues/116) completed.
 - Ships as a documented profile URI, not an `ext` extension.
 
 Two things below go further than the issue text and are called out where they occur:
@@ -34,7 +38,8 @@ emitted.
 ## 1. The AST
 
 The AST is an **initial encoding**: plain data, an Effect `Schema` union, no methods. Every
-consumer (the URL codec here; SQL, JS and IndexedDB interpreters in Legation) pattern-matches on it.
+consumer pattern-matches on it: the URL codec here, and whatever interprets a tree downstream — SQL,
+an in-memory predicate, an IndexedDB cursor — under the rules of [§6](#6-semantics).
 
 ### 1.1 Nodes
 
@@ -62,8 +67,9 @@ Rules the schema enforces:
   over the declared fields, and `Query.Filter(R).Type` narrows `field` to a literal union of the
   declared names (#84).
 - `In` / `NotIn` lists are **non-empty**. An empty list has no URL form (see [§2.3](#23-literals-and-lists)),
-  and a codec that must be total cannot carry a node it cannot encode. Legation's `Predicate.In` with
-  an empty list is a bridge concern (`toFilterAst` returns `None`, or rewrites to `Or([])`).
+  and a codec that must be total cannot carry a node it cannot encode. A producer holding an empty
+  list has to decide what it meant before it reaches this AST — drop the condition, or write the
+  `Or([])` that says "nothing matches" ([§6.2](#62-the-logic-is-three-valued)).
 - `IsNull.negated: true` is `IS NOT NULL`. `NotIn` and negated `IsNull` are redundant with `Not`
   but are kept because interpreters emit them directly (`NOT IN`, `IS NOT NULL`) and because the
   shorthand surface names them (`nin`, `isnull=false`).
@@ -95,9 +101,13 @@ fields. "Attribute" below reads as "declared field".
 
 ### 1.3 What the AST does not carry
 
-Nothing about evaluation. NULL handling, collation, type coercion, absent-attribute rules and the
-per-operator truth tables are ADR-0028's. Two facts are fixed here only because the codec needs
-them: literals are typed by the attribute schema, and `NULL` is not a literal.
+The AST is data. Nothing about evaluation is stored in a node: there are no methods, no truth
+values, no collation. What a tree _means_ is [§6](#6-semantics) — a property of the profile, not of
+the data structure — so an interpreter targeting SQL, IndexedDB or plain records reads §6 and
+pattern-matches on the nodes.
+
+Two facts are fixed in §1 rather than §6 because the _codec_ needs them, not just an interpreter:
+literals are typed by the attribute schema, and `NULL` is not a literal.
 
 ## 2. Surface syntax
 
@@ -169,8 +179,9 @@ schema (#84):
 | `X \| null` (`Schema.NullOr`) | as `X`; `null` is never a literal   | via `X`              |
 
 `DateFromString` is a `string` on the wire, so `filter[createdAt][gte]=2026-01-01T00:00:00.000Z`
-decodes to a `Date` and re-encodes via the attribute's own encoder (`toISOString()`), which is also
-the ISO-8601 UTC text ADR-0028 compares. An attribute whose encoded form is not one of these
+decodes to a `Date` and re-encodes via the attribute's own encoder (`toISOString()`). ISO-8601 UTC
+text sorts chronologically in code-point order, which is what makes `Date` an ordered kind in
+[§6.6](#66-comparison). An attribute whose encoded form is not one of these
 (a struct, an array) cannot be declared filterable; the declaration may supply an explicit literal
 codec (`Codec<Type, string>`) for the rare case.
 
@@ -215,10 +226,11 @@ a condition points at the first key of the second kind; a `NOT` with the wrong a
 
 ## 3. Canonical encoding
 
-The canonical string is what `self` links carry ([#85](https://github.com/thomasfosterau/effect-jsonapi/issues/85))
-and what Legation uses as the identity of a subscription, a coverage window and an HTTP cache tag.
-So it must be a **function of the AST alone**: two URLs that decode to the same tree canonicalise to
-the same bytes, whatever their key order, ids, escaping or `[eq]`/bare spelling.
+The canonical string is what `self` links carry ([#85](https://github.com/thomasfosterau/effect-jsonapi/issues/85)),
+and it is what anything keying on a filter — an HTTP cache tag, a stored query, a client's record of
+what it has already fetched — can use as that filter's identity. So it must be a **function of the
+AST alone**: two URLs that decode to the same tree canonicalise to the same bytes, whatever their
+key order, ids, escaping or `[eq]`/bare spelling.
 
 ### 3.1 Which form the encoder emits
 
@@ -372,11 +384,11 @@ IndexedDB semantics:
 | Excluded                                 | Why                                                                                                  |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `like` / `contains` / `startswith`       | `LIKE` escaping and case rules differ between Postgres and SQLite; IndexedDB has no substring index. |
-| case-insensitive match (`ilike`, `ieq`)  | Case folding is locale- and collation-dependent; ADR-0028 fixes code-point order only.               |
+| case-insensitive match (`ilike`, `ieq`)  | Case folding is locale- and collation-dependent; [§6.6](#66-comparison) fixes code-point order only. |
 | full-text search                         | Tokenisation, stemming and ranking are engine-specific and non-deterministic across targets.         |
 | array / JSON operators (`@>`, `?`, `->`) | No SQLite or IndexedDB equivalent; literals would stop being scalars typed by the attribute.         |
 | regular expressions                      | Three incompatible regex dialects; unbounded evaluation cost.                                        |
-| relationship traversal (`author.name`)   | An `EXISTS`; Legation D1 keeps it server-only with no URL form.                                      |
+| relationship traversal (`author.name`)   | An `EXISTS` a client authors: unbounded evaluation cost and a read surface over another collection.  |
 | `between`                                | Sugar for `gte AND lte`; a second spelling would break canonical identity.                           |
 
 Adding an operator is a new grammar version and a new profile URI ([§5](#5-profile-uri)).
@@ -393,7 +405,33 @@ Content-Type: application/vnd.api+json; profile="https://thomasfosterau.github.i
 
 - The URI is exported as a constant (`Filter.PROFILE_URI`, also `Query.FILTER_PROFILE_URI`) and is
   a version of this document. `v1` is this note; an incompatible change (a new operator, a changed
-  canonical rule) is `v2`.
+  canonical rule, a changed answer in [§6](#6-semantics)) is `v2`.
+
+**Decision (#116): writing §6 is a clarification of `v1`, not a `v2`.** The semantics section was
+added to a profile that had already been published without one, which raises the question fairly:
+a client that negotiated `v1` against a document with no semantics got no semantics, so is pinning
+them a new version?
+
+No, and deliberately so. `v1` did not previously specify _different_ answers that are now being
+changed — it specified none, and every rule §6 records is the one a careful reading of §1–§4
+already forced:
+
+- three-valued logic follows from `isnull` being the only NULL test (if NULL were an ordinary
+  value, `eq(field, null)` would be its spelling, and §2.3 refuses it);
+- `NotIn` ≡ `Not(In)` follows from `null` never being a literal, which is what removes SQL's
+  divergence between the two;
+- comparison on the encoded form follows from §2.3, which already constrains an attribute's
+  encoded form to a JSON scalar and makes the literal codec the wire contract.
+
+So no conforming `v1` implementation has to change behaviour, and no client has to re-negotiate.
+Bumping to `v2` would cost every deployment a re-advertisement for no observable difference, and
+would leave `v1` permanently undefined — the worse outcome for exactly the implementers a profile
+exists to serve.
+
+The forward rule is the one above, now explicit: **a change to any truth table, to the comparison
+domain, or to the absent-attribute rule is a `v2`**, because each changes an answer a conforming
+client can observe.
+
 - Per the spec, unknown profiles in `Accept` are ignored, never rejected; the existing negotiation
   middleware already does this (`src/Middleware.ts:83`). Nothing about request handling keys off
   the profile parameter: an endpoint declared with `filter: true` speaks the grammar whether or not
@@ -401,16 +439,215 @@ Content-Type: application/vnd.api+json; profile="https://thomasfosterau.github.i
 - The URI above is final: `https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`.
   It must stay stable now that it is published.
 
-## 6. Where semantics live
+## 6. Semantics
 
-This repo owns the AST, the URL codec, the per-field declaration and the canonical string. It
-takes no position on what a tree _means_ beyond the two facts in [§1.3](#13-what-the-ast-does-not-carry).
-Everything else, including the Kleene tables for `and`/`or`/`not` over NULL, the `in` rule, the
-absent-attribute rule, collation and numeric domains, is ADR-0028
-([thomasfosterau/legation#151](https://github.com/thomasfosterau/legation/issues/151)), and the
-interpreters are Legation's L4/L5. A consumer of this library alone gets a typed tree and is free to
-evaluate it however it likes, but two consumers that want to agree with each other should adopt
-ADR-0028.
+What a tree _means_: which resources a server returns for a given filter. This section is
+normative, and it is this profile's own — a conforming implementation needs nothing outside this
+document.
+
+JSON:API leaves `filter` semantics implementation-defined precisely so that a profile can pin them
+(§Query Parameters, and the `filter` family's own section). Pinning them is therefore _completing_
+this profile, not adding an opinion the specification declined to have. Two independent servers
+advertising this profile URI must answer `filter[status][eq]=draft` identically, and a client that
+negotiates it must know what it is asking for; neither is possible without the rules below.
+
+Every rule here has a conformance test in `src/Filter.semantics.test.ts`, run against the reference
+interpreter of [§6.8](#68-the-reference-interpreter).
+
+### 6.1 Scope
+
+These rules govern the **closed operator core** of [§4](#4-the-operator-core-is-closed) —
+`eq ne lt lte gt gte in nin isnull` and the `and` / `or` / `not` groups — over the fields of
+[§1.2](#12-fields), which are a resource's declared attributes plus its declared to-one
+relationship names. That is the whole language; there is nothing else to give meaning to.
+
+In particular there is no relationship traversal to specify. That was settled in #82 and is
+recorded in §4's exclusions; [#119](https://github.com/thomasfosterau/effect-jsonapi/issues/119)
+was closed as not planned for proposing to reopen it on a downstream library's behalf. If
+traversal is ever wanted it is a new operator, therefore a `v2` profile
+([§5](#5-profile-uri)), and it must be argued on JSON:API's terms with the URL-surface
+cost-control question answered.
+
+### 6.2 The logic is three-valued
+
+Evaluation yields **TRUE**, **FALSE** or **UNKNOWN**. A server returns exactly the resources for
+which the filter evaluates to TRUE; UNKNOWN is not TRUE, so those resources are absent from the
+response.
+
+UNKNOWN arises in one way: a comparison whose field is NULL. `isnull` is the exception and is never
+UNKNOWN — it is the operator whose entire job is to observe NULL.
+
+| Node                            | Field is NULL                                     | Field is not NULL                        |
+| ------------------------------- | ------------------------------------------------- | ---------------------------------------- |
+| `eq` `ne` `lt` `lte` `gt` `gte` | UNKNOWN                                           | TRUE / FALSE by [§6.6](#66-comparison)   |
+| `in` `nin`                      | UNKNOWN                                           | TRUE / FALSE by [§6.5](#65-in-and-notin) |
+| `isnull`                        | TRUE (`negated: false`) / FALSE (`negated: true`) | FALSE / TRUE                             |
+
+Negation and the groups use the Kleene tables:
+
+| `p`     | `not p`     |
+| ------- | ----------- |
+| TRUE    | FALSE       |
+| FALSE   | TRUE        |
+| UNKNOWN | **UNKNOWN** |
+
+| `and`       | TRUE    | FALSE | UNKNOWN |
+| ----------- | ------- | ----- | ------- |
+| **TRUE**    | TRUE    | FALSE | UNKNOWN |
+| **FALSE**   | FALSE   | FALSE | FALSE   |
+| **UNKNOWN** | UNKNOWN | FALSE | UNKNOWN |
+
+| `or`        | TRUE | FALSE   | UNKNOWN |
+| ----------- | ---- | ------- | ------- |
+| **TRUE**    | TRUE | TRUE    | TRUE    |
+| **FALSE**   | TRUE | FALSE   | UNKNOWN |
+| **UNKNOWN** | TRUE | UNKNOWN | UNKNOWN |
+
+`And([])` is TRUE and `Or([])` is FALSE, the identities of their conjunctions — as
+[§1.1](#11-nodes) already states.
+
+**The consequence worth stating plainly**, because it is the question this section most exists to
+answer: if a resource's `status` is NULL, then `?filter[status][ne]=done` does **not** return it,
+and neither does the group form of `NOT (status = done)`. Both are UNKNOWN. A client that wants the
+NULL rows as well asks for them: `NOT (status = done) OR status IS NULL`, which the group form
+spells directly.
+
+**Why three-valued.** Two-valued logic is the alternative, and it would make `ne` and `not` return
+NULL rows. It was rejected on implementability: the great majority of JSON:API servers are backed by
+a SQL engine whose `WHERE` clause is already three-valued, so a two-valued profile would oblige
+every one of them to actively deviate — injecting `OR field IS NULL` at each negation, defeating
+indexes, and silently diverging wherever an implementer forgot. A profile whose rules are the ones
+implementations naturally follow is a profile that gets implemented correctly. The grammar also
+points this way on its own: making `isnull` the _only_ NULL test, and refusing `null` as a literal,
+is what a language does when NULL is not an ordinary value.
+
+### 6.3 The subject, and absent attributes
+
+A filter is evaluated against one resource's **decoded attribute values** — the same decoded types
+the literals carry ([§2.3](#23-literals-and-lists)), not the wire strings.
+
+**An attribute that is absent is NULL.** A resource object that carries no key for a declared
+field, and one that carries the key with the value `null`, are indistinguishable to every operator
+in this profile. The alternative — a fourth state, distinct from NULL — was rejected because it
+would need a fourth truth value and a second spelling to test for it, and the grammar already has
+exactly one way to say "has no value".
+
+This is about a _resource_ lacking a value, not about the _field_ being unknown. Filtering on a
+field the resource type does not declare filterable is a 400 at the codec
+([§2](#2-surface-syntax)) and never reaches evaluation.
+
+### 6.4 NULL is never a literal
+
+There is no wire spelling that produces a `null` literal. `filter[status]=null` is the
+four-character string `"null"` on a string attribute, and a literal-decoding 400 on a number
+attribute — [§2.3](#23-literals-and-lists), unchanged.
+
+Normatively, for an AST built in code rather than parsed from a URL: **`null` in any literal
+position is invalid**, and the `Filter.Ast` schema rejects it, in both scalar (`Compare.value`) and
+list (`In.values`, `NotIn.values`) positions. The error names `isnull` as the operator to use
+instead. Every other decoded value is admissible, falsy ones included: `""`, `0` and `false` are
+ordinary literals.
+
+### 6.5 `in` and `nin`
+
+`In` is TRUE when the field's value equals some member of the list under
+[§6.6](#66-comparison), FALSE when it equals none, and UNKNOWN when the field is NULL.
+
+**`NotIn` is exactly `Not(In)`** — including the UNKNOWN case, where both are UNKNOWN.
+
+This is worth stating because SQL's `NOT IN` and `NOT (x IN ...)` famously differ: `x NOT IN (1,
+NULL)` is UNKNOWN even for an `x` that is plainly not 1. That divergence requires a NULL _inside
+the list_, and [§6.4](#64-null-is-never-a-literal) makes that unrepresentable — the lists are
+non-empty and hold no NULL. So the two spellings cannot come apart in this profile, and `NotIn`
+exists only because interpreters emit `NOT IN` directly and the shorthand surface names it
+([§1.1](#11-nodes)).
+
+An implementation compiling to SQL should be aware that it gets this for free only because the
+profile guarantees no NULL literal reaches the list.
+
+### 6.6 Comparison
+
+The literals are _decoded_ values of arbitrary schemas — a `Schema.DateFromString` attribute
+filters by a `Date`, a branded string by a branded string — so "what does `gt` mean here" has to be
+answered rather than assumed. The profile answers it in two halves, because equality can be total
+and ordering cannot.
+
+**Equality** (`eq`, `ne`, `in`, `nin`) is equality of the **encoded wire form**. Two values are
+equal iff the attribute's literal codec encodes them to the same string.
+
+This is total: [§2.3](#23-literals-and-lists) already requires every filterable attribute's encoded
+form to be a JSON scalar, or to supply an explicit `Codec<Type, string>`, so every declarable
+attribute has an encoding and therefore an equality. It also costs nothing to define, because it is
+the same encoding the canonical string of [§3](#3-canonical-encoding) is built from — two filters
+that are byte-identical canonically compare literals identically, which is the property a cache tag
+or a subscription identity needs. Two `Date` values for the same instant are equal; a brand is
+erased by encoding and so never affects equality; a custom schema gets a well-defined equality
+without the profile knowing anything about its decoded type.
+
+**Ordering** (`lt`, `lte`, `gt`, `gte`) is the order of the **decoded** value, and is defined for
+four kinds only:
+
+| Decoded kind | Order                                                                      |
+| ------------ | -------------------------------------------------------------------------- |
+| `string`     | Code-point order (Unicode scalar values, ascending). Not locale collation. |
+| `number`     | Numeric order over finite IEEE-754 doubles.                                |
+| `bigint`     | Numeric order.                                                             |
+| `Date`       | Chronological, by instant.                                                 |
+
+**Anything else has no ordering in this profile, and a conforming implementation must not declare
+an ordering operator on it.** A boolean attribute, or one whose decoded value is a structure, is
+comparable for equality and nothing more; the reference interpreter raises rather than inventing an
+order, and `Resource.attribute(schema, { filter: [...] })` should name only
+`eq ne in nin isnull` for such an attribute.
+
+Three consequences worth being explicit about:
+
+- **Ordering is on the decoded value, equality on the encoded one.** They agree, because an
+  attribute's encoding is injective; the split exists because encodings are not order-preserving in
+  general. A number encodes to `"10"`, which sorts before `"9"` as text — so numbers must be ordered
+  numerically, not as their encodings.
+- **String order is by code point, not by code unit and not by locale.** Locale collation is not
+  portable — two conforming servers on different collations would disagree — so the profile fixes
+  the one order every engine can implement identically. The practical cost is real and should be
+  planned for: a Postgres server whose database collation is not `C` must apply `COLLATE "C"` (or
+  equivalent) to conform on `lt` / `lte` / `gt` / `gte` over strings. Note also that code-point
+  order is not UTF-16 code-unit order, which is what a naive JavaScript `<` gives: `"\uFFFD"` sorts
+  _before_ an emoji by code point and _after_ it by code unit.
+- **An attribute whose encoding is not order-consistent with its decoded value must not declare
+  ordering operators.** `Schema.DateFromString` is the model case of one that is: ISO-8601 UTC text
+  sorts chronologically, so a server comparing the stored timestamp and a server comparing the
+  encoded string agree. A schema encoding a decimal as a string does not have that property, and
+  ordering it would put two conforming implementations in disagreement.
+
+### 6.7 What this profile does not govern
+
+- **`sort` ordering.** This profile governs `filter`. Which order `?sort=` produces, and where
+  NULLs land in it, is `Sort`'s and is deliberately not pinned here: folding it in would mean a
+  change to sort behaviour forces a new _filter_ profile version, and the two are negotiated as one
+  URI. The comparison rules of §6.6 are about `lt` / `gt` / `in`, nothing more.
+- **Pagination, sparse fieldsets, includes.** Other query families, other rules.
+- **Which resources a server _may_ show a client.** Authorization is not filtering. A filter
+  narrows a collection the client is already entitled to; it is not a mechanism for deciding
+  entitlement, and this profile takes no position on how a server decides what a request may see.
+
+### 6.8 The reference interpreter
+
+**Decision (#116): the package ships one**, as `Filter.evaluate` (the three-valued truth) and
+`Filter.matches` (TRUE only), over a record of decoded attribute values.
+
+The argument for shipping it is that a profile which cannot be executed is only prose. An
+implementer adopting this document needs an oracle to check themselves against, and the rules above
+need tests — a truth table asserted only in Markdown is a truth table that drifts. Shipping the
+interpreter makes §6 executable for everyone, not just for this repository's test suite. It is also
+`Schema`-only, so it reaches the schema-only tier of the package and costs a client nothing.
+
+The argument against was that evaluation is behaviour this package has never shipped: it builds
+schemas, codecs and endpoints, and a real server filters in its database, not in JavaScript. That
+is true, and it shapes what the interpreter is rather than whether it exists. It is a plain
+predicate over decoded records — the normative reference and a conformance oracle, plus the honest
+use of filtering an in-memory collection (a fixture, a test double, an already-fetched page). It is
+not a query engine and makes no claim to be one; a server backed by a database implements §6 in its
+own dialect and uses this to check that it agrees.
 
 ## 7. Error pointers
 
@@ -451,9 +688,15 @@ Unknown field, undeclared operator and bad literal are three distinct failures w
 
 ## 9. Reviewed against usage
 
-legation#148's table (23 filter sites across four example apps: 16 `eq`, 2 `in`, ids and one
-boolean, no NULL filters, no traversal) is fully expressible in bare shorthand, unchanged from what
-those sites emit today (`filter[status]=open`, `filter[priority]=1,2`). Legation's current encoder
-drops `ne` / `gt` / `or` / `not` / `eq null`
-(`packages/jsonapi/src/JsonApiQuery.ts:46-58`); under this grammar all of them have an exact form
-(`eq null` becomes `isnull=true`), which is what lets L7 delete `safeFilters`.
+A survey of 23 real filter sites across four applications (16 `eq`, 2 `in`, values mostly ids, one
+boolean; no NULL filters and no traversal) is fully expressible in bare shorthand, unchanged from
+what those sites emit today (`filter[status]=open`, `filter[priority]=1,2`). The survey is
+[thomasfosterau/legation#148](https://github.com/thomasfosterau/legation/issues/148)'s, cited here
+as evidence about how `filter` is used in practice — the grammar and its meaning are §1–§6 of this
+document and are not derived from it.
+
+Two things the survey confirms: the shorthand carries the overwhelming majority of real filters, so
+the group form's verbosity is a cost paid only by the queries that need it; and NULL filtering is
+rare enough in practice that [§6.2](#62-the-logic-is-three-valued)'s choice is unlikely to surprise
+anyone in the common case, which is a reason to document the surprising case loudly rather than a
+reason to change it.

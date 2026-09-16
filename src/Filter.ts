@@ -19,6 +19,11 @@
  * ({@link PROFILE_URI}). The URL codec over a resource's declaration is
  * `Query.Filter(resource)`.
  *
+ * The profile's **semantics** — three-valued logic, absent attributes as NULL,
+ * how literals compare — are §6 of the same document, and {@link evaluate} /
+ * {@link matches} are its reference interpreter: the executable form of those
+ * rules, and the oracle a third-party implementation can check itself against.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -41,7 +46,7 @@
  */
 import { Schema } from "effect"
 import type { FieldCodecs } from "./internal/filter.js"
-import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
+import { compareCodePoints, literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
 import { compareOperators, operators as vocabulary, resolveOperators } from "./internal/operators.js"
 
 // ---------------------------------------------------------------------------
@@ -456,8 +461,9 @@ export type Condition<Fields extends FieldTypes = FieldTypes> = {
  * `Compare<"age", number> | Compare<"title", string> | …`. The decoded
  * `filter` of a query is one root node.
  *
- * The AST carries no semantics: what a tree *means* (NULL handling,
- * collation, coercion) is the interpreter's business.
+ * The AST is data and stores no semantics. What a tree *means* — NULL
+ * handling, comparison, the truth tables — is §6 of the profile, and
+ * {@link evaluate} is its reference interpreter.
  *
  * @since 0.13.0
  * @category models
@@ -473,7 +479,15 @@ export type Ast<Fields extends FieldTypes = FieldTypes> = Condition<Fields> | An
  */
 export type Node = Ast<FieldTypes>
 
-const Literal = Schema.Unknown
+// A filter literal is any decoded value **except** `null`: the profile admits
+// no `null` literal in any position, and `isnull` is the only NULL test
+// (see `docs/filter-grammar.md` §6.4). Enforced here so a hand-built tree is
+// refused on the same rule the URL grammar has no spelling for.
+const Literal = Schema.Unknown.check(
+  Schema.makeFilter((value) =>
+    value === null ? "null is not a filter literal; use the `isnull` operator to test for NULL" : undefined
+  )
+)
 const NodeSchema: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast)
 const CompareSchema = Schema.TaggedStruct("Compare", {
   op: Schema.Literals(compareOperators),
@@ -726,6 +740,200 @@ export interface LiteralCodecs {
  */
 export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
   prepare(node, literalEncoder(fields as FieldCodecs), operatorCheck(fields)).node as N
+
+// ---------------------------------------------------------------------------
+// Semantics: the profile's reference interpreter (design §6)
+// ---------------------------------------------------------------------------
+
+/**
+ * The record a filter is evaluated against: a resource's **decoded** attribute
+ * values, keyed by the field names the filter may name. A key that is absent,
+ * or whose value is `null`, is NULL — the profile draws no distinction between
+ * the two (`docs/filter-grammar.md` §6.3).
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface Subject {
+  readonly [field: string]: unknown
+}
+
+/**
+ * A three-valued truth: `true`, `false`, or `undefined` for UNKNOWN.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export type Truth = boolean | undefined
+
+/** Whether a subject value is NULL — absent and `null` are the same thing (§6.3). */
+const isNullish = (value: unknown): boolean => value === null || value === undefined
+
+/** Kleene negation: UNKNOWN negates to UNKNOWN (§6.2). */
+const negate = (truth: Truth): Truth => (truth === undefined ? undefined : !truth)
+
+/**
+ * The profile's ordering relation (§6.6), over decoded values of the four
+ * ordered kinds. Anything else has no ordering in this profile, so a
+ * conforming declaration must not put an ordering operator on it.
+ */
+const order = (field: string, a: unknown, b: unknown): number => {
+  if (typeof a === "string" && typeof b === "string") return compareCodePoints(a, b)
+  if (typeof a === "number" && typeof b === "number") return a === b ? 0 : a < b ? -1 : 1
+  if (typeof a === "bigint" && typeof b === "bigint") return a === b ? 0 : a < b ? -1 : 1
+  if (a instanceof Date && b instanceof Date) {
+    const [x, y] = [a.getTime(), b.getTime()]
+    return x === y ? 0 : x < y ? -1 : 1
+  }
+  throw new Error(
+    `Field ${JSON.stringify(field)} has no ordering in this profile: the ordering operators are defined for ` +
+      `string, number, bigint and Date values only (docs/filter-grammar.md §6.6). ` +
+      `Declare only eq, ne, in, nin and isnull on it.`
+  )
+}
+
+/**
+ * Evaluates one filter tree against one subject, returning the profile's
+ * **three-valued** truth (§6.2): `true`, `false`, or `undefined` for UNKNOWN.
+ *
+ * This is the profile's reference interpreter — the executable form of
+ * `docs/filter-grammar.md` §6, and the oracle its conformance tests run
+ * against. It is deliberately a plain predicate over decoded records, not a
+ * query engine: a server backed by a database implements the same rules in its
+ * own dialect and can check itself against this one.
+ *
+ * Equality (`eq`, `ne`, `in`, `nin`) is equality of the **encoded** wire form,
+ * which is total over every declarable attribute; ordering (`lt`, `lte`, `gt`,
+ * `gte`) is the decoded order of a string, number, bigint or Date, and throws
+ * for any other kind, since the profile defines no ordering there. `fields` is
+ * the resource's declaration — `Resource.filterable(resource)` — exactly as for
+ * {@link normalise}.
+ *
+ * Most callers want {@link matches}, which is this with UNKNOWN folded into
+ * "not in the result set".
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Filter, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { status: Resource.attribute(Schema.NullOr(Schema.String), { filter: true }) }
+ * })
+ * const fields = Resource.filterable(Article)
+ *
+ * // A NULL attribute makes a comparison UNKNOWN, and negation keeps it UNKNOWN.
+ * Filter.evaluate(Filter.eq("status", "open"), { status: null }, fields) // undefined
+ * Filter.evaluate(Filter.not(Filter.eq("status", "open")), { status: null }, fields) // undefined
+ * // `isnull` is the only node that observes NULL, and is never UNKNOWN.
+ * Filter.evaluate(Filter.isNull("status"), { status: null }, fields) // true
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const evaluate = (node: Node, subject: Subject, fields: LiteralCodecs): Truth => {
+  const encode = literalEncoder(fields as FieldCodecs)
+  const equal = (field: string, a: unknown, b: unknown): boolean => encode(field, a) === encode(field, b)
+
+  const go = (current: Node): Truth => {
+    switch (current._tag) {
+      case "Compare": {
+        const value = subject[current.field]
+        // Every comparison against NULL is UNKNOWN (§6.2) — this is the whole
+        // of the three-valued rule; `isnull` below is the only exception.
+        if (isNullish(value)) return undefined
+        switch (current.op) {
+          case "eq":
+            return equal(current.field, value, current.value)
+          case "ne":
+            return !equal(current.field, value, current.value)
+          case "lt":
+            return order(current.field, value, current.value) < 0
+          case "lte":
+            return order(current.field, value, current.value) <= 0
+          case "gt":
+            return order(current.field, value, current.value) > 0
+          case "gte":
+            return order(current.field, value, current.value) >= 0
+        }
+      }
+      case "In": {
+        const value = subject[current.field]
+        if (isNullish(value)) return undefined
+        return current.values.some((candidate) => equal(current.field, value, candidate))
+      }
+      case "NotIn": {
+        const value = subject[current.field]
+        if (isNullish(value)) return undefined
+        // Exactly `Not(In(...))` — the lists hold no NULL, so SQL's `NOT IN`
+        // trap cannot arise here (§6.5).
+        return !current.values.some((candidate) => equal(current.field, value, candidate))
+      }
+      case "IsNull":
+        // The only node that observes NULL, and the only one never UNKNOWN.
+        return isNullish(subject[current.field]) !== current.negated
+      case "And": {
+        // FALSE dominates; otherwise UNKNOWN if any member is. `And([])` is TRUE.
+        let unknown = false
+        for (const member of current.members) {
+          const truth = go(member)
+          if (truth === false) return false
+          if (truth === undefined) unknown = true
+        }
+        return unknown ? undefined : true
+      }
+      case "Or": {
+        // TRUE dominates; otherwise UNKNOWN if any member is. `Or([])` is FALSE.
+        let unknown = false
+        for (const member of current.members) {
+          const truth = go(member)
+          if (truth === true) return true
+          if (truth === undefined) unknown = true
+        }
+        return unknown ? undefined : false
+      }
+      case "Not":
+        return negate(go(current.member))
+    }
+  }
+
+  return go(node)
+}
+
+/**
+ * Whether a subject is **in the result set** of a filter: {@link evaluate}
+ * with UNKNOWN folded into "no", per §6.2 — a server returns the resources for
+ * which the filter is TRUE, and UNKNOWN is not TRUE.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Filter, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: {
+ *     status: Resource.attribute(Schema.NullOr(Schema.String), { filter: true }),
+ *     views: Resource.attribute(Schema.Number, { filter: true })
+ *   }
+ * })
+ * const fields = Resource.filterable(Article)
+ * const rows = [
+ *   { status: "open", views: 10 },
+ *   { status: "done", views: 30 },
+ *   { status: null, views: 20 }
+ * ]
+ *
+ * const filter = Filter.and(Filter.ne("status", "done"), Filter.gt("views", 5))
+ * rows.filter((row) => Filter.matches(filter, row, fields))
+ * // → [{ status: "open", views: 10 }] — the NULL row is UNKNOWN, so excluded
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const matches = (node: Node, subject: Subject, fields: LiteralCodecs): boolean =>
+  evaluate(node, subject, fields) === true
 
 // ---------------------------------------------------------------------------
 // Profile (design §5)

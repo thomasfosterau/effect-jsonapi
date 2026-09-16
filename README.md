@@ -1447,6 +1447,46 @@ media type of responses from endpoints that speak it —
 `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the
 same way, since unknown profiles are ignored, never rejected.
 
+### What a filter means
+
+JSON:API leaves `filter` semantics implementation-defined so that a profile can pin them, and
+[§6 of the grammar](./docs/filter-grammar.md#6-semantics) does: two servers advertising this profile
+answer the same URL the same way. The rules in brief —
+
+- **The logic is three-valued.** A comparison whose field is NULL is UNKNOWN, not false; `isnull` is
+  the only operator that observes NULL, and the only one never UNKNOWN. A resource is returned when
+  the filter is TRUE, so `?filter[status][ne]=done` does **not** return a resource whose `status` is
+  NULL. Ask for those explicitly: `NOT (status = done) OR status IS NULL`.
+- **An absent attribute is NULL** — a resource carrying no key for a declared field and one carrying
+  `null` are indistinguishable.
+- **`null` is never a literal.** `isnull` is the only NULL test, and `Filter.Ast` rejects a `null` in
+  any literal position.
+- **`nin` is exactly `not(in)`**, UNKNOWN case included — SQL's `NOT IN` trap needs a NULL inside the
+  list, which the grammar cannot express.
+- **Equality is equality of the encoded form**, which is total over every declarable attribute (so
+  two `Date`s for the same instant are equal, and a brand never affects it). **Ordering** is the
+  decoded order of a `string` (by code point, not locale collation), `number`, `bigint` or `Date`;
+  no other kind has an ordering, so don't declare `lt` / `gt` on one.
+
+`Filter.evaluate` is the reference interpreter for those rules — the executable form of §6, and the
+oracle a third-party implementation can check itself against. `Filter.matches` is the predicate most
+callers want:
+
+```ts
+const fields = Resource.filterable(Product)
+const filter = Filter.and(Filter.ne("status", "done"), Filter.gt("priceCents", 500))
+
+products.filter((product) => Filter.matches(filter, product, fields))
+
+// or the three-valued truth itself, which is what makes the profile checkable:
+Filter.evaluate(Filter.eq("status", "open"), { status: null }, fields) // undefined — UNKNOWN
+Filter.evaluate(Filter.isNull("status"), { status: null }, fields) // true
+```
+
+It is a plain predicate over decoded records, not a query engine: a server backed by a database
+implements §6 in its own dialect and uses this to check that it agrees. Filtering an in-memory
+collection — a fixture, a test double, an already-fetched page — is the honest direct use.
+
 ### The canonical query string
 
 JSON:API 1.1 requires a collection document's `self` link to carry the query parameters the client
