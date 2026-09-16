@@ -47,6 +47,7 @@ import type { SchemaAST, Types } from "effect"
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
 import type { Ast, Node } from "./Filter.js"
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js"
+import type { AnySurface, SurfaceFor } from "./Include.js"
 import type { Pair as CanonicalPair } from "./internal/canonical.js"
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js"
 import { CommaSeparated, flatten, nest, Repeatable, Sort as SortCodec } from "./internal/codecs.js"
@@ -413,22 +414,35 @@ export interface IncludeOptions<R extends Any> {
   readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>
   /** How many hops into the relationship graph to derive. Defaults to 2. */
   readonly depth?: IncludeDepth
+  /**
+   * The discriminant an `Include.Surface` carries, declared here as `never` so
+   * that a surface can never satisfy this arm of {@link IncludeOption}: a
+   * surface's `paths` may well be legal paths of *another* resource, and
+   * without this it would be silently accepted as that resource's allow-list
+   * instead of being rejected as the wrong resource's surface.
+   *
+   * @internal
+   */
+  readonly "~@thomasfosterau/effect-jsonapi/include"?: never
 }
 
 /**
  * The `include` option of a query configuration: `true` (the full graph at
- * depth 2), `false` (no `?include=` parameter), or an {@link IncludeOptions}
- * object constraining the derivation.
+ * depth 2), `false` (no `?include=` parameter), an {@link IncludeOptions}
+ * object constraining the derivation, or an `Include.Surface` — a nested
+ * declaration the whitelist, the `included` union and this parameter all
+ * project from at once.
  *
  * @since 0.9.0
  * @category models
  */
-export type IncludeOption<R extends Any> = boolean | IncludeOptions<R>
+export type IncludeOption<R extends Any> = boolean | IncludeOptions<R> | SurfaceFor<R>
 
 /**
- * The `include` paths an {@link IncludeOption} legalises: the explicit
- * allow-list, else the graph derived to the requested depth, else the depth-2
- * default.
+ * The `include` paths an {@link IncludeOption} legalises: a declared
+ * `Include.Surface`'s paths or an explicit allow-list (both read off the
+ * option's `paths`), else the graph derived to the requested depth, else the
+ * depth-2 default.
  *
  * @since 0.9.0
  * @category type-level
@@ -456,14 +470,17 @@ export interface Include<R extends Any, Paths extends string = IncludePath<R>> e
   Schema.Literals<ReadonlyArray<Paths>>
 > {}
 
-// The paths an `include` schema legalises, at runtime.
+// The paths an `include` schema legalises, at runtime. A declared
+// `Include.Surface` and an explicit `paths` allow-list are the same shape here
+// — both carry the whole dotted paths to legalise — so both take the first
+// branch and neither is ever widened back to a graph walk.
 const includePathsFor = (
   resources: ReadonlyArray<Any>,
-  options: IncludeOptions<Any> | undefined
+  options: IncludeOptions<Any> | AnySurface | undefined
 ): ReadonlyArray<string> =>
   options?.paths !== undefined
     ? dedupe(options.paths as ReadonlyArray<string>)
-    : dedupe(resources.flatMap((r) => includePaths(r, options?.depth ?? 2)))
+    : dedupe(resources.flatMap((r) => includePaths(r, (options as IncludeOptions<Any> | undefined)?.depth ?? 2)))
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
@@ -474,10 +491,15 @@ const includePathsFor = (
  * allow-list, or a `depth` bound — for resources whose graph reaches further
  * than the endpoint can actually resolve.
  *
+ * Pass an `Include.Surface` to legalise exactly a *declared* surface instead:
+ * the same declaration then also derives the `included` union the success
+ * document must carry, so the advertised paths and the resources a walk may
+ * hoist cannot drift apart.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Include, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
@@ -502,18 +524,26 @@ const includePathsFor = (
  * const shallow = Query.Include(Article, { paths: ["author", "comments"] })
  * Schema.decodeUnknownSync(shallow)("author,comments")
  * // → ["author", "comments"]
+ *
+ * // …or a declared surface, which also derives the `included` union
+ * const surface = Include.make(Article, {
+ *   comments: Include.nested(Comment, { author: Person })
+ * })
+ * const declared = Query.Include(Article, surface)
+ * Schema.decodeUnknownSync(declared)("comments.author")
+ * // → ["comments.author"]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const Include = <R extends Any, const O extends IncludeOptions<R> | undefined = undefined>(
+export const Include = <R extends Any, const O extends IncludeOptions<R> | AnySurface | undefined = undefined>(
   resource: R | ReadonlyArray<R>,
   options?: O
 ): Include<R, IncludePathsOf<R, O>> =>
   CommaSeparated(
     Schema.Literals(
-      includePathsFor(toResources(resource), options as IncludeOptions<Any> | undefined) as ReadonlyArray<
+      includePathsFor(toResources(resource), options as IncludeOptions<Any> | AnySurface | undefined) as ReadonlyArray<
         IncludePathsOf<R, O>
       >
     )
@@ -809,8 +839,11 @@ export interface Options<R extends Any> {
    * Enable `?include=` — compound document inclusion. `true` legalises the
    * resource's whole relationship graph to a depth of 2; an
    * {@link IncludeOptions} object constrains that to an explicit `paths`
-   * allow-list and/or a `depth` bound. Paths are validated against the result;
-   * unknown paths produce a 400.
+   * allow-list and/or a `depth` bound; an `Include.Surface` legalises exactly
+   * a declared surface (and derives the matching `included` union). Paths are
+   * validated against the result as *whole* dotted paths, so `comments`
+   * being legal does not make `comments.editor` legal; unknown paths produce
+   * a 400.
    *
    * Both wire spellings are accepted — `?include=a,b` and `?include=a&include=b`
    * — and decode to the same set.

@@ -14,6 +14,7 @@
  *   Filter,
  *   Group,
  *   Handlers,
+ *   Include,
  *   Lid,
  *   Middleware,
  *   Query,
@@ -106,6 +107,15 @@ export * as Group from "./Group.js"
  * @since 0.1.0
  */
 export * as Handlers from "./Handlers.js"
+
+/**
+ * Declared `?include=` surfaces (`Include.make`, `Include.nested`) — one
+ * nested declaration the accepted-path whitelist, the `included` union and the
+ * advertised parameter all project from.
+ *
+ * @since 0.15.0
+ */
+export * as Include from "./Include.js"
 
 /**
  * Lid (local id) resolution (`Lid.make`).

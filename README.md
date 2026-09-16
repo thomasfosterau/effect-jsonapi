@@ -67,6 +67,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
+  - [Declaring the include surface once](#declaring-the-include-surface-once)
   - [Bracketing page keys on a query struct you own](#bracketing-page-keys-on-a-query-struct-you-own)
 - [Spec compliance, by construction](#spec-compliance-by-construction)
 - [Examples](#examples)
@@ -1461,6 +1462,56 @@ A top-level constraint applies to `get` and `list`. The relationship endpoints' 
 _target's_ graph, not this resource's, so they inherit only that `include` is on — constrain them
 with `Endpoint.related` directly if they need it too.
 
+### Declaring the include surface once
+
+An allow-list constrains _which_ paths are advertised, but says nothing about the `included` union
+the success document declares — and `HttpApiBuilder` strips a resolved `included` the document's
+schema doesn't admit, so a walk that runs correctly can still reach the client empty. Those are two
+declarations over two inputs, and they drift.
+
+`Include.make` is one nested declaration all three artefacts project from — the accepted-path
+whitelist, the `included` union, and the advertised parameter:
+
+```ts
+const surface = Include.make(Article, {
+  author: Person,
+  comments: Include.nested(Comment, { author: Person })
+})
+
+surface.paths // ["author", "comments", "comments.author"] — typed literals
+surface.included // Schema.Union([Person, Comment])
+surface.has("comments.editor") // false
+
+// one option, all three:
+Endpoint.get(Article, { include: surface })
+Endpoint.list(Article, { include: surface })
+Group.resource(Article, { include: surface })
+```
+
+Three properties are load-bearing:
+
+- **The whitelist spells depth.** `comments` and `comments.author` are separate entries, so
+  `comments.editor` is rejected even though `comments` is includable — the whole dotted path is
+  matched, never just its head segment.
+- **Nesting only ever _adds_ paths.** Wrapping a key in `Include.nested` keeps `?include=<key>`
+  meaning exactly what it did.
+- **The union carries every depth.** A walk that hoists a Comment _and_ the Person behind it needs
+  both arms, or the deeper one is stripped on encode.
+
+Every key is checked against the resource's relationship graph — an unknown key, a `paginated`
+relationship (never inlined) or a key declared against the wrong target is a compile error, and each
+is re-checked when the surface is built. `Include.paths(spec)` and `Include.included(spec)` are the
+same two projections standalone.
+
+Because the derivation recurses over the **declaration** rather than the relationship graph, a
+declared surface is not bound by the depth-2 ceiling `include: true` inherits: depth becomes a
+property of what you wrote. It is capped explicitly at `Include.MAX_DEPTH` (6) hops — the type-level
+derivation truncates past it and `Include.make` throws, so a too-deep declaration fails loudly at
+startup instead of silently advertising less than it declares.
+
+A resource that declares no surface advertises no parameter, and `include: true` /
+`Query.IncludeOptions` behave exactly as before.
+
 `Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded,
 defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination,
 `Query.Page.number(options)`): it returns the same `{ offset, limit }` field-map but lets you cap
@@ -1561,9 +1612,11 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 - **Sparse fieldsets are advisory**: `?fields[TYPE]=` is decoded, validated and handed to your
   handler, but attribute projection in responses is handler logic (automatic projection would
   require post-processing responses against request state).
-- **Include paths are typed to a depth of 2 hops** (`"comments.author"` works,
-  `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off. The runtime
-  validation matches the same set.
+- **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works,
+  `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }`
+  raises it one hop, and the runtime validation matches the same set. Declaring the surface
+  explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because
+  the derivation then recurses over the declaration rather than the graph.
 - **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on
   the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided
   via `Client.narrowIncluded`.
