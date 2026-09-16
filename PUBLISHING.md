@@ -64,6 +64,27 @@ and asserted in both directions, so moving a module between tiers fails the test
 and has to be a decision rather than a drift. `src/internal/` is deliberately not
 exported.
 
+Three modules could plausibly have gone either way, and were decided rather than
+left to fall where their imports happen to put them:
+
+- **`Resource`** is schema-only. It imports `Filter`, `Document`, `Effect`,
+  `SchemaAST` and `SchemaTransformation`, but nothing HTTP — and a resource
+  definition is the package's single source of truth for more than its HTTP
+  layer (database columns, form descriptors, search indexes), which is the use
+  `Resource.annotate` and `Resource.attributeDescriptors` exist to support. A
+  consumer deriving one of those has no transport in the picture at all, so
+  putting `Resource` behind the server surface would defeat the seam.
+- **`Query`** is schema-only, despite being the URL codec. It reads
+  `Resource.filterable` and builds `Schema` codecs over `Record<string, string>`
+  — the query family's _wire form_, not a request object — so a client
+  constructing a canonical query string, or a façade answering a JSON:API URL
+  from a local replica, needs it without needing a server.
+- **`Atomic`** is schema-only, which it was not before this change. Its only
+  reach into the HTTP tier was `internal/media.ts`, for two media-type string
+  constants; splitting that file moved it. The atomic extension's request and
+  result documents are `Schema`s like any other, and the endpoint that serves
+  them lives in `Endpoint`.
+
 `Client` is in the HTTP tier because it generates and negotiates real HTTP
 requests. The half of the client story that a consumer may want _without_ a
 transport — best-effort error-document decoding, for a façade synthesising a
