@@ -9,6 +9,7 @@
  *   ApiError,
  *   Atomic,
  *   Client,
+ *   Conformance,
  *   Document,
  *   Endpoint,
  *   Filter,
@@ -66,6 +67,15 @@ export * as Atomic from "./Atomic.js"
  * @since 0.1.0
  */
 export * as Client from "./Client.js"
+
+/**
+ * The conformance kit (`Conformance.verify`, `Conformance.format`) — an
+ * executable specification of JSON:API v1.1 and of this package's profile,
+ * which a server is driven through to prove it conforms.
+ *
+ * @since 0.15.0
+ */
+export * as Conformance from "./Conformance.js"
 
 /**
  * JSON:API document-level schemas (links, meta, error objects, document
