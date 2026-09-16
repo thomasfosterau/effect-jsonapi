@@ -53,6 +53,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
+  - [Mutually recursive resources](#mutually-recursive-resources)
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
@@ -205,6 +206,70 @@ Everything below is **derived** — never assembled by hand:
 
 Documents are not limited to one resource type — see
 [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
+
+### Mutually recursive resources
+
+An API whose articles link to comments and whose comments link back to their article is ordinary
+JSON:API, and it is expressible. `Relationship.one(() => Resource)` is a thunk, so the _runtime_
+cycle resolves itself; what TypeScript cannot do is **infer** two resource types that reference each
+other — each would need the other's type first. Write the two types out and it resolves them fine,
+exactly as recursive `Schema` definitions are always written. The cycle runs through a relationship
+descriptor's `ref` thunk, which is a deferred position, so a pair of circular type aliases is
+legal:
+
+```ts
+// Write the attributes once, as values, so the types below can point at them.
+const articleAttributes = { title: Schema.NonEmptyString }
+const commentAttributes = { body: Schema.NonEmptyString }
+
+type ArticleResource = Resource.Resource<
+  "articles",
+  typeof articleAttributes,
+  { comments: Relationship.Many<CommentResource> }
+>
+
+type CommentResource = Resource.Resource<
+  "comments",
+  typeof commentAttributes,
+  { article: Relationship.One<ArticleResource, false> }
+>
+
+const Article: ArticleResource = Resource.make("articles", {
+  attributes: articleAttributes,
+  relationships: { comments: Relationship.many(() => Comment) }
+})
+
+const Comment: CommentResource = Resource.make("comments", {
+  attributes: commentAttributes,
+  relationships: { article: Relationship.one(() => Article) }
+})
+```
+
+The annotation on each `const` is what breaks the inference cycle; the thunks need none of their
+own. Use `type` aliases rather than `interface`s: both resolve the recursion, but an alias keeps the
+generic reference intact, so `Resource.extend` and `Resource.annotate` still infer the resource's
+type tag from it.
+
+`Relationship.One<ArticleResource, false>`'s second argument is the relationship's `filter`
+declaration: `false` is what `Relationship.one(ref)` produces, and it has to be stated because the
+declared type must match the value exactly. `Many` and `Paginated` have no such parameter.
+
+Everything derived from the pair then works unchanged, in both directions:
+
+```ts
+Resource.IncludePath<typeof Article> // "comments" | "comments.article"
+Resource.IncludePath<typeof Comment> // "article" | "article.comments"
+```
+
+`?include=comments.article` type-checks, decodes and is advertised; the `included` union is finite
+(one hop, deduplicated); `createPayload` / `updatePayload` / `createInput` / `updateInput` derive as
+usual on both sides, with the inverse to-one required at create; and `Resource.extend` and
+`Resource.annotate` work on a resource that takes part in a cycle.
+
+The include _depth_ bound is what keeps the derivation finite: paths are typed to two hops, so a
+cycle contributes `comments.article` and stops there rather than recursing. That bound is the
+general one — it is not special to cycles — and the runtime walk `Query.Include` advertises matches
+it exactly, so "advertised" and "typed" agree across a cycle as they do anywhere else.
 
 ### Custom id schemas
 
@@ -1771,10 +1836,11 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   via `Client.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document
   meta are typed via options.
-- **Mutually recursive resources** (A ↔ B) are not supported: TypeScript cannot infer two resource
-  types that reference each other. Model one direction as a relationship and the reverse direction
-  as a filtered collection endpoint (e.g. `GET /articles?filter[author]=9`) or a related endpoint
-  on the side that owns the relationship.
+- **Mutually recursive resources** (A ↔ B) need each side's type written out first: TypeScript
+  cannot _infer_ two resource types that reference each other, though it resolves them fine once
+  declared. See
+  [Mutually recursive resources](#mutually-recursive-resources) — everything derived from them
+  (`?include=` across the cycle, the `included` union, the write payloads) works unchanged.
 - **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
   responses by include paths is not yet supported.
 - **Atomic operations requests are accepted with or without the `ext` media type parameter**:

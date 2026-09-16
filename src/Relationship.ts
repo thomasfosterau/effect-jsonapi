@@ -209,8 +209,9 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  * identifier, never `null`. Required in create payloads.
  *
  * The reference is a thunk so resources can reference each other regardless of
- * declaration order (mutually recursive definitions may require an explicit
- * type annotation on one side).
+ * declaration order, mutually recursive definitions included — those need each
+ * side's type written out first, since TypeScript cannot infer two resource
+ * types that reference each other (see the README).
  *
  * Pass `filter` to make the relationship a filterable field of its resource
  * (`?filter[author]=9`), valued by the related resource's id: `true` admits
