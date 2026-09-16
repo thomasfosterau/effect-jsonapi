@@ -670,9 +670,17 @@ describe("content negotiation with extensions", () => {
     expect(Middleware.acceptIsAcceptable('application/vnd.api+json;profile="https://example.com/p"')).toBe(true)
   })
 
-  it("still rejects other media type parameters (charset, q, ...)", () => {
+  it("still rejects other media type parameters (charset, ...)", () => {
     expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8", atomic)).toBe(false)
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9", atomic)).toBe(false)
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;charset=utf-8", atomic)).toBe(false)
+  })
+
+  it("accepts an Accept weight, which is not a media type parameter (#101)", () => {
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9", atomic)).toBe(true)
+    // …including alongside the extension parameter, which is one.
+    const weighted = `application/vnd.api+json;ext="${Atomic.EXTENSION_URI}";q=0.9`
+    expect(Middleware.acceptIsAcceptable(weighted, atomic)).toBe(true)
+    expect(Middleware.acceptIsAcceptable(weighted)).toBe(false)
   })
 
   it("accepts unparameterised media types and wildcards as before", () => {

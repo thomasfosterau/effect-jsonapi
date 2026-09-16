@@ -69,23 +69,49 @@ export interface NegotiationOptions {
 /**
  * Splits one media type entry into its (lowercased) base type and its
  * parameters.
+ *
+ * `acceptExtensions` splits an **`Accept`** entry at its weight, per RFC 9110
+ * §12.4.2: everything before `q` is a media type parameter, `q` and everything
+ * after it is an accept-extension belonging to the header field rather than to
+ * the representation. A `Content-Type` has no such grammar — it is a bare
+ * media type — so a `q` there is an ordinary media type parameter and is
+ * returned as one.
  */
 const parseMediaType = (
-  entry: string
-): { readonly base: string; readonly parameters: ReadonlyArray<readonly [name: string, value: string]> } => {
+  entry: string,
+  acceptExtensions: boolean = false
+): {
+  readonly base: string
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>
+  readonly weight: number
+} => {
   const [first, ...rest] = entry.split(";")
+  const parsed = rest.map((part) => {
+    const eq = part.indexOf("=")
+    if (eq === -1) return [part.trim().toLowerCase(), ""] as const
+    const name = part.slice(0, eq).trim().toLowerCase()
+    const value = part.slice(eq + 1).trim()
+    // Parameter values may be quoted (ext / profile URI lists always are).
+    const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
+    return [name, unquoted] as const
+  })
+  const weightAt = acceptExtensions ? parsed.findIndex(([name]) => name === "q") : -1
   return {
     base: (first ?? "").trim().toLowerCase(),
-    parameters: rest.map((part) => {
-      const eq = part.indexOf("=")
-      if (eq === -1) return [part.trim().toLowerCase(), ""] as const
-      const name = part.slice(0, eq).trim().toLowerCase()
-      const value = part.slice(eq + 1).trim()
-      // Parameter values may be quoted (ext / profile URI lists always are).
-      const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
-      return [name, unquoted] as const
-    })
+    // Everything from `q` onwards is the header field's, not the media type's.
+    parameters: weightAt === -1 ? parsed : parsed.slice(0, weightAt),
+    weight: weightAt === -1 ? 1 : parseWeight(parsed[weightAt]![1])
   }
+}
+
+/**
+ * An RFC 9110 §12.4.2 qvalue: 0–1, at most three decimals. A malformed weight
+ * is read as 1 rather than rejected — erring towards serving the client, since
+ * a spurious 406 is the failure mode this parsing exists to avoid.
+ */
+const parseWeight = (value: string): number => {
+  const weight = Number(value)
+  return Number.isFinite(weight) && weight >= 0 && weight <= 1 ? weight : 1
 }
 
 /**
@@ -118,6 +144,13 @@ const parametersAreAcceptable = (
  *
  * Other content types are left to the downstream payload decoder.
  *
+ * Note that a `q` here is **not** a weight: `Content-Type` is a bare media
+ * type, with no accept-extension grammar for `q` to belong to (RFC 9110
+ * §8.3), so `application/vnd.api+json;q=0.9` as a *request* content type
+ * carries a media type parameter that is neither `ext` nor `profile`, and §5
+ * requires the 415. On `Accept`, where `q` is the entry's weight, it is
+ * stripped instead — see {@link acceptIsAcceptable}.
+ *
  * @since 0.1.0
  * @category utils
  */
@@ -129,26 +162,73 @@ export const contentTypeIsAcceptable = (header: string | undefined, options?: Ne
 }
 
 /**
+ * The weight at which the client accepts JSON:API, or `undefined` when it does
+ * not — the resolved `q` of the best acceptable instance of the JSON:API media
+ * type in `Accept` (or of a `*​/*` / `application/*` range, when no JSON:API
+ * instance is named).
+ *
+ * A host that serves more than one representation on the same URL uses this to
+ * *choose*, rather than only to accept: compare it with the weight the client
+ * gave the alternatives and serve the winner.
+ *
+ * Per RFC 9110 §12.4.2, `q` is the weight of an `Accept` entry, not a media
+ * type parameter — it terminates the media type's own parameter list — so it is
+ * never counted against JSON:API §5's `ext` / `profile` rule. `q=0` is an
+ * explicit refusal of that instance, so it contributes no weight.
+ *
+ * @example
+ * ```ts
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Middleware.acceptWeight("application/vnd.api+json;q=0.8") // 0.8
+ * Middleware.acceptWeight("text/html;q=0.9, application/vnd.api+json;q=0.8") // 0.8
+ * Middleware.acceptWeight("application/vnd.api+json;q=0") // undefined — refused
+ * Middleware.acceptWeight("application/vnd.api+json;charset=utf-8") // undefined — bad parameter
+ * ```
+ *
+ * @since 0.15.0
+ * @category utils
+ */
+export const acceptWeight = (header: string | undefined, options?: NegotiationOptions): number | undefined => {
+  if (header === undefined) return 1
+  const extensions = options?.extensions ?? []
+  let specific: number | undefined
+  let wildcard: number | undefined
+  for (const entry of header.split(",").map((part) => part.trim())) {
+    if (entry === "") continue
+    const { base, parameters, weight } = parseMediaType(entry, true)
+    // `q=0` refuses this instance outright, whatever its parameters say.
+    if (weight === 0) continue
+    if (base === "*/*" || base === "application/*") {
+      wildcard = Math.max(wildcard ?? 0, weight)
+      continue
+    }
+    if (base !== MEDIA_TYPE) continue
+    if (parametersAreAcceptable(parameters, extensions)) specific = Math.max(specific ?? 0, weight)
+  }
+  // A named JSON:API instance is the more specific match and wins, per RFC 9110
+  // §12.5.1; a range only speaks for it when none is named.
+  return specific ?? wildcard
+}
+
+/**
  * JSON:API §5: the server MUST respond with 406 if every instance of the
  * JSON:API media type in `Accept` carries media type parameters other than
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
- * `*​/*` or `application/*` always satisfies the rule.
+ * `*​/*` or `application/*` satisfies the rule, unless it is refused with
+ * `q=0`.
+ *
+ * `q` is the entry's weight, not a media type parameter, so it is stripped
+ * before the `ext` / `profile` check ({@link acceptWeight}) — an `Accept` that
+ * merely states a *preference* between HTML and JSON:API is acceptable. A
+ * `q=0` on the JSON:API instance is an explicit refusal of that representation,
+ * and a genuine 406 when it is the only one.
  *
  * @since 0.1.0
  * @category utils
  */
-export const acceptIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
-  if (header === undefined) return true
-  const entries = header.split(",").map((entry) => entry.trim())
-  for (const entry of entries) {
-    if (entry === "") continue
-    const { base, parameters } = parseMediaType(entry)
-    if (base === "*/*" || base === "application/*") return true
-    if (base !== MEDIA_TYPE) continue
-    if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true
-  }
-  return false
-}
+export const acceptIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean =>
+  acceptWeight(header, options) !== undefined
 
 /**
  * Runs JSON:API §5 content negotiation over request headers, independent of

@@ -8,6 +8,7 @@ import * as Group from "./Group.js"
 import type { ContentNegotiation, SchemaErrors } from "./Middleware.js"
 import {
   acceptIsAcceptable,
+  acceptWeight,
   contentTypeIsAcceptable,
   layer,
   layerHostNegotiated,
@@ -42,6 +43,88 @@ describe("acceptIsAcceptable", () => {
 
   it("rejects when every JSON:API instance carries bad parameters", () => {
     expect(acceptIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false)
+  })
+
+  // RFC 9110 §12.4.2: `q` is the weight of an Accept entry, not a media type
+  // parameter — it terminates the media type's own parameter list. JSON:API §5
+  // constrains the *media type*'s parameters, so a weight must not count
+  // against it. Every case below was a spurious 406 before (#101).
+  describe("a q-weight is not a media type parameter", () => {
+    it("accepts a weighted JSON:API instance", () => {
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.9`)).toBe(true)
+      expect(acceptIsAcceptable(`${MEDIA_TYPE}; q=1`)).toBe(true)
+    })
+
+    it("accepts a client that merely prefers HTML — the case that bit hardest", () => {
+      expect(acceptIsAcceptable(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(true)
+    })
+
+    it("accepts a weight alongside a real media type parameter", () => {
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};profile="https://example.com/p";q=0.8`)).toBe(true)
+    })
+
+    it("still rejects a genuine bad parameter, weight notwithstanding", () => {
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
+    })
+
+    it("treats q=0 as an explicit refusal of that representation", () => {
+      // Rejected before too, but as a bad parameter rather than a refusal.
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0`)).toBe(false)
+      expect(acceptIsAcceptable("*/*;q=0")).toBe(false)
+    })
+
+    it("still serves a client that refuses one instance but accepts another", () => {
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};ext="https://example.com/x";q=0, ${MEDIA_TYPE}`)).toBe(true)
+    })
+
+    it("reads a malformed weight as 1 rather than turning it into a 406", () => {
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};q=high`)).toBe(true)
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};q=7`)).toBe(true)
+    })
+
+    it("keeps `q` a media type parameter on Content-Type, where there is no weight grammar", () => {
+      expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.9`)).toBe(false)
+    })
+  })
+})
+
+describe("acceptWeight", () => {
+  it("resolves the weight a client gave JSON:API", () => {
+    expect(acceptWeight(undefined)).toBe(1)
+    expect(acceptWeight(MEDIA_TYPE)).toBe(1)
+    expect(acceptWeight(`${MEDIA_TYPE};q=0.8`)).toBe(0.8)
+    expect(acceptWeight(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(0.8)
+  })
+
+  it("is undefined when the client will not take JSON:API", () => {
+    expect(acceptWeight("text/html")).toBeUndefined()
+    expect(acceptWeight(`${MEDIA_TYPE};q=0`)).toBeUndefined()
+    expect(acceptWeight(`${MEDIA_TYPE};charset=utf-8`)).toBeUndefined()
+  })
+
+  it("lets a host serving two representations choose between them", () => {
+    // The reason three application repos opted out of this middleware: they
+    // serve HTML and JSON:API on one origin and need the weight, not a boolean.
+    const accept = `text/html;q=0.9, ${MEDIA_TYPE};q=0.8`
+    expect(acceptWeight(accept)).toBe(0.8)
+    expect(acceptWeight(`text/html;q=0.4, ${MEDIA_TYPE};q=0.8`)).toBe(0.8)
+  })
+
+  it("takes the best of several acceptable instances", () => {
+    expect(acceptWeight(`${MEDIA_TYPE};q=0.2, ${MEDIA_TYPE};profile="https://example.com/p";q=0.7`)).toBe(0.7)
+  })
+
+  it("falls back to a range only when no JSON:API instance is named", () => {
+    expect(acceptWeight("*/*;q=0.5")).toBe(0.5)
+    expect(acceptWeight("application/*;q=0.5")).toBe(0.5)
+    // A named instance is the more specific match and wins over the range.
+    expect(acceptWeight(`*/*;q=0.5, ${MEDIA_TYPE};q=0.1`)).toBe(0.1)
+  })
+
+  it("honours ext support when resolving the weight", () => {
+    const ext = `${MEDIA_TYPE};ext="https://example.com/x";q=0.9`
+    expect(acceptWeight(ext)).toBeUndefined()
+    expect(acceptWeight(ext, { extensions: ["https://example.com/x"] })).toBe(0.9)
   })
 })
 

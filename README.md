@@ -1240,6 +1240,26 @@ if (error) {
 }
 ```
 
+`q` is handled as RFC 9110 §12.4.2 requires: it is the _weight_ of an `Accept` entry, not a media
+type parameter, so it never counts against JSON:API §5's `ext` / `profile` rule. A client that merely
+states a preference — `Accept: text/html;q=0.9, application/vnd.api+json;q=0.8`, which any browser on
+a shared origin sends — is acceptable; `q=0` on the JSON:API instance is an explicit refusal of that
+representation, and a 406 when it is the only one.
+
+When a host serves more than one representation on the same URL it needs to _choose_, not just to
+accept. `Middleware.acceptWeight(header, options?)` gives the resolved weight — the `q` of the best
+acceptable JSON:API instance, or `undefined` when the client will not take JSON:API — to compare
+against whatever the client gave the alternatives:
+
+```ts
+const jsonApi = Middleware.acceptWeight(request.headers.get("accept") ?? undefined)
+// "text/html;q=0.9, application/vnd.api+json;q=0.8" → 0.8
+// "application/vnd.api+json;q=0"                    → undefined (refused)
+```
+
+(On `Content-Type` a `q` is _not_ a weight — there is no accept-extension grammar for it to belong
+to — so it stays an ordinary media type parameter and §5's 415 applies.)
+
 `Middleware.schemaError(part)` is the other half: the JSON:API **400** a request-validation failure
 produces, standalone. It's the same value the `SchemaErrors` middleware raises inside `HttpApi`, so a
 hook that decodes requests with its own schemas answers byte-identically to an `Endpoint`-built api:

@@ -538,9 +538,16 @@ describe("blog example: spec compliance on the wire", () => {
       })
     ).toBe(true)
     // Accept in which every JSON:API instance has non-ext/profile parameters → 406
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(false)
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;charset=utf-8")).toBe(false)
     expect(Middleware.acceptIsAcceptable("application/vnd.api+json")).toBe(true)
     expect(Middleware.acceptIsAcceptable("*/*")).toBe(true)
+    // …but `q` is the entry's weight, not a media type parameter (RFC 9110
+    // §12.4.2), so a client stating a preference is served, not 406'd.
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9")).toBe(true)
+    expect(Middleware.acceptIsAcceptable("text/html;q=0.9, application/vnd.api+json;q=0.8")).toBe(true)
+    expect(Middleware.acceptWeight("text/html;q=0.9, application/vnd.api+json;q=0.8")).toBe(0.8)
+    // q=0 is an explicit refusal of the representation
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0")).toBe(false)
   })
 
   it("OpenAPI generation reflects the JSON:API media type and statuses", () => {
