@@ -34,6 +34,24 @@
  * {@link layerHostNegotiated} satisfies the endpoints' negotiation
  * requirement without running §5 twice.
  *
+ * ## Tracing
+ *
+ * The live {@link ContentNegotiationLive} and {@link SchemaErrorsLive}
+ * implementations wrap their per-request decisions in `Effect.withSpan`,
+ * under the stable names collected in {@link Span}. This is the package's
+ * whole tracing surface: everything else it exports is either a plain schema
+ * or a synchronous helper with no Effect to attach a span to (see
+ * {@link https://github.com/thomasfosterau/effect-jsonapi/issues/122 #122}
+ * for why the boundary stops here).
+ *
+ * Spans need no layer or configuration to appear — `Effect.withSpan` reads
+ * whatever `Tracer` is already in context and is a no-op when none is
+ * provided, so a host with no tracing set up pays no cost and sees no
+ * behavior change. Attributes are deliberately low-cardinality (an outcome,
+ * a rule name, a request part) and never carry a header value, a filter
+ * literal, a URL, or anything else that varies per request or could identify
+ * a user — see each span's documentation under {@link Span}.
+ *
  * @since 0.1.0
  */
 import type { Schema } from "effect"
@@ -44,6 +62,51 @@ import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
 import type { ErrorSource } from "./Document.js"
 import { MEDIA_TYPE } from "./internal/media.js"
+
+// ---------------------------------------------------------------------------
+// Tracing
+// ---------------------------------------------------------------------------
+
+/**
+ * The stable `Effect.withSpan` names this package's middleware emits,
+ * namespaced under `effect-jsonapi.` so they cannot collide with a host
+ * application's own spans. Centralised here (rather than inlined at each
+ * `withSpan` call) so a consumer can match on them — in an exporter's
+ * dashboard, a sampling rule, or a test — without depending on string
+ * literals scattered through the source.
+ *
+ * Both spans are attached automatically by {@link ContentNegotiationLive} and
+ * {@link SchemaErrorsLive}; there is nothing to enable, and they cost nothing
+ * when no `Tracer` is in context.
+ *
+ * - `Span.negotiate` — one span per request, wrapping the JSON:API §5
+ *   decision. Attributes: `jsonapi.negotiation.outcome` (`"accepted"` or
+ *   `"rejected"`), and, only when rejected, `jsonapi.negotiation.rule`
+ *   (`"content_type"` or `"accept"`, naming which header failed).
+ * - `Span.schemaError` — one span per request-validation failure, wrapping
+ *   the translation of that failure into a JSON:API 400 document. Attribute:
+ *   `jsonapi.request_part` — the {@link RequestPart} that failed
+ *   (`"Params"`, `"Headers"`, `"Query"`, `"Body"` or `"Payload"`).
+ *
+ * Every attribute value is one of a small fixed set of strings; none of them
+ * is derived from a header value, a filter literal, a query string, or
+ * anything else that could vary per request or identify a user.
+ *
+ * @example
+ * ```ts
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Middleware.Span.negotiate // "effect-jsonapi.negotiate"
+ * Middleware.Span.schemaError // "effect-jsonapi.schema_error"
+ * ```
+ *
+ * @since 0.15.0
+ * @category constants
+ */
+export const Span = {
+  negotiate: "effect-jsonapi.negotiate",
+  schemaError: "effect-jsonapi.schema_error"
+} as const
 
 // ---------------------------------------------------------------------------
 // Content negotiation predicates (JSON:API §5)
@@ -388,12 +451,22 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
     Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest
-        if (!contentTypeIsAcceptable(request.headers["content-type"], options)) {
-          return yield* Effect.fail(new UnsupportedMediaType())
-        }
-        if (!acceptIsAcceptable(request.headers["accept"], options)) {
-          return yield* Effect.fail(new NotAcceptable())
-        }
+        const error = yield* Effect.sync(() =>
+          negotiate({ contentType: request.headers["content-type"], accept: request.headers["accept"] }, options)
+        ).pipe(
+          Effect.tap((error) =>
+            Effect.annotateCurrentSpan(
+              error === undefined
+                ? { "jsonapi.negotiation.outcome": "accepted" }
+                : {
+                    "jsonapi.negotiation.outcome": "rejected",
+                    "jsonapi.negotiation.rule": error instanceof UnsupportedMediaType ? "content_type" : "accept"
+                  }
+            )
+          ),
+          Effect.withSpan(Span.negotiate)
+        )
+        if (error !== undefined) return yield* Effect.fail(error)
         return yield* httpEffect
       })
     )
@@ -431,6 +504,9 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
             status: BadRequest.status,
             contentType: MEDIA_TYPE
           })
+        ).pipe(
+          Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
+          Effect.withSpan(Span.schemaError)
         )
 )
 
