@@ -93,6 +93,7 @@ import type {
   DefaultIncluded,
   Family,
   Id,
+  Parameter,
   RelationshipName,
   Resource,
   Target,
@@ -308,7 +309,7 @@ export const get = <
   QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Enable the `?include=` query parameter. */
     readonly include?: Include
@@ -500,7 +501,7 @@ export const list = <
   >,
   Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Enable the `?include=` query parameter. */
     readonly include?: Include
@@ -658,7 +659,7 @@ export const create = <
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
   const Idem extends Idempotency.Option = false
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
@@ -799,7 +800,7 @@ export const update = <
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
   const Idem extends Idempotency.Option = false
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta
@@ -942,7 +943,7 @@ const deleteEndpoint = <
   Success extends Schema.Top = HttpApiSchema.NoContent,
   const Idem extends Idempotency.Option = false
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /**
      * Override the success response schema. Defaults to
@@ -1366,7 +1367,7 @@ export const related = <
   const FilterFields extends Query.FilterOption | undefined = undefined,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Enable the `?include=` query parameter (paths span the *target's* graph). */
@@ -1489,7 +1490,7 @@ export const getRelationship = <
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Enable `?page[*]=` pagination of the identifier collection (to-many linkage). */
@@ -1604,7 +1605,7 @@ export const updateRelationship = <
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Override the linkage document's `meta` schema. */
@@ -1702,7 +1703,7 @@ export const addRelationship = <
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   DocMeta extends Schema.Top = typeof AnyMeta
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Override the linkage document's `meta` schema. */
@@ -1798,7 +1799,7 @@ export const removeRelationship = <
   const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors>
 ) => {
@@ -2845,7 +2846,7 @@ export const resource = <
   const GMeta extends Schema.Top = Meta,
   const GIdem extends Idempotency.Option = false
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: ResourceOptions<
     Type,
     Attributes,

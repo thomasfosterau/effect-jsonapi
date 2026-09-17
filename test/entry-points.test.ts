@@ -46,11 +46,17 @@ const SCHEMA_TIER = [
  * `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`, which are
  * `HttpApi`-bound error classes — and `Handlers`, `Lid` and `Atomic` reach
  * `Query` in turn.
+ *
+ * `Conformance` drives a server over a real HTTP transport and discovers its
+ * endpoints from an `HttpApi` value, so it is unambiguously HTTP-tier; its
+ * internals come with it (`internal/conformance/report.ts` imports nothing but
+ * types, but it is reachable only from the tier that does).
  */
 const HTTP_TIER = [
   "ApiError.ts",
   "Atomic.ts",
   "Client.ts",
+  "Conformance.ts",
   "Endpoint.ts",
   "Group.ts",
   "Handlers.ts",
@@ -61,6 +67,10 @@ const HTTP_TIER = [
   "Query.ts",
   "internal/canonical.ts",
   "internal/codecs.ts",
+  "internal/conformance/core.ts",
+  "internal/conformance/profile.ts",
+  "internal/conformance/report.ts",
+  "internal/conformance/spec.ts",
   "internal/httpMedia.ts"
 ]
 
@@ -193,6 +203,7 @@ describe("root entry point", () => {
       "ApiError",
       "Atomic",
       "Client",
+      "Conformance",
       "Document",
       "Endpoint",
       "Filter",
@@ -293,18 +304,20 @@ describe("built artifact", () => {
    * barrel, it was never being blocked, and the assertion above proves
    * nothing.
    *
-   * Which subpath is named is deliberately not pinned. Node resolves a
-   * module's sibling edges concurrently, so when the root reaches more than
-   * one unstable specifier — `effect/unstable/httpapi` from `ApiError`,
-   * `effect/unstable/http` from `Client` — the one whose rejection propagates
-   * first is a race, and asserting either by name is flaky (measured: ~40/60
-   * between the two). The control's property is that the root barrel is
-   * blocked at all, which is what the prefix asserts; `httpapi` specifically
-   * is pinned, deterministically, by the static walker in the control above.
+   * Which specifier surfaces is deliberately not pinned. The root graph
+   * carries several forbidden peers — `effect/unstable/httpapi`,
+   * `effect/unstable/http` and the `http/HttpServer*` submodules — and Node
+   * links a module's dependencies concurrently, so the first rejection to
+   * surface is a race between them. Asserting one exact specifier would pass
+   * or fail on module ordering rather than on the property being protected.
+   * That the root barrel really does reach `effect/unstable/httpapi` is
+   * asserted deterministically by the static walker above.
    */
-  it.skipIf(!hasDist)("is checked by hooks that do block the unstable surface (control: the root barrel)", () => {
+  it.skipIf(!hasDist)("is checked by hooks that do block the root barrel (control)", () => {
     const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi")
-    expect(`${result.stdout}${result.stderr}`).toContain("FORBIDDEN_PEER:effect/unstable/")
+    const output = `${result.stdout}${result.stderr}`
+    expect(output).toContain("FORBIDDEN_PEER:effect/unstable/")
+    expect(output).not.toContain("LOADED")
     expect(result.status).not.toBe(0)
   })
 })

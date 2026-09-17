@@ -77,6 +77,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
+  - [Mutually recursive resources](#mutually-recursive-resources)
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
@@ -105,6 +106,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
   - [Bracketing page keys on a query struct you own](#bracketing-page-keys-on-a-query-struct-you-own)
 - [Spec compliance, by construction](#spec-compliance-by-construction)
+- [Proving it: the conformance kit](#proving-it-the-conformance-kit)
 - [Examples](#examples)
 - [Metadata](#metadata)
 - [Limitations](#limitations)
@@ -257,6 +259,72 @@ Everything below is **derived** — never assembled by hand:
 
 Documents are not limited to one resource type — see
 [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
+
+### Mutually recursive resources
+
+Relationship references are thunks, so the graph they describe may contain **cycles** — articles
+linking to their comments and each comment linking back to its article is ordinary JSON:API, and
+the runtime has always resolved it. What such a pair needs is an explicit **type annotation**:
+`Resource.make`'s return type is inferred, so without one each definition's type would depend on
+the other's and TypeScript refuses both (`TS7022`).
+
+The annotation is the same escape Effect's recursive schemas use, and this is all of it — one
+`interface` per resource in the cycle, naming the relationship record. Hoist the attributes to a
+`const` so no attribute schema is restated, and give the value the interface of the same name:
+
+```ts
+import { Schema } from "effect"
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+
+const articleAttributes = { title: Schema.NonEmptyString }
+const commentAttributes = { body: Schema.NonEmptyString }
+
+interface Article extends Resource.Resource<
+  "articles",
+  typeof articleAttributes,
+  {
+    readonly comments: Relationship.many<Comment>
+  }
+> {}
+
+interface Comment extends Resource.Resource<
+  "comments",
+  typeof commentAttributes,
+  {
+    readonly article: Relationship.one<Article>
+  }
+> {}
+
+const Article: Article = Resource.make("articles", {
+  attributes: articleAttributes,
+  relationships: { comments: Relationship.many(() => Comment) }
+})
+
+const Comment: Comment = Resource.make("comments", {
+  attributes: commentAttributes,
+  relationships: { article: Relationship.one(() => Article) }
+})
+```
+
+The lowercase `Relationship.one` / `optional` / `many` / `paginated` **types** used in the
+annotation mirror the constructors of the same name, defaults included (`one` and `optional` default
+to not filterable, `paginated` to no declared `order`, exactly as the constructors do). A resource
+definition is invariant in its relationship record, so the annotation has to name the type the
+constructor produced; these are that type. A relationship that declares a `filter` or an `order`
+names it too, as the `const` tuple the constructor infers:
+`Relationship.one<Article, readonly ["eq", "in"]>`.
+
+Self-references work the same way (`parent: Relationship.optional<Category>` on `Category`), and
+all four relationship kinds may take part in a cycle.
+
+Everything derived from the definitions keeps working, and a cycle cannot make any of it infinite:
+
+| Derived                                    | Behaviour in a cycle                                                                                                         |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Article.document()`                       | the `included` union is **one hop** wide — the targets of `Article`'s own linkable relationships, not the transitive closure |
+| `?include=` paths                          | bounded by the derivation depth (2 by default, `includePaths(R, n)` at runtime), not by the graph                            |
+| `createPayload` / `updatePayload`          | unchanged on both sides — a required `one` across the cycle is still required                                                |
+| `Endpoint.get` / `list` / `Group.resource` | derive their paths and documents from the resource's own type tag                                                            |
 
 ### Custom id schemas
 
@@ -1911,6 +1979,70 @@ const query2 = ListArticles2.pipe(
 | Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                                                                             |
 | Profiles are negotiated, advertised in `jsonapi.profile`, and unknown ones ignored                               | the filter grammar and idempotency profiles publish URIs; negotiation ignores profiles it doesn't know                                                                                                 |
 
+## Proving it: the conformance kit
+
+The table above is what the constructors guarantee. It says nothing about your server once a handler
+has an opinion — so `Conformance` is an **executable specification** you run against your own
+`HttpApi`, which fails naming the broken rule and citing its section rather than printing an
+assertion diff.
+
+```ts
+import { Effect } from "effect"
+import { Conformance } from "@thomasfosterau/effect-jsonapi"
+import { Api } from "./api.js"
+import { BlogLive } from "./handlers.js"
+
+const report = await Effect.runPromise(
+  Conformance.verify(Api, {
+    // the fixture contract: one known-existing id per resource type
+    ids: { articles: "1", people: "9" }
+  }).pipe(Effect.provide(BlogLive), Effect.scoped)
+)
+
+console.log(Conformance.format(report))
+```
+
+Endpoints are discovered from the `HttpApi` value — method, path, declared query families, response
+media type — but every rule is decided by a real request/response pair, because conformance is a wire
+property and the typed client both hides the raw status, media type parameters and unparsed body, and
+refuses to construct the malformed requests half the rules need to send. `verify` drives an
+in-memory transport over the real router (no port bound, no fixture beyond the ids);
+`Conformance.verifyWith(api, { client, baseUrl })` runs the **identical** rules against a deployed
+server over `FetchHttpClient`.
+
+Failures read as a report, not a diff:
+
+```
+FAIL  spec/content-negotiation/accept-weight-is-not-a-parameter
+      MUST NOT · Content Negotiation (with RFC 9110 §12.4.2)
+      A `q` weight is an Accept-header parameter, not a media type parameter (RFC 9110 §12.4.2),
+      so a JSON:API media type instance carrying only a non-zero `q` MUST NOT be counted as
+      parameterised and MUST NOT be rejected with 406.
+      https://jsonapi.org/format/1.1/#content-negotiation-servers
+      · a weighted preference between HTML and JSON:API was treated as a disallowed media type parameter
+        GET /articles/1  [accept: text/html;q=0.9, application/vnd.api+json;q=0.8]
+        expected: any status but 406 — the weight is not a media type parameter
+        observed: 406 application/vnd.api+json — {"errors":[{"status":"406", …
+```
+
+Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this package's filter
+grammar profile and the conventions it adds where the spec declines to have one. Pass
+`tiers: ["spec"]` to hold a server to the specification without adopting any of this library's
+opinions.
+
+**It says what it did not check.** Every rule that could not run reports why — no endpoint of that
+shape, no sample id, a mutating probe not opted into — and `Conformance.gaps` declares the areas the
+kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering
+correctness, write semantics, atomic processing), each with its reason and tracking issue. Both are
+printed in every report, and skips are counted separately from passes, so a run that proved little
+cannot read as a clean bill of health.
+
+Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule,
+its requirement, its citation and the request that decided it.
+
+Full design note, including the coverage ledger and what it would take to close each gap:
+[`docs/conformance.md`](./docs/conformance.md).
+
 ## Examples
 
 Complete runnable examples (resources, errors, api, in-memory handlers) live in
@@ -1948,6 +2080,11 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 
 ## Limitations
 
+- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document
+  structure, error objects, query-parameter handling and the filter grammar profile. Filter
+  _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics and atomic
+  processing are declared gaps rather than silent omissions — see `Conformance.gaps` and
+  [`docs/conformance.md`](./docs/conformance.md).
 - **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed
   to your handler, and the builders project it when you ask them to —
   `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })`
@@ -1963,10 +2100,10 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   via `Client.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document
   meta are typed via options.
-- **Mutually recursive resources** (A ↔ B) are not supported: TypeScript cannot infer two resource
-  types that reference each other. Model one direction as a relationship and the reverse direction
-  as a filtered collection endpoint (e.g. `GET /articles?filter[author]=9`) or a related endpoint
-  on the side that owns the relationship.
+- **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the
+  cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each
+  other. See [Mutually recursive resources](#mutually-recursive-resources) for the pattern;
+  everything derived from the definitions is unaffected.
 - **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
   responses by include paths is not yet supported.
 - **Atomic operations requests are accepted with or without the `ext` media type parameter**:
