@@ -39,5 +39,14 @@ the error document it carries was left to the consumer too. Both are now the pac
   `title`, else a constant.
 - `Client.ErrorDocument` — the decoded document type.
 
+**`Client` moves to the HTTP tier**
+
+`Client.make` and the negotiation transform reach `HttpApiClient` and `HttpClient`, so `Client` now
+resolves `effect/unstable/httpapi` and is no longer re-exported from the schema-only
+`@thomasfosterau/effect-jsonapi/schema` entry point. It is unchanged on the package root. The two
+members that would still fit that tier — `narrowIncluded`, a type-level operation with no runtime,
+and `decodeErrorDocument`, which decodes through `Document`'s error schemas alone — go with it,
+because a namespace exported from both entry points has to be the same module object.
+
 A worked client is included as `examples/blog/client.ts`, round-tripping documents and errors
 against the blog example server.

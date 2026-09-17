@@ -104,7 +104,7 @@ import { Effect, Option, Schema } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi"
 import { HttpApiClient } from "effect/unstable/httpapi"
-import { WireDocument } from "./ApiError.js"
+import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js"
 import { baseMediaType, MEDIA_TYPE, mediaTypeWith } from "./internal/media.js"
 import type { NegotiationOptions as ServerNegotiationOptions } from "./Middleware.js"
 import type { Any, IncludedFor, IncludePath } from "./Resource.js"
@@ -231,6 +231,9 @@ export interface NegotiationOptions extends ServerNegotiationOptions {}
  * something other than an `HttpClient` needs the header value — a façade
  * labelling the responses it synthesises, for instance, so its documents are
  * indistinguishable from the server's.
+ *
+ * This is the media type as a *header value*. To annotate a hand-rolled
+ * endpoint's schema with it, reach for `MediaType.asJsonApi` instead.
  *
  * @example
  * ```ts
@@ -507,9 +510,16 @@ export const make = <ApiId extends string, Groups extends HttpApiGroup.Constrain
 // Error documents
 // ---------------------------------------------------------------------------
 
+const WireDocument = ErrorDocumentSchema(ErrorObject)
+
 /**
  * A decoded JSON:API error document — the shape every `ApiError` encodes to,
  * and the shape {@link decodeErrorDocument} produces.
+ *
+ * Built from `Document.ErrorDocument` / `Document.ErrorObject` rather than
+ * `ApiError.WireDocument`: the two are the same schema, but the document
+ * schemas carry no `HttpApi` binding, so decoding a body never depends on the
+ * HTTP tier. The decoded value is what `ApiError.toDocument` renders.
  *
  * @since 0.15.0
  * @category models

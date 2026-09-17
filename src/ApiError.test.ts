@@ -163,6 +163,137 @@ describe("standard errors", () => {
   })
 })
 
+describe("query-parameter errors", () => {
+  it("UnsupportedIncludePath encodes the requested path and the includable set into meta", () => {
+    const error = new ApiError.UnsupportedIncludePath({
+      path: "author.employer",
+      includablePaths: ["author", "comments", "comments.author"]
+    })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludePath.wire)(error)
+    expect(wire).toEqual({
+      errors: [
+        {
+          status: "400",
+          code: "unsupported.include-path",
+          title: "Unsupported Include Path",
+          detail: 'Include path "author.employer" is not supported; supported paths: author, comments, comments.author',
+          meta: { path: "author.employer", includablePaths: ["author", "comments", "comments.author"] }
+        }
+      ]
+    })
+  })
+
+  it("UnsupportedIncludePath meta round-trips through the wire schema", () => {
+    const original = new ApiError.UnsupportedIncludePath({ path: "publisher", includablePaths: ["author"] })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludePath.wire)(original)
+    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedIncludePath.wire)(wire)
+    expect(decoded).toBeInstanceOf(ApiError.UnsupportedIncludePath)
+    expect(decoded.path).toBe("publisher")
+    expect(decoded.includablePaths).toEqual(["author"])
+  })
+
+  it("UnsupportedIncludePath reports an empty includable set readably", () => {
+    const error = new ApiError.UnsupportedIncludePath({ path: "author", includablePaths: [] })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludePath.wire)(error)
+    expect(wire.errors[0]?.detail).toBe('Include path "author" is not supported; supported paths: (none)')
+  })
+
+  it("UnsupportedIncludeDepth encodes the requested path and the depth cap into meta", () => {
+    const error = new ApiError.UnsupportedIncludeDepth({ path: "comments.author.employer", maxDepth: 2 })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(error)
+    expect(wire).toEqual({
+      errors: [
+        {
+          status: "400",
+          code: "unsupported.include-depth",
+          title: "Unsupported Include Depth",
+          detail: 'Include path "comments.author.employer" exceeds the maximum include depth of 2',
+          meta: { path: "comments.author.employer", maxDepth: 2 }
+        }
+      ]
+    })
+  })
+
+  it("UnsupportedIncludeDepth meta round-trips through the wire schema", () => {
+    const original = new ApiError.UnsupportedIncludeDepth({ path: "a.b.c", maxDepth: 2 })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(original)
+    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(wire)
+    expect(decoded).toBeInstanceOf(ApiError.UnsupportedIncludeDepth)
+    expect(decoded.path).toBe("a.b.c")
+    expect(decoded.maxDepth).toBe(2)
+  })
+
+  it("UnsupportedSortField encodes the requested field and the sortable set into meta", () => {
+    const error = new ApiError.UnsupportedSortField({
+      field: "internalScore",
+      sortableFields: ["title", "createdAt"]
+    })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedSortField.wire)(error)
+    expect(wire).toEqual({
+      errors: [
+        {
+          status: "400",
+          code: "unsupported.sort-field",
+          title: "Unsupported Sort Field",
+          detail: 'Sort field "internalScore" is not supported; supported fields: title, createdAt',
+          meta: { field: "internalScore", sortableFields: ["title", "createdAt"] }
+        }
+      ]
+    })
+  })
+
+  it("UnsupportedSortField meta round-trips through the wire schema", () => {
+    const original = new ApiError.UnsupportedSortField({ field: "score", sortableFields: ["title"] })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedSortField.wire)(original)
+    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedSortField.wire)(wire)
+    expect(decoded).toBeInstanceOf(ApiError.UnsupportedSortField)
+    expect(decoded.field).toBe("score")
+    expect(decoded.sortableFields).toEqual(["title"])
+  })
+
+  it("UnsupportedFieldsetMember encodes the type, requested member and attributes into meta", () => {
+    const error = new ApiError.UnsupportedFieldsetMember({
+      type: "articles",
+      field: "internalNotes",
+      attributes: ["title", "body"]
+    })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedFieldsetMember.wire)(error)
+    expect(wire).toEqual({
+      errors: [
+        {
+          status: "400",
+          code: "unsupported.fieldset",
+          title: "Unsupported Fieldset Member",
+          detail: 'Field "internalNotes" is not a supported attribute of "articles"; supported attributes: title, body',
+          meta: { type: "articles", field: "internalNotes", attributes: ["title", "body"] }
+        }
+      ]
+    })
+  })
+
+  it("UnsupportedFieldsetMember meta round-trips through the wire schema", () => {
+    const original = new ApiError.UnsupportedFieldsetMember({
+      type: "articles",
+      field: "secret",
+      attributes: ["title"]
+    })
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedFieldsetMember.wire)(original)
+    const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedFieldsetMember.wire)(wire)
+    expect(decoded).toBeInstanceOf(ApiError.UnsupportedFieldsetMember)
+    expect(decoded.type).toBe("articles")
+    expect(decoded.field).toBe("secret")
+    expect(decoded.attributes).toEqual(["title"])
+  })
+
+  it("QueryParameterErrors carries all four query-parameter errors", () => {
+    expect(ApiError.QueryParameterErrors).toHaveLength(4)
+    expect(ApiError.QueryParameterErrors).toContain(ApiError.UnsupportedIncludePath)
+    expect(ApiError.QueryParameterErrors).toContain(ApiError.UnsupportedIncludeDepth)
+    expect(ApiError.QueryParameterErrors).toContain(ApiError.UnsupportedSortField)
+    expect(ApiError.QueryParameterErrors).toContain(ApiError.UnsupportedFieldsetMember)
+  })
+})
+
 describe("ApiError.toDocument", () => {
   it("encodes an error instance to a JSON:API error document, no HttpApi", () => {
     const document = ApiError.toDocument(new ArticleNotFound({ id: "42" }))
