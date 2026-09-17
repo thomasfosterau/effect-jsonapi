@@ -44,6 +44,13 @@
  * for hosts that negotiate §6 themselves and dispatch writes to the router
  * under a different content type than the one the api advertises.
  *
+ * They also take an `idempotency` option (`create` / `update` / `delete` /
+ * `operations`, and the whole set `resource` generates): `true` declares the
+ * `Idempotency-Key` request header and honours it, `"required"` insists on one.
+ * It attaches `Idempotency.Middleware`, so an api carrying an idempotent
+ * endpoint cannot be built without a store — see {@link Idempotency} and
+ * `docs/idempotency.md`.
+ *
  * The primary-data endpoints take the same `success` option: `get` / `create` /
  * `update` default to the resource's `document()` and `list` to its
  * `collection()`, and any schema can replace that — most usefully a *wire*
@@ -73,6 +80,7 @@ import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
 import * as Atomic from "./Atomic.js"
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js"
+import * as Idempotency from "./Idempotency.js"
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js"
 import { MEDIA_TYPE } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
@@ -586,6 +594,13 @@ export const list = <
  * with `Middleware.layerHostNegotiated` so the package's own §6 check doesn't
  * then reject what the host admitted.
  *
+ * Pass `idempotency` for the creation a client can safely retry: `true`
+ * declares the `Idempotency-Key` header, `"required"` insists on it. A retry
+ * carrying the same key replays the original 201 verbatim rather than creating
+ * a second resource; the same key with a different body is a 422. It attaches
+ * `Idempotency.Middleware`, so the api needs an `Idempotency.layer(store)` —
+ * see `docs/idempotency.md`.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -617,6 +632,13 @@ export const list = <
  *   Article,
  *   Endpoint.create(Article, { status: 200 })
  * )
+ *
+ * // …or accepting an Idempotency-Key, so a retried POST replays rather than
+ * // creating a second article (provide `Idempotency.layer(store)`)
+ * const idempotentArticles = Group.make(
+ *   Article,
+ *   Endpoint.create(Article, { idempotency: true })
+ * )
  * ```
  *
  * @since 0.1.0
@@ -633,7 +655,8 @@ export const create = <
   const Path extends `/${string}` = `/${Type}`,
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+  const Idem extends Idempotency.Option = false
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -671,25 +694,38 @@ export const create = <
      * @since 0.11.0
      */
     readonly status?: number
+    /**
+     * Declare the `Idempotency-Key` request header and honour it: `true` to
+     * accept a key, `"required"` to insist on one. Off by default. Opting in
+     * attaches `Idempotency.Middleware`, so the api cannot be built without an
+     * `Idempotency.layer(store)`.
+     *
+     * @since 0.15.0
+     */
+    readonly idempotency?: Idem
   }
 ) =>
-  HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    payload: asMediaType(
-      (options?.payload ?? resource.createPayload) as Payload,
-      options?.payloadMediaType ?? MEDIA_TYPE
-    ),
-    success: asJsonApi(
-      (options?.success ??
-        resource.document(
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )) as Success,
-      options?.status ?? 201
-    ),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+  Idempotency.applied(
+    HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
+      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+      payload: asMediaType(
+        (options?.payload ?? resource.createPayload) as Payload,
+        options?.payloadMediaType ?? MEDIA_TYPE
+      ),
+      success: asJsonApi(
+        (options?.success ??
+          resource.document(
+            (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+          )) as Success,
+        options?.status ?? 201
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors)
+    })
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency
+  )
 
 // ---------------------------------------------------------------------------
 // update — PATCH /<type>/:id
@@ -760,7 +796,8 @@ export const update = <
   const Path extends `/${string}` = `/${Type}/:id`,
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"],
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
+  const Idem extends Idempotency.Option = false
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -797,26 +834,39 @@ export const update = <
      * @since 0.11.0
      */
     readonly status?: number
+    /**
+     * Declare the `Idempotency-Key` request header and honour it: `true` to
+     * accept a key, `"required"` to insist on one. Off by default. Opting in
+     * attaches `Idempotency.Middleware`, so the api cannot be built without an
+     * `Idempotency.layer(store)`.
+     *
+     * @since 0.15.0
+     */
+    readonly idempotency?: Idem
   }
 ) =>
-  HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-    params: Schema.Struct({ id: resource.Id }),
-    payload: asMediaType(
-      (options?.payload ?? resource.updatePayload) as Payload,
-      options?.payloadMediaType ?? MEDIA_TYPE
-    ),
-    success: asJsonApi(
-      (options?.success ??
-        resource.document(
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )) as Success,
-      options?.status
-    ),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+  Idempotency.applied(
+    HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+      params: Schema.Struct({ id: resource.Id }),
+      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+      payload: asMediaType(
+        (options?.payload ?? resource.updatePayload) as Payload,
+        options?.payloadMediaType ?? MEDIA_TYPE
+      ),
+      success: asJsonApi(
+        (options?.success ??
+          resource.document(
+            (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+          )) as Success,
+        options?.status
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors)
+    })
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency
+  )
 
 // ---------------------------------------------------------------------------
 // delete — DELETE /<type>/:id
@@ -889,7 +939,8 @@ const deleteEndpoint = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "delete",
   const Path extends `/${string}` = `/${Type}/:id`,
-  Success extends Schema.Top = HttpApiSchema.NoContent
+  Success extends Schema.Top = HttpApiSchema.NoContent,
+  const Idem extends Idempotency.Option = false
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -906,16 +957,29 @@ const deleteEndpoint = <
      * a `success` override.
      */
     readonly status?: number
+    /**
+     * Declare the `Idempotency-Key` request header and honour it: `true` to
+     * accept a key, `"required"` to insist on one. Off by default. Opting in
+     * attaches `Idempotency.Middleware`, so the api cannot be built without an
+     * `Idempotency.layer(store)`.
+     *
+     * @since 0.15.0
+     */
+    readonly idempotency?: Idem
   }
 ) =>
-  HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-    params: Schema.Struct({ id: resource.Id }),
-    success: deleteSuccess(options?.success, options?.status) as Success,
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+  Idempotency.applied(
+    HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
+      params: Schema.Struct({ id: resource.Id }),
+      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+      success: deleteSuccess(options?.success, options?.status) as Success,
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors)
+    })
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency
+  )
 
 export {
   /**
@@ -1830,27 +1894,40 @@ export const operations = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "operations",
   const Path extends `/${string}` = "/operations",
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
+  const Idem extends Idempotency.Option = false
 >(
   resources: Resources,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the result document's `meta` schema. */
     readonly meta?: DocMeta
+    /**
+     * Declare the `Idempotency-Key` request header and honour it. One key
+     * covers the **whole** request — the extension's own unit of atomicity —
+     * and replays the whole `atomic:results` document.
+     *
+     * @since 0.15.0
+     */
+    readonly idempotency?: Idem
   }
 ) =>
-  HttpApiEndpoint.post((options?.name ?? "operations") as Name, (options?.path ?? "/operations") as Path, {
-    payload: asJsonApi(Atomic.RequestDocument(resources)),
-    success: asJsonApiAtomic(
-      Atomic.ResultDocument(
-        resources,
-        (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-      )
-    ),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
-    .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+  Idempotency.applied(
+    HttpApiEndpoint.post((options?.name ?? "operations") as Name, (options?.path ?? "/operations") as Path, {
+      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+      payload: asJsonApi(Atomic.RequestDocument(resources)),
+      success: asJsonApiAtomic(
+        Atomic.ResultDocument(
+          resources,
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
+        )
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors)
+    })
+      .middleware(ContentNegotiation)
+      .middleware(SchemaErrors),
+    options?.idempotency
+  )
 
 // ---------------------------------------------------------------------------
 // resource — generate an entire endpoint set from a resource definition
@@ -1978,6 +2055,13 @@ export interface WriteConfig<Meta extends Schema.Top> {
    * @since 0.11.0
    */
   readonly status?: number
+  /**
+   * Declare the `Idempotency-Key` request header on this endpoint and honour
+   * it: `true` to accept a key, `"required"` to insist on one.
+   *
+   * @since 0.15.0
+   */
+  readonly idempotency?: Idempotency.Option
 }
 
 /**
@@ -2001,6 +2085,13 @@ export interface DeleteConfig {
    * `success` override.
    */
   readonly status?: number
+  /**
+   * Declare the `Idempotency-Key` request header on this endpoint and honour
+   * it: `true` to accept a key, `"required"` to insist on one.
+   *
+   * @since 0.15.0
+   */
+  readonly idempotency?: Idempotency.Option
 }
 
 /**
@@ -2114,6 +2205,11 @@ type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta",
 // `payload` override, else the resource's enveloped default.
 type EffPayload<C, Default extends Schema.Top> =
   FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default
+
+// The effective `idempotency` option of a write config: the captured
+// per-endpoint value, else the top-level default.
+type EffIdem<C, GIdem extends Idempotency.Option> =
+  FieldOr<C, "idempotency", GIdem> extends Idempotency.Option ? FieldOr<C, "idempotency", GIdem> : GIdem
 
 // The effective success response of an endpoint config: the captured `success`
 // override, else that endpoint's default response — the resource's document /
@@ -2257,6 +2353,7 @@ type GeneratedCreate<
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
+  GIdem extends Idempotency.Option,
   C = ConfigObject<E, "create">
 > =
   EmitOp<E, "create"> extends true
@@ -2272,7 +2369,8 @@ type GeneratedCreate<
           FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
           EffMeta<C, GMeta, Meta>,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"]>,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>,
+          EffIdem<C, GIdem>
         >
       >
     : never
@@ -2286,6 +2384,7 @@ type GeneratedUpdate<
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
+  GIdem extends Idempotency.Option,
   C = ConfigObject<E, "update">
 > =
   EmitOp<E, "update"> extends true
@@ -2301,7 +2400,8 @@ type GeneratedUpdate<
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
           EffMeta<C, GMeta, Meta>,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"]>,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
+          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>,
+          EffIdem<C, GIdem>
         >
       >
     : never
@@ -2314,6 +2414,7 @@ type GeneratedDelete<
   IdSchema extends Schema.Codec<any, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
+  GIdem extends Idempotency.Option,
   C = ConfigObject<E, "delete">
 > =
   EmitOp<E, "delete"> extends true
@@ -2327,7 +2428,8 @@ type GeneratedDelete<
           FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
           FieldOr<C, "name", "delete"> extends string ? FieldOr<C, "name", "delete"> : "delete",
           FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
-          EffSuccess<C, HttpApiSchema.NoContent>
+          EffSuccess<C, HttpApiSchema.NoContent>,
+          EffIdem<C, GIdem>
         >
       >
     : never
@@ -2511,13 +2613,14 @@ export type ResourceEndpoint<
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Query.FilterOption | undefined,
-  GMeta
+  GMeta,
+  GIdem extends Idempotency.Option = false
 > =
   | GeneratedGet<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, GMeta>
   | GeneratedList<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, Sort, Page, Filter, GMeta>
-  | GeneratedCreate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta>
-  | GeneratedUpdate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta>
-  | GeneratedDelete<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors>
+  | GeneratedCreate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta, GIdem>
+  | GeneratedUpdate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta, GIdem>
+  | GeneratedDelete<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GIdem>
   | GeneratedRelationships<
       Type,
       Attributes,
@@ -2552,7 +2655,8 @@ export type ResourceEndpoints<
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Query.FilterOption | undefined,
-  GMeta
+  GMeta,
+  GIdem extends Idempotency.Option = false
 > = readonly [
   ResourceEndpoint<
     Type,
@@ -2568,7 +2672,8 @@ export type ResourceEndpoints<
     Sort,
     Page,
     Filter,
-    GMeta
+    GMeta,
+    GIdem
   >,
   ...ReadonlyArray<
     ResourceEndpoint<
@@ -2585,7 +2690,8 @@ export type ResourceEndpoints<
       Sort,
       Page,
       Filter,
-      GMeta
+      GMeta,
+      GIdem
     >
   >
 ]
@@ -2614,7 +2720,8 @@ export interface ResourceOptions<
   Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Query.FilterOption | undefined,
-  GMeta extends Schema.Top
+  GMeta extends Schema.Top,
+  GIdem extends Idempotency.Option = false
 > {
   /** Which CRUD endpoints to emit and how to configure each. Defaults to all five. */
   readonly endpoints?: Endpoints
@@ -2638,6 +2745,16 @@ export interface ResourceOptions<
   readonly page?: Page
   /** Enable `?filter[*]=` on `list` (user-defined fields). */
   readonly filter?: Filter
+  /**
+   * Declare the `Idempotency-Key` request header on every generated write
+   * endpoint (`create` / `update` / `delete`) and honour it: `true` to accept
+   * a key, `"required"` to insist on one. Off by default, and overridable per
+   * endpoint. Opting in attaches `Idempotency.Middleware`, so the api cannot
+   * be built without an `Idempotency.layer(store)`.
+   *
+   * @since 0.15.0
+   */
+  readonly idempotency?: GIdem
   /**
    * The `meta` schema of the primary-data documents (`get` / `list` / `create`
    * / `update`): a `Schema` (overriding it) or a function `(base) => schema`
@@ -2725,7 +2842,8 @@ export const resource = <
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
   const Filter extends Query.FilterOption | undefined = undefined,
-  const GMeta extends Schema.Top = Meta
+  const GMeta extends Schema.Top = Meta,
+  const GIdem extends Idempotency.Option = false
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: ResourceOptions<
@@ -2742,7 +2860,8 @@ export const resource = <
     Sort,
     Page,
     Filter,
-    GMeta
+    GMeta,
+    GIdem
   >
 ): ResourceEndpoints<
   Type,
@@ -2758,7 +2877,8 @@ export const resource = <
   Sort,
   Page,
   Filter,
-  GMeta
+  GMeta,
+  GIdem
 > => {
   const gInclude = options?.include ?? true
   const gFields = options?.fields ?? true
@@ -2767,6 +2887,7 @@ export const resource = <
   const gFilter = options?.filter
   const gMeta = options?.meta
   const gErrors = options?.errors
+  const gIdem = options?.idempotency
   const endpointsOpt = options?.endpoints as Record<string, unknown> | undefined
   const relationshipsOpt = options?.relationships ?? true
 
@@ -2854,6 +2975,13 @@ export const resource = <
   // A write endpoint's `payload` override is per-endpoint only: `create` and
   // `update` have different default envelopes, so there is no sensible
   // top-level default to fall back to.
+  // `idempotency` is the one write option with a top-level default, so an
+  // absent per-endpoint key inherits it rather than staying absent.
+  const idempotencyOpt = (config: Record<string, unknown>): Record<string, unknown> => {
+    const idempotency = pick(config, "idempotency", gIdem)
+    return idempotency !== undefined ? { idempotency } : {}
+  }
+
   const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> => ({
     ...(config.payload !== undefined ? { payload: config.payload } : {}),
     ...(config.payloadMediaType !== undefined ? { payloadMediaType: config.payloadMediaType } : {})
@@ -2866,7 +2994,8 @@ export const resource = <
         ...commonOpts(createOp.config, true),
         ...payloadOpt(createOp.config),
         ...successOpt(createOp.config),
-        ...statusOpt(createOp.config)
+        ...statusOpt(createOp.config),
+        ...idempotencyOpt(createOp.config)
       } as never)
     )
   }
@@ -2877,7 +3006,8 @@ export const resource = <
         ...commonOpts(updateOp.config, true),
         ...payloadOpt(updateOp.config),
         ...successOpt(updateOp.config),
-        ...statusOpt(updateOp.config)
+        ...statusOpt(updateOp.config),
+        ...idempotencyOpt(updateOp.config)
       } as never)
     )
   }
@@ -2887,7 +3017,8 @@ export const resource = <
       deleteEndpoint(resource, {
         ...commonOpts(deleteOp.config, false),
         ...successOpt(deleteOp.config),
-        ...statusOpt(deleteOp.config)
+        ...statusOpt(deleteOp.config),
+        ...idempotencyOpt(deleteOp.config)
       } as never)
     )
   }
@@ -2958,6 +3089,7 @@ export const resource = <
     Sort,
     Page,
     Filter,
-    GMeta
+    GMeta,
+    GIdem
   >
 }

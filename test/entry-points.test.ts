@@ -38,11 +38,13 @@ const SCHEMA_TIER = [
 /**
  * The modules that resolve `effect/unstable/httpapi`, and so stay out.
  *
- * `ApiError`, `Endpoint`, `Group`, `MediaType` and `Middleware` bind JSON:API
- * to Effect's `HttpApi` directly. `Query` is here transitively: constraining
- * include paths fails with `ApiError.UnsupportedIncludePath` /
- * `UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes — and
- * `Handlers`, `Lid` and `Atomic` reach `Query` in turn.
+ * `ApiError`, `Endpoint`, `Group`, `Idempotency`, `MediaType` and `Middleware`
+ * bind JSON:API to Effect's `HttpApi` directly — `Idempotency` also to
+ * `HttpServerRequest` / `HttpServerResponse`, being a middleware over the live
+ * request. `Query` is here transitively: constraining include paths fails with
+ * `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`, which are
+ * `HttpApi`-bound error classes — and `Handlers`, `Lid` and `Atomic` reach
+ * `Query` in turn.
  */
 const HTTP_TIER = [
   "ApiError.ts",
@@ -50,6 +52,7 @@ const HTTP_TIER = [
   "Endpoint.ts",
   "Group.ts",
   "Handlers.ts",
+  "Idempotency.ts",
   "Lid.ts",
   "MediaType.ts",
   "Middleware.ts",
@@ -193,6 +196,7 @@ describe("root entry point", () => {
       "Filter",
       "Group",
       "Handlers",
+      "Idempotency",
       "Lid",
       "MEDIA_TYPE",
       "MediaType",

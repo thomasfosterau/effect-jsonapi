@@ -96,6 +96,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Relationship & related endpoints](#relationship--related-endpoints)
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
   - [Atomic operations](#atomic-operations)
+  - [Idempotent writes (`Idempotency-Key`)](#idempotent-writes-idempotency-key)
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
   - [Resolving `included` — one batch per level](#resolving-included--one-batch-per-level)
   - [The per-resource transform pass (`onResource`)](#the-per-resource-transform-pass-onresource)
@@ -1208,6 +1209,53 @@ Every endpoint automatically:
 - documents itself in **OpenAPI** (`OpenApi.fromApi(Api)`) with the JSON:API media type, status
   codes and bracket query parameters
 
+### Idempotent writes (`Idempotency-Key`)
+
+A `POST` whose response is lost leaves the client unable to tell "it didn't happen" from "it happened
+and I didn't hear" — retrying duplicates, not retrying loses the write. `lid` does not help: it
+correlates resources **within** one request, and says nothing about whether the request already ran.
+
+Opt an endpoint in and it accepts an `Idempotency-Key` request header
+([the profile](./docs/idempotency.md)):
+
+```ts
+const articles = Group.make(
+  Article,
+  Endpoint.create(Article, { idempotency: true }), // accepts a key
+  Endpoint.update(Article, { idempotency: "required" }) // insists on one
+)
+// …or for a whole generated set:
+const people = Group.resource(Person, { idempotency: true })
+```
+
+A retry carrying the same key gets the original response back **verbatim** — the same status, headers
+and body, plus `Idempotency-Replayed: true` — instead of running again. The same key carrying a
+_different_ request is a `422`, never a silent replay; a retry arriving while the original is still in
+flight is a `409`. Both are JSON:API error documents sourced at the header.
+
+This package stores nothing, so the application supplies the store — the same division `Lid.make()`
+draws:
+
+```ts
+const ApiLive = Layer.mergeAll(ArticlesLive).pipe(
+  Layer.provideMerge(Middleware.layer),
+  Layer.provideMerge(Idempotency.layer(myStore)) // `Idempotency.Store`: claim / complete / release
+)
+```
+
+`Idempotency.memoryStore()` implements the contract for tests and single-process development. Opting
+in attaches a real middleware service, so **the api won't build until the store is provided**.
+
+For the atomic extension, one key covers the **whole request** — the extension's own unit of
+atomicity — and replays the whole `atomic:results` document, which is what makes a replayed `lid`
+resolve to the id it resolved to the first time.
+
+JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the
+[IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s
+convention; the fingerprint, the replay rule, the key's scope and the retention contract are this
+package's, published as a profile URI and defined in full in
+[`docs/idempotency.md`](./docs/idempotency.md).
+
 ## 4. Handlers — typed in, validated out
 
 ```ts
@@ -1814,6 +1862,7 @@ const query2 = ListArticles2.pipe(
 | 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                                                                       |
 | Pagination / sorting / sparse fieldsets / inclusion / filtering query families                                   | typed query schemas derived from the resource definition                                                                                                                                               |
 | Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                                                                             |
+| Profiles are negotiated, advertised in `jsonapi.profile`, and unknown ones ignored                               | the filter grammar and idempotency profiles publish URIs; negotiation ignores profiles it doesn't know                                                                                                 |
 
 ## Examples
 
