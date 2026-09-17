@@ -6,6 +6,7 @@
  */
 import type { Schema } from "effect"
 import { HttpApiSchema } from "effect/unstable/httpapi"
+import { asJsonApi as publicAsJsonApi, asMediaType as publicAsMediaType } from "../MediaType.js"
 
 /**
  * The JSON:API media type, per
@@ -43,8 +44,6 @@ export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic"
  */
 export const ATOMIC_MEDIA_TYPE = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`
 
-const JSONAPI = { contentType: MEDIA_TYPE } as const
-
 const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const
 
 /**
@@ -56,12 +55,13 @@ const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const
  * {@link asJsonApi} is this at the JSON:API media type; everything the package
  * emits itself still goes through that one.
  *
+ * Public export: {@link MediaType.asMediaType}
+ *
  * @since 0.11.0
  * @category utils
  * @internal
  */
-export const asMediaType = <S extends Schema.Top>(schema: S, contentType: string) =>
-  schema.pipe(HttpApiSchema.asJson({ contentType }))
+export const asMediaType = publicAsMediaType
 
 /**
  * Marks a schema as a JSON:API body (`application/vnd.api+json`) and
@@ -70,14 +70,13 @@ export const asMediaType = <S extends Schema.Top>(schema: S, contentType: string
  * No return annotation: the inferred type carries the exact schema through so
  * Success/Error/Payload inference is preserved at endpoint declaration sites.
  *
+ * Public export: {@link MediaType.asJsonApi}
+ *
  * @since 0.1.0
  * @category utils
  * @internal
  */
-export const asJsonApi = <S extends Schema.Top>(schema: S, status?: number) => {
-  const body = schema.pipe(HttpApiSchema.asJson(JSONAPI))
-  return status === undefined ? body : body.pipe(HttpApiSchema.status(status))
-}
+export const asJsonApi = publicAsJsonApi
 
 /**
  * Marks a schema as an atomic operations *response* body: the JSON:API media

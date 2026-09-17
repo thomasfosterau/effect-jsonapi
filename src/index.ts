@@ -122,6 +122,14 @@ export * as Lid from "./Lid.js"
 export * as Middleware from "./Middleware.js"
 
 /**
+ * Media type annotation combinators for hand-rolled JSON:API endpoints
+ * (`MediaType.asJsonApi`, `MediaType.asMediaType`).
+ *
+ * @since 0.15.0
+ */
+export * as MediaType from "./MediaType.js"
+
+/**
  * Typed JSON:API query parameters (`Query.schema`, `Query.Page`, …).
  *
  * @since 0.1.0
