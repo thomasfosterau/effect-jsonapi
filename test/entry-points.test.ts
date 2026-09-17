@@ -38,11 +38,13 @@ const SCHEMA_TIER = [
 /**
  * The modules that resolve `effect/unstable/httpapi`, and so stay out.
  *
- * `ApiError`, `Endpoint`, `Group`, `MediaType` and `Middleware` bind JSON:API
- * to Effect's `HttpApi` directly. `Query` is here transitively: constraining
- * include paths fails with `ApiError.UnsupportedIncludePath` /
- * `UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes — and
- * `Handlers`, `Lid` and `Atomic` reach `Query` in turn.
+ * `ApiError`, `Endpoint`, `Group`, `Idempotency`, `MediaType` and `Middleware`
+ * bind JSON:API to Effect's `HttpApi` directly — `Idempotency` also to
+ * `HttpServerRequest` / `HttpServerResponse`, being a middleware over the live
+ * request. `Query` is here transitively: constraining include paths fails with
+ * `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`, which are
+ * `HttpApi`-bound error classes — and `Handlers`, `Lid` and `Atomic` reach
+ * `Query` in turn.
  *
  * `Conformance` drives a server over a real HTTP transport and discovers its
  * endpoints from an `HttpApi` value, so it is unambiguously HTTP-tier; its
@@ -56,6 +58,7 @@ const HTTP_TIER = [
   "Endpoint.ts",
   "Group.ts",
   "Handlers.ts",
+  "Idempotency.ts",
   "Lid.ts",
   "MediaType.ts",
   "Middleware.ts",
@@ -204,6 +207,7 @@ describe("root entry point", () => {
       "Filter",
       "Group",
       "Handlers",
+      "Idempotency",
       "Lid",
       "MEDIA_TYPE",
       "MediaType",
@@ -297,10 +301,21 @@ describe("built artifact", () => {
    * Control again. If blocking `effect/unstable/*` does not stop the root
    * barrel, it was never being blocked, and the assertion above proves
    * nothing.
+   *
+   * Which specifier surfaces is deliberately not pinned. The root graph
+   * carries several forbidden peers — `effect/unstable/httpapi`,
+   * `effect/unstable/http` and the `http/HttpServer*` submodules — and Node
+   * links a module's dependencies concurrently, so the first rejection to
+   * surface is a race between them. Asserting one exact specifier would pass
+   * or fail on module ordering rather than on the property being protected.
+   * That the root barrel really does reach `effect/unstable/httpapi` is
+   * asserted deterministically by the static walker above.
    */
-  it.skipIf(!hasDist)("is checked by hooks that do block httpapi (control: the root barrel)", () => {
+  it.skipIf(!hasDist)("is checked by hooks that do block the root barrel (control)", () => {
     const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi")
-    expect(`${result.stdout}${result.stderr}`).toContain("FORBIDDEN_PEER:effect/unstable/httpapi")
+    const output = `${result.stdout}${result.stderr}`
+    expect(output).toContain("FORBIDDEN_PEER:effect/unstable/")
+    expect(output).not.toContain("LOADED")
     expect(result.status).not.toBe(0)
   })
 })

@@ -15,6 +15,7 @@
  *   Filter,
  *   Group,
  *   Handlers,
+ *   Idempotency,
  *   Lid,
  *   Middleware,
  *   Query,
@@ -116,6 +117,14 @@ export * as Group from "./Group.js"
  * @since 0.1.0
  */
 export * as Handlers from "./Handlers.js"
+
+/**
+ * Idempotent writes — the `Idempotency-Key` profile (`Idempotency.layer`,
+ * `Idempotency.Store`, `Idempotency.PROFILE_URI`).
+ *
+ * @since 0.15.0
+ */
+export * as Idempotency from "./Idempotency.js"
 
 /**
  * Lid (local id) resolution (`Lid.make`).

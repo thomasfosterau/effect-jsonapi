@@ -5,7 +5,7 @@ implements JSON:API v1.1, and this package's profile. Tracks
 [#120](https://github.com/thomasfosterau/effect-jsonapi/issues/120) (epic
 [#115](https://github.com/thomasfosterau/effect-jsonapi/issues/115)).
 
-**Status:** v1 implemented. 31 rules across two tiers, seven declared coverage gaps.
+**Status:** v1 implemented. 31 rules across two tiers, eight declared coverage gaps.
 
 ## 0. Why it exists
 

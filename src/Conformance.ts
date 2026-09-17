@@ -458,6 +458,12 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: []
   },
   {
+    area: "The Idempotency-Key profile",
+    reason:
+      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`), and the profile tier does not check it at all — it covers the filter grammar and two library conventions only. Its rules are almost entirely about what a *retried write* does (replay of the recorded response, the fingerprint mismatch conflict, the in-flight case), so they need the write fixture the gap below describes, plus a way to replay a request the kit has already sent. Its one non-mutating rule — that a write endpoint declaring the header advertises the profile on its response media type — is checkable today and simply not yet written.",
+    tracking: ["#123"]
+  },
+  {
     area: "Link dereferenceability",
     reason:
       "That a document's `self` and `related` links are well-formed is checkable; that each resolves to the resource it claims is a second crawl the kit does not perform.",

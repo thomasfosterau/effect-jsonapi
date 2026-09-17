@@ -143,3 +143,4 @@ vite.config.ts.timestamp-*
 /docs/*
 !/docs/filter-grammar.md
 !/docs/conformance.md
+!/docs/idempotency.md
