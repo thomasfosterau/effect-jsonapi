@@ -19,7 +19,9 @@
  * (`Relationship.one(() => Person)`, `Relationship.many(() => Comment)`, …) and
  * reference other resource definitions through lazy thunks, so a typo'd
  * reference is a compile error and the relationship graph can be walked at
- * runtime.
+ * runtime. The graph may be **cyclic** — the ordinary parent ⇄ child
+ * JSON:API shape — given one interface annotation per resource in the cycle;
+ * see {@link make}.
  *
  * @example
  * ```ts
@@ -1211,6 +1213,31 @@ export interface Resource<
    */
   nullable(): Schema.OptionFromNullOr<Resource<Type, Attributes, Rels, Meta, IdSchema>>
 }
+
+/**
+ * A resource definition in **parameter position**, for APIs that destructure it
+ * into its `Type` / `Attributes` / `Rels` / `Meta` / `IdSchema` parameters —
+ * `Endpoint.*`, `Group.resource`, {@link extend} and {@link family}.
+ *
+ * As a *type* this is exactly {@link Resource}; it differs only in where
+ * `Type` is inferred from. Writing the parameter as `Resource<Type, …>` leaves
+ * `Type` to structural inference over the whole definition, which silently
+ * degrades to `string` when the argument is a definition carrying an explicit
+ * **interface annotation** — the annotation that makes a mutually-recursive
+ * resource graph authorable (see {@link make}). Every default computed from
+ * `Type` degrades with it, starting with the endpoint path `/${Type}/:id`.
+ * Reading `Type` off the definition's own `type` tag instead is exact for both.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type Parameter<
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships = {},
+  Meta extends Schema.Top = typeof AnyMeta,
+  IdSchema extends Schema.Codec<any, string> = Id<Type>
+> = Resource<NoInfer<Type>, Attributes, Rels, Meta, IdSchema> & { readonly type: Type }
 
 /**
  * The structural interface every {@link Resource} definition satisfies.
@@ -2447,6 +2474,20 @@ const definitions = new WeakMap<object, Definition>()
  * The returned value *is* the resource object `Schema.Struct`, augmented with
  * the derived members.
  *
+ * ## Mutually-recursive definitions
+ *
+ * Relationship references are thunks, so the graph they describe may contain
+ * cycles — `articles` linking to their `comments` and each comment linking
+ * back to its `article` is ordinary JSON:API. What such a pair needs is an
+ * explicit **type annotation**, because `make`'s return type is inferred and
+ * each definition's inferred type would otherwise depend on the other's
+ * (`TS7022`). This is the same escape Effect's recursive schemas use, and the
+ * whole of it: one `interface` per resource in the cycle, naming the
+ * relationship record; hoist the attributes to a `const` so no attribute
+ * schema is restated. Annotate the value with the interface of the same name
+ * and everything else — documents, include paths, payloads, endpoints — keeps
+ * deriving as usual. The second example below is a complete cyclic pair.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -2466,6 +2507,38 @@ const definitions = new WeakMap<object, Definition>()
  *     comments: Relationship.paginated(() => Person)
  *   }
  * })
+ * ```
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Endpoint, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const articleAttributes = { title: Schema.NonEmptyString }
+ * const commentAttributes = { body: Schema.NonEmptyString }
+ *
+ * interface Article extends Resource.Resource<"articles", typeof articleAttributes, {
+ *   readonly comments: Relationship.many<Comment>
+ * }> {}
+ *
+ * interface Comment extends Resource.Resource<"comments", typeof commentAttributes, {
+ *   readonly article: Relationship.one<Article>
+ * }> {}
+ *
+ * const Article: Article = Resource.make("articles", {
+ *   attributes: articleAttributes,
+ *   relationships: { comments: Relationship.many(() => Comment) }
+ * })
+ *
+ * const Comment: Comment = Resource.make("comments", {
+ *   attributes: commentAttributes,
+ *   relationships: { article: Relationship.one(() => Article) }
+ * })
+ *
+ * // Derivation is unaffected by the cycle: the `included` union is one hop
+ * // wide, and include paths are bounded by depth rather than by the graph.
+ * Resource.includePaths(Article, 2) // ["comments", "comments.article"]
+ * Endpoint.get(Article).path        // "/articles/:id"
  * ```
  *
  * @since 0.1.0
@@ -2921,7 +2994,7 @@ export const extend = <
   const InheritId extends boolean = false,
   IdSchema extends Schema.Codec<any, string> | undefined = undefined
 >(
-  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
+  base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
   options?: {
     readonly attributes?: ExtraAttributes
@@ -3195,7 +3268,7 @@ export function family<
   BaseId extends Schema.Codec<any, string>,
   const Members extends ReadonlyArray<Any>
 >(
-  base: Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
+  base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   members: Members
 ): Family<BaseType, Members, Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>>
 export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): Family<string, ReadonlyArray<Any>, any> {

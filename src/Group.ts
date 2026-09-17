@@ -37,7 +37,7 @@ import * as Endpoint from "./Endpoint.js"
 import type * as Idempotency from "./Idempotency.js"
 import type * as Query from "./Query.js"
 import type { Relationships } from "./Relationship.js"
-import type { AttributeKeys, Id, Resource } from "./Resource.js"
+import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js"
 
 /**
  * Creates an `HttpApiGroup` named after a resource's type — or after a plain
@@ -161,7 +161,7 @@ export const resource = <
   const GMeta extends Schema.Top = Meta,
   const GIdem extends Idempotency.Option = false
 >(
-  resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: Endpoint.ResourceOptions<
     Type,
     Attributes,
