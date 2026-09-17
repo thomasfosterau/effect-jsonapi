@@ -23,18 +23,21 @@
   },
   "files": [
     "dist",
-    "src",
-    "!src/**/*.test.ts",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema.d.ts",
+      "default": "./dist/schema.js"
     }
   },
   "publishConfig": {
@@ -68,7 +71,7 @@
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-beta.104"
+    "effect": ">=4.0.0-rc.112"
   },
   "engines": {
     "node": ">=20.0.0"
