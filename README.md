@@ -105,6 +105,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
   - [Bracketing page keys on a query struct you own](#bracketing-page-keys-on-a-query-struct-you-own)
 - [Spec compliance, by construction](#spec-compliance-by-construction)
+- [Proving it: the conformance kit](#proving-it-the-conformance-kit)
 - [Examples](#examples)
 - [Metadata](#metadata)
 - [Limitations](#limitations)
@@ -1864,6 +1865,70 @@ const query2 = ListArticles2.pipe(
 | Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                                                                             |
 | Profiles are negotiated, advertised in `jsonapi.profile`, and unknown ones ignored                               | the filter grammar and idempotency profiles publish URIs; negotiation ignores profiles it doesn't know                                                                                                 |
 
+## Proving it: the conformance kit
+
+The table above is what the constructors guarantee. It says nothing about your server once a handler
+has an opinion — so `Conformance` is an **executable specification** you run against your own
+`HttpApi`, which fails naming the broken rule and citing its section rather than printing an
+assertion diff.
+
+```ts
+import { Effect } from "effect"
+import { Conformance } from "@thomasfosterau/effect-jsonapi"
+import { Api } from "./api.js"
+import { BlogLive } from "./handlers.js"
+
+const report = await Effect.runPromise(
+  Conformance.verify(Api, {
+    // the fixture contract: one known-existing id per resource type
+    ids: { articles: "1", people: "9" }
+  }).pipe(Effect.provide(BlogLive), Effect.scoped)
+)
+
+console.log(Conformance.format(report))
+```
+
+Endpoints are discovered from the `HttpApi` value — method, path, declared query families, response
+media type — but every rule is decided by a real request/response pair, because conformance is a wire
+property and the typed client both hides the raw status, media type parameters and unparsed body, and
+refuses to construct the malformed requests half the rules need to send. `verify` drives an
+in-memory transport over the real router (no port bound, no fixture beyond the ids);
+`Conformance.verifyWith(api, { client, baseUrl })` runs the **identical** rules against a deployed
+server over `FetchHttpClient`.
+
+Failures read as a report, not a diff:
+
+```
+FAIL  spec/content-negotiation/accept-weight-is-not-a-parameter
+      MUST NOT · Content Negotiation (with RFC 9110 §12.4.2)
+      A `q` weight is an Accept-header parameter, not a media type parameter (RFC 9110 §12.4.2),
+      so a JSON:API media type instance carrying only a non-zero `q` MUST NOT be counted as
+      parameterised and MUST NOT be rejected with 406.
+      https://jsonapi.org/format/1.1/#content-negotiation-servers
+      · a weighted preference between HTML and JSON:API was treated as a disallowed media type parameter
+        GET /articles/1  [accept: text/html;q=0.9, application/vnd.api+json;q=0.8]
+        expected: any status but 406 — the weight is not a media type parameter
+        observed: 406 application/vnd.api+json — {"errors":[{"status":"406", …
+```
+
+Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this package's filter
+grammar profile and the conventions it adds where the spec declines to have one. Pass
+`tiers: ["spec"]` to hold a server to the specification without adopting any of this library's
+opinions.
+
+**It says what it did not check.** Every rule that could not run reports why — no endpoint of that
+shape, no sample id, a mutating probe not opted into — and `Conformance.gaps` declares the areas the
+kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering
+correctness, write semantics, atomic processing), each with its reason and tracking issue. Both are
+printed in every report, and skips are counted separately from passes, so a run that proved little
+cannot read as a clean bill of health.
+
+Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule,
+its requirement, its citation and the request that decided it.
+
+Full design note, including the coverage ledger and what it would take to close each gap:
+[`docs/conformance.md`](./docs/conformance.md).
+
 ## Examples
 
 Complete runnable examples (resources, errors, api, in-memory handlers) live in
@@ -1901,6 +1966,11 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 
 ## Limitations
 
+- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document
+  structure, error objects, query-parameter handling and the filter grammar profile. Filter
+  _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics and atomic
+  processing are declared gaps rather than silent omissions — see `Conformance.gaps` and
+  [`docs/conformance.md`](./docs/conformance.md).
 - **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed
   to your handler, and the builders project it when you ask them to —
   `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })`
