@@ -16,6 +16,7 @@
  *   Group,
  *   Handlers,
  *   Idempotency,
+ *   Include,
  *   Lid,
  *   Middleware,
  *   Query,
@@ -129,6 +130,15 @@ export * as Handlers from "./Handlers.js"
  * @since 0.15.0
  */
 export * as Idempotency from "./Idempotency.js"
+
+/**
+ * Declared `?include=` surfaces (`Include.make`, `Include.nested`) — one
+ * nested declaration the accepted-path whitelist, the `included` union and the
+ * advertised parameter all project from.
+ *
+ * @since 0.15.0
+ */
+export * as Include from "./Include.js"
 
 /**
  * Lid (local id) resolution (`Lid.make`).

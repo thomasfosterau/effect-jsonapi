@@ -25,6 +25,7 @@ const DIST = path.join(ROOT, "dist")
 const SCHEMA_TIER = [
   "Document.ts",
   "Filter.ts",
+  "Include.ts",
   "Relationship.ts",
   "Resource.ts",
   "Sort.ts",
@@ -210,6 +211,7 @@ describe("root entry point", () => {
       "Group",
       "Handlers",
       "Idempotency",
+      "Include",
       "Lid",
       "MEDIA_TYPE",
       "MediaType",

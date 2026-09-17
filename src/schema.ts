@@ -65,6 +65,17 @@ export * as Document from "./Document.js"
 export * as Filter from "./Filter.js"
 
 /**
+ * Declared `?include=` surfaces (`Include.make`, `Include.nested`) — one nested
+ * declaration the accepted-path whitelist and the `included` union both
+ * project from. Schema-tier because it derives both from resource definitions
+ * alone; the third projection, the advertised query parameter, is `Query`'s
+ * and stays in the HTTP tier with it.
+ *
+ * @since 0.15.0
+ */
+export * as Include from "./Include.js"
+
+/**
  * JSON:API relationship constructors (`Relationship.one`, `Relationship.many`,
  * …).
  *

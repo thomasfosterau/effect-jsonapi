@@ -81,6 +81,7 @@ import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
 import * as Atomic from "./Atomic.js"
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js"
 import * as Idempotency from "./Idempotency.js"
+import { isSurface } from "./Include.js"
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js"
 import { MEDIA_TYPE } from "./internal/media.js"
 import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
@@ -164,6 +165,17 @@ const queryConfig = (options?: {
   filter: options?.filter
 })
 
+// The `included` union a read endpoint's default document carries: the union a
+// declared `Include.Surface` derives, so the paths the endpoint advertises and
+// the resources its document admits come from one declaration — else the
+// relationship graph's own default. A boolean or `Query.IncludeOptions`
+// carries no union, and falls back to the graph.
+type IncludedOf<Rels extends Relationships, Include> = Include extends { readonly included: infer U }
+  ? U extends Schema.Top
+    ? U
+    : DefaultIncluded<Rels>
+  : DefaultIncluded<Rels>
+
 // The success document the single-resource endpoints (`get`, `create`,
 // `update`) bind by default — the resource's own `document()` at the effective
 // document `meta`. The default their `success` option replaces.
@@ -173,8 +185,9 @@ type DefaultDocument<
   Rels extends Relationships,
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string>,
-  DocMeta extends Schema.Top
-> = DataDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, DefaultIncluded<Rels>, DocMeta>
+  DocMeta extends Schema.Top,
+  Include = false
+> = DataDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, IncludedOf<Rels, Include>, DocMeta>
 
 // The collection counterpart, for `list` — the resource's `collection()`.
 type DefaultCollection<
@@ -183,8 +196,26 @@ type DefaultCollection<
   Rels extends Relationships,
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string>,
-  DocMeta extends Schema.Top
-> = CollectionDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, DefaultIncluded<Rels>, DocMeta>
+  DocMeta extends Schema.Top,
+  Include = false
+> = CollectionDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, IncludedOf<Rels, Include>, DocMeta>
+
+// The document options a read endpoint's default document is built with: the
+// `meta` override, plus the `included` union when the `include` option is a
+// declared surface. Absent keys stay absent so each default stands.
+const documentOptions = (
+  options:
+    | {
+        readonly meta?: Schema.Top
+        readonly include?: unknown
+      }
+    | undefined
+): { readonly meta?: Schema.Top; readonly included?: Schema.Top } => {
+  const out: { meta?: Schema.Top; included?: Schema.Top } = {}
+  if (options?.meta !== undefined) out.meta = options.meta
+  if (isSurface(options?.include)) out.included = options.include.included
+  return out
+}
 
 // ---------------------------------------------------------------------------
 // get — GET /<type>/:id
@@ -218,7 +249,9 @@ type DefaultGetQuery<
  * Success is a 200 single-resource document whose primary `data` is the
  * resource itself (non-null — a missing resource is a `404`, not
  * `200 { data: null }`); the compound `included` union is derived from the
- * resource's relationships.
+ * resource's relationships — or, when `include` is a declared
+ * `Include.Surface`, from that same declaration, so the paths this endpoint
+ * advertises and the resources its document admits cannot drift apart.
  *
  * Pass `success` to override that document with any schema — most usefully a
  * *wire* variant of the resource, for an api whose assembler emits a narrower
@@ -307,11 +340,16 @@ export const get = <
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta,
   QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
+  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include>
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
-    /** Enable the `?include=` query parameter. */
+    /**
+     * Enable the `?include=` query parameter: `true` for the resource's graph
+     * at depth 2, a `Query.IncludeOptions` object to constrain it, or an
+     * `Include.Surface` — a declared surface, which also derives this
+     * endpoint's `included` union.
+     */
     readonly include?: Include
     /** Enable `?fields[TYPE]=` sparse fieldsets. */
     readonly fields?: Fields
@@ -351,10 +389,7 @@ export const get = <
         }
       )) as QuerySchema,
     success: asJsonApi(
-      (options?.success ??
-        resource.document(
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )) as Success
+      (options?.success ?? resource.document(documentOptions(options) as { readonly meta?: DocMeta })) as Success
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -499,11 +534,16 @@ export const list = <
     PageFields,
     FilterFields
   >,
-  Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, DocMeta>
+  Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include>
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
-    /** Enable the `?include=` query parameter. */
+    /**
+     * Enable the `?include=` query parameter: `true` for the resource's graph
+     * at depth 2, a `Query.IncludeOptions` object to constrain it, or an
+     * `Include.Surface` — a declared surface, which also derives this
+     * endpoint's `included` union.
+     */
     readonly include?: Include
     /** Enable `?fields[TYPE]=` sparse fieldsets. */
     readonly fields?: Fields
@@ -552,10 +592,7 @@ export const list = <
         }
       )) as QuerySchema,
     success: asJsonApi(
-      (options?.success ??
-        resource.collection(
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )) as Success
+      (options?.success ?? resource.collection(documentOptions(options) as { readonly meta?: DocMeta })) as Success
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options?.errors)
@@ -1261,11 +1298,11 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  * @since 0.1.0
  * @category type-level
  */
-export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> =
+export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top, Include = false> =
   DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
-    ? DataDocument<Schema.NullOr<T>, DefaultIncluded<T["relationships"]>, DocMeta>
+    ? DataDocument<Schema.NullOr<T>, IncludedOf<T["relationships"], Include>, DocMeta>
     : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
-      ? CollectionDocument<T, DefaultIncluded<T["relationships"]>, DocMeta>
+      ? CollectionDocument<T, IncludedOf<T["relationships"], Include>, DocMeta>
       : never
 
 const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1)
@@ -1370,7 +1407,11 @@ export const related = <
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
-    /** Enable the `?include=` query parameter (paths span the *target's* graph). */
+    /**
+     * Enable the `?include=` query parameter (paths span the *target's*
+     * graph). A declared `Include.Surface` over the target also derives this
+     * endpoint's `included` union.
+     */
     readonly include?: Include
     /** Enable `?fields[TYPE]=` sparse fieldsets for the target and its targets. */
     readonly fields?: Fields
@@ -1387,7 +1428,10 @@ export const related = <
   type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
   const descriptor = descriptorFor(resource, name)
   const target = descriptor.ref()
-  const included = Schema.Union(directTargets(target))
+  // A declared surface over the *target* derives the union its document
+  // carries, exactly as it does for `get` / `list`; otherwise the target's own
+  // relationship graph does.
+  const included = isSurface(options?.include) ? options.include.included : Schema.Union(directTargets(target))
   const docMeta = (options?.meta ?? AnyMeta) as DocMeta
   // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly — a
   // nullable single-resource document for to-one descriptors (`data: null` is
@@ -1395,7 +1439,9 @@ export const related = <
   // off the target's relationship graph, independent of the `data` wrapper.
   const success = (Relationship.isToOne(descriptor)
     ? DataDocument(Schema.NullOr(target), { included, meta: docMeta })
-    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<RelatedSuccess<R, Name, DocMeta>>
+    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<
+    RelatedSuccess<R, Name, DocMeta, Include>
+  >
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
@@ -1965,7 +2011,9 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
   /**
    * Enable `?include=`. `true` legalises the resource's whole relationship
    * graph to a depth of 2; a `Query.IncludeOptions` object constrains that to
-   * an explicit `paths` allow-list and/or a `depth` bound.
+   * an explicit `paths` allow-list and/or a `depth` bound; an
+   * `Include.Surface` legalises exactly a declared surface and derives the
+   * matching `included` union for this endpoint's document.
    */
   readonly include?: Query.IncludeOption<R>
   readonly fields?: boolean
@@ -2287,7 +2335,18 @@ type GeneratedGet<
               ListFields<C, GFields>
             >
           >,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
+          EffSuccess<
+            C,
+            DefaultDocument<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              IdSchema,
+              EffMeta<C, GMeta, Meta>,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>
+            >
+          >
         >
       >
     : never
@@ -2340,7 +2399,18 @@ type GeneratedList<
               ListFilter<C, GFilter>
             >
           >,
-          EffSuccess<C, DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>
+          EffSuccess<
+            C,
+            DefaultCollection<
+              Type,
+              Attributes,
+              Rels,
+              Meta,
+              IdSchema,
+              EffMeta<C, GMeta, Meta>,
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>
+            >
+          >
         >
       >
     : never
@@ -2734,8 +2804,10 @@ export interface ResourceOptions<
    * Enable `?include=` on the collection-bearing endpoints. Defaults to `true`
    * — the resource's whole relationship graph at depth 2. A
    * `Query.IncludeOptions` object constrains that (`paths` allow-list and/or
-   * `depth`) for `get` and `list`; the relationship endpoints, whose paths are
-   * their target's graph, only see that `include` is on.
+   * `depth`) for `get` and `list`, and an `Include.Surface` legalises exactly a
+   * declared surface there *and* derives their documents' `included` union;
+   * the relationship endpoints, whose paths are their target's graph, only see
+   * that `include` is on.
    */
   readonly include?: Include
   /** Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`. */
