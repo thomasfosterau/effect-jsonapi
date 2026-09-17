@@ -173,7 +173,7 @@ export const acceptIsAcceptable = (header: string | undefined, options?: Negotia
  * if (error !== undefined) {
  *   // render the spec error body for the hook's response
  *   const body = ApiError.toDocument(error)
- *   console.log(body.errors[0]?.status)
+ *   body.errors[0]?.status // "415" (content type) or "406" (accept)
  * }
  * ```
  *
@@ -229,7 +229,7 @@ export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
  *   return { status: 200, body: result.value }
  * }
  *
- * console.log(decode({ limit: "nope" }).status) // 400
+ * decode({ limit: "nope" }).status // 400
  * ```
  *
  * @since 0.7.0
