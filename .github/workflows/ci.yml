@@ -58,6 +58,12 @@ jobs:
       - name: Build
         run: pnpm run build
 
+      # The other type-level tests resolve the package to ./src; this one
+      # resolves it to the built ./dist/index.d.ts, which is what consumers
+      # actually see. See test/emitted/requirements.types.ts.
+      - name: Type-check emitted declarations
+        run: pnpm run typecheck:dist
+
       - name: Test
         run: pnpm test
 
