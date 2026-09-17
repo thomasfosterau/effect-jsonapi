@@ -379,10 +379,21 @@ describe("Handlers.DocumentValue / Document.Value", () => {
     expect(named.data.id).toBe("1")
   })
 
-  it("DocumentValue carries an optional jsonapi member", () => {
-    const doc: Handlers.DocumentValue<typeof Article.Type> = { data: value, jsonapi: { version: "1.1" } }
-    expect(doc.jsonapi?.version).toBe("1.1")
+  it("DocumentValue carries jsonapi only when parameterized with J", () => {
+    const doc: Handlers.DocumentValue<typeof Article.Type, never, never, typeof Document.v1_1> = {
+      data: value,
+      jsonapi: { version: "1.1" }
+    }
+    expect(doc.jsonapi.version).toBe("1.1")
     expectTypeOf<Handlers.JsonApiObjectValue>().toEqualTypeOf<typeof Document.JsonApiObject.Type>()
+  })
+
+  it("Handlers.data narrows jsonapi into the return type based on the option", () => {
+    const withJsonapi = Handlers.data(value, { jsonapi: Document.v1_1 })
+    expect(withJsonapi.jsonapi.version).toBe("1.1")
+
+    const withoutJsonapi = Handlers.data(value)
+    expectTypeOf(withoutJsonapi).not.toHaveProperty("jsonapi")
   })
 
   it("Document.Value names a data-document value type", () => {

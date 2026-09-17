@@ -5,8 +5,11 @@ import * as Filter from "./Filter.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import {
+  annotate,
+  annotations,
   attribute,
   attributeAnnotations,
+  attributeDescriptors,
   attributeKeys,
   attributes as attributesOf,
   declaredAttributes,
@@ -1876,5 +1879,249 @@ describe("Resource.attribute `resource` option", () => {
       readonly shown: string
       readonly optional?: string
     }>()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Resource-level annotations (#113)
+// ---------------------------------------------------------------------------
+
+describe("Resource.annotate / Resource.annotations", () => {
+  const Table = "acme/table"
+
+  it("keeps every assigned resource member, where `schema.annotate` strips them", () => {
+    const Base = Resource("widgets", { attributes: { name: Schema.NonEmptyString } })
+
+    // The defect: Effect's own `annotate` rebuilds the *schema*, so the members
+    // `make` assigned onto it are gone.
+    const bare = Base.annotate({ title: "Widget" }) as unknown as Partial<typeof Base>
+    expect(bare.type).toBeUndefined()
+    expect(bare.document).toBeUndefined()
+
+    const annotated = annotate(Base, { [Table]: "widgets_v2" })
+    expect(annotated.type).toBe("widgets")
+    expect(annotated.Id).toBeDefined()
+    expect(annotated.identifier).toBeDefined()
+    expect(annotated.localIdentifier).toBeDefined()
+    expect(Object.keys(annotated.declaredAttributes)).toEqual(["name"])
+    expect(Object.keys(annotated.createPayload.fields)).toEqual(["data"])
+    expect(Object.keys(annotated.updatePayload.fields)).toEqual(["data"])
+    expect(attributeKeys(annotated)).toEqual(["name"])
+    expect(annotated.ref("1")).toEqual({ type: "widgets", id: "1" })
+    expect(annotated.lidRef("a")).toEqual({ type: "widgets", lid: "a" })
+    expect(typeof annotated.document).toBe("function")
+    expect(typeof annotated.collection).toBe("function")
+    expect(typeof annotated.nullable).toBe("function")
+    // and it still decodes as the resource it is
+    expect(Schema.decodeUnknownSync(annotated)({ type: "widgets", id: "1", attributes: { name: "n" } })).toEqual({
+      type: "widgets",
+      id: "1",
+      attributes: { name: "n" }
+    })
+  })
+
+  it("reads back the annotations, merging repeated calls and defaulting to an empty bag", () => {
+    const Plain = Resource("plains", { attributes: { name: Schema.String } })
+    expect(annotations(Plain)).toEqual({})
+
+    const once = annotate(Plain, { [Table]: "plains" })
+    const twice = annotate(once, { "acme/level": 2 })
+    expect(annotations(twice)).toEqual({ [Table]: "plains", "acme/level": 2 })
+    // later keys win
+    expect(annotations(annotate(twice, { [Table]: "renamed" }))[Table]).toBe("renamed")
+    // Effect sees them as the schema annotations they are
+    expect(Schema.resolveAnnotations(twice)?.["acme/level"]).toBe(2)
+    // the bag is a copy: mutating it cannot corrupt the definition
+    const bag = annotations(twice)
+    ;(bag as Record<string, unknown>)["acme/level"] = 99
+    expect(annotations(twice)["acme/level"]).toBe(2)
+  })
+
+  it("declares annotations up front through `make`", () => {
+    const Declared = Resource("declareds", {
+      attributes: { name: Schema.String },
+      annotations: { [Table]: "declareds", title: "Declared" }
+    })
+    expect(annotations(Declared)).toEqual({ [Table]: "declareds", title: "Declared" })
+    expect(annotations(annotate(Declared, { "acme/level": 1 }))).toEqual({
+      [Table]: "declareds",
+      title: "Declared",
+      "acme/level": 1
+    })
+  })
+
+  it("survives `Resource.extend`, the child's own keys winning", () => {
+    const Account = annotate(
+      Resource("accounts", {
+        attributes: { email: Schema.NonEmptyString },
+        relationships: { author: Relationship.one(() => Person) }
+      }),
+      { [Table]: "accounts", "acme/level": 1 }
+    )
+
+    const Admin = extend(Account, "admins", { attributes: { permissions: Schema.Array(Schema.String) } })
+    expect(annotations(Admin)).toEqual({ [Table]: "accounts", "acme/level": 1 })
+    expect(attributeKeys(Admin)).toEqual(["email", "permissions"])
+
+    const Auditor = extend(Account, "auditors", { annotations: { [Table]: "auditors" } })
+    expect(annotations(Auditor)).toEqual({ [Table]: "auditors", "acme/level": 1 })
+
+    // and an extension can be annotated in turn
+    expect(annotations(annotate(Admin, { "acme/level": 2 }))).toEqual({ [Table]: "accounts", "acme/level": 2 })
+  })
+
+  it("stays valid as a `Relationship.one` target, resolved lazily by identity", () => {
+    // The round trip the issue pins: a relationship resolves its target through
+    // a thunk, *by identity*, so an annotated resource has to remain a target.
+    const Author = annotate(Resource("authors", { attributes: { name: Schema.NonEmptyString } }), {
+      [Table]: "authors"
+    })
+
+    const Post = Resource("posts", {
+      attributes: { title: Schema.NonEmptyString },
+      relationships: {
+        author: Relationship.one(() => Author),
+        editor: Relationship.optional(() => Author),
+        reviewers: Relationship.many(() => Author),
+        drafts: Relationship.paginated(() => Author)
+      }
+    })
+
+    // identity: the descriptor resolves to the annotated definition itself
+    expect(Post.relationships.author.ref()).toBe(Author)
+    expect(directTargets(Post)).toEqual([Author])
+    expect(annotations(directTargets(Post)[0]!)[Table]).toBe("authors")
+
+    // linkage decodes against the annotated target's identifier
+    const decoded = Schema.decodeUnknownSync(Post)({
+      type: "posts",
+      id: "1",
+      attributes: { title: "T" },
+      relationships: {
+        author: { data: { type: "authors", id: "9" } },
+        editor: { data: null },
+        reviewers: { data: [{ type: "authors", id: "9" }] },
+        drafts: { links: { related: "/posts/1/drafts" } }
+      }
+    })
+    expect(decoded.relationships?.author.data).toEqual({ type: "authors", id: "9" })
+    // a foreign type is refused, so the branded target really is in play
+    expect(() =>
+      Schema.decodeUnknownSync(Post)({
+        type: "posts",
+        id: "1",
+        attributes: { title: "T" },
+        relationships: { author: { data: { type: "people", id: "9" } } }
+      })
+    ).toThrow()
+
+    // and the annotated target is what the compound document includes
+    const document = Schema.decodeUnknownSync(Post.document())({
+      data: {
+        type: "posts",
+        id: "1",
+        attributes: { title: "T" },
+        relationships: {
+          author: { data: { type: "authors", id: "9" } },
+          editor: { data: null },
+          reviewers: { data: [] },
+          drafts: { links: { related: "/posts/1/drafts" } }
+        }
+      },
+      included: [{ type: "authors", id: "9", attributes: { name: "n" } }]
+    })
+    expect(document.included).toEqual([{ type: "authors", id: "9", attributes: { name: "n" } }])
+  })
+
+  it("refuses anything that is not a `make` / `extend` definition", () => {
+    const Fam = family("actors", [Person, Comment])
+    expect(() => annotate(Fam, { [Table]: "actors" })).toThrow(/not a resource definition/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Attribute introspection (#113)
+// ---------------------------------------------------------------------------
+
+describe("Resource.attributeDescriptors", () => {
+  const Thing = Resource("things", {
+    attributes: {
+      title: Schema.NonEmptyString,
+      caption: Schema.optionalKey(Schema.String),
+      bio: Schema.NullOr(Schema.String).annotate({ dbColumn: "biography" }),
+      summary: attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+      slug: attribute(Schema.String, { resource: "optional", update: false }),
+      cleared: attribute(Schema.String, { clearable: true }),
+      createdAt: readOnlyAttribute(Schema.DateFromString),
+      draftBody: attribute(Schema.String, { resource: false, update: false })
+    }
+  })
+
+  const descriptors = attributeDescriptors(Thing)
+  const byKey = Object.fromEntries(descriptors.map((descriptor) => [descriptor.key, descriptor]))
+
+  it("reports every declared attribute in declaration order, input-only ones included", () => {
+    expect(descriptors.map((descriptor) => descriptor.key)).toEqual([
+      "title",
+      "caption",
+      "bio",
+      "summary",
+      "slug",
+      "cleared",
+      "createdAt",
+      "draftBody"
+    ])
+    // the resource-object subset is exactly `attributeKeys`, in the same order
+    expect(
+      descriptors.filter((descriptor) => descriptor.resource !== false).map((descriptor) => descriptor.key)
+    ).toEqual(attributeKeys(Thing))
+  })
+
+  it("reports the projections a plain schema attribute takes by default", () => {
+    expect(byKey.title).toMatchObject({
+      resource: "required",
+      create: "required",
+      update: "optional",
+      clearable: false,
+      nullable: false,
+      readOnly: false
+    })
+    // a bare `optionalKey` is an optional key on the resource object *and* at create
+    expect(byKey.caption).toMatchObject({ resource: "optional", create: "optional", update: "optional" })
+    // a plain `NullOr` attribute is nullable, hence clearable on update
+    expect(byKey.bio).toMatchObject({ nullable: true, clearable: true, readOnly: false })
+  })
+
+  it("reports what a projection descriptor declares", () => {
+    expect(byKey.summary).toMatchObject({
+      resource: "required",
+      create: "optional",
+      update: "optional",
+      nullable: true,
+      clearable: true,
+      readOnly: false
+    })
+    expect(byKey.slug).toMatchObject({ resource: "optional", create: "required", update: false, readOnly: false })
+    // `clearable` is the declaration, not merely the schema's nullability
+    expect(byKey.cleared).toMatchObject({ nullable: false, clearable: true })
+    expect(byKey.createdAt).toMatchObject({ create: false, update: false, readOnly: true })
+    expect(byKey.draftBody).toMatchObject({ resource: false, create: "required", update: false, readOnly: false })
+  })
+
+  it("hands over the attribute's own schema and annotation bag", () => {
+    // the declared schema, with any key-optionality wrapper removed …
+    expect(Schema.decodeUnknownSync(byKey.caption!.schema)("c")).toBe("c")
+    expect(Schema.decodeUnknownSync(byKey.summary!.schema)(null)).toBeNull()
+    expect(Schema.decodeUnknownSync(byKey.createdAt!.schema)("2024-01-02T03:04:05.000Z")).toBeInstanceOf(Date)
+    // … and the same annotation bag `attributeAnnotations` reports
+    expect(byKey.bio!.annotations?.dbColumn).toBe("biography")
+    expect(byKey.bio!.annotations).toBe(attributeAnnotations(Thing).bio)
+    expect(byKey.title!.annotations).toBe(attributeAnnotations(Thing).title)
+  })
+
+  it("reports a family's resource-object attributes", () => {
+    const Fam = family("actors", [Person, Comment])
+    // a name-only family declares nothing of its own: the members' intersection
+    expect(attributeDescriptors(Fam).map((descriptor) => descriptor.key)).toEqual(attributeKeys(Fam))
   })
 })

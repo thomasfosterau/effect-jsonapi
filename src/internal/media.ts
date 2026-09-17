@@ -3,8 +3,9 @@
  *
  * Deliberately import-free: these constants are reachable from the
  * schema-only entry point, so binding them to `effect/unstable/httpapi` here
- * would put the HTTP surface back into that entry point's graph. The schema
- * annotation helpers that *do* need `HttpApiSchema` live in `./httpMedia.js`.
+ * would put the HTTP surface back into that entry point's graph. The
+ * annotation helpers that *do* need `HttpApiSchema` live in the public
+ * {@link MediaType} module, re-exported for internal use from `./httpMedia.js`.
  *
  * @since 0.1.0
  * @internal

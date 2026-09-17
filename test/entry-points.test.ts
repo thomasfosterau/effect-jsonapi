@@ -23,26 +23,41 @@ const DIST = path.join(ROOT, "dist")
  * whatever it currently is.
  */
 const SCHEMA_TIER = [
-  "Atomic.ts",
   "Client.ts",
   "Document.ts",
   "Filter.ts",
-  "Handlers.ts",
-  "Lid.ts",
-  "Query.ts",
   "Relationship.ts",
   "Resource.ts",
   "Sort.ts",
-  "internal/canonical.ts",
-  "internal/codecs.ts",
   "internal/filter.ts",
   "internal/media.ts",
   "internal/operators.ts",
   "schema.ts"
 ]
 
-/** The modules that bind JSON:API to Effect's `HttpApi`, and so stay out. */
-const HTTP_TIER = ["ApiError.ts", "Endpoint.ts", "Group.ts", "Middleware.ts", "internal/httpMedia.ts"]
+/**
+ * The modules that resolve `effect/unstable/httpapi`, and so stay out.
+ *
+ * `ApiError`, `Endpoint`, `Group`, `MediaType` and `Middleware` bind JSON:API
+ * to Effect's `HttpApi` directly. `Query` is here transitively: constraining
+ * include paths fails with `ApiError.UnsupportedIncludePath` /
+ * `UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes — and
+ * `Handlers`, `Lid` and `Atomic` reach `Query` in turn.
+ */
+const HTTP_TIER = [
+  "ApiError.ts",
+  "Atomic.ts",
+  "Endpoint.ts",
+  "Group.ts",
+  "Handlers.ts",
+  "Lid.ts",
+  "MediaType.ts",
+  "Middleware.ts",
+  "Query.ts",
+  "internal/canonical.ts",
+  "internal/codecs.ts",
+  "internal/httpMedia.ts"
+]
 
 /**
  * Module specifiers of `file`, read off the AST.
@@ -180,6 +195,7 @@ describe("root entry point", () => {
       "Handlers",
       "Lid",
       "MEDIA_TYPE",
+      "MediaType",
       "Middleware",
       "Query",
       "Relationship",
