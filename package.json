@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc -p tsconfig.test.json && pnpm --filter \"./examples/*\" run typecheck",
+    "typecheck:dist": "pnpm run build && tsc -p tsconfig.dist.json",
     "lint": "oxlint --deny-warnings src test examples",
     "lint:fix": "oxlint --fix src test examples",
     "format": "oxfmt",
@@ -53,7 +54,7 @@
     "test": "vitest run && pnpm --filter \"./examples/*\" run test",
     "test:watch": "vitest",
     "docgen": "docgen",
-    "check": "pnpm run typecheck && pnpm run lint && pnpm run format:check && pnpm run test",
+    "check": "pnpm run typecheck && pnpm run typecheck:dist && pnpm run lint && pnpm run format:check && pnpm run test",
     "changeset": "changeset",
     "version": "changeset version",
     "release": "npm publish && changeset tag",

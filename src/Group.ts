@@ -34,6 +34,7 @@ import type { NonEmptyReadonlyArray } from "effect/Array"
 import type { HttpApiEndpoint } from "effect/unstable/httpapi"
 import { HttpApiGroup } from "effect/unstable/httpapi"
 import * as Endpoint from "./Endpoint.js"
+import type * as Idempotency from "./Idempotency.js"
 import type * as Query from "./Query.js"
 import type { Relationships } from "./Relationship.js"
 import type { AttributeKeys, Id, Resource } from "./Resource.js"
@@ -157,7 +158,8 @@ export const resource = <
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
   const Filter extends Schema.Struct.Fields | undefined = undefined,
-  const GMeta extends Schema.Top = Meta
+  const GMeta extends Schema.Top = Meta,
+  const GIdem extends Idempotency.Option = false
 >(
   resource: Resource<Type, Attributes, Rels, Meta, IdSchema>,
   options?: Endpoint.ResourceOptions<
@@ -174,7 +176,8 @@ export const resource = <
     Sort,
     Page,
     Filter,
-    GMeta
+    GMeta,
+    GIdem
   >
 ): HttpApiGroup.HttpApiGroup<
   Type,
@@ -192,7 +195,8 @@ export const resource = <
     Sort,
     Page,
     Filter,
-    GMeta
+    GMeta,
+    GIdem
   >
 > =>
   make(
@@ -211,6 +215,7 @@ export const resource = <
       Sort,
       Page,
       Filter,
-      GMeta
+      GMeta,
+      GIdem
     >(resource, options)
   )
