@@ -9,7 +9,9 @@
  *         type parameters other than `ext` / `profile` (or unsupported
  *         extension URIs) → 415 Unsupported Media Type
  *       - an `Accept` header in which every instance of the JSON:API media
- *         type carries such parameters → 406 Not Acceptable
+ *         type carries such parameters, or is weighted `q=0`, → 406 Not
+ *         Acceptable (the `q` weight itself is not a media type parameter,
+ *         per RFC 9110 §12.4.2, so it never counts against the whitelist)
  *   - {@link SchemaErrors} — converts request validation failures (malformed
  *     query parameters, payloads, path parameters) into spec-compliant
  *     JSON:API 400 error documents instead of the default HttpApi error shape:
@@ -34,6 +36,24 @@
  * {@link layerHostNegotiated} satisfies the endpoints' negotiation
  * requirement without running §5 twice.
  *
+ * ## Tracing
+ *
+ * The live {@link ContentNegotiationLive} and {@link SchemaErrorsLive}
+ * implementations wrap their per-request decisions in `Effect.withSpan`,
+ * under the stable names collected in {@link Span}. This is the package's
+ * whole tracing surface: everything else it exports is either a plain schema
+ * or a synchronous helper with no Effect to attach a span to (see
+ * {@link https://github.com/thomasfosterau/effect-jsonapi/issues/122 #122}
+ * for why the boundary stops here).
+ *
+ * Spans need no layer or configuration to appear — `Effect.withSpan` reads
+ * whatever `Tracer` is already in context and is a no-op when none is
+ * provided, so a host with no tracing set up pays no cost and sees no
+ * behavior change. Attributes are deliberately low-cardinality (an outcome,
+ * a rule name, a request part) and never carry a header value, a filter
+ * literal, a URL, or anything else that varies per request or could identify
+ * a user — see each span's documentation under {@link Span}.
+ *
  * @since 0.1.0
  */
 import type { Schema } from "effect"
@@ -42,8 +62,54 @@ import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
+import { pointer } from "./Document.js"
 import type { ErrorSource } from "./Document.js"
 import { MEDIA_TYPE } from "./internal/media.js"
+
+// ---------------------------------------------------------------------------
+// Tracing
+// ---------------------------------------------------------------------------
+
+/**
+ * The stable `Effect.withSpan` names this package's middleware emits,
+ * namespaced under `effect-jsonapi.` so they cannot collide with a host
+ * application's own spans. Centralised here (rather than inlined at each
+ * `withSpan` call) so a consumer can match on them — in an exporter's
+ * dashboard, a sampling rule, or a test — without depending on string
+ * literals scattered through the source.
+ *
+ * Both spans are attached automatically by {@link ContentNegotiationLive} and
+ * {@link SchemaErrorsLive}; there is nothing to enable, and they cost nothing
+ * when no `Tracer` is in context.
+ *
+ * - `Span.negotiate` — one span per request, wrapping the JSON:API §5
+ *   decision. Attributes: `jsonapi.negotiation.outcome` (`"accepted"` or
+ *   `"rejected"`), and, only when rejected, `jsonapi.negotiation.rule`
+ *   (`"content_type"` or `"accept"`, naming which header failed).
+ * - `Span.schemaError` — one span per request-validation failure, wrapping
+ *   the translation of that failure into a JSON:API 400 document. Attribute:
+ *   `jsonapi.request_part` — the {@link RequestPart} that failed
+ *   (`"Params"`, `"Headers"`, `"Query"`, `"Body"` or `"Payload"`).
+ *
+ * Every attribute value is one of a small fixed set of strings; none of them
+ * is derived from a header value, a filter literal, a query string, or
+ * anything else that could vary per request or identify a user.
+ *
+ * @example
+ * ```ts
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * Middleware.Span.negotiate // "effect-jsonapi.negotiate"
+ * Middleware.Span.schemaError // "effect-jsonapi.schema_error"
+ * ```
+ *
+ * @since 0.15.0
+ * @category constants
+ */
+export const Span = {
+  negotiate: "effect-jsonapi.negotiate",
+  schemaError: "effect-jsonapi.schema_error"
+} as const
 
 // ---------------------------------------------------------------------------
 // Content negotiation predicates (JSON:API §5)
@@ -67,25 +133,47 @@ export interface NegotiationOptions {
 }
 
 /**
- * Splits one media type entry into its (lowercased) base type and its
- * parameters.
+ * Splits one media type entry into its (lowercased) base type, its media type
+ * parameters, and its weight.
+ *
+ * Per RFC 9110 §12.4.2, `q` is not a media type parameter: it is the weight
+ * of an `Accept` entry, and it terminates the media type's parameter list.
+ * Everything before `q` is a media type parameter (subject to the ext/profile
+ * whitelist); `q` itself and everything after it are accept-extension
+ * parameters that belong to the header field, not the media type, and are
+ * never checked against that whitelist. Splitting is therefore positional,
+ * not a name-based filter: `;profile="…";q=0.8` has one media type parameter;
+ * `;q=0.8;foo=bar` has none.
+ *
+ * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`.
  */
 const parseMediaType = (
   entry: string
-): { readonly base: string; readonly parameters: ReadonlyArray<readonly [name: string, value: string]> } => {
+): {
+  readonly base: string
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>
+  readonly weight: number
+} => {
   const [first, ...rest] = entry.split(";")
-  return {
-    base: (first ?? "").trim().toLowerCase(),
-    parameters: rest.map((part) => {
-      const eq = part.indexOf("=")
-      if (eq === -1) return [part.trim().toLowerCase(), ""] as const
-      const name = part.slice(0, eq).trim().toLowerCase()
-      const value = part.slice(eq + 1).trim()
-      // Parameter values may be quoted (ext / profile URI lists always are).
-      const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
-      return [name, unquoted] as const
-    })
+  const parameters: Array<readonly [name: string, value: string]> = []
+  let weight = 1
+  let pastWeight = false
+  for (const part of rest) {
+    const eq = part.indexOf("=")
+    const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase()
+    if (pastWeight) continue
+    const value = eq === -1 ? "" : part.slice(eq + 1).trim()
+    if (name === "q") {
+      const parsed = Number(value)
+      weight = Number.isFinite(parsed) ? parsed : 0
+      pastWeight = true
+      continue
+    }
+    // Parameter values may be quoted (ext / profile URI lists always are).
+    const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
+    parameters.push([name, unquoted] as const)
   }
+  return { base: (first ?? "").trim().toLowerCase(), parameters, weight }
 }
 
 /**
@@ -114,7 +202,10 @@ const parametersAreAcceptable = (
  * JSON:API §5: the server MUST respond with 415 if the request `Content-Type`
  * is the JSON:API media type with any media type parameters other than `ext`
  * or `profile`, or with an `ext` parameter carrying unsupported extension
- * URIs.
+ * URIs. A `q` parameter (and anything after it) is an accept-extension
+ * parameter, not a media type parameter, so it never counts against this rule
+ * — `Content-Type` has no meaningful use for it, but the split is positional
+ * regardless of which header carries it.
  *
  * Other content types are left to the downstream payload decoder.
  *
@@ -134,6 +225,12 @@ export const contentTypeIsAcceptable = (header: string | undefined, options?: Ne
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
  * `*​/*` or `application/*` always satisfies the rule.
  *
+ * A `q` parameter is a weight on the `Accept` entry (RFC 9110 §12.4.2), not a
+ * media type parameter, so it never counts against the ext/profile rule. An
+ * entry weighted `q=0` is an explicit refusal of that representation and is
+ * skipped rather than treated as acceptable; any non-zero weight is treated
+ * the same as an entry with no weight at all.
+ *
  * @since 0.1.0
  * @category utils
  */
@@ -142,9 +239,10 @@ export const acceptIsAcceptable = (header: string | undefined, options?: Negotia
   const entries = header.split(",").map((entry) => entry.trim())
   for (const entry of entries) {
     if (entry === "") continue
-    const { base, parameters } = parseMediaType(entry)
+    const { base, parameters, weight } = parseMediaType(entry)
     if (base === "*/*" || base === "application/*") return true
     if (base !== MEDIA_TYPE) continue
+    if (weight <= 0) continue
     if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true
   }
   return false
@@ -238,9 +336,10 @@ export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
 export const schemaError = (part: RequestPart): BadRequest =>
   new BadRequest({ detail: `Request ${part.toLowerCase()} failed validation` })
 
-// A JSON Pointer (RFC 6901) from an issue path.
+// A JSON Pointer (RFC 6901) from an issue path, reusing `Document.pointer`'s
+// escaping so this spelling can't drift from the public constructors'.
 const jsonPointer = (path: ReadonlyArray<string | number>): string =>
-  "/" + path.map((segment) => String(segment).replace(/~/g, "~0").replace(/\//g, "~1")).join("/")
+  "/" + path.map((segment) => pointer.escape(String(segment))).join("/")
 
 // The `source` of one error object, from the part that failed and the issue's
 // path: query keys are re-bracketed (`["page", "limit"]` → `page[limit]`; a
@@ -388,12 +487,22 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
     Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest
-        if (!contentTypeIsAcceptable(request.headers["content-type"], options)) {
-          return yield* Effect.fail(new UnsupportedMediaType())
-        }
-        if (!acceptIsAcceptable(request.headers["accept"], options)) {
-          return yield* Effect.fail(new NotAcceptable())
-        }
+        const error = yield* Effect.sync(() =>
+          negotiate({ contentType: request.headers["content-type"], accept: request.headers["accept"] }, options)
+        ).pipe(
+          Effect.tap((error) =>
+            Effect.annotateCurrentSpan(
+              error === undefined
+                ? { "jsonapi.negotiation.outcome": "accepted" }
+                : {
+                    "jsonapi.negotiation.outcome": "rejected",
+                    "jsonapi.negotiation.rule": error instanceof UnsupportedMediaType ? "content_type" : "accept"
+                  }
+            )
+          ),
+          Effect.withSpan(Span.negotiate)
+        )
+        if (error !== undefined) return yield* Effect.fail(error)
         return yield* httpEffect
       })
     )
@@ -431,6 +540,9 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
             status: BadRequest.status,
             contentType: MEDIA_TYPE
           })
+        ).pipe(
+          Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
+          Effect.withSpan(Span.schemaError)
         )
 )
 

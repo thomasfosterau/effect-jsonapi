@@ -36,7 +36,11 @@
  *
  * References are lazy thunks (`() => Person`), so a typo'd reference is a
  * compile error and resources can reference each other regardless of
- * declaration order.
+ * declaration order — including in a **cycle** (`Article` ⇄ `Comment`),
+ * which needs one interface annotation per resource in the cycle; see
+ * `Resource.make`. The lowercase {@link one} / {@link optional} / {@link many}
+ * / {@link paginated} descriptor types are there to write those annotations
+ * with.
  *
  * A target may also be a `Resource.family(...)` supertype, not just a single
  * resource — linkage then decodes for any member of the family (keyed on the
@@ -47,7 +51,8 @@
 import { Schema } from "effect"
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js"
 import type { Operator } from "./Filter.js"
-import type { Any } from "./Resource.js"
+import type { Any, AttributeKeys } from "./Resource.js"
+import type * as Sort from "./Sort.js"
 
 // ---------------------------------------------------------------------------
 // Descriptors
@@ -118,6 +123,12 @@ export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>
 export interface One<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
   readonly kind: "one"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
   readonly filter: F
 }
 
@@ -131,6 +142,12 @@ export interface One<R extends Any, F extends FilterDeclaration = FilterDeclarat
 export interface Optional<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
   readonly kind: "optional"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
   readonly filter: F
 }
 
@@ -144,20 +161,118 @@ export interface Optional<R extends Any, F extends FilterDeclaration = FilterDec
 export interface Many<R extends Any> {
   readonly kind: "many"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
 }
+
+/**
+ * The **canonical order** of a paginated relationship: a non-empty list of
+ * {@link Sort.Term}s over the related resource's attributes, or its `id`.
+ *
+ * Ordering is part of a paginated relationship's wire contract, not a storage
+ * detail. A `paginated` relationship carries no inline linkage, so its members
+ * are reachable *only* through `links.related` — a paginated collection whose
+ * `first` / `prev` / `next` / `last` links only denote a well-defined sequence
+ * of pages if the collection has a total order. Without one, paging the same
+ * relationship twice may repeat or skip members, and the pagination links the
+ * document itself advertises are unsound. Cursor pagination makes this sharpest:
+ * a cursor *is* a position in an order.
+ *
+ * The declaration is spelled in the package's own sort vocabulary
+ * ({@link Sort.Term}, what `Query.Sort` decodes `?sort=` into), so it is
+ * directly the order the relationship's `Endpoint.related` collection is to be
+ * served in when the client asks for no `sort` of its own. Declaring it is what
+ * this package does; serving it is the handler's job — nothing here reorders a
+ * collection on your behalf.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "id">>
 
 /**
  * An unbounded to-many relationship with *no* inline linkage: the relationship
  * object carries only a required `related` link pointing at a paginated
- * collection endpoint.
+ * collection endpoint. `O` records its declared canonical {@link Order}
+ * (`undefined` when none is declared).
  *
  * @since 0.1.0
  * @category models
  */
-export interface Paginated<R extends Any> {
+export interface Paginated<R extends Any, O extends Order<R> | undefined = Order<R> | undefined> {
   readonly kind: "paginated"
   readonly ref: () => R
+  /**
+   * Phantom: the resource this relationship points at, in a position a plain
+   * indexed access can read (see {@link TargetOf}). Type-level only — it is
+   * never present on the descriptor value.
+   */
+  readonly "~target": R
+  /**
+   * The declared canonical {@link Order} of the related collection, or
+   * `undefined` when the relationship declares none.
+   *
+   * @since 0.15.0
+   */
+  readonly order: O
 }
+
+/**
+ * The type of `Relationship.one(ref)` — {@link One} with the `filter`
+ * declaration defaulted the way the constructor defaults it (`false`, not
+ * filterable), rather than to the whole {@link FilterDeclaration} union.
+ *
+ * Reach for it when writing the interface annotation that makes a
+ * mutually-recursive resource graph authorable (see `Resource.make`): a
+ * resource definition is **invariant** in its relationship record, so the
+ * annotation has to name the same type the constructor produced.
+ * `Relationship.one<Comment>` is that type, and reads like the declaration it
+ * annotates. For a filterable relationship, pass the declaration as the
+ * `const` tuple the constructor infers:
+ * `Relationship.one<Comment, readonly ["eq", "in"]>`.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface one<R extends Any, F extends FilterDeclaration = false> extends One<R, F> {}
+
+/**
+ * The type of `Relationship.optional(ref)` — {@link Optional} with the
+ * `filter` declaration defaulted to `false`, as the constructor defaults it.
+ * The {@link one} note on annotating recursive definitions applies here too.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface optional<R extends Any, F extends FilterDeclaration = false> extends Optional<R, F> {}
+
+/**
+ * The type of `Relationship.many(ref)` — {@link Many}, named to read like the
+ * declaration it annotates in a recursive resource definition.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface many<R extends Any> extends Many<R> {}
+
+/**
+ * The type of `Relationship.paginated(ref)` — {@link Paginated} with the
+ * canonical {@link Order} defaulted the way the constructor defaults it
+ * (`undefined`, no declared order), rather than to the whole
+ * `Order<R> | undefined` union. Named to read like the declaration it
+ * annotates in a recursive resource definition; the {@link one} note on
+ * annotating recursive definitions applies here too. For a relationship that
+ * declares an order, pass it as the `const` tuple the constructor infers:
+ * `Relationship.paginated<Comment, readonly [{ field: "createdAt"; direction: "desc" }]>`.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface paginated<R extends Any, O extends Order<R> | undefined = undefined> extends Paginated<R, O> {}
 
 /**
  * Any relationship descriptor.
@@ -209,8 +324,9 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
  * identifier, never `null`. Required in create payloads.
  *
  * The reference is a thunk so resources can reference each other regardless of
- * declaration order (mutually recursive definitions may require an explicit
- * type annotation on one side).
+ * declaration order, cycles included; a mutually-recursive pair needs an
+ * explicit interface annotation on each definition in the cycle (see
+ * `Resource.make`).
  *
  * Pass `filter` to make the relationship a filterable field of its resource
  * (`?filter[author]=9`), valued by the related resource's id: `true` admits
@@ -242,10 +358,12 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
 // (`Relationships` widens it to the whole `FilterDeclaration` inside a
 // `Resource.make` call); it is inferred from `options.filter` alone, and
 // defaults to `false`.
+// The cast on each constructor's result is for the descriptors' phantom
+// `~target` member, which is type-level only and has no runtime counterpart.
 export const one = <R extends Any, const F extends FilterDeclaration = false>(
   ref: () => R,
   options?: { readonly filter?: F }
-): One<R, NoInfer<F>> => ({ kind: "one", ref, filter: (options?.filter ?? false) as F })
+): One<R, NoInfer<F>> => ({ kind: "one", ref, filter: options?.filter ?? false }) as unknown as One<R, NoInfer<F>>
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
@@ -277,7 +395,8 @@ export const one = <R extends Any, const F extends FilterDeclaration = false>(
 export const optional = <R extends Any, const F extends FilterDeclaration = false>(
   ref: () => R,
   options?: { readonly filter?: F }
-): Optional<R, NoInfer<F>> => ({ kind: "optional", ref, filter: (options?.filter ?? false) as F })
+): Optional<R, NoInfer<F>> =>
+  ({ kind: "optional", ref, filter: options?.filter ?? false }) as unknown as Optional<R, NoInfer<F>>
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
@@ -301,7 +420,7 @@ export const optional = <R extends Any, const F extends FilterDeclaration = fals
  * @since 0.1.0
  * @category constructors
  */
-export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", ref })
+export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", ref }) as unknown as Many<R>
 
 /**
  * Declares an unbounded to-many relationship with no inline linkage: the
@@ -312,25 +431,65 @@ export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", r
  * `included` unions and create/update payloads — they are read and written
  * through their own endpoints.
  *
+ * Pass `order` to declare the relationship's canonical {@link Order} — the
+ * total order its `links.related` collection is paged in. Paging is only
+ * well-defined over a stable order (see {@link Order}), so this is a property of
+ * the relationship's wire contract, and it is read straight off the descriptor:
+ * `Resource.relationships(Article).comments.order`. Each term names an attribute
+ * of the *related* resource, or its `id`; a term naming anything else is a
+ * compile error, and an empty or repeating order is refused at definition time.
+ *
  * @example
  * ```ts
  * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
  * const Comment = Resource.make("comments", {
- *   attributes: { body: Schema.NonEmptyString }
+ *   attributes: { body: Schema.NonEmptyString, createdAt: Schema.DateFromString }
  * })
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { comments: Relationship.paginated(() => Comment) }
+ *   relationships: {
+ *     // newest first, `id` breaking ties so the order is total (and so a
+ *     // cursor into it is stable)
+ *     comments: Relationship.paginated(() => Comment, {
+ *       order: [{ field: "createdAt", direction: "desc" }, { field: "id", direction: "asc" }]
+ *     })
+ *   }
  * })
+ *
+ * Resource.relationships(Article).comments.order
+ * // [{ field: "createdAt", direction: "desc" }, { field: "id", direction: "asc" }]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const paginated = <R extends Any>(ref: () => R): Paginated<R> => ({ kind: "paginated", ref })
+// `NoInfer` keeps `O` from being inferred off the *contextual* return type (the
+// `Relationships` record of a `Resource.make` call widens it); it is inferred
+// from `options.order` alone, and defaults to `undefined` — no declared order.
+export const paginated = <R extends Any, const O extends Order<R> | undefined = undefined>(
+  ref: () => R,
+  options?: { readonly order?: O }
+): Paginated<R, NoInfer<O>> => {
+  const order = options?.order
+  if (order !== undefined) {
+    if (order.length === 0) {
+      throw new Error("Relationship.paginated: `order` declares no terms; name at least one, or omit the option")
+    }
+    const seen = new Set<string>()
+    for (const term of order) {
+      if (seen.has(term.field)) {
+        throw new Error(
+          `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`
+        )
+      }
+      seen.add(term.field)
+    }
+  }
+  return { kind: "paginated", ref, order: order as NoInfer<O> } as unknown as Paginated<R, NoInfer<O>>
+}
 
 // ---------------------------------------------------------------------------
 // Predicates
@@ -446,21 +605,40 @@ const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
   })
 
 /**
+ * The resource a relationship descriptor points at — the return type of its
+ * `ref` thunk.
+ *
+ * Reads the target off the descriptor's one structural member rather than
+ * matching the descriptor against `One<infer R>` / `Many<infer R>` / …: a
+ * whole-descriptor `infer` has to relate the *target resource* to each
+ * candidate interface, which is a loop TypeScript cannot close when the
+ * resource graph is cyclic (see {@link SchemaFor}).
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type TargetOf<D extends Descriptor> = D["~target"]
+
+/**
  * The wire schema of a single relationship descriptor.
+ *
+ * Selected by the descriptor's `kind` tag — a plain indexed access — rather
+ * than by a chain of `D extends One<infer R> ? …` conditionals. The two agree
+ * on every descriptor, but only this one survives a **cyclic** resource graph:
+ * matching `D` against `One<infer R>` makes TypeScript relate the target
+ * resource to the descriptor interfaces, and in an `Article` ⇄ `Comment`
+ * cycle that relation re-enters the very mapped type it is computing
+ * (`TS2615`).
  *
  * @since 0.1.0
  * @category type-level
  */
-export type SchemaFor<D extends Descriptor> =
-  D extends One<infer R>
-    ? OneSchema<R>
-    : D extends Optional<infer R>
-      ? OptionalSchema<R>
-      : D extends Many<infer R>
-        ? ManySchema<R>
-        : D extends Paginated<Any>
-          ? PaginatedSchema
-          : never
+export type SchemaFor<D extends Descriptor> = {
+  readonly one: OneSchema<TargetOf<D>>
+  readonly optional: OptionalSchema<TargetOf<D>>
+  readonly many: ManySchema<TargetOf<D>>
+  readonly paginated: PaginatedSchema
+}[D["kind"]]
 
 /**
  * Creates the wire schema for a relationship descriptor.
