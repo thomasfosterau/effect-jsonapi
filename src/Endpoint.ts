@@ -337,7 +337,7 @@ export const get = <
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-    params: { id: resource.Id },
+    params: Schema.Struct({ id: resource.Id }),
     query: (options?.query ??
       Query.schema(
         resource,
@@ -847,7 +847,7 @@ export const update = <
 ) =>
   Idempotency.applied(
     HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
       payload: asMediaType(
         (options?.payload ?? resource.updatePayload) as Payload,
@@ -970,7 +970,7 @@ const deleteEndpoint = <
 ) =>
   Idempotency.applied(
     HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
       success: deleteSuccess(options?.success, options?.status) as Success,
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -1175,7 +1175,7 @@ export const polymorphic = <
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${family.type}/:id`) as Path, {
-    params: { id: family.Id },
+    params: Schema.Struct({ id: family.Id }),
     query: Query.schema(
       family.members as ReadonlyArray<Members[number]>,
       queryConfig(options) as {
@@ -1400,7 +1400,7 @@ export const related = <
     (options?.name ?? name) as EndpointName,
     (options?.path ?? `/${resource.type}/:id/${name}`) as Path,
     {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       query: Query.schema(
         target as Target<R, Name>,
         queryConfig(options) as {
@@ -1510,7 +1510,7 @@ export const getRelationship = <
     (options?.name ?? `${name}Relationship`) as EndpointName,
     (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
     {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       query: Query.schema(
         target as Target<R, Name>,
         {
@@ -1625,7 +1625,7 @@ export const updateRelationship = <
     (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
     (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
     {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       payload: asJsonApi(payload),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -1723,7 +1723,7 @@ export const addRelationship = <
     (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
     (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
     {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       payload: asJsonApi(payload),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -1814,7 +1814,7 @@ export const removeRelationship = <
     (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
     (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
     {
-      params: { id: resource.Id },
+      params: Schema.Struct({ id: resource.Id }),
       payload: asJsonApi(payload),
       success: HttpApiSchema.NoContent,
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)

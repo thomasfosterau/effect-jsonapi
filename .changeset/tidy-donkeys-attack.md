@@ -31,6 +31,3 @@ that as a JSON:API profile
 - **Atomic operations:** one key covers the whole request — the extension's own unit of atomicity —
   and replays the whole `atomic:results` document, so a replayed `lid` resolves to the id it
   resolved to the first time.
-
-Also: `ApiError.make` now takes a `source` option, so a declared error can name the `pointer`,
-`parameter` or `header` that caused it in its error document.
