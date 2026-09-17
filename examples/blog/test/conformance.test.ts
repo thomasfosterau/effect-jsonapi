@@ -33,9 +33,7 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   // #103 landed the `jsonapi` option on the document builders, but this
   // example's handlers do not pass it, so no document advertises the version
   // it implements. An example gap now, not a library one.
-  ["profile/document/jsonapi-member", "#103"],
-  // #102 — the repeated-key spelling is honoured for `include` only.
-  ["profile/query/repeated-key-spelling", "#102"]
+  ["profile/document/jsonapi-member", "#103"]
 ]
 
 const report = await Effect.runPromise(
