@@ -18,7 +18,7 @@
  *
  * @since 0.1.0
  */
-import { Option, Schema } from "effect"
+import { JsonPointer, Option, Schema } from "effect"
 
 // ---------------------------------------------------------------------------
 // Meta
@@ -230,18 +230,12 @@ export const ErrorSource = Schema.Union([
   Schema.Struct({ header: Schema.String })
 ])
 
-// RFC 6901 escaping: encode order is `~` → `~0` then `/` → `~1` (so a literal
-// `~1` in a name round-trips: it becomes `~01`, which decoding's `~1`-first
-// pass does not touch, then its `~0` untouches to `~`).
-const escapeSegment = (segment: string): string => segment.replace(/~/g, "~0").replace(/\//g, "~1")
-const unescapeSegment = (segment: string): string => segment.replace(/~1/g, "/").replace(/~0/g, "~")
-
 const memberPointer =
   (kind: "attributes" | "relationships") =>
   (name: string, options?: { readonly index?: number }): string =>
     options?.index !== undefined
-      ? `/data/${options.index}/${kind}/${escapeSegment(name)}`
-      : `/data/${kind}/${escapeSegment(name)}`
+      ? `/data/${options.index}/${kind}/${JsonPointer.escapeToken(name)}`
+      : `/data/${kind}/${JsonPointer.escapeToken(name)}`
 
 /**
  * JSON Pointer (RFC 6901) constructors for the `source.pointer` a JSON:API
@@ -251,8 +245,8 @@ const memberPointer =
  *
  * `attribute` / `relationship` point at a resource's own member;
  * `{ index }` gives the equivalent pointer inside a collection payload's
- * `data` array. `escape` is the RFC 6901 escaping (`~` → `~0`, `/` → `~1`)
- * the constructors already apply to `name` — reach for it only when a
+ * `data` array. `escape` is `effect`'s own {@link JsonPointer.escapeToken} —
+ * the constructors already apply it to `name` — reach for it only when a
  * pointer segment is built by hand.
  *
  * @example
@@ -304,7 +298,8 @@ export const pointer = {
    */
   relationship: memberPointer("relationships"),
   /**
-   * RFC 6901-escapes one JSON Pointer segment: `~` → `~0`, `/` → `~1`. The
+   * RFC 6901-escapes one JSON Pointer segment: `~` → `~0`, `/` → `~1`. A thin
+   * re-export of `effect`'s own {@link JsonPointer.escapeToken}. The
    * {@link pointer.attribute} / {@link pointer.relationship} constructors
    * already apply this to `name` — reach for it directly only when building
    * a pointer segment that isn't a plain member name.
@@ -320,7 +315,7 @@ export const pointer = {
    * @since 0.15.0
    * @category constructors
    */
-  escape: escapeSegment
+  escape: JsonPointer.escapeToken
 } as const
 
 /**
@@ -339,8 +334,8 @@ export interface PointerMember {
 
 /**
  * Parses a JSON Pointer back into the resource member it names — the inverse
- * of {@link pointer}, with RFC 6901 unescaping (`~1` → `/`, `~0` → `~`)
- * applied to the member name.
+ * of {@link pointer}, with RFC 6901 unescaping (`effect`'s own
+ * {@link JsonPointer.unescapeToken}) applied to the member name.
  *
  * Returns `None` for anything that isn't an attribute or relationship
  * pointer under `/data` (or `/data/<index>`) — including a pointer whose
@@ -369,7 +364,7 @@ export interface PointerMember {
  */
 export const parsePointer = (value: string): Option.Option<PointerMember> => {
   if (!value.startsWith("/")) return Option.none()
-  const segments = value.split("/").slice(1).map(unescapeSegment)
+  const segments = value.split("/").slice(1).map(JsonPointer.unescapeToken)
   if (segments[0] !== "data") return Option.none()
   let rest = segments.slice(1)
   let index: number | undefined
