@@ -8,6 +8,6 @@
       "@thomasfosterau/effect-jsonapi": ["./dist/index.d.ts"]
     }
   },
-  "include": ["test/dist/**/*"],
+  "include": ["test/emitted/**/*"],
   "exclude": ["node_modules", "src"]
 }
