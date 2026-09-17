@@ -9,11 +9,13 @@
  *   ApiError,
  *   Atomic,
  *   Client,
+ *   Conformance,
  *   Document,
  *   Endpoint,
  *   Filter,
  *   Group,
  *   Handlers,
+ *   Idempotency,
  *   Include,
  *   Lid,
  *   Middleware,
@@ -62,11 +64,24 @@ export * as ApiError from "./ApiError.js"
 export * as Atomic from "./Atomic.js"
 
 /**
- * Client-side helpers (`Client.narrowIncluded`).
+ * Client-side helpers: content negotiation (`Client.make`,
+ * `Client.jsonApiHeaders`, `Client.isMutatingMethod`), best-effort
+ * error-document decoding (`Client.decodeErrorDocument`,
+ * `Client.errorDocument`, `Client.errorMessage`) and include narrowing
+ * (`Client.narrowIncluded`).
  *
  * @since 0.1.0
  */
 export * as Client from "./Client.js"
+
+/**
+ * The conformance kit (`Conformance.verify`, `Conformance.format`) — an
+ * executable specification of JSON:API v1.1 and of this package's profile,
+ * which a server is driven through to prove it conforms.
+ *
+ * @since 0.15.0
+ */
+export * as Conformance from "./Conformance.js"
 
 /**
  * JSON:API document-level schemas (links, meta, error objects, document
@@ -109,6 +124,14 @@ export * as Group from "./Group.js"
 export * as Handlers from "./Handlers.js"
 
 /**
+ * Idempotent writes — the `Idempotency-Key` profile (`Idempotency.layer`,
+ * `Idempotency.Store`, `Idempotency.PROFILE_URI`).
+ *
+ * @since 0.15.0
+ */
+export * as Idempotency from "./Idempotency.js"
+
+/**
  * Declared `?include=` surfaces (`Include.make`, `Include.nested`) — one
  * nested declaration the accepted-path whitelist, the `included` union and the
  * advertised parameter all project from.
@@ -130,6 +153,14 @@ export * as Lid from "./Lid.js"
  * @since 0.1.0
  */
 export * as Middleware from "./Middleware.js"
+
+/**
+ * Media type annotation combinators for hand-rolled JSON:API endpoints
+ * (`MediaType.asJsonApi`, `MediaType.asMediaType`).
+ *
+ * @since 0.15.0
+ */
+export * as MediaType from "./MediaType.js"
 
 /**
  * Typed JSON:API query parameters (`Query.schema`, `Query.Page`, …).

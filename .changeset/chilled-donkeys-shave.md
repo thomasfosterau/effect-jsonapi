@@ -41,3 +41,15 @@ surface is not bound by the depth-2 ceiling `include: true` inherits; it is capp
 
 `Include.paths(spec)` and `Include.included(spec)` are the same two projections standalone.
 `include: true` and `Query.IncludeOptions` are unchanged for consumers who don't opt in.
+
+The module is schema-tier, so it is exported from `@thomasfosterau/effect-jsonapi/schema` as well as
+the package root: it derives the whitelist and the union from resource definitions alone, without
+resolving `effect/unstable/httpapi`.
+
+Mutually-recursive resources are fully supported. The derivation recurses over the declaration you
+wrote, never over the resource graph, so an `Article` ⇄ `Comment` cycle costs it nothing and the
+`included` union terminates by construction.
+
+The declared surface feeds the runtime half with no glue: `surface.paths` is the `includable`
+whitelist `Query.validateIncludePaths` checks a request against, and the same array is the `paths`
+argument to `Handlers.resolveIncluded`.

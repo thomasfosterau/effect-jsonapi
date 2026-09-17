@@ -371,6 +371,81 @@ describe("Query.Filter: normal form", () => {
 })
 
 // ---------------------------------------------------------------------------
+// §6 semantics: the rules the codec itself enforces
+//
+// The evaluation rules (the truth tables) are not behaviour this package has —
+// they are checked for coherence in `Filter.semantics.test.ts` and against a
+// server by the conformance kit. What the codec is answerable for is the shape
+// of a literal: that NULL never becomes one, that each field's literals live in
+// the JSON domain §6.2 compares them in, and that a bad literal is a 400 rather
+// than a filter that silently matches nothing.
+// ---------------------------------------------------------------------------
+
+describe("Query.Filter: §6 semantics — the literal rules the codec enforces", () => {
+  it('F-NULL-2: `null` in a literal position is the string "null", or a 400 — never NULL', () => {
+    // a string-typed field: an ordinary literal, four characters long
+    expect(decode({ "filter[title]": "null" })).toEqual(eq("title", "null"))
+    // a number- or boolean-typed field: a 400 naming the key, not a no-match
+    expect(failures({ "filter[age]": "null" })).toEqual([
+      {
+        key: "filter[age]",
+        message: 'Invalid literal "null" for field "age": Expected a number filter literal, got "null"'
+      }
+    ])
+    expect(failures({ "filter[flag]": "null" })[0]?.key).toBe("filter[flag]")
+  })
+
+  it("F-NULL-1: a null literal has no wire spelling and does not encode", () => {
+    // there is no list item that decodes to NULL either — "null" stays a string
+    expect(decode({ "filter[title][in]": "a,null" })).toEqual(Filter.isIn("title", ["a", "null"]))
+    // and a hand-built tree holding one is not encodable
+    expect(() => encode(eq("title", null as never))).toThrow()
+    expect(() => encode(eq("deletedAt", null as never))).toThrow()
+    expect(() => encode(Filter.isIn("title", ["a", null as never]))).toThrow()
+  })
+
+  it("F-ORD-1: every field's literals are a JSON scalar of the domain §6.2 compares in", () => {
+    // string domain: the literal union and the relationship id
+    expect(Schema.encodeUnknownSync(fields.status.literal)("open")).toBe("open")
+    expect(Schema.encodeUnknownSync(fields.author.literal)("9")).toBe("9")
+    // number domain
+    expect(Schema.encodeUnknownSync(fields.age.literal)(1.5)).toBe("1.5")
+    // boolean domain
+    expect(Schema.encodeUnknownSync(fields.flag.literal)(true)).toBe("true")
+    // F-ORD-3: a Date's JSON form is fixed-width ISO-8601 UTC, so text order is instant order
+    const encoded = Schema.encodeUnknownSync(fields.createdAt.literal)(new Date("2026-01-01T00:00:00.000Z"))
+    expect(encoded).toBe("2026-01-01T00:00:00.000Z")
+    expect(encoded).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/)
+  })
+
+  it("F-COERCE-4: one spelling per value, so equal filters share a canonical string", () => {
+    for (const spelling of ["010", "+1e1", "10.0", "1.0e1"]) {
+      expect(canonical({ "filter[age]": spelling })).toEqual([["filter[age]", "10"]])
+    }
+    expect(canonical({ "filter[age]": "-0" })).toEqual([["filter[age]", "0"]])
+    // a date literal canonicalises to its full ISO-8601 UTC form
+    expect(canonical({ "filter[deletedAt][gte]": "2026-01-01" })).toEqual([
+      ["filter[deletedAt][gte]", "2026-01-01T00:00:00.000Z"]
+    ])
+  })
+
+  it("F-ISNULL-4: isnull is legal on a field that can never be NULL", () => {
+    // `status` is a non-nullable literal union declared with the whole core
+    expect(decode({ "filter[status][isnull]": "true" })).toEqual(Filter.isNull("status"))
+    expect(decode({ "filter[status][isnull]": "false" })).toEqual(Filter.isNull("status", true))
+  })
+
+  it("F-ERR-1 / F-ERR-3: filterability is a property of the definition, and absent is not And([])", () => {
+    // decided from the declaration alone, before any resource is looked at
+    expect(failures({ "filter[body]": "x" })[0]?.message).toBe('Unknown filter field "body"')
+    // an absent filter is no constraint; the codec never synthesises a node for it
+    expect(Schema.decodeUnknownResult(codec)({})._tag).toBe("Failure")
+    // And([]) is representable, and is a different thing entirely
+    expect(decode({ "filter[g][group][conjunction]": "AND" })).toEqual({ _tag: "And", members: [] })
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Rejections (§2, §2.4, §7): one issue per offending key
 // ---------------------------------------------------------------------------
 
@@ -412,9 +487,42 @@ describe("Query.Filter: rejections name the offending key", () => {
     expect(failures({ "filter[flag]": "1" })[0]?.key).toBe("filter[flag]")
   })
 
-  it("rejects a repeated key (only include is repeatable)", () => {
-    expect(failures({ "filter[status]": ["open", "done"] })).toEqual([
-      { key: "filter[status]", message: 'Repeated filter key "filter[status]"; a filter key may appear once' }
+  it("accepts a repeated key at a list-valued position, decoding like the comma form", () => {
+    // shorthand field key
+    expect(decode({ "filter[status]": ["open", "done"] })).toEqual(decode({ "filter[status]": "open,done" }))
+    // field + explicit operator
+    expect(decode({ "filter[priority][in]": ["1", "2"] })).toEqual(decode({ "filter[priority][in]": "1,2" }))
+    // a group form condition's `value` member
+    expect(
+      decode({
+        "filter[c][condition][path]": "priority",
+        "filter[c][condition][operator]": "in",
+        "filter[c][condition][value]": ["1", "2"]
+      })
+    ).toEqual(decode({ "filter[priority][in]": "1,2" }))
+  })
+
+  it("round-trips a repeated key through encode to the canonical comma form", () => {
+    expect(encode(decode({ "filter[priority]": ["1", "2"] }))).toEqual({ "filter[priority]": "1,2" })
+  })
+
+  it("rejects a repeated key where no list operator is declared, the same as the comma form", () => {
+    expect(failures({ "filter[flag]": ["true", "false"] })).toEqual(failures({ "filter[flag]": "true,false" }))
+    expect(failures({ "filter[flag]": ["true", "false"] })[0]?.message).toMatch(/Operator "in" is not declared/)
+  })
+
+  it("rejects a repeated key at a scalar-only position (a condition's path, not its value)", () => {
+    expect(
+      failures({
+        "filter[c][condition][path]": ["age", "status"],
+        "filter[c][condition][operator]": "eq",
+        "filter[c][condition][value]": "1"
+      })
+    ).toEqual([
+      {
+        key: "filter[c][condition][path]",
+        message: 'Repeated filter key "filter[c][condition][path]"; a filter key may appear once'
+      }
     ])
   })
 
@@ -1058,10 +1166,25 @@ describe("Endpoint.list with filter: true, end to end", () => {
     })
   })
 
-  it("answers 400 with source.parameter for a repeated key", async () => {
+  it("accepts a repeated filter key at a list-valued position (200, decoding to `in`)", async () => {
     const response = await request("http://localhost/articles?filter[status]=open&filter[status]=done")
+    expect(response.status).toBe(200)
+    // `In` values are normalised (sorted, deduplicated) on decode — see `prepare`
+    expect(received.at(-1)).toEqual(Filter.isIn("status", ["done", "open"]))
+  })
+
+  it("still answers 400 with source.parameter for a repeated key at a scalar-only position", async () => {
+    const response = await request(
+      "http://localhost/articles?filter[c][condition][path]=age&filter[c][condition][path]=status" +
+        "&filter[c][condition][operator]=gt&filter[c][condition][value]=1"
+    )
     expect(response.body).toEqual({
-      errors: [error('Repeated filter key "filter[status]"; a filter key may appear once', "filter[status]")]
+      errors: [
+        error(
+          'Repeated filter key "filter[c][condition][path]"; a filter key may appear once',
+          "filter[c][condition][path]"
+        )
+      ]
     })
   })
 

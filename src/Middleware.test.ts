@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { Effect, Layer, Schema, SchemaIssue } from "effect"
+import { Effect, Layer, Schema, SchemaIssue, Tracer } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js"
@@ -13,7 +13,8 @@ import {
   layerHostNegotiated,
   negotiate,
   schemaError,
-  schemaErrorDocument
+  schemaErrorDocument,
+  Span
 } from "./Middleware.js"
 import * as Query from "./Query.js"
 import { make as Resource } from "./Resource.js"
@@ -32,6 +33,12 @@ describe("contentTypeIsAcceptable", () => {
   it("leaves other content types to the downstream decoder", () => {
     expect(contentTypeIsAcceptable("application/json; charset=utf-8")).toBe(true)
   })
+
+  it("splits the media type parameter list positionally at q, same as Accept", () => {
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8`)).toBe(true)
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true)
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
+  })
 })
 
 describe("acceptIsAcceptable", () => {
@@ -42,6 +49,32 @@ describe("acceptIsAcceptable", () => {
 
   it("rejects when every JSON:API instance carries bad parameters", () => {
     expect(acceptIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false)
+  })
+
+  it("treats q as the entry's weight, not a media type parameter", () => {
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.9`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1`)).toBe(true)
+    // whitespace before the parameter name
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}; q=1`)).toBe(true)
+    // a weight of exactly zero is an explicit refusal, not a bad parameter
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0`)).toBe(false)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.000`)).toBe(false)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1.0`)).toBe(true)
+  })
+
+  it("weighs each Accept entry independently — a low-weight JSON:API instance is still acceptable", () => {
+    expect(acceptIsAcceptable(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}, text/html;q=0.9`)).toBe(true)
+  })
+
+  it("splits the media type parameter list positionally at q", () => {
+    // one media type parameter (profile) plus a weight: acceptable
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};profile="https://example.com/p";q=0.8`)).toBe(true)
+    // no media type parameters — everything after q is an accept-extension
+    // parameter and must not be checked against the ext/profile whitelist
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true)
+    // a real bad media type parameter (before q) is still rejected
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
   })
 })
 
@@ -221,6 +254,39 @@ const request = async (
   }
 }
 
+// Like `request`, but provides a recording `Tracer` (the pattern the `effect`
+// package itself uses to test spans — see `Tracer.make`/`Tracer.NativeSpan`)
+// and returns every span it captured, so a test can assert on the names and
+// attributes the middleware attaches.
+const requestTraced = async (
+  middlewareLayer: Layer.Layer<ContentNegotiation | SchemaErrors>,
+  url: string,
+  headers: Record<string, string> = {}
+) => {
+  const spans: Array<Tracer.NativeSpan> = []
+  const recordingTracer = Tracer.make({
+    span: (options) => {
+      const span = new Tracer.NativeSpan(options)
+      spans.push(span)
+      return span
+    }
+  })
+
+  const appLayer = HttpApiBuilder.layer(Api).pipe(
+    Layer.provide(ArticlesLive),
+    Layer.provide(middlewareLayer),
+    Layer.provide(Layer.succeed(Tracer.Tracer, recordingTracer))
+  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+
+  const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+  try {
+    const response = await handler(new Request(url, { headers }))
+    return { status: response.status, body: (await response.json()) as any, spans }
+  } finally {
+    await dispose()
+  }
+}
+
 describe("Middleware.layerHostNegotiated", () => {
   const url = "http://localhost/articles/1"
 
@@ -271,5 +337,72 @@ describe("Middleware.layerHostNegotiated", () => {
   it("serves ordinary JSON:API requests identically to Middleware.layer", async () => {
     const headers = { accept: MEDIA_TYPE }
     expect(await request(layerHostNegotiated, url, headers)).toEqual(await request(layer, url, headers))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Tracing (#122): the negotiate and schemaError spans
+// ---------------------------------------------------------------------------
+
+describe("tracing", () => {
+  const url = "http://localhost/articles/1"
+
+  it("emits Span.negotiate with an accepted outcome for a clean request", async () => {
+    const { spans, status } = await requestTraced(layer, url)
+    expect(status).toBe(200)
+    const span = spans.find((s) => s.name === Span.negotiate)
+    expect(span).toBeDefined()
+    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("accepted")
+    expect(span?.attributes.has("jsonapi.negotiation.rule")).toBe(false)
+    expect(span?.status._tag).toBe("Ended")
+  })
+
+  it("tags Span.negotiate with the content_type rule on a 415", async () => {
+    const contentType = `${MEDIA_TYPE}; charset=utf-8`
+    const { spans, status } = await requestTraced(layer, url, { "content-type": contentType })
+    expect(status).toBe(415)
+    const span = spans.find((s) => s.name === Span.negotiate)
+    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected")
+    expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("content_type")
+    // the raw header value is never captured as an attribute
+    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("charset")
+  })
+
+  it("tags Span.negotiate with the accept rule on a 406", async () => {
+    const accept = `${MEDIA_TYPE}; charset=utf-8`
+    const { spans, status } = await requestTraced(layer, url, { accept })
+    expect(status).toBe(406)
+    const span = spans.find((s) => s.name === Span.negotiate)
+    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected")
+    expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("accept")
+  })
+
+  it("emits Span.schemaError tagged by the failing request part, with no decode detail attached", async () => {
+    const { spans, status } = await requestTraced(layer, "http://localhost/articles?page[limit]=not-a-number")
+    expect(status).toBe(400)
+    const span = spans.find((s) => s.name === Span.schemaError)
+    expect(span).toBeDefined()
+    expect(span?.attributes.get("jsonapi.request_part")).toBe("Query")
+    // only the fixed request-part enum is attached — never the offending
+    // parameter name, the decode failure message, or anything else per-request
+    expect([...span!.attributes.keys()]).toEqual(["jsonapi.request_part"])
+    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("limit")
+  })
+
+  it("does not emit Span.schemaError for a request that never fails validation", async () => {
+    const { spans, status } = await requestTraced(layer, url)
+    expect(status).toBe(200)
+    expect(spans.some((s) => s.name === Span.schemaError)).toBe(false)
+  })
+
+  it("adds no layer and changes no response when nothing provides a Tracer", async () => {
+    // every other test in this file drives `layer` / `layerHostNegotiated`
+    // without providing a Tracer at all — spans are still created (against
+    // the default no-op-exporting native tracer) but nothing about the
+    // request/response behavior depends on one being supplied.
+    const traced = await requestTraced(layer, url)
+    const untraced = await request(layer, url)
+    expect(untraced.status).toBe(traced.status)
+    expect(untraced.body).toEqual(traced.body)
   })
 })

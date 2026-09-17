@@ -358,6 +358,91 @@ assertType<Chain7Untruncated>(true)
 assertType<Chain7Collapsed>(true)
 
 // ---------------------------------------------------------------------------
+// A cyclic resource graph (#118)
+// ---------------------------------------------------------------------------
+
+// The reason this derivation is safe on a cycle: it recurses over the
+// *declaration*, never over the graph. A spec is a finite object literal and
+// cannot be made cyclic — a `const` cannot appear in its own initialiser — so
+// walking `articles → comments → articles → comments` costs exactly the four
+// levels that were written, and terminates on the declaration's own depth
+// rather than on the graph's.
+//
+// The constraint side is where a cycle would bite: `Spec<R>` reaches exactly
+// one hop (`Branch<Target<R, K>, AnySpec>`, not `Spec<Target<R, K>>`), so it
+// never walks the graph either. A branch's own children are checked against
+// *its* target by `nested`'s signature, at the call site that writes them.
+
+const cyclicArticleAttributes = { title: Schema.NonEmptyString }
+const cyclicCommentAttributes = { body: Schema.NonEmptyString }
+
+interface CyclicArticle extends Resource.Resource<
+  "cyclic-articles",
+  typeof cyclicArticleAttributes,
+  {
+    readonly comments: Relationship.many<CyclicComment>
+    readonly editor: Relationship.optional<CyclicArticle>
+    readonly revisions: Relationship.paginated<CyclicArticle>
+  }
+> {}
+
+interface CyclicComment extends Resource.Resource<
+  "cyclic-comments",
+  typeof cyclicCommentAttributes,
+  {
+    readonly article: Relationship.one<CyclicArticle>
+    readonly parent: Relationship.optional<CyclicComment>
+  }
+> {}
+
+const CyclicArticle: CyclicArticle = Resource.make("cyclic-articles", {
+  attributes: cyclicArticleAttributes,
+  relationships: {
+    comments: Relationship.many(() => CyclicComment),
+    editor: Relationship.optional(() => CyclicArticle),
+    revisions: Relationship.paginated(() => CyclicArticle)
+  }
+})
+
+const CyclicComment: CyclicComment = Resource.make("cyclic-comments", {
+  attributes: cyclicCommentAttributes,
+  relationships: {
+    article: Relationship.one(() => CyclicArticle),
+    parent: Relationship.optional(() => CyclicComment)
+  }
+})
+
+// Three hops back and forth across the cycle.
+export const cyclic = Include.make(CyclicArticle, {
+  comments: Include.nested(CyclicComment, {
+    article: Include.nested(CyclicArticle, { comments: CyclicComment })
+  })
+})
+
+export type CyclicPaths = Include.Paths<(typeof cyclic)["spec"]>
+type CyclicPathsExact = Equals<CyclicPaths, "comments" | "comments.article" | "comments.article.comments">
+type CyclicPathsTruncated = Equals<CyclicPaths, "comments" | "comments.article">
+
+assertType<CyclicPathsExact>(true)
+// @ts-expect-error -- negative control: the cycle is walked to the declared depth, not cut short
+assertType<CyclicPathsTruncated>(true)
+
+// The union terminates, and is the two resources in the cycle — once each.
+export type CyclicMembers = Include.Members<(typeof cyclic)["spec"]>
+type CyclicMembersExact = Equals<CyclicMembers, CyclicComment | CyclicArticle>
+type CyclicMembersOneSided = Equals<CyclicMembers, CyclicComment>
+
+assertType<CyclicMembersExact>(true)
+// @ts-expect-error -- negative control: both sides of the cycle are members
+assertType<CyclicMembersOneSided>(true)
+
+// The graph checks still hold across the cycle.
+// @ts-expect-error -- `revisions` is paginated, cycle or no cycle
+export const cyclicPaginated = Include.make(CyclicArticle, { revisions: CyclicArticle })
+// negative control: the non-paginated self-reference on the same resource
+export const cyclicSelfEdge = Include.make(CyclicArticle, { editor: CyclicArticle })
+
+// ---------------------------------------------------------------------------
 // `has` narrows to the whitelist (what #106's resolver validates against)
 // ---------------------------------------------------------------------------
 

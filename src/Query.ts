@@ -30,10 +30,14 @@
  * literals) fail decoding, which HttpApi surfaces as a 400 — the
  * spec-compliant response.
  *
- * `?include=` accepts both spellings of the same set: the spec's comma grammar
- * (`?include=a,b`) and the repeated key (`?include=a&include=b`) that
- * `UrlParams.toRecord` decodes to an array. Both decode identically; encoding
- * always emits the comma form.
+ * Every comma-separated family — `include`, `fields[TYPE]`, `sort` — accepts
+ * both spellings of the same set: the spec's comma grammar (`?include=a,b`)
+ * and the repeated key (`?include=a&include=b`) that `UrlParams.toRecord`
+ * decodes to an array, in any mix. Both decode identically; encoding always
+ * emits the comma form. `filter[*]` accepts the repeated key too, at the
+ * grammar's list-valued positions (`docs/filter-grammar.md` §2). An empty
+ * segment from a stray comma (`?include=a,,b`, `?include=a,b,`) is dropped
+ * rather than treated as an item: both decode as `["a", "b"]`.
  *
  * A decoded query has exactly one wire spelling, the **canonical query
  * string** ({@link canonical}): the families in a fixed order, each key
@@ -45,12 +49,13 @@
  */
 import type { SchemaAST, Types } from "effect"
 import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
+import * as ApiError from "./ApiError.js"
 import type { Ast, Node } from "./Filter.js"
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js"
 import type { AnySurface, SurfaceFor } from "./Include.js"
 import type { Pair as CanonicalPair } from "./internal/canonical.js"
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js"
-import { CommaSeparated, flatten, nest, Repeatable, Sort as SortCodec } from "./internal/codecs.js"
+import { CommaSeparated, flatten, nest, Repeatable, repeatable, Sort as SortCodec } from "./internal/codecs.js"
 import type { FieldCodecs } from "./internal/filter.js"
 import { decodeFilter, encodeFilter, isFilterKey, literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
 import type {
@@ -300,8 +305,132 @@ export const Page = {
 } as const
 
 // ---------------------------------------------------------------------------
-// Standalone page-key bracketing
+// General key bracketing
 // ---------------------------------------------------------------------------
+
+// Marker recording, for a schema `bracketKeys` produced, the *original* flat
+// struct it was built from and every rename applied to it so far — named in
+// the library's own `~`-prefixed style for a non-public protocol member (see
+// `decodeTo`'s `"~type.make.in"` etc.). Kept as the base (never the previous
+// call's own wire struct) so a further `bracketKeys` call always renames a
+// stable set of decoded field names, and re-derives the *whole* wire shape in
+// one `Schema.encodeKeys` pass rather than nesting renames — nesting would
+// require iterating a previous call's already-renamed keys, silently losing
+// its bracketing the moment a later mapping didn't happen to repeat it.
+const BRACKETED = "~bracketed" as const
+
+interface BracketedState<S extends Schema.Struct<Schema.Struct.Fields>> {
+  readonly struct: S
+  readonly mapping: { readonly [key: string]: string }
+}
+
+/**
+ * The schema {@link bracketKeys} returns: `S` with the given keys' *encoded*
+ * form renamed under a bracket prefix, carrying enough of the composition —
+ * the original struct and every rename applied to it so far — that a further
+ * {@link bracketKeys} call composes onto it correctly.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface BracketedKeys<
+  S extends Schema.Struct<Schema.Struct.Fields>,
+  Mapping extends { readonly [K in keyof S["fields"]]?: string }
+> extends Schema.encodeKeys<S, Mapping> {
+  readonly [BRACKETED]: BracketedState<S>
+}
+
+// The struct a (possibly already-bracketed) schema was built from.
+type BracketedBase<S> =
+  S extends BracketedKeys<infer B, any> ? B : S extends Schema.Struct<Schema.Struct.Fields> ? S : never
+
+// The rename mapping a (possibly already-bracketed) schema carries so far.
+type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : {}
+
+// The mapping one `bracketKeys(prefix, keys)` call itself contributes.
+type PrefixMapping<Prefix extends string, Keys extends ReadonlyArray<PropertyKey>> = {
+  readonly [K in Keys[number] as K extends string ? K : never]: `${Prefix}[${K & string}]`
+}
+
+/**
+ * Re-keys an arbitrary set of a **flat** query struct's *encoded* keys under a
+ * bracket prefix — `Query.bracketKeys("page", ["offset", "limit"])` renames
+ * `offset` ↔ `page[offset]`, `limit` ↔ `page[limit]` — leaving the decoded
+ * type, and every other field's wire key, untouched. It is the general form
+ * of {@link bracketPageKeys}: any prefix (`page`, `filter`, `fields`, or one
+ * of your own) and any subset of the struct's keys, not just `offset` /
+ * `limit`.
+ *
+ * This is the standalone counterpart to {@link schema}'s family options.
+ * Where `Query.schema(resource, { page, filter })` composes the whole query
+ * and *nests* each family under its own key, this combinator only renames
+ * keys of a struct you already own — for consumers whose list-input contract
+ * merges several families **flat** into one struct (a `{ limit, offset,
+ * status, … }` the rest of their application consumes directly) rather than
+ * composing through `Query.schema`.
+ *
+ * **Composing several prefixes onto one struct.** Pipe more than one call:
+ * each renames a disjoint subset of the *original* struct's keys, and the
+ * result's decoded and encoded types reflect every rename applied so far —
+ * `.pipe(Query.bracketKeys("page", [...]), Query.bracketKeys("filter", [...]))`
+ * is not `Schema.Top`, it is the struct with both families bracketed.
+ *
+ * Built on `Schema.encodeKeys`, the canonical Effect key-rename: only the
+ * *encoded* side changes, so call-site inputs and handler-visible values keep
+ * the flat shape. `HttpApiEndpoint` coerces the bracket leaves to and from
+ * their string wire form, so fields built from either the `Query.Page`
+ * constants or a plain-number factory (`fromString: false`) work.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // A flat list input: pagination and a filter merged alongside each other.
+ * const ListArticles = Schema.Struct({
+ *   ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+ *   authorId: Schema.optionalKey(Schema.String),
+ *   status: Schema.optionalKey(Schema.String)
+ * })
+ *
+ * const wire = ListArticles.pipe(
+ *   Query.bracketKeys("page", ["offset", "limit"]),
+ *   Query.bracketKeys("filter", ["status"])
+ * )
+ *
+ * // Only `offset`/`limit` and `status` are bracketed; `authorId` stays flat.
+ * Schema.decodeUnknownSync(wire)({
+ *   "page[offset]": 20,
+ *   "page[limit]": 10,
+ *   "filter[status]": "open",
+ *   authorId: "9"
+ * })
+ * // → { offset: 20, limit: 10, status: "open", authorId: "9" }
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const bracketKeys =
+  <
+    S extends Schema.Struct<Schema.Struct.Fields> | BracketedKeys<any, any>,
+    const Prefix extends string,
+    const Keys extends ReadonlyArray<Extract<keyof BracketedBase<S>["fields"], string>>
+  >(
+    prefix: Prefix,
+    keys: Keys
+  ) =>
+  (schema: S): BracketedKeys<BracketedBase<S>, BracketedMapping<S> & PrefixMapping<Prefix, Keys>> => {
+    const state = (schema as { readonly [BRACKETED]?: BracketedState<Schema.Struct<Schema.Struct.Fields>> })[BRACKETED]
+    const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>)
+    const mapping: Record<string, string> = { ...state?.mapping }
+    for (const key of keys) mapping[key] = `${prefix}[${key}]`
+    const wire = struct.pipe(Schema.encodeKeys(mapping))
+    return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
+      BracketedBase<S>,
+      BracketedMapping<S> & PrefixMapping<Prefix, Keys>
+    >
+  }
 
 /**
  * The struct shape {@link bracketPageKeys} accepts: any struct carrying
@@ -349,11 +478,11 @@ export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.enco
  * {@link Handlers.offsetPaginationLinks} emits, so a client following a `next`
  * link decodes straight back into `{ offset, limit }`.
  *
- * Built on `Schema.encodeKeys`, the canonical Effect key-rename: only the
- * *encoded* side changes, so call-site inputs and handler-visible values keep
- * the flat shape. `HttpApiEndpoint` coerces the bracket leaves to and from
- * their string wire form, so a struct built from either {@link Page.Offset} or
- * the plain-number `Page.offset({ fromString: false })` factory works.
+ * A thin, pre-0.15 specialisation of the general {@link bracketKeys} —
+ * `Query.bracketPageKeys(s)` is exactly `s.pipe(Query.bracketKeys("page", ["offset", "limit"]))`.
+ * Reach for {@link bracketKeys} directly when you need a different prefix, a
+ * different key set, or to compose more than one bracketed family onto the
+ * same struct.
  *
  * @example
  * ```ts
@@ -377,10 +506,14 @@ export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.enco
  * @category combinators
  */
 export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketPageKeys<S> =>
-  // The cast is sound: `BracketPageKeys<S>` extends exactly the `Schema.encodeKeys`
-  // instantiation this builds, and resolves to it for every concrete `S` — but
-  // the two can't be proven comparable while `S` is still generic.
-  schema.pipe(Schema.encodeKeys({ limit: "page[limit]", offset: "page[offset]" })) as unknown as BracketPageKeys<S>
+  // The casts are sound: `BracketPageKeys<S>` extends exactly the
+  // `Schema.encodeKeys` instantiation `bracketKeys("page", ["offset", "limit"])`
+  // builds, and resolves to it for every concrete `S` — but the two can't be
+  // proven comparable while `S` is still generic, nor can `bracketKeys`'s own
+  // key-membership check run against a struct type that is itself still generic.
+  (schema as unknown as Schema.Struct<Schema.Struct.Fields>).pipe(
+    bracketKeys("page", ["offset", "limit"])
+  ) as unknown as BracketPageKeys<S>
 
 // ---------------------------------------------------------------------------
 // Feature schemas
@@ -461,13 +594,18 @@ export type IncludePathsOf<R extends Any, I> = Extract<
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
  * typed as the resource's legal path literals (2 hops into the relationship
- * graph, unless constrained) and validated at decode time.
+ * graph, unless constrained) and validated at decode time. Accepts both the
+ * comma form (`"a,b"`) and the repeated-key spelling (`["a", "b"]`,
+ * `UrlParams.toRecord`'s shape for a repeated key) and any mix of the two.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Include<R extends Any, Paths extends string = IncludePath<R>> extends CommaSeparated<
-  Schema.Literals<ReadonlyArray<Paths>>
+export interface Include<R extends Any, Paths extends string = IncludePath<R>> extends Schema.decodeTo<
+  CommaSeparated<Schema.Literals<ReadonlyArray<Paths>>>,
+  Repeatable,
+  never,
+  never
 > {}
 
 // The paths an `include` schema legalises, at runtime. A declared
@@ -496,6 +634,11 @@ const includePathsFor = (
  * document must carry, so the advertised paths and the resources a walk may
  * hoist cannot drift apart.
  *
+ * Decodes either wire spelling of the same set — the comma form (`"a,b"`) or
+ * the repeated-key spelling (`["a", "b"]`, `UrlParams.toRecord`'s shape for a
+ * repeated key) — and any mix of the two; encoding always emits the comma
+ * form.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -520,6 +663,10 @@ const includePathsFor = (
  * Schema.decodeUnknownSync(include)("author,comments.author")
  * // → ["author", "comments.author"]
  *
+ * // the repeated-key spelling decodes to the same set
+ * Schema.decodeUnknownSync(include)(["author", "comments.author"])
+ * // → ["author", "comments.author"]
+ *
  * // …or a deliberate subset: only the paths this endpoint can populate
  * const shallow = Query.Include(Article, { paths: ["author", "comments"] })
  * Schema.decodeUnknownSync(shallow)("author,comments")
@@ -541,22 +688,129 @@ export const Include = <R extends Any, const O extends IncludeOptions<R> | AnySu
   resource: R | ReadonlyArray<R>,
   options?: O
 ): Include<R, IncludePathsOf<R, O>> =>
-  CommaSeparated(
-    Schema.Literals(
-      includePathsFor(toResources(resource), options as IncludeOptions<Any> | AnySurface | undefined) as ReadonlyArray<
-        IncludePathsOf<R, O>
-      >
+  repeatable(
+    CommaSeparated(
+      Schema.Literals(
+        includePathsFor(
+          toResources(resource),
+          options as IncludeOptions<Any> | AnySurface | undefined
+        ) as ReadonlyArray<IncludePathsOf<R, O>>
+      )
     )
+  ) as Include<R, IncludePathsOf<R, O>>
+
+/**
+ * One requested `include` path, already split on `.` into its segments — the
+ * parse {@link validateIncludePaths} performs once, so a caller walking the
+ * relationship graph (a resolver) doesn't re-tokenise a path it already
+ * validated.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface IncludePathSegments {
+  /** The path as requested, e.g. `"comments.author"`. */
+  readonly path: string
+  /** The path split on `.`, e.g. `["comments", "author"]`. */
+  readonly segments: ReadonlyArray<string>
+}
+
+/**
+ * Options for {@link validateIncludePaths}: the paths actually supported, and
+ * the maximum number of hops a path may have.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface ValidateIncludePathsOptions {
+  /** The whole set of supported paths, matched against the full dotted path. */
+  readonly includable: ReadonlyArray<string>
+  /** The maximum number of `.`-separated hops a path may have. */
+  readonly maxDepth: number
+}
+
+/**
+ * Validates requested `include` paths against a runtime whitelist and depth
+ * cap, failing with {@link ApiError.UnsupportedIncludeDepth} or
+ * {@link ApiError.UnsupportedIncludePath}.
+ *
+ * Depth is checked before membership: an over-deep path fails with
+ * `UnsupportedIncludeDepth` even when it also isn't in `includable`, since
+ * depth and membership answer different questions — a caller that asked for
+ * one legal hop too many needs to be told about the cap, not told its path
+ * doesn't exist. Membership is matched against the whole dotted path, not
+ * just its first segment, so `"comments.author"` is only legal when the
+ * *whole* path is includable, not merely `"comments"`.
+ *
+ * Unlike {@link Include} — a closed `Schema.Literals` derived once, at
+ * schema-build time, from a resource's relationship graph — this validates a
+ * *runtime* list of requested paths against a runtime whitelist, for a
+ * resolver that walks arbitrary requested paths rather than a fixed schema.
+ * It returns each path's already-split segments so that walk doesn't
+ * re-tokenise a path it just validated.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const validated = Query.validateIncludePaths(["author", "comments.author"], {
+ *   includable: ["author", "comments", "comments.author"],
+ *   maxDepth: 2
+ * }).pipe(Effect.runSync)
+ * // → [
+ * //     { path: "author", segments: ["author"] },
+ * //     { path: "comments.author", segments: ["comments", "author"] }
+ * //   ]
+ *
+ * // an over-deep path fails with UnsupportedIncludeDepth even though it also
+ * // isn't in `includable` — depth is checked first
+ * const rejected = Query.validateIncludePaths(["comments.author.employer"], {
+ *   includable: ["author", "comments"],
+ *   maxDepth: 2
+ * }).pipe(Effect.flip, Effect.runSync)
+ * // → UnsupportedIncludeDepth({ path: "comments.author.employer", maxDepth: 2 })
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const validateIncludePaths = (
+  requested: ReadonlyArray<string>,
+  options: ValidateIncludePathsOptions
+): Effect.Effect<
+  ReadonlyArray<IncludePathSegments>,
+  ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath
+> =>
+  Effect.forEach(
+    requested,
+    (path): Effect.Effect<IncludePathSegments, ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath> => {
+      const segments = path.split(".")
+      if (segments.length > options.maxDepth) {
+        return Effect.fail(new ApiError.UnsupportedIncludeDepth({ path, maxDepth: options.maxDepth }))
+      }
+      if (!options.includable.includes(path)) {
+        return Effect.fail(new ApiError.UnsupportedIncludePath({ path, includablePaths: options.includable }))
+      }
+      return Effect.succeed({ path, segments })
+    }
   )
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
  * list of attribute names, validated against the closed attribute set.
+ * Accepts both the comma form and the repeated-key spelling (`["title",
+ * "body"]`), and any mix of the two.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Literals<ReadonlyArray<Field>>> {}
+export interface Fieldset<Field extends string> extends Schema.decodeTo<
+  CommaSeparated<Schema.Literals<ReadonlyArray<Field>>>,
+  Repeatable,
+  never,
+  never
+> {}
 
 /**
  * Creates the sparse-fieldset schema for one resource type.
@@ -573,21 +827,30 @@ export interface Fieldset<Field extends string> extends CommaSeparated<Schema.Li
  * const fieldset = Query.Fieldset(Article)
  * Schema.decodeUnknownSync(fieldset)("title,body")
  * // → ["title", "body"]
+ *
+ * // the repeated-key spelling (`?fields[articles]=title&fields[articles]=body`,
+ * // which `UrlParams.toRecord` surfaces as an array) decodes to the same set
+ * Schema.decodeUnknownSync(fieldset)(["title", "body"])
+ * // → ["title", "body"]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
 export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
-  CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>))
+  repeatable(CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>))) as Fieldset<
+    AttributeKeys<R>
+  >
 
 /**
- * The decoded `sort` schema: a list of `{ field, direction }` terms.
+ * The decoded `sort` schema: a list of `{ field, direction }` terms. Accepts
+ * both the comma form and the repeated-key spelling (`["-createdAt",
+ * "title"]`), and any mix of the two.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Sort<Field extends string> extends SortCodec<Field> {}
+export interface Sort<Field extends string> extends Schema.decodeTo<SortCodec<Field>, Repeatable, never, never> {}
 
 /**
  * Creates the `sort` schema for a set of sortable fields.
@@ -601,12 +864,18 @@ export interface Sort<Field extends string> extends SortCodec<Field> {}
  * Schema.decodeUnknownSync(sort)("-createdAt,title")
  * // → [{ field: "createdAt", direction: "desc" },
  * //    { field: "title", direction: "asc" }]
+ *
+ * // the repeated-key spelling (`?sort=-createdAt&sort=title`) decodes to the same list
+ * Schema.decodeUnknownSync(sort)(["-createdAt", "title"])
+ * // → [{ field: "createdAt", direction: "desc" },
+ * //    { field: "title", direction: "asc" }]
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => SortCodec(fields)
+export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> =>
+  repeatable(SortCodec(fields)) as Sort<Field>
 
 // ---------------------------------------------------------------------------
 // The filter codec (docs/filter-grammar.md)
@@ -769,6 +1038,14 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * (§3): shorthand when it round-trips, the group form with pre-order ids
  * otherwise; the returned record's insertion order is the canonical order.
  *
+ * The repeated-key spelling (`filter[f]=a&filter[f]=b`, which
+ * `UrlParams.toRecord` surfaces as an array) is accepted wherever the comma
+ * form is: `filter[f]`, `filter[f][op]`, and a group form condition's
+ * `[value]` member — decoding identically to the comma form, and rejected the
+ * same way when the field has no list operator declared. Everywhere else — a
+ * group's `[conjunction]`, any `[memberOf]`, a condition's `[path]` /
+ * `[operator]` — a repeated key is a 400 (`docs/filter-grammar.md` §2).
+ *
  * The record must carry at least one `filter[...]` key — an absent `filter`
  * is `Query.schema`'s concern, not the codec's. Literal codecs are run
  * synchronously.
@@ -852,11 +1129,17 @@ export interface Options<R extends Any> {
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for this resource and its
    * direct relationship targets. Unknown field names produce a 400.
+   *
+   * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
+   * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
    */
   readonly fields?: boolean
   /**
    * Enable `?sort=` — `true` allows sorting on every attribute; pass an array
    * of attribute names to restrict the sortable set. Unknown fields produce a 400.
+   *
+   * Both wire spellings are accepted — `?sort=-createdAt,title` and
+   * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
   /**
@@ -942,10 +1225,10 @@ export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true ? { readonly include: Schema.optionalKey<Repeatable> } : {}) &
     ([O["fields"]] extends [true]
       ? {
-          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Schema.String>
+          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Repeatable>
         }
       : {}) &
-    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Schema.String> } : {}) &
+    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Repeatable> } : {}) &
     (O["page"] extends Schema.Struct.Fields
       ? {
           readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
@@ -1052,7 +1335,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     const fieldsetFields: Record<string, Schema.Top> = {}
     for (const target of dedupe([...resources, ...resources.flatMap(allTargets)])) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target))
-      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Schema.String)
+      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable)
     }
     nestedFields.fields = Schema.optionalKey(Schema.Struct(fieldsetFields))
   }
@@ -1063,7 +1346,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
         ? dedupe(resources.flatMap((r) => attributeKeys(r)))
         : (options.sort as ReadonlyArray<string>)
     nestedFields.sort = Schema.optionalKey(Sort(sortable))
-    flatFields.sort = Schema.optionalKey(Schema.String)
+    flatFields.sort = Schema.optionalKey(Repeatable)
   }
 
   if (options.page !== undefined) {

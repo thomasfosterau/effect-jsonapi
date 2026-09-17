@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import * as Endpoint from "./Endpoint.js"
+import * as Handlers from "./Handlers.js"
 import * as Include from "./Include.js"
 import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
@@ -404,5 +405,78 @@ describe("endpoint documents", () => {
     expect(() => decode({ data: [comment], included: [person] })).not.toThrow()
     const company = { type: "companies", id: "co1", attributes: { name: "Acme" } }
     expect(() => decode({ data: [comment], included: [company] })).toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The declaration drives the runtime walk too (#106 / #107)
+// ---------------------------------------------------------------------------
+
+describe("feeding the resolver", () => {
+  const surface = Include.make(Article, {
+    author: Person,
+    comments: Include.nested(Comment, { author: Person })
+  })
+
+  // articles:1 ──author────▶ people:9
+  //            ──comments──▶ comments:5 ──author──▶ people:7
+  const article: Handlers.ResourceValue = {
+    type: "articles",
+    id: "1",
+    relationships: {
+      author: { data: { type: "people", id: "9" } },
+      comments: { data: [{ type: "comments", id: "5" }] }
+    }
+  }
+  const comment5: Handlers.ResourceValue = {
+    type: "comments",
+    id: "5",
+    relationships: { author: { data: { type: "people", id: "7" } } }
+  }
+  const person = (id: string): Handlers.ResourceValue => ({ type: "people", id })
+
+  const rows = new Map<string, Handlers.ResourceValue>(
+    [article, comment5, person("9"), person("7")].map((row) => [`${row.type}:${row.id}`, row])
+  )
+  const loader =
+    (type: string): Handlers.IncludeTarget =>
+    (idList) =>
+      Effect.sync(() =>
+        idList.flatMap((id) => {
+          const row = rows.get(`${type}:${id}`)
+          return row === undefined ? [] : [row]
+        })
+      )
+  const targets = { people: loader("people"), comments: loader("comments") }
+
+  // The deepest path the surface declares — the depth cap that matches it.
+  const maxDepth = Math.max(...surface.paths.map((path) => path.split(".").length))
+
+  it("supplies the whitelist `Query.validateIncludePaths` checks against", () => {
+    const validated = Query.validateIncludePaths(["author", "comments.author"], {
+      includable: surface.paths,
+      maxDepth
+    }).pipe(Effect.runSync)
+    expect(validated.map((v) => v.path)).toEqual(["author", "comments.author"])
+  })
+
+  it("rejects a deep path under a legal head through that same whitelist", () => {
+    const rejected = Query.validateIncludePaths(["comments.editor"], {
+      includable: surface.paths,
+      maxDepth
+    }).pipe(Effect.flip, Effect.runSync)
+    expect(rejected._tag).toBe("UnsupportedIncludePath")
+  })
+
+  it("resolves to exactly the resources its own `included` union admits", () => {
+    const resolved = Handlers.resolveIncluded(article, ["author", "comments.author"], targets).pipe(Effect.runSync)
+    expect(resolved?.map((r) => `${r.type}:${r.id}`)).toEqual(["people:9", "comments:5", "people:7"])
+    // Every type the walk produced is a member of the union derived from the
+    // same declaration — which is the whole point: nothing the resolver hoists
+    // can be stripped on encode for want of an arm.
+    const admitted = surface.included.members.map((member) => member.type)
+    expect([...new Set(resolved?.map((r) => r.type))].sort()).toEqual([...admitted].sort())
+    // …and the union is not simply wide enough to admit anything.
+    expect(admitted).not.toContain("tags")
   })
 })
