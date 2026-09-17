@@ -16,6 +16,37 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 `effect` is a peer dependency (`>=4.0.0-beta.104`). Node.js 20 or newer is required.
 
+### Importing without the HTTP surface
+
+The package root exports everything and is the import you want by default. It reaches
+`effect/unstable/httpapi`, because the error classes, endpoints, groups, media type combinators and
+middleware are built on Effect's `HttpApi`.
+
+Consumers that only want JSON:API's **wire types without the server** — a client decoding documents,
+a loader mapping them into something else, a CLI or code generator producing them — can import the
+same modules from a schema-only subpath whose only dependency is `effect` itself:
+
+```ts
+import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema"
+```
+
+`/schema` re-exports `Client`, `Document`, `Filter`, `Relationship`, `Resource`, `Sort` and
+`MEDIA_TYPE` — the modules whose import graph is `effect` alone. Error _documents_ are covered, since
+`Document.ErrorDocument` and `Document.ErrorObject` are document schemas; it is `ApiError`'s error
+_classes_ that carry HTTP status and content-type annotations.
+
+This matters beyond bundle size. `effect/unstable/*` is pre-stable, so every unnecessary dependency
+on it is a version-compatibility surface that shifts between releases: tree-shaking may drop the
+code, but it cannot drop the dependency — only an entry point can.
+
+The tier is derived from the real import graph and pinned by a test, not from what each module looks
+like it ought to be. `Query`, `Handlers`, `Lid` and `Atomic` read as schema-only but are currently
+outside it: `Query.constrainInclude` fails with `ApiError.UnsupportedIncludePath` /
+`UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes, and the other three reach `Query`.
+
+It is a packaging seam, not a second API. Every symbol is the same object under both imports, the
+root import is unchanged, and nothing in the documentation below needs to know the subpath exists.
+
 ## Overview
 
 `@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
@@ -42,6 +73,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 
 ## Contents
 
+- [Importing without the HTTP surface](#importing-without-the-http-surface)
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
