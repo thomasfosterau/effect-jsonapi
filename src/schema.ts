@@ -33,16 +33,18 @@
  * classes from their wire annotations, which is a change to a public module
  * rather than a packaging one.
  *
+ * `Client` is outside it for a plainer reason: it negotiates content over an
+ * `HttpClient` and derives a typed client from an `HttpApi`, so most of it is
+ * the HTTP surface by definition. Its two schema-tier-shaped members —
+ * `narrowIncluded`, a type-level operation with no runtime, and
+ * `decodeErrorDocument`, which decodes a body through `Document`'s error
+ * schemas alone — are not re-exported here, because a namespace cannot be
+ * split across the two entry points without them ceasing to be the same module
+ * object, which is itself pinned.
+ *
  * @packageDocumentation
  * @since 0.15.0
  */
-/**
- * Client-side helpers (`Client.narrowIncluded`).
- *
- * @since 0.15.0
- */
-export * as Client from "./Client.js"
-
 /**
  * JSON:API document-level schemas (links, meta, error objects, document
  * shapes).

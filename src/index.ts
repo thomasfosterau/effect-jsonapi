@@ -63,7 +63,11 @@ export * as ApiError from "./ApiError.js"
 export * as Atomic from "./Atomic.js"
 
 /**
- * Client-side helpers (`Client.narrowIncluded`).
+ * Client-side helpers: content negotiation (`Client.make`,
+ * `Client.jsonApiHeaders`, `Client.isMutatingMethod`), best-effort
+ * error-document decoding (`Client.decodeErrorDocument`,
+ * `Client.errorDocument`, `Client.errorMessage`) and include narrowing
+ * (`Client.narrowIncluded`).
  *
  * @since 0.1.0
  */

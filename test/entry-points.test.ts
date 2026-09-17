@@ -23,7 +23,6 @@ const DIST = path.join(ROOT, "dist")
  * whatever it currently is.
  */
 const SCHEMA_TIER = [
-  "Client.ts",
   "Document.ts",
   "Filter.ts",
   "Relationship.ts",
@@ -38,10 +37,12 @@ const SCHEMA_TIER = [
 /**
  * The modules that resolve `effect/unstable/httpapi`, and so stay out.
  *
- * `ApiError`, `Endpoint`, `Group`, `Idempotency`, `MediaType` and `Middleware`
- * bind JSON:API to Effect's `HttpApi` directly — `Idempotency` also to
- * `HttpServerRequest` / `HttpServerResponse`, being a middleware over the live
- * request. `Query` is here transitively: constraining include paths fails with
+ * `ApiError`, `Client`, `Endpoint`, `Group`, `Idempotency`, `MediaType` and
+ * `Middleware` bind JSON:API to Effect's `HttpApi` directly — `Client` since it
+ * gained the negotiation transform and `Client.make`, which reach `HttpClient`
+ * and `HttpApiClient`, and `Idempotency` also to `HttpServerRequest` /
+ * `HttpServerResponse`, being a middleware over the live request. `Query` is
+ * here transitively: constraining include paths fails with
  * `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`, which are
  * `HttpApi`-bound error classes — and `Handlers`, `Lid` and `Atomic` reach
  * `Query` in turn.
@@ -54,6 +55,7 @@ const SCHEMA_TIER = [
 const HTTP_TIER = [
   "ApiError.ts",
   "Atomic.ts",
+  "Client.ts",
   "Conformance.ts",
   "Endpoint.ts",
   "Group.ts",

@@ -64,7 +64,7 @@ import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
 import { pointer } from "./Document.js"
 import type { ErrorSource } from "./Document.js"
-import { MEDIA_TYPE } from "./internal/media.js"
+import { baseMediaType, MEDIA_TYPE } from "./internal/media.js"
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -173,7 +173,7 @@ const parseMediaType = (
     const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
     parameters.push([name, unquoted] as const)
   }
-  return { base: (first ?? "").trim().toLowerCase(), parameters, weight }
+  return { base: baseMediaType(first ?? ""), parameters, weight }
 }
 
 /**
