@@ -12,17 +12,7 @@
  */
 import type { Schema } from "effect"
 import { HttpApiSchema } from "effect/unstable/httpapi"
-
-/**
- * The JSON:API media type, per
- * {@link https://jsonapi.org/format/1.1/#content-negotiation-all the spec}.
- *
- * Re-exported from the package root as `MEDIA_TYPE`.
- *
- * @since 0.1.0
- * @category constants
- */
-const MEDIA_TYPE = "application/vnd.api+json"
+import { MEDIA_TYPE } from "./internal/media.js"
 
 /**
  * Marks a schema as a JSON:API body and optionally sets its HTTP status.
