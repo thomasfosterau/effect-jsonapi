@@ -16,6 +16,37 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 `effect` is a peer dependency (`>=4.0.0-beta.104`). Node.js 20 or newer is required.
 
+### Importing without the HTTP surface
+
+The package root exports everything and is the import you want by default. It reaches
+`effect/unstable/httpapi`, because the error classes, endpoints, groups, media type combinators and
+middleware are built on Effect's `HttpApi`.
+
+Consumers that only want JSON:API's **wire types without the server** — a client decoding documents,
+a loader mapping them into something else, a CLI or code generator producing them — can import the
+same modules from a schema-only subpath whose only dependency is `effect` itself:
+
+```ts
+import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema"
+```
+
+`/schema` re-exports `Client`, `Document`, `Filter`, `Relationship`, `Resource`, `Sort` and
+`MEDIA_TYPE` — the modules whose import graph is `effect` alone. Error _documents_ are covered, since
+`Document.ErrorDocument` and `Document.ErrorObject` are document schemas; it is `ApiError`'s error
+_classes_ that carry HTTP status and content-type annotations.
+
+This matters beyond bundle size. `effect/unstable/*` is pre-stable, so every unnecessary dependency
+on it is a version-compatibility surface that shifts between releases: tree-shaking may drop the
+code, but it cannot drop the dependency — only an entry point can.
+
+The tier is derived from the real import graph and pinned by a test, not from what each module looks
+like it ought to be. `Query`, `Handlers`, `Lid` and `Atomic` read as schema-only but are currently
+outside it: `Query.constrainInclude` fails with `ApiError.UnsupportedIncludePath` /
+`UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes, and the other three reach `Query`.
+
+It is a packaging seam, not a second API. Every symbol is the same object under both imports, the
+root import is unchanged, and nothing in the documentation below needs to know the subpath exists.
+
 ## Overview
 
 `@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
@@ -42,12 +73,14 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 
 ## Contents
 
+- [Importing without the HTTP surface](#importing-without-the-http-surface)
 - [Quick start](#quick-start)
 - [1. Resources — the single source of truth](#1-resources--the-single-source-of-truth)
   - [Relationship kinds](#relationship-kinds)
   - [Custom id schemas](#custom-id-schemas)
   - [Update payloads: set / unset / leave unchanged](#update-payloads-set--unset--leave-unchanged)
   - [Per-attribute annotations](#per-attribute-annotations)
+  - [Resource-level metadata & introspection](#resource-level-metadata--introspection)
   - [Read-only & per-attribute projections](#read-only--per-attribute-projections)
   - [Flat (command-style) payloads](#flat-command-style-payloads)
   - [Polymorphic families (heterogeneous supertypes)](#polymorphic-families-heterogeneous-supertypes)
@@ -64,6 +97,8 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
   - [Heterogeneous endpoints (search, feeds)](#heterogeneous-endpoints-search-feeds)
   - [Atomic operations](#atomic-operations)
 - [4. Handlers — typed in, validated out](#4-handlers--typed-in-validated-out)
+  - [Resolving `included` — one batch per level](#resolving-included--one-batch-per-level)
+  - [The per-resource transform pass (`onResource`)](#the-per-resource-transform-pass-onresource)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
@@ -176,6 +211,33 @@ repositories): the relationship object carries only a required `related` link
 pointing at a paginated collection endpoint (see
 [Relationship & related endpoints](#relationship--related-endpoints)).
 
+Paging is only well defined over a stable total order — `first` / `prev` /
+`next` / `last` denote a sequence of pages, and a cursor _is_ a position in an
+order — so a `paginated` relationship can declare the **canonical order** its
+related collection is paged in, in the same `{ field, direction }` terms
+`?sort=` decodes into:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.NonEmptyString },
+  relationships: {
+    comments: Relationship.paginated(() => Comment, {
+      // newest first, `id` breaking ties so the order — and any cursor into it — is total
+      order: [
+        { field: "postedAt", direction: "desc" },
+        { field: "id", direction: "asc" }
+      ]
+    })
+  }
+})
+
+Resource.relationships(Article).comments.order // the declared terms
+```
+
+Each term names an attribute of the **related** resource, or its `id`; anything
+else is a compile error, and an empty or repeating order is refused at
+definition time.
+
 Everything below is **derived** — never assembled by hand:
 
 | Derived                                       | What it is                                                                                                                                                                                                                                                     |
@@ -276,6 +338,77 @@ const Person = Resource.make("people", {
 
 Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
 ```
+
+### Resource-level metadata & introspection
+
+A resource definition is also the natural single source of truth for things
+_outside_ the HTTP layer — database columns, form descriptors, a sync engine's
+node definitions. Two accessors make deriving from one a supported thing to do.
+
+**Metadata rides the resource.** A definition _is_ a `Schema.Struct` with its
+derived members assigned onto it, so Effect's own `resource.annotate({ ... })`
+rebuilds the schema and returns a plain struct with `type`, `document()`,
+`createPayload` and the rest gone — no longer a resource, and no longer a valid
+relationship target. `Resource.annotate` is the seam that keeps it one:
+
+```ts
+const TableName = "acme/table" // namespace your keys
+
+const Person = Resource.annotate(Resource.make("people", { attributes: { name: Schema.NonEmptyString } }), {
+  [TableName]: "people"
+})
+
+Person.type // "people" — still a complete resource
+Resource.annotations(Person)[TableName] // "people"
+
+// still a relationship target, resolved lazily and by identity:
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.NonEmptyString },
+  relationships: { author: Relationship.one(() => Person) }
+})
+```
+
+Annotations are inherited by `Resource.extend` (the child's own keys winning),
+and can be declared up front with `Resource.make`'s `annotations` option — the
+better spelling when other definitions already point at the resource, since
+like `Schema.annotate` this returns a _new_ definition rather than mutating the
+one given.
+
+**Attribute shape is readable.** `Resource.attributeDescriptors` reports what
+the declaration already knows about each attribute, in declaration order, as
+plain data — no reaching into `resource.fields.attributes.ast`, no widening the
+definition through `unknown`, no running a decoder against sentinel values:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: {
+    title: Schema.NonEmptyString,
+    summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+    createdAt: Resource.readOnlyAttribute(Schema.DateFromString),
+    draftBody: Resource.attribute(Schema.String, { resource: false, update: false })
+  }
+})
+
+Resource.attributeDescriptors(Article)
+// [{ key: "title",     schema, resource: "required", create: "required", update: "optional",
+//    clearable: false, nullable: false, readOnly: false, annotations },
+//  { key: "summary",   …, create: "optional", nullable: true,  clearable: true },
+//  { key: "createdAt", …, create: false, update: false, readOnly: true },
+//  { key: "draftBody", …, resource: false }]  // input-only: declared, never on the resource object
+```
+
+**What belongs in an annotation, and what doesn't.** Annotations are for
+vocabulary JSON:API has no opinion about — a storage table or column name, a
+sync-engine node kind, an admin-UI label — so that foreign vocabulary stays out
+of this package. Metadata that _is_ JSON:API's business gets a declaration
+instead, because the package has to act on it: filterability is `Filter.able`,
+sortability is `Sort.able`, and a paginated relationship's
+[canonical order](#relationship-kinds) is `Relationship.paginated(ref, { order })`
+— without a stable order the pagination links that relationship advertises are
+unsound, which is a defect in the document itself. A storage column name, by
+contrast, has no wire representation at all: two servers that disagree about it
+serve byte-identical JSON:API documents. That is the test — if changing it
+changes nothing a client can observe, it is an annotation.
 
 ### Read-only & per-attribute projections
 
@@ -1088,11 +1221,13 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       //                 ^ params.id is a branded Article id
       //                         ^ query.include / query.fields are typed & validated
       loadArticle(params.id).pipe(
-        Effect.map((article) =>
-          Handlers.data(article, {
-            included: resolveIncluded(article, query.include),
-            self: `/articles/${article.id}`
-          })
+        Effect.flatMap((article) =>
+          // walks `?include=` one level at a time, batched per type
+          Handlers.resolveIncluded(article, query.include, targets).pipe(
+            Effect.map((included) =>
+              Handlers.data(article, { included, self: `/articles/${article.id}` })
+            )
+          )
         )
       ))
     .handle("list", ({ query }) =>
@@ -1116,7 +1251,49 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 
 The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules
 at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every
-included resource must be referenced in the document).
+included resource must be referenced in the document). Their `onResource` option applies
+per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document
+([below](#the-per-resource-transform-pass-onresource)).
+
+### Resolving `included` — one batch per level
+
+`Handlers.resolveIncluded` is the other half: the walk that _produces_ `included` from the paths the
+client requested. It takes the primary data (one resource, or a whole page), the validated `include`
+paths, and a registry of **batch loaders keyed by resource type** — and nothing else. There is no
+service to provide and no runtime to set up; it is a plain `Effect` a handler composes.
+
+```ts
+// One loader per type. Each is called once per level, with every id that level
+// collected — so each is a single `WHERE id IN (…)`, never a lookup per row.
+const targets = {
+  people: (ids: ReadonlyArray<string>) => db.people.byIds(ids),
+  tags: (ids: ReadonlyArray<string>) => db.tags.byIds(ids),
+  comments: (ids: ReadonlyArray<string>) => db.comments.byIds(ids)
+}
+
+Handlers.resolveIncluded(page, query.include, targets, { concurrency: 4, depth: 2 })
+// → Effect<ReadonlyArray<Person | Tag | Comment> | undefined, …>
+```
+
+What it guarantees, and why each one matters:
+
+| Property                         | What it means                                                                                                                                                                                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Batched per level**            | Every parent's references for the current segment are collected first, then handed to the loaders as one batch per type. `?include=author.employer` over a 50-article page is **2** loader calls, not 100 — the N+1 this exists to prevent                  |
+| **Deduplicated by `(type, id)`** | `included` is a set of resources, not of references: two paths or two rows reaching the same resource contribute it once, a shared path prefix costs no second query, and a resource already in the primary `data` is never duplicated into `included`      |
+| **Walk order**                   | Emission follows the traversal, so `get` and `list` agree and the array is stable whatever order the batches complete in                                                                                                                                    |
+| **Cycles terminate**             | A graph that loops (`articles → comments → articles`) revisits resources the document already holds, which are never re-loaded                                                                                                                              |
+| **Depth-capped**                 | `depth` (default `3`, the deepest path `Query.Include` legalises) bounds the number of hops. §7.1 leaves the bound implementation-defined and each hop is another round of loader calls, so this is a denial-of-service boundary, not just an ergonomic one |
+| **Unresolvable refs dropped**    | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document                                                           |
+| **`undefined` when unasked**     | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing"                                                                                                                                                             |
+
+Because every resource is reached _through_ a document resource's linkage, full linkage holds by
+construction — the builders' check becomes a guard rather than a live constraint. Per-viewer
+visibility rides along for free: every hop loads through the same authorised loader, so the deepest
+hop of an anonymous caller's walk excludes exactly what their direct read would.
+
+`paginated` relationships carry no inline linkage, so they contribute nothing to a walk — which is
+why they are excluded from `?include=` paths to begin with.
 
 Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and
 `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
@@ -1211,6 +1388,96 @@ const doc = yield* client.articles.get({
 )
 // doc.data.attributes.createdAt is a Date; doc.included is typed
 ```
+
+### The per-resource transform pass (`onResource`)
+
+A document carries the same resource type in more than one slot: primary `data`, every `included`
+member, the identifiers of a relationship document. Per-resource processing that only reaches one of
+them — a sparse fieldset projected out of `data` but not out of `included`, per-viewer `meta`
+stamped on one but not the other — leaves a document describing one type two different ways. Sparse
+fieldsets in particular are specified to apply to **every** resource of that type in the document.
+
+`onResource` is one pass over all of them:
+
+```ts
+Handlers.data(article, {
+  included,
+  self: `/articles/${article.id}`,
+  onResource: Handlers.compose(
+    Handlers.project(query.fields), // ?fields[articles]=title
+    Handlers.withMeta((r) => permissions(viewer, r)) // { canEdit, canDelete }
+  )
+})
+```
+
+It runs **once per resource** — after `included` is deduplicated (so once per distinct resource, not
+once per occurrence) and before the full-linkage check (so the check sees what the document actually
+emits). A resource reached in two slots is shaped once and that result reused, so it cannot come out
+two ways. Transforms must therefore be pure functions of the resource, and must not change its
+`type` or `id`.
+
+The same option is on `Handlers.collection`, on `Handlers.linkage` (where it reaches the resource
+identifiers §8.4 makes a relationship document's primary data), and on `Handlers.buildIncluded`.
+
+| Transform                         | What it does                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `Handlers.project(fields)`        | Sparse fieldsets: narrows `attributes` to the names requested for the resource's type. |
+| `Handlers.withMeta(compute)`      | Merges computed `meta` over the resource's own.                                        |
+| `Handlers.compose(first, second)` | One pass doing both.                                                                   |
+| `Handlers.transform<Lambda>(f)`   | Anything else, with its type-level effect declared.                                    |
+
+`Handlers.project` also has a data-first form, `Handlers.project(resource, fields)`, for projecting
+one resource directly. Two behaviours make it safe to run over a whole document: a type with **no
+requested set** (absent, or an empty `?fields[TYPE]=`) is returned unchanged — the spec's default of
+"every field", not "no field" — and only `attributes` is projected, so `relationships`, `links` and
+`meta` survive and a resource identifier (no attributes at all) passes through untouched.
+
+`Handlers.withMeta` merges the computed members over whatever `meta` the resource already carries,
+and emits **no** `meta` member when the merged result is empty: to the spec an empty `meta` object is
+a present-but-empty meta, which says something different from saying nothing.
+
+#### The effect stays in the type
+
+The builders' return type is computed from the transform rather than widened:
+
+```ts
+const document = Handlers.data(article, {
+  included: [otherArticle],
+  onResource: Handlers.project({ articles: ["title"] })
+})
+
+document.data.attributes // { title: string } — `body` is gone
+document.included?.[0]?.attributes // { title: string } — and gone here too, identically
+```
+
+A fieldset known only at runtime (`query.fields`) can be any subset of the selectable names, so each
+projected attribute is typed as optional — honest in both directions rather than claiming a
+selection the request may not have made.
+
+Because one transform is applied at several types in a single document, its effect cannot be a
+single inferred return type; it is carried by a type-level function. To write your own, declare the
+lambda and hand it to `Handlers.transform`:
+
+```ts
+interface SelfLinkLambda extends Handlers.TransformLambda {
+  readonly Out: this["In"] & { readonly links: { readonly self: string } }
+}
+
+const withSelfLink = Handlers.transform<SelfLinkLambda>((resource) => ({
+  ...resource,
+  links: { self: `/${resource.type}/${resource.id}` }
+}))
+```
+
+A plain function is accepted too, and is checked against `Handlers.IdentityLambda`: it must hand back
+the resource's own type, which is exactly the guarantee a shape-preserving transform makes.
+
+One consequence is worth stating plainly: a projected document is deliberately _not_ the endpoint's
+default response-document type. A resource with attributes removed no longer satisfies a schema that
+requires them, and the type says so rather than pretending otherwise. An endpoint that projects needs
+a success document that admits the projection — see
+[Overriding the success document](#overriding-the-success-document) — built over a resource variant
+whose attributes are optional.
 
 ### Narrowing `included` by the requested include paths
 
@@ -1500,6 +1767,26 @@ const query = Query.bracketPageKeys(ListArticles)
 // decoded: { offset, limit, authorId }   ← unchanged, still flat
 ```
 
+`Query.bracketKeys(prefix, keys)` is the general form `bracketPageKeys` is built on — any bracket
+prefix (`page`, `filter`, `fields`, or one of your own), any subset of the struct's own keys, and it
+**composes**: pipe it more than once to bracket several families onto the same flat struct, and the
+decoded/encoded types reflect every rename applied so far, not just the last one.
+
+```ts
+const ListArticles2 = Schema.Struct({
+  ...Query.Page.offset({ maxLimit: 100, fromString: false }),
+  authorId: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.String)
+})
+
+const query2 = ListArticles2.pipe(
+  Query.bracketKeys("page", ["offset", "limit"]),
+  Query.bracketKeys("filter", ["status"])
+)
+// wire:    { "page[offset]": …, "page[limit]": …, "filter[status]": …, authorId: … }
+// decoded: { offset, limit, status, authorId }   ← unchanged, still flat
+```
+
 ## Spec compliance, by construction
 
 | JSON:API v1.1 rule                                                                                               | How it's enforced                                                                                                                                                                                      |
@@ -1515,7 +1802,7 @@ const query = Query.bracketPageKeys(ListArticles)
 | Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                                                                     |
 | Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships                                                  |
 | Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many                                                                   |
-| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.data` / `Handlers.collection` builders (runtime check)                                                                                                                                       |
+| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so linkage holds by construction; `Handlers.data` / `Handlers.collection` re-check (runtime check)            |
 | Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                                                                    |
 | `errors` array is never empty                                                                                    | non-empty check on the error document schema                                                                                                                                                           |
 | 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                                                                       |
@@ -1628,9 +1915,13 @@ Relationship and resource-identifier `meta` currently accept free-form records (
   _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics and atomic
   processing are declared gaps rather than silent omissions — see `Conformance.gaps` and
   [`docs/conformance.md`](./docs/conformance.md).
-- **Sparse fieldsets are advisory**: `?fields[TYPE]=` is decoded, validated and handed to your
-  handler, but attribute projection in responses is handler logic (automatic projection would
-  require post-processing responses against request state).
+- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed
+  to your handler, and the builders project it when you ask them to —
+  `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })`
+  ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is
+  projected behind your back; the builders don't post-process responses against request state on
+  their own. Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is
+  built from the resource's attributes, so a relationship name cannot be requested.
 - **Include paths are typed to a depth of 2 hops** (`"comments.author"` works,
   `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off. The runtime
   validation matches the same set.

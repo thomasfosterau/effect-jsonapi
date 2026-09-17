@@ -115,9 +115,10 @@ cites `jsonapi.org/format` as its authority.
 **Content negotiation (§Content Negotiation, §Extensions, §Profiles)** — the response media type and
 its permitted parameters; 415 on a parameterised request `Content-Type`; 406 when every `Accept`
 instance is parameterised; an unsupported `ext` URI; an unrecognised `profile` ignored rather than
-rejected; and the two RFC 9110 §12.4.2 weight rules — a non-zero `q` is not a media type parameter
-(the defect in [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101)), `q=0` is a
-refusal.
+rejected; and the two RFC 9110 §12.4.2 weight rules — a non-zero `q` is not a media type parameter,
+`q=0` is a refusal. The kit reported the first of those against the shipped middleware before
+[#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101) was fixed; it now guards the fix
+against regressing.
 
 **Document structure (§Document Structure, §Compound Documents, §Resource Objects)** — at least one
 of `data` / `errors` / `meta`; `data` and `errors` never together; `included` only alongside `data`;
@@ -250,22 +251,29 @@ Two packaging questions are deliberately **not** pre-empted:
 examples. They deliberately **do not assert a clean run** — they pin the exact set of rules each
 example is known to break, with the issue tracking each:
 
-| Rule                                                        | Tracking                                                            |
-| ----------------------------------------------------------- | ------------------------------------------------------------------- |
-| `spec/content-negotiation/accept-weight-is-not-a-parameter` | [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101) |
-| `spec/document/no-duplicate-resources`                      | [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147) |
-| `spec/query/sparse-fieldsets-primary`                       | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) |
-| `spec/query/sparse-fieldsets-included`                      | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) |
-| `spec/query/unknown-query-parameter`                        | [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) |
-| `profile/document/jsonapi-member`                           | [#103](https://github.com/thomasfosterau/effect-jsonapi/issues/103) |
-| `profile/query/repeated-key-spelling`                       | [#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102) |
+| Rule                                   | Tracking                                                            | Whose         |
+| -------------------------------------- | ------------------------------------------------------------------- | ------------- |
+| `spec/document/no-duplicate-resources` | [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147) | the library's |
+| `spec/query/sparse-fieldsets-primary`  | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) | the examples' |
+| `spec/query/sparse-fieldsets-included` | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) | the examples' |
+| `spec/query/unknown-query-parameter`   | [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) | the library's |
+| `profile/document/jsonapi-member`      | [#103](https://github.com/thomasfosterau/effect-jsonapi/issues/103) | the examples' |
+| `profile/query/repeated-key-spelling`  | [#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102) | the library's |
 
-The same seven in all three examples, which is itself evidence: they are library behaviours, not
-one example's mistakes. Two were previously unfiled and were found by the kit —
+The same six in all three examples, which is itself evidence: nothing here is one example's mistake.
+Two were previously unfiled and were found by the kit —
 [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147) (`Handlers.buildIncluded` does
 not dedupe `included` against the primary data) and
 [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) (unknown query parameters are
-ignored rather than rejected).
+ignored rather than rejected). A seventh,
+[#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101), was on this list until its fix
+landed; the kit now guards it instead.
+
+Three of the six are now _example_ gaps rather than library ones: #112 landed `onResource` /
+`Handlers.project` and #103 landed the `jsonapi` builder option, but the worked examples have not
+adopted either, so the kit still sees unprojected fieldsets and documents that do not advertise
+their version. Adopting both in `examples/*/handlers.ts` would clear those three — worth doing, and
+deliberately left to a change that is about the examples rather than about the kit.
 
 A new failure means a regression; a disappearing one means a fixed bug whose entry should come off
 the list. The test says so when either happens.

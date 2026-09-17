@@ -18,22 +18,21 @@ import { NorthwindLive } from "../handlers.js"
  * Remove an entry when its issue is fixed; the test will tell you to.
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
-  // #101 — `q` is an Accept-header weight, not a media type parameter, but
-  // `Middleware.acceptIsAcceptable` counts it as one and answers 406.
-  ["spec/content-negotiation/accept-weight-is-not-a-parameter", "#101"],
-  // `Handlers.buildIncluded` dedupes `included` against itself but not against
-  // the primary data, so a resource that is both primary and included appears
-  // twice in one document.
+  // #147 — `Handlers.buildIncluded` dedupes `included` against itself but not
+  // against the primary data, so a resource that is both primary data and an
+  // include target is emitted twice in one document. A library defect.
   ["spec/document/no-duplicate-resources", "#147"],
-  // #112 — sparse fieldsets are decoded and handed to the handler, but nothing
-  // projects them, so `?fields[TYPE]=…` still returns every attribute.
+  // #112 landed the mechanism — `onResource: Handlers.project(query.fields)` —
+  // but this example's handlers have not adopted it, so `?fields[TYPE]=` still
+  // returns every attribute. An example gap now, not a library one.
   ["spec/query/sparse-fieldsets-primary", "#112"],
   ["spec/query/sparse-fieldsets-included", "#112"],
-  // A query parameter named only with a-z that the server does not recognise
-  // must be a 400; `Query.schema` ignores unknown keys instead.
+  // #148 — a query parameter named only with a-z that the server does not
+  // recognise must be a 400; `Query.schema` ignores unknown keys instead.
   ["spec/query/unknown-query-parameter", "#148"],
-  // #103 — `Handlers.data` / `Handlers.collection` cannot emit the top-level
-  // `jsonapi` member, so no document advertises the version it implements.
+  // #103 landed the `jsonapi` option on the document builders, but this
+  // example's handlers do not pass it, so no document advertises the version
+  // it implements. An example gap now, not a library one.
   ["profile/document/jsonapi-member", "#103"],
   // #102 — the repeated-key spelling is honoured for `include` only.
   ["profile/query/repeated-key-spelling", "#102"]

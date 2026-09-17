@@ -676,14 +676,14 @@ describe("Conformance: in-process", () => {
     expect(outcomeFor(report, "spec/content-negotiation/response-media-type")._tag).toBe("Passed")
   })
 
-  it("reproduces the package's own known content-negotiation defect", async () => {
-    // #101: `q` is an Accept-header weight, not a media type parameter, but the
-    // shipped middleware counts it as one and answers 406.
-    const report = await run({ only: ["spec/content-negotiation/accept-weight-is-not-a-parameter"] })
-    const outcome = outcomeFor(report, "spec/content-negotiation/accept-weight-is-not-a-parameter")
-    expect(outcome._tag).toBe("Failed")
-    if (outcome._tag === "Failed") {
-      expect(outcome.findings.some((found) => found.observed.startsWith("406"))).toBe(true)
-    }
+  it("holds the middleware to the Accept-weight rule #101 fixed", async () => {
+    // `q` is an Accept-header weight, not a media type parameter (RFC 9110
+    // §12.4.2). The kit reported this against the shipped middleware before
+    // #101 was fixed; it now guards the fix against regressing.
+    const report = await run({ only: ["spec/content-negotiation/accept-weight"] })
+    const weight = outcomeFor(report, "spec/content-negotiation/accept-weight-is-not-a-parameter")
+    expect(weight._tag).toBe("Passed")
+    // `q=0` is still a refusal, so the fix did not simply stop reading weights.
+    expect(outcomeFor(report, "spec/content-negotiation/accept-weight-zero-refuses")._tag).toBe("Passed")
   })
 })
