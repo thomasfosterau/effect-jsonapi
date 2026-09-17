@@ -9,11 +9,13 @@
  *   ApiError,
  *   Atomic,
  *   Client,
+ *   Conformance,
  *   Document,
  *   Endpoint,
  *   Filter,
  *   Group,
  *   Handlers,
+ *   Idempotency,
  *   Lid,
  *   Middleware,
  *   Query,
@@ -68,6 +70,15 @@ export * as Atomic from "./Atomic.js"
 export * as Client from "./Client.js"
 
 /**
+ * The conformance kit (`Conformance.verify`, `Conformance.format`) — an
+ * executable specification of JSON:API v1.1 and of this package's profile,
+ * which a server is driven through to prove it conforms.
+ *
+ * @since 0.15.0
+ */
+export * as Conformance from "./Conformance.js"
+
+/**
  * JSON:API document-level schemas (links, meta, error objects, document
  * shapes).
  *
@@ -108,6 +119,14 @@ export * as Group from "./Group.js"
 export * as Handlers from "./Handlers.js"
 
 /**
+ * Idempotent writes — the `Idempotency-Key` profile (`Idempotency.layer`,
+ * `Idempotency.Store`, `Idempotency.PROFILE_URI`).
+ *
+ * @since 0.15.0
+ */
+export * as Idempotency from "./Idempotency.js"
+
+/**
  * Lid (local id) resolution (`Lid.make`).
  *
  * @since 0.1.0
@@ -120,6 +139,14 @@ export * as Lid from "./Lid.js"
  * @since 0.1.0
  */
 export * as Middleware from "./Middleware.js"
+
+/**
+ * Media type annotation combinators for hand-rolled JSON:API endpoints
+ * (`MediaType.asJsonApi`, `MediaType.asMediaType`).
+ *
+ * @since 0.15.0
+ */
+export * as MediaType from "./MediaType.js"
 
 /**
  * Typed JSON:API query parameters (`Query.schema`, `Query.Page`, …).

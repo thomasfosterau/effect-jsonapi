@@ -22,13 +22,19 @@
  * The declared `fields` are round-tripped through the error object's `meta`
  * member, so clients can reconstruct the typed error from the wire document.
  *
+ * `source` (identifying which part of the request an error is about) can be
+ * declared too — constant, or a function of the fields for a per-instance
+ * pointer/parameter/header. See {@link Config.source} and
+ * `Document.pointer` for building `source.pointer` values.
+ *
  * @since 0.1.0
  */
 import type { Cause } from "effect"
 import { Schema, SchemaTransformation } from "effect"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 import { ErrorDocument, ErrorObject } from "./Document.js"
-import { asJsonApi } from "./internal/media.js"
+import type { ErrorSource } from "./Document.js"
+import { asJsonApi } from "./internal/httpMedia.js"
 
 /**
  * The wire document schema every {@link make} error encodes to.
@@ -106,6 +112,20 @@ export interface Config<Fields extends Schema.Struct.Fields> {
    * occurrence. Either a constant string or a function of the (encoded) fields.
    */
   readonly detail?: string | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | undefined)
+  /**
+   * JSON:API error `source`: identifies what in the request caused this
+   * error — `source.pointer` (a JSON Pointer into the request document, e.g.
+   * `/data/attributes/title` — build one with `Document.pointer`),
+   * `source.parameter` (a query parameter name) or `source.header` (a header
+   * name).
+   *
+   * Either a constant (the same source on every occurrence) or a function of
+   * the (encoded) fields — the usual case, since e.g. a validation error's
+   * pointer depends on which field failed.
+   */
+  readonly source?:
+    | typeof ErrorSource.Type
+    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => typeof ErrorSource.Type | undefined)
 }
 
 const snakeCase = (tag: string): string =>
@@ -127,6 +147,7 @@ const makeWire = (
     readonly title: string | undefined
     readonly fieldKeys: ReadonlyArray<string>
     readonly detail: ((fields: any) => string | undefined) | undefined
+    readonly source: ((fields: any) => typeof ErrorSource.Type | undefined) | undefined
   }
 ) => {
   const cached = wireCache.get(klass)
@@ -169,6 +190,7 @@ const makeWire = (
           encode: (encoded) => {
             const fields = encoded as Record<string, unknown>
             const detail = options.detail?.(fields)
+            const source = options.source?.(fields)
             return {
               errors: [
                 {
@@ -176,6 +198,7 @@ const makeWire = (
                   code: options.code,
                   ...(options.title !== undefined ? { title: options.title } : {}),
                   ...(detail !== undefined ? { detail } : {}),
+                  ...(source !== undefined ? { source } : {}),
                   ...(options.fieldKeys.length > 0
                     ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
                     : {})
@@ -212,6 +235,18 @@ const makeWire = (
  *
  * // in a handler:   Effect.fail(new ArticleNotFound({ id: "42" }))
  * // in a client:    Effect.catchTag("ArticleNotFound", (e) => ...)
+ *
+ * // a field-scoped validation error: `source` is a function of the fields,
+ * // since which query parameter it names depends on the instance
+ * class BadFilter extends ApiError.make<BadFilter>()("BadFilter", {
+ *   status: 400,
+ *   fields: { field: Schema.String },
+ *   detail: (e) => `Unknown filter field "${e.field}"`,
+ *   source: (e) => ({ parameter: `filter[${e.field}]` })
+ * }) {}
+ *
+ * console.log(ApiError.toDocument(new BadFilter({ field: "body" })).errors[0]?.source)
+ * // → { parameter: "filter[body]" }
  * ```
  *
  * @since 0.1.0
@@ -232,6 +267,12 @@ export const make =
         : config.detail !== undefined
           ? () => config.detail as string
           : undefined
+    const source =
+      typeof config.source === "function"
+        ? config.source
+        : config.source !== undefined
+          ? () => config.source as typeof ErrorSource.Type
+          : undefined
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
@@ -249,7 +290,8 @@ export const make =
           code,
           title: config.title,
           fieldKeys,
-          detail
+          detail,
+          source
         })
       }
     }
@@ -366,3 +408,219 @@ export class UnsupportedMediaType extends make<UnsupportedMediaType>()("Unsuppor
  * @category constants
  */
 export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as const
+
+// ---------------------------------------------------------------------------
+// Query-parameter errors — JSON:API §Query Parameters requires a 400 when a
+// server doesn't support a requested `include` path, `sort` field or
+// `fields[TYPE]` member; each carries what *is* supported in `meta`, so a
+// rejection is the only round trip a client needs to learn the legal set.
+//
+// None of the four set `source.parameter` yet: `ApiError.Config` has no way
+// to declare a `source` (constant or derived from fields) — see
+// https://github.com/thomasfosterau/effect-jsonapi/issues/108. Adding a
+// one-off `source` mechanism just for this family would fork the pattern
+// #108 is meant to establish for every declared error, so these wait for it;
+// once `Config.source` lands, each of the four below gets
+// `source: (e) => ({ parameter: ... })`.
+// ---------------------------------------------------------------------------
+
+/**
+ * 400 Bad Request: a requested `?include=` path is not one of the paths this
+ * endpoint supports.
+ *
+ * `meta.includablePaths` carries the endpoint's whole supported set, so a
+ * client that guessed wrong learns the legal paths without a second request.
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const error = new ApiError.UnsupportedIncludePath({
+ *   path: "author.employer",
+ *   includablePaths: ["author", "comments", "comments.author"]
+ * })
+ * ApiError.toDocument(error)
+ * // → { errors: [{
+ * //      status: "400",
+ * //      code: "unsupported.include-path",
+ * //      title: "Unsupported Include Path",
+ * //      detail: "Include path \"author.employer\" is not supported...",
+ * //      meta: { path: "author.employer", includablePaths: [...] }
+ * //    }] }
+ * ```
+ *
+ * @since 0.15.0
+ * @category errors
+ */
+export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()("UnsupportedIncludePath", {
+  status: 400,
+  code: "unsupported.include-path",
+  title: "Unsupported Include Path",
+  fields: {
+    path: Schema.String,
+    includablePaths: Schema.Array(Schema.String)
+  },
+  detail: (e) =>
+    `Include path "${e.path}" is not supported; supported paths: ${
+      e.includablePaths.length > 0 ? e.includablePaths.join(", ") : "(none)"
+    }`
+}) {}
+
+/**
+ * 400 Bad Request: a requested `?include=` path has more hops than this
+ * endpoint allows.
+ *
+ * Distinct from {@link UnsupportedIncludePath}: depth is a different question
+ * from membership, and a caller that asked for one hop too many needs to be
+ * told about the cap, not told its path doesn't exist. A validator checking
+ * both should check depth first — see {@link Query.validateIncludePaths}.
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const error = new ApiError.UnsupportedIncludeDepth({ path: "author.employer.address", maxDepth: 2 })
+ * ApiError.toDocument(error)
+ * // → { errors: [{
+ * //      status: "400",
+ * //      code: "unsupported.include-depth",
+ * //      title: "Unsupported Include Depth",
+ * //      detail: "Include path \"author.employer.address\" exceeds the maximum include depth of 2",
+ * //      meta: { path: "author.employer.address", maxDepth: 2 }
+ * //    }] }
+ * ```
+ *
+ * @since 0.15.0
+ * @category errors
+ */
+export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()("UnsupportedIncludeDepth", {
+  status: 400,
+  code: "unsupported.include-depth",
+  title: "Unsupported Include Depth",
+  fields: {
+    path: Schema.String,
+    maxDepth: Schema.Number
+  },
+  detail: (e) => `Include path "${e.path}" exceeds the maximum include depth of ${e.maxDepth}`
+}) {}
+
+/**
+ * 400 Bad Request: a requested `?sort=` field is not one of the fields this
+ * endpoint allows sorting on.
+ *
+ * `meta.sortableFields` carries the whole sortable set, mirroring
+ * {@link UnsupportedIncludePath}'s `meta.includablePaths`.
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const error = new ApiError.UnsupportedSortField({
+ *   field: "internalScore",
+ *   sortableFields: ["title", "createdAt"]
+ * })
+ * ApiError.toDocument(error)
+ * // → { errors: [{
+ * //      status: "400",
+ * //      code: "unsupported.sort-field",
+ * //      title: "Unsupported Sort Field",
+ * //      detail: "Sort field \"internalScore\" is not supported...",
+ * //      meta: { field: "internalScore", sortableFields: [...] }
+ * //    }] }
+ * ```
+ *
+ * @since 0.15.0
+ * @category errors
+ */
+export class UnsupportedSortField extends make<UnsupportedSortField>()("UnsupportedSortField", {
+  status: 400,
+  code: "unsupported.sort-field",
+  title: "Unsupported Sort Field",
+  fields: {
+    field: Schema.String,
+    sortableFields: Schema.Array(Schema.String)
+  },
+  detail: (e) =>
+    `Sort field "${e.field}" is not supported; supported fields: ${
+      e.sortableFields.length > 0 ? e.sortableFields.join(", ") : "(none)"
+    }`
+}) {}
+
+/**
+ * 400 Bad Request: a requested `?fields[TYPE]=` member is not one of the
+ * resource type's attributes.
+ *
+ * `meta.attributes` carries the resource type's whole attribute set, mirroring
+ * {@link UnsupportedIncludePath}'s `meta.includablePaths`.
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const error = new ApiError.UnsupportedFieldsetMember({
+ *   type: "articles",
+ *   field: "internalNotes",
+ *   attributes: ["title", "body"]
+ * })
+ * ApiError.toDocument(error)
+ * // → { errors: [{
+ * //      status: "400",
+ * //      code: "unsupported.fieldset",
+ * //      title: "Unsupported Fieldset Member",
+ * //      detail: "Field \"internalNotes\" is not a supported attribute of \"articles\"...",
+ * //      meta: { type: "articles", field: "internalNotes", attributes: [...] }
+ * //    }] }
+ * ```
+ *
+ * @since 0.15.0
+ * @category errors
+ */
+export class UnsupportedFieldsetMember extends make<UnsupportedFieldsetMember>()("UnsupportedFieldsetMember", {
+  status: 400,
+  code: "unsupported.fieldset",
+  title: "Unsupported Fieldset Member",
+  fields: {
+    type: Schema.String,
+    field: Schema.String,
+    attributes: Schema.Array(Schema.String)
+  },
+  detail: (e) =>
+    `Field "${e.field}" is not a supported attribute of "${e.type}"; supported attributes: ${
+      e.attributes.length > 0 ? e.attributes.join(", ") : "(none)"
+    }`
+}) {}
+
+/**
+ * The standard query-parameter errors JSON:API §Query Parameters implies:
+ * unsupported `include` paths and depth, and unsupported `sort` and
+ * `fields[TYPE]` members. Unlike {@link Standard}, these aren't declared on
+ * every endpoint automatically — spread them into an endpoint's `errors`
+ * option for the query features it actually enables.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { ApiError, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ *
+ * const articles = Group.make(
+ *   Article,
+ *   Endpoint.list(Article, {
+ *     sort: true,
+ *     errors: [...ApiError.QueryParameterErrors]
+ *   })
+ * )
+ * ```
+ *
+ * @since 0.15.0
+ * @category constants
+ */
+export const QueryParameterErrors = [
+  UnsupportedIncludePath,
+  UnsupportedIncludeDepth,
+  UnsupportedSortField,
+  UnsupportedFieldsetMember
+] as const

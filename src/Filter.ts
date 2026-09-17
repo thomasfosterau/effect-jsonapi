@@ -17,7 +17,9 @@
  * types and constructors, the runtime {@link Ast} schema — its normal form
  * ({@link normalise}, design §3.2) and the grammar's profile URI
  * ({@link PROFILE_URI}). The URL codec over a resource's declaration is
- * `Query.Filter(resource)`.
+ * `Query.Filter(resource)`. What a decoded tree *means* — the truth tables,
+ * NULL handling, comparison domains and coercion — is the profile's §6; this
+ * package builds and canonicalises trees, and evaluates none.
  *
  * @example
  * ```ts
@@ -456,8 +458,11 @@ export type Condition<Fields extends FieldTypes = FieldTypes> = {
  * `Compare<"age", number> | Compare<"title", string> | …`. The decoded
  * `filter` of a query is one root node.
  *
- * The AST carries no semantics: what a tree *means* (NULL handling,
- * collation, coercion) is the interpreter's business.
+ * The AST itself carries no evaluator — it is plain data. What a tree
+ * *means*, though, is not open: the filter profile defines it, operator by
+ * operator, in `docs/filter-grammar.md` §6 (three-valued logic, the NULL
+ * rules, the comparison domains and the coercion rules). A server that
+ * advertises {@link PROFILE_URI} answers according to those tables.
  *
  * @since 0.13.0
  * @category models
@@ -737,6 +742,12 @@ export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
  * `Content-Type: application/vnd.api+json; profile="…"`. Nothing about request
  * handling keys off it — an endpoint declared with `filter: true` speaks the
  * grammar whether or not the client names the profile.
+ *
+ * The profile is both halves of `docs/filter-grammar.md`: the URL surface,
+ * operator core and canonical encoding (§1–§4), and the **semantics** (§6) —
+ * three-valued logic, the per-operator truth tables, the comparison domains
+ * and the coercion rules. Advertising the URI is a claim to answer according
+ * to §6.
  *
  * @example
  * ```ts

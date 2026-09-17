@@ -55,10 +55,11 @@ Three supporting changes made it work:
 
 - **New:** the lowercase descriptor types `Relationship.one`, `Relationship.optional`,
   `Relationship.many` and `Relationship.paginated` — the types the constructors of the same name
-  produce, defaults included (`one` / `optional` default to not filterable). A resource definition
-  is invariant in its relationship record, so an annotation has to name the type the constructor
-  produced; these are it.
-- **New:** `Resource.Definition<Type, Attributes, Rels, Meta, IdSchema>`, the parameter form of
+  produce, defaults included (`one` / `optional` default to not filterable, `paginated` to no
+  declared `order`). A resource definition is invariant in its relationship record, so an annotation
+  has to name the type the constructor produced; these are it. A relationship that declares a
+  `filter` or an `order` names it in the annotation, as the `const` tuple the constructor infers.
+- **New:** `Resource.Parameter<Type, Attributes, Rels, Meta, IdSchema>`, the parameter form of
   `Resource.Resource`, now used wherever the package takes a resource definition apart into its type
   parameters (`Endpoint.*`, `Group.resource`, `Resource.extend`, `Resource.family`). It reads `Type`
   off the definition's own `type` tag instead of inferring it structurally, which silently widened

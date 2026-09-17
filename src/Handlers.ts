@@ -10,6 +10,13 @@
  *     identifier somewhere in the document (data's relationships or another
  *     included resource's relationships)
  *
+ * They also take an `onResource` hook — a per-resource transform run **once
+ * per resource, in every slot**: the primary `data`, every deduplicated
+ * `included` member, and the identifiers of a linkage document. That is what
+ * makes sparse fieldsets (`project`) and computed per-viewer `meta`
+ * (`withMeta`) uniform: a document cannot come out describing one resource
+ * type two different ways depending on where it landed.
+ *
  * ```ts
  * handlers.handle("fetch", ({ params, query }) =>
  *   loadArticle(params.id).pipe(Effect.map((article) =>
@@ -21,8 +28,14 @@
  * )
  * ```
  *
+ * {@link resolveIncluded} is the other half — the walk that *produces*
+ * `included` from the paths the client requested, one batched level at a time,
+ * so a compound document costs one query per resource type per hop rather than
+ * one per reference.
+ *
  * @since 0.1.0
  */
+import { Effect } from "effect"
 import type { JsonApiObject } from "./Document.js"
 import { serialise, withPagePairs } from "./internal/canonical.js"
 import type { Pair } from "./Query.js"
@@ -95,6 +108,425 @@ export interface LinksValue {
   readonly next?: LinkValue | null
 }
 
+/**
+ * Free-form meta values accepted by the document builders.
+ *
+ * @since 0.1.0
+ * @category models
+ */
+export type MetaValue = { readonly [key: string]: unknown }
+
+// Simplifies intersections for readable hover types.
+type Simplify<T> = { readonly [K in keyof T]: T[K] } & {}
+
+// ---------------------------------------------------------------------------
+// Per-resource transforms
+// ---------------------------------------------------------------------------
+
+/**
+ * The widest resource-object shape a transform sees: {@link ResourceValue}
+ * plus the optional members transforms read and write.
+ *
+ * A transform is handed every resource the document carries, whatever its
+ * type, so this is deliberately the *union* of what a resource object may
+ * hold rather than any one resource's shape. Switch on `type` to narrow.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface AnyResourceValue extends ResourceValue {
+  readonly attributes?: { readonly [key: string]: unknown }
+  readonly meta?: MetaValue
+  readonly links?: unknown
+}
+
+/**
+ * The type-level half of a {@link ResourceTransform}: what the transform does
+ * to the type of any resource it is applied to.
+ *
+ * A transform is applied at more than one type in a single document — the
+ * primary resource, each `included` member, each identifier of a linkage
+ * document — so its effect on the output type cannot be a single inferred
+ * return type. It is written instead as a *type-level function*: an interface
+ * whose `Out` member is computed from `this["In"]`, the resource the transform
+ * is being applied to, and applied with {@link Transformed}.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface TransformLambda {
+  readonly In: unknown
+  readonly Out: unknown
+}
+
+/**
+ * Applies a {@link TransformLambda} to one resource type — the type-level
+ * counterpart of calling the transform.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type Transformed<F extends TransformLambda, R> = (F & { readonly In: R })["Out"]
+
+/**
+ * The {@link TransformLambda} of a transform that leaves the type alone —
+ * what a hand-written `(resource) => resource` function is, and the default
+ * when no `onResource` is given.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface IdentityLambda extends TransformLambda {
+  readonly Out: this["In"]
+}
+
+/**
+ * A per-resource transform: the `onResource` hook the document builders apply,
+ * once, to every resource object the document carries.
+ *
+ * It is a *polymorphic* function — one transform, applied at every type in the
+ * document — whose effect on each output type is computed by its
+ * {@link TransformLambda}. That is what keeps the builders' return type
+ * precise: `Handlers.data(article, { onResource: Handlers.project({ articles: ["title"] }) })`
+ * has a `data.attributes` of `{ title: string }`, and an `included` of
+ * articles projected the same way, rather than a widened `ResourceValue`.
+ *
+ * Build one with {@link project}, {@link withMeta}, {@link compose} or
+ * {@link transform}. A plain function is accepted too, and is checked against
+ * the default {@link IdentityLambda}: it must return the resource's own type,
+ * which is exactly the guarantee a shape-preserving transform makes.
+ *
+ * Transforms must be pure functions of the resource they are given: the
+ * builders run one at most once per `(type, id)` per document, and reuse that
+ * result wherever else the resource appears.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface ResourceTransform<F extends TransformLambda = IdentityLambda> {
+  <R extends ResourceValue>(resource: R): Transformed<F, R>
+}
+
+/**
+ * Builds a {@link ResourceTransform} from a runtime function and an explicit
+ * {@link TransformLambda} — the escape hatch for per-resource processing the
+ * package's own transforms don't cover.
+ *
+ * The lambda is the promise the function must keep; it is not checked against
+ * the implementation, so declare the one the function actually delivers.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
+ * const article = Article.make({ id: Article.Id.make("1"), attributes: { title: "Hi" } })
+ *
+ * // the type-level half: what this transform does to every resource it sees
+ * interface SelfLinkLambda extends Handlers.TransformLambda {
+ *   readonly Out: this["In"] & { readonly links: { readonly self: string } }
+ * }
+ *
+ * const withSelfLink = Handlers.transform<SelfLinkLambda>((resource) => ({
+ *   ...resource,
+ *   links: { self: `/${resource.type}/${resource.id}` }
+ * }))
+ *
+ * const document = Handlers.data(article, { onResource: withSelfLink })
+ * // → { data: { type: "articles", id: "1", attributes: { title: "Hi" },
+ * //             links: { self: "/articles/1" } } }
+ * console.log(document.data.links.self)
+ * ```
+ *
+ * @since 0.15.0
+ * @category constructors
+ */
+export const transform = <F extends TransformLambda>(
+  f: (resource: AnyResourceValue) => AnyResourceValue
+): ResourceTransform<F> => f as ResourceTransform<F>
+
+// ---------------------------------------------------------------------------
+// project — sparse fieldsets
+// ---------------------------------------------------------------------------
+
+/**
+ * A sparse-fieldset selection: the attribute names requested per resource
+ * type. This is the decoded `fields` member of a query schema
+ * (`Query.schema(Article, { fields: true })`), so a handler passes
+ * `query.fields` straight through.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface Fields {
+  readonly [type: string]: ReadonlyArray<string> | undefined
+}
+
+// The attributes a fieldset selects. A selection known only as an *array* of
+// names (a `query.fields` value, whose contents are a runtime fact) can be any
+// subset of them, so every selected attribute becomes optional; a literal
+// tuple is exact.
+type SelectedAttributes<A, Keys> = [Keys] extends [ReadonlyArray<string>]
+  ? [Keys[number]] extends [never]
+    ? A
+    : number extends Keys["length"]
+      ? Simplify<Partial<Pick<A, Extract<keyof A, Keys[number]>>>>
+      : Simplify<Pick<A, Extract<keyof A, Keys[number]>>>
+  : A
+
+/**
+ * The type of a resource with a sparse fieldset applied: `attributes` narrowed
+ * to the names requested for its type, everything else untouched. A type with
+ * no requested set is left exactly as it is.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type Projected<R, F> = R extends { readonly type: infer T; readonly attributes: infer A }
+  ? T extends keyof F
+    ? Simplify<Omit<R, "attributes"> & { readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>> }>
+    : R
+  : R
+
+/**
+ * The {@link TransformLambda} of {@link project}.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface ProjectLambda<F> extends TransformLambda {
+  readonly Out: Projected<this["In"], F>
+}
+
+const selectAttributes = (attributes: { readonly [key: string]: unknown }, requested: ReadonlyArray<string>) => {
+  const selected = new Set<string>(requested)
+  const projected: Record<string, unknown> = {}
+  for (const name of Object.keys(attributes)) {
+    if (selected.has(name)) projected[name] = attributes[name]
+  }
+  return projected
+}
+
+const projectResource = (resource: AnyResourceValue, fields: Fields | undefined): AnyResourceValue => {
+  if (fields === undefined || !Object.hasOwn(fields, resource.type)) return resource
+  const requested = fields[resource.type]
+  // No requested set for this type is the spec's "every field", not "no
+  // field" — and an empty `fields[TYPE]=` is read the same way.
+  if (requested === undefined || requested.length === 0) return resource
+  const attributes = resource.attributes
+  // Resource identifiers (and any resource with no attributes) have nothing
+  // to project.
+  if (attributes === undefined) return resource
+  return { ...resource, attributes: selectAttributes(attributes, requested) }
+}
+
+/**
+ * Applies a sparse fieldset (§Sparse Fieldsets) to a resource: `attributes` is
+ * narrowed to the names requested for the resource's type.
+ *
+ * Two behaviours make it safe to apply to every resource in a document:
+ *
+ *   - a type with **no requested set** — absent, or an empty
+ *     `?fields[TYPE]=` — is returned unchanged, which is the spec's default of
+ *     "every field", not "no field";
+ *   - only `attributes` is projected. `relationships`, `links` and `meta` are
+ *     left alone, and a resource identifier (no `attributes` at all) is
+ *     returned as is. Relationship fields — `?fields[articles]=author` — are
+ *     out of scope: `Query.Fieldset` is built from the resource's attributes,
+ *     so a relationship name cannot be requested in the first place.
+ *
+ * Dual API: `project(fields)` builds the {@link ResourceTransform} the
+ * document builders take as `onResource`, which is what applies the fieldset
+ * **uniformly** to the primary data and every `included` member;
+ * `project(resource, fields)` projects one resource directly.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * const article = Article.make({
+ *   id: Article.Id.make("1"),
+ *   attributes: { title: "Hi", body: "…" },
+ *   relationships: { author: { data: { type: "people", id: Person.Id.make("9") } } }
+ * })
+ *
+ * // data-first: one resource, `attributes` only
+ * const projected = Handlers.project(article, { articles: ["title"] })
+ * console.log(projected.attributes)      // → { title: "Hi" }
+ * console.log(projected.relationships)   // → { author: { data: { type: "people", id: "9" } } } — untouched
+ *
+ * // no requested set for this type → unchanged
+ * console.log(Handlers.project(article, { people: ["firstName"] }).attributes)
+ * // → { title: "Hi", body: "…" }
+ *
+ * // data-last: the hook the builders apply to every resource in the document
+ * const document = Handlers.data(article, { onResource: Handlers.project({ articles: ["title"] }) })
+ * console.log(document.data.attributes)  // → { title: "Hi" }
+ * ```
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-sparse-fieldsets}
+ * @since 0.15.0
+ * @category constructors
+ */
+export const project: {
+  <const F extends Fields>(fields: F | undefined): ResourceTransform<ProjectLambda<F>>
+  <R extends ResourceValue, const F extends Fields>(resource: R, fields: F | undefined): Projected<R, F>
+} = ((...args: ReadonlyArray<unknown>) =>
+  args.length >= 2
+    ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
+    : (resource: AnyResourceValue) => projectResource(resource, args[0] as Fields | undefined)) as never
+
+// ---------------------------------------------------------------------------
+// withMeta — computed per-resource meta
+// ---------------------------------------------------------------------------
+
+// The `meta` a resource already carries, if any.
+type ExistingMeta<R> = R extends { readonly meta?: infer E } ? Exclude<E, undefined> : never
+
+// What `withMeta` leaves under `meta`: the computed members merged over
+// whatever the resource already declared.
+type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never] ? M : Simplify<ExistingMeta<R> & M>
+
+/**
+ * The type of a resource with computed `meta` merged in. The member stays
+ * optional: a computation that produces nothing leaves the resource without a
+ * `meta` member rather than with an empty one.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type WithMeta<R, M extends MetaValue> = R extends AnyResourceValue
+  ? Simplify<Omit<R, "meta"> & { readonly meta?: MergedMeta<R, M> }>
+  : R
+
+/**
+ * The {@link TransformLambda} of {@link withMeta}.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface WithMetaLambda<M extends MetaValue> extends TransformLambda {
+  readonly Out: WithMeta<this["In"], M>
+}
+
+const stampMeta = (resource: AnyResourceValue, computed: MetaValue | undefined): AnyResourceValue => {
+  const merged = { ...resource.meta, ...computed }
+  if (Object.keys(merged).length > 0) return { ...resource, meta: merged }
+  // An empty `meta` is a *present* meta object to the spec, which is a
+  // different statement from having none: emit no member at all.
+  if (resource.meta === undefined) return resource
+  const { meta: _meta, ...rest } = resource
+  return rest
+}
+
+/**
+ * Builds a {@link ResourceTransform} that stamps computed `meta` onto every
+ * resource the document carries — the standard home for per-viewer,
+ * server-computed facts about a resource (`canEdit`, `canDelete`, …).
+ *
+ * The computed members are merged **over** whatever `meta` the resource
+ * already carries. If the merged result is empty, the resource is emitted with
+ * **no** `meta` member: to the spec an empty `meta` object is a present-but-empty
+ * meta, which says something different from saying nothing.
+ *
+ * The computation is handed every resource in the document, of every type, so
+ * it receives the widest {@link AnyResourceValue} shape — switch on `type` to
+ * narrow, and return `undefined` for the resources it has nothing to say about.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
+ * const article = Article.make({ id: Article.Id.make("1"), attributes: { title: "Hi" } })
+ *
+ * const forViewer = (viewer: { readonly id: string; readonly admin: boolean }) =>
+ *   Handlers.withMeta((resource) => ({ canEdit: viewer.admin && resource.type === "articles" }))
+ *
+ * const document = Handlers.data(article, { onResource: forViewer({ id: "9", admin: true }) })
+ * console.log(document.data.meta)   // → { canEdit: true }
+ *
+ * // nothing computed → no `meta` member, rather than an empty one
+ * console.log("meta" in Handlers.data(article, { onResource: Handlers.withMeta(() => undefined) }).data)
+ * // → false
+ * ```
+ *
+ * @since 0.15.0
+ * @category constructors
+ */
+export const withMeta = <const M extends MetaValue>(
+  compute: (resource: AnyResourceValue) => M | undefined
+): ResourceTransform<WithMetaLambda<M>> =>
+  ((resource: AnyResourceValue) => stampMeta(resource, compute(resource))) as ResourceTransform<WithMetaLambda<M>>
+
+// ---------------------------------------------------------------------------
+// compose
+// ---------------------------------------------------------------------------
+
+/**
+ * The {@link TransformLambda} of {@link compose}: `second` applied to the
+ * output of `first`.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export interface ComposeLambda<A extends TransformLambda, B extends TransformLambda> extends TransformLambda {
+  readonly Out: Transformed<B, Transformed<A, this["In"]>>
+}
+
+/**
+ * Composes two transforms into one: `first`, then `second`. Nest it for more.
+ *
+ * A document has a single `onResource` hook by design — one pass, applied
+ * once per resource — so a handler that both projects a fieldset and stamps
+ * computed `meta` composes the two here rather than running two passes.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ * })
+ * const article = Article.make({ id: Article.Id.make("1"), attributes: { title: "Hi", body: "…" } })
+ *
+ * const onResource = Handlers.compose(
+ *   Handlers.project({ articles: ["title"] }),
+ *   Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }))
+ * )
+ *
+ * const document = Handlers.data(article, { onResource })
+ * console.log(document.data.attributes)  // → { title: "Hi" }
+ * console.log(document.data.meta)        // → { href: "/articles/1" }
+ * ```
+ *
+ * @since 0.15.0
+ * @category combinators
+ */
+export const compose = <A extends TransformLambda, B extends TransformLambda>(
+  first: ResourceTransform<A>,
+  second: ResourceTransform<B>
+): ResourceTransform<ComposeLambda<A, B>> =>
+  ((resource: ResourceValue) => second(first(resource) as ResourceValue)) as unknown as ResourceTransform<
+    ComposeLambda<A, B>
+  >
+
+// ---------------------------------------------------------------------------
+// Compound documents
+// ---------------------------------------------------------------------------
+
 const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}\0${identifier.id}`
 
 const referencedIdentifiers = (resources: ReadonlyArray<ResourceValue>): Set<string> => {
@@ -111,10 +543,42 @@ const referencedIdentifiers = (resources: ReadonlyArray<ResourceValue>): Set<str
   return identifiers
 }
 
+// Wraps a transform so it runs at most once per `(type, id)`, handing back
+// the same value everywhere that resource appears in the document. A resource
+// that is both primary data and an `included` member is therefore shaped
+// once, not twice — it cannot come out two ways.
+const memoise = <F extends TransformLambda>(onResource: ResourceTransform<F>): ResourceTransform<F> => {
+  const shaped = new Map<string, unknown>()
+  return ((resource: ResourceValue) => {
+    const k = key(resource)
+    if (shaped.has(k)) return shaped.get(k)
+    const transformed = onResource(resource)
+    shaped.set(k, transformed)
+    return transformed
+  }) as ResourceTransform<F>
+}
+
+// Applies a transform to every resource of an array, or hands the array back
+// when there is none.
+const mapResources = <F extends TransformLambda>(
+  resources: ReadonlyArray<ResourceValue>,
+  onResource: ResourceTransform<F> | undefined
+): ReadonlyArray<ResourceValue> =>
+  onResource === undefined ? resources : resources.map((resource) => onResource(resource) as ResourceValue)
+
 /**
- * Deduplicates included resources by `(type, id)` and verifies the spec's
- * full-linkage rule: every included resource must be referenced by a resource
- * identifier in the document.
+ * Deduplicates included resources by `(type, id)`, applies the per-resource
+ * transform, and verifies the spec's full-linkage rule: every included
+ * resource must be referenced by a resource identifier in the document.
+ *
+ * The three steps run in that order deliberately. Dedup first, so `onResource`
+ * runs once per distinct resource rather than once per occurrence; the
+ * transform before the check, so the check sees the resources the document
+ * actually emits — a transform that drops `relationships` breaks full linkage,
+ * and saying so is the point of the check.
+ *
+ * The transform is keyed off the resource as given, so it must not change a
+ * resource's `type` or `id`.
  *
  * A linkage violation is a programming error in the handler, so it throws
  * (surfacing as a defect) rather than failing the request.
@@ -122,11 +586,20 @@ const referencedIdentifiers = (resources: ReadonlyArray<ResourceValue>): Set<str
  * @since 0.1.0
  * @category utils
  */
-export const buildIncluded = <Included extends ResourceValue>(
+export const buildIncluded = <Included extends ResourceValue, F extends TransformLambda = IdentityLambda>(
   primary: ReadonlyArray<ResourceValue>,
   included: ReadonlyArray<Included>,
-  options?: { readonly checkLinkage?: boolean }
-): ReadonlyArray<Included> => {
+  options?: {
+    readonly checkLinkage?: boolean
+    /**
+     * Applied to every deduplicated included resource, after dedup and before
+     * the full-linkage check.
+     *
+     * @since 0.15.0
+     */
+    readonly onResource?: ResourceTransform<F>
+  }
+): ReadonlyArray<Transformed<F, Included>> => {
   // Dedupe by (type, id)
   const seen = new Set<string>()
   const deduped: Array<Included> = []
@@ -137,10 +610,13 @@ export const buildIncluded = <Included extends ResourceValue>(
     deduped.push(resource)
   }
 
+  // One transform pass over the survivors.
+  const shaped = mapResources(deduped, options?.onResource)
+
   // Full linkage: every included resource is referenced from the document.
   if (options?.checkLinkage !== false) {
-    const referenced = referencedIdentifiers([...primary, ...deduped])
-    for (const resource of deduped) {
+    const referenced = referencedIdentifiers([...primary, ...shaped])
+    for (const resource of shaped) {
       if (!referenced.has(key(resource))) {
         throw new Error(
           `JSON:API full linkage violation: included resource "${resource.type}:${resource.id}" ` +
@@ -151,44 +627,432 @@ export const buildIncluded = <Included extends ResourceValue>(
     }
   }
 
-  return deduped
+  return shaped as ReadonlyArray<Transformed<F, Included>>
 }
 
+// ---------------------------------------------------------------------------
+// Compound-document include resolution
+// ---------------------------------------------------------------------------
+
 /**
- * Free-form meta values accepted by the document builders.
+ * A batch loader for one resource type: given the ids the walk reached at the
+ * current level, load those resources.
  *
- * @since 0.1.0
+ * The resolver calls a target **once per level**, with every distinct id that
+ * level collected — never once per reference — so a loader should issue one
+ * query for the whole array. Ids it cannot resolve (deleted rows, rows this
+ * viewer may not see) are simply left out of the result; the resolver drops
+ * them from `included` rather than failing. A genuine fault (the database is
+ * down) belongs in the error channel, where it fails the document.
+ *
+ * @since 0.15.0
  * @category models
  */
-export type MetaValue = { readonly [key: string]: unknown }
+export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, R = never> = (
+  ids: ReadonlyArray<string>
+) => Effect.Effect<ReadonlyArray<A>, E, R>
 
-// Simplifies intersections for readable hover types.
-type Simplify<T> = { readonly [K in keyof T]: T[K] } & {}
+/**
+ * The registry {@link resolveIncluded} walks: one {@link IncludeTarget} per
+ * resource **type**, keyed by the `type` the linkage carries.
+ *
+ * Keying by type rather than by relationship name is what makes a
+ * heterogeneous to-many (`{ data: [{ type: "articles" … }, { type: "comments" … }] }`)
+ * cost one query per type, and what lets a type reached by several paths share
+ * a single loader. A type with no entry is not loadable, so references to it
+ * are dropped — the same outcome as an id the loader didn't return.
+ *
+ * Declare a registry with `satisfies Handlers.IncludeTargets` rather than
+ * annotating it: the loaders' own resource, error and service types are then
+ * still visible to {@link resolveIncluded}, which projects them onto the
+ * effect it returns ({@link IncludeTargetResource}, {@link IncludeTargetError},
+ * {@link IncludeTargetServices}).
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface IncludeTargets {
+  readonly [type: string]: IncludeTarget<ResourceValue, any, any>
+}
+
+// The `(resource, error, services)` triple a target's Effect carries.
+type IncludeTargetTypes<T> = T extends (
+  ids: ReadonlyArray<string>
+) => Effect.Effect<ReadonlyArray<infer A>, infer E, infer R>
+  ? { readonly resource: A; readonly error: E; readonly services: R }
+  : never
+
+/**
+ * The union of resource values a target registry can produce — the
+ * `included` element type {@link resolveIncluded} resolves to.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type IncludeTargetResource<Targets extends IncludeTargets> = IncludeTargetTypes<
+  Targets[keyof Targets]
+>["resource"]
+
+/**
+ * The union of failures a target registry's loaders can raise.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type IncludeTargetError<Targets extends IncludeTargets> = IncludeTargetTypes<Targets[keyof Targets]>["error"]
+
+/**
+ * The union of services a target registry's loaders require.
+ *
+ * @since 0.15.0
+ * @category type-level
+ */
+export type IncludeTargetServices<Targets extends IncludeTargets> = IncludeTargetTypes<
+  Targets[keyof Targets]
+>["services"]
+
+/**
+ * Options of {@link resolveIncluded}.
+ *
+ * @since 0.15.0
+ * @category models
+ */
+export interface ResolveIncludedOptions {
+  /**
+   * How many of a level's loader calls may run at once. Defaults to
+   * `"unbounded"`, which is a level's distinct target types — a number you
+   * control, since it is bounded by the registry, not by the request.
+   */
+  readonly concurrency?: number | "unbounded" | undefined
+  /**
+   * The maximum number of relationship hops to walk. Defaults to `3`, the
+   * deepest path `Query.Include` legalises.
+   *
+   * §7.1 leaves the bound implementation-defined, and each hop is another
+   * round of loader calls, so this is a denial-of-service boundary as much as
+   * an ergonomic one: raise it only as far as the paths you actually serve
+   * need. Segments beyond the cap are not walked.
+   */
+  readonly depth?: number | undefined
+}
+
+// A node of the trie the requested paths form: `["author", "comments.author"]`
+// becomes `{ author: {}, comments: { author: {} } }`. Paths sharing a prefix
+// share the node, so the prefix is walked once however many paths spell it.
+interface PathNode {
+  readonly segment: string
+  readonly children: Map<string, PathNode>
+}
+
+// The requested paths as a trie. `Map` preserves insertion order, so walking
+// it walks the paths in the order the client asked for them.
+const pathTrie = (paths: ReadonlyArray<string>): Map<string, PathNode> => {
+  const root = new Map<string, PathNode>()
+  for (const path of paths) {
+    let level = root
+    for (const segment of path.split(".")) {
+      if (segment === "") continue
+      let node = level.get(segment)
+      if (node === undefined) {
+        node = { segment, children: new Map() }
+        level.set(segment, node)
+      }
+      level = node.children
+    }
+  }
+  return root
+}
+
+const isIdentifier = (linkage: LinkageValue): linkage is ResourceIdentifierValue =>
+  linkage !== null && !Array.isArray(linkage)
+
+// The identifiers one relationship's inline linkage carries. A `paginated`
+// relationship has no `data` — its members are reachable only through the
+// `related` link — so it contributes nothing to a walk.
+const linkageIdentifiers = (resource: ResourceValue, name: string): ReadonlyArray<ResourceIdentifierValue> => {
+  const linkage = resource.relationships?.[name]?.data
+  if (linkage === null || linkage === undefined) return []
+  return isIdentifier(linkage) ? [linkage] : linkage
+}
+
+// One level of the walk: the trie nodes still to read, and the resources to
+// read them off.
+interface Level {
+  readonly nodes: Map<string, PathNode>
+  readonly parents: ReadonlyArray<ResourceValue>
+}
+
+const resolve = (
+  primary: ReadonlyArray<ResourceValue>,
+  paths: ReadonlyArray<string>,
+  targets: IncludeTargets,
+  concurrency: number | "unbounded",
+  depth: number
+): Effect.Effect<ReadonlyArray<ResourceValue>, any, any> =>
+  Effect.gen(function* () {
+    // Every resource the document already holds, keyed `type\0id`. Seeded with
+    // the primary data: a resource already in `data` is never loaded again and
+    // never emitted into `included` (the spec's one-resource-object-per-`(type,
+    // id)` rule spans the whole document), but the walk still steps *through*
+    // it, which is what makes a cycle terminate instead of looping.
+    const known = new Map<string, ResourceValue>()
+    for (const resource of primary) known.set(key(resource), resource)
+
+    // `included`, in walk order.
+    const included: Array<ResourceValue> = []
+
+    let level: ReadonlyArray<Level> = [{ nodes: pathTrie(paths), parents: primary }]
+    let hops = depth
+
+    while (level.length > 0 && hops > 0) {
+      hops--
+
+      // Every identifier this level reaches, deduplicated across paths, parents
+      // and rows, in walk order — and, per branch that has further segments,
+      // the keys it reached, so the next level knows its parents.
+      const levelIdentifiers = new Map<string, ResourceIdentifierValue>()
+      const branches: Array<{ readonly nodes: Map<string, PathNode>; readonly keys: ReadonlyArray<string> }> = []
+      for (const { nodes, parents } of level) {
+        for (const node of nodes.values()) {
+          const keys: Array<string> = []
+          const reached = new Set<string>()
+          for (const parent of parents) {
+            for (const identifier of linkageIdentifiers(parent, node.segment)) {
+              const k = key(identifier)
+              if (reached.has(k)) continue
+              reached.add(k)
+              keys.push(k)
+              if (!levelIdentifiers.has(k)) levelIdentifiers.set(k, identifier)
+            }
+          }
+          if (node.children.size > 0) branches.push({ nodes: node.children, keys })
+        }
+      }
+
+      // One batch per distinct type, holding only the ids the document doesn't
+      // already have. A type with no target is not loadable: its references are
+      // dropped here.
+      const batches: Array<{ readonly load: IncludeTarget<ResourceValue, any, any>; readonly ids: Array<string> }> = []
+      const byType = new Map<string, Array<string>>()
+      for (const [k, identifier] of levelIdentifiers) {
+        if (known.has(k)) continue
+        if (!Object.hasOwn(targets, identifier.type)) continue
+        const ids = byType.get(identifier.type)
+        if (ids === undefined) {
+          const fresh = [identifier.id]
+          byType.set(identifier.type, fresh)
+          batches.push({ load: targets[identifier.type]!, ids: fresh })
+        } else {
+          ids.push(identifier.id)
+        }
+      }
+
+      const rows = yield* Effect.forEach(batches, ({ ids, load }) => load(ids), { concurrency })
+
+      // Index what came back. A row nobody referenced is ignored: adding it
+      // would break the full linkage `buildIncluded` checks.
+      const loaded = new Map<string, ResourceValue>()
+      for (const batch of rows) {
+        for (const row of batch) {
+          const k = key(row)
+          if (!levelIdentifiers.has(k) || known.has(k) || loaded.has(k)) continue
+          loaded.set(k, row)
+        }
+      }
+
+      // Emit in walk order, not in whichever order the batches completed.
+      for (const k of levelIdentifiers.keys()) {
+        const resource = loaded.get(k)
+        if (resource === undefined) continue
+        known.set(k, resource)
+        included.push(resource)
+      }
+
+      // Step. A branch's parents are the resources its keys resolved to —
+      // whether this level loaded them or an earlier one did — so a shared
+      // prefix costs no second query and a diamond is traversed once.
+      const next: Array<Level> = []
+      for (const branch of branches) {
+        const parents: Array<ResourceValue> = []
+        for (const k of branch.keys) {
+          const resource = known.get(k)
+          if (resource !== undefined) parents.push(resource)
+        }
+        if (parents.length > 0) next.push({ nodes: branch.nodes, parents })
+      }
+      level = next
+    }
+
+    return included
+  })
+
+/**
+ * Resolves the `included` member of a compound document: walks the requested
+ * §7.1 include paths from the primary data, loading each level through the
+ * given per-type batch loaders.
+ *
+ * This is the runtime half of `?include=` — the part
+ * {@link buildIncluded} assumes has already happened — as a plain `Effect` a
+ * handler composes. There is no service to provide and no runtime to set up:
+ * the loaders are ordinary functions in a record, so the same call serves one
+ * primary resource and a whole page of them.
+ *
+ * What it guarantees:
+ *
+ * - **One level at a time, across the whole primary set.** Every parent's
+ *   references for the current segment are collected first, then handed to the
+ *   loaders as a single batch per type. `author.company` over a 50-article page
+ *   is two loader calls, not a hundred — the N+1 this exists to prevent.
+ * - **One bucket keyed `(type, id)`.** `included` is a set of resources, not of
+ *   references: two paths or two rows reaching the same resource contribute it
+ *   once, a shared path prefix costs no second query, and a resource already in
+ *   the primary `data` is never duplicated into `included`.
+ * - **Emission order is walk order**, so `get` and `list` agree and the array
+ *   is stable across runs whatever order the batches complete in.
+ * - **Cycles terminate.** A graph that loops (articles → comments → articles)
+ *   revisits resources the document already holds, which are never re-loaded,
+ *   so the walk is bounded by the paths, then by `depth`.
+ * - **An unresolvable reference is dropped, not a failure.** A type with no
+ *   target, an id the batch didn't return, a row the viewer may not see: all
+ *   are normal outcomes, and simply absent from `included`. A loader's own
+ *   failure propagates and fails the document.
+ * - **`undefined` when nothing was requested**, so the caller omits the member.
+ *   An empty array is the different statement "your walk resolved to nothing".
+ *
+ * Because every resource is reached *through* a document resource's linkage,
+ * full linkage holds by construction — {@link buildIncluded}'s check becomes a
+ * guard rather than a live constraint.
+ *
+ * A `paginated` relationship carries no inline linkage, so it contributes
+ * nothing to a walk; its members are reachable only through the `related` link,
+ * which is why they are excluded from `?include=` paths to begin with.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString }
+ * })
+ * const Comment = Resource.make("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: {
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.many(() => Comment)
+ *   }
+ * })
+ *
+ * const people = [
+ *   Person.make({ id: Person.Id.make("9"), attributes: { firstName: "Dan" } }),
+ *   Person.make({ id: Person.Id.make("2"), attributes: { firstName: "Tyler" } })
+ * ]
+ * const comments = [
+ *   Comment.make({
+ *     id: Comment.Id.make("5"),
+ *     attributes: { body: "First!" },
+ *     relationships: { author: { data: Person.ref(Person.Id.make("2")) } }
+ *   })
+ * ]
+ * const article = Article.make({
+ *   id: Article.Id.make("1"),
+ *   attributes: { title: "JSON:API paints my bikeshed!" },
+ *   relationships: {
+ *     author: { data: Person.ref(Person.Id.make("9")) },
+ *     comments: { data: [Comment.ref(Comment.Id.make("5"))] }
+ *   }
+ * })
+ *
+ * // One loader per type. Each is called once per level, with every id that
+ * // level collected — so each is `WHERE id IN (…)`, never a lookup per row.
+ * const targets = {
+ *   people: (ids: ReadonlyArray<string>) => Effect.succeed(people.filter((p) => ids.includes(p.id))),
+ *   comments: (ids: ReadonlyArray<string>) => Effect.succeed(comments.filter((c) => ids.includes(c.id)))
+ * }
+ *
+ * const document = Effect.runSync(
+ *   Handlers.resolveIncluded(article, ["author", "comments.author"], targets).pipe(
+ *     Effect.map((included) => Handlers.data(article, { included, self: "/articles/1" }))
+ *   )
+ * )
+ *
+ * document.included?.map((resource) => `${resource.type}:${resource.id}`)
+ * // → ["people:9", "comments:5", "people:2"]
+ * //   Three loader calls for two levels: people+comments, then people again
+ * //   for the comment's author (person 9 is already in the document, so the
+ * //   second people batch asks for id 2 alone).
+ * ```
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
+ * @since 0.15.0
+ * @category constructors
+ */
+export const resolveIncluded = <Targets extends IncludeTargets>(
+  primary: ResourceValue | null | ReadonlyArray<ResourceValue>,
+  paths: ReadonlyArray<string> | undefined,
+  targets: Targets,
+  options?: ResolveIncludedOptions
+): Effect.Effect<
+  ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
+  IncludeTargetError<Targets>,
+  IncludeTargetServices<Targets>
+> =>
+  (paths === undefined || paths.length === 0
+    ? Effect.succeed(undefined)
+    : resolve(
+        primary === null ? [] : Array.isArray(primary) ? primary : [primary as ResourceValue],
+        paths,
+        targets,
+        options?.concurrency ?? "unbounded",
+        options?.depth ?? 3
+      )) as Effect.Effect<
+    ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
+    IncludeTargetError<Targets>,
+    IncludeTargetServices<Targets>
+  >
 
 /**
  * A top-level JSON:API document *value* — the shape {@link data} and
  * {@link collection} return, named so consumers can annotate their own
  * document-assembling functions instead of hand-rolling the envelope type.
  *
- * The optional `jsonapi` member (the top-level `jsonapi` object) is included so
- * a builder that stamps it still conforms; the {@link data}/{@link collection}
- * builders themselves omit it.
+ * The `jsonapi` member is *conditional* on `J`, the same way `included` is
+ * conditional on `Included` and `meta` on `M`: it is present (and required,
+ * not optional — a builder that infers `J` from an argument has one to put
+ * there) only when a caller actually passed the `jsonapi` option, so the
+ * return type of `Handlers.data(article, { jsonapi: Document.v1_1 })` carries
+ * `jsonapi: Document.JsonApiObjectValue` and the return type of
+ * `Handlers.data(article)` has no `jsonapi` member at all — no cast needed
+ * either way.
  *
  * The type stays *conditional* on its generics so TypeScript only infers
- * `Included` / `M` from arguments — never from the expected (contextual) return
- * type of a handler, which breaks down inside `pipe(Effect.map(...))` chains.
+ * `Included` / `M` / `J` from arguments — never from the expected (contextual)
+ * return type of a handler, which breaks down inside `pipe(Effect.map(...))`
+ * chains.
  *
  * @since 0.3.0
  * @category models
  */
-export type DocumentValue<Data, Included extends ResourceValue = never, M extends MetaValue = never> = Simplify<
-  { readonly data: Data; readonly links?: LinksValue; readonly jsonapi?: JsonApiObjectValue } & ([Included] extends [
-    never
-  ]
+export type DocumentValue<
+  Data,
+  Included = never,
+  M extends MetaValue = never,
+  J extends JsonApiObjectValue = never
+> = Simplify<
+  { readonly data: Data; readonly links?: LinksValue } & ([Included] extends [never]
     ? {}
     : { readonly included?: ReadonlyArray<Included> }) &
-    ([M] extends [never] ? {} : { readonly meta?: M })
+    ([M] extends [never] ? {} : { readonly meta?: M }) &
+    ([J] extends [never] ? {} : { readonly jsonapi: J })
 >
+
+// The primary `data` of a document with the transform applied. `data(null)`
+// has no resource to transform, so a nullable primary stays nullable.
+type TransformedData<F extends TransformLambda, R> = R extends null ? null : Transformed<F, R>
 
 // Appends a query string (no leading `?`) to a path, whichever separator the
 // path needs; a path with no query is returned as is.
@@ -220,6 +1084,9 @@ const buildLinks = (options: {
   return { ...links, self: linkWithQuery(links.self, queryString(options.query)) }
 }
 
+// `data` and `primary` are the already-transformed primary resources: the
+// transform runs on them before the document is assembled, and `onResource`
+// is the memoised pass shared with `included` so nothing is shaped twice.
 const build = (
   data: unknown,
   primary: ReadonlyArray<ResourceValue>,
@@ -227,35 +1094,51 @@ const build = (
     | {
         readonly included?: ReadonlyArray<ResourceValue>
         readonly meta?: MetaValue
+        readonly jsonapi?: JsonApiObjectValue
         readonly self?: string
         readonly query?: string | ReadonlyArray<Pair>
         readonly links?: LinksValue
         readonly checkLinkage?: boolean
       }
-    | undefined
+    | undefined,
+  onResource: ResourceTransform<TransformLambda> | undefined
 ) => {
   const links = options === undefined ? undefined : buildLinks(options)
   const included =
     options?.included !== undefined && options.included.length > 0
-      ? buildIncluded(primary, options.included, options)
+      ? buildIncluded(primary, options.included, { checkLinkage: options.checkLinkage, onResource })
       : undefined
   return {
     data,
     ...(included !== undefined ? { included } : {}),
     ...(links !== undefined ? { links } : {}),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {})
+    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {})
   }
 }
 
 /**
- * Builds a single-resource document value: `{ data, included?, links?, meta? }`.
+ * Builds a single-resource document value: `{ data, included?, links?, meta?, jsonapi? }`.
  *
  * Included resources are deduplicated and checked for full linkage.
+ *
+ * Pass `jsonapi` to stamp the top-level `jsonapi` object — `Document.v1_1` to
+ * advertise JSON:API 1.1, or `Atomic.jsonapi` for the atomic-operations
+ * extension — and the return type carries `jsonapi` (typed as
+ * {@link JsonApiObjectValue}) only when you actually pass it, so no cast is
+ * needed at the call site either way.
+ *
+ * **Not emitted by default.** A JSON:API 1.1 server arguably should advertise
+ * the version it implements on every document, but defaulting it here would
+ * silently add a member to every response body this library already produces
+ * — a behavioural change disguised as a bug fix. Advertising the version is
+ * therefore opt-in: pass `jsonapi: Document.v1_1` on the responses where you
+ * want it.
  *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
@@ -293,11 +1176,44 @@ const build = (
  *       Effect.map((article) =>
  *         Handlers.data(article, {
  *           included: query.include?.includes("author") ? [author] : [],
+ *           jsonapi: Document.v1_1,
  *           self: `/articles/${article.id}`
  *         })
  *       )
  *     )
  *   )
+ * ```
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
+ * })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * const article = Article.make({
+ *   id: Article.Id.make("1"),
+ *   attributes: { title: "Hi", body: "…" },
+ *   relationships: { author: { data: { type: "people", id: Person.Id.make("9") } } }
+ * })
+ * const author = Person.make({ id: Person.Id.make("9"), attributes: { firstName: "Dan", lastName: "Gebhardt" } })
+ *
+ * // `onResource` is one pass over every resource the document carries — the
+ * // primary data and every `included` member — so a sparse fieldset cannot
+ * // shape one slot and miss the other.
+ * const document = Handlers.data(article, {
+ *   included: [author],
+ *   onResource: Handlers.project({ articles: ["title"], people: ["firstName"] })
+ * })
+ *
+ * console.log(document.data.attributes)           // → { title: "Hi" }
+ * console.log(document.included?.[0]?.attributes) // → { firstName: "Dan" }
  * ```
  *
  * @since 0.1.0
@@ -306,22 +1222,43 @@ const build = (
 export const data = <
   R extends ResourceValue | null,
   const Included extends ResourceValue = never,
-  const M extends MetaValue = never
+  const M extends MetaValue = never,
+  const J extends JsonApiObjectValue = never,
+  F extends TransformLambda = IdentityLambda
 >(
   resource: R,
   options?: {
     readonly included?: ReadonlyArray<Included>
     readonly meta?: M
+    /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
+    readonly jsonapi?: J
     readonly self?: string
     readonly links?: LinksValue
+    /**
+     * Applied to every resource the document carries — the primary resource
+     * and every deduplicated `included` member — exactly once each. See
+     * {@link ResourceTransform}, {@link project} and {@link withMeta}.
+     *
+     * @since 0.15.0
+     */
+    readonly onResource?: ResourceTransform<F>
     /** Disable the full-linkage check (it is on by default). */
     readonly checkLinkage?: boolean
   }
-): DocumentValue<R, Included, M> =>
-  build(resource, resource === null ? [] : [resource], options) as DocumentValue<R, Included, M>
+): DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J> => {
+  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
+  const primary =
+    resource === null ? null : onResource === undefined ? resource : (onResource(resource) as ResourceValue)
+  return build(primary, primary === null ? [] : [primary], options, onResource) as DocumentValue<
+    TransformedData<F, R>,
+    Transformed<F, Included>,
+    M,
+    J
+  >
+}
 
 /**
- * Builds a collection document value: `{ data: [...], included?, links?, meta? }`.
+ * Builds a collection document value: `{ data: [...], included?, links?, meta?, jsonapi? }`.
  *
  * Included resources are deduplicated and checked for full linkage.
  *
@@ -335,10 +1272,14 @@ export const data = <
  * `query` option instead ({@link offsetPaginationLinks}): pass the pairs
  * there, not here.
  *
+ * As with {@link data}, `jsonapi` (e.g. `Document.v1_1`) is only emitted, and
+ * only narrows into the return type, when you pass it — see {@link data} for
+ * why it is opt-in rather than a default.
+ *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { Handlers, Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Handlers, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
@@ -369,12 +1310,14 @@ export const data = <
  *     )
  *   )
  *
- * // …or, unpaginated, the canonical query on the collection's own `self` link
+ * // …or, unpaginated, the canonical query on the collection's own `self` link,
+ * // advertising the JSON:API version this server implements
  * Handlers.collection(page, {
+ *   jsonapi: Document.v1_1,
  *   self: "/articles",
  *   query: Query.canonicalPairs(listQuery)({ sort: [{ field: "title", direction: "desc" }] })
  * })
- * // → { data: [...], links: { self: "/articles?sort=-title" } }
+ * // → { data: [...], links: { self: "/articles?sort=-title" }, jsonapi: { version: "1.1" } }
  * ```
  *
  * @since 0.1.0
@@ -383,12 +1326,16 @@ export const data = <
 export const collection = <
   R extends ResourceValue,
   const Included extends ResourceValue = never,
-  const M extends MetaValue = never
+  const M extends MetaValue = never,
+  const J extends JsonApiObjectValue = never,
+  F extends TransformLambda = IdentityLambda
 >(
   resources: ReadonlyArray<R>,
   options?: {
     readonly included?: ReadonlyArray<Included>
     readonly meta?: M
+    /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
+    readonly jsonapi?: J
     readonly self?: string
     /**
      * The request's canonical query — `Query.canonicalPairs(schema)(query)`
@@ -399,11 +1346,27 @@ export const collection = <
      */
     readonly query?: string | ReadonlyArray<Pair>
     readonly links?: LinksValue
+    /**
+     * Applied to every resource the document carries — each member of `data`
+     * and every deduplicated `included` member — exactly once each. See
+     * {@link ResourceTransform}, {@link project} and {@link withMeta}.
+     *
+     * @since 0.15.0
+     */
+    readonly onResource?: ResourceTransform<F>
     /** Disable the full-linkage check (it is on by default). */
     readonly checkLinkage?: boolean
   }
-): DocumentValue<ReadonlyArray<R>, Included, M> =>
-  build(resources, resources, options) as DocumentValue<ReadonlyArray<R>, Included, M>
+): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
+  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
+  const primary = mapResources(resources, onResource)
+  return build(primary, primary, options, onResource) as DocumentValue<
+    ReadonlyArray<Transformed<F, R>>,
+    Transformed<F, Included>,
+    M,
+    J
+  >
+}
 
 // ---------------------------------------------------------------------------
 // Relationship linkage & links
@@ -484,14 +1447,26 @@ export type LinkageValue = ResourceIdentifierValue | ReadonlyArray<ResourceIdent
 
 // The builder's return type is conditional on its generics for the same
 // reason as `DocumentValue` above.
-type LinkageDocumentValue<Data, M extends MetaValue> = Simplify<
-  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never] ? {} : { readonly meta?: M })
+type LinkageDocumentValue<Data, M extends MetaValue, J extends JsonApiObjectValue = never> = Simplify<
+  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never] ? {} : { readonly meta?: M }) &
+    ([J] extends [never] ? {} : { readonly jsonapi: J })
 >
+
+// A transform applies to the *identifiers* a linkage document carries, one by
+// one; the mapped type keeps a tuple a tuple.
+type TransformedLinkage<F extends TransformLambda, Data> = Data extends null
+  ? null
+  : Data extends ReadonlyArray<ResourceIdentifierValue>
+    ? { readonly [K in keyof Data]: Transformed<F, Data[K]> }
+    : Transformed<F, Data>
 
 /**
  * Builds a relationship-linkage document value — what relationship-endpoint
  * handlers (`fetchRelationship` / `updateRelationship` / `addRelationship`)
- * return: `{ data, links?, meta? }` where `data` is resource linkage.
+ * return: `{ data, links?, meta?, jsonapi? }` where `data` is resource linkage.
+ *
+ * As with {@link data}, `jsonapi` is only emitted, and only narrows into the
+ * return type, when you pass it — see {@link data} for why it is opt-in.
  *
  * @example
  * ```ts
@@ -538,15 +1513,34 @@ type LinkageDocumentValue<Data, M extends MetaValue> = Simplify<
  * @since 0.1.0
  * @category constructors
  */
-export const linkage = <const Data extends LinkageValue, const M extends MetaValue = never>(
+export const linkage = <
+  const Data extends LinkageValue,
+  const M extends MetaValue = never,
+  const J extends JsonApiObjectValue = never,
+  F extends TransformLambda = IdentityLambda
+>(
   data: Data,
   options?: {
     readonly meta?: M
+    /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
+    readonly jsonapi?: J
     readonly self?: string
     readonly related?: string
     readonly links?: LinksValue
+    /**
+     * Applied to every resource identifier the document carries, exactly once
+     * each — the slot a relationship document's resources occupy (§8.4 makes
+     * its primary data bare identifiers). A fieldset projection is a no-op on
+     * an identifier, which has no `attributes`; per-resource {@link withMeta}
+     * is not, and is the reason the hook is here: the same resource must not
+     * describe different capabilities in a relationship document than it does
+     * as an `included` member elsewhere.
+     *
+     * @since 0.15.0
+     */
+    readonly onResource?: ResourceTransform<F>
   }
-): LinkageDocumentValue<Data, M> => {
+): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J> => {
   const links: LinksValue | undefined =
     options?.self !== undefined || options?.related !== undefined
       ? {
@@ -555,11 +1549,19 @@ export const linkage = <const Data extends LinkageValue, const M extends MetaVal
           ...options?.links
         }
       : options?.links
+  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
+  const shaped =
+    onResource === undefined || data === null
+      ? data
+      : Array.isArray(data)
+        ? mapResources(data as ReadonlyArray<ResourceIdentifierValue>, onResource)
+        : onResource(data as ResourceIdentifierValue)
   return {
-    data,
+    data: shaped,
     ...(links !== undefined ? { links } : {}),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {})
-  } as LinkageDocumentValue<Data, M>
+    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {})
+  } as LinkageDocumentValue<TransformedLinkage<F, Data>, M, J>
 }
 
 // ---------------------------------------------------------------------------

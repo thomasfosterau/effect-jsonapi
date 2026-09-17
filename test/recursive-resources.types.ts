@@ -275,6 +275,58 @@ const program = Effect.gen(function* () {
 })
 
 // ---------------------------------------------------------------------------
+// A paginated relationship that declares a canonical order, inside a cycle
+// ---------------------------------------------------------------------------
+
+const feedAttributes = { name: Schema.NonEmptyString }
+const postAttributes = { body: Schema.NonEmptyString, createdAt: Schema.String }
+
+// `Relationship.paginated` carries its declared `Order` in a second type
+// parameter, so the annotation has to name it — as the `const` tuple the
+// constructor infers, the same way a filterable `one` names its operators.
+interface Feed extends Resource.Resource<
+  "feeds",
+  typeof feedAttributes,
+  {
+    readonly posts: Relationship.paginated<Post, readonly [{ readonly field: "createdAt"; readonly direction: "desc" }]>
+  }
+> {}
+
+interface Post extends Resource.Resource<
+  "posts",
+  typeof postAttributes,
+  {
+    readonly feed: Relationship.one<Feed>
+  }
+> {}
+
+const Feed: Feed = Resource.make("feeds", {
+  attributes: feedAttributes,
+  relationships: {
+    posts: Relationship.paginated(() => Post, {
+      order: [{ field: "createdAt", direction: "desc" }]
+    })
+  }
+})
+
+const Post: Post = Resource.make("posts", {
+  attributes: postAttributes,
+  relationships: { feed: Relationship.one(() => Feed) }
+})
+
+assertType<"desc">(Feed.relationships.posts.order[0].direction)
+// @ts-expect-error -- the declared order is read back as its literal tuple
+assertType<"asc">(Feed.relationships.posts.order[0].direction)
+
+// An order-less `paginated` in a cycle keeps the constructor's `undefined`.
+assertType<undefined>(Article.relationships.revisions.order)
+
+type FeedPaths = Resource.IncludePath<Feed>
+// @ts-expect-error -- a paginated relationship is never includable, order or not
+const badFeedPath: FeedPaths = "posts"
+const feedEndpoint = Endpoint.related(Feed, "posts")
+
+// ---------------------------------------------------------------------------
 // Longer cycles, a custom id, `extend` and `family` over cyclic members
 // ---------------------------------------------------------------------------
 
@@ -353,6 +405,8 @@ assertType<"/graphs/:id">(graphEndpoint.path)
 
 export {
   addComment,
+  badFeedPath,
+  feedEndpoint,
   AnyNode,
   badLongPath,
   graphEndpoint,
