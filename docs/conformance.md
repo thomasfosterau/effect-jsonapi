@@ -205,23 +205,54 @@ be safe to point at a live server.
 
 ## 6. Relationship to #116
 
-[#116](https://github.com/thomasfosterau/effect-jsonapi/issues/116) completes the filter profile by
-giving it normative semantics. The two issues are coupled, but **#116 does not have to land first**,
-because the profile splits cleanly along the line the kit can already see:
+[#116](https://github.com/thomasfosterau/effect-jsonapi/issues/116) completed the filter profile by
+giving it normative semantics, and **landed while this kit was being built**. The two were coupled
+but not ordered, because the profile splits cleanly along the line the kit can see:
 
-- **Already normative and already checked.** `docs/filter-grammar.md` §2 (surface syntax and what is
+- **Normative all along, and checked here.** `docs/filter-grammar.md` §2 (surface syntax and what is
   a 400), §3 (canonical encoding and the round-trip invariants), §4 (the closed operator core), §5
   (the profile URI and its advertisement) and §7 (`source.parameter` on every rejection). None of
-  these needs to know what a tree _means_, so all of them are in the profile tier today.
-- **Not yet normative, and a different kind of rule.** §1.3 defers evaluation to a citation, which
-  is precisely #116's defect. Those rules are _semantic_: deciding them means knowing which rows the
-  server holds, which a black-box HTTP kit cannot. They need either a seeded-data fixture contract
-  or the reference evaluator #116 must decide on.
+  these needs to know what a tree _means_, so all of them are in the profile tier today, and were
+  before #116 landed.
+- **Semantic, and a different kind of rule.** What §1.3 used to defer to a citation is now
+  `docs/filter-grammar.md` §6: three-valued Kleene logic, a truth table per operator, and comparison
+  defined on the field's JSON representation — rule-identified `F-EVAL-*`, `F-CMP-*`, `F-IN-*`,
+  `F-LOGIC-*`, `F-ISNULL-*`, `F-NULL-*`, `F-CONS-*`. Deciding these means knowing which resources
+  the server holds and what each one should have matched.
 
-So: #116 can land in either order. When it does, its truth tables arrive as a second profile suite
-against an oracle, and the corresponding entry comes off `Conformance.gaps`. Nothing about the
-present structure has to change — which is the reason the gap is declared with its tracking issue
-rather than left silent.
+### 6.1 What #116 handed to this kit
+
+#116 decided **no reference evaluator ships**, and said why the oracle belongs here instead:
+
+> An executable oracle belongs where it can run against the thing that actually has to conform — a
+> **server** — which is the conformance kit, #120. […] checking a _server_ against them is #120's
+> job.
+
+It also observed that the harness already holds the input: F-ORD-1 defines comparison on a field's
+**JSON representation**, and F-EVAL-4 reads `value(resource, field)` from it — which is exactly what
+a probe gets back off the wire. So the gap is narrower than it was first written. The remaining work
+is:
+
+1. A fold over `Filter.Ast` implementing §6.3's tables (short, per #116, but a second
+   implementation of §6 to keep honest — which #116 names as a real cost).
+2. A rule that fetches a collection unfiltered, evaluates a filter tree over each returned
+   resource's JSON, and compares the expected match set against what the filtered request actually
+   returned. No seeded fixture needed — the unfiltered collection _is_ the known set.
+
+### 6.2 The open decision
+
+Whether that evaluator is **public API or internal to the kit**. #116 left it open —
+
+> Revisit if #120 wants the evaluator as a shared building block rather than a fixture of its own.
+
+— and it is a real choice, not a detail. Public, it is the first thing this package ships that
+evaluates data rather than describing it, and F-ORD-1's comparison domain (derived internally from
+an attribute's encoded form, deliberately not part of `Resource.filterable`'s public shape) would
+have to be exposed. Internal, the kit keeps its own oracle and no new public surface appears, but a
+consumer building a server cannot reuse it to check their own store.
+
+That decision is deliberately **not** taken in this version. The gap stays declared, now pointing at
+§6 and at this question rather than at an unlanded issue.
 
 ## 7. Shipping
 
@@ -296,6 +327,15 @@ it("does not flag anything else when one rule is broken", async () => {
 
 A kit that fails everything catches every bug and is worthless. The control — the conformant server,
 against which the kit reports no failures — is the other half of the same argument.
+
+**The filter-grammar rules get their own fixture**, because nothing else would run them: no api in
+this repo declares `filter: true`, so against every example they legitimately report `Skipped`. A
+rule that skips everywhere would ship never having executed, which is indistinguishable from a rule
+that does not work. So `Conformance.test.ts` carries a grammar-enabled api and a canned server
+implementing §2/§4/§5/§7 correctly, asserts the three rules **pass and actually ran** (not skipped),
+and then breaks each in turn: the profile parameter dropped from the media type, an operator outside
+the closed core accepted, a rejection that omits `source.parameter`, and the group form answering a
+different document from the shorthand it desugars from.
 
 ## 10. Open questions
 

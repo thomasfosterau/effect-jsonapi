@@ -430,8 +430,8 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "The filter profile's evaluation semantics",
     reason:
-      "The profile's syntax, closed operator core, canonical form, error pointers and advertisement are checked; what a tree *means* is not. Deciding whether `not(eq(status, x))` matches a row whose `status` is NULL, whether `nin` is SQL's `NOT IN` or the negation of `in`, and where an absent attribute lands requires an oracle over known data, which a black-box transport cannot supply. Needs the normative truth tables plus either a seeded-data fixture contract or a reference evaluator to compare against.",
-    tracking: ["#116"]
+      "The profile's syntax, closed operator core, canonical form, error pointers and advertisement are checked; what a tree *means* is not. #116 has since supplied the normative tables — `docs/filter-grammar.md` §6, rule-identified F-EVAL-*, F-CMP-*, F-IN-*, F-LOGIC-*, F-ISNULL-* — and deliberately ships no reference evaluator, assigning the executable oracle to this kit instead. The remaining work is a fold over the AST implementing §6.3, run against the unfiltered collection's JSON (which a probe already has, per F-ORD-1's JSON-representation domain) and compared against what the filtered request returned. Open first: whether that evaluator is public API — #116's \"shared building block\" — or stays internal to the kit.",
+    tracking: ["#116", "#120"]
   },
   {
     area: "Pagination link correctness",
@@ -442,8 +442,8 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "Sort ordering correctness",
     reason:
-      "A `sort` field the server does not support must be a 400, and that is checked. Whether `?sort=-createdAt` actually orders the collection, and where NULLs land, requires known data and the profile's collation decision.",
-    tracking: ["#116"]
+      "A `sort` field the server does not support must be a 400, and that is checked. Whether `?sort=-createdAt` actually orders the collection, and where NULLs land, requires known data. Note the filter profile's §6.2 ordering rules govern `filter` comparison only — `sort` ordering is still unspecified, so there is no normative text to check against yet.",
+    tracking: []
   },
   {
     area: "Write semantics",

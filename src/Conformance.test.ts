@@ -12,6 +12,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Conformance from "./Conformance.js"
 import * as Endpoint from "./Endpoint.js"
+import * as Filter from "./Filter.js"
 import * as Group from "./Group.js"
 import * as Handlers from "./Handlers.js"
 import * as Middleware from "./Middleware.js"
@@ -625,6 +626,167 @@ describe("Conformance: detects a deliberately broken server", () => {
     })
     // Exactly the media-type rule, and nothing riding along with it.
     expect(failed(report)).toEqual(["spec/content-negotiation/response-media-type"])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The filter grammar profile rules
+// ---------------------------------------------------------------------------
+
+/**
+ * The grammar rules skip against every api in this repo — none declares
+ * `filter: true` — so without a fixture that turns the grammar on they would
+ * ship never having run anywhere. This is that fixture.
+ */
+describe("Conformance: the filter grammar profile", () => {
+  const Product = Resource.make("products", {
+    attributes: {
+      name: Schema.NonEmptyString.pipe(Filter.able([Filter.Op.eq, Filter.Op.ne])),
+      priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt]))
+    }
+  })
+
+  const grammarApi = HttpApi.make("catalog").add(Group.make(Product, Endpoint.list(Product, { filter: true })))
+
+  const row = { type: "products", id: "1", attributes: { name: "Widget", priceCents: 1200 } }
+
+  /** A server that implements the grammar's §2/§4/§5/§7 surface correctly. */
+  const grammarServe = (request: { readonly path: string }): Canned => {
+    const [, search = ""] = request.path.split("?")
+    const raw = new URLSearchParams(search)
+    const contentType = `${MEDIA_TYPE};profile="${Filter.PROFILE_URI}"`
+    const reject = (parameter: string): Canned => ({
+      status: 400,
+      contentType,
+      body: { errors: [{ status: "400", title: "Bad Request", source: { parameter } }] }
+    })
+
+    const declared: Readonly<Record<string, ReadonlyArray<string>>> = {
+      name: ["eq", "ne"],
+      priceCents: ["eq", "gt", "lt"]
+    }
+    const conditions = new Map<string, { path?: string; operator?: string; value?: string }>()
+
+    for (const key of new Set(raw.keys())) {
+      if (!key.startsWith("filter")) continue
+      // §2: a repeated `filter[…]` key is a 400.
+      if (raw.getAll(key).length > 1) return reject(key)
+      const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]!)
+      const value = raw.get(key)!
+
+      // Group form: filter[id][condition][member].
+      if (segments.length === 3 && segments[1] === "condition") {
+        const entry = conditions.get(segments[0]!) ?? {}
+        if (segments[2] === "path" || segments[2] === "operator" || segments[2] === "value") {
+          entry[segments[2]] = value
+          conditions.set(segments[0]!, entry)
+          continue
+        }
+        return reject(key)
+      }
+      // Shorthand: filter[field] or filter[field][op]. Anything deeper is a 400.
+      if (segments.length > 2 || segments.length === 0) return reject(key)
+      const field = segments[0]!
+      const operators = declared[field]
+      if (operators === undefined) return reject(key)
+      const operator = segments.length === 2 ? segments[1]! : "eq"
+      if (!operators.includes(operator)) return reject(key)
+      conditions.set(key, { path: field, operator, value })
+    }
+
+    for (const [id, condition] of conditions) {
+      if (condition.path === undefined || condition.operator === undefined || condition.value === undefined) {
+        return reject(`filter[${id}][condition][operator]`)
+      }
+      const operators = declared[condition.path]
+      if (operators === undefined || !operators.includes(condition.operator)) {
+        return reject(`filter[${id}][condition][operator]`)
+      }
+    }
+
+    return { contentType, body: { jsonapi: { version: "1.1" }, data: [row] } }
+  }
+
+  const verifyGrammar = (
+    serve: (request: { readonly method: string; readonly path: string; readonly headers: Headers }) => Canned,
+    options?: Conformance.Options
+  ) =>
+    Effect.runPromise(
+      Conformance.verifyWith(grammarApi, {
+        client: cannedClient(serve),
+        baseUrl: "http://fixture.test",
+        tiers: ["profile"],
+        only: ["profile/filter"],
+        ...options
+      })
+    )
+
+  it("passes against a server that implements the grammar", async () => {
+    const report = await verifyGrammar(grammarServe)
+    expect(failed(report)).toEqual([])
+    // And genuinely ran, rather than skipping its way to a clean report.
+    for (const id of ["advertises-profile-uri", "rejections", "spelling-equivalence"]) {
+      expect(outcomeFor(report, `profile/filter/${id}`)._tag).toBe("Passed")
+    }
+  })
+
+  it("skips — never passes — against an api that does not declare the grammar", async () => {
+    const report = await Effect.runPromise(
+      Conformance.verifyWith(api, {
+        client: cannedClient(conformantServe),
+        baseUrl: "http://fixture.test",
+        ids: { articles: "1" },
+        only: ["profile/filter"]
+      })
+    )
+    for (const outcome of report.outcomes) {
+      expect(outcome._tag).toBe("Skipped")
+      if (outcome._tag === "Skipped") expect(outcome.reason).toContain("filter: true")
+    }
+  })
+
+  it("detects a server that does not advertise the profile", async () => {
+    const report = await verifyGrammar((request) => {
+      const canned = grammarServe(request)
+      return { ...canned, contentType: MEDIA_TYPE }
+    })
+    expect(failed(report)).toContain("profile/filter/advertises-profile-uri")
+  })
+
+  it("detects an operator outside the closed core being accepted", async () => {
+    const report = await verifyGrammar((request) =>
+      request.path.includes("definitelyNotAnOperator")
+        ? { contentType: `${MEDIA_TYPE};profile="${Filter.PROFILE_URI}"`, body: { data: [row] } }
+        : grammarServe(request)
+    )
+    const outcome = outcomeFor(report, "profile/filter/rejections")
+    expect(outcome._tag).toBe("Failed")
+    if (outcome._tag === "Failed") {
+      expect(outcome.findings.some((found) => found.detail.includes("outside the core"))).toBe(true)
+    }
+  })
+
+  it("detects a rejection that does not name the offending key in source.parameter", async () => {
+    const report = await verifyGrammar((request) => {
+      const canned = grammarServe(request)
+      if (canned.status !== 400) return canned
+      return { ...canned, body: { errors: [{ status: "400", title: "Bad Request" }] } }
+    })
+    const outcome = outcomeFor(report, "profile/filter/rejections")
+    expect(outcome._tag).toBe("Failed")
+    if (outcome._tag === "Failed") {
+      expect(outcome.findings.every((found) => found.detail.includes("source.parameter"))).toBe(true)
+    }
+  })
+
+  it("detects the group form disagreeing with the shorthand it desugars from", async () => {
+    const report = await verifyGrammar((request) =>
+      request.path.includes("%5Bcondition%5D") || request.path.includes("[condition]")
+        ? { contentType: `${MEDIA_TYPE};profile="${Filter.PROFILE_URI}"`, body: { data: [] } }
+        : grammarServe(request)
+    )
+    const outcome = outcomeFor(report, "profile/filter/spelling-equivalence")
+    expect(outcome._tag).toBe("Failed")
   })
 })
 
