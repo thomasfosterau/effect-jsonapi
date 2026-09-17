@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as ApiError from "./ApiError.js"
+import * as Document from "./Document.js"
 
 class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
   status: 404,
@@ -160,6 +161,58 @@ describe("standard errors", () => {
   it("Forbidden and Conflict are available for application use", () => {
     expect(ApiError.Forbidden.status).toBe(403)
     expect(ApiError.Conflict.status).toBe(409)
+  })
+})
+
+describe("ApiError.make source", () => {
+  class SlugTaken extends ApiError.make<SlugTaken>()("SlugTaken", {
+    status: 409,
+    fields: { slug: Schema.String },
+    detail: (e) => `The slug "${e.slug}" is already in use`,
+    source: { pointer: Document.pointer.attribute("slug") }
+  }) {}
+
+  class BadFilter extends ApiError.make<BadFilter>()("BadFilter", {
+    status: 400,
+    fields: { field: Schema.String },
+    source: (e) => ({ parameter: `filter[${e.field}]` })
+  }) {}
+
+  class NoSource extends ApiError.make<NoSource>()("NoSource", {
+    status: 400,
+    fields: { detail: Schema.String }
+  }) {}
+
+  it("emits a constant source into the error object", () => {
+    const wire = Schema.encodeUnknownSync(SlugTaken.wire)(new SlugTaken({ slug: "hello-world" }))
+    expect(wire.errors[0]?.source).toEqual({ pointer: "/data/attributes/slug" })
+  })
+
+  it("emits a per-instance source computed from the (encoded) fields", () => {
+    const first = Schema.encodeUnknownSync(BadFilter.wire)(new BadFilter({ field: "body" }))
+    const second = Schema.encodeUnknownSync(BadFilter.wire)(new BadFilter({ field: "title" }))
+    expect(first.errors[0]?.source).toEqual({ parameter: "filter[body]" })
+    expect(second.errors[0]?.source).toEqual({ parameter: "filter[title]" })
+  })
+
+  it("omits source entirely when not declared", () => {
+    const wire = Schema.encodeUnknownSync(NoSource.wire)(new NoSource({ detail: "x" }))
+    expect(wire.errors[0]?.source).toBeUndefined()
+  })
+
+  it("round-trips a field name containing a literal / through source.pointer and back", () => {
+    class WeirdFieldTaken extends ApiError.make<WeirdFieldTaken>()("WeirdFieldTaken", {
+      status: 409,
+      fields: { field: Schema.String },
+      source: (e) => ({ pointer: Document.pointer.attribute(e.field) })
+    }) {}
+
+    const wire = Schema.encodeUnknownSync(WeirdFieldTaken.wire)(new WeirdFieldTaken({ field: "a/b" }))
+    const source = wire.errors[0]?.source
+    expect(source).toEqual({ pointer: "/data/attributes/a~1b" })
+    expect(Document.parsePointer((source as { pointer: string }).pointer)).toEqual(
+      Option.some({ _tag: "attribute", name: "a/b" })
+    )
   })
 })
 

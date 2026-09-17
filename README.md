@@ -1635,6 +1635,13 @@ media type of responses from endpoints that speak it —
 `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the
 same way, since unknown profiles are ignored, never rejected.
 
+The profile defines what a tree **means**, not only how it is spelled:
+[§6 of the grammar](./docs/filter-grammar.md#6-semantics) is the normative semantics — three-valued
+(Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each
+attribute type, and the line between a 400 and an empty result. Handlers are what evaluate a tree,
+so that section is the contract they answer to; this package builds, validates and canonicalises
+trees and evaluates none.
+
 ### The canonical query string
 
 JSON:API 1.1 requires a collection document's `self` link to carry the query parameters the client
