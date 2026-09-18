@@ -21,58 +21,65 @@
  * which maps the package to `./dist/index.d.ts` and therefore only means
  * anything after a build.
  */
-import { Effect, Schema } from "effect"
-import { HttpApi, HttpApiClient } from "effect/unstable/httpapi"
-import { Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+import { Effect, Schema } from "effect";
+import { HttpApi, HttpApiClient } from "effect/unstable/httpapi";
+import { Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
-const Person = Resource.make("people", { attributes: { name: Schema.String } })
+const Person = Resource.make("people", { attributes: { name: Schema.String } });
 
 const Article = Resource.make("articles", {
   attributes: { title: Schema.String },
-  relationships: { author: Relationship.one(() => Person) }
-})
+  relationships: { author: Relationship.one(() => Person) },
+});
 
 /** A group generated end-to-end by {@link Group.resource}. */
-const Generated = HttpApi.make("api").add(Group.resource(Article)).add(Group.resource(Person))
+const Generated = HttpApi.make("api").add(Group.resource(Article)).add(Group.resource(Person));
 
 /** The same endpoints assembled by hand from the `Endpoint.*` constructors. */
 const Assembled = HttpApi.make("api")
-  .add(Group.make("articles", Endpoint.get(Article), Endpoint.update(Article), Endpoint.delete(Article)))
-  .add(Group.resource(Person))
+  .add(
+    Group.make(
+      "articles",
+      Endpoint.get(Article),
+      Endpoint.update(Article),
+      Endpoint.delete(Article),
+    ),
+  )
+  .add(Group.resource(Person));
 
-declare const baseUrl: string
-declare const id: never
+declare const baseUrl: string;
+declare const id: never;
 
 /** Accepts only an effect whose requirements are exactly `never`. */
-const assertNever = <A, E>(_: Effect.Effect<A, E, never>): void => {}
+const assertNever = <A, E>(_: Effect.Effect<A, E, never>): void => {};
 
 export const generated = Effect.gen(function* () {
-  const client = yield* HttpApiClient.make(Generated, { baseUrl })
+  const client = yield* HttpApiClient.make(Generated, { baseUrl });
   // Paramless endpoints were never affected — they pin the baseline.
-  assertNever(client.articles.list({ query: {} }))
+  assertNever(client.articles.list({ query: {} }));
   // `:id` endpoints: the regression surface.
-  assertNever(client.articles.get({ params: { id }, query: {} }))
-  assertNever(client.articles.delete({ params: { id } }))
-  assertNever(client.articles.author({ params: { id }, query: {} }))
-  assertNever(client.articles.authorRelationship({ params: { id }, query: {} }))
-})
+  assertNever(client.articles.get({ params: { id }, query: {} }));
+  assertNever(client.articles.delete({ params: { id } }));
+  assertNever(client.articles.author({ params: { id }, query: {} }));
+  assertNever(client.articles.authorRelationship({ params: { id }, query: {} }));
+});
 
 export const assembled = Effect.gen(function* () {
-  const client = yield* HttpApiClient.make(Assembled, { baseUrl })
-  assertNever(client.articles.get({ params: { id }, query: {} }))
-  assertNever(client.articles.delete({ params: { id } }))
-})
+  const client = yield* HttpApiClient.make(Assembled, { baseUrl });
+  assertNever(client.articles.get({ params: { id }, query: {} }));
+  assertNever(client.articles.delete({ params: { id } }));
+});
 
 /**
  * Negative control. Without this, `assertNever` passing would prove nothing:
  * if the assertion had no teeth every call above would pass vacuously.
  */
-declare const withRequirement: Effect.Effect<number, never, unknown>
+declare const withRequirement: Effect.Effect<number, never, unknown>;
 // The language-service plugin reports the same fact as its own
 // `missingEffectContext` diagnostic, which no `@ts-expect-error` covers.
 // @effect-diagnostics missingEffectContext:off
 // @ts-expect-error `assertNever` must reject a non-`never` requirement
-assertNever(withRequirement)
+assertNever(withRequirement);
 // @effect-diagnostics missingEffectContext:error
 
 /**
@@ -81,9 +88,9 @@ assertNever(withRequirement)
  * the id param is still required and still branded.
  */
 export const paramsStillTyped = Effect.gen(function* () {
-  const client = yield* HttpApiClient.make(Generated, { baseUrl })
+  const client = yield* HttpApiClient.make(Generated, { baseUrl });
   // @ts-expect-error `params` is required — erasing it to `never` must fail here
-  yield* client.articles.get({ query: {} })
+  yield* client.articles.get({ query: {} });
   // @ts-expect-error `id` is a branded articles id, not a plain string
-  yield* client.articles.get({ params: { id: "unbranded" }, query: {} })
-})
+  yield* client.articles.get({ params: { id: "unbranded" }, query: {} });
+});

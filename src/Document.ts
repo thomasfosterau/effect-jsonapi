@@ -18,7 +18,7 @@
  *
  * @since 0.1.0
  */
-import { JsonPointer, Option, Schema } from "effect"
+import { JsonPointer, Option, Schema } from "effect";
 
 // ---------------------------------------------------------------------------
 // Meta
@@ -33,7 +33,7 @@ import { JsonPointer, Option, Schema } from "effect"
  * @since 0.1.0
  * @category schemas
  */
-export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown)
+export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown);
 
 // ---------------------------------------------------------------------------
 // Links (JSON:API 1.1 link object + per-context member sets)
@@ -55,7 +55,7 @@ export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown)
  * @since 0.6.0
  * @category schemas
  */
-export const Url = Schema.Union([Schema.URLFromString, Schema.String])
+export const Url = Schema.Union([Schema.URLFromString, Schema.String]);
 
 /**
  * A link object, per https://jsonapi.org/format/1.1/#document-links
@@ -70,8 +70,8 @@ export const LinkObject = Schema.Struct({
   title: Schema.optionalKey(Schema.String),
   type: Schema.optionalKey(Schema.String),
   hreflang: Schema.optionalKey(Schema.String),
-  meta: Schema.optionalKey(AnyMeta)
-})
+  meta: Schema.optionalKey(AnyMeta),
+});
 
 /**
  * A link: either a {@link Url} (an absolute `URL` or a relative URI-reference
@@ -80,7 +80,7 @@ export const LinkObject = Schema.Struct({
  * @since 0.1.0
  * @category schemas
  */
-export const Link = Schema.Union([Url, LinkObject])
+export const Link = Schema.Union([Url, LinkObject]);
 
 /**
  * The decoded type of a {@link Link}.
@@ -88,7 +88,7 @@ export const Link = Schema.Union([Url, LinkObject])
  * @since 0.15.0
  * @category models
  */
-export type Link = typeof Link.Type
+export type Link = typeof Link.Type;
 
 /**
  * Extracts the wire string from a {@link Link}: a `string` passes through, a
@@ -114,13 +114,13 @@ export type Link = typeof Link.Type
  * @since 0.15.0
  * @category accessors
  */
-export function href(link: Link): string
-export function href(link: Link | undefined): string | undefined
+export function href(link: Link): string;
+export function href(link: Link | undefined): string | undefined;
 export function href(link: Link | undefined): string | undefined {
-  if (link === undefined) return undefined
-  if (typeof link === "string") return link
-  if (link instanceof URL) return link.href
-  return href(link.href)
+  if (link === undefined) return undefined;
+  if (typeof link === "string") return link;
+  if (link instanceof URL) return link.href;
+  return href(link.href);
 }
 
 /**
@@ -130,8 +130,8 @@ export function href(link: Link | undefined): string | undefined {
  * @category schemas
  */
 export const ResourceLinks = Schema.Struct({
-  self: Schema.optionalKey(Link)
-})
+  self: Schema.optionalKey(Link),
+});
 
 /**
  * A relationship object's `links`: the spec standardises `self` and `related`.
@@ -141,8 +141,8 @@ export const ResourceLinks = Schema.Struct({
  */
 export const RelationshipLinks = Schema.Struct({
   self: Schema.optionalKey(Link),
-  related: Schema.optionalKey(Link)
-})
+  related: Schema.optionalKey(Link),
+});
 
 /**
  * {@link RelationshipLinks} that also admits profile-defined members.
@@ -151,8 +151,8 @@ export const RelationshipLinks = Schema.Struct({
  * @category schemas
  */
 export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
-  Schema.Record(Schema.String, Schema.NullOr(Link))
-])
+  Schema.Record(Schema.String, Schema.NullOr(Link)),
+]);
 
 /**
  * The `links` of a paginated relationship: `related` is *required* — it is the
@@ -168,8 +168,8 @@ export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
  */
 export const PaginatedRelationshipLinks = Schema.Struct({
   self: Schema.optionalKey(Link),
-  related: Link
-})
+  related: Link,
+});
 
 /**
  * Top-level `links`: `self`/`related`/`describedby` plus the pagination
@@ -185,8 +185,8 @@ export const TopLevelLinks = Schema.Struct({
   first: Schema.optionalKey(Schema.NullOr(Link)),
   last: Schema.optionalKey(Schema.NullOr(Link)),
   prev: Schema.optionalKey(Schema.NullOr(Link)),
-  next: Schema.optionalKey(Schema.NullOr(Link))
-})
+  next: Schema.optionalKey(Schema.NullOr(Link)),
+});
 
 // ---------------------------------------------------------------------------
 // jsonapi object
@@ -202,8 +202,8 @@ export const JsonApiObject = Schema.Struct({
   version: Schema.optionalKey(Schema.Literals(["1.0", "1.1"])),
   ext: Schema.optionalKey(Schema.Array(Url)),
   profile: Schema.optionalKey(Schema.Array(Url)),
-  meta: Schema.optionalKey(AnyMeta)
-})
+  meta: Schema.optionalKey(AnyMeta),
+});
 
 /**
  * A ready-made `jsonapi` member value advertising JSON:API v1.1.
@@ -211,7 +211,7 @@ export const JsonApiObject = Schema.Struct({
  * @since 0.1.0
  * @category constants
  */
-export const v1_1: typeof JsonApiObject.Type = { version: "1.1" }
+export const v1_1: typeof JsonApiObject.Type = { version: "1.1" };
 
 // ---------------------------------------------------------------------------
 // Error objects
@@ -227,15 +227,15 @@ export const v1_1: typeof JsonApiObject.Type = { version: "1.1" }
 export const ErrorSource = Schema.Union([
   Schema.Struct({ pointer: Schema.String }),
   Schema.Struct({ parameter: Schema.String }),
-  Schema.Struct({ header: Schema.String })
-])
+  Schema.Struct({ header: Schema.String }),
+]);
 
 const memberPointer =
   (kind: "attributes" | "relationships") =>
   (name: string, options?: { readonly index?: number }): string =>
     options?.index !== undefined
       ? `/data/${options.index}/${kind}/${JsonPointer.escapeToken(name)}`
-      : `/data/${kind}/${JsonPointer.escapeToken(name)}`
+      : `/data/${kind}/${JsonPointer.escapeToken(name)}`;
 
 /**
  * JSON Pointer (RFC 6901) constructors for the `source.pointer` a JSON:API
@@ -315,8 +315,8 @@ export const pointer = {
    * @since 0.15.0
    * @category constructors
    */
-  escape: JsonPointer.escapeToken
-} as const
+  escape: JsonPointer.escapeToken,
+} as const;
 
 /**
  * The member a JSON Pointer built by {@link pointer} — or parsed by
@@ -327,9 +327,9 @@ export const pointer = {
  * @category models
  */
 export interface PointerMember {
-  readonly _tag: "attribute" | "relationship"
-  readonly name: string
-  readonly index?: number
+  readonly _tag: "attribute" | "relationship";
+  readonly name: string;
+  readonly index?: number;
 }
 
 /**
@@ -363,29 +363,30 @@ export interface PointerMember {
  * @category utils
  */
 export const parsePointer = (value: string): Option.Option<PointerMember> => {
-  if (!value.startsWith("/")) return Option.none()
-  const segments = value.split("/").slice(1).map(JsonPointer.unescapeToken)
-  if (segments[0] !== "data") return Option.none()
-  let rest = segments.slice(1)
-  let index: number | undefined
+  if (!value.startsWith("/")) return Option.none();
+  const segments = value.split("/").slice(1).map(JsonPointer.unescapeToken);
+  if (segments[0] !== "data") return Option.none();
+  let rest = segments.slice(1);
+  let index: number | undefined;
   if (rest.length === 3 && /^\d+$/.test(rest[0]!)) {
-    index = Number(rest[0])
-    rest = rest.slice(1)
+    index = Number(rest[0]);
+    rest = rest.slice(1);
   }
-  if (rest.length !== 2) return Option.none()
-  const [kind, name] = rest as [string, string]
-  if (name === "") return Option.none()
-  if (kind === "attributes") return Option.some({ _tag: "attribute", name, ...(index !== undefined ? { index } : {}) })
+  if (rest.length !== 2) return Option.none();
+  const [kind, name] = rest as [string, string];
+  if (name === "") return Option.none();
+  if (kind === "attributes")
+    return Option.some({ _tag: "attribute", name, ...(index !== undefined ? { index } : {}) });
   if (kind === "relationships") {
-    return Option.some({ _tag: "relationship", name, ...(index !== undefined ? { index } : {}) })
+    return Option.some({ _tag: "relationship", name, ...(index !== undefined ? { index } : {}) });
   }
-  return Option.none()
-}
+  return Option.none();
+};
 
 const errorLinks = Schema.Struct({
   about: Schema.optionalKey(Link),
-  type: Schema.optionalKey(Link)
-})
+  type: Schema.optionalKey(Link),
+});
 
 /**
  * A JSON:API error object with an open `code`.
@@ -403,8 +404,8 @@ export const ErrorObject = Schema.Struct({
   title: Schema.optionalKey(Schema.String),
   detail: Schema.optionalKey(Schema.String),
   source: Schema.optionalKey(ErrorSource),
-  meta: Schema.optionalKey(AnyMeta)
-})
+  meta: Schema.optionalKey(AnyMeta),
+});
 
 /**
  * A tightened error object with a closed `code` union.
@@ -425,8 +426,8 @@ export const ErrorObject = Schema.Struct({
 export const ErrorObjectWithCodes = <const Codes extends ReadonlyArray<string>>(codes: Codes) =>
   Schema.Struct({
     ...ErrorObject.fields,
-    code: Schema.optionalKey(Schema.Literals(codes))
-  })
+    code: Schema.optionalKey(Schema.Literals(codes)),
+  });
 
 // ---------------------------------------------------------------------------
 // Top-level documents (exactly one of data / errors / meta)
@@ -448,13 +449,13 @@ export const ErrorObjectWithCodes = <const Codes extends ReadonlyArray<string>>(
 export interface DataDocument<
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  M extends Schema.Top = typeof AnyMeta
+  M extends Schema.Top = typeof AnyMeta,
 > extends Schema.Struct<{
-  readonly data: R
-  readonly included: Schema.optionalKey<Schema.$Array<Included>>
-  readonly links: Schema.optionalKey<typeof TopLevelLinks>
-  readonly meta: Schema.optionalKey<M>
-  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+  readonly data: R;
+  readonly included: Schema.optionalKey<Schema.$Array<Included>>;
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>;
+  readonly meta: Schema.optionalKey<M>;
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>;
 }> {}
 
 /**
@@ -504,21 +505,21 @@ export interface DataDocument<
 export const DataDocument = <
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  M extends Schema.Top = typeof AnyMeta
+  M extends Schema.Top = typeof AnyMeta,
 >(
   data: R,
   options?: {
-    readonly included?: Included | undefined
-    readonly meta?: M | undefined
-  }
+    readonly included?: Included | undefined;
+    readonly meta?: M | undefined;
+  },
 ): DataDocument<R, Included, M> =>
   Schema.Struct({
     data,
     included: Schema.optionalKey(Schema.Array((options?.included ?? Schema.Never) as Included)),
     links: Schema.optionalKey(TopLevelLinks),
     meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
-    jsonapi: Schema.optionalKey(JsonApiObject)
-  })
+    jsonapi: Schema.optionalKey(JsonApiObject),
+  });
 
 /**
  * The decoded *value* type of a single-resource data document for `R` — the
@@ -537,8 +538,8 @@ export const DataDocument = <
 export type Value<
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  M extends Schema.Top = typeof AnyMeta
-> = DataDocument<R, Included, M>["Type"]
+  M extends Schema.Top = typeof AnyMeta,
+> = DataDocument<R, Included, M>["Type"];
 
 /**
  * A collection document: `data` is an array of resources (possibly empty).
@@ -549,13 +550,13 @@ export type Value<
 export interface CollectionDocument<
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  M extends Schema.Top = typeof AnyMeta
+  M extends Schema.Top = typeof AnyMeta,
 > extends Schema.Struct<{
-  readonly data: Schema.$Array<R>
-  readonly included: Schema.optionalKey<Schema.$Array<Included>>
-  readonly links: Schema.optionalKey<typeof TopLevelLinks>
-  readonly meta: Schema.optionalKey<M>
-  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+  readonly data: Schema.$Array<R>;
+  readonly included: Schema.optionalKey<Schema.$Array<Included>>;
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>;
+  readonly meta: Schema.optionalKey<M>;
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>;
 }> {}
 
 /**
@@ -580,21 +581,21 @@ export interface CollectionDocument<
 export const CollectionDocument = <
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  M extends Schema.Top = typeof AnyMeta
+  M extends Schema.Top = typeof AnyMeta,
 >(
   resource: R,
   options?: {
-    readonly included?: Included | undefined
-    readonly meta?: M | undefined
-  }
+    readonly included?: Included | undefined;
+    readonly meta?: M | undefined;
+  },
 ): CollectionDocument<R, Included, M> =>
   Schema.Struct({
     data: Schema.Array(resource),
     included: Schema.optionalKey(Schema.Array((options?.included ?? Schema.Never) as Included)),
     links: Schema.optionalKey(TopLevelLinks),
     meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
-    jsonapi: Schema.optionalKey(JsonApiObject)
-  })
+    jsonapi: Schema.optionalKey(JsonApiObject),
+  });
 
 /**
  * A relationship-linkage document: the top-level document served by
@@ -609,11 +610,14 @@ export const CollectionDocument = <
  * @since 0.1.0
  * @category models
  */
-export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
-  readonly data: D
-  readonly links: Schema.optionalKey<typeof TopLevelLinks>
-  readonly meta: Schema.optionalKey<M>
-  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+export interface LinkageDocument<
+  D extends Schema.Top,
+  M extends Schema.Top = typeof AnyMeta,
+> extends Schema.Struct<{
+  readonly data: D;
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>;
+  readonly meta: Schema.optionalKey<M>;
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>;
 }> {}
 
 /**
@@ -640,15 +644,15 @@ export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = ty
 export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typeof AnyMeta>(
   data: D,
   options?: {
-    readonly meta?: M | undefined
-  }
+    readonly meta?: M | undefined;
+  },
 ): LinkageDocument<D, M> =>
   Schema.Struct({
     data,
     links: Schema.optionalKey(TopLevelLinks),
     meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
-    jsonapi: Schema.optionalKey(JsonApiObject)
-  })
+    jsonapi: Schema.optionalKey(JsonApiObject),
+  });
 
 /**
  * An error document: a non-empty `errors` array, never `data`.
@@ -657,10 +661,10 @@ export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typ
  * @category models
  */
 export interface ErrorDocument<E extends Schema.Top = typeof ErrorObject> extends Schema.Struct<{
-  readonly errors: Schema.$Array<E>
-  readonly links: Schema.optionalKey<typeof TopLevelLinks>
-  readonly meta: Schema.optionalKey<typeof AnyMeta>
-  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+  readonly errors: Schema.$Array<E>;
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>;
+  readonly meta: Schema.optionalKey<typeof AnyMeta>;
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>;
 }> {}
 
 /**
@@ -669,13 +673,15 @@ export interface ErrorDocument<E extends Schema.Top = typeof ErrorObject> extend
  * @since 0.1.0
  * @category constructors
  */
-export const ErrorDocument = <E extends Schema.Top = typeof ErrorObject>(error?: E): ErrorDocument<E> =>
+export const ErrorDocument = <E extends Schema.Top = typeof ErrorObject>(
+  error?: E,
+): ErrorDocument<E> =>
   Schema.Struct({
     errors: Schema.Array((error ?? ErrorObject) as E).check(Schema.isMinLength(1)),
     links: Schema.optionalKey(TopLevelLinks),
     meta: Schema.optionalKey(AnyMeta),
-    jsonapi: Schema.optionalKey(JsonApiObject)
-  })
+    jsonapi: Schema.optionalKey(JsonApiObject),
+  });
 
 /**
  * A meta-only document.
@@ -684,9 +690,9 @@ export const ErrorDocument = <E extends Schema.Top = typeof ErrorObject>(error?:
  * @category models
  */
 export interface MetaDocument<M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
-  readonly meta: M
-  readonly links: Schema.optionalKey<typeof TopLevelLinks>
-  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>
+  readonly meta: M;
+  readonly links: Schema.optionalKey<typeof TopLevelLinks>;
+  readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>;
 }> {}
 
 /**
@@ -699,8 +705,8 @@ export const MetaDocument = <M extends Schema.Top = typeof AnyMeta>(meta?: M): M
   Schema.Struct({
     meta: (meta ?? AnyMeta) as M,
     links: Schema.optionalKey(TopLevelLinks),
-    jsonapi: Schema.optionalKey(JsonApiObject)
-  })
+    jsonapi: Schema.optionalKey(JsonApiObject),
+  });
 
 /**
  * The full top-level document union: exactly one of data / errors / meta.
@@ -712,8 +718,10 @@ export interface Document<
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
-  E extends Schema.Top = typeof ErrorObject
-> extends Schema.Union<readonly [DataDocument<R, Included, M>, ErrorDocument<E>, MetaDocument<M>]> {}
+  E extends Schema.Top = typeof ErrorObject,
+> extends Schema.Union<
+  readonly [DataDocument<R, Included, M>, ErrorDocument<E>, MetaDocument<M>]
+> {}
 
 /**
  * Creates the full top-level document union schema: exactly one of data /
@@ -739,17 +747,17 @@ export const Document = <
   R extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
   M extends Schema.Top = typeof AnyMeta,
-  E extends Schema.Top = typeof ErrorObject
+  E extends Schema.Top = typeof ErrorObject,
 >(
   resource: R,
   options?: {
-    readonly included?: Included | undefined
-    readonly meta?: M | undefined
-    readonly error?: E | undefined
-  }
+    readonly included?: Included | undefined;
+    readonly meta?: M | undefined;
+    readonly error?: E | undefined;
+  },
 ): Document<R, Included, M, E> =>
   Schema.Union([
     DataDocument(resource, { included: options?.included, meta: options?.meta }),
     ErrorDocument(options?.error),
-    MetaDocument(options?.meta)
-  ])
+    MetaDocument(options?.meta),
+  ]);

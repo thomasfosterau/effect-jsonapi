@@ -23,9 +23,9 @@
  *
  * @since 0.1.0
  */
-import type { MetaValue } from "./Handlers.js"
-import type * as Relationship from "./Relationship.js"
-import type { Any, RefValue } from "./Resource.js"
+import type { MetaValue } from "./Handlers.js";
+import type * as Relationship from "./Relationship.js";
+import type { Any, RefValue } from "./Resource.js";
 
 /**
  * Thrown when resolving a ref whose `lid` was never assigned an id — the
@@ -60,17 +60,19 @@ export class UnknownLidError extends Error {
    * @since 0.1.0
    * @category models
    */
-  override readonly name = "UnknownLidError"
+  override readonly name = "UnknownLidError";
   /**
    * The unresolved local id that no earlier operation in the request created.
    *
    * @since 0.1.0
    * @category models
    */
-  readonly lid: string
+  readonly lid: string;
   constructor(lid: string) {
-    super(`Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`)
-    this.lid = lid
+    super(
+      `Unknown lid "${lid}": no resource with this local id was created by an earlier operation in the request`,
+    );
+    this.lid = lid;
   }
 }
 
@@ -83,9 +85,9 @@ export class UnknownLidError extends Error {
  */
 export interface RefLinkageValue {
   readonly [key: string]: {
-    readonly data?: RefValue | ReadonlyArray<RefValue> | null
-    readonly meta?: MetaValue
-  }
+    readonly data?: RefValue | ReadonlyArray<RefValue> | null;
+    readonly meta?: MetaValue;
+  };
 }
 
 /**
@@ -101,16 +103,18 @@ export interface RefLinkageValue {
  * @category models
  */
 export type ResolvedLinkage<R extends Any> = {
-  readonly [K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any>
-    ? never
-    : K]?: R["relationships"][K] extends Relationship.One<infer T>
+  readonly [
+    K in keyof R["relationships"] as R["relationships"][K] extends Relationship.Paginated<Any>
+      ? never
+      : K
+  ]?: R["relationships"][K] extends Relationship.One<infer T>
     ? { readonly data: T["identifier"]["Type"]; readonly meta?: MetaValue }
     : R["relationships"][K] extends Relationship.Optional<infer T>
       ? { readonly data: T["identifier"]["Type"] | null; readonly meta?: MetaValue }
       : R["relationships"][K] extends Relationship.Many<infer T>
         ? { readonly data: ReadonlyArray<T["identifier"]["Type"]>; readonly meta?: MetaValue }
-        : never
-}
+        : never;
+};
 
 /**
  * Tracks the server-assigned ids of resources created with `lid`s while a
@@ -125,14 +129,14 @@ export type ResolvedLinkage<R extends Any> = {
  */
 export interface LidMap {
   /** Records the server-assigned id for a lid. */
-  readonly assign: (lid: string, id: string) => void
+  readonly assign: (lid: string, id: string) => void;
   /** The id assigned to a lid, if any. */
-  readonly id: (lid: string) => string | undefined
+  readonly id: (lid: string) => string | undefined;
   /**
    * Resolves a ref (id- or lid-based) to the resource's typed identifier.
    * Throws {@link UnknownLidError} for unassigned lids.
    */
-  readonly identifier: <R extends Any>(resource: R, ref: RefValue) => R["identifier"]["Type"]
+  readonly identifier: <R extends Any>(resource: R, ref: RefValue) => R["identifier"]["Type"];
   /**
    * Resolves every lid-based identifier inside relationship linkage to an
    * id-based identifier — the shape the resource's own relationship schemas
@@ -141,8 +145,8 @@ export interface LidMap {
    */
   readonly resolveLinkage: <R extends Any>(
     resource: R,
-    relationships: RefLinkageValue | undefined
-  ) => ResolvedLinkage<R>
+    relationships: RefLinkageValue | undefined,
+  ) => ResolvedLinkage<R>;
 }
 
 /**
@@ -187,32 +191,32 @@ export interface LidMap {
  * @category constructors
  */
 export const make = (): LidMap => {
-  const ids = new Map<string, string>()
+  const ids = new Map<string, string>();
 
   const resolveRef = (ref: RefValue): { readonly type: string; readonly id: string } => {
-    if ("id" in ref) return ref
-    const id = ids.get(ref.lid)
-    if (id === undefined) throw new UnknownLidError(ref.lid)
-    return { type: ref.type, id }
-  }
+    if ("id" in ref) return ref;
+    const id = ids.get(ref.lid);
+    if (id === undefined) throw new UnknownLidError(ref.lid);
+    return { type: ref.type, id };
+  };
 
   return {
     assign: (lid, id) => {
-      ids.set(lid, id)
+      ids.set(lid, id);
     },
     id: (lid) => ids.get(lid),
     identifier: <R extends Any>(resource: R, ref: RefValue) => {
       if (ref.type !== resource.type) {
-        throw new Error(`Ref type "${ref.type}" does not match resource type "${resource.type}"`)
+        throw new Error(`Ref type "${ref.type}" does not match resource type "${resource.type}"`);
       }
-      return resolveRef(ref) as R["identifier"]["Type"]
+      return resolveRef(ref) as R["identifier"]["Type"];
     },
     // `_resource` only pins down the return type.
     resolveLinkage: <R extends Any>(_resource: R, relationships: RefLinkageValue | undefined) => {
-      if (relationships === undefined) return {} as ResolvedLinkage<R>
-      const resolved: Record<string, unknown> = {}
+      if (relationships === undefined) return {} as ResolvedLinkage<R>;
+      const resolved: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(relationships)) {
-        const linkage = value.data
+        const linkage = value.data;
         resolved[key] = {
           ...value,
           data:
@@ -220,10 +224,10 @@ export const make = (): LidMap => {
               ? null
               : Array.isArray(linkage)
                 ? linkage.map(resolveRef)
-                : resolveRef(linkage as RefValue)
-        }
+                : resolveRef(linkage as RefValue),
+        };
       }
-      return resolved as ResolvedLinkage<R>
-    }
-  }
-}
+      return resolved as ResolvedLinkage<R>;
+    },
+  };
+};

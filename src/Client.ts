@@ -100,14 +100,14 @@
  *
  * @since 0.1.0
  */
-import { Effect, Option, Schema } from "effect"
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
-import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi"
-import { HttpApiClient } from "effect/unstable/httpapi"
-import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js"
-import { baseMediaType, MEDIA_TYPE, mediaTypeWith } from "./internal/media.js"
-import type { NegotiationOptions as ServerNegotiationOptions } from "./Middleware.js"
-import type { Any, IncludedFor, IncludePath } from "./Resource.js"
+import { Effect, Option, Schema } from "effect";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
+import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
+import { HttpApiClient } from "effect/unstable/httpapi";
+import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js";
+import { baseMediaType, MEDIA_TYPE, mediaTypeWith } from "./internal/media.js";
+import type { NegotiationOptions as ServerNegotiationOptions } from "./Middleware.js";
+import type { Any, IncludedFor, IncludePath } from "./Resource.js";
 
 /**
  * The minimal shape of a compound document value.
@@ -116,7 +116,7 @@ import type { Any, IncludedFor, IncludePath } from "./Resource.js"
  * @category models
  */
 export interface AnyDocument {
-  readonly included?: ReadonlyArray<unknown> | undefined
+  readonly included?: ReadonlyArray<unknown> | undefined;
 }
 
 /**
@@ -127,8 +127,8 @@ export interface AnyDocument {
  * @category type-level
  */
 export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> & {
-  readonly included?: ReadonlyArray<Included["Type"]>
-}
+  readonly included?: ReadonlyArray<Included["Type"]>;
+};
 
 /**
  * Narrows a response document's `included` member to the resources reachable
@@ -186,21 +186,21 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
 export const narrowIncluded: {
   <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(
     resource: R,
-    include: Paths
+    include: Paths,
   ): <Doc extends AnyDocument, E, Req>(
-    effect: Effect.Effect<Doc, E, Req>
-  ) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>
+    effect: Effect.Effect<Doc, E, Req>,
+  ) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>;
   <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>, Doc extends AnyDocument>(
     resource: R,
     include: Paths,
-    document: Doc
-  ): NarrowedDocument<Doc, IncludedFor<R, Paths>>
+    document: Doc,
+  ): NarrowedDocument<Doc, IncludedFor<R, Paths>>;
 } = ((...args: ReadonlyArray<unknown>) =>
   args.length >= 3
     ? // data-first: the document itself
       args[2]
     : // data-last: an identity function over the effect
-      (effect: unknown) => effect) as never
+      (effect: unknown) => effect) as never;
 
 // ---------------------------------------------------------------------------
 // Content negotiation (JSON:API §5), client side
@@ -247,9 +247,10 @@ export interface NegotiationOptions extends ServerNegotiationOptions {}
  * @since 0.15.0
  * @category constructors
  */
-export const mediaType = (options?: NegotiationOptions): string => mediaTypeWith(options?.extensions)
+export const mediaType = (options?: NegotiationOptions): string =>
+  mediaTypeWith(options?.extensions);
 
-const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"])
+const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
 /**
  * Whether a request method mutates state, and therefore carries a
@@ -277,7 +278,8 @@ const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "
  * @since 0.15.0
  * @category guards
  */
-export const isMutatingMethod = (method: string): boolean => MUTATING_METHODS.has(method.toUpperCase())
+export const isMutatingMethod = (method: string): boolean =>
+  MUTATING_METHODS.has(method.toUpperCase());
 
 // A `Content-Type` the transform may relabel: an absent one, one already at the
 // JSON:API media type (possibly with different `ext` parameters), or the
@@ -286,10 +288,10 @@ export const isMutatingMethod = (method: string): boolean => MUTATING_METHODS.ha
 // about the representation, not a mislabelled JSON:API body, and is left alone:
 // only the label changes, never the bytes, and never the meaning.
 const isRelabellable = (header: string | undefined): boolean => {
-  if (header === undefined || header === "") return true
-  const base = baseMediaType(header)
-  return base === MEDIA_TYPE || base === "application/json"
-}
+  if (header === undefined || header === "") return true;
+  const base = baseMediaType(header);
+  return base === MEDIA_TYPE || base === "application/json";
+};
 
 /**
  * Stamps the JSON:API negotiation headers on one request, with the given
@@ -314,17 +316,17 @@ const isRelabellable = (header: string | undefined): boolean => {
  * @category combinators
  */
 export const jsonApiHeadersWith = (
-  options?: NegotiationOptions
+  options?: NegotiationOptions,
 ): ((request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) => {
-  const type = mediaType(options)
+  const type = mediaType(options);
   return (request) => {
-    const accepted = HttpClientRequest.setHeader(request, "accept", type)
-    if (!isMutatingMethod(accepted.method)) return accepted
+    const accepted = HttpClientRequest.setHeader(request, "accept", type);
+    if (!isMutatingMethod(accepted.method)) return accepted;
     return isRelabellable(accepted.headers["content-type"])
       ? HttpClientRequest.setHeader(accepted, "content-type", type)
-      : accepted
-  }
-}
+      : accepted;
+  };
+};
 
 /**
  * Stamps the JSON:API negotiation headers on one request: `Accept` on every
@@ -359,8 +361,9 @@ export const jsonApiHeadersWith = (
  * @since 0.15.0
  * @category combinators
  */
-export const jsonApiHeaders: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest =
-  jsonApiHeadersWith()
+export const jsonApiHeaders: (
+  request: HttpClientRequest.HttpClientRequest,
+) => HttpClientRequest.HttpClientRequest = jsonApiHeadersWith();
 
 /**
  * Applies {@link jsonApiHeadersWith} to every request an `HttpClient` sends.
@@ -387,11 +390,11 @@ export const jsonApiHeaders: (request: HttpClientRequest.HttpClientRequest) => H
  * @category combinators
  */
 export const transformWith = (
-  options?: NegotiationOptions
+  options?: NegotiationOptions,
 ): (<E, R>(client: HttpClient.HttpClient.With<E, R>) => HttpClient.HttpClient.With<E, R>) => {
-  const headers = jsonApiHeadersWith(options)
-  return (client) => HttpClient.mapRequest(client, headers)
-}
+  const headers = jsonApiHeadersWith(options);
+  return (client) => HttpClient.mapRequest(client, headers);
+};
 
 /**
  * Applies {@link jsonApiHeaders} to every request an `HttpClient` sends: the
@@ -420,8 +423,9 @@ export const transformWith = (
  * @since 0.15.0
  * @category combinators
  */
-export const transform: <E, R>(client: HttpClient.HttpClient.With<E, R>) => HttpClient.HttpClient.With<E, R> =
-  transformWith()
+export const transform: <E, R>(
+  client: HttpClient.HttpClient.With<E, R>,
+) => HttpClient.HttpClient.With<E, R> = transformWith();
 
 /**
  * Options for {@link make}: the negotiation options, plus the options
@@ -432,17 +436,19 @@ export const transform: <E, R>(client: HttpClient.HttpClient.With<E, R>) => Http
  */
 export interface MakeOptions extends NegotiationOptions {
   /** The base URL every request is resolved against. */
-  readonly baseUrl?: URL | string | undefined
+  readonly baseUrl?: URL | string | undefined;
   /**
    * A further transformation of the underlying `HttpClient` — authentication
    * headers, retries, tracing. It is applied *after* the JSON:API negotiation
    * transform, so it can override the headers if it needs to.
    */
-  readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
+  readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined;
   /** A transformation of each endpoint's response effect. */
   readonly transformResponse?:
-    | ((effect: Effect.Effect<unknown, unknown, unknown>) => Effect.Effect<unknown, unknown, unknown>)
-    | undefined
+    | ((
+        effect: Effect.Effect<unknown, unknown, unknown>,
+      ) => Effect.Effect<unknown, unknown, unknown>)
+    | undefined;
 }
 
 /**
@@ -489,28 +495,30 @@ export interface MakeOptions extends NegotiationOptions {
  */
 export const make = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<ApiId, Groups>,
-  options?: MakeOptions
+  options?: MakeOptions,
 ): Effect.Effect<
   HttpApiClient.Client<Groups>,
   never,
   HttpClient.HttpClient | HttpApiGroup.MiddlewareClient<Groups>
 > => {
-  const negotiate = transformWith(options)
+  const negotiate = transformWith(options);
   return HttpApiClient.make(api, {
     baseUrl: options?.baseUrl,
     transformResponse: options?.transformResponse,
     transformClient: (client) => {
-      const negotiated = negotiate(client)
-      return options?.transformClient === undefined ? negotiated : options.transformClient(negotiated)
-    }
-  })
-}
+      const negotiated = negotiate(client);
+      return options?.transformClient === undefined
+        ? negotiated
+        : options.transformClient(negotiated);
+    },
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Error documents
 // ---------------------------------------------------------------------------
 
-const WireDocument = ErrorDocumentSchema(ErrorObject)
+const WireDocument = ErrorDocumentSchema(ErrorObject);
 
 /**
  * A decoded JSON:API error document — the shape every `ApiError` encodes to,
@@ -524,9 +532,9 @@ const WireDocument = ErrorDocumentSchema(ErrorObject)
  * @since 0.15.0
  * @category models
  */
-export type ErrorDocument = typeof WireDocument.Type
+export type ErrorDocument = typeof WireDocument.Type;
 
-const decodeWireDocument = Schema.decodeUnknownOption(WireDocument)
+const decodeWireDocument = Schema.decodeUnknownOption(WireDocument);
 
 /**
  * Best-effort decode of a response body into a JSON:API error document.
@@ -568,13 +576,13 @@ const decodeWireDocument = Schema.decodeUnknownOption(WireDocument)
  */
 export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> => {
   try {
-    return decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body)
+    return decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body);
   } catch {
     // A body that isn't JSON at all, or a decoder that threw on a hostile
     // value: there is no document here, and this is an error path already.
-    return Option.none()
+    return Option.none();
   }
-}
+};
 
 /**
  * Best-effort decode of the error document carried by a failed HTTP call.
@@ -609,15 +617,15 @@ export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument>
  * @category constructors
  */
 export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<ErrorDocument>> => {
-  const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined
-  if (response === undefined) return Effect.succeed(Option.none())
+  const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined;
+  if (response === undefined) return Effect.succeed(Option.none());
   return response.text.pipe(
     Effect.map(decodeErrorDocument),
     // The body may be unreadable (already consumed, a broken stream): that is
     // still "no document", never a second failure on top of the first.
-    Effect.catchCause(() => Effect.succeed(Option.none<ErrorDocument>()))
-  )
-}
+    Effect.catchCause(() => Effect.succeed(Option.none<ErrorDocument>())),
+  );
+};
 
 /**
  * The default message {@link errorMessage} falls back to when an error
@@ -626,7 +634,7 @@ export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<Error
  * @since 0.15.0
  * @category constants
  */
-export const DEFAULT_ERROR_MESSAGE = "Request could not be completed"
+export const DEFAULT_ERROR_MESSAGE = "Request could not be completed";
 
 /**
  * The first human-readable message in an error document: the first error
@@ -656,6 +664,6 @@ export const DEFAULT_ERROR_MESSAGE = "Request could not be completed"
  * @category accessors
  */
 export const errorMessage = (document: ErrorDocument): string => {
-  const first = document.errors[0] as ErrorDocument["errors"][number] | undefined
-  return first?.detail ?? first?.title ?? DEFAULT_ERROR_MESSAGE
-}
+  const first = document.errors[0] as ErrorDocument["errors"][number] | undefined;
+  return first?.detail ?? first?.title ?? DEFAULT_ERROR_MESSAGE;
+};

@@ -27,7 +27,7 @@
  * @since 0.1.0
  * @category constants
  */
-export const MEDIA_TYPE = "application/vnd.api+json"
+export const MEDIA_TYPE = "application/vnd.api+json";
 
 /**
  * The atomic operations extension URI, per https://jsonapi.org/ext/atomic/
@@ -36,7 +36,7 @@ export const MEDIA_TYPE = "application/vnd.api+json"
  * @category constants
  * @internal
  */
-export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic"
+export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic";
 
 /**
  * The base media type of one `Content-Type` / `Accept` entry: everything
@@ -50,7 +50,8 @@ export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic"
  * @category utils
  * @internal
  */
-export const baseMediaType = (entry: string): string => (entry.split(";", 1)[0] ?? "").trim().toLowerCase()
+export const baseMediaType = (entry: string): string =>
+  (entry.split(";", 1)[0] ?? "").trim().toLowerCase();
 
 /**
  * The JSON:API media type carrying an `ext` parameter for the given extension
@@ -66,7 +67,9 @@ export const baseMediaType = (entry: string): string => (entry.split(";", 1)[0] 
  * @internal
  */
 export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): string =>
-  extensions === undefined || extensions.length === 0 ? MEDIA_TYPE : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`
+  extensions === undefined || extensions.length === 0
+    ? MEDIA_TYPE
+    : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`;
 
 /**
  * The JSON:API media type carrying the atomic operations `ext` parameter.
@@ -75,4 +78,4 @@ export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): s
  * @category constants
  * @internal
  */
-export const ATOMIC_MEDIA_TYPE = mediaTypeWith([ATOMIC_EXTENSION_URI])
+export const ATOMIC_MEDIA_TYPE = mediaTypeWith([ATOMIC_EXTENSION_URI]);

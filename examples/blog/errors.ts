@@ -3,14 +3,14 @@
  * whose wire encoding is a spec-compliant JSON:API error document with the
  * declared HTTP status.
  */
-import { Schema } from "effect"
-import { ApiError, Atomic } from "@thomasfosterau/effect-jsonapi"
+import { Schema } from "effect";
+import { ApiError, Atomic } from "@thomasfosterau/effect-jsonapi";
 export class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
   status: 404,
   code: "not_found",
   title: "Resource not found",
   fields: { id: Schema.String },
-  detail: (e) => `Article ${e.id} not found`
+  detail: (e) => `Article ${e.id} not found`,
 }) {}
 
 export class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {
@@ -18,7 +18,7 @@ export class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {
   code: "title_taken",
   title: "Title already taken",
   fields: { title: Schema.String },
-  detail: (e) => `An article titled "${e.title}" already exists`
+  detail: (e) => `An article titled "${e.title}" already exists`,
 }) {}
 
 /**
@@ -31,5 +31,5 @@ export class OperationFailed extends ApiError.make<OperationFailed>()("Operation
   code: "operation_failed",
   title: "Atomic operation failed",
   fields: { operation: Schema.Int, reason: Schema.String },
-  detail: (e) => `Operation at ${Atomic.operationPointer(e.operation)} failed: ${e.reason}`
+  detail: (e) => `Operation at ${Atomic.operationPointer(e.operation)} failed: ${e.reason}`,
 }) {}

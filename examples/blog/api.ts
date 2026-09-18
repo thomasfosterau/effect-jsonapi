@@ -3,18 +3,18 @@
  * query parameters and JSON:API error documents — composed into a vanilla
  * `HttpApi`.
  */
-import { Schema } from "effect"
-import { HttpApi } from "effect/unstable/httpapi"
-import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi"
-import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
-import { Article, Comment, Person } from "./resources.js"
+import { Schema } from "effect";
+import { HttpApi } from "effect/unstable/httpapi";
+import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
+import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js";
+import { Article, Comment, Person } from "./resources.js";
 
 /**
  * Typed collection meta carried by list responses.
  */
 export const PageMeta = Schema.Struct({
-  total: Schema.Int
-})
+  total: Schema.Int,
+});
 
 /**
  * Offset/limit pagination capped at 100 rows — a shared DoS guard.
@@ -24,7 +24,7 @@ export const PageMeta = Schema.Struct({
  * (and the `page[offset]` / `page[limit]` keys) consistent across every
  * paginated endpoint, so the input and the emitted pagination links can't drift.
  */
-export const Pagination = Query.Page.offset({ maxLimit: 100 })
+export const Pagination = Query.Page.offset({ maxLimit: 100 });
 
 export const articles = Group.make(
   Article,
@@ -32,7 +32,7 @@ export const articles = Group.make(
   Endpoint.get(Article, {
     include: true,
     fields: true,
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
   Endpoint.list(Article, {
@@ -40,24 +40,24 @@ export const articles = Group.make(
     sort: ["createdAt", "title"],
     page: Pagination,
     filter: { author: Schema.optionalKey(Schema.String) },
-    meta: PageMeta
+    meta: PageMeta,
   }),
   // POST /articles (payload may carry a client-generated lid; author is required)
   Endpoint.create(Article, {
-    errors: [TitleTaken]
+    errors: [TitleTaken],
   }),
   // PATCH /articles/:id (partial attributes)
   Endpoint.update(Article, {
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // DELETE /articles/:id → 204
   Endpoint.delete(Article, {
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // --- Related resource endpoints --------------------------------------------
   // GET /articles/:id/author — the article's author, as a full resource
   Endpoint.related(Article, "author", {
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author —
   // the paginated comment collection that `relationships.comments.links.related`
@@ -66,27 +66,27 @@ export const articles = Group.make(
     include: true,
     page: Pagination,
     meta: PageMeta,
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // --- Relationship (linkage) endpoints ---------------------------------------
   // GET /articles/:id/relationships/comments — comment identifiers, paginated
   Endpoint.getRelationship(Article, "comments", {
     page: Pagination,
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
   Endpoint.updateRelationship(Article, "author", {
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // POST /articles/:id/relationships/comments — attach existing comments
   Endpoint.addRelationship(Article, "comments", {
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // DELETE /articles/:id/relationships/comments — detach comments → 204
   Endpoint.removeRelationship(Article, "comments", {
-    errors: [ArticleNotFound]
-  })
-)
+    errors: [ArticleNotFound],
+  }),
+);
 
 /**
  * A heterogeneous search endpoint: results are a mixed collection of articles
@@ -102,9 +102,9 @@ export const search = Group.make(
     include: true,
     fields: true,
     page: Pagination,
-    meta: PageMeta
-  })
-)
+    meta: PageMeta,
+  }),
+);
 
 /**
  * An atomic operations endpoint (https://jsonapi.org/ext/atomic/): one request
@@ -115,8 +115,8 @@ export const operations = Group.make(
   "operations",
   // POST /operations with an atomic:operations document
   Endpoint.operations([Article, Comment], {
-    errors: [OperationFailed]
-  })
-)
+    errors: [OperationFailed],
+  }),
+);
 
-export const Api = HttpApi.make("blog").add(articles).add(search).add(operations)
+export const Api = HttpApi.make("blog").add(articles).add(search).add(operations);

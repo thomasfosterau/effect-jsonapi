@@ -23,8 +23,12 @@ export default defineConfig({
       // the example is tested against the live `src/`. The subpath entry must
       // come first: string aliases match by prefix, so the root entry would
       // otherwise swallow "@thomasfosterau/effect-jsonapi/schema".
-      "@thomasfosterau/effect-jsonapi/schema": fileURLToPath(new URL("../../src/schema.ts", import.meta.url)),
-      "@thomasfosterau/effect-jsonapi": fileURLToPath(new URL("../../src/index.ts", import.meta.url)),
+      "@thomasfosterau/effect-jsonapi/schema": fileURLToPath(
+        new URL("../../src/schema.ts", import.meta.url),
+      ),
+      "@thomasfosterau/effect-jsonapi": fileURLToPath(
+        new URL("../../src/index.ts", import.meta.url),
+      ),
     },
   },
   run: {

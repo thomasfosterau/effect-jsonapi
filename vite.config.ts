@@ -243,14 +243,18 @@ export default defineConfig({
       // user code does. The subpath entry must come first: string aliases
       // match by prefix, so the root entry would otherwise swallow
       // "@thomasfosterau/effect-jsonapi/schema".
-      "@thomasfosterau/effect-jsonapi/schema": fileURLToPath(new URL("./src/schema.ts", import.meta.url)),
+      "@thomasfosterau/effect-jsonapi/schema": fileURLToPath(
+        new URL("./src/schema.ts", import.meta.url),
+      ),
       "@thomasfosterau/effect-jsonapi": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
     },
   },
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
-    ...(process.env.VITEST_MAX_WORKERS ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) } : {}),
+    ...(process.env.VITEST_MAX_WORKERS
+      ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) }
+      : {}),
   },
   // The published artifact: one ESM bundle per entry point (`dist/index.js`,
   // `dist/schema.js`, sharing chunks for the schema-tier modules both reach)

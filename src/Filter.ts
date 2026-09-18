@@ -41,10 +41,14 @@
  *
  * @since 0.13.0
  */
-import { Schema } from "effect"
-import type { FieldCodecs } from "./internal/filter.js"
-import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
-import { compareOperators, operators as vocabulary, resolveOperators } from "./internal/operators.js"
+import { Schema } from "effect";
+import type { FieldCodecs } from "./internal/filter.js";
+import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js";
+import {
+  compareOperators,
+  operators as vocabulary,
+  resolveOperators,
+} from "./internal/operators.js";
 
 // ---------------------------------------------------------------------------
 // The vocabulary
@@ -78,7 +82,7 @@ import { compareOperators, operators as vocabulary, resolveOperators } from "./i
  */
 // The tuple lives in `internal/operators.ts` so the URL grammar engine reads
 // the same list without importing this module (a cycle at module init).
-export const Operator = Schema.Literals(vocabulary)
+export const Operator = Schema.Literals(vocabulary);
 
 /**
  * A filter operator name — the decoded type of the {@link Operator} schema.
@@ -86,7 +90,7 @@ export const Operator = Schema.Literals(vocabulary)
  * @since 0.13.0
  * @category models
  */
-export type Operator = typeof Operator.Type
+export type Operator = typeof Operator.Type;
 
 /**
  * Every filter operator, in the grammar's order — the literals of the
@@ -103,7 +107,7 @@ export type Operator = typeof Operator.Type
  * @since 0.13.0
  * @category constants
  */
-export const operators: typeof Operator.literals = Operator.literals
+export const operators: typeof Operator.literals = Operator.literals;
 
 /**
  * Whether a value names a filter operator — the {@link Operator} schema's guard.
@@ -119,7 +123,7 @@ export const operators: typeof Operator.literals = Operator.literals
  * @since 0.13.0
  * @category guards
  */
-export const isOperator: (u: unknown) => u is Operator = Schema.is(Operator)
+export const isOperator: (u: unknown) => u is Operator = Schema.is(Operator);
 
 /**
  * The operators as typed constants, for declaration sites: `Filter.Op.eq` is
@@ -156,8 +160,8 @@ export const Op = Object.freeze({
   gte: "gte",
   in: "in",
   nin: "nin",
-  isnull: "isnull"
-} as const satisfies { readonly [K in Operator]: K })
+  isnull: "isnull",
+} as const satisfies { readonly [K in Operator]: K });
 
 // ---------------------------------------------------------------------------
 // The per-attribute declaration
@@ -182,7 +186,7 @@ export const Op = Object.freeze({
  * @since 0.13.0
  * @category constants
  */
-export const AnnotationId = "@thomasfosterau/effect-jsonapi/filter"
+export const AnnotationId = "@thomasfosterau/effect-jsonapi/filter";
 
 /**
  * The runtime value stored under {@link AnnotationId}: the declared operators
@@ -193,8 +197,8 @@ export const AnnotationId = "@thomasfosterau/effect-jsonapi/filter"
  * @category models
  */
 export interface Annotation {
-  readonly operators: ReadonlyArray<Operator>
-  readonly literal: Schema.Codec<unknown, string> | undefined
+  readonly operators: ReadonlyArray<Operator>;
+  readonly literal: Schema.Codec<unknown, string> | undefined;
 }
 
 /**
@@ -205,7 +209,7 @@ export interface Annotation {
  * @since 0.13.0
  * @category type-level
  */
-export type LiteralType<S extends { readonly Type: unknown }> = Exclude<S["Type"], null>
+export type LiteralType<S extends { readonly Type: unknown }> = Exclude<S["Type"], null>;
 
 /**
  * The phantom property key carrying the filter declaration at the *type*
@@ -216,7 +220,7 @@ export type LiteralType<S extends { readonly Type: unknown }> = Exclude<S["Type"
  * @since 0.13.0
  * @category type-level
  */
-export type MarkerKey = "~@thomasfosterau/effect-jsonapi/filter"
+export type MarkerKey = "~@thomasfosterau/effect-jsonapi/filter";
 
 /**
  * The type-level declaration carried under {@link MarkerKey}: the declared
@@ -226,8 +230,8 @@ export type MarkerKey = "~@thomasfosterau/effect-jsonapi/filter"
  * @category type-level
  */
 export interface Marker<Op extends Operator, Literal> {
-  readonly operators: Op
-  readonly literal: Literal
+  readonly operators: Op;
+  readonly literal: Literal;
 }
 
 /**
@@ -238,9 +242,13 @@ export interface Marker<Op extends Operator, Literal> {
  * @since 0.13.0
  * @category type-level
  */
-export type Declared<S extends Schema.Top, Op extends Operator = Operator, Literal = LiteralType<S>> = S & {
-  readonly [K in MarkerKey]: Marker<Op, Literal>
-}
+export type Declared<
+  S extends Schema.Top,
+  Op extends Operator = Operator,
+  Literal = LiteralType<S>,
+> = S & {
+  readonly [K in MarkerKey]: Marker<Op, Literal>;
+};
 
 /**
  * The operators an {@link able} argument admits, as a union of string
@@ -254,7 +262,7 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
   ? Operator
   : D extends ReadonlyArray<infer Op extends Operator>
     ? Op
-    : never
+    : never;
 
 /**
  * Declares an attribute filterable — a pipeable combinator on the attribute's
@@ -310,21 +318,23 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  */
 export function able<const Ops extends true | ReadonlyArray<Operator> = true>(
   operators?: Ops,
-  options?: { readonly literal?: undefined }
-): <S extends Schema.Top>(self: S) => Declared<S, OperatorsIn<Ops>>
+  options?: { readonly literal?: undefined },
+): <S extends Schema.Top>(self: S) => Declared<S, OperatorsIn<Ops>>;
 export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
   operators: Ops,
-  options: { readonly literal: Schema.Codec<Literal, string> }
-): <S extends Schema.Top>(self: S & { readonly Type: Literal | null }) => Declared<S, OperatorsIn<Ops>, Literal>
+  options: { readonly literal: Schema.Codec<Literal, string> },
+): <S extends Schema.Top>(
+  self: S & { readonly Type: Literal | null },
+) => Declared<S, OperatorsIn<Ops>, Literal>;
 export function able(
   operators: true | ReadonlyArray<Operator> = true,
-  options?: { readonly literal?: Schema.Codec<unknown, string> | undefined }
+  options?: { readonly literal?: Schema.Codec<unknown, string> | undefined },
 ): (self: Schema.Top) => Schema.Top {
   const annotation: Annotation = {
     operators: resolveOperators(operators, Operator, "Filter.able"),
-    literal: options?.literal
-  }
-  return (self) => self.annotate({ [AnnotationId]: annotation })
+    literal: options?.literal,
+  };
+  return (self) => self.annotate({ [AnnotationId]: annotation });
 }
 
 // ---------------------------------------------------------------------------
@@ -338,7 +348,7 @@ export function able(
  * @since 0.13.0
  * @category models
  */
-export type CompareOperator = (typeof compareOperators)[number]
+export type CompareOperator = (typeof compareOperators)[number];
 
 /**
  * The field vocabulary a filter AST is typed over: each declared field name to
@@ -349,7 +359,7 @@ export type CompareOperator = (typeof compareOperators)[number]
  * @category models
  */
 export interface FieldTypes {
-  readonly [field: string]: unknown
+  readonly [field: string]: unknown;
 }
 
 /**
@@ -359,10 +369,10 @@ export interface FieldTypes {
  * @category models
  */
 export interface Compare<Field extends string = string, Literal = unknown> {
-  readonly _tag: "Compare"
-  readonly op: CompareOperator
-  readonly field: Field
-  readonly value: Literal
+  readonly _tag: "Compare";
+  readonly op: CompareOperator;
+  readonly field: Field;
+  readonly value: Literal;
 }
 
 /**
@@ -372,9 +382,9 @@ export interface Compare<Field extends string = string, Literal = unknown> {
  * @category models
  */
 export interface In<Field extends string = string, Literal = unknown> {
-  readonly _tag: "In"
-  readonly field: Field
-  readonly values: readonly [Literal, ...Array<Literal>]
+  readonly _tag: "In";
+  readonly field: Field;
+  readonly values: readonly [Literal, ...Array<Literal>];
 }
 
 /**
@@ -384,9 +394,9 @@ export interface In<Field extends string = string, Literal = unknown> {
  * @category models
  */
 export interface NotIn<Field extends string = string, Literal = unknown> {
-  readonly _tag: "NotIn"
-  readonly field: Field
-  readonly values: readonly [Literal, ...Array<Literal>]
+  readonly _tag: "NotIn";
+  readonly field: Field;
+  readonly values: readonly [Literal, ...Array<Literal>];
 }
 
 /**
@@ -397,9 +407,9 @@ export interface NotIn<Field extends string = string, Literal = unknown> {
  * @category models
  */
 export interface IsNull<Field extends string = string> {
-  readonly _tag: "IsNull"
-  readonly field: Field
-  readonly negated: boolean
+  readonly _tag: "IsNull";
+  readonly field: Field;
+  readonly negated: boolean;
 }
 
 /**
@@ -410,8 +420,8 @@ export interface IsNull<Field extends string = string> {
  * @category models
  */
 export interface And<Fields extends FieldTypes = FieldTypes> {
-  readonly _tag: "And"
-  readonly members: ReadonlyArray<Ast<Fields>>
+  readonly _tag: "And";
+  readonly members: ReadonlyArray<Ast<Fields>>;
 }
 
 /**
@@ -422,8 +432,8 @@ export interface And<Fields extends FieldTypes = FieldTypes> {
  * @category models
  */
 export interface Or<Fields extends FieldTypes = FieldTypes> {
-  readonly _tag: "Or"
-  readonly members: ReadonlyArray<Ast<Fields>>
+  readonly _tag: "Or";
+  readonly members: ReadonlyArray<Ast<Fields>>;
 }
 
 /**
@@ -434,8 +444,8 @@ export interface Or<Fields extends FieldTypes = FieldTypes> {
  * @category models
  */
 export interface Not<Fields extends FieldTypes = FieldTypes> {
-  readonly _tag: "Not"
-  readonly member: Ast<Fields>
+  readonly _tag: "Not";
+  readonly member: Ast<Fields>;
 }
 
 /**
@@ -448,8 +458,12 @@ export interface Not<Fields extends FieldTypes = FieldTypes> {
  * @category models
  */
 export type Condition<Fields extends FieldTypes = FieldTypes> = {
-  readonly [F in keyof Fields & string]: Compare<F, Fields[F]> | In<F, Fields[F]> | NotIn<F, Fields[F]> | IsNull<F>
-}[keyof Fields & string]
+  readonly [F in keyof Fields & string]:
+    | Compare<F, Fields[F]>
+    | In<F, Fields[F]>
+    | NotIn<F, Fields[F]>
+    | IsNull<F>;
+}[keyof Fields & string];
 
 /**
  * The filter AST: an initial encoding — plain data, no methods — that every
@@ -467,7 +481,11 @@ export type Condition<Fields extends FieldTypes = FieldTypes> = {
  * @since 0.13.0
  * @category models
  */
-export type Ast<Fields extends FieldTypes = FieldTypes> = Condition<Fields> | And<Fields> | Or<Fields> | Not<Fields>
+export type Ast<Fields extends FieldTypes = FieldTypes> =
+  | Condition<Fields>
+  | And<Fields>
+  | Or<Fields>
+  | Not<Fields>;
 
 /**
  * The untyped filter AST: any field name, any literal. What the runtime
@@ -476,21 +494,30 @@ export type Ast<Fields extends FieldTypes = FieldTypes> = Condition<Fields> | An
  * @since 0.13.0
  * @category models
  */
-export type Node = Ast<FieldTypes>
+export type Node = Ast<FieldTypes>;
 
-const Literal = Schema.Unknown
-const NodeSchema: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast)
+const Literal = Schema.Unknown;
+const NodeSchema: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);
 const CompareSchema = Schema.TaggedStruct("Compare", {
   op: Schema.Literals(compareOperators),
   field: Schema.String,
-  value: Literal
-})
-const InSchema = Schema.TaggedStruct("In", { field: Schema.String, values: Schema.NonEmptyArray(Literal) })
-const NotInSchema = Schema.TaggedStruct("NotIn", { field: Schema.String, values: Schema.NonEmptyArray(Literal) })
-const IsNullSchema = Schema.TaggedStruct("IsNull", { field: Schema.String, negated: Schema.Boolean })
-const AndSchema = Schema.TaggedStruct("And", { members: Schema.Array(NodeSchema) })
-const OrSchema = Schema.TaggedStruct("Or", { members: Schema.Array(NodeSchema) })
-const NotSchema = Schema.TaggedStruct("Not", { member: NodeSchema })
+  value: Literal,
+});
+const InSchema = Schema.TaggedStruct("In", {
+  field: Schema.String,
+  values: Schema.NonEmptyArray(Literal),
+});
+const NotInSchema = Schema.TaggedStruct("NotIn", {
+  field: Schema.String,
+  values: Schema.NonEmptyArray(Literal),
+});
+const IsNullSchema = Schema.TaggedStruct("IsNull", {
+  field: Schema.String,
+  negated: Schema.Boolean,
+});
+const AndSchema = Schema.TaggedStruct("And", { members: Schema.Array(NodeSchema) });
+const OrSchema = Schema.TaggedStruct("Or", { members: Schema.Array(NodeSchema) });
+const NotSchema = Schema.TaggedStruct("Not", { member: NodeSchema });
 
 /**
  * The runtime schema of the untyped AST ({@link Node}): validates a tree's
@@ -519,8 +546,8 @@ export const Ast: Schema.Codec<Node> = Schema.Union([
   IsNullSchema,
   AndSchema,
   OrSchema,
-  NotSchema
-]) as unknown as Schema.Codec<Node>
+  NotSchema,
+]) as unknown as Schema.Codec<Node>;
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -528,12 +555,15 @@ export const Ast: Schema.Codec<Node> = Schema.Union([
 
 const compare =
   <Op extends CompareOperator>(op: Op) =>
-  <const Field extends string, const Literal>(field: Field, value: Literal): Compare<Field, Literal> => ({
+  <const Field extends string, const Literal>(
+    field: Field,
+    value: Literal,
+  ): Compare<Field, Literal> => ({
     _tag: "Compare",
     op,
     field,
-    value
-  })
+    value,
+  });
 
 /**
  * `field = value`.
@@ -548,7 +578,7 @@ const compare =
  * @since 0.13.0
  * @category constructors
  */
-export const eq = compare("eq")
+export const eq = compare("eq");
 
 /**
  * `field ≠ value`.
@@ -556,7 +586,7 @@ export const eq = compare("eq")
  * @since 0.13.0
  * @category constructors
  */
-export const ne = compare("ne")
+export const ne = compare("ne");
 
 /**
  * `field < value`.
@@ -564,7 +594,7 @@ export const ne = compare("ne")
  * @since 0.13.0
  * @category constructors
  */
-export const lt = compare("lt")
+export const lt = compare("lt");
 
 /**
  * `field ≤ value`.
@@ -572,7 +602,7 @@ export const lt = compare("lt")
  * @since 0.13.0
  * @category constructors
  */
-export const lte = compare("lte")
+export const lte = compare("lte");
 
 /**
  * `field > value`.
@@ -580,7 +610,7 @@ export const lte = compare("lte")
  * @since 0.13.0
  * @category constructors
  */
-export const gt = compare("gt")
+export const gt = compare("gt");
 
 /**
  * `field ≥ value`.
@@ -588,7 +618,7 @@ export const gt = compare("gt")
  * @since 0.13.0
  * @category constructors
  */
-export const gte = compare("gte")
+export const gte = compare("gte");
 
 /**
  * `field IN (values)` — at least one value.
@@ -605,8 +635,8 @@ export const gte = compare("gte")
  */
 export const isIn = <const Field extends string, const Literal>(
   field: Field,
-  values: readonly [Literal, ...Array<Literal>]
-): In<Field, Literal> => ({ _tag: "In", field, values })
+  values: readonly [Literal, ...Array<Literal>],
+): In<Field, Literal> => ({ _tag: "In", field, values });
 
 /**
  * `field NOT IN (values)` — at least one value.
@@ -616,8 +646,8 @@ export const isIn = <const Field extends string, const Literal>(
  */
 export const notIn = <const Field extends string, const Literal>(
   field: Field,
-  values: readonly [Literal, ...Array<Literal>]
-): NotIn<Field, Literal> => ({ _tag: "NotIn", field, values })
+  values: readonly [Literal, ...Array<Literal>],
+): NotIn<Field, Literal> => ({ _tag: "NotIn", field, values });
 
 /**
  * `field IS NULL`, or `IS NOT NULL` when `negated`.
@@ -625,11 +655,14 @@ export const notIn = <const Field extends string, const Literal>(
  * @since 0.13.0
  * @category constructors
  */
-export const isNull = <const Field extends string>(field: Field, negated: boolean = false): IsNull<Field> => ({
+export const isNull = <const Field extends string>(
+  field: Field,
+  negated: boolean = false,
+): IsNull<Field> => ({
   _tag: "IsNull",
   field,
-  negated
-})
+  negated,
+});
 
 /**
  * A conjunction of any number of members. The members' own types are kept, so
@@ -648,7 +681,7 @@ export const isNull = <const Field extends string>(field: Field, negated: boolea
  */
 export const and = <const Members extends ReadonlyArray<Node>>(
   ...members: Members
-): { readonly _tag: "And"; readonly members: Members } => ({ _tag: "And", members })
+): { readonly _tag: "And"; readonly members: Members } => ({ _tag: "And", members });
 
 /**
  * A disjunction of any number of members.
@@ -658,7 +691,7 @@ export const and = <const Members extends ReadonlyArray<Node>>(
  */
 export const or = <const Members extends ReadonlyArray<Node>>(
   ...members: Members
-): { readonly _tag: "Or"; readonly members: Members } => ({ _tag: "Or", members })
+): { readonly _tag: "Or"; readonly members: Members } => ({ _tag: "Or", members });
 
 /**
  * The negation of one member.
@@ -666,10 +699,12 @@ export const or = <const Members extends ReadonlyArray<Node>>(
  * @since 0.13.0
  * @category constructors
  */
-export const not = <const Member extends Node>(member: Member): { readonly _tag: "Not"; readonly member: Member } => ({
+export const not = <const Member extends Node>(
+  member: Member,
+): { readonly _tag: "Not"; readonly member: Member } => ({
   _tag: "Not",
-  member
-})
+  member,
+});
 
 // ---------------------------------------------------------------------------
 // Normal form (design §3.2)
@@ -686,10 +721,10 @@ export const not = <const Member extends Node>(member: Member): { readonly _tag:
  */
 export interface LiteralCodecs {
   readonly [field: string]: {
-    readonly literal: Schema.Top
+    readonly literal: Schema.Top;
     /** When present, each condition's operator is checked against it. */
-    readonly operators?: ReadonlyArray<string> | undefined
-  }
+    readonly operators?: ReadonlyArray<string> | undefined;
+  };
 }
 
 /**
@@ -730,7 +765,7 @@ export interface LiteralCodecs {
  * @category combinators
  */
 export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
-  prepare(node, literalEncoder(fields as FieldCodecs), operatorCheck(fields)).node as N
+  prepare(node, literalEncoder(fields as FieldCodecs), operatorCheck(fields)).node as N;
 
 // ---------------------------------------------------------------------------
 // Profile (design §5)
@@ -759,4 +794,5 @@ export const normalise = <N extends Node>(node: N, fields: LiteralCodecs): N =>
  * @since 0.13.0
  * @category constants
  */
-export const PROFILE_URI = "https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1"
+export const PROFILE_URI =
+  "https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1";

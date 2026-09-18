@@ -2,9 +2,7 @@
 
 Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) implement built on top of [Effect](https://effect.website)’s `HttpApi`, `Schema`, etc.
 
-[![CI](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml/badge.svg)](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/@thomasfosterau/effect-jsonapi.svg)](https://www.npmjs.com/package/@thomasfosterau/effect-jsonapi)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml/badge.svg)](https://github.com/thomasfosterau/effect-jsonapi/actions/workflows/ci.yml) [![npm version](https://img.shields.io/npm/v/@thomasfosterau/effect-jsonapi.svg)](https://www.npmjs.com/package/@thomasfosterau/effect-jsonapi) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Disclaimer:** This repository and package have been created using Claude Code. The package’s API and functionality is in flux, so expect churn and breaking changes.
 
@@ -18,58 +16,38 @@ npm install @thomasfosterau/effect-jsonapi effect
 
 ### Importing without the HTTP surface
 
-The package root exports everything and is the import you want by default. It reaches
-`effect/unstable/httpapi`, because the error classes, endpoints, groups, media type combinators and
-middleware are built on Effect's `HttpApi`.
+The package root exports everything and is the import you want by default. It reaches `effect/unstable/httpapi`, because the error classes, endpoints, groups, media type combinators and middleware are built on Effect's `HttpApi`.
 
-Consumers that only want JSON:API's **wire types without the server** — a client decoding documents,
-a loader mapping them into something else, a CLI or code generator producing them — can import the
-same modules from a schema-only subpath whose only dependency is `effect` itself:
+Consumers that only want JSON:API's **wire types without the server** — a client decoding documents, a loader mapping them into something else, a CLI or code generator producing them — can import the same modules from a schema-only subpath whose only dependency is `effect` itself:
 
 ```ts
-import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema"
+import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema";
 ```
 
-`/schema` re-exports `Client`, `Document`, `Filter`, `Relationship`, `Resource`, `Sort` and
-`MEDIA_TYPE` — the modules whose import graph is `effect` alone. Error _documents_ are covered, since
-`Document.ErrorDocument` and `Document.ErrorObject` are document schemas; it is `ApiError`'s error
-_classes_ that carry HTTP status and content-type annotations.
+`/schema` re-exports `Client`, `Document`, `Filter`, `Relationship`, `Resource`, `Sort` and `MEDIA_TYPE` — the modules whose import graph is `effect` alone. Error _documents_ are covered, since `Document.ErrorDocument` and `Document.ErrorObject` are document schemas; it is `ApiError`'s error _classes_ that carry HTTP status and content-type annotations.
 
-This matters beyond bundle size. `effect/unstable/*` is pre-stable, so every unnecessary dependency
-on it is a version-compatibility surface that shifts between releases: tree-shaking may drop the
-code, but it cannot drop the dependency — only an entry point can.
+This matters beyond bundle size. `effect/unstable/*` is pre-stable, so every unnecessary dependency on it is a version-compatibility surface that shifts between releases: tree-shaking may drop the code, but it cannot drop the dependency — only an entry point can.
 
-The tier is derived from the real import graph and pinned by a test, not from what each module looks
-like it ought to be. `Query`, `Handlers`, `Lid` and `Atomic` read as schema-only but are currently
-outside it: `Query.constrainInclude` fails with `ApiError.UnsupportedIncludePath` /
-`UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes, and the other three reach `Query`.
+The tier is derived from the real import graph and pinned by a test, not from what each module looks like it ought to be. `Query`, `Handlers`, `Lid` and `Atomic` read as schema-only but are currently outside it: `Query.constrainInclude` fails with `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes, and the other three reach `Query`.
 
-It is a packaging seam, not a second API. Every symbol is the same object under both imports, the
-root import is unchanged, and nothing in the documentation below needs to know the subpath exists.
+It is a packaging seam, not a second API. Every symbol is the same object under both imports, the root import is unchanged, and nothing in the documentation below needs to know the subpath exists.
 
 ## Overview
 
-`@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance
-is a property of the construction, not of developer discipline:
+`@thomasfosterau/effect-jsonapi` makes it **trivial to comply with the JSON:API spec, invariantly** — compliance is a property of the construction, not of developer discipline:
 
-- Define each **resource once**; identifiers, create/update payloads, documents, query parameters
-  and endpoints are all derived from that single definition.
-- Declare each **error once**; you get a tagged Effect error whose wire encoding _is_ a
-  spec-compliant JSON:API error document with the right HTTP status.
-- **Endpoints** bake in the conventions: the `application/vnd.api+json` media type, conventional
-  paths, spec status codes (200/201/204), typed `include` / `fields[TYPE]` / `sort` / `page[*]` /
-  `filter[*]` query parameters, and content-negotiation rules (406/415).
-- Everything is a plain Effect `Schema` / `HttpApiEndpoint` / `HttpApiGroup`, so it composes with
-  `HttpApi`, `HttpApiBuilder`, `HttpApiClient`, `HttpApiTest` and `OpenApi` untouched.
+- Define each **resource once**; identifiers, create/update payloads, documents, query parameters and endpoints are all derived from that single definition.
+- Declare each **error once**; you get a tagged Effect error whose wire encoding _is_ a spec-compliant JSON:API error document with the right HTTP status.
+- **Endpoints** bake in the conventions: the `application/vnd.api+json` media type, conventional paths, spec status codes (200/201/204), typed `include` / `fields[TYPE]` / `sort` / `page[*]` / `filter[*]` query parameters, and content-negotiation rules (406/415).
+- Everything is a plain Effect `Schema` / `HttpApiEndpoint` / `HttpApiGroup`, so it composes with `HttpApi`, `HttpApiBuilder`, `HttpApiClient`, `HttpApiTest` and `OpenApi` untouched.
 
 ```ts
-import { Schema } from "effect"
-import { HttpApi } from "effect/unstable/httpapi"
-import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+import { Schema } from "effect";
+import { HttpApi } from "effect/unstable/httpapi";
+import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
 ```
 
-> **Status**: built against `effect@>=4.0.0-beta.104` (the v4 beta). The
-> `effect/unstable/httpapi` surface may shift between betas.
+> **Status**: built against `effect@>=4.0.0-beta.104` (the v4 beta). The `effect/unstable/httpapi` surface may shift between betas.
 
 ## Contents
 
@@ -114,47 +92,61 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
 
 ## Quick start
 
-A complete read API — resource, error, endpoints, handlers, server — in one file. Each piece is
-expanded in the sections below.
+A complete read API — resource, error, endpoints, handlers, server — in one file. Each piece is expanded in the sections below.
 
 ```ts
-import { Effect, Layer, Schema } from "effect"
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
-import { ApiError, Endpoint, Group, Handlers, Middleware, Query, Resource } from "@thomasfosterau/effect-jsonapi"
+import { Effect, Layer, Schema } from "effect";
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import {
+  ApiError,
+  Endpoint,
+  Group,
+  Handlers,
+  Middleware,
+  Query,
+  Resource,
+} from "@thomasfosterau/effect-jsonapi";
 // 1. Define a resource once — identifiers, payloads, documents and query
 //    parameters are all derived from this single definition.
 const Article = Resource.make("articles", {
-  attributes: { title: Schema.NonEmptyString, body: Schema.String }
-})
+  attributes: { title: Schema.NonEmptyString, body: Schema.String },
+});
 
 // 2. Declare an error once — its wire encoding *is* a JSON:API error document.
 class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
   status: 404,
   fields: { id: Schema.String },
-  detail: (e) => `Article ${e.id} not found`
+  detail: (e) => `Article ${e.id} not found`,
 }) {}
 
 // 3. Build endpoints with the JSON:API conventions baked in.
 const articles = Group.make(
   Article,
   Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }),
-  Endpoint.list(Article, { page: Query.Page.Offset })
-)
+  Endpoint.list(Article, { page: Query.Page.Offset }),
+);
 
-const Api = HttpApi.make("blog").add(articles)
+const Api = HttpApi.make("blog").add(articles);
 
 // 4. Implement handlers — inputs are typed and validated, documents are checked
 //    for the compound-document rules. (`loadArticle` / `listArticles` are your
 //    own data access returning `Effect`s.)
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("get", ({ params }) => loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))))
-    .handle("list", ({ query }) => listArticles(query).pipe(Effect.map((items) => Handlers.collection(items))))
-)
+    .handle("get", ({ params }) =>
+      loadArticle(params.id).pipe(Effect.map((article) => Handlers.data(article))),
+    )
+    .handle("list", ({ query }) =>
+      listArticles(query).pipe(Effect.map((items) => Handlers.collection(items))),
+    ),
+);
 
 // 5. Wire it up — the api won't build unless the JSON:API middleware is
 //    provided, so spec compliance can't be forgotten.
-const ApiLive = HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive), Layer.provide(Middleware.layer))
+const ApiLive = HttpApiBuilder.layer(Api).pipe(
+  Layer.provide(ArticlesLive),
+  Layer.provide(Middleware.layer),
+);
 ```
 
 ## 1. Resources — the single source of truth
@@ -163,62 +155,52 @@ const ApiLive = HttpApiBuilder.layer(Api).pipe(Layer.provide(ArticlesLive), Laye
 const Person = Resource.make("people", {
   attributes: {
     firstName: Schema.NonEmptyString,
-    lastName: Schema.NonEmptyString
-  }
-})
+    lastName: Schema.NonEmptyString,
+  },
+});
 
 const Tag = Resource.make("tags", {
-  attributes: { name: Schema.NonEmptyString }
-})
+  attributes: { name: Schema.NonEmptyString },
+});
 
 const Comment = Resource.make("comments", {
   attributes: { body: Schema.NonEmptyString },
   relationships: {
-    author: Relationship.one(() => Person) // a reference, not a string — typos don't compile
-  }
-})
+    author: Relationship.one(() => Person), // a reference, not a string — typos don't compile
+  },
+});
 
 const Article = Resource.make("articles", {
   attributes: {
     title: Schema.NonEmptyString,
     body: Schema.String,
-    createdAt: Schema.DateFromString // ISO string on the wire, Date in your code
+    createdAt: Schema.DateFromString, // ISO string on the wire, Date in your code
   },
   relationships: {
     author: Relationship.one(() => Person), // required to-one
     editor: Relationship.optional(() => Person), // nullable to-one
     tags: Relationship.many(() => Tag), // bounded to-many, inlined
-    comments: Relationship.paginated(() => Comment) // unbounded to-many, linked
-  }
-})
+    comments: Relationship.paginated(() => Comment), // unbounded to-many, linked
+  },
+});
 ```
 
 ### Relationship kinds
 
-Each relationship declares its cardinality _and_ how its data travels — inline
-as resource identifiers, or behind a link to a paginated endpoint:
+Each relationship declares its cardinality _and_ how its data travels — inline as resource identifiers, or behind a link to a paginated endpoint:
 
-| Constructor              | Cardinality | Wire shape of the relationship object         | In `?include=` | In create payload              |
-| ------------------------ | ----------- | --------------------------------------------- | -------------- | ------------------------------ |
-| `Relationship.one`       | to-one      | `{ data: identifier }` — never null           | ✓              | **required**                   |
-| `Relationship.optional`  | to-one      | `{ data: identifier \| null }`                | ✓              | optional                       |
-| `Relationship.many`      | to-many     | `{ data: identifier[] }`                      | ✓              | optional                       |
-| `Relationship.paginated` | to-many     | `{ links: { related, self? } }` — **no data** | ✗              | ✗ (use relationship endpoints) |
+| Constructor | Cardinality | Wire shape of the relationship object | In `?include=` | In create payload |
+| --- | --- | --- | --- | --- |
+| `Relationship.one` | to-one | `{ data: identifier }` — never null | ✓ | **required** |
+| `Relationship.optional` | to-one | `{ data: identifier \| null }` | ✓ | optional |
+| `Relationship.many` | to-many | `{ data: identifier[] }` | ✓ | optional |
+| `Relationship.paginated` | to-many | `{ links: { related, self? } }` — **no data** | ✗ | ✗ (use relationship endpoints) |
 
-`one` / `optional` / `many` carry **inline linkage**: clients see the related
-identifiers right inside the parent resource and can pull the full resources
-into a compound document with `?include=`.
+`one` / `optional` / `many` carry **inline linkage**: clients see the related identifiers right inside the parent resource and can pull the full resources into a compound document with `?include=`.
 
-`paginated` is for **unbounded collections** (an article's comments, a user's
-repositories): the relationship object carries only a required `related` link
-pointing at a paginated collection endpoint (see
-[Relationship & related endpoints](#relationship--related-endpoints)).
+`paginated` is for **unbounded collections** (an article's comments, a user's repositories): the relationship object carries only a required `related` link pointing at a paginated collection endpoint (see [Relationship & related endpoints](#relationship--related-endpoints)).
 
-Paging is only well defined over a stable total order — `first` / `prev` /
-`next` / `last` denote a sequence of pages, and a cursor _is_ a position in an
-order — so a `paginated` relationship can declare the **canonical order** its
-related collection is paged in, in the same `{ field, direction }` terms
-`?sort=` decodes into:
+Paging is only well defined over a stable total order — `first` / `prev` / `next` / `last` denote a sequence of pages, and a cursor _is_ a position in an order — so a `paginated` relationship can declare the **canonical order** its related collection is paged in, in the same `{ field, direction }` terms `?sort=` decodes into:
 
 ```ts
 const Article = Resource.make("articles", {
@@ -228,63 +210,54 @@ const Article = Resource.make("articles", {
       // newest first, `id` breaking ties so the order — and any cursor into it — is total
       order: [
         { field: "postedAt", direction: "desc" },
-        { field: "id", direction: "asc" }
-      ]
-    })
-  }
-})
+        { field: "id", direction: "asc" },
+      ],
+    }),
+  },
+});
 
-Resource.relationships(Article).comments.order // the declared terms
+Resource.relationships(Article).comments.order; // the declared terms
 ```
 
-Each term names an attribute of the **related** resource, or its `id`; anything
-else is a compile error, and an empty or repeating order is refused at
-definition time.
+Each term names an attribute of the **related** resource, or its `id`; anything else is a compile error, and an empty or repeating order is refused at definition time.
 
 Everything below is **derived** — never assembled by hand:
 
-| Derived                                       | What it is                                                                                                                                                                                                                                                     |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Article`                                     | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…)                                                                                                                                                                                        |
-| `Article.Id`                                  | branded id schema — `Article.Id` values can't be mixed with `Person.Id`                                                                                                                                                                                        |
-| `Article.identifier`                          | the `{ type: "articles", id }` resource-identifier schema                                                                                                                                                                                                      |
-| `Article.ref("1")`                            | a typed identifier _value_ — handy for relationship linkage                                                                                                                                                                                                    |
-| `Article.localIdentifier`                     | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet)                                                                                                                                                                |
-| `Article.lidRef("a1")`                        | a typed local-identifier _value_ — the `lid` counterpart of `ref`                                                                                                                                                                                              |
-| `Article.createPayload`                       | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` relationships and non-`create` [attribute projections](#read-only--per-attribute-projections) excluded                                              |
-| `Article.updatePayload`                       | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` relationships and non-`update` [attribute projections](#read-only--per-attribute-projections) excluded |
-| `Article.createInput` / `Article.updateInput` | flat ["command-style"](#flat-command-style-payloads) request schemas — attributes (and, for update, the `id`) without the JSON:API envelope                                                                                                                    |
-| `Article.document()`                          | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships                                                                                                                            |
-| `Article.collection()`                        | collection document (strict array `data`)                                                                                                                                                                                                                      |
-| `typeof Article.Type`                         | the decoded TypeScript type                                                                                                                                                                                                                                    |
+| Derived | What it is |
+| --- | --- |
+| `Article` | the resource object `Schema.Struct` itself (`type`/`id`/`attributes`/…) |
+| `Article.Id` | branded id schema — `Article.Id` values can't be mixed with `Person.Id` |
+| `Article.identifier` | the `{ type: "articles", id }` resource-identifier schema |
+| `Article.ref("1")` | a typed identifier _value_ — handy for relationship linkage |
+| `Article.localIdentifier` | the `{ type: "articles", lid }` schema — identifies a resource being created (no server id yet) |
+| `Article.lidRef("a1")` | a typed local-identifier _value_ — the `lid` counterpart of `ref` |
+| `Article.createPayload` | `{ data: { type, lid?, attributes, relationships } }` — no `id`; `one` relationships required, `paginated` relationships and non-`create` [attribute projections](#read-only--per-attribute-projections) excluded |
+| `Article.updatePayload` | `{ data: { type, id, attributes? (partial), relationships? } }` — attributes are [tri-state](#update-payloads-set--unset--leave-unchanged); `paginated` relationships and non-`update` [attribute projections](#read-only--per-attribute-projections) excluded |
+| `Article.createInput` / `Article.updateInput` | flat ["command-style"](#flat-command-style-payloads) request schemas — attributes (and, for update, the `id`) without the JSON:API envelope |
+| `Article.document()` | single-resource document with `Article` as primary `data` (non-null); `included` union derived from the non-paginated relationships |
+| `Article.collection()` | collection document (strict array `data`) |
+| `typeof Article.Type` | the decoded TypeScript type |
 
-Documents are not limited to one resource type — see
-[Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
+Documents are not limited to one resource type — see [Heterogeneous endpoints](#heterogeneous-endpoints-search-feeds) for polymorphic collections.
 
 ### Mutually recursive resources
 
-Relationship references are thunks, so the graph they describe may contain **cycles** — articles
-linking to their comments and each comment linking back to its article is ordinary JSON:API, and
-the runtime has always resolved it. What such a pair needs is an explicit **type annotation**:
-`Resource.make`'s return type is inferred, so without one each definition's type would depend on
-the other's and TypeScript refuses both (`TS7022`).
+Relationship references are thunks, so the graph they describe may contain **cycles** — articles linking to their comments and each comment linking back to its article is ordinary JSON:API, and the runtime has always resolved it. What such a pair needs is an explicit **type annotation**: `Resource.make`'s return type is inferred, so without one each definition's type would depend on the other's and TypeScript refuses both (`TS7022`).
 
-The annotation is the same escape Effect's recursive schemas use, and this is all of it — one
-`interface` per resource in the cycle, naming the relationship record. Hoist the attributes to a
-`const` so no attribute schema is restated, and give the value the interface of the same name:
+The annotation is the same escape Effect's recursive schemas use, and this is all of it — one `interface` per resource in the cycle, naming the relationship record. Hoist the attributes to a `const` so no attribute schema is restated, and give the value the interface of the same name:
 
 ```ts
-import { Schema } from "effect"
-import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+import { Schema } from "effect";
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
-const articleAttributes = { title: Schema.NonEmptyString }
-const commentAttributes = { body: Schema.NonEmptyString }
+const articleAttributes = { title: Schema.NonEmptyString };
+const commentAttributes = { body: Schema.NonEmptyString };
 
 interface Article extends Resource.Resource<
   "articles",
   typeof articleAttributes,
   {
-    readonly comments: Relationship.many<Comment>
+    readonly comments: Relationship.many<Comment>;
   }
 > {}
 
@@ -292,87 +265,71 @@ interface Comment extends Resource.Resource<
   "comments",
   typeof commentAttributes,
   {
-    readonly article: Relationship.one<Article>
+    readonly article: Relationship.one<Article>;
   }
 > {}
 
 const Article: Article = Resource.make("articles", {
   attributes: articleAttributes,
-  relationships: { comments: Relationship.many(() => Comment) }
-})
+  relationships: { comments: Relationship.many(() => Comment) },
+});
 
 const Comment: Comment = Resource.make("comments", {
   attributes: commentAttributes,
-  relationships: { article: Relationship.one(() => Article) }
-})
+  relationships: { article: Relationship.one(() => Article) },
+});
 ```
 
-The lowercase `Relationship.one` / `optional` / `many` / `paginated` **types** used in the
-annotation mirror the constructors of the same name, defaults included (`one` and `optional` default
-to not filterable, `paginated` to no declared `order`, exactly as the constructors do). A resource
-definition is invariant in its relationship record, so the annotation has to name the type the
-constructor produced; these are that type. A relationship that declares a `filter` or an `order`
-names it too, as the `const` tuple the constructor infers:
-`Relationship.one<Article, readonly ["eq", "in"]>`.
+The lowercase `Relationship.one` / `optional` / `many` / `paginated` **types** used in the annotation mirror the constructors of the same name, defaults included (`one` and `optional` default to not filterable, `paginated` to no declared `order`, exactly as the constructors do). A resource definition is invariant in its relationship record, so the annotation has to name the type the constructor produced; these are that type. A relationship that declares a `filter` or an `order` names it too, as the `const` tuple the constructor infers: `Relationship.one<Article, readonly ["eq", "in"]>`.
 
-Self-references work the same way (`parent: Relationship.optional<Category>` on `Category`), and
-all four relationship kinds may take part in a cycle.
+Self-references work the same way (`parent: Relationship.optional<Category>` on `Category`), and all four relationship kinds may take part in a cycle.
 
 Everything derived from the definitions keeps working, and a cycle cannot make any of it infinite:
 
-| Derived                                    | Behaviour in a cycle                                                                                                         |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `Article.document()`                       | the `included` union is **one hop** wide — the targets of `Article`'s own linkable relationships, not the transitive closure |
-| `?include=` paths                          | bounded by the derivation depth (2 by default, `includePaths(R, n)` at runtime), not by the graph                            |
-| `createPayload` / `updatePayload`          | unchanged on both sides — a required `one` across the cycle is still required                                                |
-| `Endpoint.get` / `list` / `Group.resource` | derive their paths and documents from the resource's own type tag                                                            |
+| Derived | Behaviour in a cycle |
+| --- | --- |
+| `Article.document()` | the `included` union is **one hop** wide — the targets of `Article`'s own linkable relationships, not the transitive closure |
+| `?include=` paths | bounded by the derivation depth (2 by default, `includePaths(R, n)` at runtime), not by the graph |
+| `createPayload` / `updatePayload` | unchanged on both sides — a required `one` across the cycle is still required |
+| `Endpoint.get` / `list` / `Group.resource` | derive their paths and documents from the resource's own type tag |
 
 ### Custom id schemas
 
-By default a resource's id is `Resource.Id(type)` — a `string` branded by resource type. Pass your
-own `id` schema (anything whose **encoded** side stays a `string`, so the wire is spec-compliant) to
-brand ids your way — e.g. an id shared across a hierarchy of types, or one decoded to a richer value:
+By default a resource's id is `Resource.Id(type)` — a `string` branded by resource type. Pass your own `id` schema (anything whose **encoded** side stays a `string`, so the wire is spec-compliant) to brand ids your way — e.g. an id shared across a hierarchy of types, or one decoded to a richer value:
 
 ```ts
-const PersonId = Schema.String.pipe(Schema.brand("PersonId"))
+const PersonId = Schema.String.pipe(Schema.brand("PersonId"));
 
 const Person = Resource.make("people", {
   id: PersonId, // default = Resource.Id("people")
-  attributes: { name: Schema.NonEmptyString }
-})
+  attributes: { name: Schema.NonEmptyString },
+});
 
-Person.Id // PersonId
+Person.Id; // PersonId
 // Person.identifier.Type      → { type: "people"; id: PersonId }
 // Person.updatePayload.Type   → data.id is PersonId
 // Document.DataDocument(Person).Type.data.id is PersonId
 ```
 
-The injected id flows through `identifier`, `updatePayload`, `ref`, `createInput`/`updateInput` and
-the document schemas. Omit `id` and nothing changes — existing definitions keep the auto-branded id.
-`Resource.Identifier(type, id?)` accepts a custom id too, for standalone identifier schemas.
+The injected id flows through `identifier`, `updatePayload`, `ref`, `createInput`/`updateInput` and the document schemas. Omit `id` and nothing changes — existing definitions keep the auto-branded id. `Resource.Identifier(type, id?)` accepts a custom id too, for standalone identifier schemas.
 
-**Subtype ids via `extend`.** To make a subtype's id a _subtype_ of its base's id — a `PersonId` that
-_is an_ `AgentId` _is a_ `NodeId` — pass `inheritId: true` to [`extend`](#reusing--extending-resources).
-The child's id brands the base's id schema, so it accumulates the base's brand(s) and is assignable
-wherever the base id is expected (transitively through a chain); the reverse is rejected. Effect's
-brands are intersectional, so this is just brand accumulation:
+**Subtype ids via `extend`.** To make a subtype's id a _subtype_ of its base's id — a `PersonId` that _is an_ `AgentId` _is a_ `NodeId` — pass `inheritId: true` to [`extend`](#reusing--extending-resources). The child's id brands the base's id schema, so it accumulates the base's brand(s) and is assignable wherever the base id is expected (transitively through a chain); the reverse is rejected. Effect's brands are intersectional, so this is just brand accumulation:
 
 ```ts
-const Account = Resource.make("accounts", { attributes: { email: Schema.NonEmptyString } })
-const Manager = Resource.extend(Account, "managers", { inheritId: true })
+const Account = Resource.make("accounts", { attributes: { email: Schema.NonEmptyString } });
+const Manager = Resource.extend(Account, "managers", { inheritId: true });
 
-const managerId = Manager.Id.make("1")
-const asAccount: typeof Account.Id.Type = managerId // ✓ a manager id IS an account id
+const managerId = Manager.Id.make("1");
+const asAccount: typeof Account.Id.Type = managerId; // ✓ a manager id IS an account id
 // @ts-expect-error an account id is not a manager id
-const asManager: typeof Manager.Id.Type = Account.Id.make("2")
+const asManager: typeof Manager.Id.Type = Account.Id.make("2");
 ```
 
 `inheritId` defaults to `false` — by default an extended resource gets a fresh, independent brand.
 
 ### Update payloads: set / unset / leave unchanged
 
-A PATCH must distinguish three intents per attribute. `updatePayload` models them with
-`Schema.optional` (`= optionalKey(UndefinedOr(...))`), so each attribute is genuinely tri-state:
+A PATCH must distinguish three intents per attribute. `updatePayload` models them with `Schema.optional` (`= optionalKey(UndefinedOr(...))`), so each attribute is genuinely tri-state:
 
 | Wire / value   | Meaning           |
 | -------------- | ----------------- |
@@ -380,15 +337,12 @@ A PATCH must distinguish three intents per attribute. `updatePayload` models the
 | key = `null`†  | unset (clear)     |
 | key = a value  | set to that value |
 
-† `null` requires a nullable attribute (`Schema.NullOr(...)`). In-process — and over codec transports
-that preserve it, like RPC / remote functions — an explicit `undefined` is also accepted as "unset".
-Over a JSON HTTP body, JSON can't carry `undefined`, so `null` is the wire clear signal and an absent
-key means "leave unchanged".
+† `null` requires a nullable attribute (`Schema.NullOr(...)`). In-process — and over codec transports that preserve it, like RPC / remote functions — an explicit `undefined` is also accepted as "unset". Over a JSON HTTP body, JSON can't carry `undefined`, so `null` is the wire clear signal and an absent key means "leave unchanged".
 
 ```ts
 const Person = Resource.make("people", {
-  attributes: { name: Schema.NonEmptyString, bio: Schema.NullOr(Schema.String) }
-})
+  attributes: { name: Schema.NonEmptyString, bio: Schema.NullOr(Schema.String) },
+});
 
 // Person.updatePayload accepts, for `bio`: a string (set), null (clear), or omit (leave unchanged).
 // Its type is `{ name?: string; bio?: string | null | undefined }` under `data.attributes`.
@@ -396,57 +350,45 @@ const Person = Resource.make("people", {
 
 ### Per-attribute annotations
 
-Stamp metadata onto an attribute with Effect's `schema.annotate({ ... })`, and read it back per
-attribute with `Resource.attributeAnnotations` — handy for carrying, say, a database column name
-alongside the attribute schema:
+Stamp metadata onto an attribute with Effect's `schema.annotate({ ... })`, and read it back per attribute with `Resource.attributeAnnotations` — handy for carrying, say, a database column name alongside the attribute schema:
 
 ```ts
 const Person = Resource.make("people", {
-  attributes: { bio: Schema.NullOr(Schema.String).annotate({ dbColumn: "biography" }) }
-})
+  attributes: { bio: Schema.NullOr(Schema.String).annotate({ dbColumn: "biography" }) },
+});
 
-Resource.attributeAnnotations(Person).bio?.dbColumn // "biography"
+Resource.attributeAnnotations(Person).bio?.dbColumn; // "biography"
 ```
 
 ### Resource-level metadata & introspection
 
-A resource definition is also the natural single source of truth for things
-_outside_ the HTTP layer — database columns, form descriptors, a sync engine's
-node definitions. Two accessors make deriving from one a supported thing to do.
+A resource definition is also the natural single source of truth for things _outside_ the HTTP layer — database columns, form descriptors, a sync engine's node definitions. Two accessors make deriving from one a supported thing to do.
 
-**Metadata rides the resource.** A definition _is_ a `Schema.Struct` with its
-derived members assigned onto it, so Effect's own `resource.annotate({ ... })`
-rebuilds the schema and returns a plain struct with `type`, `document()`,
-`createPayload` and the rest gone — no longer a resource, and no longer a valid
-relationship target. `Resource.annotate` is the seam that keeps it one:
+**Metadata rides the resource.** A definition _is_ a `Schema.Struct` with its derived members assigned onto it, so Effect's own `resource.annotate({ ... })` rebuilds the schema and returns a plain struct with `type`, `document()`, `createPayload` and the rest gone — no longer a resource, and no longer a valid relationship target. `Resource.annotate` is the seam that keeps it one:
 
 ```ts
-const TableName = "acme/table" // namespace your keys
+const TableName = "acme/table"; // namespace your keys
 
-const Person = Resource.annotate(Resource.make("people", { attributes: { name: Schema.NonEmptyString } }), {
-  [TableName]: "people"
-})
+const Person = Resource.annotate(
+  Resource.make("people", { attributes: { name: Schema.NonEmptyString } }),
+  {
+    [TableName]: "people",
+  },
+);
 
-Person.type // "people" — still a complete resource
-Resource.annotations(Person)[TableName] // "people"
+Person.type; // "people" — still a complete resource
+Resource.annotations(Person)[TableName]; // "people"
 
 // still a relationship target, resolved lazily and by identity:
 const Article = Resource.make("articles", {
   attributes: { title: Schema.NonEmptyString },
-  relationships: { author: Relationship.one(() => Person) }
-})
+  relationships: { author: Relationship.one(() => Person) },
+});
 ```
 
-Annotations are inherited by `Resource.extend` (the child's own keys winning),
-and can be declared up front with `Resource.make`'s `annotations` option — the
-better spelling when other definitions already point at the resource, since
-like `Schema.annotate` this returns a _new_ definition rather than mutating the
-one given.
+Annotations are inherited by `Resource.extend` (the child's own keys winning), and can be declared up front with `Resource.make`'s `annotations` option — the better spelling when other definitions already point at the resource, since like `Schema.annotate` this returns a _new_ definition rather than mutating the one given.
 
-**Attribute shape is readable.** `Resource.attributeDescriptors` reports what
-the declaration already knows about each attribute, in declaration order, as
-plain data — no reaching into `resource.fields.attributes.ast`, no widening the
-definition through `unknown`, no running a decoder against sentinel values:
+**Attribute shape is readable.** `Resource.attributeDescriptors` reports what the declaration already knows about each attribute, in declaration order, as plain data — no reaching into `resource.fields.attributes.ast`, no widening the definition through `unknown`, no running a decoder against sentinel values:
 
 ```ts
 const Article = Resource.make("articles", {
@@ -454,11 +396,11 @@ const Article = Resource.make("articles", {
     title: Schema.NonEmptyString,
     summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
     createdAt: Resource.readOnlyAttribute(Schema.DateFromString),
-    draftBody: Resource.attribute(Schema.String, { resource: false, update: false })
-  }
-})
+    draftBody: Resource.attribute(Schema.String, { resource: false, update: false }),
+  },
+});
 
-Resource.attributeDescriptors(Article)
+Resource.attributeDescriptors(Article);
 // [{ key: "title",     schema, resource: "required", create: "required", update: "optional",
 //    clearable: false, nullable: false, readOnly: false, annotations },
 //  { key: "summary",   …, create: "optional", nullable: true,  clearable: true },
@@ -466,27 +408,11 @@ Resource.attributeDescriptors(Article)
 //  { key: "draftBody", …, resource: false }]  // input-only: declared, never on the resource object
 ```
 
-**What belongs in an annotation, and what doesn't.** Annotations are for
-vocabulary JSON:API has no opinion about — a storage table or column name, a
-sync-engine node kind, an admin-UI label — so that foreign vocabulary stays out
-of this package. Metadata that _is_ JSON:API's business gets a declaration
-instead, because the package has to act on it: filterability is `Filter.able`,
-sortability is `Sort.able`, and a paginated relationship's
-[canonical order](#relationship-kinds) is `Relationship.paginated(ref, { order })`
-— without a stable order the pagination links that relationship advertises are
-unsound, which is a defect in the document itself. A storage column name, by
-contrast, has no wire representation at all: two servers that disagree about it
-serve byte-identical JSON:API documents. That is the test — if changing it
-changes nothing a client can observe, it is an annotation.
+**What belongs in an annotation, and what doesn't.** Annotations are for vocabulary JSON:API has no opinion about — a storage table or column name, a sync-engine node kind, an admin-UI label — so that foreign vocabulary stays out of this package. Metadata that _is_ JSON:API's business gets a declaration instead, because the package has to act on it: filterability is `Filter.able`, sortability is `Sort.able`, and a paginated relationship's [canonical order](#relationship-kinds) is `Relationship.paginated(ref, { order })` — without a stable order the pagination links that relationship advertises are unsound, which is a defect in the document itself. A storage column name, by contrast, has no wire representation at all: two servers that disagree about it serve byte-identical JSON:API documents. That is the test — if changing it changes nothing a client can observe, it is an annotation.
 
 ### Read-only & per-attribute projections
 
-By default every attribute is read-write: it appears in the resource object, the documents, and all
-four write projections (`createPayload` / `updatePayload` / `createInput` / `updateInput`). Some
-attributes need a different shape — server-set timestamps that are never client input, fields
-settable only at create time, optional or clearable values. `Resource.attribute(schema, options)`
-declares that shape per attribute, and `Resource.readOnlyAttribute(schema)` is the common shorthand
-for "server-set" (`{ create: false, update: false }`).
+By default every attribute is read-write: it appears in the resource object, the documents, and all four write projections (`createPayload` / `updatePayload` / `createInput` / `updateInput`). Some attributes need a different shape — server-set timestamps that are never client input, fields settable only at create time, optional or clearable values. `Resource.attribute(schema, options)` declares that shape per attribute, and `Resource.readOnlyAttribute(schema)` is the common shorthand for "server-set" (`{ create: false, update: false }`).
 
 ```ts
 const Article = Resource.make("articles", {
@@ -497,109 +423,84 @@ const Article = Resource.make("articles", {
     // settable only at create, never updatable
     slug: Resource.attribute(Schema.String, { update: false }),
     // optional at create, clearable (nullable) on update
-    summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" })
-  }
-})
+    summary: Resource.attribute(Schema.NullOr(Schema.String), { create: "optional" }),
+  },
+});
 
 // Article.Type.attributes                  → { title, createdAt, slug, summary }
 // Article.createPayload … data.attributes  → { title, slug, summary? }   (no createdAt)
 // Article.updatePayload … data.attributes  → { title?, summary? }        (no createdAt, no slug)
 ```
 
-An optional create attribute (`create: "optional"`, or a bare `Schema.optionalKey(...)` attribute)
-projects as `Schema.optional`, exactly as every update attribute does: the key may be absent, or
-present with a value or an explicit `undefined`. So a caller that builds
-`{ summary: input.summary?.trim() || undefined }` type-checks against `createInput` and
-`updateInput` alike (also under `exactOptionalPropertyTypes`). On a JSON wire an explicit `undefined`
-and an absent key are the same thing — the attribute is not supplied.
+An optional create attribute (`create: "optional"`, or a bare `Schema.optionalKey(...)` attribute) projects as `Schema.optional`, exactly as every update attribute does: the key may be absent, or present with a value or an explicit `undefined`. So a caller that builds `{ summary: input.summary?.trim() || undefined }` type-checks against `createInput` and `updateInput` alike (also under `exactOptionalPropertyTypes`). On a JSON wire an explicit `undefined` and an absent key are the same thing — the attribute is not supplied.
 
 The descriptor options (all optional; the defaults reproduce a plain `Schema` attribute):
 
-| option      | values                                          | controls                                                             |
-| ----------- | ----------------------------------------------- | -------------------------------------------------------------------- |
-| `resource`  | `true` (default) · `"optional"` · `false`       | presence in the resource object schema + documents                   |
-| `create`    | `"required"` (default) · `"optional"` · `false` | presence in `createPayload` / `createInput`                          |
-| `update`    | `"optional"` (default) · `false`                | presence in `updatePayload` / `updateInput` (tri-state when present) |
-| `clearable` | `boolean` (default: nullable?)                  | whether the update projection additionally accepts `null` to clear   |
+| option | values | controls |
+| --- | --- | --- |
+| `resource` | `true` (default) · `"optional"` · `false` | presence in the resource object schema + documents |
+| `create` | `"required"` (default) · `"optional"` · `false` | presence in `createPayload` / `createInput` |
+| `update` | `"optional"` (default) · `false` | presence in `updatePayload` / `updateInput` (tri-state when present) |
+| `clearable` | `boolean` (default: nullable?) | whether the update projection additionally accepts `null` to clear |
 
-The descriptor rides on the attribute's schema value, so it flows through `attributeKeys`,
-`attributeAnnotations`, sparse `fields` and `include`, is carried through
-[`Resource.extend`](#reusing--extending-resources), and is respected by the
-[atomic operations](#atomic-operations) (`add` mirrors create, `update` mirrors update) — all
-consistently with the create/update payloads.
+The descriptor rides on the attribute's schema value, so it flows through `attributeKeys`, `attributeAnnotations`, sparse `fields` and `include`, is carried through [`Resource.extend`](#reusing--extending-resources), and is respected by the [atomic operations](#atomic-operations) (`add` mirrors create, `update` mirrors update) — all consistently with the create/update payloads.
 
 #### Write-only (input-only) attributes
 
-`resource: false` declares an attribute that is **accepted as input but never on the resource
-object** — an upload's binary, a password, a one-time token. It is absent from the resource `Struct`,
-the documents, `attributeKeys`, sparse `fields`, `filterable` and `sortable`, yet still projected
-into `createPayload` / `createInput` and `updatePayload` / `updateInput` per its `create` / `update`
-settings (and into the atomic `add` / `update` operations), so a write-only field stays declared in
-one place:
+`resource: false` declares an attribute that is **accepted as input but never on the resource object** — an upload's binary, a password, a one-time token. It is absent from the resource `Struct`, the documents, `attributeKeys`, sparse `fields`, `filterable` and `sortable`, yet still projected into `createPayload` / `createInput` and `updatePayload` / `updateInput` per its `create` / `update` settings (and into the atomic `add` / `update` operations), so a write-only field stays declared in one place:
 
 ```ts
-const FileSchema = Schema.Uint8Array // or any `Schema.declare`d binary
+const FileSchema = Schema.Uint8Array; // or any `Schema.declare`d binary
 
 const Upload = Resource.make("uploads", {
   attributes: {
     fileName: Schema.NonEmptyString,
     contentType: Schema.NonEmptyString,
     // create-only binary: in `createInput`, never on the resource object
-    file: Resource.attribute(FileSchema, { resource: false, update: false })
-  }
-})
+    file: Resource.attribute(FileSchema, { resource: false, update: false }),
+  },
+});
 
 // Upload.Type.attributes   → { fileName, contentType }              (no file)
 // Upload.createInput.Type  → { fileName, contentType, file }
 // Upload.updateInput.Type  → { id, fileName?, contentType? }        (no file — update: false)
-Resource.attributeKeys(Upload) // ["fileName", "contentType"]
+Resource.attributeKeys(Upload); // ["fileName", "contentType"]
 ```
 
-An input-only attribute must keep at least one write projection (`resource: false` with both
-`create: false` and `update: false` declares nothing) and cannot carry a `filter` / `sort`
-declaration (it is not on the resource object to filter or sort by); `Resource.make` throws on
-either, naming the attribute. `Resource.attributes(R)` returns the resource-object map, without
-input-only attributes; `Resource.declaredAttributes(R)` returns the map as declared, and that is
-what `Resource.extend` inherits — so a subtype of `Upload` accepts `file` at create too.
+An input-only attribute must keep at least one write projection (`resource: false` with both `create: false` and `update: false` declares nothing) and cannot carry a `filter` / `sort` declaration (it is not on the resource object to filter or sort by); `Resource.make` throws on either, naming the attribute. `Resource.attributes(R)` returns the resource-object map, without input-only attributes; `Resource.declaredAttributes(R)` returns the map as declared, and that is what `Resource.extend` inherits — so a subtype of `Upload` accepts `file` at create too.
 
 The common helpers compose from a single `attribute(...)` call, so you can define your own sugar:
 
 ```ts
-const computed = <S extends Schema.Top>(s: S) => Resource.attribute(s, { create: false, update: false })
-const createOnly = <S extends Schema.Top>(s: S) => Resource.attribute(s, { update: false })
-const defaulted = <S extends Schema.Top>(s: S) => Resource.attribute(s, { create: "optional" })
-const optional = <S extends Schema.Top>(s: S) => Resource.attribute(s, { resource: "optional", create: "optional" })
-const inputOnly = <S extends Schema.Top>(s: S) => Resource.attribute(s, { resource: false, update: false })
+const computed = <S extends Schema.Top>(s: S) =>
+  Resource.attribute(s, { create: false, update: false });
+const createOnly = <S extends Schema.Top>(s: S) => Resource.attribute(s, { update: false });
+const defaulted = <S extends Schema.Top>(s: S) => Resource.attribute(s, { create: "optional" });
+const optional = <S extends Schema.Top>(s: S) =>
+  Resource.attribute(s, { resource: "optional", create: "optional" });
+const inputOnly = <S extends Schema.Top>(s: S) =>
+  Resource.attribute(s, { resource: false, update: false });
 ```
 
 ### Flat (command-style) payloads
 
-Alongside the JSON:API `{ data: { type, attributes } }` payloads, every resource exposes flat request
-schemas — the attributes alone, no envelope — for transports (RPC, remote functions) that carry a
-flat shape:
+Alongside the JSON:API `{ data: { type, attributes } }` payloads, every resource exposes flat request schemas — the attributes alone, no envelope — for transports (RPC, remote functions) that carry a flat shape:
 
 ```ts
-Person.createInput // { name, bio }            — flat create attributes
-Person.updateInput // { id, name?, bio? }      — id plus the same tri-state attributes
+Person.createInput; // { name, bio }            — flat create attributes
+Person.updateInput; // { id, name?, bio? }      — id plus the same tri-state attributes
 ```
 
-These are also what the `payload` override on `Endpoint.create` / `Endpoint.update` takes, when the
-HTTP write contract itself is a flat command input rather than a JSON:API document — see
-[Overriding the write payload](#overriding-the-write-payload).
+These are also what the `payload` override on `Endpoint.create` / `Endpoint.update` takes, when the HTTP write contract itself is a flat command input rather than a JSON:API document — see [Overriding the write payload](#overriding-the-write-payload).
 
 ### Nullable primary `data`
 
-`Document.DataDocument` is a **pure envelope**: its `data` member is exactly the
-schema you pass, so nullability is your compositional choice — not something the
-constructor decides for you. JSON:API only permits `data: null` for a
-single-resource request whose URL _might_ correspond to a resource but currently
-doesn't; fetch-existing / create / update always carry the resource (a missing
-one is a `404`, never `200 { data: null }`).
+`Document.DataDocument` is a **pure envelope**: its `data` member is exactly the schema you pass, so nullability is your compositional choice — not something the constructor decides for you. JSON:API only permits `data: null` for a single-resource request whose URL _might_ correspond to a resource but currently doesn't; fetch-existing / create / update always carry the resource (a missing one is a `404`, never `200 { data: null }`).
 
 ```ts
-Document.DataDocument(Article) //                       data: Article
-Document.DataDocument(Schema.NullOr(Article)) //        data: Article | null
-Document.DataDocument(Article.nullable()) //            data: Option<Article>, ⇆ null on the wire
+Document.DataDocument(Article); //                       data: Article
+Document.DataDocument(Schema.NullOr(Article)); //        data: Article | null
+Document.DataDocument(Article.nullable()); //            data: Option<Article>, ⇆ null on the wire
 ```
 
 `Article.nullable()` is `Schema.OptionFromNullOr(Article)` — the spec-clean nullable codec (`None ⇆ null`). Avoid effect's _structural_ `Schema.Option` (`{ _tag, value }`): it serialises a non-conformant body, and `DataDocument` can't tell the two apart. `Article.document()` and `Endpoint.get` / `create` / `update` use the non-null form; `Endpoint.related` for a to-one relationship keeps the nullable form (`data: target | null`) for the empty-linkage case.
@@ -610,8 +511,8 @@ When several resources share a set of attributes or relationships, define them o
 
 ```ts
 const Profile = Resource.make("profiles", {
-  attributes: { ...Resource.attributes(Person), bio: Schema.String }
-})
+  attributes: { ...Resource.attributes(Person), bio: Schema.String },
+});
 ```
 
 `Resource.extend` does the same wholesale — a **subtype** that inherits the base's attributes _and_ relationships, adding (or overriding) its own. JSON:API has no native subtyping, so the result is a _distinct_ resource type: its own `type` tag and branded id, with payloads and documents derived afresh. `meta` is inherited unless overridden.
@@ -619,77 +520,65 @@ const Profile = Resource.make("profiles", {
 ```ts
 const Account = Resource.make("accounts", {
   attributes: { email: Schema.NonEmptyString, createdAt: Schema.DateFromString },
-  relationships: { organisation: Relationship.one(() => Organisation) }
-})
+  relationships: { organisation: Relationship.one(() => Organisation) },
+});
 
 // `admins` inherits email, createdAt and organisation, adding `permissions`.
 const Admin = Resource.extend(Account, "admins", {
-  attributes: { permissions: Schema.Array(Schema.String) }
-})
+  attributes: { permissions: Schema.Array(Schema.String) },
+});
 
-Resource.attributeKeys(Admin) // ["email", "createdAt", "permissions"]
+Resource.attributeKeys(Admin); // ["email", "createdAt", "permissions"]
 ```
 
 `extend` accepts a custom `id` schema exactly as `Resource.make` does, for a consumer that keys its subtypes with its own brand catalogue (branding at the row-mapping seam via `AdminId.make(row.id)`). The subtype's id is then that schema and nothing else — no package brand is added — and it flows through `identifier`, `ref`, the payloads and the documents as usual. `id` and `inheritId: true` are contradictory, so passing both is a type error and throws at definition time.
 
 ```ts
-const AdminId = Schema.String.pipe(Schema.brand("AdminId"))
-const Admin = Resource.extend(Account, "admins", { id: AdminId })
+const AdminId = Schema.String.pipe(Schema.brand("AdminId"));
+const Admin = Resource.extend(Account, "admins", { id: AdminId });
 
-Admin.Id.make("1") // string & Brand<"AdminId">
-Admin.ref("1") // { type: "admins", id: string & Brand<"AdminId"> }
+Admin.Id.make("1"); // string & Brand<"AdminId">
+Admin.ref("1"); // { type: "admins", id: string & Brand<"AdminId"> }
 ```
 
 ### Polymorphic families (heterogeneous supertypes)
 
-`Resource.family` defines a **supertype** over a set of member resources — for a
-heterogeneous "any node" endpoint, a document whose `data` is the union of
-subtypes, or a relationship that targets "any member". A family **is** the
-discriminated union over its members (decoded by the `type` tag) _and_ a
-first-class resource-like value, so it can be used as primary `data`, as a
-compound `included` member, and as a **relationship target**.
+`Resource.family` defines a **supertype** over a set of member resources — for a heterogeneous "any node" endpoint, a document whose `data` is the union of subtypes, or a relationship that targets "any member". A family **is** the discriminated union over its members (decoded by the `type` tag) _and_ a first-class resource-like value, so it can be used as primary `data`, as a compound `included` member, and as a **relationship target**.
 
 ```ts
-const Node = Resource.make("nodes", { attributes: { name: Schema.NonEmptyString } })
-const Person = Resource.extend(Node, "people", { inheritId: true, attributes: { firstName: Schema.String } })
+const Node = Resource.make("nodes", { attributes: { name: Schema.NonEmptyString } });
+const Person = Resource.extend(Node, "people", {
+  inheritId: true,
+  attributes: { firstName: Schema.String },
+});
 const Organisation = Resource.extend(Node, "organisations", {
   inheritId: true,
-  attributes: { legalName: Schema.String }
-})
+  attributes: { legalName: Schema.String },
+});
 
 // Base-anchored family: shared id brand / relationships / attributes come from Node.
-const AnyNode = Resource.family(Node, [Person, Organisation])
+const AnyNode = Resource.family(Node, [Person, Organisation]);
 
-AnyNode.document() // data: Person | Organisation, included spans members' targets
-AnyNode.collection() // data: Array<Person | Organisation>
+AnyNode.document(); // data: Person | Organisation, included spans members' targets
+AnyNode.collection(); // data: Array<Person | Organisation>
 
 // As a relationship target — linkage decodes for ANY member (keyed on the member
 // `type`, never the family name):
 const Edge = Resource.make("edges", {
   attributes: { weight: Schema.Number },
-  relationships: { to: Relationship.one(() => AnyNode) }
-})
+  relationships: { to: Relationship.one(() => AnyNode) },
+});
 // Edge.to.data is { type: "people"; id } | { type: "organisations"; id }
 ```
 
-Endpoints: `Endpoint.polymorphic(AnyNode, { include: true })` is the single-resource
-`GET /nodes/:id` (returning any member), and `Endpoint.collection(AnyNode.members, …)`
-the `GET /nodes` collection; `Group.make(AnyNode, …)` hosts them.
+Endpoints: `Endpoint.polymorphic(AnyNode, { include: true })` is the single-resource `GET /nodes/:id` (returning any member), and `Endpoint.collection(AnyNode.members, …)` the `GET /nodes` collection; `Group.make(AnyNode, …)` hosts them.
 
 Two forms:
 
-- **Base-anchored** `Resource.family(Base, [A, B])` — **recommended**. The shared
-  `Id` / `relationships` / attributes come from `Base`, so the shared id brand
-  anchors "any member id" and dotted `?include=` paths _through_ the family are
-  meaningful. Pair with members defined as `extend(Base, …, { inheritId: true })`.
-- **Named** `Resource.family("media", [Article, Photo])` — no base; the shared id
-  is a union of the members' ids and the shared relationships/attributes are the
-  by-key intersection of the members'. Fully correct for data / `included` /
-  linkage; include-_through_ and the shared id brand degrade to the intersection.
+- **Base-anchored** `Resource.family(Base, [A, B])` — **recommended**. The shared `Id` / `relationships` / attributes come from `Base`, so the shared id brand anchors "any member id" and dotted `?include=` paths _through_ the family are meaningful. Pair with members defined as `extend(Base, …, { inheritId: true })`.
+- **Named** `Resource.family("media", [Article, Photo])` — no base; the shared id is a union of the members' ids and the shared relationships/attributes are the by-key intersection of the members'. Fully correct for data / `included` / linkage; include-_through_ and the shared id brand degrade to the intersection.
 
-A family value is data/target-only — it is never _created_, so it deliberately
-has no `ref` / `createPayload` (only its concrete members do). `Resource.isFamily`
-distinguishes a family from a single resource or a plain union.
+A family value is data/target-only — it is never _created_, so it deliberately has no `ref` / `createPayload` (only its concrete members do). `Resource.isFamily` distinguishes a family from a single resource or a plain union.
 
 ## 2. Errors — declared once, spec-compliant forever
 
@@ -699,7 +588,7 @@ class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound"
   code: "not_found",
   title: "Resource not found",
   fields: { id: Schema.String }, // typed fields, round-tripped through the wire
-  detail: (e) => `Article ${e.id} not found`
+  detail: (e) => `Article ${e.id} not found`,
 }) {}
 ```
 
@@ -724,8 +613,7 @@ One declaration gives you all of:
 
 - the **HTTP status** and OpenAPI documentation for free.
 
-`ApiError.BadRequest` (400), `ApiError.NotAcceptable` (406), `ApiError.UnsupportedMediaType` (415),
-`ApiError.Forbidden` (403) and `ApiError.Conflict` (409) are predefined.
+`ApiError.BadRequest` (400), `ApiError.NotAcceptable` (406), `ApiError.UnsupportedMediaType` (415), `ApiError.Forbidden` (403) and `ApiError.Conflict` (409) are predefined.
 
 ## 3. Endpoints & groups — conventions baked in
 
@@ -736,7 +624,7 @@ const articles = Group.make(
   Endpoint.get(Article, {
     include: true,
     fields: true,
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
   // (`filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` an operator —
@@ -746,7 +634,7 @@ const articles = Group.make(
     sort: ["createdAt", "title"],
     page: Query.Page.Offset,
     filter: { author: Schema.optionalKey(Schema.String) },
-    meta: Schema.Struct({ total: Schema.Int })
+    meta: Schema.Struct({ total: Schema.Int }),
   }),
   // POST /articles → 201 (client may send a lid; the required author relationship must be present)
   Endpoint.create(Article, { errors: [TitleTaken] }),
@@ -757,89 +645,73 @@ const articles = Group.make(
   // GET /articles/:id/comments — the paginated related collection
   Endpoint.related(Article, "comments", {
     page: Query.Page.Offset,
-    errors: [ArticleNotFound]
+    errors: [ArticleNotFound],
   }),
   // PATCH /articles/:id/relationships/author — replace the author
-  Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] })
-)
+  Endpoint.updateRelationship(Article, "author", { errors: [ArticleNotFound] }),
+);
 
-const Api = HttpApi.make("blog").add(articles)
+const Api = HttpApi.make("blog").add(articles);
 ```
 
 ### Overriding the write payload
 
-`Endpoint.create` and `Endpoint.update` bind their request body to the resource's `createPayload` /
-`updatePayload` — the nested JSON:API envelope — which is what a spec-compliant client sends. Some
-apis deliberately keep a **flat** write contract instead: a command input carrying foreign-key ids
-or nested arrays that JSON:API's relationship-linkage model can't express, while still _answering_
-with JSON:API documents.
+`Endpoint.create` and `Endpoint.update` bind their request body to the resource's `createPayload` / `updatePayload` — the nested JSON:API envelope — which is what a spec-compliant client sends. Some apis deliberately keep a **flat** write contract instead: a command input carrying foreign-key ids or nested arrays that JSON:API's relationship-linkage model can't express, while still _answering_ with JSON:API documents.
 
-Pass `payload` to supply that schema. It defaults to today's envelope, so existing endpoints are
-unchanged; only the request body moves — path, params, success document, errors and middleware stay
-exactly as they were.
+Pass `payload` to supply that schema. It defaults to today's envelope, so existing endpoints are unchanged; only the request body moves — path, params, success document, errors and middleware stay exactly as they were.
 
 ```ts
 // POST /articles with a flat body: { title, body }
-Endpoint.create(Article, { payload: Article.createInput })
+Endpoint.create(Article, { payload: Article.createInput });
 
 // PATCH /articles/:id with a flat body: { id, title?, body? }
 // (the payload's `id` stays the validation authority; the path `:id` is the routing key)
-Endpoint.update(Article, { payload: Article.updateInput, errors: [ArticleNotFound] })
+Endpoint.update(Article, { payload: Article.updateInput, errors: [ArticleNotFound] });
 ```
 
-Any schema works, not just the derived projections — reach for your own when the create needs fields
-the resource doesn't carry:
+Any schema works, not just the derived projections — reach for your own when the create needs fields the resource doesn't carry:
 
 ```ts
 Endpoint.create(Article, {
-  payload: Schema.Struct({ title: Schema.NonEmptyString, authorId: Schema.String })
-})
+  payload: Schema.Struct({ title: Schema.NonEmptyString, authorId: Schema.String }),
+});
 ```
 
-The same option is available per-endpoint when generating a whole group, so a `Group.resource` call
-site can adopt flat writes without giving up the generated surface:
+The same option is available per-endpoint when generating a whole group, so a `Group.resource` call site can adopt flat writes without giving up the generated surface:
 
 ```ts
 const articles = Group.resource(Article, {
   endpoints: {
     create: { payload: Article.createInput },
-    update: { payload: Article.updateInput }
-  }
-})
+    update: { payload: Article.updateInput },
+  },
+});
 ```
 
 ### Overriding the success document
 
-`Endpoint.get`, `create` and `update` bind their response to the resource's `document()`, and
-`Endpoint.list` to its `collection()` — the resource is the single source of truth for what a
-handler returns. Some apis need the response to be a **wire variant** of the resource rather than the
-resource itself: the assembler stringifies every link before the document leaves the server, so
-`links.self` is a plain string on the wire, while the resource's own `links.self` is
-`Document.Link`, which decodes an absolute reference to a `URL`. A generated client then hands every
-call site a `URL` where it wants a `string`.
+`Endpoint.get`, `create` and `update` bind their response to the resource's `document()`, and `Endpoint.list` to its `collection()` — the resource is the single source of truth for what a handler returns. Some apis need the response to be a **wire variant** of the resource rather than the resource itself: the assembler stringifies every link before the document leaves the server, so `links.self` is a plain string on the wire, while the resource's own `links.self` is `Document.Link`, which decodes an absolute reference to a `URL`. A generated client then hands every call site a `URL` where it wants a `string`.
 
-Pass `success` to supply that schema. It defaults to today's `document()` / `collection()`, so
-existing endpoints are unchanged; only the response moves — path, params, query parameters, request
-payload, errors and middleware stay exactly as they were. Any schema works, exactly as with
-`payload`: the document envelope is untouched, so `Handlers.offsetPaginationLinks` and the rest of
-the handler helpers still apply.
+Pass `success` to supply that schema. It defaults to today's `document()` / `collection()`, so existing endpoints are unchanged; only the response moves — path, params, query parameters, request payload, errors and middleware stay exactly as they were. Any schema works, exactly as with `payload`: the document envelope is untouched, so `Handlers.offsetPaginationLinks` and the rest of the handler helpers still apply.
 
 ```ts
 // The wire variant: the resource, with its link members narrowed to plain strings
 const WireArticle = Schema.Struct({
   ...Article.fields,
-  links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) }))
-})
+  links: Schema.optionalKey(Schema.Struct({ self: Schema.optionalKey(Schema.String) })),
+});
 
 // GET /articles/:id → 200, { data: { …, links: { self: "https://…" } } } — `self` a string
-Endpoint.get(Article, { success: Document.DataDocument(WireArticle), errors: [ArticleNotFound] })
+Endpoint.get(Article, { success: Document.DataDocument(WireArticle), errors: [ArticleNotFound] });
 
 // GET /articles → 200, the collection of the same
-Endpoint.list(Article, { success: Document.CollectionDocument(WireArticle), page: Query.Page.Offset })
+Endpoint.list(Article, {
+  success: Document.CollectionDocument(WireArticle),
+  page: Query.Page.Offset,
+});
 ```
 
-The same option is available per-endpoint when generating a whole group, so a `Group.resource` call
-site can adopt the wire variant without giving up the generated surface:
+The same option is available per-endpoint when generating a whole group, so a `Group.resource` call site can adopt the wire variant without giving up the generated surface:
 
 ```ts
 const articles = Group.resource(Article, {
@@ -847,58 +719,44 @@ const articles = Group.resource(Article, {
     get: { success: Document.DataDocument(WireArticle) },
     list: { success: Document.CollectionDocument(WireArticle) },
     create: { success: Document.DataDocument(WireArticle) },
-    update: { success: Document.DataDocument(WireArticle) }
-  }
-})
+    update: { success: Document.DataDocument(WireArticle) },
+  },
+});
 ```
 
 ### Overriding the write status
 
-`Endpoint.create` answers `201 Created` and `Endpoint.update` `200 OK` — the spec's recommendation
-for a creation that returns the created resource, and the status `HttpApi` gives any success schema
-carrying a body. Some apis answer their whole write surface with 200, or accept a write for later
-application and answer `202`.
+`Endpoint.create` answers `201 Created` and `Endpoint.update` `200 OK` — the spec's recommendation for a creation that returns the created resource, and the status `HttpApi` gives any success schema carrying a body. Some apis answer their whole write surface with 200, or accept a write for later application and answer `202`.
 
-Pass `status` to say so. It defaults to today's 201 / 200 — including when `success` is given, which
-is otherwise re-stamped with the constructor's own — so existing endpoints are unchanged; only the
-status moves. This is the `status` `Endpoint.delete` already carries, on the write endpoints.
+Pass `status` to say so. It defaults to today's 201 / 200 — including when `success` is given, which is otherwise re-stamped with the constructor's own — so existing endpoints are unchanged; only the status moves. This is the `status` `Endpoint.delete` already carries, on the write endpoints.
 
 ```ts
 // POST /articles → 200, the created document
-Endpoint.create(Article, { status: 200 })
+Endpoint.create(Article, { status: 200 });
 
 // PATCH /articles/:id → 202, an update accepted but not yet applied
-Endpoint.update(Article, { status: 202, errors: [ArticleNotFound] })
+Endpoint.update(Article, { status: 202, errors: [ArticleNotFound] });
 ```
 
 The same option is available per-endpoint when generating a whole group:
 
 ```ts
 const articles = Group.resource(Article, {
-  endpoints: { create: { status: 200 }, update: { status: 200 } }
-})
+  endpoints: { create: { status: 200 }, update: { status: 200 } },
+});
 ```
 
 ### Overriding the payload media type
 
-Every body the package declares is `application/vnd.api+json`, request bodies included — and the
-router matches an incoming `Content-Type` against that registration, answering **415** on a mismatch.
-That is right for an api that owns its URLs and negotiates §6 itself.
+Every body the package declares is `application/vnd.api+json`, request bodies included — and the router matches an incoming `Content-Type` against that registration, answering **415** on a mismatch. That is right for an api that owns its URLs and negotiates §6 itself.
 
-It is wrong for an api whose **host** negotiates instead. Such a host enforces §6 at its own seam —
-`Middleware.negotiate` is exactly that, reused outside the constructors — and then hands the router a
-request relabelled `application/json`, because that is what the rest of its URL space speaks. The
-request the host just admitted would then be 415'd by the router before any handler sees it.
+It is wrong for an api whose **host** negotiates instead. Such a host enforces §6 at its own seam — `Middleware.negotiate` is exactly that, reused outside the constructors — and then hands the router a request relabelled `application/json`, because that is what the rest of its URL space speaks. The request the host just admitted would then be 415'd by the router before any handler sees it.
 
-Pass `payloadMediaType` to register the request body under the label the host actually dispatches. It
-defaults to `application/vnd.api+json`, so existing endpoints are unchanged; the payload schema, the
-**response** media type, path, params, errors and middleware all stay as they were. Pair it with
-[`Middleware.layerHostNegotiated`](#4-handlers--typed-in-validated-out), or the package's own §5 check
-will reject what the host admitted:
+Pass `payloadMediaType` to register the request body under the label the host actually dispatches. It defaults to `application/vnd.api+json`, so existing endpoints are unchanged; the payload schema, the **response** media type, path, params, errors and middleware all stay as they were. Pair it with [`Middleware.layerHostNegotiated`](#4-handlers--typed-in-validated-out), or the package's own §5 check will reject what the host admitted:
 
 ```ts
 // POST /articles with Content-Type: application/json — the label the host dispatches
-Endpoint.create(Article, { payload: Article.createInput, payloadMediaType: "application/json" })
+Endpoint.create(Article, { payload: Article.createInput, payloadMediaType: "application/json" });
 
 // …the response is still application/vnd.api+json
 ```
@@ -909,53 +767,42 @@ The same option is available per-endpoint when generating a whole group:
 const articles = Group.resource(Article, {
   endpoints: {
     create: { payload: Article.createInput, payloadMediaType: "application/json" },
-    update: { payload: Article.updateInput, payloadMediaType: "application/json" }
-  }
-})
+    update: { payload: Article.updateInput, payloadMediaType: "application/json" },
+  },
+});
 ```
 
-Reach for this only when something upstream genuinely enforces §6; on an api that owns its own URLs,
-the default is the correct — and spec-compliant — choice.
+Reach for this only when something upstream genuinely enforces §6; on an api that owns its own URLs, the default is the correct — and spec-compliant — choice.
 
 ### Overriding the delete response
 
-`Endpoint.delete` answers `204 No Content`, the spec's recommendation for a deletion with nothing
-further to say. Some apis do have something to say: a **soft delete** marks the row deleted, re-reads
-it, and returns the tombstone resource so an admin viewer can render what was removed.
+`Endpoint.delete` answers `204 No Content`, the spec's recommendation for a deletion with nothing further to say. Some apis do have something to say: a **soft delete** marks the row deleted, re-reads it, and returns the tombstone resource so an admin viewer can render what was removed.
 
-Pass `success` to supply that response schema — it defaults to the 204, so existing endpoints are
-unchanged. The schema is served as `application/vnd.api+json` like every other body in the package,
-at 200 unless `status` says otherwise; the `:id` path param, errors and middleware are untouched.
+Pass `success` to supply that response schema — it defaults to the 204, so existing endpoints are unchanged. The schema is served as `application/vnd.api+json` like every other body in the package, at 200 unless `status` says otherwise; the `:id` path param, errors and middleware are untouched.
 
 ```ts
 // DELETE /articles/:id → 200, { data: { type: "articles", ... } }
-Endpoint.delete(Article, { success: Article.document(), errors: [ArticleNotFound] })
+Endpoint.delete(Article, { success: Article.document(), errors: [ArticleNotFound] });
 
 // …or an asynchronous deletion that has been accepted but not yet performed
-Endpoint.delete(Article, { success: Article.document(), status: 202 })
+Endpoint.delete(Article, { success: Article.document(), status: 202 });
 ```
 
 The same option is available per-endpoint when generating a whole group:
 
 ```ts
 const articles = Group.resource(Article, {
-  endpoints: { delete: { success: Article.document() } }
-})
+  endpoints: { delete: { success: Article.document() } },
+});
 ```
 
 ### Overriding the read query
 
-`Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter`
-options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape
-(`page: { offset, limit }`, `filter: { … }`). That is the spec-compliant contract, and the default.
+`Endpoint.list` composes its query schema from the `include` / `fields` / `sort` / `page` / `filter` options: a flat, bracket-keyed string record on the wire that decodes to the spec's **nested** shape (`page: { offset, limit }`, `filter: { … }`). That is the spec-compliant contract, and the default.
 
-Some apis want a different one — a **flat** list input their operations layer consumes directly, with
-entity foreign keys and flags JSON:API has no query family for. Forcing such a flag through `filter`
-would put it on the wire as `filter[includeDeleted]`, which is not what those clients send.
+Some apis want a different one — a **flat** list input their operations layer consumes directly, with entity foreign keys and flags JSON:API has no query family for. Forcing such a flag through `filter` would put it on the wire as `filter[includeDeleted]`, which is not what those clients send.
 
-Pass `query` to supply the whole schema. It defaults to today's composition, so existing endpoints
-are unchanged; the feature options are simply ignored once `query` is given, and the success
-document, path, errors and middleware stay as they were.
+Pass `query` to supply the whole schema. It defaults to today's composition, so existing endpoints are unchanged; the feature options are simply ignored once `query` is given, and the success document, path, errors and middleware stay as they were.
 
 ```ts
 // GET /articles?page[offset]=20&page[limit]=10&sort=-createdAt&authorId=9&includeDeleted=true
@@ -965,49 +812,39 @@ const ListArticles = Query.bracketPageKeys(
     ...Query.Page.offset({ maxLimit: 100 }),
     sort: Schema.optionalKey(Schema.String),
     authorId: Schema.optionalKey(Schema.String),
-    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
-  })
-)
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"])),
+  }),
+);
 
-Endpoint.list(Article, { query: ListArticles })
+Endpoint.list(Article, { query: ListArticles });
 ```
 
-[`Query.bracketPageKeys`](#bracketing-page-keys-on-a-query-struct-you-own) is what keeps the page
-cursor spec-canonical on the wire (`page[offset]` / `page[limit]`) while the handler still sees
-`{ offset, limit }` — but any schema works, bracketed or not.
+[`Query.bracketPageKeys`](#bracketing-page-keys-on-a-query-struct-you-own) is what keeps the page cursor spec-canonical on the wire (`page[offset]` / `page[limit]`) while the handler still sees `{ offset, limit }` — but any schema works, bracketed or not.
 
-`Endpoint.get` takes the same option, over the `include` / `fields` parameters it composes — for a
-single-resource fetch carrying a flag JSON:API has no family for, or an `?include=` grammar the api
-owns rather than derives:
+`Endpoint.get` takes the same option, over the `include` / `fields` parameters it composes — for a single-resource fetch carrying a flag JSON:API has no family for, or an `?include=` grammar the api owns rather than derives:
 
 ```ts
 Endpoint.get(Article, {
   query: Schema.Struct({
     include: Schema.optionalKey(Schema.String),
-    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"]))
-  })
-})
+    includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"])),
+  }),
+});
 ```
 
 Both are available per-endpoint when generating a whole group:
 
 ```ts
 const articles = Group.resource(Article, {
-  endpoints: { list: { query: ListArticles }, get: { query: GetArticle } }
-})
+  endpoints: { list: { query: ListArticles }, get: { query: GetArticle } },
+});
 ```
 
-Note that the package's own `?include=` needs no escape hatch for the **repeated-key** spelling:
-`?include=author&include=comments` and `?include=author,comments` denote the same set and both
-decode to it, so a client using either is served identically. Encoding always emits the comma form.
+Note that the package's own `?include=` needs no escape hatch for the **repeated-key** spelling: `?include=author&include=comments` and `?include=author,comments` denote the same set and both decode to it, so a client using either is served identically. Encoding always emits the comma form.
 
 ### Generating a whole group from a resource
 
-Writing out every endpoint is explicit, but repetitive — a resource definition
-already knows its attributes, relationships and graph. `Group.resource` walks
-that definition and emits the entire group: the CRUD surface plus, for every
-relationship, the `related` and linkage endpoints appropriate to its kind, with
-`include` / `fields` / `sort` derived from the graph.
+Writing out every endpoint is explicit, but repetitive — a resource definition already knows its attributes, relationships and graph. `Group.resource` walks that definition and emits the entire group: the CRUD surface plus, for every relationship, the `related` and linkage endpoints appropriate to its kind, with `include` / `fields` / `sort` derived from the graph.
 
 ```ts
 // CRUD + every relationship endpoint, fully typed — equivalent to spelling out
@@ -1019,85 +856,81 @@ const articles = Group.resource(Article, {
   // operations, the values a boolean (emit / omit) or that endpoint's options.
   endpoints: {
     create: { errors: [TitleTaken] },
-    list: { filter: { author: Schema.optionalKey(Schema.String) } }
-  }
-})
+    list: { filter: { author: Schema.optionalKey(Schema.String) } },
+  },
+});
 
 // A read-only resource: just get + list, no relationship endpoints:
 const people = Group.resource(Person, {
   endpoints: { create: false, update: false, delete: false },
-  relationships: false
-})
+  relationships: false,
+});
 
 // Per-relationship config: drop one relationship, re-error another:
 const issues = Group.resource(Issue, {
   relationships: {
     comments: false, // omit this relationship's endpoints
-    assignee: { errors: [UserNotFound] } // configure that relationship's endpoints
+    assignee: { errors: [UserNotFound] }, // configure that relationship's endpoints
   },
   // `meta` may be a function, *extending* the resource's base meta rather than
   // replacing it:
-  meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int })
-})
+  meta: (base) => Schema.Struct({ ...base.fields, total: Schema.Int }),
+});
 ```
 
-Defaults emit all five CRUD operations and every relationship's endpoints with
-`include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their
-semantics are application-defined), and `errors` is applied to every generated
-endpoint. Every default is overridable, globally or per endpoint / relationship
-— see `Endpoint.ResourceOptions`.
+Defaults emit all five CRUD operations and every relationship's endpoints with `include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their semantics are application-defined), and `errors` is applied to every generated endpoint. Every default is overridable, globally or per endpoint / relationship — see `Endpoint.ResourceOptions`.
 
-For finer control — adding a heterogeneous `search`, dropping or replacing an
-individual endpoint — `Endpoint.resource` returns the same endpoints as a plain
-tuple to spread into `Group.make`:
+For finer control — adding a heterogeneous `search`, dropping or replacing an individual endpoint — `Endpoint.resource` returns the same endpoints as a plain tuple to spread into `Group.make`:
 
 ```ts
 const articles = Group.make(
   Article,
   ...Endpoint.resource(Article, { errors: [ArticleNotFound] }),
   // …plus anything else this group should serve
-  Endpoint.list(Article, { name: "search", path: "/articles/search", filter: { q: Schema.String } })
-)
+  Endpoint.list(Article, {
+    name: "search",
+    path: "/articles/search",
+    filter: { q: Schema.String },
+  }),
+);
 ```
 
 ### Relationship & related endpoints
 
 The spec defines two URL families per relationship; both are first-class:
 
-| Constructor                   | Method & path                             | Payload               | Success                                                                                                                                  |
-| ----------------------------- | ----------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `Endpoint.related`            | `GET /<type>/:id/<name>`                  | —                     | 200 — the related resource(s) themselves: a single-resource document (to-one) or a collection document with full query support (to-many) |
-| `Endpoint.getRelationship`    | `GET /<type>/:id/relationships/<name>`    | —                     | 200 — a linkage document (`data` is identifiers, never full resources)                                                                   |
-| `Endpoint.updateRelationship` | `PATCH /<type>/:id/relationships/<name>`  | replacement linkage   | 200 — the updated linkage                                                                                                                |
-| `Endpoint.addRelationship`    | `POST /<type>/:id/relationships/<name>`   | identifiers to add    | 200 — the resulting linkage (to-many only)                                                                                               |
-| `Endpoint.removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | identifiers to remove | 204 (to-many only)                                                                                                                       |
+| Constructor | Method & path | Payload | Success |
+| --- | --- | --- | --- |
+| `Endpoint.related` | `GET /<type>/:id/<name>` | — | 200 — the related resource(s) themselves: a single-resource document (to-one) or a collection document with full query support (to-many) |
+| `Endpoint.getRelationship` | `GET /<type>/:id/relationships/<name>` | — | 200 — a linkage document (`data` is identifiers, never full resources) |
+| `Endpoint.updateRelationship` | `PATCH /<type>/:id/relationships/<name>` | replacement linkage | 200 — the updated linkage |
+| `Endpoint.addRelationship` | `POST /<type>/:id/relationships/<name>` | identifiers to add | 200 — the resulting linkage (to-many only) |
+| `Endpoint.removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | identifiers to remove | 204 (to-many only) |
 
 Payload and success schemas follow the relationship's kind:
 
 ```ts
 // `author` is Relationship.one(() => Person):
-Endpoint.updateRelationship(Article, "author")
+Endpoint.updateRelationship(Article, "author");
 // PATCH payload: { data: PersonIdentifier }          — null doesn't decode (required relationship)
 
 // `editor` is Relationship.optional(() => Person):
-Endpoint.updateRelationship(Article, "editor")
+Endpoint.updateRelationship(Article, "editor");
 // PATCH payload: { data: PersonIdentifier | null }   — null clears the relationship
 
 // `comments` is Relationship.paginated(() => Comment):
-Endpoint.related(Article, "comments", { page: Query.Page.Offset, include: true })
+Endpoint.related(Article, "comments", { page: Query.Page.Offset, include: true });
 // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author
 // → a paginated collection document of full Comment resources
 
-Endpoint.addRelationship(Article, "comments")
+Endpoint.addRelationship(Article, "comments");
 // POST payload: { data: CommentIdentifier[] }
 
 // to-many constructors only accept to-many relationship names:
-Endpoint.addRelationship(Article, "author") // ✗ compile error
+Endpoint.addRelationship(Article, "author"); // ✗ compile error
 ```
 
-Handlers return linkage documents with `Handlers.linkage`, and build the
-relationship URLs with `Handlers.relationshipLink` / `Handlers.relatedLink` /
-`Handlers.paginatedRelationship`:
+Handlers return linkage documents with `Handlers.linkage`, and build the relationship URLs with `Handlers.relationshipLink` / `Handlers.relatedLink` / `Handlers.paginatedRelationship`:
 
 ```ts
 .handle("commentsRelationship", ({ params, query }) =>
@@ -1111,9 +944,7 @@ relationship URLs with `Handlers.relationshipLink` / `Handlers.relatedLink` /
 
 ### Heterogeneous endpoints (search, feeds)
 
-`Endpoint.collection` builds collection endpoints whose `data` mixes several resource types,
-discriminated by their `type` tags — the natural fit for search results, feeds and timelines.
-A polymorphic collection has no single owning resource, so `name` and `path` are required:
+`Endpoint.collection` builds collection endpoints whose `data` mixes several resource types, discriminated by their `type` tags — the natural fit for search results, feeds and timelines. A polymorphic collection has no single owning resource, so `name` and `path` are required:
 
 ```ts
 const search = Group.make(
@@ -1126,57 +957,50 @@ const search = Group.make(
     include: true, // include paths span both resources' graphs
     fields: true, // ?fields[articles]= and ?fields[people]=
     page: Query.Page.Offset,
-    meta: Schema.Struct({ total: Schema.Int })
-  })
-)
+    meta: Schema.Struct({ total: Schema.Int }),
+  }),
+);
 
-const Api = HttpApi.make("blog").add(articles).add(search)
+const Api = HttpApi.make("blog").add(articles).add(search);
 
 // Handlers return mixed collections; clients discriminate on `type`:
 for (const result of doc.data) {
   if (result.type === "articles")
-    result.attributes.title // Article
-  else result.attributes.firstName // Person
+    result.attributes.title; // Article
+  else result.attributes.firstName; // Person
 }
 ```
 
-The `included` union spans every searched resource's relationship targets, and query features
-(`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
+The `included` union spans every searched resource's relationship targets, and query features (`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
 
 ### Atomic operations
 
-`Endpoint.operations` models the [atomic operations extension](https://jsonapi.org/ext/atomic/):
-one request carrying an ordered list of operations — creating, updating and deleting resources or
-their relationships — processed all-or-nothing:
+`Endpoint.operations` models the [atomic operations extension](https://jsonapi.org/ext/atomic/): one request carrying an ordered list of operations — creating, updating and deleting resources or their relationships — processed all-or-nothing:
 
 ```ts
 const operations = Group.make(
   "operations",
   // POST /operations with an atomic:operations document
-  Endpoint.operations([Article, Comment], { errors: [OperationFailed] })
-)
+  Endpoint.operations([Article, Comment], { errors: [OperationFailed] }),
+);
 
-const Api = HttpApi.make("blog").add(articles).add(operations)
+const Api = HttpApi.make("blog").add(articles).add(operations);
 ```
 
-Like everything else, the operations a resource supports are **derived** from its definition —
-`Atomic.operationsFor(Article)` exposes them as a named record of schemas:
+Like everything else, the operations a resource supports are **derived** from its definition — `Atomic.operationsFor(Article)` exposes them as a named record of schemas:
 
-| Derived operation                                                                             | Wire form                                                                                                             |
-| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `.add`                                                                                        | `{ op: "add", data: { type, lid?, attributes, relationships } }` — `one` relationships required, `paginated` excluded |
-| `.update`                                                                                     | `{ op: "update", data: { type, id \| lid, attributes?, relationships? } }` — `paginated` excluded                     |
-| `.remove`                                                                                     | `{ op: "remove", ref: { type, id \| lid } }`                                                                          |
-| `.relationships.author.update` (per `one` relationship)                                       | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref }` — never null                                    |
-| `.relationships.editor.update` (per `optional` relationship)                                  | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref \| null }`                                         |
-| `.relationships.comments.add` / `.update` / `.remove` (per `many` / `paginated` relationship) | `{ op, ref: { type, id \| lid, relationship }, data: [refs] }`                                                        |
+| Derived operation | Wire form |
+| --- | --- |
+| `.add` | `{ op: "add", data: { type, lid?, attributes, relationships } }` — `one` relationships required, `paginated` excluded |
+| `.update` | `{ op: "update", data: { type, id \| lid, attributes?, relationships? } }` — `paginated` excluded |
+| `.remove` | `{ op: "remove", ref: { type, id \| lid } }` |
+| `.relationships.author.update` (per `one` relationship) | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref }` — never null |
+| `.relationships.editor.update` (per `optional` relationship) | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref \| null }` |
+| `.relationships.comments.add` / `.update` / `.remove` (per `many` / `paginated` relationship) | `{ op, ref: { type, id \| lid, relationship }, data: [refs] }` |
 
-`paginated` relationships — which carry no inline linkage — are managed exactly this way: their
-membership is changed through relationship operations (or relationship endpoints), never inside a
-resource's `relationships` member.
+`paginated` relationships — which carry no inline linkage — are managed exactly this way: their membership is changed through relationship operations (or relationship endpoints), never inside a resource's `relationships` member.
 
-Clients build requests with the typed operation constructors — note the lid refs
-(`Article.lidRef` / `Comment.lidRef`) linking operations within the same request:
+Clients build requests with the typed operation constructors — note the lid refs (`Article.lidRef` / `Comment.lidRef`) linking operations within the same request:
 
 ```ts
 const doc =
@@ -1190,30 +1014,27 @@ const doc =
         attributes: { title: "Atomic bikeshedding", body: "…", createdAt: new Date() },
         relationships: {
           author: { data: Person.ref("9") },
-          tags: { data: [Tag.ref("1")] }
-        }
+          tags: { data: [Tag.ref("1")] },
+        },
       }),
       // 2. create a comment...
       Atomic.add(Comment, {
         lid: "c1",
         attributes: { body: "First!" },
-        relationships: { author: { data: Person.ref("9") } }
+        relationships: { author: { data: Person.ref("9") } },
       }),
       // 3. ...and link it into the new article's paginated comments relationship —
       //    both sides referenced by lid
       Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.lidRef("c1")]),
       // 4. to-one relationship operations replace linkage (`one`: never null)
-      Atomic.updateRelationship(Comment, "5", "author", Person.ref("9"))
-    )
-  })
+      Atomic.updateRelationship(Comment, "5", "author", Person.ref("9")),
+    ),
+  });
 
-doc["atomic:results"] // one result per operation, in order; `data` is typed Article | Comment
+doc["atomic:results"]; // one result per operation, in order; `data` is typed Article | Comment
 ```
 
-Handlers pattern-match over the decoded operation union — the `targetsResource` /
-`targetsRelationship` guards are curried, so they drop straight into Effect's `Match` module and
-narrow each case to fully typed `data` / `ref`; `Lid.make()` tracks the server-assigned ids
-of lid-created resources:
+Handlers pattern-match over the decoded operation union — the `targetsResource` / `targetsRelationship` guards are curried, so they drop straight into Effect's `Match` module and narrow each case to fully typed `data` / `ref`; `Lid.make()` tracks the server-assigned ids of lid-created resources:
 
 ```ts
 const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
@@ -1259,71 +1080,51 @@ const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
     })))
 ```
 
-Because the extension uses the JSON:API media type with an `ext` parameter, provide the
-middleware with the extension declared:
+Because the extension uses the JSON:API media type with an `ext` parameter, provide the middleware with the extension declared:
 
 ```ts
-Layer.provide(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] }))
+Layer.provide(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] }));
 ```
 
 Every endpoint automatically:
 
 - serves and accepts **`application/vnd.api+json`**
 - declares its errors as **JSON:API error documents** at the right status
-- carries the **content-negotiation middleware** (415 on parameterised request media types, 406 on
-  unacceptable `Accept` headers) and the **schema-error middleware** (malformed
-  params/query/payloads become JSON:API 400 documents) — and because they're real
-  `HttpApiMiddleware` services, **the api won't build until you provide them**: forgetting is a
-  compile error, not a runtime surprise
-- documents itself in **OpenAPI** (`OpenApi.fromApi(Api)`) with the JSON:API media type, status
-  codes and bracket query parameters
+- carries the **content-negotiation middleware** (415 on parameterised request media types, 406 on unacceptable `Accept` headers) and the **schema-error middleware** (malformed params/query/payloads become JSON:API 400 documents) — and because they're real `HttpApiMiddleware` services, **the api won't build until you provide them**: forgetting is a compile error, not a runtime surprise
+- documents itself in **OpenAPI** (`OpenApi.fromApi(Api)`) with the JSON:API media type, status codes and bracket query parameters
 
 ### Idempotent writes (`Idempotency-Key`)
 
-A `POST` whose response is lost leaves the client unable to tell "it didn't happen" from "it happened
-and I didn't hear" — retrying duplicates, not retrying loses the write. `lid` does not help: it
-correlates resources **within** one request, and says nothing about whether the request already ran.
+A `POST` whose response is lost leaves the client unable to tell "it didn't happen" from "it happened and I didn't hear" — retrying duplicates, not retrying loses the write. `lid` does not help: it correlates resources **within** one request, and says nothing about whether the request already ran.
 
-Opt an endpoint in and it accepts an `Idempotency-Key` request header
-([the profile](./docs/idempotency.md)):
+Opt an endpoint in and it accepts an `Idempotency-Key` request header ([the profile](./docs/idempotency.md)):
 
 ```ts
 const articles = Group.make(
   Article,
   Endpoint.create(Article, { idempotency: true }), // accepts a key
-  Endpoint.update(Article, { idempotency: "required" }) // insists on one
-)
+  Endpoint.update(Article, { idempotency: "required" }), // insists on one
+);
 // …or for a whole generated set:
-const people = Group.resource(Person, { idempotency: true })
+const people = Group.resource(Person, { idempotency: true });
 ```
 
-A retry carrying the same key gets the original response back **verbatim** — the same status, headers
-and body, plus `Idempotency-Replayed: true` — instead of running again. The same key carrying a
-_different_ request is a `422`, never a silent replay; a retry arriving while the original is still in
-flight is a `409`. Both are JSON:API error documents sourced at the header.
+A retry carrying the same key gets the original response back **verbatim** — the same status, headers and body, plus `Idempotency-Replayed: true` — instead of running again. The same key carrying a _different_ request is a `422`, never a silent replay; a retry arriving while the original is still in flight is a `409`. Both are JSON:API error documents sourced at the header.
 
-This package stores nothing, so the application supplies the store — the same division `Lid.make()`
-draws:
+This package stores nothing, so the application supplies the store — the same division `Lid.make()` draws:
 
 ```ts
 const ApiLive = Layer.mergeAll(ArticlesLive).pipe(
   Layer.provideMerge(Middleware.layer),
-  Layer.provideMerge(Idempotency.layer(myStore)) // `Idempotency.Store`: claim / complete / release
-)
+  Layer.provideMerge(Idempotency.layer(myStore)), // `Idempotency.Store`: claim / complete / release
+);
 ```
 
-`Idempotency.memoryStore()` implements the contract for tests and single-process development. Opting
-in attaches a real middleware service, so **the api won't build until the store is provided**.
+`Idempotency.memoryStore()` implements the contract for tests and single-process development. Opting in attaches a real middleware service, so **the api won't build until the store is provided**.
 
-For the atomic extension, one key covers the **whole request** — the extension's own unit of
-atomicity — and replays the whole `atomic:results` document, which is what makes a replayed `lid`
-resolve to the id it resolved to the first time.
+For the atomic extension, one key covers the **whole request** — the extension's own unit of atomicity — and replays the whole `atomic:results` document, which is what makes a replayed `lid` resolve to the id it resolved to the first time.
 
-JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the
-[IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s
-convention; the fingerprint, the replay rule, the key's scope and the retention contract are this
-package's, published as a profile URI and defined in full in
-[`docs/idempotency.md`](./docs/idempotency.md).
+JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI and defined in full in [`docs/idempotency.md`](./docs/idempotency.md).
 
 ## 4. Handlers — typed in, validated out
 
@@ -1365,18 +1166,11 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 )
 ```
 
-The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules
-at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every
-included resource must be referenced in the document). Their `onResource` option applies
-per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document
-([below](#the-per-resource-transform-pass-onresource)).
+The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every included resource must be referenced in the document). Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
 
 ### Resolving `included` — one batch per level
 
-`Handlers.resolveIncluded` is the other half: the walk that _produces_ `included` from the paths the
-client requested. It takes the primary data (one resource, or a whole page), the validated `include`
-paths, and a registry of **batch loaders keyed by resource type** — and nothing else. There is no
-service to provide and no runtime to set up; it is a plain `Effect` a handler composes.
+`Handlers.resolveIncluded` is the other half: the walk that _produces_ `included` from the paths the client requested. It takes the primary data (one resource, or a whole page), the validated `include` paths, and a registry of **batch loaders keyed by resource type** — and nothing else. There is no service to provide and no runtime to set up; it is a plain `Effect` a handler composes.
 
 ```ts
 // One loader per type. Each is called once per level, with every id that level
@@ -1384,43 +1178,32 @@ service to provide and no runtime to set up; it is a plain `Effect` a handler co
 const targets = {
   people: (ids: ReadonlyArray<string>) => db.people.byIds(ids),
   tags: (ids: ReadonlyArray<string>) => db.tags.byIds(ids),
-  comments: (ids: ReadonlyArray<string>) => db.comments.byIds(ids)
-}
+  comments: (ids: ReadonlyArray<string>) => db.comments.byIds(ids),
+};
 
-Handlers.resolveIncluded(page, query.include, targets, { concurrency: 4, depth: 2 })
+Handlers.resolveIncluded(page, query.include, targets, { concurrency: 4, depth: 2 });
 // → Effect<ReadonlyArray<Person | Tag | Comment> | undefined, …>
 ```
 
 What it guarantees, and why each one matters:
 
-| Property                         | What it means                                                                                                                                                                                                                                               |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Batched per level**            | Every parent's references for the current segment are collected first, then handed to the loaders as one batch per type. `?include=author.employer` over a 50-article page is **2** loader calls, not 100 — the N+1 this exists to prevent                  |
-| **Deduplicated by `(type, id)`** | `included` is a set of resources, not of references: two paths or two rows reaching the same resource contribute it once, a shared path prefix costs no second query, and a resource already in the primary `data` is never duplicated into `included`      |
-| **Walk order**                   | Emission follows the traversal, so `get` and `list` agree and the array is stable whatever order the batches complete in                                                                                                                                    |
-| **Cycles terminate**             | A graph that loops (`articles → comments → articles`) revisits resources the document already holds, which are never re-loaded                                                                                                                              |
-| **Depth-capped**                 | `depth` (default `3`, the deepest path `Query.Include` legalises) bounds the number of hops. §7.1 leaves the bound implementation-defined and each hop is another round of loader calls, so this is a denial-of-service boundary, not just an ergonomic one |
-| **Unresolvable refs dropped**    | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document                                                           |
-| **`undefined` when unasked**     | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing"                                                                                                                                                             |
+| Property | What it means |
+| --- | --- |
+| **Batched per level** | Every parent's references for the current segment are collected first, then handed to the loaders as one batch per type. `?include=author.employer` over a 50-article page is **2** loader calls, not 100 — the N+1 this exists to prevent |
+| **Deduplicated by `(type, id)`** | `included` is a set of resources, not of references: two paths or two rows reaching the same resource contribute it once, a shared path prefix costs no second query, and a resource already in the primary `data` is never duplicated into `included` |
+| **Walk order** | Emission follows the traversal, so `get` and `list` agree and the array is stable whatever order the batches complete in |
+| **Cycles terminate** | A graph that loops (`articles → comments → articles`) revisits resources the document already holds, which are never re-loaded |
+| **Depth-capped** | `depth` (default `3`, the deepest path `Query.Include` legalises) bounds the number of hops. §7.1 leaves the bound implementation-defined and each hop is another round of loader calls, so this is a denial-of-service boundary, not just an ergonomic one |
+| **Unresolvable refs dropped** | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document |
+| **`undefined` when unasked** | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing" |
 
-Because every resource is reached _through_ a document resource's linkage, full linkage holds by
-construction — the builders' check becomes a guard rather than a live constraint. Per-viewer
-visibility rides along for free: every hop loads through the same authorised loader, so the deepest
-hop of an anonymous caller's walk excludes exactly what their direct read would.
+Because every resource is reached _through_ a document resource's linkage, full linkage holds by construction — the builders' check becomes a guard rather than a live constraint. Per-viewer visibility rides along for free: every hop loads through the same authorised loader, so the deepest hop of an anonymous caller's walk excludes exactly what their direct read would.
 
-`paginated` relationships carry no inline linkage, so they contribute nothing to a walk — which is
-why they are excluded from `?include=` paths to begin with.
+`paginated` relationships carry no inline linkage, so they contribute nothing to a walk — which is why they are excluded from `?include=` paths to begin with.
 
-Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and
-`Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` /
-`next` / `last` top-level links from the request's page parameters and the total count. Pass the
-request's other query parameters as `{ query: Query.canonicalPairs(listQuery)(query) }` and every
-link carries them too ([the canonical query string](#the-canonical-query-string)).
+Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` / `next` / `last` top-level links from the request's page parameters and the total count. Pass the request's other query parameters as `{ query: Query.canonicalPairs(listQuery)(query) }` and every link carries them too ([the canonical query string](#the-canonical-query-string)).
 
-To name the value a builder returns — e.g. on a helper that assembles documents outside a handler —
-use `Handlers.DocumentValue<Data, Included?, Meta?>` (the runtime shape, with an optional `jsonapi`
-member) or the schema-derived `Document.Value<R, Included?, Meta?>`, instead of hand-rolling the
-`{ data, included?, links?, meta?, jsonapi? }` envelope.
+To name the value a builder returns — e.g. on a helper that assembles documents outside a handler — use `Handlers.DocumentValue<Data, Included?, Meta?>` (the runtime shape, with an optional `jsonapi` member) or the schema-derived `Document.Value<R, Included?, Meta?>`, instead of hand-rolling the `{ data, included?, links?, meta?, jsonapi? }` envelope.
 
 To serve it (with `@effect/platform-node`):
 
@@ -1438,56 +1221,42 @@ HttpApiBuilder.layer(Api).pipe(
 )
 ```
 
-If you negotiate content outside `HttpApi` — say in a framework hook that owns the URL —
-`Middleware.negotiate(headers, options?)` runs the §5 rules standalone, returning the offending
-`ApiError` (`UnsupportedMediaType` / `NotAcceptable`) or `undefined`, and `ApiError.toDocument(error)`
-renders any `ApiError` to a JSON:API error-document value:
+If you negotiate content outside `HttpApi` — say in a framework hook that owns the URL — `Middleware.negotiate(headers, options?)` runs the §5 rules standalone, returning the offending `ApiError` (`UnsupportedMediaType` / `NotAcceptable`) or `undefined`, and `ApiError.toDocument(error)` renders any `ApiError` to a JSON:API error-document value:
 
 ```ts
 const error = Middleware.negotiate({
   contentType: request.headers.get("content-type") ?? undefined,
-  accept: request.headers.get("accept") ?? undefined
-})
+  accept: request.headers.get("accept") ?? undefined,
+});
 if (error) {
-  const body = ApiError.toDocument(error) // { errors: [{ status, code, title }] }
+  const body = ApiError.toDocument(error); // { errors: [{ status, code, title }] }
   // → respond with `Number(body.errors[0].status)` and `body`
 }
 ```
 
-`Middleware.schemaError(part)` is the other half: the JSON:API **400** a request-validation failure
-produces, standalone. It's the same value the `SchemaErrors` middleware raises inside `HttpApi`, so a
-hook that decodes requests with its own schemas answers byte-identically to an `Endpoint`-built api:
+`Middleware.schemaError(part)` is the other half: the JSON:API **400** a request-validation failure produces, standalone. It's the same value the `SchemaErrors` middleware raises inside `HttpApi`, so a hook that decodes requests with its own schemas answers byte-identically to an `Endpoint`-built api:
 
 ```ts
-const parsed = Schema.decodeUnknownExit(ListQuery)(params)
+const parsed = Schema.decodeUnknownExit(ListQuery)(params);
 if (parsed._tag === "Failure") {
-  return json(400, ApiError.toDocument(Middleware.schemaError("Query")))
+  return json(400, ApiError.toDocument(Middleware.schemaError("Query")));
 }
 ```
 
 #### When the host already negotiated
 
-If you _do_ adopt the endpoint constructors but your host negotiates content upstream — a framework
-hook serving JSON:API and HTML on one URL space — the constructors' `ContentNegotiation` middleware
-would run §5 a second time. That's redundant at best, and contradictory when the host deliberately
-admits something the spec's rules reject (an api that accepts `Accept: application/json` would see
-those requests 406'd after the hook let them through).
+If you _do_ adopt the endpoint constructors but your host negotiates content upstream — a framework hook serving JSON:API and HTML on one URL space — the constructors' `ContentNegotiation` middleware would run §5 a second time. That's redundant at best, and contradictory when the host deliberately admits something the spec's rules reject (an api that accepts `Accept: application/json` would see those requests 406'd after the hook let them through).
 
-`Middleware.layerHostNegotiated` is the drop-in replacement for `Middleware.layer` in that case: it
-satisfies the endpoints' `ContentNegotiation` requirement without performing any checks, leaving the
-host the single negotiating authority, and keeps `SchemaErrors` live so request validation still
-answers with JSON:API 400s. Nothing else about the endpoints changes.
+`Middleware.layerHostNegotiated` is the drop-in replacement for `Middleware.layer` in that case: it satisfies the endpoints' `ContentNegotiation` requirement without performing any checks, leaving the host the single negotiating authority, and keeps `SchemaErrors` live so request validation still answers with JSON:API 400s. Nothing else about the endpoints changes.
 
 ```ts
 HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),
-  Layer.provide(Middleware.layerHostNegotiated) // the hook ran `Middleware.negotiate` already
-)
+  Layer.provide(Middleware.layerHostNegotiated), // the hook ran `Middleware.negotiate` already
+);
 ```
 
-Use it only when something upstream genuinely enforces §5 — for an api that owns its own URLs,
-`Middleware.layer` remains the correct choice. (`Middleware.ContentNegotiationPassthrough` is the
-negotiation half alone, for composing your own set.)
+Use it only when something upstream genuinely enforces §5 — for an api that owns its own URLs, `Middleware.layer` remains the correct choice. (`Middleware.ContentNegotiationPassthrough` is the negotiation half alone, for composing your own set.)
 
 And to call it — the same definitions drive a fully typed client:
 
@@ -1505,35 +1274,22 @@ const doc = yield* client.articles.get({
 // doc.data.attributes.createdAt is a Date; doc.included is typed
 ```
 
-`Client.make` is `HttpApiClient.make` with JSON:API content negotiation applied: `Accept:
-application/vnd.api+json` on every request, and `Content-Type` on every mutating one — including a
-bodyless `DELETE`, which carries no body to label but is still negotiated on. A client derived by
-`HttpApiClient.make` alone sends neither, so it does not meet the spec's client responsibilities and
-a host serving HTML and JSON:API on one origin has nothing to select on. An api using extensions
-takes the same `extensions` value the server's `Middleware.layerWith` is given:
+`Client.make` is `HttpApiClient.make` with JSON:API content negotiation applied: `Accept: application/vnd.api+json` on every request, and `Content-Type` on every mutating one — including a bodyless `DELETE`, which carries no body to label but is still negotiated on. A client derived by `HttpApiClient.make` alone sends neither, so it does not meet the spec's client responsibilities and a host serving HTML and JSON:API on one origin has nothing to select on. An api using extensions takes the same `extensions` value the server's `Middleware.layerWith` is given:
 
 ```ts
 const client =
   yield *
   Client.make(Api, {
     baseUrl: "http://localhost:3000",
-    extensions: [Atomic.EXTENSION_URI] // ← the same value `Middleware.layerWith` gets
-  })
+    extensions: [Atomic.EXTENSION_URI], // ← the same value `Middleware.layerWith` gets
+  });
 ```
 
-The pieces are public individually, for transports that are not a derived client:
-`Client.transform` applies the negotiation to any `HttpClient`, `Client.jsonApiHeaders` to a single
-request, `Client.mediaType(options)` builds the header value, and `Client.isMutatingMethod` is the
-`POST` / `PATCH` / `PUT` / `DELETE` predicate — exported because which requests carry a
-`Content-Type` is a correctness detail that a façade and a server must not answer differently.
+The pieces are public individually, for transports that are not a derived client: `Client.transform` applies the negotiation to any `HttpClient`, `Client.jsonApiHeaders` to a single request, `Client.mediaType(options)` builds the header value, and `Client.isMutatingMethod` is the `POST` / `PATCH` / `PUT` / `DELETE` predicate — exported because which requests carry a `Content-Type` is a correctness detail that a façade and a server must not answer differently.
 
 ### The per-resource transform pass (`onResource`)
 
-A document carries the same resource type in more than one slot: primary `data`, every `included`
-member, the identifiers of a relationship document. Per-resource processing that only reaches one of
-them — a sparse fieldset projected out of `data` but not out of `included`, per-viewer `meta`
-stamped on one but not the other — leaves a document describing one type two different ways. Sparse
-fieldsets in particular are specified to apply to **every** resource of that type in the document.
+A document carries the same resource type in more than one slot: primary `data`, every `included` member, the identifiers of a relationship document. Per-resource processing that only reaches one of them — a sparse fieldset projected out of `data` but not out of `included`, per-viewer `meta` stamped on one but not the other — leaves a document describing one type two different ways. Sparse fieldsets in particular are specified to apply to **every** resource of that type in the document.
 
 `onResource` is one pass over all of them:
 
@@ -1543,36 +1299,25 @@ Handlers.data(article, {
   self: `/articles/${article.id}`,
   onResource: Handlers.compose(
     Handlers.project(query.fields), // ?fields[articles]=title
-    Handlers.withMeta((r) => permissions(viewer, r)) // { canEdit, canDelete }
-  )
-})
+    Handlers.withMeta((r) => permissions(viewer, r)), // { canEdit, canDelete }
+  ),
+});
 ```
 
-It runs **once per resource** — after `included` is deduplicated (so once per distinct resource, not
-once per occurrence) and before the full-linkage check (so the check sees what the document actually
-emits). A resource reached in two slots is shaped once and that result reused, so it cannot come out
-two ways. Transforms must therefore be pure functions of the resource, and must not change its
-`type` or `id`.
+It runs **once per resource** — after `included` is deduplicated (so once per distinct resource, not once per occurrence) and before the full-linkage check (so the check sees what the document actually emits). A resource reached in two slots is shaped once and that result reused, so it cannot come out two ways. Transforms must therefore be pure functions of the resource, and must not change its `type` or `id`.
 
-The same option is on `Handlers.collection`, on `Handlers.linkage` (where it reaches the resource
-identifiers §8.4 makes a relationship document's primary data), and on `Handlers.buildIncluded`.
+The same option is on `Handlers.collection`, on `Handlers.linkage` (where it reaches the resource identifiers §8.4 makes a relationship document's primary data), and on `Handlers.buildIncluded`.
 
-| Transform                         | What it does                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------- |
-| `Handlers.project(fields)`        | Sparse fieldsets: narrows `attributes` to the names requested for the resource's type. |
-| `Handlers.withMeta(compute)`      | Merges computed `meta` over the resource's own.                                        |
-| `Handlers.compose(first, second)` | One pass doing both.                                                                   |
-| `Handlers.transform<Lambda>(f)`   | Anything else, with its type-level effect declared.                                    |
+| Transform | What it does |
+| --- | --- |
+| `Handlers.project(fields)` | Sparse fieldsets: narrows `attributes` to the names requested for the resource's type. |
+| `Handlers.withMeta(compute)` | Merges computed `meta` over the resource's own. |
+| `Handlers.compose(first, second)` | One pass doing both. |
+| `Handlers.transform<Lambda>(f)` | Anything else, with its type-level effect declared. |
 
-`Handlers.project` also has a data-first form, `Handlers.project(resource, fields)`, for projecting
-one resource directly. Two behaviours make it safe to run over a whole document: a type with **no
-requested set** (absent, or an empty `?fields[TYPE]=`) is returned unchanged — the spec's default of
-"every field", not "no field" — and only `attributes` is projected, so `relationships`, `links` and
-`meta` survive and a resource identifier (no attributes at all) passes through untouched.
+`Handlers.project` also has a data-first form, `Handlers.project(resource, fields)`, for projecting one resource directly. Two behaviours make it safe to run over a whole document: a type with **no requested set** (absent, or an empty `?fields[TYPE]=`) is returned unchanged — the spec's default of "every field", not "no field" — and only `attributes` is projected, so `relationships`, `links` and `meta` survive and a resource identifier (no attributes at all) passes through untouched.
 
-`Handlers.withMeta` merges the computed members over whatever `meta` the resource already carries,
-and emits **no** `meta` member when the merged result is empty: to the spec an empty `meta` object is
-a present-but-empty meta, which says something different from saying nothing.
+`Handlers.withMeta` merges the computed members over whatever `meta` the resource already carries, and emits **no** `meta` member when the merged result is empty: to the spec an empty `meta` object is a present-but-empty meta, which says something different from saying nothing.
 
 #### The effect stays in the type
 
@@ -1581,74 +1326,58 @@ The builders' return type is computed from the transform rather than widened:
 ```ts
 const document = Handlers.data(article, {
   included: [otherArticle],
-  onResource: Handlers.project({ articles: ["title"] })
-})
+  onResource: Handlers.project({ articles: ["title"] }),
+});
 
-document.data.attributes // { title: string } — `body` is gone
-document.included?.[0]?.attributes // { title: string } — and gone here too, identically
+document.data.attributes; // { title: string } — `body` is gone
+document.included?.[0]?.attributes; // { title: string } — and gone here too, identically
 ```
 
-A fieldset known only at runtime (`query.fields`) can be any subset of the selectable names, so each
-projected attribute is typed as optional — honest in both directions rather than claiming a
-selection the request may not have made.
+A fieldset known only at runtime (`query.fields`) can be any subset of the selectable names, so each projected attribute is typed as optional — honest in both directions rather than claiming a selection the request may not have made.
 
-Because one transform is applied at several types in a single document, its effect cannot be a
-single inferred return type; it is carried by a type-level function. To write your own, declare the
-lambda and hand it to `Handlers.transform`:
+Because one transform is applied at several types in a single document, its effect cannot be a single inferred return type; it is carried by a type-level function. To write your own, declare the lambda and hand it to `Handlers.transform`:
 
 ```ts
 interface SelfLinkLambda extends Handlers.TransformLambda {
-  readonly Out: this["In"] & { readonly links: { readonly self: string } }
+  readonly Out: this["In"] & { readonly links: { readonly self: string } };
 }
 
 const withSelfLink = Handlers.transform<SelfLinkLambda>((resource) => ({
   ...resource,
-  links: { self: `/${resource.type}/${resource.id}` }
-}))
+  links: { self: `/${resource.type}/${resource.id}` },
+}));
 ```
 
-A plain function is accepted too, and is checked against `Handlers.IdentityLambda`: it must hand back
-the resource's own type, which is exactly the guarantee a shape-preserving transform makes.
+A plain function is accepted too, and is checked against `Handlers.IdentityLambda`: it must hand back the resource's own type, which is exactly the guarantee a shape-preserving transform makes.
 
-One consequence is worth stating plainly: a projected document is deliberately _not_ the endpoint's
-default response-document type. A resource with attributes removed no longer satisfies a schema that
-requires them, and the type says so rather than pretending otherwise. An endpoint that projects needs
-a success document that admits the projection — see
-[Overriding the success document](#overriding-the-success-document) — built over a resource variant
-whose attributes are optional.
+One consequence is worth stating plainly: a projected document is deliberately _not_ the endpoint's default response-document type. A resource with attributes removed no longer satisfies a schema that requires them, and the type says so rather than pretending otherwise. An endpoint that projects needs a success document that admits the projection — see [Overriding the success document](#overriding-the-success-document) — built over a resource variant whose attributes are optional.
 
 ### Narrowing `included` by the requested include paths
 
-The spec guarantees that a server "MUST NOT include unrequested resource objects", so the client
-knows _statically_ what `included` can contain — `Client.narrowIncluded` exposes that:
+The spec guarantees that a server "MUST NOT include unrequested resource objects", so the client knows _statically_ what `included` can contain — `Client.narrowIncluded` exposes that:
 
 ```ts
-const include = ["author"] as const
+const include = ["author"] as const;
 
 const doc =
   yield *
   client.articles
     .get({
       params: { id: Article.Id.make("1") },
-      query: { include }
+      query: { include },
     })
-    .pipe(Client.narrowIncluded(Article, include))
+    .pipe(Client.narrowIncluded(Article, include));
 
-doc.included
+doc.included;
 // ^ ReadonlyArray<Person> — not Person | Comment | Tag.
 //   doc.included[0].attributes.firstName is accessible without narrowing on `type`.
 ```
 
-Dotted paths include the intermediate resources (`["comments.author"]` → `Comment | Person`), and
-requesting nothing narrows `included` to `never`. This is a type-level operation with no runtime
-cost; the response is still decoded against the endpoint's full schema, so a non-compliant server
-fails loudly instead of lying.
+Dotted paths include the intermediate resources (`["comments.author"]` → `Comment | Person`), and requesting nothing narrows `included` to `never`. This is a type-level operation with no runtime cost; the response is still decoded against the endpoint's full schema, so a non-compliant server fails loudly instead of lying.
 
 ### Reading error documents
 
-A failure the api declares arrives as its typed error (`Effect.catchTag` above). A failure it does
-not — an opaque 5xx, a gateway's HTML, a truncated body — arrives as an `HttpClientError`, and
-`Client.errorDocument` reads whatever JSON:API error document it carries:
+A failure the api declares arrives as its typed error (`Effect.catchTag` above). A failure it does not — an opaque 5xx, a gateway's HTML, a truncated body — arrives as an `HttpClientError`, and `Client.errorDocument` reads whatever JSON:API error document it carries:
 
 ```ts
 const message =
@@ -1656,131 +1385,90 @@ const message =
   Effect.map(Client.errorDocument(cause), (document) =>
     Option.match(document, {
       onNone: () => "The server could not be reached",
-      onSome: Client.errorMessage // first `detail`, else `title`, else a constant
-    })
-  )
+      onSome: Client.errorMessage, // first `detail`, else `title`, else a constant
+    }),
+  );
 ```
 
-The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than
-throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same
-decoder reached from a **body** rather than a response — a supported entry point, not an internal
-of the cause-based one — so a façade that synthesises responses locally and never holds an
-`HttpClientError` decodes through exactly the same seam as the network transport. That is what makes
-a façade-served error and a network-served error for the same URL indistinguishable to the client.
-A worked client is in [`examples/blog/client.ts`](./examples/blog/client.ts).
+The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response — a supported entry point, not an internal of the cause-based one — so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](./examples/blog/client.ts).
 
 ## Query parameters
 
-| Family         | Wire form                                 | Decoded form                                                                                                                                                                                                                             |
-| -------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `include`      | `?include=author,comments.author`         | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph ([constrainable](#constraining-the-advertised-include-paths))                                                                   |
-| `fields[TYPE]` | `?fields[articles]=title,body`            | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets                                                                                                                                                        |
-| `sort`         | `?sort=-createdAt,title`                  | `[{ field: "createdAt", direction: "desc" }, …]`                                                                                                                                                                                         |
-| `page[*]`      | `?page[offset]=0&page[limit]=10`          | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom)                                                                                                                                           |
-| `filter[*]`    | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](./docs/filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
+| Family | Wire form | Decoded form |
+| --- | --- | --- |
+| `include` | `?include=author,comments.author` | `ReadonlyArray<"author" \| "comments" \| "comments.author">` — literal paths from the relationship graph ([constrainable](#constraining-the-advertised-include-paths)) |
+| `fields[TYPE]` | `?fields[articles]=title,body` | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets |
+| `sort` | `?sort=-createdAt,title` | `[{ field: "createdAt", direction: "desc" }, …]` |
+| `page[*]` | `?page[offset]=0&page[limit]=10` | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom) |
+| `filter[*]` | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](./docs/filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
 
-Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar —
-unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error
-middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry
-`source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`). HttpApi decodes a
-request with `errors: "first"`, so a query yields one error object — except the `filter` family,
-whose codec reports every offending key together.
+Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar — unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry `source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`). HttpApi decodes a request with `errors: "first"`, so a query yields one error object — except the `filter` family, whose codec reports every offending key together.
 
-Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces
-for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`,
-and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a
-repeated key at its list-valued positions ([the filter grammar](./docs/filter-grammar.md) §2).
-Encoding always emits the single comma form.
+Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](./docs/filter-grammar.md) §2). Encoding always emits the single comma form.
 
 ### Declaring filterable and sortable attributes
 
-Filterability is a per-resource property, declared per attribute: which attributes, which operators,
-and (from the attribute's own schema) what literal type. The declaration lives on the attribute
-schema itself: pipe it through `Filter.able` / `Sort.able` — Effect-native combinators in the manner
-of `Schema.brand` — and it rides with the schema as an annotation (`Filter.AnnotationId` /
-`Sort.AnnotationId`), the single source of truth `Resource.filterable` / `Resource.sortable` read
-back. An attribute declared with neither — or a plain `Schema` attribute — is not filterable and not
-sortable, so the declaration fails closed the way `include` / `fields` / `sort` already do.
+Filterability is a per-resource property, declared per attribute: which attributes, which operators, and (from the attribute's own schema) what literal type. The declaration lives on the attribute schema itself: pipe it through `Filter.able` / `Sort.able` — Effect-native combinators in the manner of `Schema.brand` — and it rides with the schema as an annotation (`Filter.AnnotationId` / `Sort.AnnotationId`), the single source of truth `Resource.filterable` / `Resource.sortable` read back. An attribute declared with neither — or a plain `Schema` attribute — is not filterable and not sortable, so the declaration fails closed the way `include` / `fields` / `sort` already do.
 
 ```ts
-import { Filter, Relationship, Resource, Sort } from "@thomasfosterau/effect-jsonapi"
+import { Filter, Relationship, Resource, Sort } from "@thomasfosterau/effect-jsonapi";
 
 const Product = Resource.make("products", {
   attributes: {
     name: Schema.NonEmptyString, // neither filterable nor sortable
     // a subset of the operator core, spelt as constants, and sortable
-    priceCents: Schema.Int.pipe(Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt]), Sort.able()),
+    priceCents: Schema.Int.pipe(
+      Filter.able([Filter.Op.eq, Filter.Op.gt, Filter.Op.lt]),
+      Sort.able(),
+    ),
     // the whole core: eq ne lt lte gt gte in nin isnull (`Filter.operators`)
     discontinued: Schema.Boolean.pipe(Filter.able()),
     // server-set, so read-only — and the usual sort key
-    createdAt: Resource.readOnlyAttribute(Schema.DateFromString.pipe(Filter.able(["gte", "lt"]), Sort.able())),
+    createdAt: Resource.readOnlyAttribute(
+      Schema.DateFromString.pipe(Filter.able(["gte", "lt"]), Sort.able()),
+    ),
     // nullable: declare the member and wrap it — `isnull` names NULL, the literal is the number
-    rating: Schema.NullOr(Schema.Number.pipe(Filter.able(["gte", "isnull"])))
+    rating: Schema.NullOr(Schema.Number.pipe(Filter.able(["gte", "isnull"]))),
   },
   relationships: {
     // a to-one relationship is a filter field too, valued by the related id
-    supplier: Relationship.one(() => Supplier, { filter: ["eq", "in"] })
-  }
-})
+    supplier: Relationship.one(() => Supplier, { filter: ["eq", "in"] }),
+  },
+});
 
-Resource.filterable(Product)
+Resource.filterable(Product);
 // → { priceCents: { operators: ["eq", "gt", "lt"], literal }, discontinued: { … }, createdAt: { … }, rating: { … }, supplier: { … } }
-Resource.sortable(Product) // → ["priceCents", "createdAt"]
+Resource.sortable(Product); // → ["priceCents", "createdAt"]
 ```
 
-`Resource.attribute`'s `filter` / `filterLiteral` / `sort` options are sugar for exactly those calls
-on the inner schema — handy when the attribute takes a projection descriptor anyway — and stamp
-nothing else, so the two spellings are indistinguishable downstream, at runtime and in the types:
+`Resource.attribute`'s `filter` / `filterLiteral` / `sort` options are sugar for exactly those calls on the inner schema — handy when the attribute takes a projection descriptor anyway — and stamp nothing else, so the two spellings are indistinguishable downstream, at runtime and in the types:
 
 ```ts
-priceCents: Resource.attribute(Schema.Int, { create: "optional", filter: ["eq", "gt", "lt"], sort: true })
+priceCents: Resource.attribute(Schema.Int, {
+  create: "optional",
+  filter: ["eq", "gt", "lt"],
+  sort: true,
+});
 // ≡ Resource.attribute(Schema.Int.pipe(Filter.able(["eq", "gt", "lt"]), Sort.able()), { create: "optional" })
 ```
 
-The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` over the closed core,
-from which `Filter.operators` and `Filter.isOperator` derive — and `Filter.Op` spells it as typed
-constants (`Filter.Op.gt` is the literal `"gt"`), so a typo is a compile error while plain strings
-stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: the runtime declaration
-survives a later `.check(...)`, `.annotate(...)` or `Schema.brand`, but any rebuild drops the
-type-level marker (`Resource.FilterableKeys` / `SortableKeys` stop naming the attribute); wrapping
-the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both.
+The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` over the closed core, from which `Filter.operators` and `Filter.isOperator` derive — and `Filter.Op` spells it as typed constants (`Filter.Op.gt` is the literal `"gt"`), so a typo is a compile error while plain strings stay accepted. Apply `Filter.able` / `Sort.able` as the last step of a pipe: the runtime declaration survives a later `.check(...)`, `.annotate(...)` or `Schema.brand`, but any rebuild drops the type-level marker (`Resource.FilterableKeys` / `SortableKeys` stop naming the attribute); wrapping the declared schema in `Schema.NullOr` or `Schema.optionalKey` afterwards keeps both.
 
-`Resource.filterable(R)` is a read-only record keyed by the declared fields (undeclared ones are
-absent, so `Object.keys` is the filterable set); each entry carries the declared `operators` and a
-`literal` codec, `Schema.Codec<Type, string>`. For an attribute the codec is derived from the
-schema's encoded form — `string`, `number`, `boolean`, or `Schema.NullOr` of one. A wire string is
-parsed strictly as that scalar (`number` accepts only a finite decimal, `boolean` only `true` /
-`false`) and then decoded through the attribute schema itself, so refinements, brands, literal
-unions and `DateFromString` all apply: `filter[priceCents][gt]=abc` fails decoding rather than
-silently matching nothing. An attribute whose encoded form is not a scalar cannot be declared
-filterable (`Resource.make` throws, naming it) unless the declaration supplies an explicit codec:
-`Filter.able(["eq"], { literal: PointFromString })` (or the `filterLiteral` option).
+`Resource.filterable(R)` is a read-only record keyed by the declared fields (undeclared ones are absent, so `Object.keys` is the filterable set); each entry carries the declared `operators` and a `literal` codec, `Schema.Codec<Type, string>`. For an attribute the codec is derived from the schema's encoded form — `string`, `number`, `boolean`, or `Schema.NullOr` of one. A wire string is parsed strictly as that scalar (`number` accepts only a finite decimal, `boolean` only `true` / `false`) and then decoded through the attribute schema itself, so refinements, brands, literal unions and `DateFromString` all apply: `filter[priceCents][gt]=abc` fails decoding rather than silently matching nothing. An attribute whose encoded form is not a scalar cannot be declared filterable (`Resource.make` throws, naming it) unless the declaration supplies an explicit codec: `Filter.able(["eq"], { literal: PointFromString })` (or the `filterLiteral` option).
 
-To-one relationships (`Relationship.one` / `Relationship.optional`) take a `filter` option and
-become filter fields valued by the related resource's id — `filter[supplier]=9` — with the target's
-`Id` schema as the literal codec, so the decoded literal is the branded id. Only `eq ne in nin isnull`
-apply to a relationship (`Relationship.FilterOperator`, a narrowing of `Filter.Operator`);
-`filter: true` means those five, and declaring an ordering operator is a definition-time error.
-To-many relationships are not fields.
+To-one relationships (`Relationship.one` / `Relationship.optional`) take a `filter` option and become filter fields valued by the related resource's id — `filter[supplier]=9` — with the target's `Id` schema as the literal codec, so the decoded literal is the branded id. Only `eq ne in nin isnull` apply to a relationship (`Relationship.FilterOperator`, a narrowing of `Filter.Operator`); `filter: true` means those five, and declaring an ordering operator is a definition-time error. To-many relationships are not fields.
 
-`Resource.sortable(R)` returns the declared attribute keys (attributes only), typed as their literal
-union, so it is the natural `sort` allow-list for an endpoint; `sort: true` keeps meaning "every
-attribute":
+`Resource.sortable(R)` returns the declared attribute keys (attributes only), typed as their literal union, so it is the natural `sort` allow-list for an endpoint; `sort: true` keeps meaning "every attribute":
 
 ```ts
-Endpoint.list(Product, { sort: Resource.sortable(Product), page: Query.Page.Offset })
+Endpoint.list(Product, { sort: Resource.sortable(Product), page: Query.Page.Offset });
 // ?sort=-createdAt,priceCents decodes; ?sort=name is a 400
 ```
 
-`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the
-grammar in [`docs/filter-grammar.md`](./docs/filter-grammar.md). `filter[f]=v` is `eq`,
-`filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form
-(`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and
-repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node,
-with `field` narrowed to the declared names and every literal decoded through its attribute schema:
+`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the grammar in [`docs/filter-grammar.md`](./docs/filter-grammar.md). `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form (`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node, with `field` narrowed to the declared names and every literal decoded through its attribute schema:
 
 ```ts
-Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Query.Page.Offset })
+Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Query.Page.Offset });
 
 // GET /products?filter[priceCents][lt]=1000&filter[supplier]=9&filter[discontinued]=false
 // → query.filter:
@@ -1790,36 +1478,15 @@ Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Q
 //     { _tag: "Compare", op: "eq", field: "supplier", value: "9" } ] }   // a branded Supplier id
 ```
 
-`filter[name]=x` (undeclared), `filter[priceCents][gte]=1` (undeclared operator) and
-`filter[priceCents][lt]=cheap` (bad literal) are each a 400 whose `source.parameter` names the key.
-`Query.Filter(resource)` is the codec on its own (`Schema.Codec<Filter.Ast, Record<string, string>>`);
-encoding always emits the canonical form (§3 of the grammar: sorted, deduplicated, ids reassigned),
-and `Filter.normalise` puts a hand-built tree in the same normal form. The per-key map
-(`filter: { q: Schema.String }`) remains the escape hatch for flags JSON:API has no family for; an
-endpoint uses one or the other.
+`filter[name]=x` (undeclared), `filter[priceCents][gte]=1` (undeclared operator) and `filter[priceCents][lt]=cheap` (bad literal) are each a 400 whose `source.parameter` names the key. `Query.Filter(resource)` is the codec on its own (`Schema.Codec<Filter.Ast, Record<string, string>>`); encoding always emits the canonical form (§3 of the grammar: sorted, deduplicated, ids reassigned), and `Filter.normalise` puts a hand-built tree in the same normal form. The per-key map (`filter: { q: Schema.String }`) remains the escape hatch for flags JSON:API has no family for; an endpoint uses one or the other.
 
-The grammar is a JSON:API **profile**, `Filter.PROFILE_URI`
-(`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the
-media type of responses from endpoints that speak it —
-`Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the
-same way, since unknown profiles are ignored, never rejected.
+The grammar is a JSON:API **profile**, `Filter.PROFILE_URI` (`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the media type of responses from endpoints that speak it — `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the same way, since unknown profiles are ignored, never rejected.
 
-The profile defines what a tree **means**, not only how it is spelled:
-[§6 of the grammar](./docs/filter-grammar.md#6-semantics) is the normative semantics — three-valued
-(Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each
-attribute type, and the line between a 400 and an empty result. Handlers are what evaluate a tree,
-so that section is the contract they answer to; this package builds, validates and canonicalises
-trees and evaluates none.
+The profile defines what a tree **means**, not only how it is spelled: [§6 of the grammar](./docs/filter-grammar.md#6-semantics) is the normative semantics — three-valued (Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each attribute type, and the line between a 400 and an empty result. Handlers are what evaluate a tree, so that section is the contract they answer to; this package builds, validates and canonicalises trees and evaluates none.
 
 ### The canonical query string
 
-JSON:API 1.1 requires a collection document's `self` link to carry the query parameters the client
-provided. `Query.canonical(schema)` turns a decoded query into its **one** wire spelling: encoded
-through the schema, ordered by one rule, RFC 3986 percent-encoded. Two equal decoded queries produce
-byte-identical strings whatever spelling they came from — key order, `?include=a&include=b` against
-`?include=a,b`, `filter[f][eq]=v` against `filter[f]=v` — and the string decodes back to the same
-query through the same schema, which makes it a stable identity for a query (a subscription, a
-cache tag) as well as a `self` link.
+JSON:API 1.1 requires a collection document's `self` link to carry the query parameters the client provided. `Query.canonical(schema)` turns a decoded query into its **one** wire spelling: encoded through the schema, ordered by one rule, RFC 3986 percent-encoded. Two equal decoded queries produce byte-identical strings whatever spelling they came from — key order, `?include=a&include=b` against `?include=a,b`, `filter[f][eq]=v` against `filter[f]=v` — and the string decodes back to the same query through the same schema, which makes it a stable identity for a query (a subscription, a cache tag) as well as a `self` link.
 
 ```ts
 const listQuery = Query.schema(Article, {
@@ -1827,25 +1494,17 @@ const listQuery = Query.schema(Article, {
   fields: true,
   sort: true,
   page: Query.Page.Offset,
-  filter: true
-})
-const canonical = Query.canonical(listQuery)
+  filter: true,
+});
+const canonical = Query.canonical(listQuery);
 
-canonical(query)
+canonical(query);
 // → "include=author&fields[articles]=title&filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
 ```
 
-The order is `include`; `fields[*]` sorted by type; `filter[*]` in [the grammar's canonical
-order](./docs/filter-grammar.md#33-key-order-and-ids) (shorthand sorted by key, the group form in
-the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit`
-— what the link builders emit); then any other key, sorted. Keys and values go through
-`encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,`
-alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result
-back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and
-`Query.serialise(pairs)` the encoding on its own.
+The order is `include`; `fields[*]` sorted by type; `filter[*]` in [the grammar's canonical order](./docs/filter-grammar.md#33-key-order-and-ids) (shorthand sorted by key, the group form in the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit` — what the link builders emit); then any other key, sorted. Keys and values go through `encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,` alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and `Query.serialise(pairs)` the encoding on its own.
 
-The pagination link builders serialise the same way and take the other pairs as an option, so every
-link carries the full query with its page cursor slotted in:
+The pagination link builders serialise the same way and take the other pairs as an option, so every link carries the full query with its page cursor slotted in:
 
 ```ts
 handlers.handle("list", ({ query }) =>
@@ -1854,218 +1513,167 @@ handlers.handle("list", ({ query }) =>
       Handlers.collection(items, {
         meta: { total },
         links: Handlers.offsetPaginationLinks("/articles", query.page ?? {}, total, {
-          query: Query.canonicalPairs(listQuery)(query)
-        })
+          query: Query.canonicalPairs(listQuery)(query),
+        }),
         // self: "/articles?filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
         // next: "/articles?filter[status]=open&sort=-createdAt&page[offset]=10&page[limit]=10"
-      })
-    )
-  )
-)
+      }),
+    ),
+  ),
+);
 
 // unpaginated: the canonical query on the collection's own `self`
-Handlers.collection(items, { self: "/articles", query: Query.canonicalPairs(listQuery)(query) })
+Handlers.collection(items, { self: "/articles", query: Query.canonicalPairs(listQuery)(query) });
 ```
 
 ### Constraining the advertised include paths
 
-`include: true` legalises the resource's **whole relationship graph, two hops deep** — every path
-`Query.Include` can derive. That is the right default when the endpoint can resolve all of them, and
-the wrong one when it can't: a to-one relationship on a related resource makes depth 2 advertise
-paths (`release.tracks`, say) whose resolver was never written. Advertising such a path answers
-`200` with an empty `included` — strictly worse than the `400` an unknown path already produces.
+`include: true` legalises the resource's **whole relationship graph, two hops deep** — every path `Query.Include` can derive. That is the right default when the endpoint can resolve all of them, and the wrong one when it can't: a to-one relationship on a related resource makes depth 2 advertise paths (`release.tracks`, say) whose resolver was never written. Advertising such a path answers `200` with an empty `included` — strictly worse than the `400` an unknown path already produces.
 
-Pass an object instead of `true` to constrain the derivation — an explicit `paths` allow-list, a
-`depth` bound (`1` / `2` / `3`), or both, in which case `paths` wins. The literal path type narrows
-with it, so a client that asks for an unlisted path fails to compile as well as to decode:
+Pass an object instead of `true` to constrain the derivation — an explicit `paths` allow-list, a `depth` bound (`1` / `2` / `3`), or both, in which case `paths` wins. The literal path type narrows with it, so a client that asks for an unlisted path fails to compile as well as to decode:
 
 ```ts
 // only the paths this endpoint actually populates
-Endpoint.get(Work, { include: { paths: ["composer", "recordings"] } })
+Endpoint.get(Work, { include: { paths: ["composer", "recordings"] } });
 
 // …or just the direct relationships, whatever they are
-Endpoint.list(Track, { include: { depth: 1 } })
+Endpoint.list(Track, { include: { depth: 1 } });
 
 // Query.Include takes the same options standalone
-const include = Query.Include(Article, { paths: ["author"] })
+const include = Query.Include(Article, { paths: ["author"] });
 // typeof include.Type === ReadonlyArray<"author">
 ```
 
-The option is available wherever `include` is — `Endpoint.get` / `list` / `related` / `collection`,
-and `Group.resource` both top-level and per endpoint:
+The option is available wherever `include` is — `Endpoint.get` / `list` / `related` / `collection`, and `Group.resource` both top-level and per endpoint:
 
 ```ts
 const works = Group.resource(Work, {
   include: { depth: 1 },
-  endpoints: { get: { include: { paths: ["composer", "recordings"] } } }
-})
+  endpoints: { get: { include: { paths: ["composer", "recordings"] } } },
+});
 ```
 
-A top-level constraint applies to `get` and `list`. The relationship endpoints' paths are their
-_target's_ graph, not this resource's, so they inherit only that `include` is on — constrain them
-with `Endpoint.related` directly if they need it too.
+A top-level constraint applies to `get` and `list`. The relationship endpoints' paths are their _target's_ graph, not this resource's, so they inherit only that `include` is on — constrain them with `Endpoint.related` directly if they need it too.
 
 ### Declaring the include surface once
 
-An allow-list constrains _which_ paths are advertised, but says nothing about the `included` union
-the success document declares — and `HttpApiBuilder` strips a resolved `included` the document's
-schema doesn't admit, so a walk that runs correctly can still reach the client empty. Those are two
-declarations over two inputs, and they drift.
+An allow-list constrains _which_ paths are advertised, but says nothing about the `included` union the success document declares — and `HttpApiBuilder` strips a resolved `included` the document's schema doesn't admit, so a walk that runs correctly can still reach the client empty. Those are two declarations over two inputs, and they drift.
 
-`Include.make` is one nested declaration all three artefacts project from — the accepted-path
-whitelist, the `included` union, and the advertised parameter:
+`Include.make` is one nested declaration all three artefacts project from — the accepted-path whitelist, the `included` union, and the advertised parameter:
 
 ```ts
 const surface = Include.make(Article, {
   author: Person,
-  comments: Include.nested(Comment, { author: Person })
-})
+  comments: Include.nested(Comment, { author: Person }),
+});
 
-surface.paths // ["author", "comments", "comments.author"] — typed literals
-surface.included // Schema.Union([Person, Comment])
-surface.has("comments.editor") // false
+surface.paths; // ["author", "comments", "comments.author"] — typed literals
+surface.included; // Schema.Union([Person, Comment])
+surface.has("comments.editor"); // false
 
 // one option, all three:
-Endpoint.get(Article, { include: surface })
-Endpoint.list(Article, { include: surface })
-Group.resource(Article, { include: surface })
+Endpoint.get(Article, { include: surface });
+Endpoint.list(Article, { include: surface });
+Group.resource(Article, { include: surface });
 ```
 
 Three properties are load-bearing:
 
-- **The whitelist spells depth.** `comments` and `comments.author` are separate entries, so
-  `comments.editor` is rejected even though `comments` is includable — the whole dotted path is
-  matched, never just its head segment.
-- **Nesting only ever _adds_ paths.** Wrapping a key in `Include.nested` keeps `?include=<key>`
-  meaning exactly what it did.
-- **The union carries every depth.** A walk that hoists a Comment _and_ the Person behind it needs
-  both arms, or the deeper one is stripped on encode.
+- **The whitelist spells depth.** `comments` and `comments.author` are separate entries, so `comments.editor` is rejected even though `comments` is includable — the whole dotted path is matched, never just its head segment.
+- **Nesting only ever _adds_ paths.** Wrapping a key in `Include.nested` keeps `?include=<key>` meaning exactly what it did.
+- **The union carries every depth.** A walk that hoists a Comment _and_ the Person behind it needs both arms, or the deeper one is stripped on encode.
 
-Every key is checked against the resource's relationship graph — an unknown key, a `paginated`
-relationship (never inlined) or a key declared against the wrong target is a compile error, and each
-is re-checked when the surface is built. `Include.paths(spec)` and `Include.included(spec)` are the
-same two projections standalone.
+Every key is checked against the resource's relationship graph — an unknown key, a `paginated` relationship (never inlined) or a key declared against the wrong target is a compile error, and each is re-checked when the surface is built. `Include.paths(spec)` and `Include.included(spec)` are the same two projections standalone.
 
-Because the derivation recurses over the **declaration** rather than the relationship graph, a
-declared surface is not bound by the depth-2 ceiling `include: true` inherits: depth becomes a
-property of what you wrote. It is capped explicitly at `Include.MAX_DEPTH` (6) hops — the type-level
-derivation truncates past it and `Include.make` throws, so a too-deep declaration fails loudly at
-startup instead of silently advertising less than it declares.
+Because the derivation recurses over the **declaration** rather than the relationship graph, a declared surface is not bound by the depth-2 ceiling `include: true` inherits: depth becomes a property of what you wrote. It is capped explicitly at `Include.MAX_DEPTH` (6) hops — the type-level derivation truncates past it and `Include.make` throws, so a too-deep declaration fails loudly at startup instead of silently advertising less than it declares.
 
-A resource that declares no surface advertises no parameter, and `include: true` /
-`Query.IncludeOptions` behave exactly as before.
+A resource that declares no surface advertises no parameter, and `include: true` / `Query.IncludeOptions` behave exactly as before.
 
-`Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded,
-defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination,
-`Query.Page.number(options)`): it returns the same `{ offset, limit }` field-map but lets you cap
-`limit` with `maxLimit` (a DoS guard every JSON:API server wants), fill in `defaultLimit` /
-`defaultOffset` on decode, and — with `fromString: false` — build the fields from plain
-`Schema.Number` instead of `FiniteFromString`, so the one schema works both as a numeric call-site
-input and behind a transport that coerces query strings to numbers (e.g. raw `HttpApiEndpoint`
-wrapped in `Schema.toCodecStringTree`).
+`Page.Offset` / `Page.Number` / `Page.Cursor` are the ready-made constants. For a **bounded, defaulted, dual-use** variant, call `Query.Page.offset(options)` (and, for page-number pagination, `Query.Page.number(options)`): it returns the same `{ offset, limit }` field-map but lets you cap `limit` with `maxLimit` (a DoS guard every JSON:API server wants), fill in `defaultLimit` / `defaultOffset` on decode, and — with `fromString: false` — build the fields from plain `Schema.Number` instead of `FiniteFromString`, so the one schema works both as a numeric call-site input and behind a transport that coerces query strings to numbers (e.g. raw `HttpApiEndpoint` wrapped in `Schema.toCodecStringTree`).
 
 ```ts
 // caps page size at 100, defaults to 25, still decodes from query strings
-Endpoint.list(Article, { page: Query.Page.offset({ maxLimit: 100, defaultLimit: 25 }) })
+Endpoint.list(Article, { page: Query.Page.offset({ maxLimit: 100, defaultLimit: 25 }) });
 ```
 
 ### Bracketing page keys on a query struct you own
 
-`Query.schema`'s `page` option composes the whole query and **nests** the decoded cursor under a
-`page` key. Some applications instead merge pagination **flat** into their own list-input struct —
-`{ limit, offset, …filters }` — because the rest of the application consumes that flat type directly
-and shouldn't learn a transport-shaped nesting.
+`Query.schema`'s `page` option composes the whole query and **nests** the decoded cursor under a `page` key. Some applications instead merge pagination **flat** into their own list-input struct — `{ limit, offset, …filters }` — because the rest of the application consumes that flat type directly and shouldn't learn a transport-shaped nesting.
 
-`Query.bracketPageKeys` is the standalone rename for exactly that case: given any struct carrying
-`offset` and `limit`, it re-keys **only those two encoded keys** to `page[offset]` / `page[limit]`,
-leaving the decoded type and every other field's wire key alone. The bracket family it produces is
-the same one `Handlers.offsetPaginationLinks` emits, so following a `next` link decodes straight back
-into the flat `{ offset, limit }` the list operation reads.
+`Query.bracketPageKeys` is the standalone rename for exactly that case: given any struct carrying `offset` and `limit`, it re-keys **only those two encoded keys** to `page[offset]` / `page[limit]`, leaving the decoded type and every other field's wire key alone. The bracket family it produces is the same one `Handlers.offsetPaginationLinks` emits, so following a `next` link decodes straight back into the flat `{ offset, limit }` the list operation reads.
 
 ```ts
 const ListArticles = Schema.Struct({
   ...Query.Page.offset({ maxLimit: 100, fromString: false }),
-  authorId: Schema.optionalKey(Schema.String)
-})
+  authorId: Schema.optionalKey(Schema.String),
+});
 
-const query = Query.bracketPageKeys(ListArticles)
+const query = Query.bracketPageKeys(ListArticles);
 // wire:    { "page[offset]": …, "page[limit]": …, authorId: … }
 // decoded: { offset, limit, authorId }   ← unchanged, still flat
 ```
 
-`Query.bracketKeys(prefix, keys)` is the general form `bracketPageKeys` is built on — any bracket
-prefix (`page`, `filter`, `fields`, or one of your own), any subset of the struct's own keys, and it
-**composes**: pipe it more than once to bracket several families onto the same flat struct, and the
-decoded/encoded types reflect every rename applied so far, not just the last one.
+`Query.bracketKeys(prefix, keys)` is the general form `bracketPageKeys` is built on — any bracket prefix (`page`, `filter`, `fields`, or one of your own), any subset of the struct's own keys, and it **composes**: pipe it more than once to bracket several families onto the same flat struct, and the decoded/encoded types reflect every rename applied so far, not just the last one.
 
 ```ts
 const ListArticles2 = Schema.Struct({
   ...Query.Page.offset({ maxLimit: 100, fromString: false }),
   authorId: Schema.optionalKey(Schema.String),
-  status: Schema.optionalKey(Schema.String)
-})
+  status: Schema.optionalKey(Schema.String),
+});
 
 const query2 = ListArticles2.pipe(
   Query.bracketKeys("page", ["offset", "limit"]),
-  Query.bracketKeys("filter", ["status"])
-)
+  Query.bracketKeys("filter", ["status"]),
+);
 // wire:    { "page[offset]": …, "page[limit]": …, "filter[status]": …, authorId: … }
 // decoded: { offset, limit, status, authorId }   ← unchanged, still flat
 ```
 
 ## Spec compliance, by construction
 
-| JSON:API v1.1 rule                                                                                               | How it's enforced                                                                                                                                                                                      |
-| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Media type `application/vnd.api+json`                                                                            | baked into every document/payload/error schema                                                                                                                                                         |
-| 415/406 on media type parameters other than `ext` / `profile` (or unsupported extensions)                        | middleware attached to every endpoint; providing it is required by the type system                                                                                                                     |
-| Error bodies are error documents                                                                                 | only `ApiError.make` classes can be declared as endpoint errors                                                                                                                                        |
-| Top-level document holds exactly one of `data` / `errors` / `meta`                                               | success schemas only ever contain `data`; error schemas only `errors` — mixing is unrepresentable                                                                                                      |
-| `null` primary `data` only for a single-resource URL that might correspond to a resource but currently doesn't   | `DataDocument` is a pure envelope: `DataDocument(R)` is non-null; opt into `data: null` with `Schema.NullOr(R)` / `R.nullable()`. `Endpoint.related` keeps the nullable form for a to-one relationship |
-| Resource objects have `type` and `id`; ids are not interchangeable across types                                  | `Resource` always emits the type tag and a per-type branded id                                                                                                                                         |
-| Create requests may omit `id` and send `lid`                                                                     | `createPayload` derivation                                                                                                                                                                             |
-| Update requests require `id`, attributes are partial                                                             | `updatePayload` derivation                                                                                                                                                                             |
-| Relationships hold at least one of `data` / `links` / `meta`                                                     | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related`                                                                                     |
-| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many                                    | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships                                                  |
-| Related resource endpoints (`related` links)                                                                     | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many                                                                   |
-| Compound documents: no duplicate resources, full linkage                                                         | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so linkage holds by construction; `Handlers.data` / `Handlers.collection` re-check (runtime check)            |
-| Compound documents never inline unbounded relationships                                                          | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction                                                                                                    |
-| `errors` array is never empty                                                                                    | non-empty check on the error document schema                                                                                                                                                           |
-| 200 / 201 / 204 status codes per operation                                                                       | set by the endpoint constructors                                                                                                                                                                       |
-| Pagination / sorting / sparse fieldsets / inclusion / filtering query families                                   | typed query schemas derived from the resource definition                                                                                                                                               |
-| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions                                                                                                                             |
-| Profiles are negotiated, advertised in `jsonapi.profile`, and unknown ones ignored                               | the filter grammar and idempotency profiles publish URIs; negotiation ignores profiles it doesn't know                                                                                                 |
+| JSON:API v1.1 rule | How it's enforced |
+| --- | --- |
+| Media type `application/vnd.api+json` | baked into every document/payload/error schema |
+| 415/406 on media type parameters other than `ext` / `profile` (or unsupported extensions) | middleware attached to every endpoint; providing it is required by the type system |
+| Error bodies are error documents | only `ApiError.make` classes can be declared as endpoint errors |
+| Top-level document holds exactly one of `data` / `errors` / `meta` | success schemas only ever contain `data`; error schemas only `errors` — mixing is unrepresentable |
+| `null` primary `data` only for a single-resource URL that might correspond to a resource but currently doesn't | `DataDocument` is a pure envelope: `DataDocument(R)` is non-null; opt into `data: null` with `Schema.NullOr(R)` / `R.nullable()`. `Endpoint.related` keeps the nullable form for a to-one relationship |
+| Resource objects have `type` and `id`; ids are not interchangeable across types | `Resource` always emits the type tag and a per-type branded id |
+| Create requests may omit `id` and send `lid` | `createPayload` derivation |
+| Update requests require `id`, attributes are partial | `updatePayload` derivation |
+| Relationships hold at least one of `data` / `links` / `meta` | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related` |
+| Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
+| Related resource endpoints (`related` links) | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many |
+| Compound documents: no duplicate resources, full linkage | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so linkage holds by construction; `Handlers.data` / `Handlers.collection` re-check (runtime check) |
+| Compound documents never inline unbounded relationships | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction |
+| `errors` array is never empty | non-empty check on the error document schema |
+| 200 / 201 / 204 status codes per operation | set by the endpoint constructors |
+| Pagination / sorting / sparse fieldsets / inclusion / filtering query families | typed query schemas derived from the resource definition |
+| Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions |
+| Profiles are negotiated, advertised in `jsonapi.profile`, and unknown ones ignored | the filter grammar and idempotency profiles publish URIs; negotiation ignores profiles it doesn't know |
 
 ## Proving it: the conformance kit
 
-The table above is what the constructors guarantee. It says nothing about your server once a handler
-has an opinion — so `Conformance` is an **executable specification** you run against your own
-`HttpApi`, which fails naming the broken rule and citing its section rather than printing an
-assertion diff.
+The table above is what the constructors guarantee. It says nothing about your server once a handler has an opinion — so `Conformance` is an **executable specification** you run against your own `HttpApi`, which fails naming the broken rule and citing its section rather than printing an assertion diff.
 
 ```ts
-import { Effect } from "effect"
-import { Conformance } from "@thomasfosterau/effect-jsonapi"
-import { Api } from "./api.js"
-import { BlogLive } from "./handlers.js"
+import { Effect } from "effect";
+import { Conformance } from "@thomasfosterau/effect-jsonapi";
+import { Api } from "./api.js";
+import { BlogLive } from "./handlers.js";
 
 const report = await Effect.runPromise(
   Conformance.verify(Api, {
     // the fixture contract: one known-existing id per resource type
-    ids: { articles: "1", people: "9" }
-  }).pipe(Effect.provide(BlogLive), Effect.scoped)
-)
+    ids: { articles: "1", people: "9" },
+  }).pipe(Effect.provide(BlogLive), Effect.scoped),
+);
 
-console.log(Conformance.format(report))
+console.log(Conformance.format(report));
 ```
 
-Endpoints are discovered from the `HttpApi` value — method, path, declared query families, response
-media type — but every rule is decided by a real request/response pair, because conformance is a wire
-property and the typed client both hides the raw status, media type parameters and unparsed body, and
-refuses to construct the malformed requests half the rules need to send. `verify` drives an
-in-memory transport over the real router (no port bound, no fixture beyond the ids);
-`Conformance.verifyWith(api, { client, baseUrl })` runs the **identical** rules against a deployed
-server over `FetchHttpClient`.
+Endpoints are discovered from the `HttpApi` value — method, path, declared query families, response media type — but every rule is decided by a real request/response pair, because conformance is a wire property and the typed client both hides the raw status, media type parameters and unparsed body, and refuses to construct the malformed requests half the rules need to send. `verify` drives an in-memory transport over the real router (no port bound, no fixture beyond the ids); `Conformance.verifyWith(api, { client, baseUrl })` runs the **identical** rules against a deployed server over `FetchHttpClient`.
 
 Failures read as a report, not a diff:
 
@@ -2082,42 +1690,27 @@ FAIL  spec/content-negotiation/accept-weight-is-not-a-parameter
         observed: 406 application/vnd.api+json — {"errors":[{"status":"406", …
 ```
 
-Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this package's filter
-grammar profile and the conventions it adds where the spec declines to have one. Pass
-`tiers: ["spec"]` to hold a server to the specification without adopting any of this library's
-opinions.
+Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this package's filter grammar profile and the conventions it adds where the spec declines to have one. Pass `tiers: ["spec"]` to hold a server to the specification without adopting any of this library's opinions.
 
-**It says what it did not check.** Every rule that could not run reports why — no endpoint of that
-shape, no sample id, a mutating probe not opted into — and `Conformance.gaps` declares the areas the
-kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering
-correctness, write semantics, atomic processing), each with its reason and tracking issue. Both are
-printed in every report, and skips are counted separately from passes, so a run that proved little
-cannot read as a clean bill of health.
+**It says what it did not check.** Every rule that could not run reports why — no endpoint of that shape, no sample id, a mutating probe not opted into — and `Conformance.gaps` declares the areas the kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics, atomic processing), each with its reason and tracking issue. Both are printed in every report, and skips are counted separately from passes, so a run that proved little cannot read as a clean bill of health.
 
-Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule,
-its requirement, its citation and the request that decided it.
+Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule, its requirement, its citation and the request that decided it.
 
-Full design note, including the coverage ledger and what it would take to close each gap:
-[`docs/conformance.md`](./docs/conformance.md).
+Full design note, including the coverage ledger and what it would take to close each gap: [`docs/conformance.md`](./docs/conformance.md).
 
 ## Examples
 
-Complete runnable examples (resources, errors, api, in-memory handlers) live in
-[`examples`](./examples). Each is a **standalone package** in the pnpm workspace —
-it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you
-can lift any one out as a starting point. Run them all from the repo root with
-`pnpm test`, or a single one with `pnpm --filter @thomasfosterau/effect-jsonapi-example-northwind test`.
+Complete runnable examples (resources, errors, api, in-memory handlers) live in [`examples`](./examples). Each is a **standalone package** in the pnpm workspace — it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you can lift any one out as a starting point. Run them all from the repo root with `pnpm test`, or a single one with `pnpm --filter @thomasfosterau/effect-jsonapi-example-northwind test`.
 
-| Example                                      | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Test                                          |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| [`examples/blog`](./examples/blog)           | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution                                                                                                                                                                                                                                                                                                                                                                                                                      | [`blog/test`](./examples/blog/test)           |
-| [`examples/github`](./examples/github)       | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types                                                                                                                                                                                                            | [`github/test`](./examples/github/test)       |
+| Example | What it shows | Test |
+| --- | --- | --- |
+| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution | [`blog/test`](./examples/blog/test) |
+| [`examples/github`](./examples/github) | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types | [`github/test`](./examples/github/test) |
 | [`examples/northwind`](./examples/northwind) | A Northwind Traders e-commerce API: categories, suppliers, shippers, customers, territories, employees, products, orders and line items; all four relationship kinds laid out as an acyclic graph (required `category`/`supplier`/`customer`/`employee`, nullable `shipper`, inlined `territories`, a paginated line-item feed); the reverse directions (a category's products, a customer's orders) and the self-referential reporting hierarchy modelled as `filter[…]` collection endpoints; product CRUD with typed numeric price-range filters; offset/limit pagination; territory assignment and order shipping via relationship endpoints; 404/409 domain errors; global catalog search across three resource types | [`northwind/test`](./examples/northwind/test) |
 
 ## Metadata
 
-`meta` is free-form by spec, so every `meta` member accepts arbitrary records by default. Tighten
-any of them by passing a schema:
+`meta` is free-form by spec, so every `meta` member accepts arbitrary records by default. Tighten any of them by passing a schema:
 
 ```ts
 // Resource-level meta (on every resource object)
@@ -2137,38 +1730,14 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 
 ## Limitations
 
-- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document
-  structure, error objects, query-parameter handling and the filter grammar profile. Filter
-  _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics and atomic
-  processing are declared gaps rather than silent omissions — see `Conformance.gaps` and
-  [`docs/conformance.md`](./docs/conformance.md).
-- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed
-  to your handler, and the builders project it when you ask them to —
-  `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })`
-  ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is
-  projected behind your back; the builders don't post-process responses against request state on
-  their own. Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is
-  built from the resource's attributes, so a relationship name cannot be requested.
-- **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works,
-  `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }`
-  raises it one hop, and the runtime validation matches the same set. Declaring the surface
-  explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because
-  the derivation then recurses over the declaration rather than the graph.
-- **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on
-  the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided
-  via `Client.narrowIncluded`.
-- **Relationship and identifier `meta` are untyped** (free-form records); resource and document
-  meta are typed via options.
-- **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the
-  cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each
-  other. See [Mutually recursive resources](#mutually-recursive-resources) for the pattern;
-  everything derived from the definitions is unaffected.
-- **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search)
-  responses by include paths is not yet supported.
-- **Atomic operations requests are accepted with or without the `ext` media type parameter**:
-  spec-compliant clients send `application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"`
-  (accepted once the middleware declares the extension), but the bare media type is not rejected.
-  Responses always carry the parameter.
+- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling and the filter grammar profile. Filter _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics and atomic processing are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](./docs/conformance.md).
+- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed to your handler, and the builders project it when you ask them to — `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })` ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is projected behind your back; the builders don't post-process responses against request state on their own. Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is built from the resource's attributes, so a relationship name cannot be requested.
+- **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works, `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }` raises it one hop, and the runtime validation matches the same set. Declaring the surface explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because the derivation then recurses over the declaration rather than the graph.
+- **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided via `Client.narrowIncluded`.
+- **Relationship and identifier `meta` are untyped** (free-form records); resource and document meta are typed via options.
+- **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each other. See [Mutually recursive resources](#mutually-recursive-resources) for the pattern; everything derived from the definitions is unaffected.
+- **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search) responses by include paths is not yet supported.
+- **Atomic operations requests are accepted with or without the `ext` media type parameter**: spec-compliant clients send `application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"` (accepted once the middleware declares the extension), but the bare media type is not rejected. Responses always carry the parameter.
 
 ## Contributing
 

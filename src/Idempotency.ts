@@ -52,15 +52,15 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
-import { Effect, Layer, Schema, SchemaTransformation } from "effect"
-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
-import type * as ServerRequest from "effect/unstable/http/HttpServerRequest"
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
-import type { HttpApiEndpoint } from "effect/unstable/httpapi"
-import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { make as makeApiError } from "./ApiError.js"
-import type { JsonApiObject } from "./Document.js"
-import { MEDIA_TYPE } from "./internal/media.js"
+import { Effect, Layer, Schema, SchemaTransformation } from "effect";
+import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+import type * as ServerRequest from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import type { HttpApiEndpoint } from "effect/unstable/httpapi";
+import { HttpApiMiddleware } from "effect/unstable/httpapi";
+import { make as makeApiError } from "./ApiError.js";
+import type { JsonApiObject } from "./Document.js";
+import { MEDIA_TYPE } from "./internal/media.js";
 
 // ---------------------------------------------------------------------------
 // Profile constants
@@ -90,7 +90,8 @@ import { MEDIA_TYPE } from "./internal/media.js"
  * @since 0.15.0
  * @category constants
  */
-export const PROFILE_URI = "https://thomasfosterau.github.io/effect-jsonapi/profiles/idempotency/v1"
+export const PROFILE_URI =
+  "https://thomasfosterau.github.io/effect-jsonapi/profiles/idempotency/v1";
 
 /**
  * The request header carrying the key: `"idempotency-key"` (header names are
@@ -109,7 +110,7 @@ export const PROFILE_URI = "https://thomasfosterau.github.io/effect-jsonapi/prof
  * @since 0.15.0
  * @category constants
  */
-export const HEADER = "idempotency-key"
+export const HEADER = "idempotency-key";
 
 /**
  * The response header marking a replay: `"idempotency-replayed"`, set to
@@ -133,7 +134,7 @@ export const HEADER = "idempotency-key"
  * @since 0.15.0
  * @category constants
  */
-export const REPLAY_HEADER = "idempotency-replayed"
+export const REPLAY_HEADER = "idempotency-replayed";
 
 /**
  * A ready-made top-level `jsonapi` member value advertising support for the
@@ -153,7 +154,7 @@ export const REPLAY_HEADER = "idempotency-replayed"
  * @since 0.15.0
  * @category constants
  */
-export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", profile: [PROFILE_URI] }
+export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", profile: [PROFILE_URI] };
 
 // ---------------------------------------------------------------------------
 // The key
@@ -165,7 +166,7 @@ export const jsonapi: typeof JsonApiObject.Type = { version: "1.1", profile: [PR
 const unquote = (value: string): string =>
   value.length >= 2 && value.startsWith(`"`) && value.endsWith(`"`)
     ? value.slice(1, -1).replace(/\\(["\\])/g, "$1")
-    : value
+    : value;
 
 /**
  * The `Idempotency-Key` header value: a non-empty string of at most 255
@@ -204,11 +205,11 @@ export const Key: Key = Schema.String.pipe(
     Schema.String.check(
       Schema.isMinLength(1),
       Schema.isMaxLength(255),
-      Schema.isPattern(/^[\x20-\x7E]+$/, { title: "printable US-ASCII" })
+      Schema.isPattern(/^[\x20-\x7E]+$/, { title: "printable US-ASCII" }),
     ),
-    SchemaTransformation.transform<string, string>({ decode: unquote, encode: (key) => key })
-  )
-) as Key
+    SchemaTransformation.transform<string, string>({ decode: unquote, encode: (key) => key }),
+  ),
+) as Key;
 
 /**
  * The request headers of an endpoint that *accepts* a key: `idempotency-key`,
@@ -217,7 +218,9 @@ export const Key: Key = Schema.String.pipe(
  * @since 0.15.0
  * @category schemas
  */
-export interface Headers extends Schema.Struct<{ readonly "idempotency-key": Schema.optionalKey<Key> }> {}
+export interface Headers extends Schema.Struct<{
+  readonly "idempotency-key": Schema.optionalKey<Key>;
+}> {}
 
 /**
  * The request headers of an endpoint that accepts a key. See {@link Headers}.
@@ -225,7 +228,7 @@ export interface Headers extends Schema.Struct<{ readonly "idempotency-key": Sch
  * @since 0.15.0
  * @category schemas
  */
-export const Headers: Headers = Schema.Struct({ "idempotency-key": Schema.optionalKey(Key) })
+export const Headers: Headers = Schema.Struct({ "idempotency-key": Schema.optionalKey(Key) });
 
 /**
  * The request headers of an endpoint that *requires* a key. A write without
@@ -245,7 +248,7 @@ export interface HeadersRequired extends Schema.Struct<{ readonly "idempotency-k
  * @since 0.15.0
  * @category schemas
  */
-export const HeadersRequired: HeadersRequired = Schema.Struct({ "idempotency-key": Key })
+export const HeadersRequired: HeadersRequired = Schema.Struct({ "idempotency-key": Key });
 
 // ---------------------------------------------------------------------------
 // The endpoint option
@@ -259,7 +262,7 @@ export const HeadersRequired: HeadersRequired = Schema.Struct({ "idempotency-key
  * @since 0.15.0
  * @category models
  */
-export type Option = boolean | "required"
+export type Option = boolean | "required";
 
 /**
  * The header schema an {@link Option} declares — none at all when the option
@@ -274,7 +277,7 @@ export type HeadersFor<O> = [O] extends [false | undefined]
   ? never
   : [O] extends ["required"]
     ? HeadersRequired
-    : Headers
+    : Headers;
 
 /**
  * The endpoint type an {@link Option} produces: the endpoint as declared, plus
@@ -313,7 +316,7 @@ export type Applied<E, O> = [O] extends [false | undefined]
         Mw | Middleware,
         HttpApiMiddleware.ApplyServices<Middleware, Services>
       >
-    : never
+    : never;
 
 /**
  * The header schema an {@link Option} declares, at runtime.
@@ -323,7 +326,11 @@ export type Applied<E, O> = [O] extends [false | undefined]
  * @internal
  */
 export const headersFor = (option: Option | undefined): Schema.Top | undefined =>
-  option === undefined || option === false ? undefined : option === "required" ? HeadersRequired : Headers
+  option === undefined || option === false
+    ? undefined
+    : option === "required"
+      ? HeadersRequired
+      : Headers;
 
 /**
  * Attaches {@link Middleware} to an endpoint when the {@link Option} is on.
@@ -335,7 +342,10 @@ export const headersFor = (option: Option | undefined): Schema.Top | undefined =
 export const applied = <E, O extends Option | undefined>(endpoint: E, option: O): Applied<E, O> =>
   (option === undefined || option === false
     ? endpoint
-    : (endpoint as { middleware: (key: unknown) => unknown }).middleware(Middleware)) as Applied<E, O>
+    : (endpoint as { middleware: (key: unknown) => unknown }).middleware(Middleware)) as Applied<
+    E,
+    O
+  >;
 
 // ---------------------------------------------------------------------------
 // Fingerprinting
@@ -343,16 +353,16 @@ export const applied = <E, O extends Option | undefined>(endpoint: E, option: O)
 
 /** Recursively orders object keys so re-serialisation is stable. */
 const canonicalValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonicalValue)
+  if (Array.isArray(value)) return value.map(canonicalValue);
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
       Object.keys(value as Record<string, unknown>)
         .sort()
-        .map((key) => [key, canonicalValue((value as Record<string, unknown>)[key])])
-    )
+        .map((key) => [key, canonicalValue((value as Record<string, unknown>)[key])]),
+    );
   }
-  return value
-}
+  return value;
+};
 
 /**
  * The request a fingerprint is taken over.
@@ -362,11 +372,11 @@ const canonicalValue = (value: unknown): unknown => {
  */
 export interface Fingerprinted {
   /** The HTTP method, e.g. `"POST"`. */
-  readonly method: string
+  readonly method: string;
   /** The request target as received — path and query string. */
-  readonly url: string
+  readonly url: string;
   /** The raw request body, or `""` for a bodyless request. */
-  readonly body: string
+  readonly body: string;
 }
 
 /**
@@ -400,22 +410,22 @@ export interface Fingerprinted {
  * @category utils
  */
 export const canonical = (request: Fingerprinted): string => {
-  const [path, ...rest] = request.url.split("?")
-  const query = rest.join("?")
-  const pairs = query === "" ? [] : query.split("&").sort()
-  let body = request.body
+  const [path, ...rest] = request.url.split("?");
+  const query = rest.join("?");
+  const pairs = query === "" ? [] : query.split("&").sort();
+  let body = request.body;
   if (body !== "") {
     try {
-      body = JSON.stringify(canonicalValue(JSON.parse(body)))
+      body = JSON.stringify(canonicalValue(JSON.parse(body)));
     } catch {
       // Not JSON — compare the bytes as received.
     }
   }
-  return `${request.method.toUpperCase()}\n${path ?? ""}\n${pairs.join("&")}\n${body}`
-}
+  return `${request.method.toUpperCase()}\n${path ?? ""}\n${pairs.join("&")}\n${body}`;
+};
 
 const hex = (bytes: ArrayBuffer): string =>
-  Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("")
+  Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 /**
  * The fingerprint of a request: the SHA-256 of its {@link canonical} string,
@@ -448,8 +458,10 @@ const hex = (bytes: ArrayBuffer): string =>
  */
 export const fingerprint = (request: Fingerprinted): Effect.Effect<string> =>
   Effect.promise(() =>
-    globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical(request))).then(hex)
-  )
+    globalThis.crypto.subtle
+      .digest("SHA-256", new TextEncoder().encode(canonical(request)))
+      .then(hex),
+  );
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -486,7 +498,7 @@ export class KeyMismatch extends makeApiError<KeyMismatch>()("KeyMismatch", {
   title: "Idempotency-Key Mismatch",
   detail:
     "This Idempotency-Key has already been used for a different request. A key identifies one write; use a new key.",
-  source: { header: HEADER }
+  source: { header: HEADER },
 }) {}
 
 /**
@@ -512,8 +524,9 @@ export class KeyInProgress extends makeApiError<KeyInProgress>()("KeyInProgress"
   status: 409,
   code: "idempotency_key_in_progress",
   title: "Idempotency-Key In Progress",
-  detail: "A request with this Idempotency-Key is still being processed. Retry after a short delay.",
-  source: { header: HEADER }
+  detail:
+    "A request with this Idempotency-Key is still being processed. Retry after a short delay.",
+  source: { header: HEADER },
 }) {}
 
 /**
@@ -532,7 +545,7 @@ export class KeyInProgress extends makeApiError<KeyInProgress>()("KeyInProgress"
  * @since 0.15.0
  * @category constants
  */
-export const Errors = [KeyMismatch, KeyInProgress] as const
+export const Errors = [KeyMismatch, KeyInProgress] as const;
 
 // ---------------------------------------------------------------------------
 // The store seam
@@ -547,11 +560,11 @@ export const Errors = [KeyMismatch, KeyInProgress] as const
  */
 export interface Recorded {
   /** The HTTP status. */
-  readonly status: number
+  readonly status: number;
   /** The response headers, lowercased. */
-  readonly headers: Record<string, string>
+  readonly headers: Record<string, string>;
   /** The response body, as text (`""` for a bodyless response). */
-  readonly body: string
+  readonly body: string;
 }
 
 /**
@@ -566,11 +579,11 @@ export interface Recorded {
  */
 export interface Attempt {
   /** The decoded `Idempotency-Key`. */
-  readonly key: string
+  readonly key: string;
   /** The {@link fingerprint} of this request. */
-  readonly fingerprint: string
+  readonly fingerprint: string;
   /** The request itself — method, url, headers — for scoping. */
-  readonly request: ServerRequest.HttpServerRequest
+  readonly request: ServerRequest.HttpServerRequest;
 }
 
 /**
@@ -587,7 +600,7 @@ export interface Attempt {
 export type Claim =
   | { readonly _tag: "Claimed" }
   | { readonly _tag: "InProgress"; readonly fingerprint: string }
-  | { readonly _tag: "Completed"; readonly fingerprint: string; readonly response: Recorded }
+  | { readonly _tag: "Completed"; readonly fingerprint: string; readonly response: Recorded };
 
 /**
  * The storage seam. The package holds nothing: whether a key has been seen,
@@ -618,11 +631,11 @@ export type Claim =
  */
 export interface Store {
   /** Atomically claims the key for this attempt, reporting what was there. */
-  readonly claim: (attempt: Attempt) => Effect.Effect<Claim>
+  readonly claim: (attempt: Attempt) => Effect.Effect<Claim>;
   /** Records the response this attempt produced. */
-  readonly complete: (attempt: Attempt, response: Recorded) => Effect.Effect<void>
+  readonly complete: (attempt: Attempt, response: Recorded) => Effect.Effect<void>;
   /** Forgets this attempt's claim, so the key may be used again. */
-  readonly release: (attempt: Attempt) => Effect.Effect<void>
+  readonly release: (attempt: Attempt) => Effect.Effect<void>;
 }
 
 /**
@@ -660,31 +673,39 @@ export interface Store {
 export const memoryStore = (): Store => {
   type Entry =
     | { readonly state: "in-progress"; readonly fingerprint: string }
-    | { readonly state: "completed"; readonly fingerprint: string; readonly response: Recorded }
-  const entries = new Map<string, Entry>()
+    | { readonly state: "completed"; readonly fingerprint: string; readonly response: Recorded };
+  const entries = new Map<string, Entry>();
 
   return {
     claim: (attempt) =>
       Effect.sync(() => {
-        const entry = entries.get(attempt.key)
+        const entry = entries.get(attempt.key);
         if (entry === undefined) {
-          entries.set(attempt.key, { state: "in-progress", fingerprint: attempt.fingerprint })
-          return { _tag: "Claimed" } as const
+          entries.set(attempt.key, { state: "in-progress", fingerprint: attempt.fingerprint });
+          return { _tag: "Claimed" } as const;
         }
         return entry.state === "in-progress"
           ? ({ _tag: "InProgress", fingerprint: entry.fingerprint } as const)
-          : ({ _tag: "Completed", fingerprint: entry.fingerprint, response: entry.response } as const)
+          : ({
+              _tag: "Completed",
+              fingerprint: entry.fingerprint,
+              response: entry.response,
+            } as const);
       }),
     complete: (attempt, response) =>
       Effect.sync(() => {
-        entries.set(attempt.key, { state: "completed", fingerprint: attempt.fingerprint, response })
+        entries.set(attempt.key, {
+          state: "completed",
+          fingerprint: attempt.fingerprint,
+          response,
+        });
       }),
     release: (attempt) =>
       Effect.sync(() => {
-        entries.delete(attempt.key)
-      })
-  }
-}
+        entries.delete(attempt.key);
+      }),
+  };
+};
 
 // ---------------------------------------------------------------------------
 // The middleware
@@ -704,30 +725,34 @@ export const memoryStore = (): Store => {
  * @since 0.15.0
  * @category services
  */
-export class Middleware extends HttpApiMiddleware.Service<Middleware>()("effect-jsonapi/Idempotency", {
-  error: [KeyMismatch.wire, KeyInProgress.wire] as const
-}) {}
+export class Middleware extends HttpApiMiddleware.Service<Middleware>()(
+  "effect-jsonapi/Idempotency",
+  {
+    error: [KeyMismatch.wire, KeyInProgress.wire] as const,
+  },
+) {}
 
 // Safe methods carry no write to make idempotent; HTTP already guarantees it.
-const isSafe = (method: string): boolean => method === "GET" || method === "HEAD" || method === "OPTIONS"
+const isSafe = (method: string): boolean =>
+  method === "GET" || method === "HEAD" || method === "OPTIONS";
 
 // The response text of a body whose bytes are already settled — everything the
 // package's own endpoints emit. `undefined` means "this response cannot be
 // reproduced byte for byte" (a stream, a form, a raw value the platform will
 // serialise later): the key is released rather than replayed from a guess.
 const bodyText = (response: HttpServerResponse.HttpServerResponse): string | undefined => {
-  const body = response.body
+  const body = response.body;
   switch (body._tag) {
     case "Empty":
-      return ""
+      return "";
     case "Uint8Array":
-      return new TextDecoder().decode(body.body)
+      return new TextDecoder().decode(body.body);
     case "Raw":
-      return typeof body.body === "string" ? body.body : undefined
+      return typeof body.body === "string" ? body.body : undefined;
     default:
-      return undefined
+      return undefined;
   }
-}
+};
 
 const replay = (recorded: Recorded): HttpServerResponse.HttpServerResponse => {
   const base =
@@ -735,10 +760,10 @@ const replay = (recorded: Recorded): HttpServerResponse.HttpServerResponse => {
       ? HttpServerResponse.empty({ status: recorded.status })
       : HttpServerResponse.text(recorded.body, {
           status: recorded.status,
-          contentType: recorded.headers["content-type"] ?? MEDIA_TYPE
-        })
-  return HttpServerResponse.setHeaders(base, { ...recorded.headers, [REPLAY_HEADER]: "true" })
-}
+          contentType: recorded.headers["content-type"] ?? MEDIA_TYPE,
+        });
+  return HttpServerResponse.setHeaders(base, { ...recorded.headers, [REPLAY_HEADER]: "true" });
+};
 
 /**
  * The live {@link Middleware}, over a {@link Store} the application supplies.
@@ -805,34 +830,38 @@ export const layer = (store: Store): Layer.Layer<Middleware> =>
     Middleware,
     Effect.succeed<typeof Middleware.Service>((httpEffect) =>
       Effect.gen(function* () {
-        const request = yield* HttpServerRequest
-        const raw = request.headers[HEADER]
-        if (raw === undefined || isSafe(request.method)) return yield* httpEffect
+        const request = yield* HttpServerRequest;
+        const raw = request.headers[HEADER];
+        if (raw === undefined || isSafe(request.method)) return yield* httpEffect;
 
-        const key = unquote(raw)
-        const body = yield* Effect.orDie(request.text)
-        const print = yield* fingerprint({ method: request.method, url: request.url, body })
-        const attempt: Attempt = { key, fingerprint: print, request }
+        const key = unquote(raw);
+        const body = yield* Effect.orDie(request.text);
+        const print = yield* fingerprint({ method: request.method, url: request.url, body });
+        const attempt: Attempt = { key, fingerprint: print, request };
 
-        const claim = yield* store.claim(attempt)
+        const claim = yield* store.claim(attempt);
         if (claim._tag !== "Claimed") {
-          if (claim.fingerprint !== print) return yield* Effect.fail(new KeyMismatch())
-          if (claim._tag === "InProgress") return yield* Effect.fail(new KeyInProgress())
-          return replay(claim.response)
+          if (claim.fingerprint !== print) return yield* Effect.fail(new KeyMismatch());
+          if (claim._tag === "InProgress") return yield* Effect.fail(new KeyInProgress());
+          return replay(claim.response);
         }
 
         return yield* httpEffect.pipe(
           Effect.tap((response) => {
-            const text = bodyText(response)
+            const text = bodyText(response);
             return response.status >= 500 || text === undefined
               ? store.release(attempt)
-              : store.complete(attempt, { status: response.status, headers: { ...response.headers }, body: text })
+              : store.complete(attempt, {
+                  status: response.status,
+                  headers: { ...response.headers },
+                  body: text,
+                });
           }),
           // A defect, an interruption, or a handler failure encoded downstream
           // of us, leaves no response to record — the key must not stay
           // claimed, or a write that never completed would block its retry.
-          Effect.onError(() => store.release(attempt))
-        )
-      })
-    )
-  )
+          Effect.onError(() => store.release(attempt)),
+        );
+      }),
+    ),
+  );

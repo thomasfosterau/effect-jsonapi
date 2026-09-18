@@ -8,7 +8,7 @@
  * it also catches a graph that only reaches `httpapi` through `effect`'s own
  * internals, or an `exports` entry pointing at the wrong file.
  */
-import { register } from "node:module"
+import { register } from "node:module";
 
 register(
   `data:text/javascript,
@@ -18,5 +18,5 @@ register(
       }
       return next(specifier, context)
     }`,
-  import.meta.url
-)
+  import.meta.url,
+);

@@ -14,25 +14,25 @@
  * - `search` is a heterogeneous endpoint across repositories, issues and
  *   users, like GitHub's global search
  */
-import { Schema } from "effect"
-import { HttpApi } from "effect/unstable/httpapi"
-import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi"
+import { Schema } from "effect";
+import { HttpApi } from "effect/unstable/httpapi";
+import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {
   IssueLocked,
   IssueNotFound,
   PullRequestNotFound,
   RepositoryNameTaken,
   RepositoryNotFound,
-  UserNotFound
-} from "./errors.js"
-import { Issue, PullRequest, Repository, User } from "./resources.js"
+  UserNotFound,
+} from "./errors.js";
+import { Issue, PullRequest, Repository, User } from "./resources.js";
 
 /**
  * Typed collection meta carried by list responses.
  */
 export const PageMeta = Schema.Struct({
-  total: Schema.Int
-})
+  total: Schema.Int,
+});
 
 /**
  * GitHub-style page-number pagination with the page size capped at 100 — a
@@ -43,26 +43,26 @@ export const PageMeta = Schema.Struct({
  * defining it once keeps the cap and the `page[number]` / `page[size]` keys
  * consistent across every paginated endpoint.
  */
-export const Pagination = Query.Page.number({ maxSize: 100 })
+export const Pagination = Query.Page.number({ maxSize: 100 });
 
 /**
  * Offset/limit pagination for the global search endpoint, capped at 100 rows.
  */
-export const SearchPagination = Query.Page.offset({ maxLimit: 100 })
+export const SearchPagination = Query.Page.offset({ maxLimit: 100 });
 
 export const users = Group.make(
   User,
   // GET /users/:id
   Endpoint.get(User, {
-    errors: [UserNotFound]
+    errors: [UserNotFound],
   }),
   // GET /users?sort=login&page[number]=1&page[size]=30
   Endpoint.list(User, {
     sort: ["login", "createdAt"],
     page: Pagination,
-    meta: PageMeta
-  })
-)
+    meta: PageMeta,
+  }),
+);
 
 export const repositories = Group.make(
   Repository,
@@ -70,7 +70,7 @@ export const repositories = Group.make(
   Endpoint.get(Repository, {
     include: true,
     fields: true,
-    errors: [RepositoryNotFound]
+    errors: [RepositoryNotFound],
   }),
   // GET /repositories?sort=-stargazerCount&filter[language]=TypeScript&page[number]=1&page[size]=30
   Endpoint.list(Repository, {
@@ -80,27 +80,27 @@ export const repositories = Group.make(
     filter: {
       owner: Schema.optionalKey(Schema.String),
       language: Schema.optionalKey(Schema.String),
-      visibility: Schema.optionalKey(Schema.Literals(["public", "private"]))
+      visibility: Schema.optionalKey(Schema.Literals(["public", "private"])),
     },
-    meta: PageMeta
+    meta: PageMeta,
   }),
   // POST /repositories → 201
   Endpoint.create(Repository, {
-    errors: [RepositoryNameTaken]
+    errors: [RepositoryNameTaken],
   }),
   // PATCH /repositories/:id (partial attributes)
   Endpoint.update(Repository, {
-    errors: [RepositoryNotFound]
+    errors: [RepositoryNotFound],
   }),
   // DELETE /repositories/:id → 204
   Endpoint.delete(Repository, {
-    errors: [RepositoryNotFound]
+    errors: [RepositoryNotFound],
   }),
   // GET /repositories/:id/owner — the owning user, as a full resource
   Endpoint.related(Repository, "owner", {
-    errors: [RepositoryNotFound]
-  })
-)
+    errors: [RepositoryNotFound],
+  }),
+);
 
 export const issues = Group.make(
   Issue,
@@ -108,7 +108,7 @@ export const issues = Group.make(
   Endpoint.get(Issue, {
     include: true,
     fields: true,
-    errors: [IssueNotFound]
+    errors: [IssueNotFound],
   }),
   // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt
   Endpoint.list(Issue, {
@@ -118,17 +118,17 @@ export const issues = Group.make(
     filter: {
       repository: Schema.optionalKey(Schema.String),
       state: Schema.optionalKey(Schema.Literals(["open", "closed"])),
-      assignee: Schema.optionalKey(Schema.String)
+      assignee: Schema.optionalKey(Schema.String),
     },
-    meta: PageMeta
+    meta: PageMeta,
   }),
   // POST /issues → 201 (repository and author are required relationships)
   Endpoint.create(Issue, {
-    errors: [RepositoryNotFound]
+    errors: [RepositoryNotFound],
   }),
   // PATCH /issues/:id — closing an issue is `attributes: { state: "closed" }`
   Endpoint.update(Issue, {
-    errors: [IssueNotFound, IssueLocked]
+    errors: [IssueNotFound, IssueLocked],
   }),
   // --- Related resource endpoints --------------------------------------------
   // GET /issues/:id/comments?page[number]=1&page[size]=30&include=author —
@@ -138,38 +138,38 @@ export const issues = Group.make(
     include: true,
     page: Pagination,
     meta: PageMeta,
-    errors: [IssueNotFound]
+    errors: [IssueNotFound],
   }),
   // --- Relationship (linkage) endpoints: issue triage -------------------------
   // GET /issues/:id/relationships/labels — label identifiers
   Endpoint.getRelationship(Issue, "labels", {
-    errors: [IssueNotFound]
+    errors: [IssueNotFound],
   }),
   // PATCH /issues/:id/relationships/assignee — assign ({ data: identifier })
   // or unassign ({ data: null })
   Endpoint.updateRelationship(Issue, "assignee", {
-    errors: [IssueNotFound, IssueLocked, UserNotFound]
+    errors: [IssueNotFound, IssueLocked, UserNotFound],
   }),
   // PATCH /issues/:id/relationships/labels — replace all labels
   Endpoint.updateRelationship(Issue, "labels", {
-    errors: [IssueNotFound, IssueLocked]
+    errors: [IssueNotFound, IssueLocked],
   }),
   // POST /issues/:id/relationships/labels — add labels
   Endpoint.addRelationship(Issue, "labels", {
-    errors: [IssueNotFound, IssueLocked]
+    errors: [IssueNotFound, IssueLocked],
   }),
   // DELETE /issues/:id/relationships/labels → 204 — remove labels
   Endpoint.removeRelationship(Issue, "labels", {
-    errors: [IssueNotFound, IssueLocked]
-  })
-)
+    errors: [IssueNotFound, IssueLocked],
+  }),
+);
 
 export const pulls = Group.make(
   PullRequest,
   // GET /pulls/:id?include=author,reviewers,repository
   Endpoint.get(PullRequest, {
     include: true,
-    errors: [PullRequestNotFound]
+    errors: [PullRequestNotFound],
   }),
   // GET /pulls?filter[state]=open
   Endpoint.list(PullRequest, {
@@ -178,11 +178,11 @@ export const pulls = Group.make(
     page: Pagination,
     filter: {
       repository: Schema.optionalKey(Schema.String),
-      state: Schema.optionalKey(Schema.Literals(["open", "closed", "merged"]))
+      state: Schema.optionalKey(Schema.Literals(["open", "closed", "merged"])),
     },
-    meta: PageMeta
-  })
-)
+    meta: PageMeta,
+  }),
+);
 
 /**
  * GitHub-style global search: a heterogeneous collection of repositories,
@@ -198,8 +198,13 @@ export const search = Group.make(
     include: true,
     fields: true,
     page: SearchPagination,
-    meta: PageMeta
-  })
-)
+    meta: PageMeta,
+  }),
+);
 
-export const Api = HttpApi.make("github").add(users).add(repositories).add(issues).add(pulls).add(search)
+export const Api = HttpApi.make("github")
+  .add(users)
+  .add(repositories)
+  .add(issues)
+  .add(pulls)
+  .add(search);

@@ -76,18 +76,18 @@
  *
  * @since 0.1.0
  */
-import { Schema } from "effect"
-import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
-import * as Atomic from "./Atomic.js"
-import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js"
-import * as Idempotency from "./Idempotency.js"
-import { isSurface } from "./Include.js"
-import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js"
-import { MEDIA_TYPE } from "./internal/media.js"
-import { ContentNegotiation, SchemaErrors } from "./Middleware.js"
-import * as Query from "./Query.js"
-import * as Relationship from "./Relationship.js"
-import type { Relationships } from "./Relationship.js"
+import { Schema } from "effect";
+import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi";
+import * as Atomic from "./Atomic.js";
+import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js";
+import * as Idempotency from "./Idempotency.js";
+import { isSurface } from "./Include.js";
+import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
+import { MEDIA_TYPE } from "./internal/media.js";
+import { ContentNegotiation, SchemaErrors } from "./Middleware.js";
+import * as Query from "./Query.js";
+import * as Relationship from "./Relationship.js";
+import type { Relationships } from "./Relationship.js";
 import type {
   Any,
   AttributeKeys,
@@ -99,9 +99,9 @@ import type {
   Resource,
   Target,
   TargetsOf,
-  ToManyName
-} from "./Resource.js"
-import { directTargets } from "./Resource.js"
+  ToManyName,
+} from "./Resource.js";
+import { directTargets } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -115,8 +115,8 @@ import { directTargets } from "./Resource.js"
  * @category models
  */
 export interface ErrorClass {
-  readonly wire: Schema.Top
-  readonly status: number
+  readonly wire: Schema.Top;
+  readonly status: number;
 }
 
 /**
@@ -126,11 +126,12 @@ export interface ErrorClass {
  * @category type-level
  */
 export type Wires<Errors extends ReadonlyArray<ErrorClass>> = {
-  readonly [K in keyof Errors]: Errors[K]["wire"]
-}
+  readonly [K in keyof Errors]: Errors[K]["wire"];
+};
 
-const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors: Errors | undefined): Wires<Errors> =>
-  ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>
+const wires = <const Errors extends ReadonlyArray<ErrorClass>>(
+  errors: Errors | undefined,
+): Wires<Errors> => ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>;
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -144,37 +145,42 @@ const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors: Errors | 
  */
 export interface CommonOptions<Name extends string, Path extends `/${string}`, Errors> {
   /** Endpoint name within its group. Defaults to the operation name (`"get"`, `"list"`, …). */
-  readonly name?: Name
+  readonly name?: Name;
   /** Route path. Defaults to the conventional JSON:API path for the operation. */
-  readonly path?: Path
+  readonly path?: Path;
   /** `ApiError` classes this endpoint can fail with. */
-  readonly errors?: Errors
+  readonly errors?: Errors;
 }
 
 const queryConfig = (options?: {
-  readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number } | undefined
-  readonly fields?: boolean | undefined
-  readonly sort?: boolean | ReadonlyArray<string> | undefined
-  readonly page?: Schema.Struct.Fields | undefined
-  readonly filter?: Query.FilterOption | undefined
+  readonly include?:
+    | boolean
+    | { readonly paths?: ReadonlyArray<string>; readonly depth?: number }
+    | undefined;
+  readonly fields?: boolean | undefined;
+  readonly sort?: boolean | ReadonlyArray<string> | undefined;
+  readonly page?: Schema.Struct.Fields | undefined;
+  readonly filter?: Query.FilterOption | undefined;
 }) => ({
   include: options?.include ?? false,
   fields: options?.fields === true,
   sort: options?.sort ?? false,
   page: options?.page,
-  filter: options?.filter
-})
+  filter: options?.filter,
+});
 
 // The `included` union a read endpoint's default document carries: the union a
 // declared `Include.Surface` derives, so the paths the endpoint advertises and
 // the resources its document admits come from one declaration — else the
 // relationship graph's own default. A boolean or `Query.IncludeOptions`
 // carries no union, and falls back to the graph.
-type IncludedOf<Rels extends Relationships, Include> = Include extends { readonly included: infer U }
+type IncludedOf<Rels extends Relationships, Include> = Include extends {
+  readonly included: infer U;
+}
   ? U extends Schema.Top
     ? U
     : DefaultIncluded<Rels>
-  : DefaultIncluded<Rels>
+  : DefaultIncluded<Rels>;
 
 // The success document the single-resource endpoints (`get`, `create`,
 // `update`) bind by default — the resource's own `document()` at the effective
@@ -186,8 +192,12 @@ type DefaultDocument<
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string>,
   DocMeta extends Schema.Top,
-  Include = false
-> = DataDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, IncludedOf<Rels, Include>, DocMeta>
+  Include = false,
+> = DataDocument<
+  Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  IncludedOf<Rels, Include>,
+  DocMeta
+>;
 
 // The collection counterpart, for `list` — the resource's `collection()`.
 type DefaultCollection<
@@ -197,8 +207,12 @@ type DefaultCollection<
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string>,
   DocMeta extends Schema.Top,
-  Include = false
-> = CollectionDocument<Resource<Type, Attributes, Rels, Meta, IdSchema>, IncludedOf<Rels, Include>, DocMeta>
+  Include = false,
+> = CollectionDocument<
+  Resource<Type, Attributes, Rels, Meta, IdSchema>,
+  IncludedOf<Rels, Include>,
+  DocMeta
+>;
 
 // The document options a read endpoint's default document is built with: the
 // `meta` override, plus the `included` union when the `include` option is a
@@ -206,16 +220,16 @@ type DefaultCollection<
 const documentOptions = (
   options:
     | {
-        readonly meta?: Schema.Top
-        readonly include?: unknown
+        readonly meta?: Schema.Top;
+        readonly include?: unknown;
       }
-    | undefined
+    | undefined,
 ): { readonly meta?: Schema.Top; readonly included?: Schema.Top } => {
-  const out: { meta?: Schema.Top; included?: Schema.Top } = {}
-  if (options?.meta !== undefined) out.meta = options.meta
-  if (isSurface(options?.include)) out.included = options.include.included
-  return out
-}
+  const out: { meta?: Schema.Top; included?: Schema.Top } = {};
+  if (options?.meta !== undefined) out.meta = options.meta;
+  if (isSurface(options?.include)) out.included = options.include.included;
+  return out;
+};
 
 // ---------------------------------------------------------------------------
 // get — GET /<type>/:id
@@ -231,17 +245,17 @@ type DefaultGetQuery<
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
-  Fields extends boolean
+  Fields extends boolean,
 > = Query.QuerySchema<
   Resource<Type, Attributes, Rels, Meta, IdSchema>,
   {
-    readonly include: Include
-    readonly fields: Fields
-    readonly sort: false
-    readonly page: undefined
-    readonly filter: undefined
+    readonly include: Include;
+    readonly fields: Fields;
+    readonly sort: false;
+    readonly page: undefined;
+    readonly filter: undefined;
   }
->
+>;
 
 /**
  * `GET /<type>/:id` — fetch a single resource.
@@ -336,11 +350,28 @@ export const get = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${Type}/:id`,
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> =
+    false,
   const Fields extends boolean = false,
   DocMeta extends Schema.Top = Meta,
-  QuerySchema extends Schema.Top = DefaultGetQuery<Type, Attributes, Rels, Meta, IdSchema, Include, Fields>,
-  Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include>
+  QuerySchema extends Schema.Top = DefaultGetQuery<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    Include,
+    Fields
+  >,
+  Success extends Schema.Top = DefaultDocument<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    DocMeta,
+    Include
+  >,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -350,11 +381,11 @@ export const get = <
      * `Include.Surface` — a declared surface, which also derives this
      * endpoint's `included` union.
      */
-    readonly include?: Include
+    readonly include?: Include;
     /** Enable `?fields[TYPE]=` sparse fieldsets. */
-    readonly fields?: Fields
+    readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
-    readonly meta?: DocMeta
+    readonly meta?: DocMeta;
     /**
      * Override the whole query schema. Defaults to the `Query.schema`
      * composition of the `include` / `fields` options above (which those
@@ -363,7 +394,7 @@ export const get = <
      *
      * @since 0.11.0
      */
-    readonly query?: QuerySchema
+    readonly query?: QuerySchema;
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -372,31 +403,36 @@ export const get = <
      *
      * @since 0.10.0
      */
-    readonly success?: Success
-  }
+    readonly success?: Success;
+  },
 ) =>
-  HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-    params: Schema.Struct({ id: resource.Id }),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
-    query: (options?.query ??
-      Query.schema(
-        resource,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: false
-          readonly page: undefined
-          readonly filter: undefined
-        }
-      )) as QuerySchema,
-    success: asJsonApi(
-      (options?.success ?? resource.document(documentOptions(options) as { readonly meta?: DocMeta })) as Success
-    ),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
+  HttpApiEndpoint.get(
+    (options?.name ?? "get") as Name,
+    (options?.path ?? `/${resource.type}/:id`) as Path,
+    {
+      params: Schema.Struct({ id: resource.Id }),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+      query: (options?.query ??
+        Query.schema(
+          resource,
+          queryConfig(options) as {
+            readonly include: Include;
+            readonly fields: Fields;
+            readonly sort: false;
+            readonly page: undefined;
+            readonly filter: undefined;
+          },
+        )) as QuerySchema,
+      success: asJsonApi(
+        (options?.success ??
+          resource.document(documentOptions(options) as { readonly meta?: DocMeta })) as Success,
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors),
+    },
+  )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+    .middleware(SchemaErrors);
 
 // ---------------------------------------------------------------------------
 // list — GET /<type>
@@ -412,19 +448,21 @@ type DefaultListQuery<
   IdSchema extends Schema.Codec<any, string>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   PageFields extends Schema.Struct.Fields | undefined,
-  FilterFields extends Query.FilterOption | undefined
+  FilterFields extends Query.FilterOption | undefined,
 > = Query.QuerySchema<
   Resource<Type, Attributes, Rels, Meta, IdSchema>,
   {
-    readonly include: Include
-    readonly fields: Fields
-    readonly sort: Sort
-    readonly page: PageFields
-    readonly filter: FilterFields
+    readonly include: Include;
+    readonly fields: Fields;
+    readonly sort: Sort;
+    readonly page: PageFields;
+    readonly filter: FilterFields;
   }
->
+>;
 
 /**
  * `GET /<type>` — list a collection of resources.
@@ -517,9 +555,12 @@ export const list = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "list",
   const Path extends `/${string}` = `/${Type}`,
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = false,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> =
+    false,
   const Fields extends boolean = false,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
+  const Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Query.FilterOption | undefined = undefined,
   DocMeta extends Schema.Top = Meta,
@@ -535,7 +576,15 @@ export const list = <
     PageFields,
     FilterFields
   >,
-  Success extends Schema.Top = DefaultCollection<Type, Attributes, Rels, Meta, IdSchema, DocMeta, Include>
+  Success extends Schema.Top = DefaultCollection<
+    Type,
+    Attributes,
+    Rels,
+    Meta,
+    IdSchema,
+    DocMeta,
+    Include
+  >,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -545,22 +594,22 @@ export const list = <
      * `Include.Surface` — a declared surface, which also derives this
      * endpoint's `included` union.
      */
-    readonly include?: Include
+    readonly include?: Include;
     /** Enable `?fields[TYPE]=` sparse fieldsets. */
-    readonly fields?: Fields
+    readonly fields?: Fields;
     /** Enable `?sort=`: `true` for all attributes, or an array of sortable attribute names. */
-    readonly sort?: Sort
+    readonly sort?: Sort;
     /** Enable `?page[*]=` pagination (see `Query.Page` for ready-made strategies). */
-    readonly page?: PageFields
+    readonly page?: PageFields;
     /**
      * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
      * (`docs/filter-grammar.md`) over the resource's declared filterable
      * fields, decoding to a `Filter.Ast`; a field map (`{ q: Schema.String }`)
      * is the open per-key escape hatch, each key becoming `filter[<key>]`.
      */
-    readonly filter?: FilterFields
+    readonly filter?: FilterFields;
     /** Override the collection document's `meta` schema (e.g. pagination totals). */
-    readonly meta?: DocMeta
+    readonly meta?: DocMeta;
     /**
      * Override the whole query schema. Defaults to the `Query.schema`
      * composition of the `include` / `fields` / `sort` / `page` / `filter`
@@ -568,7 +617,7 @@ export const list = <
      * for a list contract of your own — e.g. a flat struct whose page cursor is
      * bracketed on the wire by `Query.bracketPageKeys` but decoded flat.
      */
-    readonly query?: QuerySchema
+    readonly query?: QuerySchema;
     /**
      * Override the success document schema. Defaults to the resource's
      * `collection()` (which `meta` then tunes); pass a collection document over
@@ -577,30 +626,35 @@ export const list = <
      *
      * @since 0.10.0
      */
-    readonly success?: Success
-  }
+    readonly success?: Success;
+  },
 ) =>
-  HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
-    query: (options?.query ??
-      Query.schema(
-        resource,
-        queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: Sort
-          readonly page: PageFields
-          readonly filter: FilterFields
-        }
-      )) as QuerySchema,
-    success: asJsonApi(
-      (options?.success ?? resource.collection(documentOptions(options) as { readonly meta?: DocMeta })) as Success
-    ),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
+  HttpApiEndpoint.get(
+    (options?.name ?? "list") as Name,
+    (options?.path ?? `/${resource.type}`) as Path,
+    {
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+      query: (options?.query ??
+        Query.schema(
+          resource,
+          queryConfig(options) as {
+            readonly include: Include;
+            readonly fields: Fields;
+            readonly sort: Sort;
+            readonly page: PageFields;
+            readonly filter: FilterFields;
+          },
+        )) as QuerySchema,
+      success: asJsonApi(
+        (options?.success ??
+          resource.collection(documentOptions(options) as { readonly meta?: DocMeta })) as Success,
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors),
+    },
+  )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+    .middleware(SchemaErrors);
 
 // ---------------------------------------------------------------------------
 // create — POST /<type>
@@ -696,18 +750,18 @@ export const create = <
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"],
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
-  const Idem extends Idempotency.Option = false
+  const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
-    readonly meta?: DocMeta
+    readonly meta?: DocMeta;
     /**
      * Override the request payload schema. Defaults to the resource's
      * `createPayload` (the JSON:API envelope); pass `resource.createInput` for
      * the flat command-input shape, or any schema of your own.
      */
-    readonly payload?: Payload
+    readonly payload?: Payload;
     /**
      * The media type the request payload is registered under, which the router
      * matches a request's `Content-Type` against. Defaults to
@@ -716,7 +770,7 @@ export const create = <
      *
      * @since 0.11.0
      */
-    readonly payloadMediaType?: string
+    readonly payloadMediaType?: string;
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -725,7 +779,7 @@ export const create = <
      *
      * @since 0.10.0
      */
-    readonly success?: Success
+    readonly success?: Success;
     /**
      * The success status. Defaults to 201 — the spec's recommendation for a
      * creation answering with the created resource — whether or not `success`
@@ -733,7 +787,7 @@ export const create = <
      *
      * @since 0.11.0
      */
-    readonly status?: number
+    readonly status?: number;
     /**
      * Declare the `Idempotency-Key` request header and honour it: `true` to
      * accept a key, `"required"` to insist on one. Off by default. Opting in
@@ -742,30 +796,36 @@ export const create = <
      *
      * @since 0.15.0
      */
-    readonly idempotency?: Idem
-  }
+    readonly idempotency?: Idem;
+  },
 ) =>
   Idempotency.applied(
-    HttpApiEndpoint.post((options?.name ?? "create") as Name, (options?.path ?? `/${resource.type}`) as Path, {
-      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
-      payload: asMediaType(
-        (options?.payload ?? resource.createPayload) as Payload,
-        options?.payloadMediaType ?? MEDIA_TYPE
-      ),
-      success: asJsonApi(
-        (options?.success ??
-          resource.document(
-            (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-          )) as Success,
-        options?.status ?? 201
-      ),
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    })
+    HttpApiEndpoint.post(
+      (options?.name ?? "create") as Name,
+      (options?.path ?? `/${resource.type}`) as Path,
+      {
+        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        payload: asMediaType(
+          (options?.payload ?? resource.createPayload) as Payload,
+          options?.payloadMediaType ?? MEDIA_TYPE,
+        ),
+        success: asJsonApi(
+          (options?.success ??
+            resource.document(
+              (options?.meta !== undefined ? { meta: options.meta } : {}) as {
+                readonly meta?: DocMeta;
+              },
+            )) as Success,
+          options?.status ?? 201,
+        ),
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
-    options?.idempotency
-  )
+    options?.idempotency,
+  );
 
 // ---------------------------------------------------------------------------
 // update — PATCH /<type>/:id
@@ -837,18 +897,18 @@ export const update = <
   DocMeta extends Schema.Top = Meta,
   Payload extends Schema.Top = Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"],
   Success extends Schema.Top = DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, DocMeta>,
-  const Idem extends Idempotency.Option = false
+  const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the success document's `meta` schema. */
-    readonly meta?: DocMeta
+    readonly meta?: DocMeta;
     /**
      * Override the request payload schema. Defaults to the resource's
      * `updatePayload` (the JSON:API envelope); pass `resource.updateInput` for
      * the flat command-input shape, or any schema of your own.
      */
-    readonly payload?: Payload
+    readonly payload?: Payload;
     /**
      * The media type the request payload is registered under, which the router
      * matches a request's `Content-Type` against. Defaults to
@@ -857,7 +917,7 @@ export const update = <
      *
      * @since 0.11.0
      */
-    readonly payloadMediaType?: string
+    readonly payloadMediaType?: string;
     /**
      * Override the success document schema. Defaults to the resource's
      * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -866,14 +926,14 @@ export const update = <
      *
      * @since 0.10.0
      */
-    readonly success?: Success
+    readonly success?: Success;
     /**
      * The success status. Defaults to 200 — the status `HttpApi` gives a
      * success schema carrying a body — whether or not `success` is given.
      *
      * @since 0.11.0
      */
-    readonly status?: number
+    readonly status?: number;
     /**
      * Declare the `Idempotency-Key` request header and honour it: `true` to
      * accept a key, `"required"` to insist on one. Off by default. Opting in
@@ -882,31 +942,37 @@ export const update = <
      *
      * @since 0.15.0
      */
-    readonly idempotency?: Idem
-  }
+    readonly idempotency?: Idem;
+  },
 ) =>
   Idempotency.applied(
-    HttpApiEndpoint.patch((options?.name ?? "update") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-      params: Schema.Struct({ id: resource.Id }),
-      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
-      payload: asMediaType(
-        (options?.payload ?? resource.updatePayload) as Payload,
-        options?.payloadMediaType ?? MEDIA_TYPE
-      ),
-      success: asJsonApi(
-        (options?.success ??
-          resource.document(
-            (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-          )) as Success,
-        options?.status
-      ),
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    })
+    HttpApiEndpoint.patch(
+      (options?.name ?? "update") as Name,
+      (options?.path ?? `/${resource.type}/:id`) as Path,
+      {
+        params: Schema.Struct({ id: resource.Id }),
+        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        payload: asMediaType(
+          (options?.payload ?? resource.updatePayload) as Payload,
+          options?.payloadMediaType ?? MEDIA_TYPE,
+        ),
+        success: asJsonApi(
+          (options?.success ??
+            resource.document(
+              (options?.meta !== undefined ? { meta: options.meta } : {}) as {
+                readonly meta?: DocMeta;
+              },
+            )) as Success,
+          options?.status,
+        ),
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
-    options?.idempotency
-  )
+    options?.idempotency,
+  );
 
 // ---------------------------------------------------------------------------
 // delete — DELETE /<type>/:id
@@ -921,7 +987,7 @@ const deleteSuccess = (success: Schema.Top | undefined, status: number | undefin
     ? status === undefined
       ? HttpApiSchema.NoContent
       : HttpApiSchema.NoContent.pipe(HttpApiSchema.status(status))
-    : asJsonApi(success, status)
+    : asJsonApi(success, status);
 
 /**
  * `DELETE /<type>/:id` — delete a resource.
@@ -980,7 +1046,7 @@ const deleteEndpoint = <
   const Name extends string = "delete",
   const Path extends `/${string}` = `/${Type}/:id`,
   Success extends Schema.Top = HttpApiSchema.NoContent,
-  const Idem extends Idempotency.Option = false
+  const Idem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: CommonOptions<Name, Path, Errors> & {
@@ -991,12 +1057,12 @@ const deleteEndpoint = <
      * resource, or any schema of your own — it is served as
      * `application/vnd.api+json`.
      */
-    readonly success?: Success
+    readonly success?: Success;
     /**
      * The success status. Defaults to 204 for the no-content default, 200 for
      * a `success` override.
      */
-    readonly status?: number
+    readonly status?: number;
     /**
      * Declare the `Idempotency-Key` request header and honour it: `true` to
      * accept a key, `"required"` to insist on one. Off by default. Opting in
@@ -1005,21 +1071,25 @@ const deleteEndpoint = <
      *
      * @since 0.15.0
      */
-    readonly idempotency?: Idem
-  }
+    readonly idempotency?: Idem;
+  },
 ) =>
   Idempotency.applied(
-    HttpApiEndpoint.delete((options?.name ?? "delete") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
-      params: Schema.Struct({ id: resource.Id }),
-      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
-      success: deleteSuccess(options?.success, options?.status) as Success,
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    })
+    HttpApiEndpoint.delete(
+      (options?.name ?? "delete") as Name,
+      (options?.path ?? `/${resource.type}/:id`) as Path,
+      {
+        params: Schema.Struct({ id: resource.Id }),
+        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        success: deleteSuccess(options?.success, options?.status) as Success,
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
-    options?.idempotency
-  )
+    options?.idempotency,
+  );
 
 export {
   /**
@@ -1028,14 +1098,14 @@ export {
    * @since 0.1.0
    * @category constructors
    */
-  deleteEndpoint as delete
-}
+  deleteEndpoint as delete,
+};
 
 // ---------------------------------------------------------------------------
 // collection — GET <path>, heterogeneous collection
 // ---------------------------------------------------------------------------
 
-const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
+const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
 
 /**
  * The default compound `included` union of a heterogeneous collection
@@ -1106,57 +1176,57 @@ export const collection = <
   const Sort extends boolean | ReadonlyArray<AttributeKeys<Resources[number]>> = false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Schema.Struct.Fields | undefined = undefined,
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resources: Resources,
   options: {
     /** Endpoint name within its group (required — a polymorphic collection has no conventional name). */
-    readonly name: Name
+    readonly name: Name;
     /** Route path, e.g. `/search` or `/feed` (required — a polymorphic collection has no conventional path). */
-    readonly path: Path
+    readonly path: Path;
     /** `ApiError` classes this endpoint can fail with. */
-    readonly errors?: Errors
+    readonly errors?: Errors;
     /** Enable the `?include=` query parameter (paths span all resources' graphs). */
-    readonly include?: Include
+    readonly include?: Include;
     /** Enable `?fields[TYPE]=` sparse fieldsets for all resources and their targets. */
-    readonly fields?: Fields
+    readonly fields?: Fields;
     /** Enable `?sort=`: `true` for every attribute of every resource, or an explicit list. */
-    readonly sort?: Sort
+    readonly sort?: Sort;
     /** Enable `?page[*]=` pagination (see `Query.Page` for ready-made strategies). */
-    readonly page?: PageFields
+    readonly page?: PageFields;
     /** Enable `?filter[*]=` filtering (user-defined fields, e.g. the search term). */
-    readonly filter?: FilterFields
+    readonly filter?: FilterFields;
     /** Override the collection document's `meta` schema (e.g. result totals). */
-    readonly meta?: DocMeta
-  }
+    readonly meta?: DocMeta;
+  },
 ) =>
   HttpApiEndpoint.get(options.name as Name, options.path as Path, {
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     query: Query.schema(
       resources as ReadonlyArray<Resources[number]>,
       queryConfig(options) as {
-        readonly include: Include
-        readonly fields: Fields
-        readonly sort: Sort
-        readonly page: PageFields
-        readonly filter: FilterFields
-      }
+        readonly include: Include;
+        readonly fields: Fields;
+        readonly sort: Sort;
+        readonly page: PageFields;
+        readonly filter: FilterFields;
+      },
     ),
     success: asJsonApi(
       CollectionDocument(Schema.Union(resources), {
         // The cast is sound: every direct target of every member of
         // `Resources` is, by construction, a member of `TargetsOf<...>`.
         included: Schema.Union(
-          dedupe(resources.flatMap((resource) => directTargets(resource)))
+          dedupe(resources.flatMap((resource) => directTargets(resource))),
         ) as unknown as CollectionIncluded<Resources>,
-        meta: (options.meta ?? AnyMeta) as DocMeta
-      })
+        meta: (options.meta ?? AnyMeta) as DocMeta,
+      }),
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options.errors)
+    error: wires(options.errors),
   })
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+    .middleware(SchemaErrors);
 
 // ---------------------------------------------------------------------------
 // polymorphic — GET /<family>/:id (single resource, any family member)
@@ -1203,40 +1273,48 @@ export const polymorphic = <
   const Path extends `/${string}` = `/${FamilyName}/:id`,
   const Include extends Query.IncludeOption<Members[number]> = false,
   const Fields extends boolean = false,
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   family: Family<FamilyName, Members, Base>,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Enable the `?include=` query parameter (paths span all members' graphs). */
-    readonly include?: Include
+    readonly include?: Include;
     /** Enable `?fields[TYPE]=` sparse fieldsets for all members and their targets. */
-    readonly fields?: Fields
+    readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
-    readonly meta?: DocMeta
-  }
+    readonly meta?: DocMeta;
+  },
 ) =>
-  HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${family.type}/:id`) as Path, {
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
-    params: Schema.Struct({ id: family.Id }),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
-    query: Query.schema(
-      family.members as ReadonlyArray<Members[number]>,
-      queryConfig(options) as {
-        readonly include: Include
-        readonly fields: Fields
-        readonly sort: false
-        readonly page: undefined
-        readonly filter: undefined
-      }
-    ),
-    success: asJsonApi(
-      family.document((options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta })
-    ),
-    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-    error: wires(options?.errors)
-  })
+  HttpApiEndpoint.get(
+    (options?.name ?? "get") as Name,
+    (options?.path ?? `/${family.type}/:id`) as Path,
+    {
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+      params: Schema.Struct({ id: family.Id }),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
+      query: Query.schema(
+        family.members as ReadonlyArray<Members[number]>,
+        queryConfig(options) as {
+          readonly include: Include;
+          readonly fields: Fields;
+          readonly sort: false;
+          readonly page: undefined;
+          readonly filter: undefined;
+        },
+      ),
+      success: asJsonApi(
+        family.document(
+          (options?.meta !== undefined ? { meta: options.meta } : {}) as {
+            readonly meta?: DocMeta;
+          },
+        ),
+      ),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+      error: wires(options?.errors),
+    },
+  )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
+    .middleware(SchemaErrors);
 
 // ---------------------------------------------------------------------------
 // Relationship endpoints — shared type machinery
@@ -1244,12 +1322,13 @@ export const polymorphic = <
 
 // Resolves to `T` for every concrete relationship; needed because conditional
 // types over a still-generic resource can't be proven to satisfy `Schema.Top`.
-type AsSchema<T> = T extends Schema.Top ? T : never
+type AsSchema<T> = T extends Schema.Top ? T : never;
 
 /**
  * The descriptor of a named relationship.
  */
-type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name & keyof R["relationships"]]
+type DescriptorOf<R extends Any, Name extends string> = R["relationships"][Name &
+  keyof R["relationships"]];
 
 /**
  * The linkage (`data`) schema of a relationship, by kind:
@@ -1268,7 +1347,7 @@ export type LinkageData<R extends Any, Name extends string> =
       ? Schema.NullOr<AsSchema<T["identifier"]>>
       : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
         ? Schema.$Array<AsSchema<T["identifier"]>>
-        : never
+        : never;
 
 /**
  * The success document schema of a relationship endpoint: a linkage document
@@ -1277,10 +1356,11 @@ export type LinkageData<R extends Any, Name extends string> =
  * @since 0.1.0
  * @category type-level
  */
-export type RelationshipSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top> = LinkageDocument<
-  AsSchema<LinkageData<R, Name>>,
-  DocMeta
->
+export type RelationshipSuccess<
+  R extends Any,
+  Name extends string,
+  DocMeta extends Schema.Top,
+> = LinkageDocument<AsSchema<LinkageData<R, Name>>, DocMeta>;
 
 /**
  * The request payload schema of a relationship mutation: `{ data: linkage }`.
@@ -1289,7 +1369,7 @@ export type RelationshipSuccess<R extends Any, Name extends string, DocMeta exte
  * @category models
  */
 export interface LinkagePayload<R extends Any, Name extends string> extends Schema.Struct<{
-  readonly data: AsSchema<LinkageData<R, Name>>
+  readonly data: AsSchema<LinkageData<R, Name>>;
 }> {}
 
 /**
@@ -1303,24 +1383,29 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  * @since 0.1.0
  * @category type-level
  */
-export type RelatedSuccess<R extends Any, Name extends string, DocMeta extends Schema.Top, Include = false> =
+export type RelatedSuccess<
+  R extends Any,
+  Name extends string,
+  DocMeta extends Schema.Top,
+  Include = false,
+> =
   DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
     ? DataDocument<Schema.NullOr<T>, IncludedOf<T["relationships"], Include>, DocMeta>
     : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
       ? CollectionDocument<T, IncludedOf<T["relationships"], Include>, DocMeta>
-      : never
+      : never;
 
-const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1)
+const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
 
 // Looks up a relationship descriptor by name; an unknown name is a programmer
 // error (it is also a compile error at the constructor's call site).
 const descriptorFor = (resource: Any, name: string): Relationship.Descriptor => {
-  const descriptor = (resource.relationships as Record<string, Relationship.Descriptor>)[name]
+  const descriptor = (resource.relationships as Record<string, Relationship.Descriptor>)[name];
   if (descriptor === undefined) {
-    throw new Error(`Unknown relationship "${name}" on resource "${resource.type}"`)
+    throw new Error(`Unknown relationship "${name}" on resource "${resource.type}"`);
   }
-  return descriptor
-}
+  return descriptor;
+};
 
 // The runtime linkage (`data`) schema for a relationship descriptor.
 const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.Top =>
@@ -1328,7 +1413,7 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
     ? target.identifier
     : descriptor.kind === "optional"
       ? Schema.NullOr(target.identifier)
-      : Schema.Array(target.identifier)
+      : Schema.Array(target.identifier);
 
 // ---------------------------------------------------------------------------
 // related — GET /<type>/:id/<name>
@@ -1400,14 +1485,17 @@ export const related = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = Name,
   const Path extends `/${string}` = `/${Type}/:id/${Name}`,
-  const Include extends Query.IncludeOption<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>> = false,
+  const Include extends Query.IncludeOption<
+    Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>
+  > = false,
   const Fields extends boolean = false,
   const Sort extends
     | boolean
-    | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> = false,
+    | ReadonlyArray<AttributeKeys<Target<Resource<Type, Attributes, Rels, Meta, IdSchema>, Name>>> =
+    false,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   const FilterFields extends Query.FilterOption | undefined = undefined,
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
@@ -1417,27 +1505,29 @@ export const related = <
      * graph). A declared `Include.Surface` over the target also derives this
      * endpoint's `included` union.
      */
-    readonly include?: Include
+    readonly include?: Include;
     /** Enable `?fields[TYPE]=` sparse fieldsets for the target and its targets. */
-    readonly fields?: Fields
+    readonly fields?: Fields;
     /** Enable `?sort=` over the target's attributes (to-many relationships). */
-    readonly sort?: Sort
+    readonly sort?: Sort;
     /** Enable `?page[*]=` pagination (to-many relationships; see `Query.Page`). */
-    readonly page?: PageFields
+    readonly page?: PageFields;
     /** Enable `?filter[*]=` filtering: `true` for the grammar over the *target's* declaration, or a field map. */
-    readonly filter?: FilterFields
+    readonly filter?: FilterFields;
     /** Override the success document's `meta` schema. */
-    readonly meta?: DocMeta
-  }
+    readonly meta?: DocMeta;
+  },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
-  const descriptor = descriptorFor(resource, name)
-  const target = descriptor.ref()
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  const descriptor = descriptorFor(resource, name);
+  const target = descriptor.ref();
   // A declared surface over the *target* derives the union its document
   // carries, exactly as it does for `get` / `list`; otherwise the target's own
   // relationship graph does.
-  const included = isSurface(options?.include) ? options.include.included : Schema.Union(directTargets(target))
-  const docMeta = (options?.meta ?? AnyMeta) as DocMeta
+  const included = isSurface(options?.include)
+    ? options.include.included
+    : Schema.Union(directTargets(target));
+  const docMeta = (options?.meta ?? AnyMeta) as DocMeta;
   // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly — a
   // nullable single-resource document for to-one descriptors (`data: null` is
   // the empty-linkage case), a collection document otherwise. `included` keys
@@ -1446,7 +1536,7 @@ export const related = <
     ? DataDocument(Schema.NullOr(target), { included, meta: docMeta })
     : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<
     RelatedSuccess<R, Name, DocMeta, Include>
-  >
+  >;
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
@@ -1457,21 +1547,21 @@ export const related = <
       query: Query.schema(
         target as Target<R, Name>,
         queryConfig(options) as {
-          readonly include: Include
-          readonly fields: Fields
-          readonly sort: Sort
-          readonly page: PageFields
-          readonly filter: FilterFields
-        }
+          readonly include: Include;
+          readonly fields: Fields;
+          readonly sort: Sort;
+          readonly page: PageFields;
+          readonly filter: FilterFields;
+        },
       ),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    }
+      error: wires(options?.errors),
+    },
   )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
-}
+    .middleware(SchemaErrors);
+};
 
 // ---------------------------------------------------------------------------
 // getRelationship — GET /<type>/:id/relationships/<name>
@@ -1540,24 +1630,24 @@ export const getRelationship = <
   const EndpointName extends string = `${Name}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Enable `?page[*]=` pagination of the identifier collection (to-many linkage). */
-    readonly page?: PageFields
+    readonly page?: PageFields;
     /** Override the linkage document's `meta` schema. */
-    readonly meta?: DocMeta
-  }
+    readonly meta?: DocMeta;
+  },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
-  const descriptor = descriptorFor(resource, name)
-  const target = descriptor.ref()
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  const descriptor = descriptorFor(resource, name);
+  const target = descriptor.ref();
   // The cast is sound: `linkageData` mirrors `LinkageData` kind by kind.
   const success = LinkageDocument(linkageData(descriptor, target), {
-    meta: (options?.meta ?? AnyMeta) as DocMeta
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta>
+    meta: (options?.meta ?? AnyMeta) as DocMeta,
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta>;
 
   return HttpApiEndpoint.get(
     (options?.name ?? `${name}Relationship`) as EndpointName,
@@ -1572,23 +1662,23 @@ export const getRelationship = <
           fields: false,
           sort: false,
           page: options?.page,
-          filter: undefined
+          filter: undefined,
         } as {
-          readonly include: false
-          readonly fields: false
-          readonly sort: false
-          readonly page: PageFields
-          readonly filter: undefined
-        }
+          readonly include: false;
+          readonly fields: false;
+          readonly sort: false;
+          readonly page: PageFields;
+          readonly filter: undefined;
+        },
       ),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    }
+      error: wires(options?.errors),
+    },
   )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
-}
+    .middleware(SchemaErrors);
+};
 
 // ---------------------------------------------------------------------------
 // updateRelationship — PATCH /<type>/:id/relationships/<name>
@@ -1656,24 +1746,24 @@ export const updateRelationship = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `update${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Override the linkage document's `meta` schema. */
-    readonly meta?: DocMeta
-  }
+    readonly meta?: DocMeta;
+  },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
-  const descriptor = descriptorFor(resource, name)
-  const target = descriptor.ref()
-  const data = linkageData(descriptor, target)
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  const descriptor = descriptorFor(resource, name);
+  const target = descriptor.ref();
+  const data = linkageData(descriptor, target);
   // The casts are sound: the runtime schemas mirror the conditional types kind by kind.
-  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>
+  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>;
   const success = LinkageDocument(data, {
-    meta: (options?.meta ?? AnyMeta) as DocMeta
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta>
+    meta: (options?.meta ?? AnyMeta) as DocMeta,
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta>;
 
   return HttpApiEndpoint.patch(
     (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
@@ -1683,12 +1773,12 @@ export const updateRelationship = <
       payload: asJsonApi(payload),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    }
+      error: wires(options?.errors),
+    },
   )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
-}
+    .middleware(SchemaErrors);
+};
 
 // ---------------------------------------------------------------------------
 // addRelationship — POST /<type>/:id/relationships/<name> (to-many only)
@@ -1754,24 +1844,24 @@ export const addRelationship = <
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `add${Capitalize<Name>}Relationship`,
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
-  DocMeta extends Schema.Top = typeof AnyMeta
+  DocMeta extends Schema.Top = typeof AnyMeta,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
   options?: CommonOptions<EndpointName, Path, Errors> & {
     /** Override the linkage document's `meta` schema. */
-    readonly meta?: DocMeta
-  }
+    readonly meta?: DocMeta;
+  },
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
-  const descriptor = descriptorFor(resource, name)
-  const target = descriptor.ref()
-  const data = Schema.Array(target.identifier)
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  const descriptor = descriptorFor(resource, name);
+  const target = descriptor.ref();
+  const data = Schema.Array(target.identifier);
   // The casts are sound: to-many linkage is always an identifier array.
-  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>
+  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>;
   const success = LinkageDocument(data, {
-    meta: (options?.meta ?? AnyMeta) as DocMeta
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta>
+    meta: (options?.meta ?? AnyMeta) as DocMeta,
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta>;
 
   return HttpApiEndpoint.post(
     (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
@@ -1781,12 +1871,12 @@ export const addRelationship = <
       payload: asJsonApi(payload),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    }
+      error: wires(options?.errors),
+    },
   )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
-}
+    .middleware(SchemaErrors);
+};
 
 // ---------------------------------------------------------------------------
 // removeRelationship — DELETE /<type>/:id/relationships/<name> (to-many only)
@@ -1850,19 +1940,19 @@ export const removeRelationship = <
   const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
-  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`
+  const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
-  options?: CommonOptions<EndpointName, Path, Errors>
+  options?: CommonOptions<EndpointName, Path, Errors>,
 ) => {
-  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>
-  const descriptor = descriptorFor(resource, name)
-  const target = descriptor.ref()
+  type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
+  const descriptor = descriptorFor(resource, name);
+  const target = descriptor.ref();
   // The cast is sound: to-many linkage is always an identifier array.
   const payload = Schema.Struct({
-    data: Schema.Array(target.identifier)
-  }) as unknown as LinkagePayload<R, Name>
+    data: Schema.Array(target.identifier),
+  }) as unknown as LinkagePayload<R, Name>;
 
   return HttpApiEndpoint.delete(
     (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
@@ -1872,12 +1962,12 @@ export const removeRelationship = <
       payload: asJsonApi(payload),
       success: HttpApiSchema.NoContent,
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    }
+      error: wires(options?.errors),
+    },
   )
     .middleware(ContentNegotiation)
-    .middleware(SchemaErrors)
-}
+    .middleware(SchemaErrors);
+};
 
 // ---------------------------------------------------------------------------
 // operations — POST /operations, atomic operations extension
@@ -1949,12 +2039,12 @@ export const operations = <
   const Name extends string = "operations",
   const Path extends `/${string}` = "/operations",
   DocMeta extends Schema.Top = typeof AnyMeta,
-  const Idem extends Idempotency.Option = false
+  const Idem extends Idempotency.Option = false,
 >(
   resources: Resources,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the result document's `meta` schema. */
-    readonly meta?: DocMeta
+    readonly meta?: DocMeta;
     /**
      * Declare the `Idempotency-Key` request header and honour it. One key
      * covers the **whole** request — the extension's own unit of atomicity —
@@ -1962,26 +2052,32 @@ export const operations = <
      *
      * @since 0.15.0
      */
-    readonly idempotency?: Idem
-  }
+    readonly idempotency?: Idem;
+  },
 ) =>
   Idempotency.applied(
-    HttpApiEndpoint.post((options?.name ?? "operations") as Name, (options?.path ?? "/operations") as Path, {
-      headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
-      payload: asJsonApi(Atomic.RequestDocument(resources)),
-      success: asJsonApiAtomic(
-        Atomic.ResultDocument(
-          resources,
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as { readonly meta?: DocMeta }
-        )
-      ),
-      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
-      error: wires(options?.errors)
-    })
+    HttpApiEndpoint.post(
+      (options?.name ?? "operations") as Name,
+      (options?.path ?? "/operations") as Path,
+      {
+        headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
+        payload: asJsonApi(Atomic.RequestDocument(resources)),
+        success: asJsonApiAtomic(
+          Atomic.ResultDocument(
+            resources,
+            (options?.meta !== undefined ? { meta: options.meta } : {}) as {
+              readonly meta?: DocMeta;
+            },
+          ),
+        ),
+        // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
+        error: wires(options?.errors),
+      },
+    )
       .middleware(ContentNegotiation)
       .middleware(SchemaErrors),
-    options?.idempotency
-  )
+    options?.idempotency,
+  );
 
 // ---------------------------------------------------------------------------
 // resource — generate an entire endpoint set from a resource definition
@@ -1993,7 +2089,7 @@ export const operations = <
  * @since 0.1.0
  * @category models
  */
-export type CrudOperation = "get" | "list" | "create" | "update" | "delete"
+export type CrudOperation = "get" | "list" | "create" | "update" | "delete";
 
 /**
  * A `meta` option for a generated document: a `Schema` (overriding the meta
@@ -2003,7 +2099,7 @@ export type CrudOperation = "get" | "list" | "create" | "update" | "delete"
  * @since 0.1.0
  * @category models
  */
-export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => Schema.Top)
+export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => Schema.Top);
 
 /**
  * Per-endpoint configuration for the read-one (`get`) endpoint.
@@ -2012,9 +2108,9 @@ export type MetaOption<Meta extends Schema.Top> = Schema.Top | ((base: Meta) => 
  * @category models
  */
 export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
-  readonly name?: string
-  readonly path?: `/${string}`
-  readonly errors?: ReadonlyArray<ErrorClass>
+  readonly name?: string;
+  readonly path?: `/${string}`;
+  readonly errors?: ReadonlyArray<ErrorClass>;
   /**
    * Enable `?include=`. `true` legalises the resource's whole relationship
    * graph to a depth of 2; a `Query.IncludeOptions` object constrains that to
@@ -2022,9 +2118,9 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
    * `Include.Surface` legalises exactly a declared surface and derives the
    * matching `included` union for this endpoint's document.
    */
-  readonly include?: Query.IncludeOption<R>
-  readonly fields?: boolean
-  readonly meta?: MetaOption<Meta>
+  readonly include?: Query.IncludeOption<R>;
+  readonly fields?: boolean;
+  readonly meta?: MetaOption<Meta>;
   /**
    * Override the whole query schema. Defaults to the `Query.schema`
    * composition of `include` / `fields`; pass any schema for a read contract of
@@ -2032,7 +2128,7 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
    *
    * @since 0.11.0
    */
-  readonly query?: Schema.Top
+  readonly query?: Schema.Top;
   /**
    * Override the success document schema. Defaults to the resource's
    * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -2040,7 +2136,7 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
    *
    * @since 0.10.0
    */
-  readonly success?: Schema.Top
+  readonly success?: Schema.Top;
 }
 
 /**
@@ -2050,16 +2146,16 @@ export interface GetConfig<Meta extends Schema.Top, R extends Any = Any> {
  * @category models
  */
 export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetConfig<Meta, R> {
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
-  readonly page?: Schema.Struct.Fields
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>;
+  readonly page?: Schema.Struct.Fields;
   /** `true` for the filter grammar over the resource's declaration, or a per-key field map. */
-  readonly filter?: Query.FilterOption
+  readonly filter?: Query.FilterOption;
   /**
    * Override the whole query schema. Defaults to the `Query.schema`
    * composition of `include` / `fields` / `sort` / `page` / `filter`; pass any
    * schema for a list contract of your own.
    */
-  readonly query?: Schema.Top
+  readonly query?: Schema.Top;
   /**
    * Override the success document schema. Defaults to the resource's
    * `collection()` (which `meta` then tunes); pass a collection document over a
@@ -2067,7 +2163,7 @@ export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetC
    *
    * @since 0.10.0
    */
-  readonly success?: Schema.Top
+  readonly success?: Schema.Top;
 }
 
 /**
@@ -2077,16 +2173,16 @@ export interface ListConfig<R extends Any, Meta extends Schema.Top> extends GetC
  * @category models
  */
 export interface WriteConfig<Meta extends Schema.Top> {
-  readonly name?: string
-  readonly path?: `/${string}`
-  readonly errors?: ReadonlyArray<ErrorClass>
-  readonly meta?: MetaOption<Meta>
+  readonly name?: string;
+  readonly path?: `/${string}`;
+  readonly errors?: ReadonlyArray<ErrorClass>;
+  readonly meta?: MetaOption<Meta>;
   /**
    * Override the request payload schema. Defaults to the resource's
    * `createPayload` / `updatePayload` (the JSON:API envelope); pass the
    * resource's flat `createInput` / `updateInput`, or any schema of your own.
    */
-  readonly payload?: Schema.Top
+  readonly payload?: Schema.Top;
   /**
    * The media type the request payload is registered under, which the router
    * matches a request's `Content-Type` against. Defaults to
@@ -2095,7 +2191,7 @@ export interface WriteConfig<Meta extends Schema.Top> {
    *
    * @since 0.11.0
    */
-  readonly payloadMediaType?: string
+  readonly payloadMediaType?: string;
   /**
    * Override the success document schema. Defaults to the resource's
    * `document()` (which `meta` then tunes); pass a wire variant of the
@@ -2103,21 +2199,21 @@ export interface WriteConfig<Meta extends Schema.Top> {
    *
    * @since 0.10.0
    */
-  readonly success?: Schema.Top
+  readonly success?: Schema.Top;
   /**
    * The success status. Defaults to 201 for `create` (the spec's
    * recommendation) and 200 for `update`, whether or not `success` is given.
    *
    * @since 0.11.0
    */
-  readonly status?: number
+  readonly status?: number;
   /**
    * Declare the `Idempotency-Key` request header on this endpoint and honour
    * it: `true` to accept a key, `"required"` to insist on one.
    *
    * @since 0.15.0
    */
-  readonly idempotency?: Idempotency.Option
+  readonly idempotency?: Idempotency.Option;
 }
 
 /**
@@ -2127,27 +2223,27 @@ export interface WriteConfig<Meta extends Schema.Top> {
  * @category models
  */
 export interface DeleteConfig {
-  readonly name?: string
-  readonly path?: `/${string}`
-  readonly errors?: ReadonlyArray<ErrorClass>
+  readonly name?: string;
+  readonly path?: `/${string}`;
+  readonly errors?: ReadonlyArray<ErrorClass>;
   /**
    * Override the success response schema. Defaults to `HttpApiSchema.NoContent`
    * (204, empty body); pass the resource's `document()` for a soft delete that
    * answers with the tombstone resource, or any schema of your own.
    */
-  readonly success?: Schema.Top
+  readonly success?: Schema.Top;
   /**
    * The success status. Defaults to 204 for the no-content default, 200 for a
    * `success` override.
    */
-  readonly status?: number
+  readonly status?: number;
   /**
    * Declare the `Idempotency-Key` request header on this endpoint and honour
    * it: `true` to accept a key, `"required"` to insist on one.
    *
    * @since 0.15.0
    */
-  readonly idempotency?: Idempotency.Option
+  readonly idempotency?: Idempotency.Option;
 }
 
 /**
@@ -2160,11 +2256,11 @@ export interface DeleteConfig {
  * @category models
  */
 export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
-  readonly get?: boolean | GetConfig<Meta, R>
-  readonly list?: boolean | ListConfig<R, Meta>
-  readonly create?: boolean | WriteConfig<Meta>
-  readonly update?: boolean | WriteConfig<Meta>
-  readonly delete?: boolean | DeleteConfig
+  readonly get?: boolean | GetConfig<Meta, R>;
+  readonly list?: boolean | ListConfig<R, Meta>;
+  readonly create?: boolean | WriteConfig<Meta>;
+  readonly update?: boolean | WriteConfig<Meta>;
+  readonly delete?: boolean | DeleteConfig;
 }
 
 /**
@@ -2174,11 +2270,11 @@ export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
  * @category models
  */
 export interface RelationshipConfig {
-  readonly errors?: ReadonlyArray<ErrorClass>
-  readonly include?: boolean
-  readonly fields?: boolean
-  readonly sort?: boolean
-  readonly page?: Schema.Struct.Fields
+  readonly errors?: ReadonlyArray<ErrorClass>;
+  readonly include?: boolean;
+  readonly fields?: boolean;
+  readonly sort?: boolean;
+  readonly page?: Schema.Struct.Fields;
 }
 
 /**
@@ -2193,7 +2289,7 @@ export interface RelationshipConfig {
  */
 export type RelationshipsOption<R extends Any> =
   | boolean
-  | { readonly [K in RelationshipName<R>]?: boolean | RelationshipConfig }
+  | { readonly [K in RelationshipName<R>]?: boolean | RelationshipConfig };
 
 // --- extraction helpers (config objects are captured via `const`) ----------
 
@@ -2206,10 +2302,10 @@ type ConfigObject<E, Op extends string> = E extends undefined
         ? {}
         : V
       : {}
-    : {}
+    : {};
 
 // Field `K` of config object `C`, else fallback `F`.
-type FieldOr<C, K extends string, F> = K extends keyof C ? Exclude<C[K], undefined> : F
+type FieldOr<C, K extends string, F> = K extends keyof C ? Exclude<C[K], undefined> : F;
 
 // Whether CRUD op `Op` is emitted: absent → emit; `false` → omit; else emit.
 type EmitOp<E, Op extends string> = E extends undefined
@@ -2218,7 +2314,7 @@ type EmitOp<E, Op extends string> = E extends undefined
     ? NonNullable<E[Op]> extends false
       ? false
       : true
-    : true
+    : true;
 
 // The captured config object for relationship `K` (or `{}`).
 type RelConfigObject<RO, K extends string> = RO extends boolean
@@ -2231,7 +2327,7 @@ type RelConfigObject<RO, K extends string> = RO extends boolean
           ? {}
           : V
         : {}
-      : {}
+      : {};
 
 // Whether relationship `K` is emitted.
 type EmitRel<RO, K extends string> = RO extends false
@@ -2244,7 +2340,7 @@ type EmitRel<RO, K extends string> = RO extends false
         ? NonNullable<RO[K]> extends false
           ? false
           : true
-        : true
+        : true;
 
 // Resolve a meta option (schema or function) to its effective schema type.
 type ResolveMeta<M, Meta extends Schema.Top> = [M] extends [(...args: any) => infer Ret]
@@ -2253,53 +2349,63 @@ type ResolveMeta<M, Meta extends Schema.Top> = [M] extends [(...args: any) => in
     : Meta
   : M extends Schema.Top
     ? M
-    : Meta
+    : Meta;
 
-type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta", GMeta>, Meta>
+type EffMeta<C, GMeta, Meta extends Schema.Top> = ResolveMeta<FieldOr<C, "meta", GMeta>, Meta>;
 
 // The effective write payload of a `create` / `update` config: the captured
 // `payload` override, else the resource's enveloped default.
 type EffPayload<C, Default extends Schema.Top> =
-  FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default
+  FieldOr<C, "payload", Default> extends infer P ? (P extends Schema.Top ? P : Default) : Default;
 
 // The effective `idempotency` option of a write config: the captured
 // per-endpoint value, else the top-level default.
 type EffIdem<C, GIdem extends Idempotency.Option> =
-  FieldOr<C, "idempotency", GIdem> extends Idempotency.Option ? FieldOr<C, "idempotency", GIdem> : GIdem
+  FieldOr<C, "idempotency", GIdem> extends Idempotency.Option
+    ? FieldOr<C, "idempotency", GIdem>
+    : GIdem;
 
 // The effective success response of an endpoint config: the captured `success`
 // override, else that endpoint's default response — the resource's document /
 // collection for the primary-data endpoints, the 204 no-content for `delete`.
 type EffSuccess<C, Default extends Schema.Top> =
-  FieldOr<C, "success", Default> extends infer S ? (S extends Schema.Top ? S : Default) : Default
+  FieldOr<C, "success", Default> extends infer S ? (S extends Schema.Top ? S : Default) : Default;
 
 // The effective query schema of a `list` config: the captured `query`
 // override, else the `Query.schema` composition of its feature options.
 type EffQuery<C, Default extends Schema.Top> =
-  FieldOr<C, "query", Default> extends infer Q ? (Q extends Schema.Top ? Q : Default) : Default
+  FieldOr<C, "query", Default> extends infer Q ? (Q extends Schema.Top ? Q : Default) : Default;
 
 // Whether `sort` is enabled at all: `false` only when explicitly disabled.
-type EnabledSort<Sort> = [Sort] extends [false] ? false : true
+type EnabledSort<Sort> = [Sort] extends [false] ? false : true;
 
 // Whether `include` is enabled at all. A `Query.IncludeOptions` object
 // constrains the *resource's own* paths, which a relationship endpoint — whose
 // graph is its target's — can't reuse; it only learns that the parameter is on.
-type EnabledInclude<Include> = [Include] extends [false] ? false : true
+type EnabledInclude<Include> = [Include] extends [false] ? false : true;
 
 // The effective query feature options of a `get` / `list` config: the captured
 // override, else the top-level default. Named (rather than inlined at each use
 // site) because `list` needs them twice — once as its own options, once to
 // reconstruct the query schema they compose by default.
 type ListInclude<C, R extends Any, GInclude extends Query.IncludeOption<R>> =
-  FieldOr<C, "include", GInclude> extends Query.IncludeOption<R> ? FieldOr<C, "include", GInclude> : GInclude
+  FieldOr<C, "include", GInclude> extends Query.IncludeOption<R>
+    ? FieldOr<C, "include", GInclude>
+    : GInclude;
 type ListFields<C, GFields extends boolean> =
-  FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields
+  FieldOr<C, "fields", GFields> extends boolean ? FieldOr<C, "fields", GFields> : GFields;
 type ListSort<C, R extends Any, GSort extends boolean | ReadonlyArray<AttributeKeys<R>>> =
-  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>> ? FieldOr<C, "sort", GSort> : GSort
+  FieldOr<C, "sort", GSort> extends boolean | ReadonlyArray<AttributeKeys<R>>
+    ? FieldOr<C, "sort", GSort>
+    : GSort;
 type ListPage<C, GPage extends Schema.Struct.Fields | undefined> =
-  FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<C, "page", GPage> : GPage
+  FieldOr<C, "page", GPage> extends Schema.Struct.Fields | undefined
+    ? FieldOr<C, "page", GPage>
+    : GPage;
 type ListFilter<C, GFilter extends Query.FilterOption | undefined> =
-  FieldOr<C, "filter", GFilter> extends Query.FilterOption | undefined ? FieldOr<C, "filter", GFilter> : GFilter
+  FieldOr<C, "filter", GFilter> extends Query.FilterOption | undefined
+    ? FieldOr<C, "filter", GFilter>
+    : GFilter;
 
 // --- the effective generated endpoint types --------------------------------
 
@@ -2314,7 +2420,7 @@ type GeneratedGet<
   GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   GFields extends boolean,
   GMeta,
-  C = ConfigObject<E, "get">
+  C = ConfigObject<E, "get">,
 > =
   EmitOp<E, "get"> extends true
     ? ReturnType<
@@ -2324,9 +2430,13 @@ type GeneratedGet<
           Rels,
           Meta,
           IdSchema,
-          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass>
+            ? FieldOr<C, "errors", GErrors>
+            : GErrors,
           FieldOr<C, "name", "get"> extends string ? FieldOr<C, "name", "get"> : "get",
-          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}`
+            ? FieldOr<C, "path", `/${Type}/:id`>
+            : `/${Type}/:id`,
           ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
           ListFields<C, GFields>,
           EffMeta<C, GMeta, Meta>,
@@ -2356,7 +2466,7 @@ type GeneratedGet<
           >
         >
       >
-    : never
+    : never;
 
 type GeneratedList<
   Type extends string,
@@ -2368,11 +2478,13 @@ type GeneratedList<
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   GFields extends boolean,
-  GSort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  GSort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   GPage extends Schema.Struct.Fields | undefined,
   GFilter extends Query.FilterOption | undefined,
   GMeta,
-  C = ConfigObject<E, "list">
+  C = ConfigObject<E, "list">,
 > =
   EmitOp<E, "list"> extends true
     ? ReturnType<
@@ -2382,9 +2494,13 @@ type GeneratedList<
           Rels,
           Meta,
           IdSchema,
-          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass>
+            ? FieldOr<C, "errors", GErrors>
+            : GErrors,
           FieldOr<C, "name", "list"> extends string ? FieldOr<C, "name", "list"> : "list",
-          FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
+          FieldOr<C, "path", `/${Type}`> extends `/${string}`
+            ? FieldOr<C, "path", `/${Type}`>
+            : `/${Type}`,
           ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
           ListFields<C, GFields>,
           ListSort<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GSort>,
@@ -2420,7 +2536,7 @@ type GeneratedList<
           >
         >
       >
-    : never
+    : never;
 
 type GeneratedCreate<
   Type extends string,
@@ -2432,7 +2548,7 @@ type GeneratedCreate<
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
   GIdem extends Idempotency.Option,
-  C = ConfigObject<E, "create">
+  C = ConfigObject<E, "create">,
 > =
   EmitOp<E, "create"> extends true
     ? ReturnType<
@@ -2442,16 +2558,23 @@ type GeneratedCreate<
           Rels,
           Meta,
           IdSchema,
-          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass>
+            ? FieldOr<C, "errors", GErrors>
+            : GErrors,
           FieldOr<C, "name", "create"> extends string ? FieldOr<C, "name", "create"> : "create",
-          FieldOr<C, "path", `/${Type}`> extends `/${string}` ? FieldOr<C, "path", `/${Type}`> : `/${Type}`,
+          FieldOr<C, "path", `/${Type}`> extends `/${string}`
+            ? FieldOr<C, "path", `/${Type}`>
+            : `/${Type}`,
           EffMeta<C, GMeta, Meta>,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["createPayload"]>,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>,
+          EffSuccess<
+            C,
+            DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>
+          >,
           EffIdem<C, GIdem>
         >
       >
-    : never
+    : never;
 
 type GeneratedUpdate<
   Type extends string,
@@ -2463,7 +2586,7 @@ type GeneratedUpdate<
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
   GIdem extends Idempotency.Option,
-  C = ConfigObject<E, "update">
+  C = ConfigObject<E, "update">,
 > =
   EmitOp<E, "update"> extends true
     ? ReturnType<
@@ -2473,16 +2596,23 @@ type GeneratedUpdate<
           Rels,
           Meta,
           IdSchema,
-          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass>
+            ? FieldOr<C, "errors", GErrors>
+            : GErrors,
           FieldOr<C, "name", "update"> extends string ? FieldOr<C, "name", "update"> : "update",
-          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}`
+            ? FieldOr<C, "path", `/${Type}/:id`>
+            : `/${Type}/:id`,
           EffMeta<C, GMeta, Meta>,
           EffPayload<C, Resource<Type, Attributes, Rels, Meta, IdSchema>["updatePayload"]>,
-          EffSuccess<C, DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>>,
+          EffSuccess<
+            C,
+            DefaultDocument<Type, Attributes, Rels, Meta, IdSchema, EffMeta<C, GMeta, Meta>>
+          >,
           EffIdem<C, GIdem>
         >
       >
-    : never
+    : never;
 
 type GeneratedDelete<
   Type extends string,
@@ -2493,7 +2623,7 @@ type GeneratedDelete<
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GIdem extends Idempotency.Option,
-  C = ConfigObject<E, "delete">
+  C = ConfigObject<E, "delete">,
 > =
   EmitOp<E, "delete"> extends true
     ? ReturnType<
@@ -2503,24 +2633,32 @@ type GeneratedDelete<
           Rels,
           Meta,
           IdSchema,
-          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<C, "errors", GErrors> : GErrors,
+          FieldOr<C, "errors", GErrors> extends ReadonlyArray<ErrorClass>
+            ? FieldOr<C, "errors", GErrors>
+            : GErrors,
           FieldOr<C, "name", "delete"> extends string ? FieldOr<C, "name", "delete"> : "delete",
-          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}` ? FieldOr<C, "path", `/${Type}/:id`> : `/${Type}/:id`,
+          FieldOr<C, "path", `/${Type}/:id`> extends `/${string}`
+            ? FieldOr<C, "path", `/${Type}/:id`>
+            : `/${Type}/:id`,
           EffSuccess<C, HttpApiSchema.NoContent>,
           EffIdem<C, GIdem>
         >
       >
-    : never
+    : never;
 
 // per-relationship effective option helpers
 type RelErrors<RC, GErrors extends ReadonlyArray<ErrorClass>> =
-  FieldOr<RC, "errors", GErrors> extends ReadonlyArray<ErrorClass> ? FieldOr<RC, "errors", GErrors> : GErrors
+  FieldOr<RC, "errors", GErrors> extends ReadonlyArray<ErrorClass>
+    ? FieldOr<RC, "errors", GErrors>
+    : GErrors;
 type RelInclude<RC, GInclude extends boolean> =
-  FieldOr<RC, "include", GInclude> extends boolean ? FieldOr<RC, "include", GInclude> : GInclude
+  FieldOr<RC, "include", GInclude> extends boolean ? FieldOr<RC, "include", GInclude> : GInclude;
 type RelFields<RC, GFields extends boolean> =
-  FieldOr<RC, "fields", GFields> extends boolean ? FieldOr<RC, "fields", GFields> : GFields
+  FieldOr<RC, "fields", GFields> extends boolean ? FieldOr<RC, "fields", GFields> : GFields;
 type RelPage<RC, GPage extends Schema.Struct.Fields | undefined> =
-  FieldOr<RC, "page", GPage> extends Schema.Struct.Fields | undefined ? FieldOr<RC, "page", GPage> : GPage
+  FieldOr<RC, "page", GPage> extends Schema.Struct.Fields | undefined
+    ? FieldOr<RC, "page", GPage>
+    : GPage;
 
 type GeneratedRelated<
   Type extends string,
@@ -2534,7 +2672,7 @@ type GeneratedRelated<
   GInclude extends boolean,
   GFields extends boolean,
   GSort,
-  GPage extends Schema.Struct.Fields | undefined
+  GPage extends Schema.Struct.Fields | undefined,
 > =
   Rels[K] extends Relationship.ToMany<Any>
     ? ReturnType<
@@ -2574,7 +2712,7 @@ type GeneratedRelated<
           undefined,
           typeof AnyMeta
         >
-      >
+      >;
 
 type GeneratedRelationships<
   Type extends string,
@@ -2587,10 +2725,13 @@ type GeneratedRelationships<
   GInclude extends boolean,
   GFields extends boolean,
   GSort,
-  GPage extends Schema.Struct.Fields | undefined
+  GPage extends Schema.Struct.Fields | undefined,
 > =
   | {
-      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<RO, K> extends true
+      readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<
+        RO,
+        K
+      > extends true
         ?
             | GeneratedRelated<
                 Type,
@@ -2617,7 +2758,9 @@ type GeneratedRelationships<
                   RelErrors<RelConfigObject<RO, K>, GErrors>,
                   `${K}Relationship`,
                   `/${Type}/:id/relationships/${K}`,
-                  Rels[K] extends Relationship.ToMany<Any> ? RelPage<RelConfigObject<RO, K>, GPage> : undefined,
+                  Rels[K] extends Relationship.ToMany<Any>
+                    ? RelPage<RelConfigObject<RO, K>, GPage>
+                    : undefined,
                   typeof AnyMeta
                 >
               >
@@ -2635,10 +2778,13 @@ type GeneratedRelationships<
                   typeof AnyMeta
                 >
               >
-        : never
+        : never;
     }[RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]
   | {
-      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<RO, K> extends true
+      readonly [K in ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<
+        RO,
+        K
+      > extends true
         ?
             | ReturnType<
                 typeof addRelationship<
@@ -2667,8 +2813,8 @@ type GeneratedRelationships<
                   `/${Type}/:id/relationships/${K}`
                 >
               >
-        : never
-    }[ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]
+        : never;
+    }[ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>];
 
 /**
  * The union of every endpoint {@link resource} emits for a resource and its
@@ -2688,14 +2834,30 @@ export type ResourceEndpoint<
   Errors extends ReadonlyArray<ErrorClass>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Query.FilterOption | undefined,
   GMeta,
-  GIdem extends Idempotency.Option = false
+  GIdem extends Idempotency.Option = false,
 > =
   | GeneratedGet<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, GMeta>
-  | GeneratedList<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, Sort, Page, Filter, GMeta>
+  | GeneratedList<
+      Type,
+      Attributes,
+      Rels,
+      Meta,
+      IdSchema,
+      Endpoints,
+      Errors,
+      Include,
+      Fields,
+      Sort,
+      Page,
+      Filter,
+      GMeta
+    >
   | GeneratedCreate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta, GIdem>
   | GeneratedUpdate<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GMeta, GIdem>
   | GeneratedDelete<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, GIdem>
@@ -2711,7 +2873,7 @@ export type ResourceEndpoint<
       Fields,
       Sort,
       Page
-    >
+    >;
 
 /**
  * The non-empty tuple of endpoints {@link resource} returns.
@@ -2730,11 +2892,13 @@ export type ResourceEndpoints<
   Errors extends ReadonlyArray<ErrorClass>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Query.FilterOption | undefined,
   GMeta,
-  GIdem extends Idempotency.Option = false
+  GIdem extends Idempotency.Option = false,
 > = readonly [
   ResourceEndpoint<
     Type,
@@ -2771,8 +2935,8 @@ export type ResourceEndpoints<
       GMeta,
       GIdem
     >
-  >
-]
+  >,
+];
 
 /**
  * Configuration for {@link resource} — the whole-resource endpoint generator.
@@ -2795,18 +2959,20 @@ export interface ResourceOptions<
   Errors extends ReadonlyArray<ErrorClass>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
-  Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
+  Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>>,
   Page extends Schema.Struct.Fields | undefined,
   Filter extends Query.FilterOption | undefined,
   GMeta extends Schema.Top,
-  GIdem extends Idempotency.Option = false
+  GIdem extends Idempotency.Option = false,
 > {
   /** Which CRUD endpoints to emit and how to configure each. Defaults to all five. */
-  readonly endpoints?: Endpoints
+  readonly endpoints?: Endpoints;
   /** Which relationships' endpoints to emit. `true` (all, default) / `false` (none) or a per-relationship object. */
-  readonly relationships?: RelationshipsOpt
+  readonly relationships?: RelationshipsOpt;
   /** `ApiError` classes applied to every generated endpoint (overridable per endpoint / relationship). */
-  readonly errors?: Errors
+  readonly errors?: Errors;
   /**
    * Enable `?include=` on the collection-bearing endpoints. Defaults to `true`
    * — the resource's whole relationship graph at depth 2. A
@@ -2816,15 +2982,15 @@ export interface ResourceOptions<
    * the relationship endpoints, whose paths are their target's graph, only see
    * that `include` is on.
    */
-  readonly include?: Include
+  readonly include?: Include;
   /** Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`. */
-  readonly fields?: Fields
+  readonly fields?: Fields;
   /** Enable `?sort=`: `true` for all attributes, an explicit list, or `false` to disable. Defaults to `true`. */
-  readonly sort?: Sort
+  readonly sort?: Sort;
   /** Enable `?page[*]=` on `list`, to-many `related` and paginated-linkage endpoints (see `Query.Page`). */
-  readonly page?: Page
+  readonly page?: Page;
   /** Enable `?filter[*]=` on `list` (user-defined fields). */
-  readonly filter?: Filter
+  readonly filter?: Filter;
   /**
    * Declare the `Idempotency-Key` request header on every generated write
    * endpoint (`create` / `update` / `delete`) and honour it: `true` to accept
@@ -2834,17 +3000,17 @@ export interface ResourceOptions<
    *
    * @since 0.15.0
    */
-  readonly idempotency?: GIdem
+  readonly idempotency?: GIdem;
   /**
    * The `meta` schema of the primary-data documents (`get` / `list` / `create`
    * / `update`): a `Schema` (overriding it) or a function `(base) => schema`
    * (extending the resource's base meta rather than replacing it).
    */
-  readonly meta?: GMeta | ((base: Meta) => GMeta)
+  readonly meta?: GMeta | ((base: Meta) => GMeta);
 }
 
 const pick = (config: Record<string, unknown>, key: string, fallback: unknown): unknown =>
-  key in config ? config[key] : fallback
+  key in config ? config[key] : fallback;
 
 /**
  * Generates the entire JSON:API endpoint set for a resource definition — the
@@ -2914,16 +3080,22 @@ export const resource = <
   Rels extends Relationships,
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string> = Id<Type>,
-  const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> = {},
-  const RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
+  const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> =
+    {},
+  const RelationshipsOpt extends RelationshipsOption<
+    Resource<Type, Attributes, Rels, Meta, IdSchema>
+  > = true,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> =
+    true,
   const Fields extends boolean = true,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
+  const Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
   const Filter extends Query.FilterOption | undefined = undefined,
   const GMeta extends Schema.Top = Meta,
-  const GIdem extends Idempotency.Option = false
+  const GIdem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: ResourceOptions<
@@ -2942,7 +3114,7 @@ export const resource = <
     Filter,
     GMeta,
     GIdem
-  >
+  >,
 ): ResourceEndpoints<
   Type,
   Attributes,
@@ -2960,70 +3132,75 @@ export const resource = <
   GMeta,
   GIdem
 > => {
-  const gInclude = options?.include ?? true
-  const gFields = options?.fields ?? true
-  const gSort = options?.sort ?? true
-  const gPage = options?.page
-  const gFilter = options?.filter
-  const gMeta = options?.meta
-  const gErrors = options?.errors
-  const gIdem = options?.idempotency
-  const endpointsOpt = options?.endpoints as Record<string, unknown> | undefined
-  const relationshipsOpt = options?.relationships ?? true
+  const gInclude = options?.include ?? true;
+  const gFields = options?.fields ?? true;
+  const gSort = options?.sort ?? true;
+  const gPage = options?.page;
+  const gFilter = options?.filter;
+  const gMeta = options?.meta;
+  const gErrors = options?.errors;
+  const gIdem = options?.idempotency;
+  const endpointsOpt = options?.endpoints as Record<string, unknown> | undefined;
+  const relationshipsOpt = options?.relationships ?? true;
 
   // The resource's base meta schema, for resolving `meta` functions.
-  const baseMeta = (resource.fields.meta as { readonly schema: Schema.Top }).schema
+  const baseMeta = (resource.fields.meta as { readonly schema: Schema.Top }).schema;
   const resolveMeta = (value: unknown): Schema.Top | undefined =>
     value === undefined
       ? undefined
       : typeof value === "function"
         ? (value as (base: Schema.Top) => Schema.Top)(baseMeta)
-        : (value as Schema.Top)
+        : (value as Schema.Top);
 
   // Emit + captured config for a CRUD op.
-  const opConfig = (op: CrudOperation): { readonly emit: boolean; readonly config: Record<string, unknown> } => {
-    if (endpointsOpt === undefined) return { emit: true, config: {} }
-    const value = endpointsOpt[op]
-    if (value === undefined || value === true) return { emit: true, config: {} }
-    if (value === false) return { emit: false, config: {} }
-    return { emit: true, config: value as Record<string, unknown> }
-  }
+  const opConfig = (
+    op: CrudOperation,
+  ): { readonly emit: boolean; readonly config: Record<string, unknown> } => {
+    if (endpointsOpt === undefined) return { emit: true, config: {} };
+    const value = endpointsOpt[op];
+    if (value === undefined || value === true) return { emit: true, config: {} };
+    if (value === false) return { emit: false, config: {} };
+    return { emit: true, config: value as Record<string, unknown> };
+  };
 
   // The shared name / path / errors (and, optionally, meta) overrides of an op.
-  const commonOpts = (config: Record<string, unknown>, withMeta: boolean): Record<string, unknown> => {
-    const out: Record<string, unknown> = {}
-    const errors = pick(config, "errors", gErrors)
-    if (errors !== undefined) out.errors = errors
-    if ("name" in config) out.name = config.name
-    if ("path" in config) out.path = config.path
+  const commonOpts = (
+    config: Record<string, unknown>,
+    withMeta: boolean,
+  ): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    const errors = pick(config, "errors", gErrors);
+    if (errors !== undefined) out.errors = errors;
+    if ("name" in config) out.name = config.name;
+    if ("path" in config) out.path = config.path;
     if (withMeta) {
-      const meta = resolveMeta(pick(config, "meta", gMeta))
-      if (meta !== undefined) out.meta = meta
+      const meta = resolveMeta(pick(config, "meta", gMeta));
+      if (meta !== undefined) out.meta = meta;
     }
-    return out
-  }
+    return out;
+  };
 
   // An endpoint's `success` override is per-endpoint only: the primary-data
   // endpoints answer with a single-resource document and `list` with a
   // collection, so there is no sensible top-level default to fall back to.
   const successOpt = (config: Record<string, unknown>): Record<string, unknown> =>
-    config.success !== undefined ? { success: config.success } : {}
+    config.success !== undefined ? { success: config.success } : {};
 
   // Likewise `status`: each endpoint's default (201 for `create`, 200 for
   // `update`, 204 for `delete`) is the constructor's, so an absent key must
   // stay absent rather than resolve to some shared number here.
   const statusOpt = (config: Record<string, unknown>): Record<string, unknown> =>
-    config.status !== undefined ? { status: config.status } : {}
+    config.status !== undefined ? { status: config.status } : {};
 
   // A read endpoint's `query` override is per-endpoint only: it replaces that
   // endpoint's whole composed query, and `get`'s and `list`'s compositions
   // differ, so there is no sensible top-level default to fall back to.
   const queryOpt = (config: Record<string, unknown>): Record<string, unknown> =>
-    config.query !== undefined ? { query: config.query } : {}
+    config.query !== undefined ? { query: config.query } : {};
 
-  const endpoints: Array<HttpApiEndpoint.Top> = []
+  const endpoints: Array<HttpApiEndpoint.Top> = [];
 
-  const getOp = opConfig("get")
+  const getOp = opConfig("get");
   if (getOp.emit) {
     endpoints.push(
       get(resource, {
@@ -3031,14 +3208,14 @@ export const resource = <
         fields: pick(getOp.config, "fields", gFields),
         ...queryOpt(getOp.config),
         ...commonOpts(getOp.config, true),
-        ...successOpt(getOp.config)
-      } as never)
-    )
+        ...successOpt(getOp.config),
+      } as never),
+    );
   }
-  const listOp = opConfig("list")
+  const listOp = opConfig("list");
   if (listOp.emit) {
-    const page = pick(listOp.config, "page", gPage)
-    const filter = pick(listOp.config, "filter", gFilter)
+    const page = pick(listOp.config, "page", gPage);
+    const filter = pick(listOp.config, "filter", gFilter);
     endpoints.push(
       list(resource, {
         include: pick(listOp.config, "include", gInclude),
@@ -3048,9 +3225,9 @@ export const resource = <
         ...(filter !== undefined ? { filter } : {}),
         ...queryOpt(listOp.config),
         ...commonOpts(listOp.config, true),
-        ...successOpt(listOp.config)
-      } as never)
-    )
+        ...successOpt(listOp.config),
+      } as never),
+    );
   }
   // A write endpoint's `payload` override is per-endpoint only: `create` and
   // `update` have different default envelopes, so there is no sensible
@@ -3058,16 +3235,16 @@ export const resource = <
   // `idempotency` is the one write option with a top-level default, so an
   // absent per-endpoint key inherits it rather than staying absent.
   const idempotencyOpt = (config: Record<string, unknown>): Record<string, unknown> => {
-    const idempotency = pick(config, "idempotency", gIdem)
-    return idempotency !== undefined ? { idempotency } : {}
-  }
+    const idempotency = pick(config, "idempotency", gIdem);
+    return idempotency !== undefined ? { idempotency } : {};
+  };
 
   const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> => ({
     ...(config.payload !== undefined ? { payload: config.payload } : {}),
-    ...(config.payloadMediaType !== undefined ? { payloadMediaType: config.payloadMediaType } : {})
-  })
+    ...(config.payloadMediaType !== undefined ? { payloadMediaType: config.payloadMediaType } : {}),
+  });
 
-  const createOp = opConfig("create")
+  const createOp = opConfig("create");
   if (createOp.emit) {
     endpoints.push(
       create(resource, {
@@ -3075,11 +3252,11 @@ export const resource = <
         ...payloadOpt(createOp.config),
         ...successOpt(createOp.config),
         ...statusOpt(createOp.config),
-        ...idempotencyOpt(createOp.config)
-      } as never)
-    )
+        ...idempotencyOpt(createOp.config),
+      } as never),
+    );
   }
-  const updateOp = opConfig("update")
+  const updateOp = opConfig("update");
   if (updateOp.emit) {
     endpoints.push(
       update(resource, {
@@ -3087,43 +3264,46 @@ export const resource = <
         ...payloadOpt(updateOp.config),
         ...successOpt(updateOp.config),
         ...statusOpt(updateOp.config),
-        ...idempotencyOpt(updateOp.config)
-      } as never)
-    )
+        ...idempotencyOpt(updateOp.config),
+      } as never),
+    );
   }
-  const deleteOp = opConfig("delete")
+  const deleteOp = opConfig("delete");
   if (deleteOp.emit) {
     endpoints.push(
       deleteEndpoint(resource, {
         ...commonOpts(deleteOp.config, false),
         ...successOpt(deleteOp.config),
         ...statusOpt(deleteOp.config),
-        ...idempotencyOpt(deleteOp.config)
-      } as never)
-    )
+        ...idempotencyOpt(deleteOp.config),
+      } as never),
+    );
   }
 
   if (relationshipsOpt !== false) {
-    const relMap = typeof relationshipsOpt === "object" ? (relationshipsOpt as Record<string, unknown>) : undefined
-    const relationships = resource.relationships as Record<string, Relationship.Descriptor>
+    const relMap =
+      typeof relationshipsOpt === "object"
+        ? (relationshipsOpt as Record<string, unknown>)
+        : undefined;
+    const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
     for (const name of Object.keys(relationships)) {
-      let relConfig: Record<string, unknown> = {}
+      let relConfig: Record<string, unknown> = {};
       if (relMap !== undefined) {
-        const value = relMap[name]
-        if (value === false) continue
-        if (value !== undefined && value !== true) relConfig = value as Record<string, unknown>
+        const value = relMap[name];
+        if (value === false) continue;
+        if (value !== undefined && value !== true) relConfig = value as Record<string, unknown>;
       }
-      const toMany = Relationship.isToMany(relationships[name]!)
+      const toMany = Relationship.isToMany(relationships[name]!);
       // A constrained `include` names this resource's paths, not the target's:
       // a relationship endpoint only inherits that the parameter is on.
-      const inheritedInclude = pick(relConfig, "include", gInclude)
-      const include = typeof inheritedInclude === "object" ? true : inheritedInclude
-      const fields = pick(relConfig, "fields", gFields)
-      const sortOpt = pick(relConfig, "sort", gSort)
-      const page = pick(relConfig, "page", gPage)
-      const errors = pick(relConfig, "errors", gErrors)
-      const errorOpt = errors !== undefined ? { errors } : {}
-      const relatedSort = sortOpt === false ? false : true
+      const inheritedInclude = pick(relConfig, "include", gInclude);
+      const include = typeof inheritedInclude === "object" ? true : inheritedInclude;
+      const fields = pick(relConfig, "fields", gFields);
+      const sortOpt = pick(relConfig, "sort", gSort);
+      const page = pick(relConfig, "page", gPage);
+      const errors = pick(relConfig, "errors", gErrors);
+      const errorOpt = errors !== undefined ? { errors } : {};
+      const relatedSort = sortOpt === false ? false : true;
 
       endpoints.push(
         related(
@@ -3133,24 +3313,24 @@ export const resource = <
             include,
             fields,
             ...(toMany ? { sort: relatedSort, ...(page !== undefined ? { page } : {}) } : {}),
-            ...errorOpt
-          } as never
-        )
-      )
+            ...errorOpt,
+          } as never,
+        ),
+      );
       endpoints.push(
         getRelationship(
           resource,
           name as never,
           {
             ...(toMany && page !== undefined ? { page } : {}),
-            ...errorOpt
-          } as never
-        )
-      )
-      endpoints.push(updateRelationship(resource, name as never, { ...errorOpt } as never))
+            ...errorOpt,
+          } as never,
+        ),
+      );
+      endpoints.push(updateRelationship(resource, name as never, { ...errorOpt } as never));
       if (toMany) {
-        endpoints.push(addRelationship(resource, name as never, { ...errorOpt } as never))
-        endpoints.push(removeRelationship(resource, name as never, { ...errorOpt } as never))
+        endpoints.push(addRelationship(resource, name as never, { ...errorOpt } as never));
+        endpoints.push(removeRelationship(resource, name as never, { ...errorOpt } as never));
       }
     }
   }
@@ -3171,5 +3351,5 @@ export const resource = <
     Filter,
     GMeta,
     GIdem
-  >
-}
+  >;
+};

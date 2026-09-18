@@ -48,11 +48,11 @@
  *
  * @since 0.1.0
  */
-import { Schema } from "effect"
-import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js"
-import type { Operator } from "./Filter.js"
-import type { Any, AttributeKeys } from "./Resource.js"
-import type * as Sort from "./Sort.js"
+import { Schema } from "effect";
+import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js";
+import type { Operator } from "./Filter.js";
+import type { Any, AttributeKeys } from "./Resource.js";
+import type * as Sort from "./Sort.js";
 
 // ---------------------------------------------------------------------------
 // Descriptors
@@ -82,8 +82,8 @@ export const FilterOperator = Schema.Literals([
   "ne",
   "in",
   "nin",
-  "isnull"
-] as const satisfies ReadonlyArray<Operator>)
+  "isnull",
+] as const satisfies ReadonlyArray<Operator>);
 
 /**
  * A filter operator a to-one relationship may declare — the decoded type of
@@ -92,7 +92,7 @@ export const FilterOperator = Schema.Literals([
  * @since 0.13.0
  * @category models
  */
-export type FilterOperator = typeof FilterOperator.Type
+export type FilterOperator = typeof FilterOperator.Type;
 
 /**
  * Every relationship filter operator, in order — the literals of the
@@ -101,7 +101,7 @@ export type FilterOperator = typeof FilterOperator.Type
  * @since 0.13.0
  * @category constants
  */
-export const filterOperators: typeof FilterOperator.literals = FilterOperator.literals
+export const filterOperators: typeof FilterOperator.literals = FilterOperator.literals;
 
 /**
  * How a to-one relationship is declared filterable (`Relationship.one(ref, { filter })`):
@@ -111,7 +111,7 @@ export const filterOperators: typeof FilterOperator.literals = FilterOperator.li
  * @since 0.13.0
  * @category type-level
  */
-export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>
+export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>;
 
 /**
  * A required to-one relationship: linkage is always a single resource
@@ -121,15 +121,15 @@ export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>
  * @category models
  */
 export interface One<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
-  readonly kind: "one"
-  readonly ref: () => R
+  readonly kind: "one";
+  readonly ref: () => R;
   /**
    * Phantom: the resource this relationship points at, in a position a plain
    * indexed access can read (see {@link TargetOf}). Type-level only — it is
    * never present on the descriptor value.
    */
-  readonly "~target": R
-  readonly filter: F
+  readonly "~target": R;
+  readonly filter: F;
 }
 
 /**
@@ -140,15 +140,15 @@ export interface One<R extends Any, F extends FilterDeclaration = FilterDeclarat
  * @category models
  */
 export interface Optional<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
-  readonly kind: "optional"
-  readonly ref: () => R
+  readonly kind: "optional";
+  readonly ref: () => R;
   /**
    * Phantom: the resource this relationship points at, in a position a plain
    * indexed access can read (see {@link TargetOf}). Type-level only — it is
    * never present on the descriptor value.
    */
-  readonly "~target": R
-  readonly filter: F
+  readonly "~target": R;
+  readonly filter: F;
 }
 
 /**
@@ -159,14 +159,14 @@ export interface Optional<R extends Any, F extends FilterDeclaration = FilterDec
  * @category models
  */
 export interface Many<R extends Any> {
-  readonly kind: "many"
-  readonly ref: () => R
+  readonly kind: "many";
+  readonly ref: () => R;
   /**
    * Phantom: the resource this relationship points at, in a position a plain
    * indexed access can read (see {@link TargetOf}). Type-level only — it is
    * never present on the descriptor value.
    */
-  readonly "~target": R
+  readonly "~target": R;
 }
 
 /**
@@ -192,7 +192,7 @@ export interface Many<R extends Any> {
  * @since 0.15.0
  * @category type-level
  */
-export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "id">>
+export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "id">>;
 
 /**
  * An unbounded to-many relationship with *no* inline linkage: the relationship
@@ -204,21 +204,21 @@ export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "i
  * @category models
  */
 export interface Paginated<R extends Any, O extends Order<R> | undefined = Order<R> | undefined> {
-  readonly kind: "paginated"
-  readonly ref: () => R
+  readonly kind: "paginated";
+  readonly ref: () => R;
   /**
    * Phantom: the resource this relationship points at, in a position a plain
    * indexed access can read (see {@link TargetOf}). Type-level only — it is
    * never present on the descriptor value.
    */
-  readonly "~target": R
+  readonly "~target": R;
   /**
    * The declared canonical {@link Order} of the related collection, or
    * `undefined` when the relationship declares none.
    *
    * @since 0.15.0
    */
-  readonly order: O
+  readonly order: O;
 }
 
 /**
@@ -248,7 +248,10 @@ export interface one<R extends Any, F extends FilterDeclaration = false> extends
  * @since 0.15.0
  * @category type-level
  */
-export interface optional<R extends Any, F extends FilterDeclaration = false> extends Optional<R, F> {}
+export interface optional<R extends Any, F extends FilterDeclaration = false> extends Optional<
+  R,
+  F
+> {}
 
 /**
  * The type of `Relationship.many(ref)` — {@link Many}, named to read like the
@@ -272,7 +275,10 @@ export interface many<R extends Any> extends Many<R> {}
  * @since 0.15.0
  * @category type-level
  */
-export interface paginated<R extends Any, O extends Order<R> | undefined = undefined> extends Paginated<R, O> {}
+export interface paginated<
+  R extends Any,
+  O extends Order<R> | undefined = undefined,
+> extends Paginated<R, O> {}
 
 /**
  * Any relationship descriptor.
@@ -280,7 +286,7 @@ export interface paginated<R extends Any, O extends Order<R> | undefined = undef
  * @since 0.1.0
  * @category models
  */
-export type Descriptor = One<Any> | Optional<Any> | Many<Any> | Paginated<Any>
+export type Descriptor = One<Any> | Optional<Any> | Many<Any> | Paginated<Any>;
 
 /**
  * A record of relationship descriptors, as written in a resource definition.
@@ -288,7 +294,7 @@ export type Descriptor = One<Any> | Optional<Any> | Many<Any> | Paginated<Any>
  * @since 0.1.0
  * @category models
  */
-export type Relationships = { readonly [key: string]: Descriptor }
+export type Relationships = { readonly [key: string]: Descriptor };
 
 /**
  * The to-one descriptors: linkage is a single identifier (nullable or not).
@@ -296,7 +302,7 @@ export type Relationships = { readonly [key: string]: Descriptor }
  * @since 0.1.0
  * @category models
  */
-export type ToOne<R extends Any> = One<R> | Optional<R>
+export type ToOne<R extends Any> = One<R> | Optional<R>;
 
 /**
  * The to-many (collection-valued) descriptors.
@@ -304,7 +310,7 @@ export type ToOne<R extends Any> = One<R> | Optional<R>
  * @since 0.1.0
  * @category models
  */
-export type ToMany<R extends Any> = Many<R> | Paginated<R>
+export type ToMany<R extends Any> = Many<R> | Paginated<R>;
 
 /**
  * The descriptors that carry inline `data` linkage — everything except
@@ -313,7 +319,7 @@ export type ToMany<R extends Any> = Many<R> | Paginated<R>
  * @since 0.1.0
  * @category models
  */
-export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
+export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>;
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -362,8 +368,9 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>
 // `~target` member, which is type-level only and has no runtime counterpart.
 export const one = <R extends Any, const F extends FilterDeclaration = false>(
   ref: () => R,
-  options?: { readonly filter?: F }
-): One<R, NoInfer<F>> => ({ kind: "one", ref, filter: options?.filter ?? false }) as unknown as One<R, NoInfer<F>>
+  options?: { readonly filter?: F },
+): One<R, NoInfer<F>> =>
+  ({ kind: "one", ref, filter: options?.filter ?? false }) as unknown as One<R, NoInfer<F>>;
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
@@ -394,9 +401,12 @@ export const one = <R extends Any, const F extends FilterDeclaration = false>(
  */
 export const optional = <R extends Any, const F extends FilterDeclaration = false>(
   ref: () => R,
-  options?: { readonly filter?: F }
+  options?: { readonly filter?: F },
 ): Optional<R, NoInfer<F>> =>
-  ({ kind: "optional", ref, filter: options?.filter ?? false }) as unknown as Optional<R, NoInfer<F>>
+  ({ kind: "optional", ref, filter: options?.filter ?? false }) as unknown as Optional<
+    R,
+    NoInfer<F>
+  >;
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
@@ -420,7 +430,8 @@ export const optional = <R extends Any, const F extends FilterDeclaration = fals
  * @since 0.1.0
  * @category constructors
  */
-export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", ref }) as unknown as Many<R>
+export const many = <R extends Any>(ref: () => R): Many<R> =>
+  ({ kind: "many", ref }) as unknown as Many<R>;
 
 /**
  * Declares an unbounded to-many relationship with no inline linkage: the
@@ -471,25 +482,30 @@ export const many = <R extends Any>(ref: () => R): Many<R> => ({ kind: "many", r
 // from `options.order` alone, and defaults to `undefined` — no declared order.
 export const paginated = <R extends Any, const O extends Order<R> | undefined = undefined>(
   ref: () => R,
-  options?: { readonly order?: O }
+  options?: { readonly order?: O },
 ): Paginated<R, NoInfer<O>> => {
-  const order = options?.order
+  const order = options?.order;
   if (order !== undefined) {
     if (order.length === 0) {
-      throw new Error("Relationship.paginated: `order` declares no terms; name at least one, or omit the option")
+      throw new Error(
+        "Relationship.paginated: `order` declares no terms; name at least one, or omit the option",
+      );
     }
-    const seen = new Set<string>()
+    const seen = new Set<string>();
     for (const term of order) {
       if (seen.has(term.field)) {
         throw new Error(
-          `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`
-        )
+          `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`,
+        );
       }
-      seen.add(term.field)
+      seen.add(term.field);
     }
   }
-  return { kind: "paginated", ref, order: order as NoInfer<O> } as unknown as Paginated<R, NoInfer<O>>
-}
+  return { kind: "paginated", ref, order: order as NoInfer<O> } as unknown as Paginated<
+    R,
+    NoInfer<O>
+  >;
+};
 
 // ---------------------------------------------------------------------------
 // Predicates
@@ -502,7 +518,8 @@ export const paginated = <R extends Any, const O extends Order<R> | undefined = 
  * @since 0.1.0
  * @category accessors
  */
-export const isLinkable = (descriptor: Descriptor): descriptor is Linkable<Any> => descriptor.kind !== "paginated"
+export const isLinkable = (descriptor: Descriptor): descriptor is Linkable<Any> =>
+  descriptor.kind !== "paginated";
 
 /**
  * Whether a descriptor is to-one (`one` or `optional`).
@@ -511,7 +528,7 @@ export const isLinkable = (descriptor: Descriptor): descriptor is Linkable<Any> 
  * @category accessors
  */
 export const isToOne = (descriptor: Descriptor): descriptor is ToOne<Any> =>
-  descriptor.kind === "one" || descriptor.kind === "optional"
+  descriptor.kind === "one" || descriptor.kind === "optional";
 
 /**
  * Whether a descriptor is to-many (`many` or `paginated`).
@@ -520,7 +537,7 @@ export const isToOne = (descriptor: Descriptor): descriptor is ToOne<Any> =>
  * @category accessors
  */
 export const isToMany = (descriptor: Descriptor): descriptor is ToMany<Any> =>
-  descriptor.kind === "many" || descriptor.kind === "paginated"
+  descriptor.kind === "many" || descriptor.kind === "paginated";
 
 // ---------------------------------------------------------------------------
 // Wire schemas (derived from descriptors)
@@ -534,9 +551,9 @@ export const isToMany = (descriptor: Descriptor): descriptor is ToMany<Any> =>
  * @category models
  */
 export interface OneSchema<R extends Any> extends Schema.Struct<{
-  readonly data: Schema.suspend<R["identifier"]>
-  readonly links: Schema.optionalKey<typeof RelationshipLinks>
-  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly data: Schema.suspend<R["identifier"]>;
+  readonly links: Schema.optionalKey<typeof RelationshipLinks>;
+  readonly meta: Schema.optionalKey<typeof AnyMeta>;
 }> {}
 
 /**
@@ -547,9 +564,9 @@ export interface OneSchema<R extends Any> extends Schema.Struct<{
  * @category models
  */
 export interface OptionalSchema<R extends Any> extends Schema.Struct<{
-  readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>
-  readonly links: Schema.optionalKey<typeof RelationshipLinks>
-  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>;
+  readonly links: Schema.optionalKey<typeof RelationshipLinks>;
+  readonly meta: Schema.optionalKey<typeof AnyMeta>;
 }> {}
 
 /**
@@ -560,9 +577,9 @@ export interface OptionalSchema<R extends Any> extends Schema.Struct<{
  * @category models
  */
 export interface ManySchema<R extends Any> extends Schema.Struct<{
-  readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>
-  readonly links: Schema.optionalKey<typeof RelationshipLinks>
-  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>;
+  readonly links: Schema.optionalKey<typeof RelationshipLinks>;
+  readonly meta: Schema.optionalKey<typeof AnyMeta>;
 }> {}
 
 /**
@@ -573,36 +590,36 @@ export interface ManySchema<R extends Any> extends Schema.Struct<{
  * @category models
  */
 export interface PaginatedSchema extends Schema.Struct<{
-  readonly links: typeof PaginatedRelationshipLinks
-  readonly meta: Schema.optionalKey<typeof AnyMeta>
+  readonly links: typeof PaginatedRelationshipLinks;
+  readonly meta: Schema.optionalKey<typeof AnyMeta>;
 }> {}
 
 const makeOneSchema = <R extends Any>(descriptor: One<R>): OneSchema<R> =>
   Schema.Struct({
     data: Schema.suspend(() => descriptor.ref().identifier as R["identifier"]),
     links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta)
-  })
+    meta: Schema.optionalKey(AnyMeta),
+  });
 
 const makeOptionalSchema = <R extends Any>(descriptor: Optional<R>): OptionalSchema<R> =>
   Schema.Struct({
     data: Schema.NullOr(Schema.suspend(() => descriptor.ref().identifier as R["identifier"])),
     links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta)
-  })
+    meta: Schema.optionalKey(AnyMeta),
+  });
 
 const makeManySchema = <R extends Any>(descriptor: Many<R>): ManySchema<R> =>
   Schema.Struct({
     data: Schema.Array(Schema.suspend(() => descriptor.ref().identifier as R["identifier"])),
     links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta)
-  })
+    meta: Schema.optionalKey(AnyMeta),
+  });
 
 const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
   Schema.Struct({
     links: PaginatedRelationshipLinks,
-    meta: Schema.optionalKey(AnyMeta)
-  })
+    meta: Schema.optionalKey(AnyMeta),
+  });
 
 /**
  * The resource a relationship descriptor points at — the return type of its
@@ -617,7 +634,7 @@ const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
  * @since 0.15.0
  * @category type-level
  */
-export type TargetOf<D extends Descriptor> = D["~target"]
+export type TargetOf<D extends Descriptor> = D["~target"];
 
 /**
  * The wire schema of a single relationship descriptor.
@@ -634,11 +651,11 @@ export type TargetOf<D extends Descriptor> = D["~target"]
  * @category type-level
  */
 export type SchemaFor<D extends Descriptor> = {
-  readonly one: OneSchema<TargetOf<D>>
-  readonly optional: OptionalSchema<TargetOf<D>>
-  readonly many: ManySchema<TargetOf<D>>
-  readonly paginated: PaginatedSchema
-}[D["kind"]]
+  readonly one: OneSchema<TargetOf<D>>;
+  readonly optional: OptionalSchema<TargetOf<D>>;
+  readonly many: ManySchema<TargetOf<D>>;
+  readonly paginated: PaginatedSchema;
+}[D["kind"]];
 
 /**
  * Creates the wire schema for a relationship descriptor.
@@ -653,7 +670,7 @@ export const schemaFor = <D extends Descriptor>(descriptor: D): SchemaFor<D> =>
       ? makeOptionalSchema(descriptor)
       : descriptor.kind === "many"
         ? makeManySchema(descriptor)
-        : makePaginatedSchema(descriptor)) as SchemaFor<D>
+        : makePaginatedSchema(descriptor)) as SchemaFor<D>;
 
 /**
  * Maps a record of relationship descriptors to their wire schemas.
@@ -662,8 +679,8 @@ export const schemaFor = <D extends Descriptor>(descriptor: D): SchemaFor<D> =>
  * @category type-level
  */
 export type RelationshipSchemas<Rels extends Relationships> = {
-  readonly [K in keyof Rels]: SchemaFor<Rels[K]>
-}
+  readonly [K in keyof Rels]: SchemaFor<Rels[K]>;
+};
 
 /**
  * Creates the wire schemas for a record of relationship descriptors.
@@ -671,7 +688,9 @@ export type RelationshipSchemas<Rels extends Relationships> = {
  * @since 0.1.0
  * @category constructors
  */
-export const makeRelationshipSchemas = <Rels extends Relationships>(rels: Rels): RelationshipSchemas<Rels> =>
+export const makeRelationshipSchemas = <Rels extends Relationships>(
+  rels: Rels,
+): RelationshipSchemas<Rels> =>
   Object.fromEntries(
-    Object.entries(rels).map(([key, descriptor]) => [key, schemaFor(descriptor)])
-  ) as RelationshipSchemas<Rels>
+    Object.entries(rels).map(([key, descriptor]) => [key, schemaFor(descriptor)]),
+  ) as RelationshipSchemas<Rels>;

@@ -29,12 +29,12 @@
  *
  * @since 0.1.0
  */
-import type { Cause } from "effect"
-import { Schema, SchemaTransformation } from "effect"
-import { HttpApiSchema } from "effect/unstable/httpapi"
-import { ErrorDocument, ErrorObject } from "./Document.js"
-import type { ErrorSource } from "./Document.js"
-import { asJsonApi } from "./internal/httpMedia.js"
+import type { Cause } from "effect";
+import { Schema, SchemaTransformation } from "effect";
+import { HttpApiSchema } from "effect/unstable/httpapi";
+import { ErrorDocument, ErrorObject } from "./Document.js";
+import type { ErrorSource } from "./Document.js";
+import { asJsonApi } from "./internal/httpMedia.js";
 
 /**
  * The wire document schema every {@link make} error encodes to.
@@ -42,9 +42,9 @@ import { asJsonApi } from "./internal/httpMedia.js"
  * @since 0.1.0
  * @category schemas
  */
-export const WireDocument = ErrorDocument(ErrorObject)
+export const WireDocument = ErrorDocument(ErrorObject);
 
-type WireDocumentType = typeof WireDocument.Type
+type WireDocumentType = typeof WireDocument.Type;
 
 /**
  * The endpoint error schema derived from an error class: decodes a JSON:API
@@ -53,7 +53,11 @@ type WireDocumentType = typeof WireDocument.Type
  * @since 0.1.0
  * @category models
  */
-export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.decodeTo<
+export interface Wire<
+  Self,
+  Tag extends string,
+  Fields extends Schema.Struct.Fields,
+> extends Schema.decodeTo<
   Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
   typeof WireDocument,
   never,
@@ -67,23 +71,23 @@ export interface Wire<Self, Tag extends string, Fields extends Schema.Struct.Fie
  * @since 0.1.0
  * @category models
  */
-export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.Struct.Fields> extends Schema.Class<
+export interface ApiErrorClass<
   Self,
-  Schema.TaggedStruct<Tag, Fields>,
-  Cause.YieldableError
-> {
+  Tag extends string,
+  Fields extends Schema.Struct.Fields,
+> extends Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError> {
   /** The HTTP status this error responds with. */
-  readonly status: number
+  readonly status: number;
   /** The JSON:API error `code` (application-specific identifier). */
-  readonly code: string
+  readonly code: string;
   /** The JSON:API error `title`, if declared. */
-  readonly title: string | undefined
+  readonly title: string | undefined;
   /**
    * The endpoint error schema: an instance of this class on the Effect side,
    * a JSON:API error document on the wire, annotated with the HTTP status and
    * the JSON:API media type.
    */
-  readonly wire: Wire<Self, Tag, Fields>
+  readonly wire: Wire<Self, Tag, Fields>;
 }
 
 /**
@@ -94,24 +98,26 @@ export interface ApiErrorClass<Self, Tag extends string, Fields extends Schema.S
  */
 export interface Config<Fields extends Schema.Struct.Fields> {
   /** HTTP status code for this error response (e.g. 404, 409, 422). */
-  readonly status: number
+  readonly status: number;
   /**
    * JSON:API error `code`: an application-specific identifier, stable across
    * occurrences. Defaults to the snake_cased tag.
    */
-  readonly code?: string
+  readonly code?: string;
   /** JSON:API error `title`: a human-readable summary, constant across occurrences. */
-  readonly title?: string
+  readonly title?: string;
   /**
    * Typed fields carried by the error. Round-tripped through the error
    * object's `meta` member so clients can reconstruct the error.
    */
-  readonly fields?: Fields
+  readonly fields?: Fields;
   /**
    * JSON:API error `detail`: a human-readable explanation specific to this
    * occurrence. Either a constant string or a function of the (encoded) fields.
    */
-  readonly detail?: string | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | undefined)
+  readonly detail?:
+    | string
+    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => string | undefined);
   /**
    * JSON:API error `source`: identifies what in the request caused this
    * error — `source.pointer` (a JSON Pointer into the request document, e.g.
@@ -125,33 +131,33 @@ export interface Config<Fields extends Schema.Struct.Fields> {
    */
   readonly source?:
     | typeof ErrorSource.Type
-    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => typeof ErrorSource.Type | undefined)
+    | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => typeof ErrorSource.Type | undefined);
 }
 
 const snakeCase = (tag: string): string =>
   tag
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[\s-]+/g, "_")
-    .toLowerCase()
+    .toLowerCase();
 
 // Wire schemas are derived lazily (so they bind to the user's final subclass,
 // preserving `instanceof`) and cached per class.
-const wireCache = new WeakMap<object, unknown>()
+const wireCache = new WeakMap<object, unknown>();
 
 const makeWire = (
   klass: { new (...args: Array<any>): any },
   options: {
-    readonly tag: string
-    readonly status: number
-    readonly code: string
-    readonly title: string | undefined
-    readonly fieldKeys: ReadonlyArray<string>
-    readonly detail: ((fields: any) => string | undefined) | undefined
-    readonly source: ((fields: any) => typeof ErrorSource.Type | undefined) | undefined
-  }
+    readonly tag: string;
+    readonly status: number;
+    readonly code: string;
+    readonly title: string | undefined;
+    readonly fieldKeys: ReadonlyArray<string>;
+    readonly detail: ((fields: any) => string | undefined) | undefined;
+    readonly source: ((fields: any) => typeof ErrorSource.Type | undefined) | undefined;
+  },
 ) => {
-  const cached = wireCache.get(klass)
-  if (cached !== undefined) return cached
+  const cached = wireCache.get(klass);
+  if (cached !== undefined) return cached;
 
   // The wire document only decodes error documents carrying *this* error's
   // status and code, so unions of error schemas stay discriminated — e.g. an
@@ -161,9 +167,9 @@ const makeWire = (
     Schema.Struct({
       ...ErrorObject.fields,
       status: Schema.Literals([String(options.status)]),
-      code: Schema.Literals([options.code])
-    })
-  ) as unknown as typeof WireDocument
+      code: Schema.Literals([options.code]),
+    }),
+  ) as unknown as typeof WireDocument;
 
   const wire = strictDocument
     .pipe(
@@ -177,20 +183,20 @@ const makeWire = (
           // own `detail` — the source-bearing 400s of the schema-error
           // middleware carry it there and nowhere else.
           decode: (doc) => {
-            const first = doc.errors[0]
-            const meta = first?.meta ?? {}
-            const fields: Record<string, unknown> = {}
+            const first = doc.errors[0];
+            const meta = first?.meta ?? {};
+            const fields: Record<string, unknown> = {};
             for (const key of options.fieldKeys) {
-              if (key in meta) fields[key] = meta[key]
-              else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail
+              if (key in meta) fields[key] = meta[key];
+              else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail;
             }
-            return { _tag: options.tag, ...fields }
+            return { _tag: options.tag, ...fields };
           },
           // class encoded form -> document
           encode: (encoded) => {
-            const fields = encoded as Record<string, unknown>
-            const detail = options.detail?.(fields)
-            const source = options.source?.(fields)
+            const fields = encoded as Record<string, unknown>;
+            const detail = options.detail?.(fields);
+            const source = options.source?.(fields);
             return {
               errors: [
                 {
@@ -200,21 +206,25 @@ const makeWire = (
                   ...(detail !== undefined ? { detail } : {}),
                   ...(source !== undefined ? { source } : {}),
                   ...(options.fieldKeys.length > 0
-                    ? { meta: Object.fromEntries(options.fieldKeys.map((key) => [key, fields[key]])) }
-                    : {})
-                }
-              ]
-            }
-          }
-        })
+                    ? {
+                        meta: Object.fromEntries(
+                          options.fieldKeys.map((key) => [key, fields[key]]),
+                        ),
+                      }
+                    : {}),
+                },
+              ],
+            };
+          },
+        }),
       ),
-      HttpApiSchema.status(options.status)
+      HttpApiSchema.status(options.status),
     )
-    .pipe((schema) => asJsonApi(schema))
+    .pipe((schema) => asJsonApi(schema));
 
-  wireCache.set(klass, wire)
-  return wire
-}
+  wireCache.set(klass, wire);
+  return wire;
+};
 
 /**
  * Declares a JSON:API error in one shot: a tagged error class whose wire
@@ -256,32 +266,34 @@ export const make =
   <Self = never>(identifier?: string) =>
   <const Tag extends string, const Fields extends Schema.Struct.Fields = {}>(
     tag: Tag,
-    config: Config<Fields>
+    config: Config<Fields>,
   ): ApiErrorClass<Self, Tag, Fields> => {
-    const fields = (config.fields ?? {}) as Fields
-    const fieldKeys = Object.keys(fields)
-    const code = config.code ?? snakeCase(tag)
+    const fields = (config.fields ?? {}) as Fields;
+    const fieldKeys = Object.keys(fields);
+    const code = config.code ?? snakeCase(tag);
     const detail =
       typeof config.detail === "function"
         ? config.detail
         : config.detail !== undefined
           ? () => config.detail as string
-          : undefined
+          : undefined;
     const source =
       typeof config.source === "function"
         ? config.source
         : config.source !== undefined
           ? () => config.source as typeof ErrorSource.Type
-          : undefined
+          : undefined;
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
-    const Base = Schema.TaggedError<Self>(identifier)(tag, fields) as unknown as new (...args: Array<any>) => object
+    const Base = Schema.TaggedError<Self>(identifier)(tag, fields) as unknown as new (
+      ...args: Array<any>
+    ) => object;
 
     class ApiErrorBase extends Base {
-      static readonly status = config.status
-      static readonly code = code
-      static readonly title = config.title
+      static readonly status = config.status;
+      static readonly code = code;
+      static readonly title = config.title;
       static get wire() {
         // `this` is the user's final class, so decoded errors are `instanceof` it.
         return makeWire(this as unknown as { new (...args: Array<any>): any }, {
@@ -291,13 +303,13 @@ export const make =
           title: config.title,
           fieldKeys,
           detail,
-          source
-        })
+          source,
+        });
       }
     }
 
-    return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>
-  }
+    return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>;
+  };
 
 /**
  * Encodes an {@link make} error instance to its JSON:API error-document value
@@ -320,14 +332,14 @@ export const make =
  * @category encoding
  */
 export const toDocument = (error: object): typeof WireDocument.Type => {
-  const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire
+  const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire;
   if (wire === undefined || !Schema.isSchema(wire)) {
     throw new Error(
-      "ApiError.toDocument expects an instance of an ApiError.make(...) class (with a static `wire` schema)"
-    )
+      "ApiError.toDocument expects an instance of an ApiError.make(...) class (with a static `wire` schema)",
+    );
   }
-  return Schema.encodeUnknownSync(wire as Schema.Codec<unknown, typeof WireDocument.Type>)(error)
-}
+  return Schema.encodeUnknownSync(wire as Schema.Codec<unknown, typeof WireDocument.Type>)(error);
+};
 
 // ---------------------------------------------------------------------------
 // Standard errors — the responses every JSON:API endpoint must support
@@ -344,7 +356,7 @@ export class BadRequest extends make<BadRequest>()("BadRequest", {
   code: "bad_request",
   title: "Bad Request",
   fields: { detail: Schema.optionalKey(Schema.String) },
-  detail: (e) => e.detail
+  detail: (e) => e.detail,
 }) {}
 
 /**
@@ -356,7 +368,7 @@ export class BadRequest extends make<BadRequest>()("BadRequest", {
 export class Forbidden extends make<Forbidden>()("Forbidden", {
   status: 403,
   code: "forbidden",
-  title: "Forbidden"
+  title: "Forbidden",
 }) {}
 
 /**
@@ -369,7 +381,7 @@ export class Forbidden extends make<Forbidden>()("Forbidden", {
 export class NotAcceptable extends make<NotAcceptable>()("NotAcceptable", {
   status: 406,
   code: "not_acceptable",
-  title: "Not Acceptable"
+  title: "Not Acceptable",
 }) {}
 
 /**
@@ -384,7 +396,7 @@ export class Conflict extends make<Conflict>()("Conflict", {
   code: "conflict",
   title: "Conflict",
   fields: { detail: Schema.optionalKey(Schema.String) },
-  detail: (e) => e.detail
+  detail: (e) => e.detail,
 }) {}
 
 /**
@@ -397,7 +409,7 @@ export class Conflict extends make<Conflict>()("Conflict", {
 export class UnsupportedMediaType extends make<UnsupportedMediaType>()("UnsupportedMediaType", {
   status: 415,
   code: "unsupported_media_type",
-  title: "Unsupported Media Type"
+  title: "Unsupported Media Type",
 }) {}
 
 /**
@@ -407,7 +419,7 @@ export class UnsupportedMediaType extends make<UnsupportedMediaType>()("Unsuppor
  * @since 0.1.0
  * @category constants
  */
-export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as const
+export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as const;
 
 // ---------------------------------------------------------------------------
 // Query-parameter errors — JSON:API §Query Parameters requires a 400 when a
@@ -452,19 +464,22 @@ export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as con
  * @since 0.15.0
  * @category errors
  */
-export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()("UnsupportedIncludePath", {
-  status: 400,
-  code: "unsupported.include-path",
-  title: "Unsupported Include Path",
-  fields: {
-    path: Schema.String,
-    includablePaths: Schema.Array(Schema.String)
+export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()(
+  "UnsupportedIncludePath",
+  {
+    status: 400,
+    code: "unsupported.include-path",
+    title: "Unsupported Include Path",
+    fields: {
+      path: Schema.String,
+      includablePaths: Schema.Array(Schema.String),
+    },
+    detail: (e) =>
+      `Include path "${e.path}" is not supported; supported paths: ${
+        e.includablePaths.length > 0 ? e.includablePaths.join(", ") : "(none)"
+      }`,
   },
-  detail: (e) =>
-    `Include path "${e.path}" is not supported; supported paths: ${
-      e.includablePaths.length > 0 ? e.includablePaths.join(", ") : "(none)"
-    }`
-}) {}
+) {}
 
 /**
  * 400 Bad Request: a requested `?include=` path has more hops than this
@@ -493,16 +508,19 @@ export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()("Unsu
  * @since 0.15.0
  * @category errors
  */
-export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()("UnsupportedIncludeDepth", {
-  status: 400,
-  code: "unsupported.include-depth",
-  title: "Unsupported Include Depth",
-  fields: {
-    path: Schema.String,
-    maxDepth: Schema.Number
+export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()(
+  "UnsupportedIncludeDepth",
+  {
+    status: 400,
+    code: "unsupported.include-depth",
+    title: "Unsupported Include Depth",
+    fields: {
+      path: Schema.String,
+      maxDepth: Schema.Number,
+    },
+    detail: (e) => `Include path "${e.path}" exceeds the maximum include depth of ${e.maxDepth}`,
   },
-  detail: (e) => `Include path "${e.path}" exceeds the maximum include depth of ${e.maxDepth}`
-}) {}
+) {}
 
 /**
  * 400 Bad Request: a requested `?sort=` field is not one of the fields this
@@ -538,12 +556,12 @@ export class UnsupportedSortField extends make<UnsupportedSortField>()("Unsuppor
   title: "Unsupported Sort Field",
   fields: {
     field: Schema.String,
-    sortableFields: Schema.Array(Schema.String)
+    sortableFields: Schema.Array(Schema.String),
   },
   detail: (e) =>
     `Sort field "${e.field}" is not supported; supported fields: ${
       e.sortableFields.length > 0 ? e.sortableFields.join(", ") : "(none)"
-    }`
+    }`,
 }) {}
 
 /**
@@ -575,20 +593,23 @@ export class UnsupportedSortField extends make<UnsupportedSortField>()("Unsuppor
  * @since 0.15.0
  * @category errors
  */
-export class UnsupportedFieldsetMember extends make<UnsupportedFieldsetMember>()("UnsupportedFieldsetMember", {
-  status: 400,
-  code: "unsupported.fieldset",
-  title: "Unsupported Fieldset Member",
-  fields: {
-    type: Schema.String,
-    field: Schema.String,
-    attributes: Schema.Array(Schema.String)
+export class UnsupportedFieldsetMember extends make<UnsupportedFieldsetMember>()(
+  "UnsupportedFieldsetMember",
+  {
+    status: 400,
+    code: "unsupported.fieldset",
+    title: "Unsupported Fieldset Member",
+    fields: {
+      type: Schema.String,
+      field: Schema.String,
+      attributes: Schema.Array(Schema.String),
+    },
+    detail: (e) =>
+      `Field "${e.field}" is not a supported attribute of "${e.type}"; supported attributes: ${
+        e.attributes.length > 0 ? e.attributes.join(", ") : "(none)"
+      }`,
   },
-  detail: (e) =>
-    `Field "${e.field}" is not a supported attribute of "${e.type}"; supported attributes: ${
-      e.attributes.length > 0 ? e.attributes.join(", ") : "(none)"
-    }`
-}) {}
+) {}
 
 /**
  * The standard query-parameter errors JSON:API §Query Parameters implies:
@@ -622,5 +643,5 @@ export const QueryParameterErrors = [
   UnsupportedIncludePath,
   UnsupportedIncludeDepth,
   UnsupportedSortField,
-  UnsupportedFieldsetMember
-] as const
+  UnsupportedFieldsetMember,
+] as const;

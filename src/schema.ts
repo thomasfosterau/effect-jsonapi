@@ -51,7 +51,7 @@
  *
  * @since 0.15.0
  */
-export * as Document from "./Document.js"
+export * as Document from "./Document.js";
 
 /**
  * The `filter` query family: the operator vocabulary (`Filter.Operator`,
@@ -62,7 +62,7 @@ export * as Document from "./Document.js"
  *
  * @since 0.15.0
  */
-export * as Filter from "./Filter.js"
+export * as Filter from "./Filter.js";
 
 /**
  * Declared `?include=` surfaces (`Include.make`, `Include.nested`) — one nested
@@ -73,7 +73,7 @@ export * as Filter from "./Filter.js"
  *
  * @since 0.15.0
  */
-export * as Include from "./Include.js"
+export * as Include from "./Include.js";
 
 /**
  * JSON:API relationship constructors (`Relationship.one`, `Relationship.many`,
@@ -81,7 +81,7 @@ export * as Include from "./Include.js"
  *
  * @since 0.15.0
  */
-export * as Relationship from "./Relationship.js"
+export * as Relationship from "./Relationship.js";
 
 /**
  * JSON:API resource definitions (`Resource.make`) — the single source of truth
@@ -90,14 +90,14 @@ export * as Relationship from "./Relationship.js"
  *
  * @since 0.15.0
  */
-export * as Resource from "./Resource.js"
+export * as Resource from "./Resource.js";
 
 /**
  * The `sort` query family's per-attribute declaration (`Sort.able`).
  *
  * @since 0.15.0
  */
-export * as Sort from "./Sort.js"
+export * as Sort from "./Sort.js";
 
 /**
  * The JSON:API media type, `"application/vnd.api+json"`.
@@ -105,4 +105,4 @@ export * as Sort from "./Sort.js"
  * @since 0.15.0
  * @category constants
  */
-export { MEDIA_TYPE } from "./internal/media.js"
+export { MEDIA_TYPE } from "./internal/media.js";

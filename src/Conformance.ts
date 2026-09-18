@@ -77,19 +77,24 @@
  *
  * @since 0.15.0
  */
-import { Data, Effect, Layer } from "effect"
-import type { FileSystem } from "effect/FileSystem"
-import type { Path } from "effect/Path"
-import type { Scope } from "effect/Scope"
-import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import type { Etag } from "effect/unstable/http"
-import type { HttpPlatform } from "effect/unstable/http/HttpPlatform"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
-import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import * as Core from "./internal/conformance/core.js"
-import * as ProfileRules from "./internal/conformance/profile.js"
-import * as ReportFormat from "./internal/conformance/report.js"
-import * as SpecRules from "./internal/conformance/spec.js"
+import { Data, Effect, Layer } from "effect";
+import type { FileSystem } from "effect/FileSystem";
+import type { Path } from "effect/Path";
+import type { Scope } from "effect/Scope";
+import {
+  HttpClient,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
+import type { Etag } from "effect/unstable/http";
+import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
+import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
+import * as Core from "./internal/conformance/core.js";
+import * as ProfileRules from "./internal/conformance/profile.js";
+import * as ReportFormat from "./internal/conformance/report.js";
+import * as SpecRules from "./internal/conformance/spec.js";
 
 // ---------------------------------------------------------------------------
 // The rule model
@@ -114,7 +119,7 @@ import * as SpecRules from "./internal/conformance/spec.js"
  * @since 0.15.0
  * @category models
  */
-export type Tier = Core.Tier
+export type Tier = Core.Tier;
 
 /**
  * The normative force of a rule, in RFC 2119 terms. A failing `MUST` is
@@ -131,7 +136,7 @@ export type Tier = Core.Tier
  * @since 0.15.0
  * @category models
  */
-export type Level = Core.Level
+export type Level = Core.Level;
 
 /**
  * One checkable requirement: a stable `id`, the `requirement` as a normative
@@ -232,7 +237,7 @@ export interface Finding extends Core.Finding {}
  * @since 0.15.0
  * @category models
  */
-export type Outcome = Core.Outcome
+export type Outcome = Core.Outcome;
 
 /**
  * An area the kit does not check at all, with the reason and the issues that
@@ -281,12 +286,12 @@ export interface Gap extends Core.Gap {}
  */
 export interface Report {
   /** A name for what was driven — the `HttpApi`'s identifier by default. */
-  readonly target: string
+  readonly target: string;
   /** The JSON:API version the spec tier encodes. */
-  readonly version: string
-  readonly transport: "in-process" | "http"
-  readonly outcomes: ReadonlyArray<Outcome>
-  readonly gaps: ReadonlyArray<Gap>
+  readonly version: string;
+  readonly transport: "in-process" | "http";
+  readonly outcomes: ReadonlyArray<Outcome>;
+  readonly gaps: ReadonlyArray<Gap>;
 }
 
 /**
@@ -346,13 +351,13 @@ export interface Summary extends ReportFormat.Summary {}
  * @category errors
  */
 export class ContractViolation extends Data.TaggedError("ContractViolation")<{
-  readonly rule: Rule
-  readonly detail: string
-  readonly expected: string
-  readonly observed: string
-  readonly probe: Probe | undefined
+  readonly rule: Rule;
+  readonly detail: string;
+  readonly expected: string;
+  readonly observed: string;
+  readonly probe: Probe | undefined;
   /** How many further findings the report carries beyond this one. */
-  readonly remaining: number
+  readonly remaining: number;
 }> {
   /**
    * The rule, its requirement and its citation, then the observation — in that
@@ -361,17 +366,18 @@ export class ContractViolation extends Data.TaggedError("ContractViolation")<{
    * @since 0.15.0
    */
   override get message(): string {
-    const request = this.probe === undefined ? "" : `\n  request: ${this.probe.method} ${this.probe.url}`
+    const request =
+      this.probe === undefined ? "" : `\n  request: ${this.probe.method} ${this.probe.url}`;
     const more =
       this.remaining === 0
         ? ""
-        : `\n  (and ${this.remaining} further finding${this.remaining === 1 ? "" : "s"} in the report)`
+        : `\n  (and ${this.remaining} further finding${this.remaining === 1 ? "" : "s"} in the report)`;
     return `${this.rule.id} — ${this.rule.level}, ${this.rule.section}
   ${this.rule.requirement}
   ${this.rule.reference}
   ${this.detail}${request}
   expected: ${this.expected}
-  observed: ${this.observed}${more}`
+  observed: ${this.observed}${more}`;
   }
 }
 
@@ -379,7 +385,7 @@ export class ContractViolation extends Data.TaggedError("ContractViolation")<{
 // The catalogue
 // ---------------------------------------------------------------------------
 
-const implementations: ReadonlyArray<Core.RuleImpl> = [...SpecRules.rules, ...ProfileRules.rules]
+const implementations: ReadonlyArray<Core.RuleImpl> = [...SpecRules.rules, ...ProfileRules.rules];
 
 /**
  * Every rule the kit can check, spec tier first.
@@ -401,7 +407,9 @@ const implementations: ReadonlyArray<Core.RuleImpl> = [...SpecRules.rules, ...Pr
  * @since 0.15.0
  * @category constants
  */
-export const rules: ReadonlyArray<Rule> = implementations.map((implementation) => implementation.rule)
+export const rules: ReadonlyArray<Rule> = implementations.map(
+  (implementation) => implementation.rule,
+);
 
 /**
  * The areas this kit does not check, each with the reason and the issues that
@@ -431,51 +439,51 @@ export const gaps: ReadonlyArray<Gap> = [
     area: "The filter profile's evaluation semantics",
     reason:
       "The profile's syntax, closed operator core, canonical form, error pointers and advertisement are checked; what a tree *means* is not. #116 has since supplied the normative tables — `docs/filter-grammar.md` §6, rule-identified F-EVAL-*, F-CMP-*, F-IN-*, F-LOGIC-*, F-ISNULL-* — and deliberately ships no reference evaluator, assigning the executable oracle to this kit instead. The remaining work is a fold over the AST implementing §6.3, run against the unfiltered collection's JSON (which a probe already has, per F-ORD-1's JSON-representation domain) and compared against what the filtered request returned. Open first: whether that evaluator is public API — #116's \"shared building block\" — or stays internal to the kit.",
-    tracking: ["#116", "#120"]
+    tracking: ["#116", "#120"],
   },
   {
     area: "Pagination link correctness",
     reason:
       "That `first` / `prev` / `next` / `last` are present and well-formed is checkable; that following them enumerates the collection exactly once, with no gap or repeat, requires knowing the full set the server is paging over.",
-    tracking: []
+    tracking: [],
   },
   {
     area: "Sort ordering correctness",
     reason:
       "A `sort` field the server does not support must be a 400, and that is checked. Whether `?sort=-createdAt` actually orders the collection, and where NULLs land, requires known data. Note the filter profile's §6.2 ordering rules govern `filter` comparison only — `sort` ordering is still unspecified, so there is no normative text to check against yet.",
-    tracking: []
+    tracking: [],
   },
   {
     area: "Write semantics",
     reason:
       "Create, update, delete and relationship mutation. The status-code and `Location` rules are declared and reported as skipped: deciding them means applying writes, and the kit cannot synthesise a valid payload for an arbitrary resource or reset the target afterwards. Needs a fixture contract that supplies a payload and a disposable target.",
-    tracking: []
+    tracking: [],
   },
   {
     area: "Atomic operations processing",
     reason:
       "The request document's shape is checked. `lid` resolution across operations, all-or-nothing application and `atomic:results` ordering all require applying operations and then observing what was stored, so they share the write-fixture gap above.",
-    tracking: []
+    tracking: [],
   },
   {
     area: "The Idempotency-Key profile",
     reason:
       "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`), and the profile tier does not check it at all — it covers the filter grammar and two library conventions only. Its rules are almost entirely about what a *retried write* does (replay of the recorded response, the fingerprint mismatch conflict, the in-flight case), so they need the write fixture the gap below describes, plus a way to replay a request the kit has already sent. Its one non-mutating rule — that a write endpoint declaring the header advertises the profile on its response media type — is checkable today and simply not yet written.",
-    tracking: ["#123"]
+    tracking: ["#123"],
   },
   {
     area: "Link dereferenceability",
     reason:
       "That a document's `self` and `related` links are well-formed is checkable; that each resolves to the resource it claims is a second crawl the kit does not perform.",
-    tracking: []
+    tracking: [],
   },
   {
     area: "Concerns outside JSON:API",
     reason:
       "Authentication, authorisation, caching and conditional requests, rate limiting and CORS. JSON:API takes no position on any of them, so neither does this kit.",
-    tracking: []
-  }
-]
+    tracking: [],
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Options
@@ -513,40 +521,40 @@ export interface Options {
    * A known-existing id per resource type, keyed by the type name — which under
    * the conventional paths is the first literal path segment.
    */
-  readonly ids?: Readonly<Record<string, string>> | undefined
+  readonly ids?: Readonly<Record<string, string>> | undefined;
   /**
    * An explicit URL path for an endpoint, keyed `"<group>.<endpoint>"`, for
    * paths the `ids` convention cannot resolve (several path parameters, or a
    * path that does not begin with the resource type).
    */
-  readonly paths?: Readonly<Record<string, string>> | undefined
+  readonly paths?: Readonly<Record<string, string>> | undefined;
   /**
    * An id the target is known *not* to have, used to probe the 404 rules.
    * Defaults to a value no realistic fixture would use.
    */
-  readonly absentId?: string | undefined
+  readonly absentId?: string | undefined;
   /**
    * Extension URIs the target advertises support for. Only affects which `ext`
    * URI the kit treats as unsupported when probing negotiation.
    */
-  readonly extensions?: ReadonlyArray<string> | undefined
+  readonly extensions?: ReadonlyArray<string> | undefined;
   /**
    * Run the rules whose probes change the target's state. Off by default: a
    * conformance run should be safe to point at a live server.
    */
-  readonly mutating?: boolean | undefined
+  readonly mutating?: boolean | undefined;
   /** Which tiers to run. Defaults to both. */
-  readonly tiers?: ReadonlyArray<Tier> | undefined
+  readonly tiers?: ReadonlyArray<Tier> | undefined;
   /**
    * Run only these rule ids. A prefix matches every rule beneath it, so
    * `["spec/content-negotiation"]` selects that whole section.
    */
-  readonly only?: ReadonlyArray<string> | undefined
+  readonly only?: ReadonlyArray<string> | undefined;
   /** A name for the report's header. Defaults to the `HttpApi`'s identifier. */
-  readonly target?: string | undefined
+  readonly target?: string | undefined;
 }
 
-const DEFAULT_ABSENT_ID = "conformance-absent-id-0000"
+const DEFAULT_ABSENT_ID = "conformance-absent-id-0000";
 
 const resolveOptions = (baseUrl: string, options: Options | undefined): Core.ResolvedOptions => ({
   baseUrl,
@@ -554,51 +562,52 @@ const resolveOptions = (baseUrl: string, options: Options | undefined): Core.Res
   paths: options?.paths ?? {},
   absentId: options?.absentId ?? DEFAULT_ABSENT_ID,
   extensions: options?.extensions ?? [],
-  mutating: options?.mutating ?? false
-})
+  mutating: options?.mutating ?? false,
+});
 
 const selected = (options: Options | undefined): ReadonlyArray<Core.RuleImpl> => {
-  const tiers = options?.tiers
-  const only = options?.only
+  const tiers = options?.tiers;
+  const only = options?.only;
   return implementations.filter((implementation) => {
-    if (tiers !== undefined && !tiers.includes(implementation.rule.tier)) return false
-    if (only !== undefined && !only.some((prefix) => implementation.rule.id.startsWith(prefix))) return false
-    return true
-  })
-}
+    if (tiers !== undefined && !tiers.includes(implementation.rule.tier)) return false;
+    if (only !== undefined && !only.some((prefix) => implementation.rule.id.startsWith(prefix)))
+      return false;
+    return true;
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Running
 // ---------------------------------------------------------------------------
 
-const IN_PROCESS_ORIGIN = "http://conformance.invalid"
+const IN_PROCESS_ORIGIN = "http://conformance.invalid";
 
 const execute = (
   api: HttpApi.HttpApi<string, any>,
   client: HttpClient.HttpClient,
   transport: Report["transport"],
   baseUrl: string,
-  options: Options | undefined
+  options: Options | undefined,
 ): Effect.Effect<Report> =>
   Effect.gen(function* () {
-    const resolved = resolveOptions(baseUrl, options)
+    const resolved = resolveOptions(baseUrl, options);
     const ctx: Core.Context = {
       endpoints: Core.discover(api),
       options: resolved,
-      request: Core.runner(client, resolved.baseUrl)
-    }
-    const outcomes: Array<Outcome> = []
+      request: Core.runner(client, resolved.baseUrl),
+    };
+    const outcomes: Array<Outcome> = [];
     for (const implementation of selected(options)) {
-      outcomes.push(yield* implementation.run(ctx))
+      outcomes.push(yield* implementation.run(ctx));
     }
     return {
       target: options?.target ?? api.identifier,
       version: "1.1",
       transport,
       outcomes,
-      gaps
-    }
-  })
+      gaps,
+    };
+  });
 
 /**
  * Drives an `HttpApi` through the conformance rules in-process and returns the
@@ -650,9 +659,12 @@ const execute = (
  * @since 0.15.0
  * @category constructors
  */
-export const verify = Effect.fnUntraced(function* <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+export const verify = Effect.fnUntraced(function* <
+  ApiId extends string,
+  Groups extends HttpApiGroup.Constraint,
+>(
   api: HttpApi.HttpApi<ApiId, Groups>,
-  options?: Options
+  options?: Options,
 ): Effect.fn.Return<
   Report,
   never,
@@ -667,26 +679,30 @@ export const verify = Effect.fnUntraced(function* <ApiId extends string, Groups 
 > {
   // The handler layers come from the ambient context, exactly as
   // `HttpApiTest.groups` takes them, so a run drives the api's real wiring.
-  const context = yield* Effect.context<HttpApiGroup.ToService<ApiId, Groups>>()
+  const context = yield* Effect.context<HttpApiGroup.ToService<ApiId, Groups>>();
   const handler = yield* HttpRouter.toHttpEffect(
-    HttpApiBuilder.layer(api).pipe(Layer.provide(Layer.succeedContext(context))) as unknown as Layer.Layer<
-      never,
-      never,
-      HttpRouter.HttpRouter
-    >
-  )
+    HttpApiBuilder.layer(api).pipe(
+      Layer.provide(Layer.succeedContext(context)),
+    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>,
+  );
   const client = HttpClient.make(
     Effect.fnUntraced(function* (request) {
-      const serverRequest = HttpServerRequest.fromClientRequest(request)
+      const serverRequest = HttpServerRequest.fromClientRequest(request);
       const response = yield* handler.pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, serverRequest),
-        Effect.orDie
-      )
-      return HttpServerResponse.toClientResponse(response)
-    }, Effect.scoped)
-  )
-  return yield* execute(api as HttpApi.HttpApi<string, any>, client, "in-process", IN_PROCESS_ORIGIN, options)
-})
+        Effect.orDie,
+      );
+      return HttpServerResponse.toClientResponse(response);
+    }, Effect.scoped),
+  );
+  return yield* execute(
+    api as HttpApi.HttpApi<string, any>,
+    client,
+    "in-process",
+    IN_PROCESS_ORIGIN,
+    options,
+  );
+});
 
 /**
  * Runs the conformance rules over a transport you supply — a deployed server
@@ -730,12 +746,12 @@ export const verify = Effect.fnUntraced(function* <ApiId extends string, Groups 
 export const verifyWith = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<ApiId, Groups>,
   options: Options & {
-    readonly client: HttpClient.HttpClient
+    readonly client: HttpClient.HttpClient;
     /** The origin every probe is sent to. */
-    readonly baseUrl: string
-  }
+    readonly baseUrl: string;
+  },
 ): Effect.Effect<Report> =>
-  execute(api as HttpApi.HttpApi<string, any>, options.client, "http", options.baseUrl, options)
+  execute(api as HttpApi.HttpApi<string, any>, options.client, "http", options.baseUrl, options);
 
 // ---------------------------------------------------------------------------
 // Reading a report
@@ -781,7 +797,7 @@ export const verifyWith = <ApiId extends string, Groups extends HttpApiGroup.Con
  * @category accessors
  */
 export const format = (report: Report, options?: { readonly width?: number | undefined }): string =>
-  ReportFormat.format(report, options)
+  ReportFormat.format(report, options);
 
 /**
  * Counts a report's outcomes.
@@ -807,7 +823,7 @@ export const format = (report: Report, options?: { readonly width?: number | und
  * @since 0.15.0
  * @category accessors
  */
-export const summarise = (report: Report): Summary => ReportFormat.summarise(report.outcomes)
+export const summarise = (report: Report): Summary => ReportFormat.summarise(report.outcomes);
 
 /**
  * Every finding in a report, flattened across rules — failures in declaration
@@ -844,7 +860,7 @@ export const summarise = (report: Report): Summary => ReportFormat.summarise(rep
  * @category accessors
  */
 export const findings = (report: Report): ReadonlyArray<Finding> =>
-  report.outcomes.flatMap((outcome) => (outcome._tag === "Failed" ? outcome.findings : []))
+  report.outcomes.flatMap((outcome) => (outcome._tag === "Failed" ? outcome.findings : []));
 
 /**
  * Fails with the report's first {@link ContractViolation}, or succeeds with the
@@ -893,9 +909,9 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
  * @category combinators
  */
 export const assert = (report: Report): Effect.Effect<Report, ContractViolation> => {
-  const all = findings(report)
-  const first = all[0]
-  if (first === undefined) return Effect.succeed(report)
+  const all = findings(report);
+  const first = all[0];
+  if (first === undefined) return Effect.succeed(report);
   return Effect.fail(
     new ContractViolation({
       rule: first.rule,
@@ -903,7 +919,7 @@ export const assert = (report: Report): Effect.Effect<Report, ContractViolation>
       expected: first.expected,
       observed: first.observed,
       probe: first.probe,
-      remaining: all.length - 1
-    })
-  )
-}
+      remaining: all.length - 1,
+    }),
+  );
+};

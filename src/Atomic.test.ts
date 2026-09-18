@@ -1,9 +1,9 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test"
-import { Match, Schema } from "effect"
-import * as Atomic from "./Atomic.js"
-import * as Middleware from "./Middleware.js"
-import * as Relationship from "./Relationship.js"
-import { attribute, make as Resource, readOnlyAttribute, Ref } from "./Resource.js"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { Match, Schema } from "effect";
+import * as Atomic from "./Atomic.js";
+import * as Middleware from "./Middleware.js";
+import * as Relationship from "./Relationship.js";
+import { attribute, make as Resource, readOnlyAttribute, Ref } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures — one relationship of every kind
@@ -12,22 +12,22 @@ import { attribute, make as Resource, readOnlyAttribute, Ref } from "./Resource.
 const Person = Resource("people", {
   attributes: {
     firstName: Schema.NonEmptyString,
-    lastName: Schema.NonEmptyString
-  }
-})
+    lastName: Schema.NonEmptyString,
+  },
+});
 
 const Comment = Resource("comments", {
   attributes: { body: Schema.NonEmptyString },
   relationships: {
     // required to-one: comments can't exist without an author
-    author: Relationship.one(() => Person)
-  }
-})
+    author: Relationship.one(() => Person),
+  },
+});
 
 const Article = Resource("articles", {
   attributes: {
     title: Schema.NonEmptyString,
-    body: Schema.String
+    body: Schema.String,
   },
   relationships: {
     // nullable to-one
@@ -35,19 +35,19 @@ const Article = Resource("articles", {
     // inline to-many
     comments: Relationship.many(() => Comment),
     // unbounded to-many: no inline linkage
-    subscribers: Relationship.paginated(() => Person)
-  }
-})
+    subscribers: Relationship.paginated(() => Person),
+  },
+});
 
-const Operations = Atomic.Operations([Article, Comment])
-const Request = Atomic.RequestDocument([Article, Comment])
-const Results = Atomic.ResultDocument([Article, Comment])
+const Operations = Atomic.Operations([Article, Comment]);
+const Request = Atomic.RequestDocument([Article, Comment]);
+const Results = Atomic.ResultDocument([Article, Comment]);
 
-const decodeOperation = Schema.decodeUnknownSync(Operations as Schema.Codec<unknown, unknown>)
-const decodeRequest = Schema.decodeUnknownSync(Request as Schema.Codec<unknown, unknown>)
-const encodeRequest = Schema.encodeUnknownSync(Request as Schema.Codec<unknown, unknown>)
-const decodeResults = Schema.decodeUnknownSync(Results as Schema.Codec<unknown, unknown>)
-const encodeResults = Schema.encodeUnknownSync(Results as Schema.Codec<unknown, unknown>)
+const decodeOperation = Schema.decodeUnknownSync(Operations as Schema.Codec<unknown, unknown>);
+const decodeRequest = Schema.decodeUnknownSync(Request as Schema.Codec<unknown, unknown>);
+const encodeRequest = Schema.encodeUnknownSync(Request as Schema.Codec<unknown, unknown>);
+const decodeResults = Schema.decodeUnknownSync(Results as Schema.Codec<unknown, unknown>);
+const encodeResults = Schema.encodeUnknownSync(Results as Schema.Codec<unknown, unknown>);
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,14 +55,14 @@ const encodeResults = Schema.encodeUnknownSync(Results as Schema.Codec<unknown, 
 
 describe("extension constants", () => {
   it("exposes the extension URI and media type", () => {
-    expect(Atomic.EXTENSION_URI).toBe("https://jsonapi.org/ext/atomic")
-    expect(Atomic.MEDIA_TYPE).toBe('application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"')
-  })
+    expect(Atomic.EXTENSION_URI).toBe("https://jsonapi.org/ext/atomic");
+    expect(Atomic.MEDIA_TYPE).toBe('application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"');
+  });
 
   it("provides a ready-made jsonapi member advertising the extension", () => {
-    expect(Atomic.jsonapi).toEqual({ version: "1.1", ext: ["https://jsonapi.org/ext/atomic"] })
-  })
-})
+    expect(Atomic.jsonapi).toEqual({ version: "1.1", ext: ["https://jsonapi.org/ext/atomic"] });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Refs
@@ -72,40 +72,45 @@ describe("refs", () => {
   it("Ref decodes id-based identifiers", () => {
     const ref = Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
       type: "articles",
-      id: "1"
-    })
-    expect(ref).toEqual({ type: "articles", id: "1" })
-  })
+      id: "1",
+    });
+    expect(ref).toEqual({ type: "articles", id: "1" });
+  });
 
   it("Ref decodes lid-based local identifiers", () => {
     const ref = Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
       type: "articles",
-      lid: "a1"
-    })
-    expect(ref).toEqual({ type: "articles", lid: "a1" })
-  })
+      lid: "a1",
+    });
+    expect(ref).toEqual({ type: "articles", lid: "a1" });
+  });
 
   it("Ref rejects identifiers of other types", () => {
     expect(() =>
       Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
         type: "people",
-        id: "9"
-      })
-    ).toThrow()
-  })
+        id: "9",
+      }),
+    ).toThrow();
+  });
 
   it("Resource.lidRef creates typed lid-based ref values", () => {
-    const ref = Article.lidRef("a1")
-    expect(ref).toEqual({ type: "articles", lid: "a1" })
-    expectTypeOf(ref.type).toEqualTypeOf<"articles">()
-  })
+    const ref = Article.lidRef("a1");
+    expect(ref).toEqual({ type: "articles", lid: "a1" });
+    expectTypeOf(ref.type).toEqualTypeOf<"articles">();
+  });
 
   it("Resource.localIdentifier is the { type, lid } schema", () => {
-    const decoded = Schema.decodeUnknownSync(Article.localIdentifier)({ type: "articles", lid: "a1" })
-    expect(decoded).toEqual({ type: "articles", lid: "a1" })
-    expect(() => Schema.decodeUnknownSync(Article.localIdentifier)({ type: "articles", id: "1" })).toThrow()
-  })
-})
+    const decoded = Schema.decodeUnknownSync(Article.localIdentifier)({
+      type: "articles",
+      lid: "a1",
+    });
+    expect(decoded).toEqual({ type: "articles", lid: "a1" });
+    expect(() =>
+      Schema.decodeUnknownSync(Article.localIdentifier)({ type: "articles", id: "1" }),
+    ).toThrow();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Operation schemas: decoding the wire format
@@ -118,13 +123,13 @@ describe("operation schemas", () => {
       data: {
         type: "articles",
         lid: "a1",
-        attributes: { title: "Hello", body: "World" }
-      }
-    }) as { op: string; data: { type: string; lid?: string } }
-    expect(operation.op).toBe("add")
-    expect(operation.data.type).toBe("articles")
-    expect(operation.data.lid).toBe("a1")
-  })
+        attributes: { title: "Hello", body: "World" },
+      },
+    }) as { op: string; data: { type: string; lid?: string } };
+    expect(operation.op).toBe("add");
+    expect(operation.data.type).toBe("articles");
+    expect(operation.data.lid).toBe("a1");
+  });
 
   it("decodes an add operation with lid-based relationship linkage", () => {
     const operation = decodeOperation({
@@ -134,32 +139,32 @@ describe("operation schemas", () => {
         attributes: { title: "Hello", body: "World" },
         relationships: {
           author: { data: { type: "people", id: "9" } },
-          comments: { data: [{ type: "comments", lid: "c1" }] }
-        }
-      }
-    }) as any
-    expect(operation.data.relationships.comments.data).toEqual([{ type: "comments", lid: "c1" }])
-  })
+          comments: { data: [{ type: "comments", lid: "c1" }] },
+        },
+      },
+    }) as any;
+    expect(operation.data.relationships.comments.data).toEqual([{ type: "comments", lid: "c1" }]);
+  });
 
   it("requires `one` relationships in add operations", () => {
     // Comment's author is required: an add operation without it fails
     expect(() =>
       decodeOperation({
         op: "add",
-        data: { type: "comments", attributes: { body: "No author" } }
-      })
-    ).toThrow()
+        data: { type: "comments", attributes: { body: "No author" } },
+      }),
+    ).toThrow();
 
     const operation = decodeOperation({
       op: "add",
       data: {
         type: "comments",
         attributes: { body: "Nice" },
-        relationships: { author: { data: { type: "people", lid: "p1" } } }
-      }
-    }) as any
-    expect(operation.data.relationships.author.data).toEqual({ type: "people", lid: "p1" })
-  })
+        relationships: { author: { data: { type: "people", lid: "p1" } } },
+      },
+    }) as any;
+    expect(operation.data.relationships.author.data).toEqual({ type: "people", lid: "p1" });
+  });
 
   it("excludes `paginated` relationships from add operations", () => {
     // Article's subscribers relationship is paginated — it is not part of the
@@ -172,13 +177,13 @@ describe("operation schemas", () => {
         attributes: { title: "Hello", body: "" },
         relationships: {
           author: { data: null },
-          subscribers: { data: [{ type: "people", id: "9" }] }
-        }
-      }
-    }) as any
-    expect(operation.data.relationships.subscribers).toBeUndefined()
-    expect(operation.data.relationships.author).toEqual({ data: null })
-  })
+          subscribers: { data: [{ type: "people", id: "9" }] },
+        },
+      },
+    }) as any;
+    expect(operation.data.relationships.subscribers).toBeUndefined();
+    expect(operation.data.relationships.author).toEqual({ data: null });
+  });
 
   it("decodes an update operation targeted by data id", () => {
     const operation = decodeOperation({
@@ -186,95 +191,98 @@ describe("operation schemas", () => {
       data: {
         type: "articles",
         id: "1",
-        attributes: { title: "Updated" }
-      }
-    }) as any
-    expect(operation.op).toBe("update")
-    expect(operation.data.id).toBe("1")
-    expect(operation.data.attributes).toEqual({ title: "Updated" })
-  })
+        attributes: { title: "Updated" },
+      },
+    }) as any;
+    expect(operation.op).toBe("update");
+    expect(operation.data.id).toBe("1");
+    expect(operation.data.attributes).toEqual({ title: "Updated" });
+  });
 
   it("update operation honours the tri-state attribute semantics (set / unset / leave)", () => {
-    const Widget = Resource("widgets", { attributes: { note: Schema.NullOr(Schema.String) } })
-    const Op = Atomic.UpdateOperation(Widget) as Schema.Codec<any, unknown>
+    const Widget = Resource("widgets", { attributes: { note: Schema.NullOr(Schema.String) } });
+    const Op = Atomic.UpdateOperation(Widget) as Schema.Codec<any, unknown>;
     const decode = (attributes: unknown) =>
-      Schema.decodeUnknownSync(Op)({ op: "update", data: { type: "widgets", id: "1", attributes } }) as any
+      Schema.decodeUnknownSync(Op)({
+        op: "update",
+        data: { type: "widgets", id: "1", attributes },
+      }) as any;
     // present `undefined` is accepted (the runtime now matches the widened type)
-    expect("note" in decode({ note: undefined }).data.attributes).toBe(true)
+    expect("note" in decode({ note: undefined }).data.attributes).toBe(true);
     // null clears, value sets, absent leaves unchanged
-    expect(decode({ note: null }).data.attributes.note).toBeNull()
-    expect(decode({ note: "hi" }).data.attributes.note).toBe("hi")
-    expect("note" in decode({}).data.attributes).toBe(false)
+    expect(decode({ note: null }).data.attributes.note).toBeNull();
+    expect(decode({ note: "hi" }).data.attributes.note).toBe("hi");
+    expect("note" in decode({}).data.attributes).toBe(false);
     // the declared type advertises value | null | undefined
-    type Attrs = NonNullable<Atomic.UpdateOperation<typeof Widget>["Type"]["data"]["attributes"]>
-    expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>()
-  })
+    type Attrs = NonNullable<Atomic.UpdateOperation<typeof Widget>["Type"]["data"]["attributes"]>;
+    expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>();
+  });
 
   it("decodes a remove operation targeted by ref", () => {
     const operation = decodeOperation({
       op: "remove",
-      ref: { type: "articles", id: "1" }
-    }) as any
-    expect(operation.op).toBe("remove")
-    expect(operation.ref).toEqual({ type: "articles", id: "1" })
-  })
+      ref: { type: "articles", id: "1" },
+    }) as any;
+    expect(operation.op).toBe("remove");
+    expect(operation.ref).toEqual({ type: "articles", id: "1" });
+  });
 
   it("decodes a remove operation targeted by lid", () => {
     const operation = decodeOperation({
       op: "remove",
-      ref: { type: "articles", lid: "a1" }
-    }) as any
-    expect(operation.ref).toEqual({ type: "articles", lid: "a1" })
-  })
+      ref: { type: "articles", lid: "a1" },
+    }) as any;
+    expect(operation.ref).toEqual({ type: "articles", lid: "a1" });
+  });
 
   it("rejects operations on resources outside the set", () => {
     expect(() =>
       decodeOperation({
         op: "add",
-        data: { type: "people", attributes: { firstName: "Dan", lastName: "Gebhardt" } }
-      })
-    ).toThrow()
-  })
+        data: { type: "people", attributes: { firstName: "Dan", lastName: "Gebhardt" } },
+      }),
+    ).toThrow();
+  });
 
   it("rejects unknown ops", () => {
     expect(() =>
       decodeOperation({
         op: "upsert",
-        data: { type: "articles", attributes: { title: "Hello", body: "" } }
-      })
-    ).toThrow()
-  })
-})
+        data: { type: "articles", attributes: { title: "Hello", body: "" } },
+      }),
+    ).toThrow();
+  });
+});
 
 describe("relationship operation schemas", () => {
   it("decodes a required (`one`) to-one relationship update", () => {
     const operation = decodeOperation({
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
-      data: { type: "people", id: "9" }
-    }) as any
-    expect(operation.ref.relationship).toBe("author")
-    expect(operation.data).toEqual({ type: "people", id: "9" })
-  })
+      data: { type: "people", id: "9" },
+    }) as any;
+    expect(operation.ref.relationship).toBe("author");
+    expect(operation.data).toEqual({ type: "people", id: "9" });
+  });
 
   it("rejects null data for required (`one`) to-one relationship updates", () => {
     expect(() =>
       decodeOperation({
         op: "update",
         ref: { type: "comments", id: "5", relationship: "author" },
-        data: null
-      })
-    ).toThrow()
-  })
+        data: null,
+      }),
+    ).toThrow();
+  });
 
   it("decodes an `optional` to-one relationship update to null", () => {
     const operation = decodeOperation({
       op: "update",
       ref: { type: "articles", id: "1", relationship: "author" },
-      data: null
-    }) as any
-    expect(operation.data).toBeNull()
-  })
+      data: null,
+    }) as any;
+    expect(operation.data).toBeNull();
+  });
 
   it("decodes `many` relationship add / update / remove", () => {
     for (const op of ["add", "update", "remove"]) {
@@ -283,14 +291,14 @@ describe("relationship operation schemas", () => {
         ref: { type: "articles", id: "1", relationship: "comments" },
         data: [
           { type: "comments", id: "5" },
-          { type: "comments", lid: "c1" }
-        ]
-      }) as any
-      expect(operation.op).toBe(op)
-      expect(operation.ref.relationship).toBe("comments")
-      expect(operation.data).toHaveLength(2)
+          { type: "comments", lid: "c1" },
+        ],
+      }) as any;
+      expect(operation.op).toBe(op);
+      expect(operation.ref.relationship).toBe("comments");
+      expect(operation.data).toHaveLength(2);
     }
-  })
+  });
 
   it("decodes `paginated` relationship add / update / remove", () => {
     // paginated relationships have no inline linkage, but they ARE manageable
@@ -299,33 +307,33 @@ describe("relationship operation schemas", () => {
       const operation = decodeOperation({
         op,
         ref: { type: "articles", id: "1", relationship: "subscribers" },
-        data: [{ type: "people", id: "9" }]
-      }) as any
-      expect(operation.op).toBe(op)
-      expect(operation.ref.relationship).toBe("subscribers")
+        data: [{ type: "people", id: "9" }],
+      }) as any;
+      expect(operation.op).toBe(op);
+      expect(operation.ref.relationship).toBe("subscribers");
     }
-  })
+  });
 
   it("rejects relationship refs with unknown relationship names", () => {
     expect(() =>
       decodeOperation({
         op: "update",
         ref: { type: "articles", id: "1", relationship: "publisher" },
-        data: null
-      })
-    ).toThrow()
-  })
+        data: null,
+      }),
+    ).toThrow();
+  });
 
   it("rejects to-one updates whose data is the wrong resource type", () => {
     expect(() =>
       decodeOperation({
         op: "update",
         ref: { type: "comments", id: "5", relationship: "author" },
-        data: { type: "comments", id: "1" }
-      })
-    ).toThrow()
-  })
-})
+        data: { type: "comments", id: "1" },
+      }),
+    ).toThrow();
+  });
+});
 
 describe("operation union disambiguation", () => {
   it("a ref with a relationship member never decodes as a resource operation", () => {
@@ -334,10 +342,10 @@ describe("operation union disambiguation", () => {
     expect(() =>
       decodeOperation({
         op: "remove",
-        ref: { type: "articles", id: "1", relationship: "comments" }
-      })
-    ).toThrow()
-  })
+        ref: { type: "articles", id: "1", relationship: "comments" },
+      }),
+    ).toThrow();
+  });
 
   it("a relationship operation whose target type is in the resource set stays a relationship operation", () => {
     // The comments relationship targets Comment, which is itself in the
@@ -346,20 +354,20 @@ describe("operation union disambiguation", () => {
     const operation = decodeOperation({
       op: "update",
       ref: { type: "articles", id: "1", relationship: "comments" },
-      data: [{ type: "comments", id: "5" }]
-    }) as any
-    expect(operation.ref.relationship).toBe("comments")
-    expect(Array.isArray(operation.data)).toBe(true)
-  })
+      data: [{ type: "comments", id: "5" }],
+    }) as any;
+    expect(operation.ref.relationship).toBe("comments");
+    expect(Array.isArray(operation.data)).toBe(true);
+  });
 
   it("resource removes still decode (refs without relationship)", () => {
     const operation = decodeOperation({
       op: "remove",
-      ref: { type: "comments", id: "5" }
-    }) as any
-    expect(operation.ref).toEqual({ type: "comments", id: "5" })
-  })
-})
+      ref: { type: "comments", id: "5" },
+    }) as any;
+    expect(operation.ref).toEqual({ type: "comments", id: "5" });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Request / result documents
@@ -369,20 +377,23 @@ describe("RequestDocument", () => {
   it("decodes a multi-operation document", () => {
     const document = decodeRequest({
       "atomic:operations": [
-        { op: "add", data: { type: "articles", lid: "a1", attributes: { title: "Hello", body: "" } } },
-        { op: "remove", ref: { type: "comments", id: "5" } }
-      ]
-    }) as any
-    expect(document["atomic:operations"]).toHaveLength(2)
-  })
+        {
+          op: "add",
+          data: { type: "articles", lid: "a1", attributes: { title: "Hello", body: "" } },
+        },
+        { op: "remove", ref: { type: "comments", id: "5" } },
+      ],
+    }) as any;
+    expect(document["atomic:operations"]).toHaveLength(2);
+  });
 
   it("rejects empty operation lists", () => {
-    expect(() => decodeRequest({ "atomic:operations": [] })).toThrow()
-  })
+    expect(() => decodeRequest({ "atomic:operations": [] })).toThrow();
+  });
 
   it("rejects documents without atomic:operations", () => {
-    expect(() => decodeRequest({ data: { type: "articles", id: "1" } })).toThrow()
-  })
+    expect(() => decodeRequest({ data: { type: "articles", id: "1" } })).toThrow();
+  });
 
   it("round-trips operation values built by the constructors", () => {
     const value = Atomic.request(
@@ -391,19 +402,19 @@ describe("RequestDocument", () => {
         attributes: { title: "Hello", body: "World" },
         relationships: {
           author: { data: Person.ref("9") },
-          comments: { data: [Comment.lidRef("c1")] }
-        }
+          comments: { data: [Comment.lidRef("c1")] },
+        },
       }),
       Atomic.update(Article, { id: Article.Id.make("1"), attributes: { title: "Updated" } }),
       Atomic.remove(Comment, "5"),
       Atomic.updateRelationship(Comment, "5", "author", Person.ref("9")),
       Atomic.updateRelationship(Article, "1", "author", null),
       Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.ref("5")]),
-      Atomic.removeFromRelationship(Article, "1", "subscribers", [Person.ref("9")])
-    )
+      Atomic.removeFromRelationship(Article, "1", "subscribers", [Person.ref("9")]),
+    );
 
-    const encoded = encodeRequest(value) as any
-    expect(encoded["atomic:operations"]).toHaveLength(7)
+    const encoded = encodeRequest(value) as any;
+    expect(encoded["atomic:operations"]).toHaveLength(7);
     expect(encoded["atomic:operations"][0]).toEqual({
       op: "add",
       data: {
@@ -412,108 +423,114 @@ describe("RequestDocument", () => {
         attributes: { title: "Hello", body: "World" },
         relationships: {
           author: { data: { type: "people", id: "9" } },
-          comments: { data: [{ type: "comments", lid: "c1" }] }
-        }
-      }
-    })
+          comments: { data: [{ type: "comments", lid: "c1" }] },
+        },
+      },
+    });
     expect(encoded["atomic:operations"][3]).toEqual({
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
-      data: { type: "people", id: "9" }
-    })
+      data: { type: "people", id: "9" },
+    });
     expect(encoded["atomic:operations"][4]).toEqual({
       op: "update",
       ref: { type: "articles", id: "1", relationship: "author" },
-      data: null
-    })
+      data: null,
+    });
     expect(encoded["atomic:operations"][5]).toEqual({
       op: "add",
       ref: { type: "articles", lid: "a1", relationship: "comments" },
-      data: [{ type: "comments", id: "5" }]
-    })
+      data: [{ type: "comments", id: "5" }],
+    });
 
     // and the wire form decodes back
-    const decoded = decodeRequest(encoded) as any
-    expect(decoded["atomic:operations"]).toHaveLength(7)
-  })
-})
+    const decoded = decodeRequest(encoded) as any;
+    expect(decoded["atomic:operations"]).toHaveLength(7);
+  });
+});
 
 describe("ResultDocument", () => {
   const article = {
     type: "articles",
     id: "1",
-    attributes: { title: "Hello", body: "World" }
-  }
+    attributes: { title: "Hello", body: "World" },
+  };
 
   it("decodes results with data, null data and empty objects", () => {
     const document = decodeResults({
-      "atomic:results": [{ data: article }, { data: null }, {}]
-    }) as any
-    expect(document["atomic:results"]).toHaveLength(3)
-    expect(document["atomic:results"][0].data.attributes.title).toBe("Hello")
-    expect(document["atomic:results"][1].data).toBeNull()
-    expect(document["atomic:results"][2]).toEqual({})
-  })
+      "atomic:results": [{ data: article }, { data: null }, {}],
+    }) as any;
+    expect(document["atomic:results"]).toHaveLength(3);
+    expect(document["atomic:results"][0].data.attributes.title).toBe("Hello");
+    expect(document["atomic:results"][1].data).toBeNull();
+    expect(document["atomic:results"][2]).toEqual({});
+  });
 
   it("encodes values built with the results helpers", () => {
-    const value = Atomic.results([Atomic.result(article), Atomic.emptyResult], { meta: { processed: 2 } })
+    const value = Atomic.results([Atomic.result(article), Atomic.emptyResult], {
+      meta: { processed: 2 },
+    });
 
-    const encoded = encodeResults(value) as any
-    expect(encoded["atomic:results"]).toHaveLength(2)
-    expect(encoded.meta).toEqual({ processed: 2 })
-  })
+    const encoded = encodeResults(value) as any;
+    expect(encoded["atomic:results"]).toHaveLength(2);
+    expect(encoded.meta).toEqual({ processed: 2 });
+  });
 
   it("rejects results outside the resource set", () => {
     expect(() =>
       decodeResults({
-        "atomic:results": [{ data: { type: "people", id: "9", attributes: { firstName: "D", lastName: "G" } } }]
-      })
-    ).toThrow()
-  })
-})
+        "atomic:results": [
+          { data: { type: "people", id: "9", attributes: { firstName: "D", lastName: "G" } } },
+        ],
+      }),
+    ).toThrow();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Handler helpers
 // ---------------------------------------------------------------------------
 
 describe("isRelationshipOperation", () => {
-  type Op = Atomic.Operation<typeof Article | typeof Comment>["Type"]
+  type Op = Atomic.Operation<typeof Article | typeof Comment>["Type"];
 
   it("discriminates relationship operations from resource operations", () => {
     const relationshipOp = decodeOperation({
       op: "update",
       ref: { type: "comments", id: "5", relationship: "author" },
-      data: { type: "people", id: "9" }
-    }) as Op
+      data: { type: "people", id: "9" },
+    }) as Op;
     const resourceOp = decodeOperation({
       op: "remove",
-      ref: { type: "comments", id: "5" }
-    }) as Op
+      ref: { type: "comments", id: "5" },
+    }) as Op;
 
-    expect(Atomic.isRelationshipOperation(relationshipOp)).toBe(true)
-    expect(Atomic.isRelationshipOperation(resourceOp)).toBe(false)
+    expect(Atomic.isRelationshipOperation(relationshipOp)).toBe(true);
+    expect(Atomic.isRelationshipOperation(resourceOp)).toBe(false);
 
     if (Atomic.isRelationshipOperation(relationshipOp)) {
       // the guard narrows to operations whose ref carries `relationship`
-      expectTypeOf(relationshipOp.ref.relationship).toEqualTypeOf<"author" | "comments" | "subscribers">()
+      expectTypeOf(relationshipOp.ref.relationship).toEqualTypeOf<
+        "author" | "comments" | "subscribers"
+      >();
     }
-  })
+  });
 
   it("treats add operations (no ref) as resource operations", () => {
     const addOp = decodeOperation({
       op: "add",
-      data: { type: "articles", attributes: { title: "Hello", body: "" } }
-    }) as Op
-    expect(Atomic.isRelationshipOperation(addOp)).toBe(false)
-  })
-})
+      data: { type: "articles", attributes: { title: "Hello", body: "" } },
+    }) as Op;
+    expect(Atomic.isRelationshipOperation(addOp)).toBe(false);
+  });
+});
 
 describe("operationPointer", () => {
   it("builds JSON pointers into the operations array", () => {
-    expect(Atomic.operationPointer(0)).toBe("/atomic:operations/0")
-    expect(Atomic.operationPointer(3)).toBe("/atomic:operations/3")
-  })
-})
+    expect(Atomic.operationPointer(0)).toBe("/atomic:operations/0");
+    expect(Atomic.operationPointer(3)).toBe("/atomic:operations/3");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Discovering the derived operations
@@ -521,65 +538,71 @@ describe("operationPointer", () => {
 
 describe("operationsFor", () => {
   it("derives a named record of every operation for a resource", () => {
-    const operations = Atomic.operationsFor(Article)
+    const operations = Atomic.operationsFor(Article);
 
     // resource-level operations
-    expect(Object.keys(operations)).toEqual(["add", "update", "remove", "relationships"])
+    expect(Object.keys(operations)).toEqual(["add", "update", "remove", "relationships"]);
     // relationship operations, by relationship key and kind
-    expect(Object.keys(operations.relationships)).toEqual(["author", "comments", "subscribers"])
+    expect(Object.keys(operations.relationships)).toEqual(["author", "comments", "subscribers"]);
     // `optional` to-one → update only
-    expect(Object.keys(operations.relationships.author)).toEqual(["update"])
+    expect(Object.keys(operations.relationships.author)).toEqual(["update"]);
     // `many` to-many → add / update / remove
-    expect(Object.keys(operations.relationships.comments)).toEqual(["add", "update", "remove"])
+    expect(Object.keys(operations.relationships.comments)).toEqual(["add", "update", "remove"]);
     // `paginated` to-many → add / update / remove (managed through operations, not inline)
-    expect(Object.keys(operations.relationships.subscribers)).toEqual(["add", "update", "remove"])
-  })
+    expect(Object.keys(operations.relationships.subscribers)).toEqual(["add", "update", "remove"]);
+  });
 
   it("the record's schemas decode their wire forms", () => {
-    const operations = Atomic.operationsFor(Article)
+    const operations = Atomic.operationsFor(Article);
 
     const add = Schema.decodeUnknownSync(operations.add as Schema.Codec<unknown, unknown>)({
       op: "add",
-      data: { type: "articles", attributes: { title: "Hello", body: "" } }
-    }) as { readonly op: string }
-    expect(add.op).toBe("add")
+      data: { type: "articles", attributes: { title: "Hello", body: "" } },
+    }) as { readonly op: string };
+    expect(add.op).toBe("add");
 
     const linkComments = Schema.decodeUnknownSync(
-      operations.relationships.comments.add as Schema.Codec<unknown, unknown>
+      operations.relationships.comments.add as Schema.Codec<unknown, unknown>,
     )({
       op: "add",
       ref: { type: "articles", id: "1", relationship: "comments" },
-      data: [{ type: "comments", id: "5" }]
-    }) as { readonly ref: { readonly relationship: string } }
-    expect(linkComments.ref.relationship).toBe("comments")
-  })
+      data: [{ type: "comments", id: "5" }],
+    }) as { readonly ref: { readonly relationship: string } };
+    expect(linkComments.ref.relationship).toBe("comments");
+  });
 
   it("resources without relationships derive only resource operations", () => {
-    const operations = Atomic.operationsFor(Person)
-    expect(Object.keys(operations.relationships)).toEqual([])
-  })
-})
+    const operations = Atomic.operationsFor(Person);
+    expect(Object.keys(operations.relationships)).toEqual([]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Pattern matching over operations with Effect's Match module
 // ---------------------------------------------------------------------------
 
 describe("Match integration (curried guards)", () => {
-  type Op = Atomic.Operation<typeof Article | typeof Comment>["Type"]
+  type Op = Atomic.Operation<typeof Article | typeof Comment>["Type"];
 
   const describeOperation = (operation: Op): string =>
     Match.value(operation).pipe(
-      Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => `link ${op.data.length} comments`),
+      Match.when(
+        Atomic.targetsRelationship(Article, "comments"),
+        (op) => `link ${op.data.length} comments`,
+      ),
       Match.when(
         Atomic.targetsRelationship(Article, "author"),
-        (op) => `set article author to ${op.data === null ? "null" : "a person"}`
+        (op) => `set article author to ${op.data === null ? "null" : "a person"}`,
       ),
-      Match.when(Atomic.targetsRelationship(Article, "subscribers"), (op) => `${op.op} ${op.data.length} subscribers`),
+      Match.when(
+        Atomic.targetsRelationship(Article, "subscribers"),
+        (op) => `${op.op} ${op.data.length} subscribers`,
+      ),
       Match.when(Atomic.targetsRelationship(Comment, "author"), () => "set comment author"),
       Match.when(Atomic.targetsResource(Article), (op) => `${op.op} article`),
       Match.when(Atomic.targetsResource(Comment), (op) => `${op.op} comment`),
-      Match.exhaustive
-    )
+      Match.exhaustive,
+    );
 
   it("dispatches relationship and resource operations", () => {
     expect(
@@ -587,110 +610,118 @@ describe("Match integration (curried guards)", () => {
         decodeOperation({
           op: "add",
           ref: { type: "articles", id: "1", relationship: "comments" },
-          data: [{ type: "comments", id: "5" }]
-        }) as Op
-      )
-    ).toBe("link 1 comments")
+          data: [{ type: "comments", id: "5" }],
+        }) as Op,
+      ),
+    ).toBe("link 1 comments");
 
     expect(
       describeOperation(
         decodeOperation({
           op: "update",
           ref: { type: "articles", id: "1", relationship: "author" },
-          data: null
-        }) as Op
-      )
-    ).toBe("set article author to null")
+          data: null,
+        }) as Op,
+      ),
+    ).toBe("set article author to null");
 
     expect(
       describeOperation(
         decodeOperation({
           op: "update",
           ref: { type: "comments", id: "5", relationship: "author" },
-          data: { type: "people", id: "9" }
-        }) as Op
-      )
-    ).toBe("set comment author")
+          data: { type: "people", id: "9" },
+        }) as Op,
+      ),
+    ).toBe("set comment author");
 
     expect(
       describeOperation(
         decodeOperation({
           op: "add",
-          data: { type: "articles", attributes: { title: "Hello", body: "" } }
-        }) as Op
-      )
-    ).toBe("add article")
+          data: { type: "articles", attributes: { title: "Hello", body: "" } },
+        }) as Op,
+      ),
+    ).toBe("add article");
 
     expect(
       describeOperation(
         decodeOperation({
           op: "remove",
-          ref: { type: "comments", id: "5" }
-        }) as Op
-      )
-    ).toBe("remove comment")
-  })
+          ref: { type: "comments", id: "5" },
+        }) as Op,
+      ),
+    ).toBe("remove comment");
+  });
 
   it("curried and data-first guards agree", () => {
     const operation = decodeOperation({
       op: "remove",
-      ref: { type: "articles", id: "1" }
-    }) as Op
-    expect(Atomic.targetsResource(operation, Article)).toBe(true)
-    expect(Atomic.targetsResource(Article)(operation)).toBe(true)
-    expect(Atomic.targetsResource(operation, Comment)).toBe(false)
-    expect(Atomic.targetsResource(Comment)(operation)).toBe(false)
-  })
-})
+      ref: { type: "articles", id: "1" },
+    }) as Op;
+    expect(Atomic.targetsResource(operation, Article)).toBe(true);
+    expect(Atomic.targetsResource(Article)(operation)).toBe(true);
+    expect(Atomic.targetsResource(operation, Comment)).toBe(false);
+    expect(Atomic.targetsResource(Comment)(operation)).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Content negotiation with the extension media type
 // ---------------------------------------------------------------------------
 
 describe("content negotiation with extensions", () => {
-  const atomic = { extensions: [Atomic.EXTENSION_URI] }
+  const atomic = { extensions: [Atomic.EXTENSION_URI] };
 
   it("accepts the atomic media type when the extension is supported", () => {
-    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, atomic)).toBe(true)
-    expect(Middleware.acceptIsAcceptable(Atomic.MEDIA_TYPE, atomic)).toBe(true)
-  })
+    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE, atomic)).toBe(true);
+    expect(Middleware.acceptIsAcceptable(Atomic.MEDIA_TYPE, atomic)).toBe(true);
+  });
 
   it("rejects the atomic media type when the extension is not supported", () => {
-    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false)
-    expect(Middleware.acceptIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false)
-  })
+    expect(Middleware.contentTypeIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false);
+    expect(Middleware.acceptIsAcceptable(Atomic.MEDIA_TYPE)).toBe(false);
+  });
 
   it("rejects unsupported extension URIs even when others are supported", () => {
-    const header = 'application/vnd.api+json;ext="https://example.com/ext/other"'
-    expect(Middleware.contentTypeIsAcceptable(header, atomic)).toBe(false)
-  })
+    const header = 'application/vnd.api+json;ext="https://example.com/ext/other"';
+    expect(Middleware.contentTypeIsAcceptable(header, atomic)).toBe(false);
+  });
 
   it("accepts profile parameters regardless of extension support (per §5)", () => {
-    expect(Middleware.contentTypeIsAcceptable('application/vnd.api+json;profile="https://example.com/p"')).toBe(true)
-    expect(Middleware.acceptIsAcceptable('application/vnd.api+json;profile="https://example.com/p"')).toBe(true)
-  })
+    expect(
+      Middleware.contentTypeIsAcceptable(
+        'application/vnd.api+json;profile="https://example.com/p"',
+      ),
+    ).toBe(true);
+    expect(
+      Middleware.acceptIsAcceptable('application/vnd.api+json;profile="https://example.com/p"'),
+    ).toBe(true);
+  });
 
   it("still rejects other media type parameters (charset), but q is a weight, not a parameter", () => {
-    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8", atomic)).toBe(false)
+    expect(
+      Middleware.contentTypeIsAcceptable("application/vnd.api+json; charset=utf-8", atomic),
+    ).toBe(false);
     // `q` is the Accept entry's weight (RFC 9110 §12.4.2), not a media type
     // parameter, so a non-zero weight does not make the entry unacceptable.
-    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9", atomic)).toBe(true)
-  })
+    expect(Middleware.acceptIsAcceptable("application/vnd.api+json;q=0.9", atomic)).toBe(true);
+  });
 
   it("accepts unparameterised media types and wildcards as before", () => {
-    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true)
-    expect(Middleware.contentTypeIsAcceptable(undefined)).toBe(true)
-    expect(Middleware.acceptIsAcceptable("*/*")).toBe(true)
-    expect(Middleware.acceptIsAcceptable("application/*;q=0.8")).toBe(true)
-    expect(Middleware.acceptIsAcceptable("text/html")).toBe(false)
-  })
+    expect(Middleware.contentTypeIsAcceptable("application/vnd.api+json")).toBe(true);
+    expect(Middleware.contentTypeIsAcceptable(undefined)).toBe(true);
+    expect(Middleware.acceptIsAcceptable("*/*")).toBe(true);
+    expect(Middleware.acceptIsAcceptable("application/*;q=0.8")).toBe(true);
+    expect(Middleware.acceptIsAcceptable("text/html")).toBe(false);
+  });
 
   it("accepts an Accept header mixing parameterised and bare JSON:API media types", () => {
-    const header = `${Atomic.MEDIA_TYPE}, application/vnd.api+json`
-    expect(Middleware.acceptIsAcceptable(header)).toBe(true)
-    expect(Middleware.acceptIsAcceptable(header, atomic)).toBe(true)
-  })
-})
+    const header = `${Atomic.MEDIA_TYPE}, application/vnd.api+json`;
+    expect(Middleware.acceptIsAcceptable(header)).toBe(true);
+    expect(Middleware.acceptIsAcceptable(header, atomic)).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Type-level guarantees
@@ -698,65 +729,72 @@ describe("content negotiation with extensions", () => {
 
 describe("type-level guarantees", () => {
   it("operation values from constructors are typed", () => {
-    const addOp = Atomic.add(Article, { attributes: { title: "Hello", body: "" } })
-    expectTypeOf(addOp.op).toEqualTypeOf<"add">()
-    expectTypeOf(addOp.data.type).toEqualTypeOf<"articles">()
-    expectTypeOf(addOp.data.attributes.title).toEqualTypeOf<string>()
+    const addOp = Atomic.add(Article, { attributes: { title: "Hello", body: "" } });
+    expectTypeOf(addOp.op).toEqualTypeOf<"add">();
+    expectTypeOf(addOp.data.type).toEqualTypeOf<"articles">();
+    expectTypeOf(addOp.data.attributes.title).toEqualTypeOf<string>();
 
-    const removeOp = Atomic.remove(Comment, "5")
-    expectTypeOf(removeOp.op).toEqualTypeOf<"remove">()
+    const removeOp = Atomic.remove(Comment, "5");
+    expectTypeOf(removeOp.op).toEqualTypeOf<"remove">();
 
     // relationship constructors only accept declared relationship keys
     // @ts-expect-error -- "publisher" is not a relationship of Article
-    Atomic.updateRelationship(Article, "1", "publisher", null)
+    Atomic.updateRelationship(Article, "1", "publisher", null);
 
     // to-many constructors only accept to-many keys
     // @ts-expect-error -- "author" is a to-one relationship
-    Atomic.addToRelationship(Article, "1", "author", [])
+    Atomic.addToRelationship(Article, "1", "author", []);
 
     // required (`one`) to-one relationships can't be set to null
     // @ts-expect-error -- Comment.author is required
-    Atomic.updateRelationship(Comment, "5", "author", null)
-  })
+    Atomic.updateRelationship(Comment, "5", "author", null);
+  });
 
   it("add data attributes are required and typed", () => {
     // @ts-expect-error -- missing attributes
-    Atomic.add(Article, {})
-  })
-})
+    Atomic.add(Article, {});
+  });
+});
 
 describe("per-attribute descriptors in operations", () => {
   const Doc = Resource("docs", {
     attributes: {
       title: Schema.NonEmptyString,
       createdAt: readOnlyAttribute(Schema.Date), // server-set
-      slug: attribute(Schema.String, { update: false }) // set at create only
-    }
-  })
+      slug: attribute(Schema.String, { update: false }), // set at create only
+    },
+  });
 
   it("excludes read-only attributes from the add operation", () => {
     const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Doc))({
       op: "add",
-      data: { type: "docs", attributes: { title: "Hello", slug: "hello" } }
-    })
-    expect((decoded as { data: { attributes: unknown } }).data.attributes).toEqual({ title: "Hello", slug: "hello" })
-    type AddAttrs = Atomic.AddOperation<typeof Doc>["Type"]["data"]["attributes"]
-    expectTypeOf<AddAttrs>().not.toHaveProperty("createdAt")
-    expectTypeOf<AddAttrs>().toHaveProperty("slug")
-  })
+      data: { type: "docs", attributes: { title: "Hello", slug: "hello" } },
+    });
+    expect((decoded as { data: { attributes: unknown } }).data.attributes).toEqual({
+      title: "Hello",
+      slug: "hello",
+    });
+    type AddAttrs = Atomic.AddOperation<typeof Doc>["Type"]["data"]["attributes"];
+    expectTypeOf<AddAttrs>().not.toHaveProperty("createdAt");
+    expectTypeOf<AddAttrs>().toHaveProperty("slug");
+  });
 
   it("excludes read-only and non-updatable attributes from the update operation", () => {
     const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Doc))({
       op: "update",
-      data: { type: "docs", id: "1", attributes: { title: "Renamed" } }
-    })
-    expect((decoded as { data: { attributes: unknown } }).data.attributes).toEqual({ title: "Renamed" })
-    type UpdateAttrs = NonNullable<Atomic.UpdateOperation<typeof Doc>["Type"]["data"]["attributes"]>
-    expectTypeOf<UpdateAttrs>().not.toHaveProperty("createdAt")
-    expectTypeOf<UpdateAttrs>().not.toHaveProperty("slug")
-    expectTypeOf<UpdateAttrs>().toHaveProperty("title")
-  })
-})
+      data: { type: "docs", id: "1", attributes: { title: "Renamed" } },
+    });
+    expect((decoded as { data: { attributes: unknown } }).data.attributes).toEqual({
+      title: "Renamed",
+    });
+    type UpdateAttrs = NonNullable<
+      Atomic.UpdateOperation<typeof Doc>["Type"]["data"]["attributes"]
+    >;
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("createdAt");
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("slug");
+    expectTypeOf<UpdateAttrs>().toHaveProperty("title");
+  });
+});
 
 describe("input-only attributes in operations", () => {
   const Upload = Resource("uploads", {
@@ -765,96 +803,109 @@ describe("input-only attributes in operations", () => {
       // accepted at create only, never on the resource object
       file: attribute(Schema.Uint8Array, { resource: false, update: false }),
       // accepted at create and update, never on the resource object
-      secret: attribute(Schema.String, { resource: false })
-    }
-  })
-  const bytes = new Uint8Array([1, 2, 3])
+      secret: attribute(Schema.String, { resource: false }),
+    },
+  });
+  const bytes = new Uint8Array([1, 2, 3]);
 
   it("accepts input-only attributes in the add operation", () => {
-    type AddAttrs = Atomic.AddOperation<typeof Upload>["Type"]["data"]["attributes"]
+    type AddAttrs = Atomic.AddOperation<typeof Upload>["Type"]["data"]["attributes"];
     expectTypeOf<AddAttrs>().toEqualTypeOf<{
-      readonly fileName: string
-      readonly file: Uint8Array
-      readonly secret: string
-    }>()
+      readonly fileName: string;
+      readonly file: Uint8Array;
+      readonly secret: string;
+    }>();
     const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
       op: "add",
-      data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } }
-    })
-    expect(decoded.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" })
+      data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } },
+    });
+    expect(decoded.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" });
     // required: the add operation demands `file`, as `createPayload` does
     expect(() =>
       Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
         op: "add",
-        data: { type: "uploads", attributes: { fileName: "a.png", secret: "s" } }
-      })
-    ).toThrow()
+        data: { type: "uploads", attributes: { fileName: "a.png", secret: "s" } },
+      }),
+    ).toThrow();
     // the constructor is typed from the declared map too
-    const op = Atomic.add(Upload, { attributes: { fileName: "a.png", file: bytes, secret: "s" } })
-    expectTypeOf(op.data.attributes.file).toEqualTypeOf<Uint8Array>()
-  })
+    const op = Atomic.add(Upload, { attributes: { fileName: "a.png", file: bytes, secret: "s" } });
+    expectTypeOf(op.data.attributes.file).toEqualTypeOf<Uint8Array>();
+  });
 
   it("projects input-only attributes into the update operation per `update`", () => {
-    type UpdateAttrs = NonNullable<Atomic.UpdateOperation<typeof Upload>["Type"]["data"]["attributes"]>
-    expectTypeOf<UpdateAttrs>().toHaveProperty("secret")
-    expectTypeOf<UpdateAttrs>().not.toHaveProperty("file")
+    type UpdateAttrs = NonNullable<
+      Atomic.UpdateOperation<typeof Upload>["Type"]["data"]["attributes"]
+    >;
+    expectTypeOf<UpdateAttrs>().toHaveProperty("secret");
+    expectTypeOf<UpdateAttrs>().not.toHaveProperty("file");
     const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Upload))({
       op: "update",
-      data: { type: "uploads", id: "1", attributes: { secret: "t", file: bytes } }
-    })
+      data: { type: "uploads", id: "1", attributes: { secret: "t", file: bytes } },
+    });
     // `secret` is accepted; `file` (update: false) is dropped, not an error
-    expect(decoded.data.attributes).toEqual({ secret: "t" })
-  })
-})
+    expect(decoded.data.attributes).toEqual({ secret: "t" });
+  });
+});
 
 describe("optional create attributes in the add operation", () => {
   const Note = Resource("notes", {
     attributes: {
       title: Schema.NonEmptyString,
-      body: attribute(Schema.String, { create: "optional" })
-    }
-  })
-  const Add = Atomic.AddOperation(Note)
+      body: attribute(Schema.String, { create: "optional" }),
+    },
+  });
+  const Add = Atomic.AddOperation(Note);
 
   it("accepts an absent key, a value, or an explicit undefined (Schema.optional, as update does)", () => {
-    type AddAttrs = Atomic.AddOperation<typeof Note>["Type"]["data"]["attributes"]
-    expectTypeOf<AddAttrs["body"]>().toEqualTypeOf<string | undefined>()
-    expectTypeOf<AddAttrs>().toEqualTypeOf<{ readonly title: string; readonly body?: string | undefined }>()
+    type AddAttrs = Atomic.AddOperation<typeof Note>["Type"]["data"]["attributes"];
+    expectTypeOf<AddAttrs["body"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<AddAttrs>().toEqualTypeOf<{
+      readonly title: string;
+      readonly body?: string | undefined;
+    }>();
     // the field schema itself is `Schema.optional`, so its own `Type` admits `undefined`
-    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.body)["Type"]>().toEqualTypeOf<string | undefined>()
+    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.body)["Type"]>().toEqualTypeOf<
+      string | undefined
+    >();
 
-    const absent = Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "notes", attributes: { title: "t" } } })
-    expect(absent.data.attributes).toEqual({ title: "t" })
+    const absent = Schema.decodeUnknownSync(Add)({
+      op: "add",
+      data: { type: "notes", attributes: { title: "t" } },
+    });
+    expect(absent.data.attributes).toEqual({ title: "t" });
     const present = Schema.decodeUnknownSync(Add)({
       op: "add",
-      data: { type: "notes", attributes: { title: "t", body: "b" } }
-    })
-    expect(present.data.attributes).toEqual({ title: "t", body: "b" })
+      data: { type: "notes", attributes: { title: "t", body: "b" } },
+    });
+    expect(present.data.attributes).toEqual({ title: "t", body: "b" });
     const explicit = Schema.decodeUnknownSync(Add)({
       op: "add",
-      data: { type: "notes", attributes: { title: "t", body: undefined } }
-    })
-    expect(explicit.data.attributes).toEqual({ title: "t", body: undefined })
+      data: { type: "notes", attributes: { title: "t", body: undefined } },
+    });
+    expect(explicit.data.attributes).toEqual({ title: "t", body: undefined });
 
     // the constructor accepts the explicit undefined too
-    const op = Atomic.add(Note, { attributes: { title: "t", body: undefined } })
-    expect(op.data.attributes).toEqual({ title: "t", body: undefined })
-  })
+    const op = Atomic.add(Note, { attributes: { title: "t", body: undefined } });
+    expect(op.data.attributes).toEqual({ title: "t", body: undefined });
+  });
 
   it("widens a bare Schema.optionalKey attribute the same way", () => {
     const Profile = Resource("profiles", {
-      attributes: { handle: Schema.NonEmptyString, bio: Schema.optionalKey(Schema.String) }
-    })
-    const Add = Atomic.AddOperation(Profile)
-    type AddAttrs = Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"]
-    expectTypeOf<AddAttrs["bio"]>().toEqualTypeOf<string | undefined>()
-    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.bio)["Type"]>().toEqualTypeOf<string | undefined>()
+      attributes: { handle: Schema.NonEmptyString, bio: Schema.optionalKey(Schema.String) },
+    });
+    const Add = Atomic.AddOperation(Profile);
+    type AddAttrs = Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"];
+    expectTypeOf<AddAttrs["bio"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.bio)["Type"]>().toEqualTypeOf<
+      string | undefined
+    >();
     const decode = (attributes: unknown) =>
-      Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "profiles", attributes } }).data.attributes
-    expect(decode({ handle: "h" })).toEqual({ handle: "h" })
-    expect(decode({ handle: "h", bio: "b" })).toEqual({ handle: "h", bio: "b" })
-    expect(decode({ handle: "h", bio: undefined })).toEqual({ handle: "h", bio: undefined })
-    const op = Atomic.add(Profile, { attributes: { handle: "h", bio: undefined } })
-    expect(op.data.attributes).toEqual({ handle: "h", bio: undefined })
-  })
-})
+      Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "profiles", attributes } }).data
+        .attributes;
+    expect(decode({ handle: "h" })).toEqual({ handle: "h" });
+    expect(decode({ handle: "h", bio: "b" })).toEqual({ handle: "h", bio: "b" });
+    expect(decode({ handle: "h", bio: undefined })).toEqual({ handle: "h", bio: undefined });
+    const op = Atomic.add(Profile, { attributes: { handle: "h", bio: undefined } });
+    expect(op.data.attributes).toEqual({ handle: "h", bio: undefined });
+  });
+});
