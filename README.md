@@ -1700,7 +1700,7 @@ Full design note, including the coverage ledger and what it would take to close 
 
 ## Examples
 
-Complete runnable examples (resources, errors, api, in-memory handlers) live in [`examples`](./examples). Each is a **standalone package** in the pnpm workspace — it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you can lift any one out as a starting point. Run them all from the repo root with `pnpm test`, or a single one with `pnpm --filter @thomasfosterau/effect-jsonapi-example-northwind test`.
+Complete runnable examples (resources, errors, api, in-memory handlers) live in [`examples`](./examples). Each is a **standalone package** in the pnpm workspace — it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you can lift any one out as a starting point. Run them all from the repo root with `vp run -r test:unit`, or a single one with `vp run --filter ./examples/northwind test:unit`.
 
 | Example | What it shows | Test |
 | --- | --- | --- |

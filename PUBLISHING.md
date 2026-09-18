@@ -6,9 +6,9 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 1. **Add a changeset with your change.** Run `pnpm changeset`, pick the bump (`patch` / `minor` / `major`) and write a user-facing summary, then commit the generated file alongside your change. (Changes that don't affect the published package — docs, CI, examples — need no changeset.)
 2. **Merge to `main`.** The [`release`](./.github/workflows/release.yml) workflow runs and, while changesets are pending, opens or updates a **"Version Packages"** PR that applies the version bump and rolls the changesets into `CHANGELOG.md`.
-3. **Merge the "Version Packages" PR.** With no changesets left, the workflow publishes the new version to npm (with provenance) via the npm CLI and trusted publishing, then tags the commit and creates the GitHub release.
+3. **Merge the "Version Packages" PR.** With no changesets left, the workflow publishes the new version to npm (with provenance) via `pnpm publish` and trusted publishing, then tags the commit and creates the GitHub release.
 
-The publish step uses the npm CLI (`npm publish`) rather than `pnpm publish` because pnpm does not yet support npm OIDC trusted publishing ([pnpm#9812](https://github.com/pnpm/pnpm/issues/9812)); `changeset tag` then emits the `New tag:` lines the Changesets action uses to push the tag and create the GitHub release.
+The publish step uses `pnpm publish`, not `npm publish`: pnpm 11 supports npm OIDC trusted publishing (it mints the short-lived token and the provenance statement itself — [pnpm#9812](https://github.com/pnpm/pnpm/issues/9812) is closed), and it is what rewrites the `catalog:peers` specifier in `package.json` into the `effect` peer range consumers actually see; npm would publish the literal `catalog:` protocol. `changeset tag` then emits the `New tag:` lines the Changesets action uses to push the tag and create the GitHub release.
 
 ## Maintainer setup (one-time)
 

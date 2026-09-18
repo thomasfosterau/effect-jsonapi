@@ -1,0 +1,6 @@
+# Commits `git blame` should skip. Enable once per clone with
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub's blame view reads this file automatically.)
+
+# style: reformat the whole repository with vp fmt (the Vite+ migration, #175)
+2f7ad038eb9b870f65e6169fe5ecfbff14740c60
