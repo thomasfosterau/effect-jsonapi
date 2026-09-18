@@ -68,8 +68,12 @@ export const assembled = Effect.gen(function* () {
  * if the assertion had no teeth every call above would pass vacuously.
  */
 declare const withRequirement: Effect.Effect<number, never, unknown>
+// The language-service plugin reports the same fact as its own
+// `missingEffectContext` diagnostic, which no `@ts-expect-error` covers.
+// @effect-diagnostics missingEffectContext:off
 // @ts-expect-error `assertNever` must reject a non-`never` requirement
 assertNever(withRequirement)
+// @effect-diagnostics missingEffectContext:error
 
 /**
  * The `params` schema must stay *typed*, not merely free of requirements.

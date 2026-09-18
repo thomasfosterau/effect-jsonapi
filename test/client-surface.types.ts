@@ -46,8 +46,13 @@ const calls = Effect.gen(function* () {
 
 // control: the client needs the `HttpClient` service…
 assertType<Effect.Effect<unknown, never, HttpClient.HttpClient>>(Client.make(Api))
-// @ts-expect-error -- …and cannot be built without it
+// …and cannot be built without it. The language-service plugin reports the
+// same fact as its own `missingEffectContext` diagnostic, which no
+// `@ts-expect-error` covers, so it is switched off for this one assertion.
+// @effect-diagnostics missingEffectContext:off
+// @ts-expect-error -- the requirement is not `never`
 assertType<Effect.Effect<unknown, never, never>>(Client.make(Api))
+// @effect-diagnostics missingEffectContext:error
 
 // ---------------------------------------------------------------------------
 // transform: the underlying client's channels survive

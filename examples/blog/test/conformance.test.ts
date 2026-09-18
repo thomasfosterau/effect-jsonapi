@@ -7,7 +7,7 @@
  * regression in the example, and a disappearing one means a fixed bug whose
  * entry should come off this list.
  */
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Effect } from "effect"
 import { Conformance } from "@thomasfosterau/effect-jsonapi"
 import { Api } from "../api.js"

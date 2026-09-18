@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Effect, Schema } from "effect"
 import * as Endpoint from "./Endpoint.js"
 import * as Handlers from "./Handlers.js"

@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test"
 import { Cause, Effect, Exit, Layer, Result, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiSchema, HttpApiTest } from "effect/unstable/httpapi"
@@ -12,6 +12,29 @@ import * as Query from "./Query.js"
 import * as Relationship from "./Relationship.js"
 import { make as Resource } from "./Resource.js"
 import { MEDIA_TYPE } from "./internal/media.js"
+
+/**
+ * Drops every `undefined` member of a payload's `attributes`. In-process — and
+ * over codec transports that preserve it — an explicit `undefined` is accepted
+ * for an optional attribute, but the resource's own schema takes the key
+ * absent, and under `exactOptionalPropertyTypes` the two spell differently.
+ */
+const definedAttributes = <A extends Record<string, unknown>>(
+  attributes: A
+): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
+  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+    readonly [K in keyof A]: Exclude<A[K], undefined>
+  }
+
+/**
+ * Applies a PATCH's `attributes` over the current ones. An absent member —
+ * or, in-process, an explicit `undefined` — leaves the current value; a plain
+ * spread would type the result as possibly-`undefined`.
+ */
+const patchAttributes = <A extends Record<string, unknown>>(
+  current: A,
+  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined
+): A => ({ ...current, ...definedAttributes(patch ?? {}) })
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -180,7 +203,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         Effect.map((article) => ({
           data: Article.make({
             ...article,
-            attributes: { ...article.attributes, ...payload.data.attributes }
+            attributes: patchAttributes(article.attributes, payload.data.attributes)
           })
         }))
       )

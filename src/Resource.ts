@@ -525,7 +525,7 @@ export const attribute = <
     readonly update?: Update
     readonly clearable?: Clearable
     readonly filter?: FilterDecl
-    readonly filterLiteral?: Schema.Codec<Literal, string>
+    readonly filterLiteral?: Schema.Codec<Literal, string> | undefined
     readonly sort?: Sortable
   }
 ): Attribute<Declare<S, FilterDecl, Sortable, Literal>, Resource, Create, Update, ResolveClearable<S, Clearable>> => {
@@ -605,7 +605,7 @@ export const readOnlyAttribute = <
     NotAlready<S, Sort.MarkerKey, Sortable>,
   options?: {
     readonly filter?: FilterDecl
-    readonly filterLiteral?: Schema.Codec<Literal, string>
+    readonly filterLiteral?: Schema.Codec<Literal, string> | undefined
     readonly sort?: Sortable
   }
 ): ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>> =>
@@ -2558,7 +2558,7 @@ export const make = <
      * `string` (so the wire stays spec-compliant); its decoded type becomes the
      * resource's id brand. Defaults to the auto-derived {@link Id} for `type`.
      */
-    readonly id?: IdSchema
+    readonly id?: IdSchema | undefined
     readonly attributes: Attributes
     readonly relationships?: Rels
     readonly meta?: Meta
@@ -3008,7 +3008,7 @@ export const extend = <
      *
      * @since 0.14.0
      */
-    readonly id?: IdSchema
+    readonly id?: IdSchema | undefined
     /**
      * Brand the *base's* id schema with this resource's type instead of minting
      * a fresh independent id, so the child id is a subtype of the base id.

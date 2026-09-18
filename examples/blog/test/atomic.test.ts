@@ -5,7 +5,7 @@
  * lid-based references, relationship operations (including on `paginated`
  * relationships) and all-or-nothing semantics.
  */
-import { describe, expect, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { ApiError, Atomic, Middleware } from "@thomasfosterau/effect-jsonapi"

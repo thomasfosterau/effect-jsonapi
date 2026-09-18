@@ -1,4 +1,5 @@
 {
-  "image": "mcr.microsoft.com/devcontainers/javascript-node",
-  "features": {}
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "features": {},
+  "postCreateCommand": "bash .claude/hooks/session-start.sh"
 }

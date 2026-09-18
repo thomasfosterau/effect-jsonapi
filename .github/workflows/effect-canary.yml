@@ -1,7 +1,7 @@
 name: Effect Canary
 
 # Runs the gate against the newest Effect *prerelease* (the "rc" npm dist-tag)
-# instead of the version pinned in package.json/pnpm-lock.yaml, so upstream
+# instead of the version pinned in the catalog / pnpm-lock.yaml, so upstream
 # breakage surfaces here on a schedule rather than in a consumer's build.
 #
 # Scheduled + manual only — this never runs on push or pull_request, so a red
@@ -25,62 +25,65 @@ jobs:
   canary:
     name: Typecheck, test & docgen against effect@rc
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write # to file/refresh the failure-notification issue
+    env:
+      NODE_OPTIONS: --max-old-space-size=2048
+      VITEST_MAX_WORKERS: 2
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Installs the pnpm version pinned by the package.json "packageManager"
-      # field. Must run before setup-node so its pnpm cache can find the store.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # Baseline install against the committed lockfile (--ignore-scripts for
+      # dependencies, then the repository's own `prepare`; see the action).
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
 
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.x
-          cache: pnpm
-
-      # Baseline install against the committed lockfile. --ignore-scripts
-      # blocks dependency lifecycle scripts (a common supply-chain attack
-      # vector) from running.
-      - name: Install dependencies
-        run: pnpm install --ignore-scripts
-
-      # Float every workspace package (root + examples/*) onto the newest
-      # Effect prerelease. The "rc" dist-tag is the pre-4.0 release-candidate
-      # line this repo currently tracks (see the "effect" devDependency in
-      # package.json) — switch this to "beta" or "next" if the project moves
-      # to tracking a different prerelease line.
+      # Float the whole workspace onto the newest Effect prerelease. Every
+      # package references `effect` through the strict catalog (a version
+      # literal anywhere else is rejected at install), so the float is one
+      # edit to the catalog entry followed by a non-frozen install — not a
+      # `pnpm add` per package. The peer range under `catalogs.peers` is left
+      # alone: it is what consumers see, not what this run tests. The "rc"
+      # dist-tag is the pre-4.0 release-candidate line this repo currently
+      # tracks (see the `effect` catalog entry) — switch this to "beta" or
+      # "next" if the project moves to tracking a different prerelease line.
+      # `minimumReleaseAge` is lifted for the run: the point of a canary is to
+      # see the newest publish, not the one-day-old one.
       - name: Install latest Effect prerelease
         run: |
-          pnpm add -D -w effect@rc --ignore-scripts
-          pnpm --filter "./examples/*" add effect@rc --ignore-scripts
+          set -euo pipefail
+          latest="$(pnpm view effect@rc version)"
+          echo "floating effect to ${latest}"
+          sed -i -E "s/^(  effect: ).*$/\1${latest}/" pnpm-workspace.yaml
+          grep -E "^  effect: ${latest}$" pnpm-workspace.yaml
+          pnpm install --no-frozen-lockfile --ignore-scripts --config.minimumReleaseAge=0
+          pnpm run prepare
 
       # The three checks most likely to catch an Effect API/behavior break.
       # Lint and formatting are deliberately skipped: they have nothing to do
       # with the Effect version and would only add unrelated noise to a
       # canary result. Each step runs even if an earlier one fails, so a
       # single run reports typecheck/test/docgen status independently.
-      - name: Type-check (incl. type-level tests)
+      - name: Type gates (incl. type-level tests, examples, emitted declarations)
         id: typecheck
         continue-on-error: true
-        run: pnpm run typecheck
+        run: vp run --concurrency-limit 2 check
 
       - name: Test
         id: test
         continue-on-error: true
-        run: pnpm test
+        run: vp run -r test:unit
 
       # Type-checks AND runs every JSDoc @example against the new Effect version.
       - name: Verify documentation examples (docgen)
         id: docgen
         continue-on-error: true
-        run: pnpm run docgen
+        run: vp run docgen
 
       - name: Open or refresh an issue if the canary is red
         if: |

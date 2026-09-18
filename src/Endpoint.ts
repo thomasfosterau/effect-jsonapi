@@ -152,11 +152,11 @@ export interface CommonOptions<Name extends string, Path extends `/${string}`, E
 }
 
 const queryConfig = (options?: {
-  readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number }
-  readonly fields?: boolean
-  readonly sort?: boolean | ReadonlyArray<string>
-  readonly page?: Schema.Struct.Fields
-  readonly filter?: Query.FilterOption
+  readonly include?: boolean | { readonly paths?: ReadonlyArray<string>; readonly depth?: number } | undefined
+  readonly fields?: boolean | undefined
+  readonly sort?: boolean | ReadonlyArray<string> | undefined
+  readonly page?: Schema.Struct.Fields | undefined
+  readonly filter?: Query.FilterOption | undefined
 }) => ({
   include: options?.include ?? false,
   fields: options?.fields === true,
@@ -377,6 +377,7 @@ export const get = <
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${resource.type}/:id`) as Path, {
     params: Schema.Struct({ id: resource.Id }),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     query: (options?.query ??
       Query.schema(
         resource,
@@ -580,6 +581,7 @@ export const list = <
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "list") as Name, (options?.path ?? `/${resource.type}`) as Path, {
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     query: (options?.query ??
       Query.schema(
         resource,
@@ -1129,6 +1131,7 @@ export const collection = <
   }
 ) =>
   HttpApiEndpoint.get(options.name as Name, options.path as Path, {
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     query: Query.schema(
       resources as ReadonlyArray<Resources[number]>,
       queryConfig(options) as {
@@ -1213,7 +1216,9 @@ export const polymorphic = <
   }
 ) =>
   HttpApiEndpoint.get((options?.name ?? "get") as Name, (options?.path ?? `/${family.type}/:id`) as Path, {
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     params: Schema.Struct({ id: family.Id }),
+    // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
     query: Query.schema(
       family.members as ReadonlyArray<Members[number]>,
       queryConfig(options) as {
@@ -1448,6 +1453,7 @@ export const related = <
     (options?.path ?? `/${resource.type}/:id/${name}`) as Path,
     {
       params: Schema.Struct({ id: resource.Id }),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
       query: Query.schema(
         target as Target<R, Name>,
         queryConfig(options) as {
@@ -1558,6 +1564,7 @@ export const getRelationship = <
     (options?.path ?? `/${resource.type}/:id/relationships/${name}`) as Path,
     {
       params: Schema.Struct({ id: resource.Id }),
+      // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
       query: Query.schema(
         target as Target<R, Name>,
         {

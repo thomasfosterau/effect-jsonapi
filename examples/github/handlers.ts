@@ -26,6 +26,29 @@ import {
 } from "./errors.js"
 import { Issue, IssueComment, Label, PullRequest, Repository, User } from "./resources.js"
 
+/**
+ * Drops every `undefined` member of a payload's `attributes`. In-process — and
+ * over codec transports that preserve it — an explicit `undefined` is accepted
+ * for an optional attribute, but the resource's own schema takes the key
+ * absent, and under `exactOptionalPropertyTypes` the two spell differently.
+ */
+const definedAttributes = <A extends Record<string, unknown>>(
+  attributes: A
+): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
+  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+    readonly [K in keyof A]: Exclude<A[K], undefined>
+  }
+
+/**
+ * Applies a PATCH's `attributes` over the current ones. An absent member —
+ * or, in-process, an explicit `undefined` — leaves the current value; a plain
+ * spread would type the result as possibly-`undefined`.
+ */
+const patchAttributes = <A extends Record<string, unknown>>(
+  current: A,
+  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined
+): A => ({ ...current, ...definedAttributes(patch ?? {}) })
+
 // ---------------------------------------------------------------------------
 // In-memory store
 // ---------------------------------------------------------------------------
@@ -446,7 +469,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       }
       const repository = Repository.make({
         id: Repository.Id.make(`${store.repositories.size + 1}`),
-        attributes: payload.data.attributes,
+        attributes: definedAttributes(payload.data.attributes),
         relationships: payload.data.relationships
       })
       store.repositories.set(repository.id, repository)
@@ -457,7 +480,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
         Effect.map((repository) => {
           const updated = Repository.make({
             ...repository,
-            attributes: { ...repository.attributes, ...payload.data.attributes },
+            attributes: patchAttributes(repository.attributes, payload.data.attributes),
             relationships: {
               owner: payload.data.relationships?.owner ?? repository.relationships!.owner
             }
@@ -550,7 +573,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       const id = Issue.Id.make(`${store.issues.size + 1}`)
       const issue = Issue.make({
         id,
-        attributes: payload.data.attributes,
+        attributes: definedAttributes(payload.data.attributes),
         relationships: {
           repository: payload.data.relationships.repository,
           author: payload.data.relationships.author,
@@ -570,7 +593,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           const relationships = issue.relationships!
           const updated = Issue.make({
             ...issue,
-            attributes: { ...issue.attributes, ...payload.data.attributes },
+            attributes: patchAttributes(issue.attributes, payload.data.attributes),
             relationships: {
               repository: payload.data.relationships?.repository ?? relationships.repository,
               author: payload.data.relationships?.author ?? relationships.author,

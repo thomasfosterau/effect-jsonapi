@@ -30,6 +30,29 @@ import {
 } from "./errors.js"
 import { Category, Customer, Employee, Order, OrderItem, Product, Shipper, Supplier, Territory } from "./resources.js"
 
+/**
+ * Drops every `undefined` member of a payload's `attributes`. In-process — and
+ * over codec transports that preserve it — an explicit `undefined` is accepted
+ * for an optional attribute, but the resource's own schema takes the key
+ * absent, and under `exactOptionalPropertyTypes` the two spell differently.
+ */
+const definedAttributes = <A extends Record<string, unknown>>(
+  attributes: A
+): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
+  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+    readonly [K in keyof A]: Exclude<A[K], undefined>
+  }
+
+/**
+ * Applies a PATCH's `attributes` over the current ones. An absent member —
+ * or, in-process, an explicit `undefined` — leaves the current value; a plain
+ * spread would type the result as possibly-`undefined`.
+ */
+const patchAttributes = <A extends Record<string, unknown>>(
+  current: A,
+  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined
+): A => ({ ...current, ...definedAttributes(patch ?? {}) })
+
 // ---------------------------------------------------------------------------
 // In-memory store — a slice of the classic Northwind dataset
 // ---------------------------------------------------------------------------
@@ -608,7 +631,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
         yield* loadSupplier(payload.data.relationships.supplier.data.id)
         const product = Product.make({
           id: Product.Id.make(`${store.products.size + 1}`),
-          attributes: payload.data.attributes,
+          attributes: definedAttributes(payload.data.attributes),
           relationships: payload.data.relationships
         })
         store.products.set(product.id, product)
@@ -620,7 +643,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
         Effect.map((product) => {
           const updated = Product.make({
             ...product,
-            attributes: { ...product.attributes, ...payload.data.attributes },
+            attributes: patchAttributes(product.attributes, payload.data.attributes),
             relationships: {
               category: payload.data.relationships?.category ?? product.relationships!.category,
               supplier: payload.data.relationships?.supplier ?? product.relationships!.supplier
@@ -856,7 +879,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         const id = Order.Id.make(`${10248 + store.orders.size}`)
         const order = Order.make({
           id,
-          attributes: payload.data.attributes,
+          attributes: definedAttributes(payload.data.attributes),
           relationships: {
             customer: payload.data.relationships.customer,
             employee: payload.data.relationships.employee,
@@ -877,7 +900,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
           const relationships = order.relationships!
           const updated = Order.make({
             ...order,
-            attributes: { ...order.attributes, ...payload.data.attributes },
+            attributes: patchAttributes(order.attributes, payload.data.attributes),
             relationships: {
               customer: payload.data.relationships?.customer ?? relationships.customer,
               employee: payload.data.relationships?.employee ?? relationships.employee,

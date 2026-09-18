@@ -223,7 +223,7 @@ export const contentTypeIsAcceptable = (header: string | undefined, options?: Ne
  * JSON:API §5: the server MUST respond with 406 if every instance of the
  * JSON:API media type in `Accept` carries media type parameters other than
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
- * `*​/*` or `application/*` always satisfies the rule.
+ * `*\/*` or `application/*` always satisfies the rule.
  *
  * A `q` parameter is a weight on the `Accept` entry (RFC 9110 §12.4.2), not a
  * media type parameter, so it never counts against the ext/profile rule. An

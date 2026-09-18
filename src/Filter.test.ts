@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test"
 import { Schema, SchemaGetter } from "effect"
 import * as Filter from "./Filter.js"
 import * as Relationship from "./Relationship.js"

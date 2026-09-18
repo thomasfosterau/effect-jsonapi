@@ -1,5 +1,10 @@
 name: CI
 
+# ONE job, ONE required check: the pipeline's task graph lives in
+# vite.config.ts (the root `check` aggregate), not in GitHub Actions `needs:`.
+# Copied in shape from effect-drizzle-ext (the library reference); the docgen
+# step is this repository's own contribution to the template.
+
 on:
   push:
     branches: [main]
@@ -8,65 +13,59 @@ on:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # No permissions by default; the single job grants only read access.
 permissions: {}
 
 jobs:
-  check:
-    name: Lint, type-check, build & test
+  ci:
+    name: Format, lint, type-check, test, build & docgen
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: [20.x, 22.x]
+    env:
+      # A modest ceiling for every Node process in the pipeline. NODE_OPTIONS
+      # is inherited by every child, including each vitest fork.
+      NODE_OPTIONS: --max-old-space-size=2048
+      VITEST_MAX_WORKERS: 2
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Installs the pnpm version pinned by the package.json "packageManager"
-      # field. Must run before setup-node so its pnpm cache can find the store.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
 
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: Restore the Vite+ task cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: pnpm
+          path: node_modules/.vite/task-cache
+          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            vp-task-v1-${{ runner.os }}-
 
-      # --ignore-scripts blocks dependency lifecycle scripts (a common
-      # supply-chain attack vector) from running in CI. --frozen-lockfile
-      # fails if pnpm-lock.yaml is out of sync with the manifests.
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Format and lint
+        run: vp check
 
-      - name: Lint
-        run: pnpm run lint
+      # The sources, the colocated and type-level tests, every example, and the
+      # emitted declarations (which builds `dist/` first — see
+      # test/emitted/requirements.types.ts for why consumers see something the
+      # source-resolved check does not).
+      - name: Type gates (sources, type-level tests, examples, emitted declarations)
+        run: vp run --concurrency-limit 2 check
 
-      - name: Check formatting
-        run: pnpm run format:check
-
-      - name: Type-check (incl. type-level tests)
-        run: pnpm run typecheck
+      - name: Unit tests
+        run: vp run -r test:unit
 
       - name: Build
-        run: pnpm run build
-
-      # The other type-level tests resolve the package to ./src; this one
-      # resolves it to the built ./dist/index.d.ts, which is what consumers
-      # actually see. See test/emitted/requirements.types.ts.
-      - name: Type-check emitted declarations
-        run: pnpm run typecheck:dist
-
-      - name: Test
-        run: pnpm test
+        run: vp run build
 
       # Type-checks AND runs every JSDoc @example, and generates the API docs.
       - name: Verify documentation examples (docgen)
-        run: pnpm run docgen
+        run: vp run docgen
+
+      - name: Audit
+        run: pnpm audit --audit-level high

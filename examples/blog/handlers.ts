@@ -19,6 +19,29 @@ import { Api } from "./api.js"
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js"
 import { Article, Comment, Person, Tag } from "./resources.js"
 
+/**
+ * Drops every `undefined` member of a payload's `attributes`. In-process — and
+ * over codec transports that preserve it — an explicit `undefined` is accepted
+ * for an optional attribute, but the resource's own schema takes the key
+ * absent, and under `exactOptionalPropertyTypes` the two spell differently.
+ */
+const definedAttributes = <A extends Record<string, unknown>>(
+  attributes: A
+): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
+  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+    readonly [K in keyof A]: Exclude<A[K], undefined>
+  }
+
+/**
+ * Applies a PATCH's `attributes` over the current ones. An absent member —
+ * or, in-process, an explicit `undefined` — leaves the current value; a plain
+ * spread would type the result as possibly-`undefined`.
+ */
+const patchAttributes = <A extends Record<string, unknown>>(
+  current: A,
+  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined
+): A => ({ ...current, ...definedAttributes(patch ?? {}) })
+
 // ---------------------------------------------------------------------------
 // In-memory store
 // ---------------------------------------------------------------------------
@@ -186,7 +209,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           const relationships = article.relationships!
           const updated = Article.make({
             ...article,
-            attributes: { ...article.attributes, ...payload.data.attributes },
+            attributes: patchAttributes(article.attributes, payload.data.attributes),
             relationships: {
               author: payload.data.relationships?.author ?? relationships.author,
               tags: payload.data.relationships?.tags ?? relationships.tags,
@@ -502,7 +525,7 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
           const resolved = lids.resolveLinkage(Article, update.data.relationships)
           const updated = Article.make({
             ...article,
-            attributes: { ...article.attributes, ...update.data.attributes },
+            attributes: patchAttributes(article.attributes, update.data.attributes),
             relationships: { ...article.relationships!, ...resolved }
           })
           draft.articles.set(updated.id, updated)
@@ -537,7 +560,7 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
           const resolved = lids.resolveLinkage(Comment, update.data.relationships)
           const updated = Comment.make({
             ...comment,
-            attributes: { ...comment.attributes, ...update.data.attributes },
+            attributes: patchAttributes(comment.attributes, update.data.attributes),
             relationships: { ...comment.relationships!, ...resolved }
           })
           draft.comments.set(updated.id, updated)

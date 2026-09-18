@@ -1,24 +1,18 @@
 {
+  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "lib": ["ES2022"],
-    "moduleResolution": "NodeNext",
-    "declaration": true,
-    "declarationMap": false,
-    "sourceMap": false,
-    "outDir": "./dist",
-    "rootDir": "./src",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noImplicitReturns": true,
-    "noFallthroughCasesInSwitch": true
+    "types": ["node"],
+    // The sources, their colocated tests and the type-level tests under
+    // `test/*.types.ts` all resolve the package name to `./src`, exactly as
+    // the vitest alias does — so a `@ts-expect-error` there asserts what
+    // TypeScript infers from source. `test/emitted` is the one exception:
+    // it asserts the EMITTED declarations through tsconfig.dist.json.
+    "paths": {
+      "@thomasfosterau/effect-jsonapi": ["./src/index.ts"],
+      "@thomasfosterau/effect-jsonapi/schema": ["./src/schema.ts"]
+    }
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "include": ["src", "test", "vite.config.ts"],
+  "exclude": ["node_modules", "dist", "test/emitted"]
 }

@@ -590,14 +590,14 @@ export const buildIncluded = <Included extends ResourceValue, F extends Transfor
   primary: ReadonlyArray<ResourceValue>,
   included: ReadonlyArray<Included>,
   options?: {
-    readonly checkLinkage?: boolean
+    readonly checkLinkage?: boolean | undefined
     /**
      * Applied to every deduplicated included resource, after dedup and before
      * the full-linkage check.
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
+    readonly onResource?: ResourceTransform<F> | undefined
   }
 ): ReadonlyArray<Transformed<F, Included>> => {
   // Dedupe by (type, id)
@@ -1092,13 +1092,13 @@ const build = (
   primary: ReadonlyArray<ResourceValue>,
   options:
     | {
-        readonly included?: ReadonlyArray<ResourceValue>
+        readonly included?: ReadonlyArray<ResourceValue> | undefined
         readonly meta?: MetaValue
         readonly jsonapi?: JsonApiObjectValue
         readonly self?: string
         readonly query?: string | ReadonlyArray<Pair>
         readonly links?: LinksValue
-        readonly checkLinkage?: boolean
+        readonly checkLinkage?: boolean | undefined
       }
     | undefined,
   onResource: ResourceTransform<TransformLambda> | undefined
@@ -1228,7 +1228,7 @@ export const data = <
 >(
   resource: R,
   options?: {
-    readonly included?: ReadonlyArray<Included>
+    readonly included?: ReadonlyArray<Included> | undefined
     readonly meta?: M
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
     readonly jsonapi?: J
@@ -1241,9 +1241,9 @@ export const data = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
+    readonly onResource?: ResourceTransform<F> | undefined
     /** Disable the full-linkage check (it is on by default). */
-    readonly checkLinkage?: boolean
+    readonly checkLinkage?: boolean | undefined
   }
 ): DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
@@ -1332,7 +1332,7 @@ export const collection = <
 >(
   resources: ReadonlyArray<R>,
   options?: {
-    readonly included?: ReadonlyArray<Included>
+    readonly included?: ReadonlyArray<Included> | undefined
     readonly meta?: M
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
     readonly jsonapi?: J
@@ -1353,9 +1353,9 @@ export const collection = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
+    readonly onResource?: ResourceTransform<F> | undefined
     /** Disable the full-linkage check (it is on by default). */
-    readonly checkLinkage?: boolean
+    readonly checkLinkage?: boolean | undefined
   }
 ): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
@@ -1538,7 +1538,7 @@ export const linkage = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
+    readonly onResource?: ResourceTransform<F> | undefined
   }
 ): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J> => {
   const links: LinksValue | undefined =

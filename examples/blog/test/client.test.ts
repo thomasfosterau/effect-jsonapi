@@ -8,7 +8,7 @@
  * façade synthesises without a server at all, all reduced to one message by one
  * accessor.
  */
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Effect, Option } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { HttpApiClient } from "effect/unstable/httpapi"

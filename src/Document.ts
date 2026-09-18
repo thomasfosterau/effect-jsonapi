@@ -508,8 +508,8 @@ export const DataDocument = <
 >(
   data: R,
   options?: {
-    readonly included?: Included
-    readonly meta?: M
+    readonly included?: Included | undefined
+    readonly meta?: M | undefined
   }
 ): DataDocument<R, Included, M> =>
   Schema.Struct({
@@ -584,8 +584,8 @@ export const CollectionDocument = <
 >(
   resource: R,
   options?: {
-    readonly included?: Included
-    readonly meta?: M
+    readonly included?: Included | undefined
+    readonly meta?: M | undefined
   }
 ): CollectionDocument<R, Included, M> =>
   Schema.Struct({
@@ -640,7 +640,7 @@ export interface LinkageDocument<D extends Schema.Top, M extends Schema.Top = ty
 export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typeof AnyMeta>(
   data: D,
   options?: {
-    readonly meta?: M
+    readonly meta?: M | undefined
   }
 ): LinkageDocument<D, M> =>
   Schema.Struct({
@@ -743,9 +743,9 @@ export const Document = <
 >(
   resource: R,
   options?: {
-    readonly included?: Included
-    readonly meta?: M
-    readonly error?: E
+    readonly included?: Included | undefined
+    readonly meta?: M | undefined
+    readonly error?: E | undefined
   }
 ): Document<R, Included, M, E> =>
   Schema.Union([

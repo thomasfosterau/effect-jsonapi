@@ -1125,7 +1125,7 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted — `?include=a,b` and `?include=a&include=b`
    * — and decode to the same set.
    */
-  readonly include?: IncludeOption<R>
+  readonly include?: IncludeOption<R> | undefined
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for this resource and its
    * direct relationship targets. Unknown field names produce a 400.
@@ -1133,7 +1133,7 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
    * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
    */
-  readonly fields?: boolean
+  readonly fields?: boolean | undefined
   /**
    * Enable `?sort=` — `true` allows sorting on every attribute; pass an array
    * of attribute names to restrict the sortable set. Unknown fields produce a 400.
@@ -1141,12 +1141,12 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted — `?sort=-createdAt,title` and
    * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>> | undefined
   /**
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
    * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`).
    */
-  readonly page?: Schema.Struct.Fields
+  readonly page?: Schema.Struct.Fields | undefined
   /**
    * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
    * (`docs/filter-grammar.md`) over the resource's declared filterable fields
@@ -1160,7 +1160,7 @@ export interface Options<R extends Any> {
    * JSON:API has no family for: each key becomes `filter[<key>]` and its
    * schema must decode from a string.
    */
-  readonly filter?: FilterOption
+  readonly filter?: FilterOption | undefined
 }
 
 /**

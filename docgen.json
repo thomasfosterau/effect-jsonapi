@@ -1,14 +1,24 @@
 {
   "$schema": "./node_modules/@effect/docgen/schema.json",
-  "exclude": ["src/**/*.test.ts", "src/internal/**/*.ts", "src/index.ts", "src/schema.ts"],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/internal/**/*.ts",
+    "src/index.ts",
+    "src/schema.ts"
+  ],
   "parseCompilerOptions": {
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "target": "es2022",
-    "lib": ["es2022"],
+    "lib": [
+      "es2022"
+    ],
     "strict": true,
     "skipLibCheck": true,
-    "exactOptionalPropertyTypes": false
+    "exactOptionalPropertyTypes": false,
+    "types": [
+      "node"
+    ]
   },
   "examplesCompilerOptions": {
     "noEmit": true,
@@ -17,7 +27,12 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "target": "es2022",
-    "lib": ["es2022"],
-    "exactOptionalPropertyTypes": false
+    "lib": [
+      "es2022"
+    ],
+    "exactOptionalPropertyTypes": false,
+    "types": [
+      "node"
+    ]
   }
 }

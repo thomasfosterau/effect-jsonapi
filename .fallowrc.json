@@ -1,0 +1,43 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+  "entry": [
+    "src/index.ts",
+    "src/schema.ts",
+    "src/**/*.test.ts",
+    "test/**/*.test.ts",
+    "test/**/*.types.ts",
+    "test/fixtures/*.mjs",
+    "examples/*/**/*.ts",
+    "**/vite.config.ts"
+  ],
+  "ignorePatterns": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "docs/**"],
+  "ignoreDependencies": [
+    "@types/node",
+    "effect-solutions",
+    "@effect/docgen",
+    "@effect/tsgo",
+    "@effect/language-service",
+    "@typescript/native",
+    "typescript",
+    "tsx",
+    "vite",
+    "vitest",
+    "vite-plus",
+    "@changesets/cli",
+    "fallow"
+  ],
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "warn",
+    "unused-types": "warn",
+    "unused-dependencies": "error",
+    "unused-dev-dependencies": "warn",
+    "unused-enum-members": "error",
+    "unused-class-members": "warn",
+    "unresolved-imports": "error",
+    "unlisted-dependencies": "error",
+    "duplicate-exports": "error",
+    "circular-dependencies": "warn",
+    "stale-suppressions": "warn"
+  }
+}

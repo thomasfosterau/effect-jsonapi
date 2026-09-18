@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test"
 import { Effect, Schema } from "effect"
 import { UrlParams } from "effect/unstable/http"
 import * as ApiError from "./ApiError.js"

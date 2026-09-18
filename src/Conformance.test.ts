@@ -6,7 +6,7 @@
  * flag. A kit that reports nothing against a real server is only trustworthy
  * once it has been shown to report the right things against a broken one.
  */
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "vite-plus/test"
 import { Effect, Layer, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"

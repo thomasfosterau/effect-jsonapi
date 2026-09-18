@@ -308,9 +308,9 @@ export const decodeFilter = (fields: FieldCodecs, input: { readonly [key: string
   // Group form: build every node, then wire them up.
   interface Built {
     readonly kind: "group" | "condition"
-    readonly node?: Node
-    readonly conjunction?: { readonly key: string; readonly value: string }
-    readonly memberOf?: { readonly key: string; readonly value: string }
+    readonly node?: Node | undefined
+    readonly conjunction?: { readonly key: string; readonly value: string } | undefined
+    readonly memberOf?: { readonly key: string; readonly value: string } | undefined
   }
   const built = new Map<string, Built>()
   for (const [id, draft] of drafts) {

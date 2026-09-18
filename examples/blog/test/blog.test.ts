@@ -3,7 +3,7 @@
  * encoding → routing → middleware → handler → response decoding) through the
  * in-memory `HttpApiTest` client.
  */
-import { describe, expect, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test"
 import { Cause, Effect, Exit, Result, Schema } from "effect"
 import { HttpApiTest, OpenApi } from "effect/unstable/httpapi"
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi"

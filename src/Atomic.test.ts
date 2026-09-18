@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest"
+import { describe, expect, expectTypeOf, it } from "vite-plus/test"
 import { Match, Schema } from "effect"
 import * as Atomic from "./Atomic.js"
 import * as Middleware from "./Middleware.js"
