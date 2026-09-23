@@ -79,7 +79,9 @@
 import { Schema } from "effect";
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi";
 import * as Atomic from "./Atomic.js";
-import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument } from "./Document.js";
+import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument, wire } from "./Document.js";
+import type { WireSchema } from "./Document.js";
+import * as FlatQuery from "./FlatQuery.js";
 import * as Idempotency from "./Idempotency.js";
 import { isSurface } from "./Include.js";
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
@@ -3352,4 +3354,227 @@ export const resource = <
     GMeta,
     GIdem
   >;
+};
+
+// ---------------------------------------------------------------------------
+// The flat contract: string-link documents and the §7.4 related endpoint
+// ---------------------------------------------------------------------------
+
+/**
+ * Options of {@link ResourceDocument}, {@link CollectionDocument} and
+ * {@link RelatedDocument}.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatDocumentOptions<Included extends Schema.Top> {
+  /**
+   * The union of resource schemas an `?include=` walk over this endpoint can
+   * hoist (`Include.make(...).included`), declared so the compound `included`
+   * member survives the success-schema encode — without it the response
+   * encoder strips whatever the handler resolved.
+   */
+  readonly included?: Included | undefined;
+}
+
+/**
+ * The `success:` document of a flat `get` / `create` / `update`: a
+ * single-resource data document over the **wire** form of `resource`
+ * (`Document.wire` — string links, since the assembler stringifies every
+ * `URL` before the document leaves the server), annotated with the JSON:API
+ * media type. `data` is non-null: a missing resource is a 404, never
+ * `200 { data: null }`.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { HttpApiEndpoint } from "effect/unstable/httpapi"
+ * import { Endpoint, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
+ *
+ * const latest = HttpApiEndpoint.get("latest", "/articles/latest", {
+ *   success: Endpoint.ResourceDocument(Article)
+ * })
+ * console.log(latest.path)
+ * // → /articles/latest
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const ResourceDocument = <
+  S extends Schema.Top,
+  Included extends Schema.Top = typeof Schema.Never,
+>(
+  resource: S,
+  options?: FlatDocumentOptions<Included>,
+): DataDocument<WireSchema<S>, WireSchema<Included>> =>
+  asJsonApi(
+    DataDocument(
+      wire(resource),
+      options?.included === undefined ? undefined : { included: wire(options.included) },
+    ),
+  ) as DataDocument<WireSchema<S>, WireSchema<Included>>;
+
+/**
+ * The `success:` document of a §7.4 related-resource fetch of a **to-one**
+ * relationship: {@link ResourceDocument} whose `data` may be `null` (empty
+ * linkage).
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const RelatedDocument = <
+  S extends Schema.Top,
+  Included extends Schema.Top = typeof Schema.Never,
+>(
+  resource: S,
+  options?: FlatDocumentOptions<Included>,
+): DataDocument<Schema.NullOr<WireSchema<S>>, WireSchema<Included>> =>
+  asJsonApi(
+    DataDocument(
+      Schema.NullOr(wire(resource)),
+      options?.included === undefined ? undefined : { included: wire(options.included) },
+    ),
+  ) as DataDocument<Schema.NullOr<WireSchema<S>>, WireSchema<Included>>;
+
+/**
+ * The `success:` document of a flat `list` (or a to-many related fetch): a
+ * collection document over the wire form of `resource`, annotated with the
+ * JSON:API media type. A list endpoint that resolves an `?include=` walk
+ * MUST pass `included`, or the walk silently returns nothing.
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const FlatCollectionDocument = <
+  S extends Schema.Top,
+  Included extends Schema.Top = typeof Schema.Never,
+>(
+  resource: S,
+  options?: FlatDocumentOptions<Included>,
+): CollectionDocument<WireSchema<S>, WireSchema<Included>> =>
+  asJsonApi(
+    CollectionDocument(
+      wire(resource),
+      options?.included === undefined ? undefined : { included: wire(options.included) },
+    ),
+  ) as CollectionDocument<WireSchema<S>, WireSchema<Included>>;
+
+/**
+ * The endpoint (and handler) name of a flat §7.4 related-resource fetch —
+ * `related_<key>`, collision-free with the CRUD and §8 operation names.
+ *
+ * @since 0.16.0
+ * @category utils
+ */
+export const relatedName = <const Key extends string>(key: Key): `related_${Key}` =>
+  `related_${key}`;
+
+/**
+ * The `get` query of a flat endpoint: the open `?include=` parameter and
+ * nothing else.
+ *
+ * @since 0.16.0
+ * @category schemas
+ */
+export const FlatGetQuery: Schema.Struct<typeof Query.includeListField> = Schema.Struct(
+  Query.includeListField,
+);
+
+/**
+ * Options of {@link flatRelated}.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatRelatedOptions<Key extends string> {
+  /** The relationship key: the field under `relationships`, and the path segment. */
+  readonly key: Key;
+  readonly cardinality: "one" | "many";
+  /** The parent family's id schema, validating the `:id` path param. */
+  readonly idSchema: Schema.Top;
+  /** The related resource schema (a concrete schema, or a union for polymorphic refs). */
+  readonly target: Schema.Top;
+  /**
+   * To-many only: the flat page-cursor struct, bracketed on the wire.
+   * Defaults to `FlatQuery.pagination({ maxLimit: 100 })`.
+   */
+  readonly query?: Query.FlatListStruct | undefined;
+  /**
+   * To-one only: the `included` union an `?include=` walk over the related
+   * resource can hoist. Omit when the relationship supports no includes —
+   * the endpoint then carries no `include` parameter at all.
+   */
+  readonly included?: Schema.Top | undefined;
+}
+
+/**
+ * A flat JSON:API §7.4 related-resource fetch endpoint for one declared
+ * relationship, at `/:id/<key>` (relative — add it to the family's group,
+ * which prefixes the path) and named {@link relatedName}: a to-many
+ * relationship answers a paginated collection document
+ * ({@link FlatCollectionDocument}, `page[…]` query), a to-one the nullable
+ * {@link RelatedDocument}, with the open `?include=` when `included` is
+ * declared.
+ *
+ * The package-native counterpart, deriving everything from the relationship
+ * declaration, is {@link related}.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { HttpApiGroup } from "effect/unstable/httpapi"
+ * import { Endpoint, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * const author = Endpoint.flatRelated({
+ *   key: "author",
+ *   cardinality: "one",
+ *   idSchema: Article.Id,
+ *   target: Person
+ * })
+ * console.log(author.identifier, author.path)
+ * // → related_author /:id/author
+ *
+ * const group = HttpApiGroup.make("articles").add(author).prefix("/articles")
+ * console.log(Object.keys(group.endpoints))
+ * // → [ "related_author" ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const flatRelated = <const Key extends string>(options: FlatRelatedOptions<Key>) => {
+  const path = `/:id/${options.key}` as const;
+  const name = relatedName(options.key);
+  const params = { id: options.idSchema };
+  if (options.cardinality === "many") {
+    return HttpApiEndpoint.get(name, path, {
+      params,
+      query: Query.flatList(
+        (options.query ??
+          Schema.Struct(FlatQuery.pagination({ maxLimit: 100 }))) as Query.FlatListStruct,
+        { include: false },
+      ),
+      success: FlatCollectionDocument(options.target),
+    });
+  }
+  if (options.included === undefined) {
+    return HttpApiEndpoint.get(name, path, {
+      params,
+      success: RelatedDocument(options.target),
+    });
+  }
+  return HttpApiEndpoint.get(name, path, {
+    params,
+    query: FlatGetQuery,
+    success: RelatedDocument(options.target, { included: options.included }),
+  });
 };

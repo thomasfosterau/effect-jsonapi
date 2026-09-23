@@ -26,6 +26,40 @@
     "@changesets/cli",
     "fallow"
   ],
+  "ignoreExports": [
+    {
+      "file": "src/Assemble.ts",
+      "exports": ["CollectionDocument", "Options", "Ref", "collection", "resource"]
+    },
+    {
+      "file": "src/Document.ts",
+      "exports": ["Wire"]
+    },
+    {
+      "file": "src/FlatQuery.ts",
+      "exports": ["suppliedValue"]
+    },
+    {
+      "file": "src/Negotiation.ts",
+      "exports": ["Options", "errorResponse", "make"]
+    },
+    {
+      "file": "src/Registry.ts",
+      "exports": ["Family", "Options", "layer"]
+    },
+    {
+      "file": "src/ResourceHandlers.ts",
+      "exports": ["Config", "make"]
+    },
+    {
+      "file": "src/ServerErrors.ts",
+      "exports": ["ErrorDocument", "Forbidden", "errorResponse", "pathToJsonPointer"]
+    },
+    {
+      "file": "src/internal/media.ts",
+      "exports": ["parseMediaType"]
+    }
+  ],
   "rules": {
     "unused-files": "error",
     "unused-exports": "warn",

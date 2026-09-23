@@ -761,3 +761,192 @@ export const Document = <
     ErrorDocument(options?.error),
     MetaDocument(options?.meta),
   ]);
+
+// ---------------------------------------------------------------------------
+// Wire form — string links
+// ---------------------------------------------------------------------------
+
+/**
+ * `T` with every `URL`-typed link value replaced by a plain `string`,
+ * recursively — the *wire* form of a resource whose links a server builds as
+ * `URL`s internally ("URL internal, string on the wire").
+ *
+ * `Date` values, branded ids (`string & Brand<…>` — an object-flavoured
+ * intersection that must not fall into the mapped-object branch) and
+ * array / object mutability and optionality are all preserved, so wire types
+ * stay assignable wherever the model types were.
+ *
+ * @since 0.16.0
+ * @category type-level
+ */
+export type Wire<T> = T extends URL
+  ? string
+  : T extends Date
+    ? T
+    : T extends string
+      ? T
+      : T extends Array<infer E>
+        ? Array<Wire<E>>
+        : T extends ReadonlyArray<infer E>
+          ? ReadonlyArray<Wire<E>>
+          : T extends object
+            ? { [K in keyof T]: Wire<T[K]> }
+            : T;
+
+/**
+ * The schema {@link wire} returns: `S` with its links as strings, on both
+ * sides — a plain codec whose `Type` is `Wire<S["Type"]>`.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface WireSchema<S extends Schema.Top> extends Schema.Codec<
+  Wire<S["Type"]>,
+  Wire<S["Encoded"]>,
+  S["DecodingServices"],
+  S["EncodingServices"]
+> {}
+
+const isStructLike = (
+  schema: unknown,
+): schema is Schema.Top & { readonly fields: { readonly [key: string]: Schema.Top } } =>
+  Schema.isSchema(schema) &&
+  typeof (schema as { readonly fields?: unknown }).fields === "object" &&
+  (schema as { readonly fields?: unknown }).fields !== null;
+
+const isUnionLike = (
+  schema: unknown,
+): schema is Schema.Top & { readonly members: ReadonlyArray<Schema.Top> } =>
+  Schema.isSchema(schema) && Array.isArray((schema as { readonly members?: unknown }).members);
+
+/** The `_tag` of a schema's AST node, when it exposes one. */
+const astTag = (schema: Schema.Top): string | undefined =>
+  (schema as { readonly ast?: { readonly _tag?: string } }).ast?._tag;
+
+/**
+ * Whether a struct field is declared optional — `Schema.optionalKey(S)` or
+ * `Schema.optional(S)`; both stamp `isOptional` on the field's AST context,
+ * the only marker that distinguishes `optionalKey(Link)` from the `Link`
+ * union it wraps (both report `_tag: "Union"`).
+ */
+const isOptionalField = (schema: Schema.Top): boolean =>
+  (schema as { readonly ast?: { readonly context?: { readonly isOptional?: boolean } } }).ast
+    ?.context?.isOptional === true;
+
+/**
+ * Splits a struct field into its inner schema and the re-wrapper that
+ * restores its optionality. `Schema.optionalKey(S)` exposes `S` as
+ * `.schema`; `Schema.optional(S)` is `optionalKey(UndefinedOr(S))` and
+ * exposes the union — hence the explicit `Undefined`-member check rather
+ * than blindly taking `members[0]`, which would mistake a genuine union (the
+ * package's `Link`) for that wrapper.
+ */
+const splitOptionality = (
+  schema: Schema.Top,
+): readonly [Schema.Top, (rebuilt: Schema.Top) => Schema.Top] => {
+  const identity = (rebuilt: Schema.Top): Schema.Top => rebuilt;
+  if (!isOptionalField(schema)) return [schema, identity];
+  const inner = (schema as { readonly schema?: unknown }).schema;
+  if (!Schema.isSchema(inner)) return [schema, identity];
+  if (isUnionLike(inner) && inner.members.some((m) => astTag(m) === "Undefined")) {
+    const concrete = inner.members.find((m) => astTag(m) !== "Undefined");
+    if (concrete !== undefined) return [concrete, (rebuilt) => Schema.optional(rebuilt)];
+  }
+  return [inner, (rebuilt) => Schema.optionalKey(rebuilt)];
+};
+
+/** One link member forced to a wire string, preserving its optionality. */
+const wireLinkField = (field: Schema.Top): Schema.Top => {
+  const [inner, rewrap] = splitOptionality(field);
+  return astTag(inner) === "String" ? field : rewrap(Schema.String);
+};
+
+/**
+ * A `links` block rebuilt member by member (so `self` *and* `related` both
+ * survive, each keeping its own optionality) with every member a wire string.
+ */
+const wireLinkBlock = (links: Schema.Top): Schema.Top => {
+  const [inner, rewrap] = splitOptionality(links);
+  if (!isStructLike(inner)) return links;
+  return rewrap(
+    Schema.Struct(
+      Object.fromEntries(
+        Object.entries(inner.fields).map(([key, field]) => [key, wireLinkField(field)]),
+      ),
+    ),
+  );
+};
+
+/** A relationship object (`{ data, links, meta }`) with its `links` block wired. */
+const wireRelationship = (relationship: Schema.Top): Schema.Top => {
+  const [inner, rewrap] = splitOptionality(relationship);
+  const links = isStructLike(inner) ? inner.fields["links"] : undefined;
+  if (links === undefined || !isStructLike(inner)) return relationship;
+  return rewrap(Schema.Struct({ ...inner.fields, links: wireLinkBlock(links) }));
+};
+
+/**
+ * The wire variant of a resource schema: `links.self` and every
+ * relationship's `links.related` (and `self`) become plain strings — the
+ * shape a server emits once it has stringified the `URL`s it built
+ * internally, and therefore the shape its endpoints' `success:` documents
+ * must declare, or the response encoder rejects every document carrying a
+ * link.
+ *
+ * Only the link fields change: attributes, ids, `Date` codecs and the
+ * optionality of every member are untouched, and a union (a polymorphic
+ * `included` whitelist) wires each member. A schema that is not a struct
+ * passes through unchanged.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString }
+ * })
+ *
+ * // `Resource.make` declares `links.self` as `URL | string`; on the wire it is a string
+ * const Wire = Document.wire(Article)
+ * const decoded = Schema.decodeUnknownSync(Wire)({
+ *   type: "articles",
+ *   id: "1",
+ *   attributes: { title: "Hi" },
+ *   links: { self: "https://example.test/articles/1" }
+ * })
+ * console.log(typeof decoded.links?.self)
+ * // → string
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const wire = <S extends Schema.Top>(schema: S): WireSchema<S> => {
+  // The casts are the honest assertion this function makes: the rebuilt
+  // schema differs from `S` only in its link fields, which `Wire` mirrors at
+  // the type level.
+  if (isUnionLike(schema)) {
+    return Schema.Union(schema.members.map(wire)) as unknown as WireSchema<S>;
+  }
+  if (!isStructLike(schema)) return schema as unknown as WireSchema<S>;
+  const fields: { [key: string]: Schema.Top } = { ...schema.fields };
+  // `Resource.make` declares both blocks with `Schema.optionalKey`, so each is
+  // unwrapped before its members are reachable and re-wrapped after.
+  const links = fields["links"];
+  if (links !== undefined) fields["links"] = wireLinkBlock(links);
+  const relationships = fields["relationships"];
+  if (relationships !== undefined) {
+    const [inner, rewrap] = splitOptionality(relationships);
+    if (isStructLike(inner)) {
+      fields["relationships"] = rewrap(
+        Schema.Struct(
+          Object.fromEntries(
+            Object.entries(inner.fields).map(([key, field]) => [key, wireRelationship(field)]),
+          ),
+        ),
+      );
+    }
+  }
+  return Schema.Struct(fields) as unknown as WireSchema<S>;
+};
