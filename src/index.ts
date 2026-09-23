@@ -77,8 +77,11 @@ export * as Assemble from "./Assemble.js";
  * Client-side helpers: content negotiation (`Client.make`,
  * `Client.jsonApiHeaders`, `Client.isMutatingMethod`), best-effort
  * error-document decoding (`Client.decodeErrorDocument`,
- * `Client.errorDocument`, `Client.errorMessage`) and include narrowing
- * (`Client.narrowIncluded`).
+ * `Client.errorDocument`, `Client.errorMessage`, `Client.ErrorResponse`),
+ * include narrowing and hydration (`Client.narrowIncluded`, `Client.related`,
+ * `Client.walk`, `Client.hydrate`), the document readers
+ * (`Client.readTotalCount`, `Client.hasNextPage`) and the page cursor
+ * (`Client.readPageCursor`, `Client.pageHref`, `Client.pageWindow`).
  *
  * @since 0.1.0
  */
