@@ -17,6 +17,7 @@ import {
   Span,
 } from "./Middleware.js";
 import * as Query from "./Query.js";
+import * as Relationship from "./Relationship.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 
@@ -200,6 +201,47 @@ describe("Middleware.schemaErrorDocument", () => {
     expect(schemaErrorDocument("Query", inside)).toEqual({
       errors: [bad("nope", { parameter: "sort" })],
     });
+  });
+
+  it("carries the schema's published vocabulary as `meta` (include paths, sortable fields)", () => {
+    const Person = Resource("people", { attributes: { name: Schema.String } });
+    const Article = Resource("articles", {
+      attributes: { title: Schema.String, createdAt: Schema.String },
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const ListQuery = Query.schema(Article, {
+      include: true,
+      fields: false,
+      sort: ["title", "createdAt"],
+      page: undefined,
+      filter: undefined,
+    });
+    const withMeta = (detail: string, parameter: string, meta: object) => ({
+      ...bad(detail, { parameter }),
+      meta,
+    });
+    // the comma grammar and the repeated-key spelling both reach the same annotation
+    expect(schemaErrorDocument("Query", failure(ListQuery, { include: "author,nope" }))).toEqual({
+      errors: [withMeta('Expected "author"', "include", { includablePaths: ["author"] })],
+    });
+    expect(
+      schemaErrorDocument("Query", failure(ListQuery, { include: ["author", "nope"] })),
+    ).toEqual({
+      errors: [withMeta('Expected "author"', "include", { includablePaths: ["author"] })],
+    });
+    expect(schemaErrorDocument("Query", failure(ListQuery, { sort: "-nope" }))).toEqual({
+      errors: [
+        withMeta('Expected "title" | "createdAt"', "sort", {
+          sortableFields: ["title", "createdAt"],
+        }),
+      ],
+    });
+    // a schema that publishes nothing renders no `meta` member at all
+    const errors = schemaErrorDocument(
+      "Query",
+      failure(Schema.Struct({ limit: Schema.FiniteFromString }), { limit: "x" }),
+    ).errors;
+    expect(errors[0] !== undefined && "meta" in errors[0]).toBe(false);
   });
 
   it("names a path parameter and a header", () => {

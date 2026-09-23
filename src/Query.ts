@@ -63,6 +63,7 @@ import {
   repeatable,
   Sort as SortCodec,
 } from "./internal/codecs.js";
+import { errorMeta } from "./internal/errorMeta.js";
 import type { FieldCodecs } from "./internal/filter.js";
 import {
   decodeFilter,
@@ -737,17 +738,21 @@ export const Include = <
 >(
   resource: R | ReadonlyArray<R>,
   options?: O,
-): Include<R, IncludePathsOf<R, O>> =>
-  repeatable(
+): Include<R, IncludePathsOf<R, O>> => {
+  const paths = includePathsFor(
+    toResources(resource),
+    options as IncludeOptions<Any> | AnySurface | undefined,
+  ) as ReadonlyArray<IncludePathsOf<R, O>>;
+  return repeatable(
     CommaSeparated(
-      Schema.Literals(
-        includePathsFor(
-          toResources(resource),
-          options as IncludeOptions<Any> | AnySurface | undefined,
-        ) as ReadonlyArray<IncludePathsOf<R, O>>,
-      ),
+      // The whitelist rides on the literal schema as error `meta`, so the 400
+      // `Middleware.schemaErrorDocument` renders for a rejected path carries
+      // `meta.includablePaths` — the same set `ApiError.UnsupportedIncludePath`
+      // publishes — and a caller learns the legal paths without a second call.
+      Schema.Literals(paths).annotate(errorMeta({ includablePaths: paths })),
     ),
   ) as Include<R, IncludePathsOf<R, O>>;
+};
 
 /**
  * One requested `include` path, already split on `.` into its segments — the

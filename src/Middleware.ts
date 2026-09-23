@@ -70,6 +70,7 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
+import { indexErrorMeta } from "./internal/errorMeta.js";
 import { baseMediaType, MEDIA_TYPE } from "./internal/media.js";
 
 // ---------------------------------------------------------------------------
@@ -408,6 +409,13 @@ const sourceOf = (
  * whole part is malformed) it is the single-error document of
  * {@link schemaError}.
  *
+ * Where the schema that rejected the value publishes what it *would* have
+ * accepted, the error object carries it as `meta`: a rejected `?include=` path
+ * carries `meta.includablePaths` (the endpoint's whole supported set, as
+ * {@link ApiError.UnsupportedIncludePath} does) and an unknown `?sort=` field
+ * carries `meta.sortableFields`. A caller that guessed wrong learns the legal
+ * vocabulary from the rejection instead of from a second request.
+ *
  * How many issues a failure reports is the decoder's choice: HttpApi decodes
  * with the default parse options (`errors: "first"`), so inside
  * {@link SchemaErrorsLive} a part yields one error object, except the `filter`
@@ -441,21 +449,28 @@ export const schemaErrorDocument = (
 ): typeof WireDocument.Type => {
   const issue = SchemaIssue.isIssue(error) ? error : error.issue;
   const leaves = SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues;
+  // Error `meta` a schema publishes for its own rejections — the include
+  // whitelist, the sortable fields — indexed once per failure and looked up
+  // per leaf by the path the leaf sits at.
+  const metaAt = indexErrorMeta(issue);
   const errors = leaves.map((leaf) => {
-    const path = (leaf.path ?? []).flatMap((segment) => {
-      const key = typeof segment === "object" ? segment.key : segment;
-      return typeof key === "string" || typeof key === "number" ? [key] : [];
-    });
-    return { detail: leaf.message, source: sourceOf(part, path) };
+    const keys = (leaf.path ?? []).map((segment) =>
+      typeof segment === "object" ? segment.key : segment,
+    );
+    const path = keys.flatMap((key) =>
+      typeof key === "string" || typeof key === "number" ? [key] : [],
+    );
+    return { detail: leaf.message, source: sourceOf(part, path), meta: metaAt(keys) };
   });
   if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part));
   return {
-    errors: errors.map(({ detail, source }) => ({
+    errors: errors.map(({ detail, source, meta }) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
       detail,
       ...(source !== undefined ? { source } : {}),
+      ...(meta !== undefined ? { meta } : {}),
     })),
   };
 };
