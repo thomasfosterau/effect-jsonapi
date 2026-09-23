@@ -47,6 +47,8 @@ overrides:
   vite: npm:@voidzero-dev/vite-plus-core@0.3.2
   vitest: 4.1.11
   effect: 4.0.0-rc.112
+  brace-expansion@2: '>=2.1.4'
+  js-yaml@3: '>=3.15.2'
 
 importers:
 
@@ -1311,6 +1313,9 @@ packages:
   argparse@1.0.10:
     resolution: {integrity: sha512-o5Roy6tNG4SL/FOkCAN6RzjiakZS25RLYFrcMttJqbdd8BWrnA+fGz57iN5Pb06pvBGvl5gQ0B48dJlslXvoTg==}
 
+  argparse@2.0.1:
+    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+
   aria-query@5.3.0:
     resolution: {integrity: sha512-b0P0sZPKtyu8HkeRAfCq0IfURZK+SuwMjY1UXGBU27wpAiTwQAIlq56IbIO+ytk/JjS1fMR14ee5WBBfKi5J6A==}
 
@@ -1321,11 +1326,13 @@ packages:
   autolinker@0.28.1:
     resolution: {integrity: sha512-zQAFO1Dlsn69eXaO6+7YZc+v84aquQKbwpzCE3L0stj56ERn9hutFxPopViLjo9G+rWwjozRhgS5KJ25Xy19cQ==}
 
-  balanced-match@1.0.2:
-    resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
+  balanced-match@4.0.4:
+    resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
+    engines: {node: 18 || 20 || >=22}
 
-  brace-expansion@2.1.1:
-    resolution: {integrity: sha512-WR1cURNjuvBLMZBMbqM0UoE+WAfdUcEV1ccD8PVBVOI+Z3ND4+SZbN8RsfT2bMuG1qwz5RFvPukSZm5fF2D5eA==}
+  brace-expansion@5.0.12:
+    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
+    engines: {node: 20 || >=22}
 
   buffer-from@1.1.2:
     resolution: {integrity: sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==}
@@ -1409,11 +1416,6 @@ packages:
   esbuild@0.28.1:
     resolution: {integrity: sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==}
     engines: {node: '>=18'}
-    hasBin: true
-
-  esprima@4.0.1:
-    resolution: {integrity: sha512-eGuFFw7Upda+g4p+QHvnW0RyTX/SVeJBDM/gCtMARO0cLuT2HcEKnTPvhjV6aGeqrCB/sbNop0Kszm0jsaWU4A==}
-    engines: {node: '>=4'}
     hasBin: true
 
   estree-walker@3.0.3:
@@ -1561,8 +1563,8 @@ packages:
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
-  js-yaml@3.14.2:
-    resolution: {integrity: sha512-PMSmkqxr106Xa156c2M265Z+FTrPl+oxd/rgOQy2tijQeK5TxQ43psO1ZCwhVOSdnn+RzkzlRz/eY4BgJBYVpg==}
+  js-yaml@5.4.2:
+    resolution: {integrity: sha512-m+aqu+LwO1O6sIopafj8HUVl5aawITwZQe/yHpMCKjaWBaA/d07B/QdMb3529REftiU+RMMHL3Vlsw3hON7vWg==}
     hasBin: true
 
   jsonc-parser@3.3.1:
@@ -2895,6 +2897,8 @@ snapshots:
     dependencies:
       sprintf-js: 1.0.3
 
+  argparse@2.0.1: {}
+
   aria-query@5.3.0:
     dependencies:
       dequal: 2.0.3
@@ -2905,11 +2909,11 @@ snapshots:
     dependencies:
       gulp-header: 1.8.12
 
-  balanced-match@1.0.2: {}
+  balanced-match@4.0.4: {}
 
-  brace-expansion@2.1.1:
+  brace-expansion@5.0.12:
     dependencies:
-      balanced-match: 1.0.2
+      balanced-match: 4.0.4
 
   buffer-from@1.1.2: {}
 
@@ -3013,8 +3017,6 @@ snapshots:
       '@esbuild/win32-ia32': 0.28.1
       '@esbuild/win32-x64': 0.28.1
 
-  esprima@4.0.1: {}
-
   estree-walker@3.0.3:
     dependencies:
       '@types/estree': 1.0.9
@@ -3098,13 +3100,13 @@ snapshots:
   gray-matter@3.1.1:
     dependencies:
       extend-shallow: 2.0.1
-      js-yaml: 3.14.2
+      js-yaml: 5.4.2
       kind-of: 5.1.0
       strip-bom-string: 1.0.0
 
   gray-matter@4.0.3:
     dependencies:
-      js-yaml: 3.14.2
+      js-yaml: 5.4.2
       kind-of: 6.0.3
       section-matter: 1.0.0
       strip-bom-string: 1.0.0
@@ -3161,10 +3163,9 @@ snapshots:
 
   js-tokens@4.0.0: {}
 
-  js-yaml@3.14.2:
+  js-yaml@5.4.2:
     dependencies:
-      argparse: 1.0.10
-      esprima: 4.0.1
+      argparse: 2.0.1
 
   jsonc-parser@3.3.1: {}
 
@@ -3266,7 +3267,7 @@ snapshots:
 
   minimatch@9.0.9:
     dependencies:
-      brace-expansion: 2.1.1
+      brace-expansion: 5.0.12
 
   minimist@1.2.8: {}
 

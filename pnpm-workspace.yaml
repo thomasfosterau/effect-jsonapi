@@ -92,6 +92,18 @@ overrides:
   # `effect` MUST be a singleton (see the header): force every resolution to
   # the catalog version so a hoisting reshuffle cannot introduce a second copy.
   effect: "catalog:"
+  # Advisory floors for transitive dependencies of the docs toolchain, which
+  # `pnpm audit --audit-level high` (CI's last step) gates. Neither is reached
+  # by the published package: `brace-expansion` arrives via
+  # @effect/docgen > glob > minimatch (GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg,
+  # GHSA-rgw5-rvv9-x895 — patched in 2.1.4); `js-yaml` 3.x via
+  # @effect/docgen > @effect/markdown-toc > gray-matter and effect-solutions >
+  # gray-matter (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh —
+  # patched in 3.15.2). Scoped to the affected major so a 4.x/5.x consumer
+  # elsewhere in the tree keeps its own range. Drop each once its dependent
+  # ships the fix in range.
+  "brace-expansion@2": ">=2.1.4"
+  "js-yaml@3": ">=3.15.2"
 nodeLinker: hoisted
 allowBuilds:
   esbuild: true
