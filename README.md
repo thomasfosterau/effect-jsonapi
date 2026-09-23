@@ -80,6 +80,11 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
   - [Resolving `included` — one batch per level](#resolving-included--one-batch-per-level)
   - [The per-resource transform pass (`onResource`)](#the-per-resource-transform-pass-onresource)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
+- [5. The server skeleton](#5-the-server-skeleton)
+  - [The flat contract](#the-flat-contract)
+  - [The error seam](#the-error-seam)
+  - [The negotiation verdict](#the-negotiation-verdict)
+  - [The assembler, the handlers and the registry](#the-assembler-the-handlers-and-the-registry)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
   - [Declaring the include surface once](#declaring-the-include-surface-once)
@@ -1392,6 +1397,107 @@ const message =
 ```
 
 The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response — a supported entry point, not an internal of the cause-based one — so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](./examples/blog/client.ts).
+
+## 5. The server skeleton
+
+Three applications built on this package each grew the same two thousand lines on top of it: an error catalogue and the seam that turns a failure into an error document, a content-negotiation verdict for an api that shares its URLs with rendered pages, a document assembler that stamps per-viewer `meta` and stringifies links, a handler factory over "the operations", and a registry that checks every family against its group at module init. That scaffolding lives here now, as the modules below. Each is optional — an api built from `Group.make` and `HttpApiBuilder` directly never meets them — and each is generic in what an application owns: its viewer, its transaction boundary, its cache, its database's errors.
+
+### The flat contract
+
+A _flat_ contract is one whose list inputs are one struct the rest of the application consumes directly — `{ limit, offset, status, sort }` — and whose write payloads are flat command inputs rather than the JSON:API envelope. `FlatQuery` is the grammar such a struct is built from (bounded pagination with decoding defaults, the `?sort=` string in both wire spellings, a `filter[ids]` list, a slug attribute), `Query.flatList` puts it on the wire, and `Group.flat` / `Group.flatReadOnly` derive the standard endpoint set from it:
+
+```ts
+import { FlatQuery, Group, Include, Resource } from "@thomasfosterau/effect-jsonapi";
+
+const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) });
+//    { offset: 0, limit: 50, sort?: SortField[], q?: string } once decoded
+
+const { group: peopleGroup, listQuery: peopleListQuery } = Group.flat({
+  resource: Person,
+  list: ListPeople,
+  filters: ["q"], // ?filter[q]= on the wire, `q` once decoded
+  include: Include.make(Person, { birthPlace: Place }),
+  create: CreatePerson,
+  update: UpdatePerson, // carries `id`; a mismatch with `:id` is the 409
+});
+// GET /people        → 200 collection, ?page[offset]= ?page[limit]= ?filter[q]= ?include=
+// GET /people/:id    → 200 document,   ?include=
+// POST /people       → 201, PATCH /people/:id → 200 (declares 409), DELETE /people/:id → 204
+```
+
+The documents the endpoints declare are the **wire** form of the resource (`Document.wire`: string links, since the assembler stringifies every `URL` it is handed), and the `listQuery` handed back beside the group is what the collection handler spells its pagination links from — the same schema the endpoint decodes, so a link's query and a request's query cannot drift. `Endpoint.flatRelated` is the §7.4 related-resource endpoint in the same style, for a longhand group.
+
+### The error seam
+
+`ServerErrors` holds the catalogue an operation fails with (`NotFound`, `Unauthorized`, `Forbidden`, `Redirect`, `HttpError`, `ValidationFailure`), the `JsonapiError` carrier for a one-off, and `fromTaggedError`, which maps any of them — and any `ApiError.make` class, `ApiError.Conflict` and the package's own include / sort errors included — to its error document. `respond` wraps a handler with it:
+
+```ts
+import { Option } from "effect";
+import { ServerErrors } from "@thomasfosterau/effect-jsonapi";
+
+const boundary = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  ServerErrors.respond(effect, {
+    // the arms only the application can recognise — a driver's unique violation, say
+    materialise: (cause) =>
+      isUniqueViolation(cause)
+        ? Option.some(
+            new ServerErrors.JsonapiError({
+              status: 409,
+              errors: [{ status: "409", code: "conflict" }],
+            }),
+          )
+        : Option.none(),
+  });
+// NotFound → 404 not-found · Forbidden → 403 auth.forbidden · ApiError.Conflict → 409 conflict
+// anything unmapped → logged, then an opaque 500 `internal`
+```
+
+### The negotiation verdict
+
+An api on bare resource URLs shared with its pages decides, per request and before any routing, whether `/people/1` answers a page or a document. `Negotiation.make({ api })` derives the route table from every endpoint the api declares and answers that from the request line and headers alone, so a web front door and the api it forwards to share one verdict:
+
+```ts
+import { Negotiation } from "@thomasfosterau/effect-jsonapi";
+
+const { isApiPath, negotiate } = Negotiation.make({ api: Api });
+
+// in the framework hook:
+const verdict = negotiate(request);
+if (verdict.error) return Negotiation.errorResponse(verdict.error); // §5: 406 / 415
+if (verdict.dispatch) return apiHandler(Negotiation.requestForRouter(request), context);
+// otherwise render the page; `verdict.representation` is the cache-key token
+```
+
+A read dispatches when a clean JSON:API instance wins `Accept`; a write when its `Content-Type` is the JSON:API media type; a browser navigation, an `application/json` client and a bare `*/*` all fall through. Pair it with `Middleware.layerHostNegotiated` on the api side, which leaves the host the single negotiating authority.
+
+### The assembler, the handlers and the registry
+
+`Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set. `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
+
+```ts
+import { Assemble, Registry, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+
+const peopleFamily = {
+  group: "people",
+  handlers: ResourceHandlers.make({
+    segment: "people",
+    listQuery: peopleListQuery,                    // the family's own list query, for the links
+    linkBase,                                      // Effect<string>: the absolute origin
+    viewer,                                        // Effect<User | null>: the request's viewer
+    capabilities: Assemble.roleCapabilities((user) => user?.role === "admin"),
+    transact,                                      // the boundary every write runs inside
+    cache,                                         // read-through on get, write-through on writes
+    include: { includable: PERSON_INCLUDE.paths, targets },
+    ops: { list, get, create, update, delete },    // the application's Effect-native operations
+  }),
+} satisfies Registry.FamilyFor<typeof peopleGroup>  // every handler's success channel checked
+                                                    // against its endpoint's declared document
+
+const { handler } = Registry.webHandler(Api, [peopleFamily, contestsFamily], {
+  respond: boundary,
+})
+// (request: Request, context: Context<User | Database | …>) => Promise<Response>
+```
 
 ## Query parameters
 

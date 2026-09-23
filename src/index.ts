@@ -64,6 +64,16 @@ export * as ApiError from "./ApiError.js";
 export * as Atomic from "./Atomic.js";
 
 /**
+ * The server-side document assembler (`Assemble.resource`,
+ * `Assemble.collection`, `Assemble.relationship`) over `Handlers`, with the
+ * capability hooks (`Assemble.roleCapabilities`, `Assemble.ownedCapabilities`)
+ * and the link / wire coercions.
+ *
+ * @since 0.16.0
+ */
+export * as Assemble from "./Assemble.js";
+
+/**
  * Client-side helpers: content negotiation (`Client.make`,
  * `Client.jsonApiHeaders`, `Client.isMutatingMethod`), best-effort
  * error-document decoding (`Client.decodeErrorDocument`,
@@ -108,6 +118,14 @@ export * as Endpoint from "./Endpoint.js";
  * @since 0.13.0
  */
 export * as Filter from "./Filter.js";
+
+/**
+ * The flat list-input grammar (`FlatQuery.pagination`, `FlatQuery.listInput`,
+ * `FlatQuery.SortParam`, `FlatQuery.idList`, `FlatQuery.slug`).
+ *
+ * @since 0.16.0
+ */
+export * as FlatQuery from "./FlatQuery.js";
 
 /**
  * JSON:API resource groups (`Group.make`).
@@ -163,11 +181,28 @@ export * as Middleware from "./Middleware.js";
 export * as MediaType from "./MediaType.js";
 
 /**
+ * The representation verdict for a host serving JSON:API on its page URLs
+ * (`Negotiation.make`, `Negotiation.requestForRouter`,
+ * `Negotiation.errorResponse`).
+ *
+ * @since 0.16.0
+ */
+export * as Negotiation from "./Negotiation.js";
+
+/**
  * Typed JSON:API query parameters (`Query.schema`, `Query.Page`, …).
  *
  * @since 0.1.0
  */
 export * as Query from "./Query.js";
+
+/**
+ * The handler registry and router (`Registry.FamilyFor`, `Registry.checkFamily`,
+ * `Registry.webHandler`).
+ *
+ * @since 0.16.0
+ */
+export * as Registry from "./Registry.js";
 
 /**
  * JSON:API relationship constructors (`Relationship.one`, `Relationship.many`,
@@ -183,6 +218,23 @@ export * as Relationship from "./Relationship.js";
  * @since 0.1.0
  */
 export * as Resource from "./Resource.js";
+
+/**
+ * The server handler factory (`ResourceHandlers.make`,
+ * `ResourceHandlers.readOnly`, `ResourceHandlers.related`) — the handler-side
+ * counterpart of `Group.flat` / `Group.flatReadOnly`.
+ *
+ * @since 0.16.0
+ */
+export * as ResourceHandlers from "./ResourceHandlers.js";
+
+/**
+ * The server's error seam: the domain error catalogue, the `JsonapiError`
+ * carrier, `ServerErrors.fromTaggedError` and `ServerErrors.respond`.
+ *
+ * @since 0.16.0
+ */
+export * as ServerErrors from "./ServerErrors.js";
 
 /**
  * The `sort` query family's per-attribute declaration (`Sort.able`).

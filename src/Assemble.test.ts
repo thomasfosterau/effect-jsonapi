@@ -1,0 +1,526 @@
+/**
+ * The document assembler, pinned against the consuming applications'
+ * assembler corpus: the envelope shape, link coercion, the capability meta,
+ * sparse fieldsets, the collection's pagination math, the `included` walk
+ * with its whitelist / depth guards and its batching, and the §8.4
+ * relationship document.
+ */
+import { describe, expect, it } from "vite-plus/test";
+import { Effect, Exit } from "effect";
+import * as ApiError from "./ApiError.js";
+import * as Assemble from "./Assemble.js";
+import type * as Handlers from "./Handlers.js";
+
+interface User {
+  readonly id: string;
+  readonly role: "user" | "editor" | "admin";
+}
+const ADMIN: User = { id: "u-admin", role: "admin" };
+const EDITOR: User = { id: "u-editor", role: "editor" };
+const NON_ADMIN: User = { id: "u-user", role: "user" };
+
+/** The reference-data rule: admins write, everyone else reads. */
+const adminCapabilities = Assemble.roleCapabilities(
+  (viewer: User | null | undefined) => viewer?.role === "admin",
+);
+
+/** The applications' family rule: political types by role, ingested types never. */
+const POLITICAL = new Set(["people", "places"]);
+const familyCapabilities: Assemble.CapabilitiesHook<User | null> = (resource, viewer) =>
+  POLITICAL.has(resource.type)
+    ? adminCapabilities(resource, viewer)
+    : { canEdit: false, canDelete: false };
+
+const person = (id: string): Assemble.ResourceLike => ({
+  type: "people",
+  id,
+  attributes: {
+    name: `Person ${id}`,
+    slug: `person-${id}`,
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+  },
+  relationships: {
+    birthPlace: {
+      data: { type: "places", id: "place-1" },
+      links: { related: new URL(`https://example.test/people/${id}/birthPlace`) },
+    },
+    officeHoldings: {
+      data: [],
+      links: { related: `https://example.test/people/${id}/officeHoldings` },
+    },
+  },
+  links: { self: new URL(`https://example.test/people/${id}`) },
+});
+
+const contest = (id: string): Assemble.ResourceLike => ({
+  type: "contests",
+  id,
+  attributes: { name: `Contest ${id}` },
+  relationships: {
+    election: { data: { type: "elections", id: "election-1" } },
+    candidates: {
+      data: [
+        { type: "candidates", id: "c-1" },
+        { type: "candidates", id: "c-2" },
+      ],
+    },
+  },
+  links: { self: `https://example.test/contests/${id}` },
+});
+
+const place: Assemble.ResourceLike = {
+  type: "places",
+  id: "place-1",
+  attributes: { name: "Sydney" },
+};
+const election: Assemble.ResourceLike = {
+  type: "elections",
+  id: "election-1",
+  attributes: { name: "House" },
+  relationships: { electionEvent: { data: { type: "election-events", id: "event-1" } } },
+};
+const event: Assemble.ResourceLike = { type: "election-events", id: "event-1", attributes: {} };
+const candidate = (id: string, party?: string): Assemble.ResourceLike => ({
+  type: "candidates",
+  id,
+  attributes: {},
+  ...(party === undefined
+    ? {}
+    : { relationships: { party: { data: { type: "parties", id: party } } } }),
+});
+const party = (id: string): Assemble.ResourceLike => ({ type: "parties", id, attributes: {} });
+
+/** A loader registry over a fixed set of resources, recording every call. */
+const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
+  const calls: Array<{ type: string; ids: ReadonlyArray<string> }> = [];
+  const target =
+    (type: string): Handlers.IncludeTarget =>
+    (ids) =>
+      Effect.sync(() => {
+        calls.push({ type, ids });
+        return known.filter(
+          (r) => r.type === type && ids.includes(r.id),
+        ) as ReadonlyArray<Handlers.ResourceValue>;
+      });
+  const targets = Object.fromEntries(
+    [...new Set(known.map((r) => r.type))].map((type) => [type, target(type)]),
+  ) satisfies Handlers.IncludeTargets;
+  return { calls, targets };
+};
+
+const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
+const ids = (resources: ReadonlyArray<Assemble.ResourceLike> | undefined) =>
+  resources?.map((r) => `${r.type}:${r.id}`);
+
+describe("Assemble.resource", () => {
+  it("wraps a resource in a JSON:API document with the jsonapi member and a self link", async () => {
+    const document = await run(Assemble.resource(person("p1")));
+    expect(document.jsonapi).toEqual({ version: "1.1" });
+    expect(document.data.type).toBe("people");
+    expect(document.data.id).toBe("p1");
+    expect(document.links?.self).toBe("https://example.test/people/p1");
+    expect(document.data.attributes["name"]).toBe("Person p1");
+  });
+
+  it("coerces URL `links.self` and relationship `links.related` to wire strings", async () => {
+    const document = await run(Assemble.resource(person("p1")));
+    expect(typeof document.data.links?.self).toBe("string");
+    const rels = document.data.relationships as Record<string, { links: { related: unknown } }>;
+    expect(rels["birthPlace"]?.links.related).toBe("https://example.test/people/p1/birthPlace");
+    expect(rels["officeHoldings"]?.links.related).toBe(
+      "https://example.test/people/p1/officeHoldings",
+    );
+  });
+
+  it("stamps canEdit / canDelete per the hook: true for an admin, false for everyone else", async () => {
+    const stamped = (viewer: User | null) =>
+      run(Assemble.resource(person("p1"), { viewer, capabilities: familyCapabilities }));
+    expect((await stamped(ADMIN)).data.meta).toEqual({ canEdit: true, canDelete: true });
+    expect((await stamped(NON_ADMIN)).data.meta).toEqual({ canEdit: false, canDelete: false });
+    expect((await stamped(EDITOR)).data.meta).toEqual({ canEdit: false, canDelete: false });
+    expect((await stamped(null)).data.meta).toEqual({ canEdit: false, canDelete: false });
+  });
+
+  it("keys the rule off the resource type, so an ingested family is never editable", async () => {
+    const document = await run(
+      Assemble.resource(contest("x"), { viewer: ADMIN, capabilities: familyCapabilities }),
+    );
+    expect(document.data.meta).toEqual({ canEdit: false, canDelete: false });
+  });
+
+  it("stamps no meta without a hook, and drops an empty meta for `noCapabilities`", async () => {
+    expect((await run(Assemble.resource(person("p1")))).data).not.toHaveProperty("meta");
+    const none = await run(
+      Assemble.resource(person("p1"), { viewer: ADMIN, capabilities: Assemble.noCapabilities }),
+    );
+    expect(none.data).not.toHaveProperty("meta");
+    // …but a resource's own meta survives, merged under the hook's members.
+    const own = await run(
+      Assemble.resource(
+        { ...person("p1"), meta: { score: 1 } },
+        { capabilities: adminCapabilities },
+      ),
+    );
+    expect(own.data.meta).toEqual({ score: 1, canEdit: false, canDelete: false });
+  });
+
+  it("applies sparse fieldset projection to attributes, by type", async () => {
+    const projected = await run(Assemble.resource(person("p1"), { fields: { people: ["name"] } }));
+    expect(Object.keys(projected.data.attributes)).toEqual(["name"]);
+    const untouched = await run(Assemble.resource(person("p1"), { fields: { places: ["name"] } }));
+    expect(Object.keys(untouched.data.attributes).length).toBeGreaterThan(1);
+  });
+
+  it("omits top-level links when the resource has no self URL", async () => {
+    expect((await run(Assemble.resource(place))).links).toBeUndefined();
+  });
+
+  it("resolves a to-one include into `included`, capability-stamped per type", async () => {
+    const { calls, targets } = registry([place]);
+    const document = await run(
+      Assemble.resource(person("p1"), {
+        viewer: ADMIN,
+        capabilities: familyCapabilities,
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      }),
+    );
+    expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
+    expect(document.included).toHaveLength(1);
+    expect(document.included?.[0]).toMatchObject({ type: "places", id: "place-1" });
+    expect(document.included?.[0]?.meta).toEqual({ canEdit: true, canDelete: true });
+  });
+
+  it("resolves a to-many include in one loader call per level", async () => {
+    const { calls, targets } = registry([candidate("c-1"), candidate("c-2")]);
+    const document = await run(
+      Assemble.resource(contest("x"), {
+        include: ["candidates"],
+        includable: ["candidates"],
+        targets,
+      }),
+    );
+    expect(calls).toEqual([{ type: "candidates", ids: ["c-1", "c-2"] }]);
+    expect(document.included?.map((r) => r.id)).toEqual(["c-1", "c-2"]);
+  });
+
+  it("walks a nested path level by level and drops a ref that does not resolve", async () => {
+    const { targets } = registry([election, event]);
+    const document = await run(
+      Assemble.resource(contest("x"), {
+        include: ["election.electionEvent", "candidates"],
+        includable: ["election", "election.electionEvent", "candidates"],
+        targets,
+      }),
+    );
+    expect(ids(document.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+  });
+
+  it("walks a second hop off a to-many head, hoisting the whole level, deduplicated", async () => {
+    const { calls, targets } = registry([
+      candidate("c-1", "party-1"),
+      candidate("c-2", "party-1"),
+      party("party-1"),
+    ]);
+    const document = await run(
+      Assemble.resource(contest("x"), {
+        include: ["candidates.party"],
+        includable: ["candidates", "candidates.party"],
+        targets,
+      }),
+    );
+    expect(ids(document.included)).toEqual(["candidates:c-1", "candidates:c-2", "parties:party-1"]);
+    // Two candidates sharing one party is one read of that party, not two.
+    expect(calls.filter((call) => call.type === "parties")).toEqual([
+      { type: "parties", ids: ["party-1"] },
+    ]);
+  });
+
+  it("emits no `included` when no include is requested, or no registry is wired", async () => {
+    expect(
+      (await run(Assemble.resource(person("p1"), { includable: ["birthPlace"] }))).included,
+    ).toBeUndefined();
+    const validatedOnly = await run(
+      Assemble.resource(person("p1"), { include: ["birthPlace"], includable: ["birthPlace"] }),
+    );
+    expect(validatedOnly.included).toBeUndefined();
+  });
+
+  it("rejects an include path outside the whitelist, naming the allowed paths", async () => {
+    const exit = await Effect.runPromiseExit(
+      Assemble.resource(person("p1"), { include: ["candidacies"], includable: ["birthPlace"] }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    const error = Effect.runSync(
+      Effect.flip(
+        Assemble.resource(person("p1"), { include: ["candidacies"], includable: ["birthPlace"] }),
+      ),
+    );
+    expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+    expect((error as ApiError.UnsupportedIncludePath).includablePaths).toEqual(["birthPlace"]);
+  });
+
+  it("rejects a path deeper than the cap as a depth error, before the whitelist", () => {
+    const deep = Effect.runSync(
+      Effect.flip(Assemble.resource(person("p1"), { include: ["a.b.c.d"], includable: ["a"] })),
+    );
+    expect(deep).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+    const shallow = Effect.runSync(
+      Effect.flip(
+        Assemble.resource(person("p1"), { include: ["a.b"], includable: ["a"], depth: 1 }),
+      ),
+    );
+    expect(shallow).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+  });
+
+  it("matches the whole dotted path, not just its head", async () => {
+    const head = Effect.runSync(
+      Effect.flip(
+        Assemble.resource(contest("x"), {
+          include: ["election.electionEvent"],
+          includable: ["election"],
+        }),
+      ),
+    );
+    expect(head).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+    const { targets } = registry([election, event]);
+    const whole = await run(
+      Assemble.resource(contest("x"), {
+        include: ["election.electionEvent"],
+        includable: ["election", "election.electionEvent"],
+        targets,
+      }),
+    );
+    expect(ids(whole.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+  });
+});
+
+describe("Assemble.collection", () => {
+  const page = [person("a"), person("b"), person("c")];
+  const baseUrl = "https://example.test/people";
+  const at = (offset: number, limit: number, totalCount: number) =>
+    run(Assemble.collection(page, { totalCount, offset, limit, baseUrl }));
+
+  it("populates meta.totalCount and the jsonapi member", async () => {
+    const document = await at(0, 10, 42);
+    expect(document.meta.totalCount).toBe(42);
+    expect(document.jsonapi).toEqual({ version: "1.1" });
+  });
+
+  it("builds first-page links without prev, with next", async () => {
+    const document = await at(0, 10, 100);
+    expect(document.links.first).toContain("page[offset]=0");
+    expect(document.links.next).toContain("page[offset]=10");
+    expect(document.links.prev).toBeNull();
+  });
+
+  it("builds last-page links with prev, without next", async () => {
+    const document = await at(20, 10, 25);
+    expect(document.links.prev).toContain("page[offset]=10");
+    expect(document.links.next).toBeNull();
+    expect(document.links.last).toContain("page[offset]=20");
+  });
+
+  it("handles an empty collection by pointing last at offset 0", async () => {
+    const document = await run(
+      Assemble.collection([], { totalCount: 0, offset: 0, limit: 10, baseUrl }),
+    );
+    expect(document.links.last).toContain("page[offset]=0");
+    expect(document.data).toEqual([]);
+  });
+
+  it("carries the request's other query pairs into every link, cursor last", async () => {
+    const document = await run(
+      Assemble.collection(page, {
+        totalCount: 3,
+        offset: 1,
+        limit: 1,
+        baseUrl,
+        query: [
+          ["include", "birthPlace"],
+          ["filter[q]", "alpha"],
+        ],
+      }),
+    );
+    expect(document.links).toEqual({
+      self: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=1&page[limit]=1",
+      first:
+        "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=0&page[limit]=1",
+      prev: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=0&page[limit]=1",
+      next: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=2&page[limit]=1",
+      last: "https://example.test/people?include=birthPlace&filter[q]=alpha&page[offset]=2&page[limit]=1",
+    });
+  });
+
+  it("stamps per-viewer meta on every resource in data", async () => {
+    const document = await run(
+      Assemble.collection(
+        page,
+        { totalCount: 3, offset: 0, limit: 10, baseUrl },
+        { viewer: ADMIN, capabilities: familyCapabilities },
+      ),
+    );
+    for (const resource of document.data) {
+      expect(resource.meta).toEqual({ canEdit: true, canDelete: true });
+    }
+  });
+
+  it("emits pre-resolved included members, link-coerced, and omits the member when empty", async () => {
+    const withIncluded = await run(
+      Assemble.collection(
+        page,
+        { totalCount: 3, offset: 0, limit: 10, baseUrl },
+        {
+          included: [{ ...place, links: { self: new URL("https://example.test/places/place-1") } }],
+        },
+      ),
+    );
+    expect(withIncluded.included).toHaveLength(1);
+    expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
+    expect((await at(0, 10, 3)).included).toBeUndefined();
+    expect(
+      (
+        await run(
+          Assemble.collection(
+            page,
+            { totalCount: 3, offset: 0, limit: 10, baseUrl },
+            { included: [] },
+          ),
+        )
+      ).included,
+    ).toBeUndefined();
+  });
+
+  it("resolves the page's include walk in one batch per target type, deduplicated", async () => {
+    const { calls, targets } = registry([place]);
+    const document = await run(
+      Assemble.collection(
+        page,
+        { totalCount: 3, offset: 0, limit: 10, baseUrl },
+        {
+          viewer: NON_ADMIN,
+          capabilities: familyCapabilities,
+          include: ["birthPlace"],
+          includable: ["birthPlace"],
+          targets,
+        },
+      ),
+    );
+    // Three people share one birthplace: one loader call, one id, one member.
+    expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
+    expect(document.included?.map((r) => r.id)).toEqual(["place-1"]);
+    expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+  });
+});
+
+describe("Assemble.relationship", () => {
+  it("answers the linkage as data, the parent (and extras) as included, and the related link", () => {
+    const document = Assemble.relationship({
+      parent: contest("x"),
+      key: "candidates",
+      included: [candidate("c-1"), candidate("c-1")],
+    });
+    expect(document.data).toEqual([
+      { type: "candidates", id: "c-1" },
+      { type: "candidates", id: "c-2" },
+    ]);
+    expect(ids(document.included)).toEqual(["contests:x", "candidates:c-1"]);
+    expect(document.links).toBeUndefined();
+    expect(document.jsonapi).toEqual({ version: "1.1" });
+    const withLink = Assemble.relationship({ parent: person("p1"), key: "birthPlace" });
+    expect(withLink.data).toEqual({ type: "places", id: "place-1" });
+    expect(withLink.links).toEqual({ related: "https://example.test/people/p1/birthPlace" });
+  });
+
+  it("spells an empty to-one as `data: null`", () => {
+    const parent: Assemble.ResourceLike = {
+      type: "t",
+      id: "1",
+      attributes: {},
+      relationships: { one: { data: null } },
+    };
+    expect(Assemble.relationship({ parent, key: "one" }).data).toBeNull();
+    expect(Assemble.relationship({ parent, key: "missing" }).data).toBeNull();
+  });
+});
+
+describe("Assemble.edgePage", () => {
+  it("assembles a capability-free page under <base>/<segment>", async () => {
+    const document = await run(
+      Assemble.edgePage(
+        "contributions",
+        { items: [person("a")], totalCount: 7 },
+        { limit: 1, offset: 0 },
+        "https://example.test",
+        ADMIN,
+      ),
+    );
+    expect(document.links.self).toBe(
+      "https://example.test/contributions?page[offset]=0&page[limit]=1",
+    );
+    expect(document.data[0]).not.toHaveProperty("meta");
+    expect(document.meta.totalCount).toBe(7);
+  });
+});
+
+describe("helpers", () => {
+  it("reads the refs a relationship's data carries, tolerating bare shapes", () => {
+    expect(Assemble.relationshipRefs(contest("x"), "candidates")).toEqual([
+      { type: "candidates", id: "c-1" },
+      { type: "candidates", id: "c-2" },
+    ]);
+    expect(Assemble.relationshipRefs(contest("x"), "election")).toEqual([
+      { type: "elections", id: "election-1" },
+    ]);
+    expect(Assemble.relationshipRefs(contest("x"), "missing")).toEqual([]);
+    const bare: Assemble.ResourceLike = {
+      type: "t",
+      id: "1",
+      attributes: {},
+      relationships: { one: { type: "u", id: "2" }, many: [{ type: "u", id: "3" }], none: null },
+    };
+    expect(Assemble.relationshipRefs(bare, "one")).toEqual([{ type: "u", id: "2" }]);
+    expect(Assemble.relationshipRefs(bare, "many")).toEqual([{ type: "u", id: "3" }]);
+    expect(Assemble.relationshipRefs(bare, "none")).toEqual([]);
+  });
+
+  it("deep-coerces Dates and URLs and drops undefined members", () => {
+    const coerced = Assemble.toWireSafeResource({
+      type: "t",
+      id: "1",
+      attributes: { at: new Date("2026-01-01T00:00:00Z"), gone: undefined, list: [undefined, 1] },
+      links: { self: new URL("https://example.test/t/1") },
+    });
+    expect(coerced.attributes).toEqual({ at: "2026-01-01T00:00:00.000Z", list: [null, 1] });
+    expect(coerced.links?.self).toBe("https://example.test/t/1");
+  });
+
+  it("stringifies a link object's href too", () => {
+    const wired = Assemble.stringifyLinks({
+      type: "t",
+      id: "1",
+      attributes: {},
+      links: { self: { href: new URL("https://example.test/t/1") } },
+    });
+    expect(wired.links?.self).toBe("https://example.test/t/1");
+  });
+
+  it("ownedCapabilities: the owner and a moderator may write, a stranger may not", () => {
+    const owned = Assemble.ownedCapabilities({
+      viewerId: (viewer: User | null | undefined) => viewer?.id,
+      canModerate: (viewer) => viewer?.role === "admin",
+    });
+    const garden: Assemble.ResourceLike = {
+      type: "gardens",
+      id: "g1",
+      attributes: {},
+      relationships: { owner: { data: { type: "users", id: "u-user" } } },
+    };
+    expect(owned(garden, NON_ADMIN)).toEqual({ canEdit: true, canDelete: true });
+    expect(owned(garden, ADMIN)).toEqual({ canEdit: true, canDelete: true });
+    expect(owned(garden, EDITOR)).toEqual({ canEdit: false, canDelete: false });
+    expect(owned(garden, null)).toEqual({ canEdit: false, canDelete: false });
+    expect(owned(place, NON_ADMIN)).toEqual({ canEdit: false, canDelete: false });
+  });
+});

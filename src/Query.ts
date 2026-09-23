@@ -755,6 +755,190 @@ export const Include = <
 };
 
 /**
+ * The open `?include=` list: a §7.1 path list with **no** whitelist — the
+ * spelling a flat contract advertises when the legal set is enforced by the
+ * handler (`Assemble.resource` / `ResourceHandlers`, which answer
+ * `ApiError.UnsupportedIncludePath` with `meta.includablePaths`) rather than
+ * by the schema.
+ *
+ * Decodes either wire spelling — the comma form (`"a,b"`) or the
+ * repeated-key form (`["a", "b"]`, `UrlParams.toRecord`'s shape for a
+ * repeated key) and any mix — trimming incidental whitespace and dropping
+ * empty segments; encoding is the identity on the array (the client always
+ * sends one, and `UrlParams` expands it to repeated keys).
+ *
+ * Prefer {@link Include} where the endpoint's legal set is known at
+ * schema-build time: it rejects an unknown path with the same
+ * `meta.includablePaths` at decode, before any handler runs.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const decode = Schema.decodeUnknownSync(Query.IncludeList)
+ * console.log(decode("author, comments,,"), decode(["author", "comments.author"]))
+ * // → [ "author", "comments" ] [ "author", "comments.author" ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export const IncludeList: Schema.decodeTo<
+  Schema.$Array<Schema.String>,
+  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>,
+  never,
+  never
+> = Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
+  Schema.decodeTo(
+    Schema.Array(Schema.String),
+    SchemaTransformation.transform<ReadonlyArray<string>, string | ReadonlyArray<string>>({
+      decode: (value) =>
+        (typeof value === "string" ? [value] : value).flatMap((occurrence) =>
+          occurrence
+            .split(",")
+            .map((path) => path.trim())
+            .filter((path) => path !== ""),
+        ),
+      encode: (value) => value,
+    }),
+  ),
+);
+
+/**
+ * The decoded {@link IncludeList}: the §7.1 path list.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type IncludeList = typeof IncludeList.Type;
+
+/**
+ * The `include` field a flat query struct spreads in to advertise the open
+ * `?include=` parameter: `{ include: Schema.optionalKey(Query.IncludeList) }`.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export const includeListField: { readonly include: Schema.optionalKey<typeof IncludeList> } = {
+  include: Schema.optionalKey(IncludeList),
+};
+
+/**
+ * The struct shape {@link flatList} accepts: a flat list input carrying the
+ * `offset` / `limit` page cursor, whatever else it also carries.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatListStruct extends Schema.Struct<Schema.Struct.Fields> {
+  readonly fields: {
+    readonly offset: Schema.Top;
+    readonly limit: Schema.Top;
+    readonly [key: string]: Schema.Top;
+  };
+}
+
+/**
+ * Options of {@link flatList}.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatListOptions<S extends FlatListStruct> {
+  /**
+   * Fields of the struct whose **wire** key moves into the JSON:API
+   * `filter[…]` family, the way the page cursor's moves into `page[…]`:
+   * `filters: ["status"]` advertises `?filter[status]=` and decodes it back to
+   * a flat `status`. Fields not named stay under their flat key.
+   */
+  readonly filters?: ReadonlyArray<Extract<keyof S["fields"], string>> | undefined;
+  /**
+   * Whether to add the open `?include=` parameter ({@link includeListField}).
+   * Defaults to `true`.
+   */
+  readonly include?: boolean | undefined;
+}
+
+/**
+ * The schema {@link flatList} returns: the flat struct plus the `include`
+ * field, page-cursor and filter keys bracketed on the wire.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type FlatList<
+  S extends FlatListStruct,
+  Filters extends ReadonlyArray<string>,
+  IncludeField extends boolean,
+> = BracketedKeys<
+  Schema.Struct<S["fields"] & (IncludeField extends false ? {} : typeof includeListField)>,
+  { readonly offset: "page[offset]"; readonly limit: "page[limit]" } & {
+    readonly [K in Filters[number]]: `filter[${K}]`;
+  }
+>;
+
+/**
+ * A list endpoint's wire query from a **flat** list input — the struct the
+ * rest of an application consumes directly (`{ limit, offset, status }`):
+ * the open `?include=` parameter added ({@link includeListField}), the page
+ * cursor re-keyed to `page[offset]` / `page[limit]` and each named filter to
+ * `filter[<field>]`. The decoded shape is the flat input, unchanged, so the
+ * operation consuming it never sees the difference.
+ *
+ * The `include` field is added *before* the keys are bracketed: a bracketed
+ * schema is a key-rename wrapper rather than a struct, so a field added after
+ * it has nowhere to go. The result is a `Query.FlatQuerySchema`, so
+ * {@link canonicalPairs} applies to it directly — which is how a collection's
+ * pagination links come to carry every parameter the request did.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { FlatQuery, Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const ListArticles = Schema.Struct({
+ *   ...FlatQuery.pagination({ maxLimit: 100 }),
+ *   status: Schema.optionalKey(Schema.String)
+ * })
+ * const wire = Query.flatList(ListArticles, { filters: ["status"] })
+ *
+ * console.log(Schema.decodeUnknownSync(wire)({
+ *   "page[limit]": 5, "filter[status]": "open", include: "author"
+ * }))
+ * // → { offset: 0, limit: 5, status: "open", include: [ "author" ] }
+ * console.log(Query.canonicalPairs(wire)({ offset: 0, limit: 5, status: "open", include: ["author"] }))
+ * // → [ [ "include", "author" ], [ "filter[status]", "open" ], [ "page[offset]", "0" ], [ "page[limit]", "5" ] ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const flatList = <
+  S extends FlatListStruct,
+  const Filters extends ReadonlyArray<Extract<keyof S["fields"], string>> = readonly [],
+  const IncludeField extends boolean = true,
+>(
+  list: S,
+  options?: FlatListOptions<S> & {
+    readonly filters?: Filters | undefined;
+    readonly include?: IncludeField | undefined;
+  },
+): FlatList<S, Filters, IncludeField> => {
+  const filters = options?.filters ?? [];
+  const withInclude =
+    options?.include === false
+      ? Schema.Struct(list.fields)
+      : Schema.Struct({ ...list.fields, ...includeListField });
+  // The cast restates what the type parameters already say: `bracketKeys`
+  // checks each key's membership against a struct type that is generic here.
+  return withInclude.pipe(
+    bracketKeys("page", ["offset", "limit"]),
+    bracketKeys("filter", filters as ReadonlyArray<never>),
+  ) as unknown as FlatList<S, Filters, IncludeField>;
+};
+
+/**
  * One requested `include` path, already split on `.` into its segments — the
  * parse {@link validateIncludePaths} performs once, so a caller walking the
  * relationship graph (a resolver) doesn't re-tokenise a path it already

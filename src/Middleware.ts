@@ -71,7 +71,7 @@ import {
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
-import { baseMediaType, MEDIA_TYPE } from "./internal/media.js";
+import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -138,53 +138,6 @@ export interface NegotiationOptions {
    */
   readonly extensions?: ReadonlyArray<string>;
 }
-
-/**
- * Splits one media type entry into its (lowercased) base type, its media type
- * parameters, and its weight.
- *
- * Per RFC 9110 §12.4.2, `q` is not a media type parameter: it is the weight
- * of an `Accept` entry, and it terminates the media type's parameter list.
- * Everything before `q` is a media type parameter (subject to the ext/profile
- * whitelist); `q` itself and everything after it are accept-extension
- * parameters that belong to the header field, not the media type, and are
- * never checked against that whitelist. Splitting is therefore positional,
- * not a name-based filter: `;profile="…";q=0.8` has one media type parameter;
- * `;q=0.8;foo=bar` has none.
- *
- * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`.
- */
-const parseMediaType = (
-  entry: string,
-): {
-  readonly base: string;
-  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
-  readonly weight: number;
-} => {
-  const [first, ...rest] = entry.split(";");
-  const parameters: Array<readonly [name: string, value: string]> = [];
-  let weight = 1;
-  let pastWeight = false;
-  for (const part of rest) {
-    const eq = part.indexOf("=");
-    const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase();
-    if (pastWeight) continue;
-    const value = eq === -1 ? "" : part.slice(eq + 1).trim();
-    if (name === "q") {
-      const parsed = Number(value);
-      weight = Number.isFinite(parsed) ? parsed : 0;
-      pastWeight = true;
-      continue;
-    }
-    // Parameter values may be quoted (ext / profile URI lists always are).
-    const unquoted =
-      value.startsWith('"') && value.endsWith('"') && value.length >= 2
-        ? value.slice(1, -1)
-        : value;
-    parameters.push([name, unquoted] as const);
-  }
-  return { base: baseMediaType(first ?? ""), parameters, weight };
-};
 
 /**
  * JSON:API §5: a JSON:API media type instance is acceptable when its only
@@ -258,7 +211,8 @@ export const acceptIsAcceptable = (
     const { base, parameters, weight } = parseMediaType(entry);
     if (base === "*/*" || base === "application/*") return true;
     if (base !== MEDIA_TYPE) continue;
-    if (weight <= 0) continue;
+    // An unparseable `q` is a refusal here, not a default weight.
+    if ((weight ?? 0) <= 0) continue;
     if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true;
   }
   return false;
