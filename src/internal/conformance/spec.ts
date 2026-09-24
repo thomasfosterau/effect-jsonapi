@@ -11,8 +11,8 @@
  * @since 0.15.0
  * @internal
  */
-import { Effect } from "effect"
-import { MEDIA_TYPE } from "../media.js"
+import { Effect } from "effect";
+import { MEDIA_TYPE } from "../media.js";
 import {
   atomicMediaType,
   type Context,
@@ -34,34 +34,47 @@ import {
   type RuleImpl,
   settle,
   skip,
-  withQuery
-} from "./core.js"
+  withQuery,
+} from "./core.js";
 
-const SPEC = "https://jsonapi.org/format/1.1"
-const ATOMIC = "https://jsonapi.org/ext/atomic"
+const SPEC = "https://jsonapi.org/format/1.1";
+const ATOMIC = "https://jsonapi.org/ext/atomic";
 
-const rule = (id: string, section: string, anchor: string, level: Rule["level"], requirement: string): Rule => ({
+const rule = (
+  id: string,
+  section: string,
+  anchor: string,
+  level: Rule["level"],
+  requirement: string,
+): Rule => ({
   id,
   tier: "spec",
   section,
   reference: `${SPEC}/#${anchor}`,
   level,
-  requirement
-})
+  requirement,
+});
 
-const atomicRule = (id: string, section: string, level: Rule["level"], requirement: string): Rule => ({
+const atomicRule = (
+  id: string,
+  section: string,
+  level: Rule["level"],
+  requirement: string,
+): Rule => ({
   id,
   tier: "spec",
   section,
   reference: ATOMIC,
   level,
-  requirement
-})
+  requirement,
+});
 
 /** Every endpoint whose successful response is a JSON:API document. */
-const readable = (ctx: Context) => probeable(ctx, ["collection", "resource", "related", "relationship"])
+const readable = (ctx: Context) =>
+  probeable(ctx, ["collection", "resource", "related", "relationship"]);
 
-const MUTATING_SKIP = "mutating probe — pass `mutating: true` to run it against a disposable target"
+const MUTATING_SKIP =
+  "mutating probe — pass `mutating: true` to run it against a disposable target";
 
 // ---------------------------------------------------------------------------
 // Content negotiation
@@ -73,57 +86,57 @@ const responseMediaType: RuleImpl = {
     "Content Negotiation",
     "content-negotiation-servers",
     "MUST",
-    "Servers MUST send all JSON:API data in response documents with the header `Content-Type: application/vnd.api+json` without any media type parameters other than `ext` and `profile`."
+    "Servers MUST send all JSON:API data in response documents with the header `Content-Type: application/vnd.api+json` without any media type parameters other than `ext` and `profile`.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = readable(ctx)
+      const { resolved, unresolved } = readable(ctx);
       if (resolved.length === 0)
-        return skip(responseMediaType.rule, noProbeReason("JSON:API read endpoint", unresolved))
-      const findings: Array<Finding> = []
+        return skip(responseMediaType.rule, noProbeReason("JSON:API read endpoint", unresolved));
+      const findings: Array<Finding> = [];
       for (const { path } of resolved) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
-        if (observation.status < 200 || observation.status >= 300) continue
-        if (observation.text === "") continue
-        const header = observation.contentType
+        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
+        if (observation.status < 200 || observation.status >= 300) continue;
+        if (observation.text === "") continue;
+        const header = observation.contentType;
         if (header === undefined) {
           findings.push(
             finding(responseMediaType.rule, {
               detail: `${path} answered a JSON:API document with no Content-Type`,
               expected: MEDIA_TYPE,
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
-          continue
+              probe: observation.probe,
+            }),
+          );
+          continue;
         }
-        const { base, parameters } = parseMediaType(header)
+        const { base, parameters } = parseMediaType(header);
         if (base !== MEDIA_TYPE) {
           findings.push(
             finding(responseMediaType.rule, {
               detail: `${path} answered with a non-JSON:API media type`,
               expected: MEDIA_TYPE,
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
-          continue
+              probe: observation.probe,
+            }),
+          );
+          continue;
         }
-        const illegal = parameters.filter(([name]) => name !== "ext" && name !== "profile")
+        const illegal = parameters.filter(([name]) => name !== "ext" && name !== "profile");
         if (illegal.length > 0) {
           findings.push(
             finding(responseMediaType.rule, {
               detail: `${path} answered with the media type parameter(s) ${illegal.map(([n]) => n).join(", ")}`,
               expected: `${MEDIA_TYPE} with only \`ext\` / \`profile\` parameters`,
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(responseMediaType.rule, resolved.length, findings, coverageNote(unresolved))
-    })
-}
+      return settle(responseMediaType.rule, resolved.length, findings, coverageNote(unresolved));
+    }),
+};
 
 const contentTypeParameters: RuleImpl = {
   rule: rule(
@@ -131,35 +144,35 @@ const contentTypeParameters: RuleImpl = {
     "Content Negotiation",
     "content-negotiation-servers",
     "MUST",
-    "Servers MUST respond with a 415 Unsupported Media Type status code if a request specifies the header `Content-Type: application/vnd.api+json` with any media type parameters other than `ext` or `profile`."
+    "Servers MUST respond with a 415 Unsupported Media Type status code if a request specifies the header `Content-Type: application/vnd.api+json` with any media type parameters other than `ext` or `profile`.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = probeable(ctx, ["create", "update", "relationshipWrite"])
-      const target = resolved[0]
+      const { resolved, unresolved } = probeable(ctx, ["create", "update", "relationshipWrite"]);
+      const target = resolved[0];
       if (target === undefined) {
-        return skip(contentTypeParameters.rule, noProbeReason("write endpoint", unresolved))
+        return skip(contentTypeParameters.rule, noProbeReason("write endpoint", unresolved));
       }
-      const findings: Array<Finding> = []
+      const findings: Array<Finding> = [];
       const observation = yield* ctx.request({
         method: target.endpoint.method,
         url: target.path,
         headers: { accept: MEDIA_TYPE, "content-type": `${MEDIA_TYPE};charset=utf-8` },
-        body: { data: { type: target.endpoint.segment ?? "unknown", attributes: {} } }
-      })
+        body: { data: { type: target.endpoint.segment ?? "unknown", attributes: {} } },
+      });
       if (observation.status !== 415) {
         findings.push(
           finding(contentTypeParameters.rule, {
             detail: `a \`charset\` parameter on the request Content-Type was not rejected at ${target.endpoint.method} ${target.path}`,
             expected: "415 Unsupported Media Type",
             observed: describe(observation),
-            probe: observation.probe
-          })
-        )
+            probe: observation.probe,
+          }),
+        );
       }
-      return settle(contentTypeParameters.rule, 1, findings)
-    })
-}
+      return settle(contentTypeParameters.rule, 1, findings);
+    }),
+};
 
 const acceptParameters: RuleImpl = {
   rule: rule(
@@ -167,30 +180,32 @@ const acceptParameters: RuleImpl = {
     "Content Negotiation",
     "content-negotiation-servers",
     "MUST",
-    "Servers MUST respond with a 406 Not Acceptable status code if a request's `Accept` header contains the JSON:API media type and all instances of that media type are modified with media type parameters other than `ext` or `profile`."
+    "Servers MUST respond with a 406 Not Acceptable status code if a request's `Accept` header contains the JSON:API media type and all instances of that media type are modified with media type parameters other than `ext` or `profile`.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved[0]
-      if (target === undefined) return skip(acceptParameters.rule, noProbeReason("JSON:API read endpoint", []))
+      const target = readable(ctx).resolved[0];
+      if (target === undefined)
+        return skip(acceptParameters.rule, noProbeReason("JSON:API read endpoint", []));
       const observation = yield* ctx.request({
         url: target.path,
-        headers: { accept: `${MEDIA_TYPE};charset=utf-8` }
-      })
+        headers: { accept: `${MEDIA_TYPE};charset=utf-8` },
+      });
       const findings =
         observation.status === 406
           ? []
           : [
               finding(acceptParameters.rule, {
-                detail: "an `Accept` whose only JSON:API instance carries a `charset` parameter was not rejected",
+                detail:
+                  "an `Accept` whose only JSON:API instance carries a `charset` parameter was not rejected",
                 expected: "406 Not Acceptable",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(acceptParameters.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(acceptParameters.rule, 1, findings);
+    }),
+};
 
 const acceptWeight: RuleImpl = {
   rule: rule(
@@ -198,35 +213,39 @@ const acceptWeight: RuleImpl = {
     "Content Negotiation (with RFC 9110 §12.4.2)",
     "content-negotiation-servers",
     "MUST NOT",
-    "A `q` weight is an Accept-header parameter, not a media type parameter (RFC 9110 §12.4.2), so a JSON:API media type instance carrying only a non-zero `q` MUST NOT be counted as parameterised and MUST NOT be rejected with 406."
+    "A `q` weight is an Accept-header parameter, not a media type parameter (RFC 9110 §12.4.2), so a JSON:API media type instance carrying only a non-zero `q` MUST NOT be counted as parameterised and MUST NOT be rejected with 406.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved[0]
-      if (target === undefined) return skip(acceptWeight.rule, noProbeReason("JSON:API read endpoint", []))
+      const target = readable(ctx).resolved[0];
+      if (target === undefined)
+        return skip(acceptWeight.rule, noProbeReason("JSON:API read endpoint", []));
       const accepts: ReadonlyArray<readonly [string, string]> = [
         [`${MEDIA_TYPE};q=0.9`, "a weight on the JSON:API instance"],
         [`${MEDIA_TYPE}; q=1`, "a weight with surrounding whitespace"],
         [`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`, "a weighted preference between HTML and JSON:API"],
-        [`${MEDIA_TYPE};profile="https://example.com/p";q=0.8`, "a media type parameter followed by a weight"]
-      ]
-      const findings: Array<Finding> = []
+        [
+          `${MEDIA_TYPE};profile="https://example.com/p";q=0.8`,
+          "a media type parameter followed by a weight",
+        ],
+      ];
+      const findings: Array<Finding> = [];
       for (const [accept, description] of accepts) {
-        const observation = yield* ctx.request({ url: target.path, headers: { accept } })
+        const observation = yield* ctx.request({ url: target.path, headers: { accept } });
         if (observation.status === 406) {
           findings.push(
             finding(acceptWeight.rule, {
               detail: `${description} was treated as a disallowed media type parameter`,
               expected: "any status but 406 — the weight is not a media type parameter",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(acceptWeight.rule, accepts.length, findings)
-    })
-}
+      return settle(acceptWeight.rule, accepts.length, findings);
+    }),
+};
 
 const acceptWeightZero: RuleImpl = {
   rule: rule(
@@ -234,13 +253,17 @@ const acceptWeightZero: RuleImpl = {
     "Content Negotiation (with RFC 9110 §12.4.2)",
     "content-negotiation-servers",
     "MUST",
-    "`q=0` on the only JSON:API instance in `Accept` is an explicit refusal of that representation (RFC 9110 §12.4.2), so a server that can only answer JSON:API MUST respond 406."
+    "`q=0` on the only JSON:API instance in `Accept` is an explicit refusal of that representation (RFC 9110 §12.4.2), so a server that can only answer JSON:API MUST respond 406.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved[0]
-      if (target === undefined) return skip(acceptWeightZero.rule, noProbeReason("JSON:API read endpoint", []))
-      const observation = yield* ctx.request({ url: target.path, headers: { accept: `${MEDIA_TYPE};q=0` } })
+      const target = readable(ctx).resolved[0];
+      if (target === undefined)
+        return skip(acceptWeightZero.rule, noProbeReason("JSON:API read endpoint", []));
+      const observation = yield* ctx.request({
+        url: target.path,
+        headers: { accept: `${MEDIA_TYPE};q=0` },
+      });
       const findings =
         observation.status === 406
           ? []
@@ -249,12 +272,12 @@ const acceptWeightZero: RuleImpl = {
                 detail: "`q=0` on the only JSON:API instance was not treated as a refusal",
                 expected: "406 Not Acceptable",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(acceptWeightZero.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(acceptWeightZero.rule, 1, findings);
+    }),
+};
 
 const unknownProfileIgnored: RuleImpl = {
   rule: rule(
@@ -262,16 +285,17 @@ const unknownProfileIgnored: RuleImpl = {
     "Profiles",
     "profiles",
     "MUST",
-    "A server MUST ignore `profile` parameters naming profiles it does not support, rather than rejecting the request."
+    "A server MUST ignore `profile` parameters naming profiles it does not support, rather than rejecting the request.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved[0]
-      if (target === undefined) return skip(unknownProfileIgnored.rule, noProbeReason("JSON:API read endpoint", []))
+      const target = readable(ctx).resolved[0];
+      if (target === undefined)
+        return skip(unknownProfileIgnored.rule, noProbeReason("JSON:API read endpoint", []));
       const observation = yield* ctx.request({
         url: target.path,
-        headers: { accept: `${MEDIA_TYPE};profile="https://example.com/unrecognised-profile"` }
-      })
+        headers: { accept: `${MEDIA_TYPE};profile="https://example.com/unrecognised-profile"` },
+      });
       const findings =
         observation.status === 406 || observation.status === 415
           ? [
@@ -279,13 +303,13 @@ const unknownProfileIgnored: RuleImpl = {
                 detail: "an unrecognised `profile` in `Accept` was rejected instead of ignored",
                 expected: "the profile ignored — any status but 406 / 415",
                 observed: describe(observation),
-                probe: observation.probe
-              })
+                probe: observation.probe,
+              }),
             ]
-          : []
-      return settle(unknownProfileIgnored.rule, 1, findings)
-    })
-}
+          : [];
+      return settle(unknownProfileIgnored.rule, 1, findings);
+    }),
+};
 
 const unsupportedExtension: RuleImpl = {
   rule: rule(
@@ -293,16 +317,17 @@ const unsupportedExtension: RuleImpl = {
     "Extensions",
     "extensions",
     "MUST",
-    "A server MUST respond with 406 Not Acceptable when every JSON:API instance in `Accept` names an `ext` extension URI it does not support."
+    "A server MUST respond with 406 Not Acceptable when every JSON:API instance in `Accept` names an `ext` extension URI it does not support.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved[0]
-      if (target === undefined) return skip(unsupportedExtension.rule, noProbeReason("JSON:API read endpoint", []))
+      const target = readable(ctx).resolved[0];
+      if (target === undefined)
+        return skip(unsupportedExtension.rule, noProbeReason("JSON:API read endpoint", []));
       const observation = yield* ctx.request({
         url: target.path,
-        headers: { accept: `${MEDIA_TYPE};ext="https://example.com/unsupported-extension"` }
-      })
+        headers: { accept: `${MEDIA_TYPE};ext="https://example.com/unsupported-extension"` },
+      });
       const findings =
         observation.status === 406
           ? []
@@ -311,12 +336,12 @@ const unsupportedExtension: RuleImpl = {
                 detail: "an unsupported `ext` URI in `Accept` was not rejected",
                 expected: "406 Not Acceptable",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(unsupportedExtension.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(unsupportedExtension.rule, 1, findings);
+    }),
+};
 
 // ---------------------------------------------------------------------------
 // Document structure
@@ -329,17 +354,17 @@ const unsupportedExtension: RuleImpl = {
  * probe into a spurious finding.
  */
 const includableOf = (body: unknown): ReadonlyArray<string> => {
-  if (!isRecord(body)) return []
-  const data = body["data"]
-  const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined
-  if (first === undefined) return []
-  const relationships = first["relationships"]
-  if (!isRecord(relationships)) return []
+  if (!isRecord(body)) return [];
+  const data = body["data"];
+  const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
+  if (first === undefined) return [];
+  const relationships = first["relationships"];
+  if (!isRecord(relationships)) return [];
   return Object.keys(relationships).filter((name) => {
-    const relationship = relationships[name]
-    return isRecord(relationship) && "data" in relationship
-  })
-}
+    const relationship = relationships[name];
+    return isRecord(relationship) && "data" in relationship;
+  });
+};
 
 /**
  * Every document the api will hand the kit for its read endpoints: a bare probe
@@ -352,19 +377,20 @@ const includableOf = (body: unknown): ReadonlyArray<string> => {
  */
 const documentProbes = (ctx: Context) =>
   Effect.gen(function* () {
-    const out: Array<{ readonly where: string; readonly observation: Observation }> = []
+    const out: Array<{ readonly where: string; readonly observation: Observation }> = [];
     for (const { endpoint, path } of readable(ctx).resolved) {
-      const bare = yield* ctx.request({ url: path, headers: jsonApiAccept })
-      out.push({ where: path, observation: bare })
-      if (!endpoint.queryKeys.includes("include")) continue
-      const includable = includableOf(bare.body)
-      if (includable.length === 0) continue
-      const url = withQuery(path, [["include", includable.join(",")]])
-      const compound = yield* ctx.request({ url, headers: jsonApiAccept })
-      if (compound.status >= 200 && compound.status < 300) out.push({ where: url, observation: compound })
+      const bare = yield* ctx.request({ url: path, headers: jsonApiAccept });
+      out.push({ where: path, observation: bare });
+      if (!endpoint.queryKeys.includes("include")) continue;
+      const includable = includableOf(bare.body);
+      if (includable.length === 0) continue;
+      const url = withQuery(path, [["include", includable.join(",")]]);
+      const compound = yield* ctx.request({ url, headers: jsonApiAccept });
+      if (compound.status >= 200 && compound.status < 300)
+        out.push({ where: url, observation: compound });
     }
-    return out
-  })
+    return out;
+  });
 
 /**
  * Runs one document-level predicate over every document the api returns.
@@ -377,30 +403,38 @@ const overDocuments =
   (
     impl: Rule,
     options: {
-      readonly applicable?: ((body: unknown) => boolean) | undefined
-      readonly inapplicable?: string | undefined
-      readonly check: (body: unknown, observation: Observation, where: string) => ReadonlyArray<Finding>
-    }
+      readonly applicable?: ((body: unknown) => boolean) | undefined;
+      readonly inapplicable?: string | undefined;
+      readonly check: (
+        body: unknown,
+        observation: Observation,
+        where: string,
+      ) => ReadonlyArray<Finding>;
+    },
   ): RuleImpl["run"] =>
   (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = readable(ctx)
-      if (resolved.length === 0) return skip(impl, noProbeReason("JSON:API read endpoint", unresolved))
-      const documents = yield* documentProbes(ctx)
-      const note = coverageNote(unresolved)
-      const findings: Array<Finding> = []
-      let evaluated = 0
+      const { resolved, unresolved } = readable(ctx);
+      if (resolved.length === 0)
+        return skip(impl, noProbeReason("JSON:API read endpoint", unresolved));
+      const documents = yield* documentProbes(ctx);
+      const note = coverageNote(unresolved);
+      const findings: Array<Finding> = [];
+      let evaluated = 0;
       for (const { observation, where } of documents) {
-        if (observation.body === undefined) continue
-        if (options.applicable !== undefined && !options.applicable(observation.body)) continue
-        evaluated += 1
-        findings.push(...options.check(observation.body, observation, where))
+        if (observation.body === undefined) continue;
+        if (options.applicable !== undefined && !options.applicable(observation.body)) continue;
+        evaluated += 1;
+        findings.push(...options.check(observation.body, observation, where));
       }
       if (evaluated === 0) {
-        return skip(impl, options.inapplicable ?? "no endpoint returned a document this rule applies to")
+        return skip(
+          impl,
+          options.inapplicable ?? "no endpoint returned a document this rule applies to",
+        );
       }
-      return settle(impl, evaluated, findings, note)
-    })
+      return settle(impl, evaluated, findings, note);
+    });
 
 const topLevelMembers: RuleImpl = {
   rule: rule(
@@ -408,7 +442,7 @@ const topLevelMembers: RuleImpl = {
     "Document Structure",
     "document-top-level",
     "MUST",
-    "A JSON:API document MUST contain at least one of the top-level members `data`, `errors` or `meta`."
+    "A JSON:API document MUST contain at least one of the top-level members `data`, `errors` or `meta`.",
   ),
   run: (ctx) =>
     overDocuments(topLevelMembers.rule, {
@@ -419,11 +453,11 @@ const topLevelMembers: RuleImpl = {
               detail: `${where} answered a body that is not a JSON object`,
               expected: "a JSON:API document object",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          ]
+              probe: observation.probe,
+            }),
+          ];
         }
-        const has = ["data", "errors", "meta"].filter((member) => member in body)
+        const has = ["data", "errors", "meta"].filter((member) => member in body);
         return has.length > 0
           ? []
           : [
@@ -431,12 +465,12 @@ const topLevelMembers: RuleImpl = {
                 detail: `${where} answered a document with none of \`data\`, \`errors\`, \`meta\``,
                 expected: "at least one of `data`, `errors`, `meta`",
                 observed: `top-level members: ${Object.keys(body).join(", ") || "(none)"}`,
-                probe: observation.probe
-              })
-            ]
-      }
-    })(ctx)
-}
+                probe: observation.probe,
+              }),
+            ];
+      },
+    })(ctx),
+};
 
 const dataAndErrorsExclusive: RuleImpl = {
   rule: rule(
@@ -444,25 +478,25 @@ const dataAndErrorsExclusive: RuleImpl = {
     "Document Structure",
     "document-top-level",
     "MUST NOT",
-    "The members `data` and `errors` MUST NOT coexist in the same document."
+    "The members `data` and `errors` MUST NOT coexist in the same document.",
   ),
   run: (ctx) =>
     overDocuments(dataAndErrorsExclusive.rule, {
       check: (body, observation, where) => {
-        if (!isRecord(body)) return []
+        if (!isRecord(body)) return [];
         return "data" in body && "errors" in body
           ? [
               finding(dataAndErrorsExclusive.rule, {
                 detail: `${where} answered a document carrying both \`data\` and \`errors\``,
                 expected: "one of `data` / `errors`, never both",
                 observed: `top-level members: ${Object.keys(body).join(", ")}`,
-                probe: observation.probe
-              })
+                probe: observation.probe,
+              }),
             ]
-          : []
-      }
-    })(ctx)
-}
+          : [];
+      },
+    })(ctx),
+};
 
 const includedRequiresData: RuleImpl = {
   rule: rule(
@@ -470,25 +504,25 @@ const includedRequiresData: RuleImpl = {
     "Document Structure",
     "document-top-level",
     "MUST NOT",
-    "If a document does not contain a top-level `data` key, the `included` member MUST NOT be present."
+    "If a document does not contain a top-level `data` key, the `included` member MUST NOT be present.",
   ),
   run: (ctx) =>
     overDocuments(includedRequiresData.rule, {
       check: (body, observation, where) => {
-        if (!isRecord(body)) return []
+        if (!isRecord(body)) return [];
         return "included" in body && !("data" in body)
           ? [
               finding(includedRequiresData.rule, {
                 detail: `${where} answered \`included\` with no top-level \`data\``,
                 expected: "`included` only alongside `data`",
                 observed: `top-level members: ${Object.keys(body).join(", ")}`,
-                probe: observation.probe
-              })
+                probe: observation.probe,
+              }),
             ]
-          : []
-      }
-    })(ctx)
-}
+          : [];
+      },
+    })(ctx),
+};
 
 const fullLinkage: RuleImpl = {
   rule: rule(
@@ -496,44 +530,49 @@ const fullLinkage: RuleImpl = {
     "Compound Documents",
     "document-compound-documents",
     "MUST NOT",
-    "A compound document MUST NOT include resources that cannot be linked to the primary data: every resource in `included` must be identified by a resource identifier object reachable from the primary data or from another included resource."
+    "A compound document MUST NOT include resources that cannot be linked to the primary data: every resource in `included` must be identified by a resource identifier object reachable from the primary data or from another included resource.",
   ),
   run: (ctx) =>
     overDocuments(fullLinkage.rule, {
-      applicable: (body) => isRecord(body) && Array.isArray(body["included"]) && body["included"].length > 0,
+      applicable: (body) =>
+        isRecord(body) && Array.isArray(body["included"]) && body["included"].length > 0,
       inapplicable:
         "no endpoint returned a compound document — either none declares `include`, or no resource it returned carries inline relationship linkage to include",
       check: (body, observation, where) => {
-        if (!isRecord(body)) return []
-        const included = body["included"]
-        if (!Array.isArray(included) || included.length === 0) return []
-        const primary = body["data"]
-        const primaries = Array.isArray(primary) ? primary.filter(isRecord) : isRecord(primary) ? [primary] : []
-        const includedRecords = included.filter(isRecord)
-        const byIdentity = new Map<string, Readonly<Record<string, unknown>>>()
+        if (!isRecord(body)) return [];
+        const included = body["included"];
+        if (!Array.isArray(included) || included.length === 0) return [];
+        const primary = body["data"];
+        const primaries = Array.isArray(primary)
+          ? primary.filter(isRecord)
+          : isRecord(primary)
+            ? [primary]
+            : [];
+        const includedRecords = included.filter(isRecord);
+        const byIdentity = new Map<string, Readonly<Record<string, unknown>>>();
         for (const resource of includedRecords) {
-          const key = identity(resource)
-          if (key !== undefined) byIdentity.set(key, resource)
+          const key = identity(resource);
+          if (key !== undefined) byIdentity.set(key, resource);
         }
-        const reachable = new Set<string>()
-        const frontier: Array<string> = []
+        const reachable = new Set<string>();
+        const frontier: Array<string> = [];
         const seed = (keys: ReadonlyArray<string>) => {
           for (const key of keys) {
-            if (reachable.has(key)) continue
-            reachable.add(key)
-            frontier.push(key)
+            if (reachable.has(key)) continue;
+            reachable.add(key);
+            frontier.push(key);
           }
-        }
-        for (const resource of primaries) seed(linkageOf(resource))
+        };
+        for (const resource of primaries) seed(linkageOf(resource));
         while (frontier.length > 0) {
-          const key = frontier.pop()!
-          const resource = byIdentity.get(key)
-          if (resource !== undefined) seed(linkageOf(resource))
+          const key = frontier.pop()!;
+          const resource = byIdentity.get(key);
+          if (resource !== undefined) seed(linkageOf(resource));
         }
         const orphans = includedRecords.filter((resource) => {
-          const key = identity(resource)
-          return key === undefined || !reachable.has(key)
-        })
+          const key = identity(resource);
+          return key === undefined || !reachable.has(key);
+        });
         return orphans.length === 0
           ? []
           : [
@@ -541,14 +580,17 @@ const fullLinkage: RuleImpl = {
                 detail: `${where} answered ${orphans.length} included resource(s) unreachable from the primary data`,
                 expected: "every `included` resource reachable through resource linkage",
                 observed: orphans
-                  .map((resource) => `${String(resource["type"])}:${String(resource["id"] ?? resource["lid"])}`)
+                  .map(
+                    (resource) =>
+                      `${String(resource["type"])}:${String(resource["id"] ?? resource["lid"])}`,
+                  )
                   .join(", "),
-                probe: observation.probe
-              })
-            ]
-      }
-    })(ctx)
-}
+                probe: observation.probe,
+              }),
+            ];
+      },
+    })(ctx),
+};
 
 const noDuplicateResources: RuleImpl = {
   rule: rule(
@@ -556,22 +598,25 @@ const noDuplicateResources: RuleImpl = {
     "Compound Documents",
     "document-compound-documents",
     "MUST NOT",
-    "A compound document MUST NOT include more than one resource object for each `type` and `id` pair."
+    "A compound document MUST NOT include more than one resource object for each `type` and `id` pair.",
   ),
   run: (ctx) =>
     overDocuments(noDuplicateResources.rule, {
       applicable: (body) => resourcesOf(body).length > 1,
       inapplicable: "no endpoint returned a document carrying more than one resource object",
       check: (body, observation, where) => {
-        const resources = resourcesOf(body)
-        const seen = new Map<string, string>()
-        const duplicates: Array<string> = []
+        const resources = resourcesOf(body);
+        const seen = new Map<string, string>();
+        const duplicates: Array<string> = [];
         for (const { pointer, resource } of resources) {
-          const key = identity(resource)
-          if (key === undefined) continue
-          const first = seen.get(key)
-          if (first === undefined) seen.set(key, pointer)
-          else duplicates.push(`${String(resource["type"])}:${String(resource["id"])} at ${first} and ${pointer}`)
+          const key = identity(resource);
+          if (key === undefined) continue;
+          const first = seen.get(key);
+          if (first === undefined) seen.set(key, pointer);
+          else
+            duplicates.push(
+              `${String(resource["type"])}:${String(resource["id"])} at ${first} and ${pointer}`,
+            );
         }
         return duplicates.length === 0
           ? []
@@ -580,12 +625,12 @@ const noDuplicateResources: RuleImpl = {
                 detail: `${where} answered the same (type, id) more than once`,
                 expected: "one resource object per (type, id)",
                 observed: duplicates.join("; "),
-                probe: observation.probe
-              })
-            ]
-      }
-    })(ctx)
-}
+                probe: observation.probe,
+              }),
+            ];
+      },
+    })(ctx),
+};
 
 const resourceIdentification: RuleImpl = {
   rule: rule(
@@ -593,42 +638,42 @@ const resourceIdentification: RuleImpl = {
     "Resource Objects",
     "document-resource-objects",
     "MUST",
-    "Every resource object MUST contain `id` and `type` members, except when the resource object originates at the client and represents a new resource; the values of both MUST be strings."
+    "Every resource object MUST contain `id` and `type` members, except when the resource object originates at the client and represents a new resource; the values of both MUST be strings.",
   ),
   run: (ctx) =>
     overDocuments(resourceIdentification.rule, {
       applicable: (body) => resourcesOf(body).length > 0,
       inapplicable: "no endpoint returned a document carrying a resource object",
       check: (body, observation, where) => {
-        const findings: Array<Finding> = []
+        const findings: Array<Finding> = [];
         for (const { pointer, resource } of resourcesOf(body)) {
-          const type = resource["type"]
+          const type = resource["type"];
           if (typeof type !== "string" || type === "") {
             findings.push(
               finding(resourceIdentification.rule, {
                 detail: `${where} answered a resource object at ${pointer} with no string \`type\``,
                 expected: "`type` present and a non-empty string",
                 observed: `type: ${JSON.stringify(type)}`,
-                probe: observation.probe
-              })
-            )
+                probe: observation.probe,
+              }),
+            );
           }
-          const id = resource["id"]
+          const id = resource["id"];
           if (typeof id !== "string" || id === "") {
             findings.push(
               finding(resourceIdentification.rule, {
                 detail: `${where} answered a resource object at ${pointer} with no string \`id\``,
                 expected: "`id` present and a non-empty string",
                 observed: `id: ${JSON.stringify(id)}`,
-                probe: observation.probe
-              })
-            )
+                probe: observation.probe,
+              }),
+            );
           }
         }
-        return findings
-      }
-    })(ctx)
-}
+        return findings;
+      },
+    })(ctx),
+};
 
 const jsonApiObject: RuleImpl = {
   rule: rule(
@@ -636,54 +681,54 @@ const jsonApiObject: RuleImpl = {
     "Document Structure",
     "document-jsonapi-object",
     "MUST",
-    "If present, the top-level `jsonapi` member MUST be an object; its `version` member, if present, MUST be a string, and its `ext` / `profile` members, if present, MUST be arrays of strings."
+    "If present, the top-level `jsonapi` member MUST be an object; its `version` member, if present, MUST be a string, and its `ext` / `profile` members, if present, MUST be arrays of strings.",
   ),
   run: (ctx) =>
     overDocuments(jsonApiObject.rule, {
       applicable: (body) => isRecord(body) && "jsonapi" in body,
       inapplicable: "no endpoint returned a document carrying a `jsonapi` member",
       check: (body, observation, where) => {
-        if (!isRecord(body) || !("jsonapi" in body)) return []
-        const value = body["jsonapi"]
+        if (!isRecord(body) || !("jsonapi" in body)) return [];
+        const value = body["jsonapi"];
         if (!isRecord(value)) {
           return [
             finding(jsonApiObject.rule, {
               detail: `${where} answered a non-object \`jsonapi\` member`,
               expected: "a jsonapi object",
               observed: JSON.stringify(value),
-              probe: observation.probe
-            })
-          ]
+              probe: observation.probe,
+            }),
+          ];
         }
-        const findings: Array<Finding> = []
+        const findings: Array<Finding> = [];
         if ("version" in value && typeof value["version"] !== "string") {
           findings.push(
             finding(jsonApiObject.rule, {
               detail: `${where} answered a non-string \`jsonapi.version\``,
               expected: "a string",
               observed: JSON.stringify(value["version"]),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
         for (const member of ["ext", "profile"] as const) {
-          if (!(member in value)) continue
-          const list = value[member]
+          if (!(member in value)) continue;
+          const list = value[member];
           if (!Array.isArray(list) || list.some((uri) => typeof uri !== "string")) {
             findings.push(
               finding(jsonApiObject.rule, {
                 detail: `${where} answered a \`jsonapi.${member}\` that is not an array of strings`,
                 expected: "an array of URI strings",
                 observed: JSON.stringify(list),
-                probe: observation.probe
-              })
-            )
+                probe: observation.probe,
+              }),
+            );
           }
         }
-        return findings
-      }
-    })(ctx)
-}
+        return findings;
+      },
+    })(ctx),
+};
 
 // ---------------------------------------------------------------------------
 // Error objects
@@ -695,20 +740,30 @@ const jsonApiObject: RuleImpl = {
  */
 const errorProbes = (ctx: Context) =>
   Effect.gen(function* () {
-    const read = readable(ctx).resolved
-    const out: Array<Observation> = []
-    const resource = ctx.endpoints.find((endpoint) => endpoint.role === "resource")
+    const read = readable(ctx).resolved;
+    const out: Array<Observation> = [];
+    const resource = ctx.endpoints.find((endpoint) => endpoint.role === "resource");
     if (resource !== undefined && resource.segment !== undefined) {
-      const path = resource.path.replace(`:${resource.params[0]}`, encodeURIComponent(ctx.options.absentId))
-      out.push(yield* ctx.request({ url: path, headers: jsonApiAccept }))
+      const path = resource.path.replace(
+        `:${resource.params[0]}`,
+        encodeURIComponent(ctx.options.absentId),
+      );
+      out.push(yield* ctx.request({ url: path, headers: jsonApiAccept }));
     }
-    const first = read[0]
+    const first = read[0];
     if (first !== undefined) {
-      out.push(yield* ctx.request({ url: withQuery(first.path, [["unknown", "1"]]), headers: jsonApiAccept }))
-      out.push(yield* ctx.request({ url: first.path, headers: { accept: `${MEDIA_TYPE};charset=utf-8` } }))
+      out.push(
+        yield* ctx.request({
+          url: withQuery(first.path, [["unknown", "1"]]),
+          headers: jsonApiAccept,
+        }),
+      );
+      out.push(
+        yield* ctx.request({ url: first.path, headers: { accept: `${MEDIA_TYPE};charset=utf-8` } }),
+      );
     }
-    return out.filter((observation) => observation.status >= 400)
-  })
+    return out.filter((observation) => observation.status >= 400);
+  });
 
 const errorDocumentShape: RuleImpl = {
   rule: rule(
@@ -716,32 +771,35 @@ const errorDocumentShape: RuleImpl = {
     "Errors",
     "errors",
     "MUST",
-    "Error objects MUST be returned as an array keyed by `errors` in the top level of a JSON:API document."
+    "Error objects MUST be returned as an array keyed by `errors` in the top level of a JSON:API document.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const observations = yield* errorProbes(ctx)
+      const observations = yield* errorProbes(ctx);
       if (observations.length === 0) {
-        return skip(errorDocumentShape.rule, "no error response could be provoked without mutating the target")
+        return skip(
+          errorDocumentShape.rule,
+          "no error response could be provoked without mutating the target",
+        );
       }
-      const findings: Array<Finding> = []
+      const findings: Array<Finding> = [];
       for (const observation of observations) {
-        if (observation.status === 404 && observation.text === "") continue
-        const body = observation.body
+        if (observation.status === 404 && observation.text === "") continue;
+        const body = observation.body;
         if (!isRecord(body) || !Array.isArray(body["errors"]) || body["errors"].length === 0) {
           findings.push(
             finding(errorDocumentShape.rule, {
               detail: `a ${observation.status} response was not a JSON:API error document`,
               expected: "`{ errors: [ … ] }` with at least one error object",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(errorDocumentShape.rule, observations.length, findings)
-    })
-}
+      return settle(errorDocumentShape.rule, observations.length, findings);
+    }),
+};
 
 const errorMemberTypes: RuleImpl = {
   rule: rule(
@@ -749,16 +807,17 @@ const errorMemberTypes: RuleImpl = {
     "Error Objects",
     "error-objects",
     "MUST",
-    "An error object's `id`, `status`, `code`, `title` and `detail` members MUST be strings, and `links`, `source` and `meta` MUST be objects."
+    "An error object's `id`, `status`, `code`, `title` and `detail` members MUST be strings, and `links`, `source` and `meta` MUST be objects.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const observations = yield* errorProbes(ctx)
+      const observations = yield* errorProbes(ctx);
       const errors = observations.flatMap((observation) =>
-        errorObjectsOf(observation.body).map((error) => ({ error, observation }))
-      )
-      if (errors.length === 0) return skip(errorMemberTypes.rule, "no error object could be provoked")
-      const findings: Array<Finding> = []
+        errorObjectsOf(observation.body).map((error) => ({ error, observation })),
+      );
+      if (errors.length === 0)
+        return skip(errorMemberTypes.rule, "no error object could be provoked");
+      const findings: Array<Finding> = [];
       for (const { error, observation } of errors) {
         for (const member of ["id", "status", "code", "title", "detail"] as const) {
           if (member in error && typeof error[member] !== "string") {
@@ -767,9 +826,9 @@ const errorMemberTypes: RuleImpl = {
                 detail: `a ${observation.status} error object's \`${member}\` is not a string`,
                 expected: "a string",
                 observed: JSON.stringify(error[member]),
-                probe: observation.probe
-              })
-            )
+                probe: observation.probe,
+              }),
+            );
           }
         }
         for (const member of ["links", "source", "meta"] as const) {
@@ -779,15 +838,15 @@ const errorMemberTypes: RuleImpl = {
                 detail: `a ${observation.status} error object's \`${member}\` is not an object`,
                 expected: "an object",
                 observed: JSON.stringify(error[member]),
-                probe: observation.probe
-              })
-            )
+                probe: observation.probe,
+              }),
+            );
           }
         }
       }
-      return settle(errorMemberTypes.rule, errors.length, findings)
-    })
-}
+      return settle(errorMemberTypes.rule, errors.length, findings);
+    }),
+};
 
 const errorSourceDiscrimination: RuleImpl = {
   rule: rule(
@@ -795,21 +854,24 @@ const errorSourceDiscrimination: RuleImpl = {
     "Error Objects",
     "error-objects",
     "MUST",
-    "An error object's `source` member MUST contain only `pointer` (a JSON Pointer to the associated entity in the request document), `parameter` (a URI query parameter name) or `header` (a request header name)."
+    "An error object's `source` member MUST contain only `pointer` (a JSON Pointer to the associated entity in the request document), `parameter` (a URI query parameter name) or `header` (a request header name).",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const observations = yield* errorProbes(ctx)
+      const observations = yield* errorProbes(ctx);
       const sources = observations.flatMap((observation) =>
         errorObjectsOf(observation.body)
           .map((error) => error["source"])
           .filter(isRecord)
-          .map((source) => ({ source, observation }))
-      )
+          .map((source) => ({ source, observation })),
+      );
       if (sources.length === 0) {
-        return skip(errorSourceDiscrimination.rule, "no provoked error object carried a `source` member")
+        return skip(
+          errorSourceDiscrimination.rule,
+          "no provoked error object carried a `source` member",
+        );
       }
-      const findings: Array<Finding> = []
+      const findings: Array<Finding> = [];
       for (const { observation, source } of sources) {
         for (const key of Object.keys(source)) {
           if (key !== "pointer" && key !== "parameter" && key !== "header") {
@@ -818,22 +880,22 @@ const errorSourceDiscrimination: RuleImpl = {
                 detail: `a ${observation.status} error object's \`source\` carries the member \`${key}\``,
                 expected: "only `pointer`, `parameter` or `header`",
                 observed: JSON.stringify(source),
-                probe: observation.probe
-              })
-            )
-            continue
+                probe: observation.probe,
+              }),
+            );
+            continue;
           }
-          const value = source[key]
+          const value = source[key];
           if (typeof value !== "string") {
             findings.push(
               finding(errorSourceDiscrimination.rule, {
                 detail: `a ${observation.status} error object's \`source.${key}\` is not a string`,
                 expected: "a string",
                 observed: JSON.stringify(value),
-                probe: observation.probe
-              })
-            )
-            continue
+                probe: observation.probe,
+              }),
+            );
+            continue;
           }
           if (key === "pointer" && value !== "" && !value.startsWith("/")) {
             findings.push(
@@ -841,15 +903,15 @@ const errorSourceDiscrimination: RuleImpl = {
                 detail: `a ${observation.status} error object's \`source.pointer\` is not a JSON Pointer`,
                 expected: "the empty string or a value beginning with `/`",
                 observed: JSON.stringify(value),
-                probe: observation.probe
-              })
-            )
+                probe: observation.probe,
+              }),
+            );
           }
         }
       }
-      return settle(errorSourceDiscrimination.rule, sources.length, findings)
-    })
-}
+      return settle(errorSourceDiscrimination.rule, sources.length, findings);
+    }),
+};
 
 const errorStatusMatches: RuleImpl = {
   rule: rule(
@@ -857,32 +919,33 @@ const errorStatusMatches: RuleImpl = {
     "Error Objects",
     "error-objects",
     "SHOULD",
-    "An error object's `status` is the HTTP status code applicable to the problem, so in a single-error document it SHOULD equal the response's status code."
+    "An error object's `status` is the HTTP status code applicable to the problem, so in a single-error document it SHOULD equal the response's status code.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
       const observations = (yield* errorProbes(ctx)).filter(
-        (observation) => errorObjectsOf(observation.body).length === 1
-      )
-      if (observations.length === 0) return skip(errorStatusMatches.rule, "no single-error document could be provoked")
-      const findings: Array<Finding> = []
+        (observation) => errorObjectsOf(observation.body).length === 1,
+      );
+      if (observations.length === 0)
+        return skip(errorStatusMatches.rule, "no single-error document could be provoked");
+      const findings: Array<Finding> = [];
       for (const observation of observations) {
-        const error = errorObjectsOf(observation.body)[0]!
-        const status = error["status"]
+        const error = errorObjectsOf(observation.body)[0]!;
+        const status = error["status"];
         if (typeof status === "string" && status !== String(observation.status)) {
           findings.push(
             finding(errorStatusMatches.rule, {
               detail: "a single-error document's `status` disagrees with the response status",
               expected: `"${observation.status}"`,
               observed: JSON.stringify(status),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(errorStatusMatches.rule, observations.length, findings)
-    })
-}
+      return settle(errorStatusMatches.rule, observations.length, findings);
+    }),
+};
 
 // ---------------------------------------------------------------------------
 // Query parameters
@@ -891,7 +954,7 @@ const errorStatusMatches: RuleImpl = {
 const fieldsOf = (queryKeys: ReadonlyArray<string>): ReadonlyArray<string> =>
   queryKeys
     .filter((key) => key.startsWith("fields[") && key.endsWith("]"))
-    .map((key) => key.slice("fields[".length, -1))
+    .map((key) => key.slice("fields[".length, -1));
 
 const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
   const impl = rule(
@@ -901,76 +964,78 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
     "MUST NOT",
     `If a client requests a restricted set of fields for a given resource type with \`fields[TYPE]\`, an endpoint MUST NOT include additional fields in resource objects of that type in its response${
       where === "included" ? " — including resource objects in `included`" : ""
-    }.`
-  )
+    }.`,
+  );
   return {
     rule: impl,
     run: (ctx) =>
       Effect.gen(function* () {
-        const candidates = readable(ctx).resolved.filter(({ endpoint }) => fieldsOf(endpoint.queryKeys).length > 0)
-        if (candidates.length === 0) return skip(impl, "no endpoint declares `fields[TYPE]`")
-        const findings: Array<Finding> = []
-        let probes = 0
-        let evaluated = 0
+        const candidates = readable(ctx).resolved.filter(
+          ({ endpoint }) => fieldsOf(endpoint.queryKeys).length > 0,
+        );
+        if (candidates.length === 0) return skip(impl, "no endpoint declares `fields[TYPE]`");
+        const findings: Array<Finding> = [];
+        let probes = 0;
+        let evaluated = 0;
         for (const { endpoint, path } of candidates) {
           // Learn the attribute names this endpoint actually emits, then ask for
           // exactly the first one: a projection rule needs a field set the
           // server is known to be able to return. The `included` variant needs a
           // compound document, so the baseline is taken with `include` on.
-          const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept })
-          probes += 1
-          let source = baseline
-          let base = path
+          const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+          probes += 1;
+          let source = baseline;
+          let base = path;
           if (where === "included") {
-            if (!endpoint.queryKeys.includes("include")) continue
-            const includable = includableOf(baseline.body)
-            if (includable.length === 0) continue
-            base = withQuery(path, [["include", includable.join(",")]])
-            source = yield* ctx.request({ url: base, headers: jsonApiAccept })
-            probes += 1
-            if (source.status < 200 || source.status >= 300) continue
+            if (!endpoint.queryKeys.includes("include")) continue;
+            const includable = includableOf(baseline.body);
+            if (includable.length === 0) continue;
+            base = withQuery(path, [["include", includable.join(",")]]);
+            source = yield* ctx.request({ url: base, headers: jsonApiAccept });
+            probes += 1;
+            if (source.status < 200 || source.status >= 300) continue;
           }
           // Only types that actually appear in the slot under test can decide
           // this rule; anything else would be a pass over an empty set.
-          const byType = new Map<string, ReadonlyArray<string>>()
+          const byType = new Map<string, ReadonlyArray<string>>();
           for (const { pointer, resource } of resourcesOf(source.body)) {
-            const inIncluded = pointer.startsWith("/included")
-            if (where === "included" ? !inIncluded : inIncluded) continue
-            const type = resource["type"]
-            const attributes = resource["attributes"]
+            const inIncluded = pointer.startsWith("/included");
+            if (where === "included" ? !inIncluded : inIncluded) continue;
+            const type = resource["type"];
+            const attributes = resource["attributes"];
             if (typeof type === "string" && isRecord(attributes) && !byType.has(type)) {
-              byType.set(type, Object.keys(attributes))
+              byType.set(type, Object.keys(attributes));
             }
           }
           for (const type of fieldsOf(endpoint.queryKeys)) {
-            const attributes = byType.get(type)
-            if (attributes === undefined || attributes.length < 2) continue
-            const requested = attributes[0]!
-            const url = withQuery(base, [[`fields[${type}]`, requested]])
-            const observation = yield* ctx.request({ url, headers: jsonApiAccept })
-            probes += 1
-            if (observation.status < 200 || observation.status >= 300) continue
+            const attributes = byType.get(type);
+            if (attributes === undefined || attributes.length < 2) continue;
+            const requested = attributes[0]!;
+            const url = withQuery(base, [[`fields[${type}]`, requested]]);
+            const observation = yield* ctx.request({ url, headers: jsonApiAccept });
+            probes += 1;
+            if (observation.status < 200 || observation.status >= 300) continue;
             const subjects = resourcesOf(observation.body).filter(({ pointer, resource }) => {
-              const inIncluded = pointer.startsWith("/included")
-              return (where === "included" ? inIncluded : !inIncluded) && resource["type"] === type
-            })
+              const inIncluded = pointer.startsWith("/included");
+              return (where === "included" ? inIncluded : !inIncluded) && resource["type"] === type;
+            });
             // A projection request that returned no resource of that type in
             // that slot proves nothing either way.
-            if (subjects.length === 0) continue
-            evaluated += 1
+            if (subjects.length === 0) continue;
+            evaluated += 1;
             for (const { pointer, resource } of subjects) {
-              const emitted = resource["attributes"]
-              if (!isRecord(emitted)) continue
-              const extra = Object.keys(emitted).filter((key) => key !== requested)
+              const emitted = resource["attributes"];
+              if (!isRecord(emitted)) continue;
+              const extra = Object.keys(emitted).filter((key) => key !== requested);
               if (extra.length > 0) {
                 findings.push(
                   finding(impl, {
                     detail: `\`fields[${type}]=${requested}\` still returned other fields at ${pointer}`,
                     expected: `only \`${requested}\` in \`attributes\``,
                     observed: `also returned: ${extra.join(", ")}`,
-                    probe: observation.probe
-                  })
-                )
+                    probe: observation.probe,
+                  }),
+                );
               }
             }
           }
@@ -980,13 +1045,13 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
             impl,
             where === "included"
               ? "no endpoint returned an `included` resource, of a type it declares `fields[TYPE]` for, carrying two or more attributes to project"
-              : "no endpoint returned a primary resource, of a type it declares `fields[TYPE]` for, carrying two or more attributes to project"
-          )
+              : "no endpoint returned a primary resource, of a type it declares `fields[TYPE]` for, carrying two or more attributes to project",
+          );
         }
-        return settle(impl, probes, findings)
-      })
-  }
-}
+        return settle(impl, probes, findings);
+      }),
+  };
+};
 
 const unknownQueryParameter: RuleImpl = {
   rule: rule(
@@ -994,28 +1059,30 @@ const unknownQueryParameter: RuleImpl = {
     "Query Parameters",
     "query-parameters-custom",
     "MUST",
-    "Implementation-specific query parameters MUST contain at least one non a-z character, so a server MUST respond with 400 Bad Request to a query parameter named only with a-z that it does not recognise from the specification."
+    "Implementation-specific query parameters MUST contain at least one non a-z character, so a server MUST respond with 400 Bad Request to a query parameter named only with a-z that it does not recognise from the specification.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved[0]
-      if (target === undefined) return skip(unknownQueryParameter.rule, noProbeReason("JSON:API read endpoint", []))
-      const url = withQuery(target.path, [["unknown", "1"]])
-      const observation = yield* ctx.request({ url, headers: jsonApiAccept })
+      const target = readable(ctx).resolved[0];
+      if (target === undefined)
+        return skip(unknownQueryParameter.rule, noProbeReason("JSON:API read endpoint", []));
+      const url = withQuery(target.path, [["unknown", "1"]]);
+      const observation = yield* ctx.request({ url, headers: jsonApiAccept });
       const findings =
         observation.status === 400
           ? []
           : [
               finding(unknownQueryParameter.rule, {
-                detail: "`?unknown=1` — a name with no non a-z character, not reserved by the spec — was not rejected",
+                detail:
+                  "`?unknown=1` — a name with no non a-z character, not reserved by the spec — was not rejected",
                 expected: "400 Bad Request",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(unknownQueryParameter.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(unknownQueryParameter.rule, 1, findings);
+    }),
+};
 
 const unsupportedInclude: RuleImpl = {
   rule: rule(
@@ -1023,14 +1090,17 @@ const unsupportedInclude: RuleImpl = {
     "Inclusion of Related Resources",
     "fetching-includes",
     "MUST",
-    "If a server is unable to identify a relationship path, or does not support inclusion of resources from a path, it MUST respond with 400 Bad Request."
+    "If a server is unable to identify a relationship path, or does not support inclusion of resources from a path, it MUST respond with 400 Bad Request.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved.find(({ endpoint }) => endpoint.queryKeys.includes("include"))
-      if (target === undefined) return skip(unsupportedInclude.rule, "no endpoint declares `include`")
-      const url = withQuery(target.path, [["include", "notARelationshipPath"]])
-      const observation = yield* ctx.request({ url, headers: jsonApiAccept })
+      const target = readable(ctx).resolved.find(({ endpoint }) =>
+        endpoint.queryKeys.includes("include"),
+      );
+      if (target === undefined)
+        return skip(unsupportedInclude.rule, "no endpoint declares `include`");
+      const url = withQuery(target.path, [["include", "notARelationshipPath"]]);
+      const observation = yield* ctx.request({ url, headers: jsonApiAccept });
       const findings =
         observation.status === 400
           ? []
@@ -1039,12 +1109,12 @@ const unsupportedInclude: RuleImpl = {
                 detail: "an unidentifiable relationship path in `include` was not rejected",
                 expected: "400 Bad Request",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(unsupportedInclude.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(unsupportedInclude.rule, 1, findings);
+    }),
+};
 
 const unsupportedSort: RuleImpl = {
   rule: rule(
@@ -1052,14 +1122,16 @@ const unsupportedSort: RuleImpl = {
     "Sorting",
     "fetching-sorting",
     "MUST",
-    "If the server does not support sorting as specified in the query parameter `sort`, it MUST respond with 400 Bad Request."
+    "If the server does not support sorting as specified in the query parameter `sort`, it MUST respond with 400 Bad Request.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = readable(ctx).resolved.find(({ endpoint }) => endpoint.queryKeys.includes("sort"))
-      if (target === undefined) return skip(unsupportedSort.rule, "no endpoint declares `sort`")
-      const url = withQuery(target.path, [["sort", "notASortableField"]])
-      const observation = yield* ctx.request({ url, headers: jsonApiAccept })
+      const target = readable(ctx).resolved.find(({ endpoint }) =>
+        endpoint.queryKeys.includes("sort"),
+      );
+      if (target === undefined) return skip(unsupportedSort.rule, "no endpoint declares `sort`");
+      const url = withQuery(target.path, [["sort", "notASortableField"]]);
+      const observation = yield* ctx.request({ url, headers: jsonApiAccept });
       const findings =
         observation.status === 400
           ? []
@@ -1068,12 +1140,12 @@ const unsupportedSort: RuleImpl = {
                 detail: "an unsupported `sort` field was not rejected",
                 expected: "400 Bad Request",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(unsupportedSort.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(unsupportedSort.rule, 1, findings);
+    }),
+};
 
 // ---------------------------------------------------------------------------
 // Status codes
@@ -1085,16 +1157,22 @@ const resourceNotFound: RuleImpl = {
     "Fetching Resources",
     "fetching-resources-responses-404",
     "MUST",
-    "A server MUST respond with 404 Not Found when processing a request to fetch a single resource that does not exist."
+    "A server MUST respond with 404 Not Found when processing a request to fetch a single resource that does not exist.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const endpoint = ctx.endpoints.find((candidate) => candidate.role === "resource")
+      const endpoint = ctx.endpoints.find((candidate) => candidate.role === "resource");
       if (endpoint === undefined || endpoint.params.length !== 1) {
-        return skip(resourceNotFound.rule, "no single-resource GET endpoint with exactly one path parameter")
+        return skip(
+          resourceNotFound.rule,
+          "no single-resource GET endpoint with exactly one path parameter",
+        );
       }
-      const path = endpoint.path.replace(`:${endpoint.params[0]}`, encodeURIComponent(ctx.options.absentId))
-      const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
+      const path = endpoint.path.replace(
+        `:${endpoint.params[0]}`,
+        encodeURIComponent(ctx.options.absentId),
+      );
+      const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
       const findings =
         observation.status === 404
           ? []
@@ -1103,12 +1181,17 @@ const resourceNotFound: RuleImpl = {
                 detail: `fetching the absent id "${ctx.options.absentId}" did not produce a 404`,
                 expected: "404 Not Found",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(resourceNotFound.rule, 1, findings, `probed with the absent id "${ctx.options.absentId}"`)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(
+        resourceNotFound.rule,
+        1,
+        findings,
+        `probed with the absent id "${ctx.options.absentId}"`,
+      );
+    }),
+};
 
 const createLocation: RuleImpl = {
   rule: rule(
@@ -1116,18 +1199,18 @@ const createLocation: RuleImpl = {
     "Creating Resources",
     "crud-creating-responses-201",
     "MUST",
-    "If a POST request did not include a client-generated id and the requested resource has been created, the server MUST respond with 201 Created and a `Location` header identifying the new resource."
+    "If a POST request did not include a client-generated id and the requested resource has been created, the server MUST respond with 201 Created and a `Location` header identifying the new resource.",
   ),
   run: (ctx) =>
     Effect.succeed(
       ctx.options.mutating
         ? skip(
             createLocation.rule,
-            "`mutating: true` was set but the kit cannot synthesise a valid create payload for an arbitrary resource — supply it through a fixture (not yet implemented; see the coverage gaps)"
+            "`mutating: true` was set but the kit cannot synthesise a valid create payload for an arbitrary resource — supply it through a fixture (not yet implemented; see the coverage gaps)",
           )
-        : skip(createLocation.rule, MUTATING_SKIP)
-    )
-}
+        : skip(createLocation.rule, MUTATING_SKIP),
+    ),
+};
 
 const deleteResponse: RuleImpl = {
   rule: rule(
@@ -1135,15 +1218,20 @@ const deleteResponse: RuleImpl = {
     "Deleting Resources",
     "crud-deleting-responses",
     "MUST",
-    "A server MUST respond to a successful DELETE with 204 No Content and an empty body, 200 OK with only top-level `meta`, or 202 Accepted."
+    "A server MUST respond to a successful DELETE with 204 No Content and an empty body, 200 OK with only top-level `meta`, or 202 Accepted.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      if (!ctx.options.mutating) return skip(deleteResponse.rule, MUTATING_SKIP)
-      const target = probeable(ctx, ["delete"]).resolved[0]
-      if (target === undefined) return skip(deleteResponse.rule, noProbeReason("DELETE resource endpoint", []))
-      const observation = yield* ctx.request({ method: "DELETE", url: target.path, headers: jsonApiAccept })
-      const findings: Array<Finding> = []
+      if (!ctx.options.mutating) return skip(deleteResponse.rule, MUTATING_SKIP);
+      const target = probeable(ctx, ["delete"]).resolved[0];
+      if (target === undefined)
+        return skip(deleteResponse.rule, noProbeReason("DELETE resource endpoint", []));
+      const observation = yield* ctx.request({
+        method: "DELETE",
+        url: target.path,
+        headers: jsonApiAccept,
+      });
+      const findings: Array<Finding> = [];
       if (observation.status === 204) {
         if (observation.text !== "") {
           findings.push(
@@ -1151,25 +1239,27 @@ const deleteResponse: RuleImpl = {
               detail: "a 204 DELETE response carried a body",
               expected: "an empty body",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       } else if (observation.status === 200) {
-        const body = observation.body
-        const members = isRecord(body) ? Object.keys(body) : []
+        const body = observation.body;
+        const members = isRecord(body) ? Object.keys(body) : [];
         if (
           !isRecord(body) ||
-          !members.every((member) => member === "meta" || member === "jsonapi" || member === "links")
+          !members.every(
+            (member) => member === "meta" || member === "jsonapi" || member === "links",
+          )
         ) {
           findings.push(
             finding(deleteResponse.rule, {
               detail: "a 200 DELETE response carried members other than `meta`",
               expected: "only top-level `meta`",
               observed: `top-level members: ${members.join(", ") || "(none)"}`,
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       } else if (observation.status !== 202) {
         findings.push(
@@ -1177,37 +1267,39 @@ const deleteResponse: RuleImpl = {
             detail: "a DELETE produced neither 204, 200 nor 202",
             expected: "204, 200 with only `meta`, or 202",
             observed: describe(observation),
-            probe: observation.probe
-          })
-        )
+            probe: observation.probe,
+          }),
+        );
       }
-      return settle(deleteResponse.rule, 1, findings)
-    })
-}
+      return settle(deleteResponse.rule, 1, findings);
+    }),
+};
 
 // ---------------------------------------------------------------------------
 // Atomic operations extension
 // ---------------------------------------------------------------------------
 
-const operationsEndpoint = (ctx: Context) => ctx.endpoints.find((endpoint) => endpoint.role === "operations")
+const operationsEndpoint = (ctx: Context) =>
+  ctx.endpoints.find((endpoint) => endpoint.role === "operations");
 
 const atomicMalformedRejected: RuleImpl = {
   rule: atomicRule(
     "spec/atomic/malformed-operations-rejected",
     "Atomic Operations — Request Document",
     "MUST",
-    "An atomic operations request document's `atomic:operations` member MUST be an array of operation objects, so a server MUST reject a document whose `atomic:operations` is not an array."
+    "An atomic operations request document's `atomic:operations` member MUST be an array of operation objects, so a server MUST reject a document whose `atomic:operations` is not an array.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const endpoint = operationsEndpoint(ctx)
-      if (endpoint === undefined) return skip(atomicMalformedRejected.rule, "no atomic operations endpoint")
+      const endpoint = operationsEndpoint(ctx);
+      if (endpoint === undefined)
+        return skip(atomicMalformedRejected.rule, "no atomic operations endpoint");
       const observation = yield* ctx.request({
         method: endpoint.method,
         url: endpoint.path,
         headers: { accept: atomicMediaType, "content-type": atomicMediaType },
-        body: { "atomic:operations": "not an array" }
-      })
+        body: { "atomic:operations": "not an array" },
+      });
       const findings =
         observation.status >= 400 && observation.status < 500
           ? []
@@ -1216,19 +1308,19 @@ const atomicMalformedRejected: RuleImpl = {
                 detail: "a non-array `atomic:operations` was not rejected",
                 expected: "a 4xx status",
                 observed: describe(observation),
-                probe: observation.probe
-              })
-            ]
-      return settle(atomicMalformedRejected.rule, 1, findings)
-    })
-}
+                probe: observation.probe,
+              }),
+            ];
+      return settle(atomicMalformedRejected.rule, 1, findings);
+    }),
+};
 
 const atomicResponseExt: RuleImpl = {
   rule: atomicRule(
     "spec/atomic/response-ext-parameter",
     "Atomic Operations — Media Type",
     "MUST",
-    "A server that processes an atomic operations request MUST respond with the `ext` parameter naming the extension URI on the response's `Content-Type`."
+    "A server that processes an atomic operations request MUST respond with the `ext` parameter naming the extension URI on the response's `Content-Type`.",
   ),
   run: (ctx) =>
     Effect.succeed(
@@ -1238,17 +1330,17 @@ const atomicResponseExt: RuleImpl = {
           ? skip(atomicResponseExt.rule, MUTATING_SKIP)
           : skip(
               atomicResponseExt.rule,
-              "`mutating: true` was set but the kit cannot synthesise a valid operation for an arbitrary resource — supply it through a fixture (not yet implemented; see the coverage gaps)"
-            )
-    )
-}
+              "`mutating: true` was set but the kit cannot synthesise a valid operation for an arbitrary resource — supply it through a fixture (not yet implemented; see the coverage gaps)",
+            ),
+    ),
+};
 
 const atomicAllOrNothing: RuleImpl = {
   rule: atomicRule(
     "spec/atomic/all-or-nothing",
     "Atomic Operations — Processing",
     "MUST",
-    "If an operation in an atomic operations request fails, the server MUST NOT apply any of the operations in that request, and MUST respond with an error document."
+    "If an operation in an atomic operations request fails, the server MUST NOT apply any of the operations in that request, and MUST respond with an error document.",
   ),
   run: (ctx) =>
     Effect.succeed(
@@ -1256,17 +1348,17 @@ const atomicAllOrNothing: RuleImpl = {
         ? skip(atomicAllOrNothing.rule, "no atomic operations endpoint")
         : skip(
             atomicAllOrNothing.rule,
-            "requires applying then observing operations against known data — supply it through a fixture (not yet implemented; see the coverage gaps)"
-          )
-    )
-}
+            "requires applying then observing operations against known data — supply it through a fixture (not yet implemented; see the coverage gaps)",
+          ),
+    ),
+};
 
 const atomicLidResolution: RuleImpl = {
   rule: atomicRule(
     "spec/atomic/lid-resolution",
     "Atomic Operations — Local Identifiers",
     "MUST",
-    "A `lid` assigned by one operation MUST be resolvable as a reference in every later operation of the same request."
+    "A `lid` assigned by one operation MUST be resolvable as a reference in every later operation of the same request.",
   ),
   run: (ctx) =>
     Effect.succeed(
@@ -1274,10 +1366,10 @@ const atomicLidResolution: RuleImpl = {
         ? skip(atomicLidResolution.rule, "no atomic operations endpoint")
         : skip(
             atomicLidResolution.rule,
-            "requires applying operations against known data — supply it through a fixture (not yet implemented; see the coverage gaps)"
-          )
-    )
-}
+            "requires applying operations against known data — supply it through a fixture (not yet implemented; see the coverage gaps)",
+          ),
+    ),
+};
 
 // ---------------------------------------------------------------------------
 // Reachability
@@ -1289,29 +1381,30 @@ const reachable: RuleImpl = {
     "Conformance preconditions",
     "introduction",
     "MUST",
-    "Every endpoint the kit probes must answer with an HTTP response — a kit cannot report conformance for a target it cannot reach."
+    "Every endpoint the kit probes must answer with an HTTP response — a kit cannot report conformance for a target it cannot reach.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = readable(ctx)
-      if (resolved.length === 0) return skip(reachable.rule, noProbeReason("JSON:API read endpoint", unresolved))
-      const findings: Array<Finding> = []
+      const { resolved, unresolved } = readable(ctx);
+      if (resolved.length === 0)
+        return skip(reachable.rule, noProbeReason("JSON:API read endpoint", unresolved));
+      const findings: Array<Finding> = [];
       for (const { path } of resolved) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
+        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
         if (observation.status === 0) {
           findings.push(
             finding(reachable.rule, {
               detail: `${path} produced no HTTP response`,
               expected: "any HTTP response",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(reachable.rule, resolved.length, findings, coverageNote(unresolved))
-    })
-}
+      return settle(reachable.rule, resolved.length, findings, coverageNote(unresolved));
+    }),
+};
 
 /**
  * The JSON:API v1.1 suite, in report order.
@@ -1349,5 +1442,5 @@ export const rules: ReadonlyArray<RuleImpl> = [
   atomicMalformedRejected,
   atomicResponseExt,
   atomicAllOrNothing,
-  atomicLidResolution
-]
+  atomicLidResolution,
+];

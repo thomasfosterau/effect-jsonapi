@@ -6,25 +6,25 @@
  *
  * @internal
  */
-import { Schema } from "effect"
+import { Schema } from "effect";
 
 /** The six comparison operators: one literal against the field. */
-export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const
+export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const;
 
 /** The two list-membership operators: a non-empty literal list. */
-export const listOperators = ["in", "nin"] as const
+export const listOperators = ["in", "nin"] as const;
 
 /** The null test. */
-export const nullOperator = "isnull"
+export const nullOperator = "isnull";
 
 /**
  * The closed operator core, in the grammar's order. `Filter.Operator` is the
  * `Schema.Literals` over exactly this tuple.
  */
-export const operators = [...compareOperators, ...listOperators, nullOperator] as const
+export const operators = [...compareOperators, ...listOperators, nullOperator] as const;
 
 /** The conjunctions of the group form. */
-export const conjunctions = ["AND", "OR", "NOT"] as const
+export const conjunctions = ["AND", "OR", "NOT"] as const;
 
 /**
  * Normalises a `filter` declaration to the operator list it declares, checked
@@ -38,21 +38,23 @@ export const conjunctions = ["AND", "OR", "NOT"] as const
 export const resolveOperators = <const L extends ReadonlyArray<string>>(
   filter: true | ReadonlyArray<string>,
   allowed: Schema.Literals<L>,
-  subject: string
+  subject: string,
 ): ReadonlyArray<L[number]> => {
-  if (filter === true) return allowed.literals
+  if (filter === true) return allowed.literals;
   if (filter.length === 0) {
-    throw new Error(`${subject} declares filter: [] — no operators; omit \`filter\` (or pass false) instead`)
+    throw new Error(
+      `${subject} declares filter: [] — no operators; omit \`filter\` (or pass false) instead`,
+    );
   }
-  const isAllowed = Schema.is(allowed)
-  const operators: Array<L[number]> = []
+  const isAllowed = Schema.is(allowed);
+  const operators: Array<L[number]> = [];
   for (const operator of filter) {
     if (!isAllowed(operator)) {
       throw new Error(
-        `${subject} declares filter operator ${JSON.stringify(operator)}; expected one of ${allowed.literals.join(", ")}`
-      )
+        `${subject} declares filter operator ${JSON.stringify(operator)}; expected one of ${allowed.literals.join(", ")}`,
+      );
     }
-    if (!operators.includes(operator)) operators.push(operator)
+    if (!operators.includes(operator)) operators.push(operator);
   }
-  return operators
-}
+  return operators;
+};

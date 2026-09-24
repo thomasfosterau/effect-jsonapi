@@ -10,55 +10,55 @@
  * @since 0.15.0
  * @internal
  */
-import type { Gap, Outcome, Rule, Tier } from "./core.js"
+import type { Gap, Outcome, Rule, Tier } from "./core.js";
 
 /** @internal */
 export interface Summary {
-  readonly passed: number
-  readonly failed: number
-  readonly skipped: number
-  readonly findings: number
-  readonly probes: number
+  readonly passed: number;
+  readonly failed: number;
+  readonly skipped: number;
+  readonly findings: number;
+  readonly probes: number;
 }
 
 /** @internal */
 export const summarise = (outcomes: ReadonlyArray<Outcome>): Summary => {
-  let passed = 0
-  let failed = 0
-  let skipped = 0
-  let findings = 0
-  let probes = 0
+  let passed = 0;
+  let failed = 0;
+  let skipped = 0;
+  let findings = 0;
+  let probes = 0;
   for (const outcome of outcomes) {
     switch (outcome._tag) {
       case "Passed":
-        passed += 1
-        probes += outcome.probes
-        break
+        passed += 1;
+        probes += outcome.probes;
+        break;
       case "Failed":
-        failed += 1
-        findings += outcome.findings.length
-        probes += outcome.probes
-        break
+        failed += 1;
+        findings += outcome.findings.length;
+        probes += outcome.probes;
+        break;
       case "Skipped":
-        skipped += 1
-        break
+        skipped += 1;
+        break;
     }
   }
-  return { passed, failed, skipped, findings, probes }
-}
+  return { passed, failed, skipped, findings, probes };
+};
 
-const MARK = { Passed: "PASS", Failed: "FAIL", Skipped: "SKIP" } as const
+const MARK = { Passed: "PASS", Failed: "FAIL", Skipped: "SKIP" } as const;
 
 const TIER_TITLE: Readonly<Record<Tier, string>> = {
   spec: "JSON:API v1.1 — the specification",
-  profile: "This package's profile — the filter grammar and library conventions"
-}
+  profile: "This package's profile — the filter grammar and library conventions",
+};
 
 const indent = (text: string, by: string): string =>
   text
     .split("\n")
     .map((line) => `${by}${line}`)
-    .join("\n")
+    .join("\n");
 
 /**
  * Hard-wraps prose at `width`, preserving the leading indent. Rule text is the
@@ -66,59 +66,66 @@ const indent = (text: string, by: string): string =>
  * terminal.
  */
 const wrap = (text: string, width: number): ReadonlyArray<string> => {
-  const words = text.split(/\s+/).filter((word) => word !== "")
-  const lines: Array<string> = []
-  let line = ""
+  const words = text.split(/\s+/).filter((word) => word !== "");
+  const lines: Array<string> = [];
+  let line = "";
   for (const word of words) {
-    if (line === "") line = word
-    else if (`${line} ${word}`.length <= width) line = `${line} ${word}`
+    if (line === "") line = word;
+    else if (`${line} ${word}`.length <= width) line = `${line} ${word}`;
     else {
-      lines.push(line)
-      line = word
+      lines.push(line);
+      line = word;
     }
   }
-  if (line !== "") lines.push(line)
-  return lines
-}
+  if (line !== "") lines.push(line);
+  return lines;
+};
 
-const header = (rule: Rule, mark: string): string => `${mark}  ${rule.id}`
+const header = (rule: Rule, mark: string): string => `${mark}  ${rule.id}`;
 
-const meta = (rule: Rule): string => `${rule.level} · ${rule.section}`
+const meta = (rule: Rule): string => `${rule.level} · ${rule.section}`;
 
 const renderOutcome = (outcome: Outcome, width: number): string => {
-  const lines: Array<string> = [header(outcome.rule, MARK[outcome._tag]), indent(meta(outcome.rule), "      ")]
+  const lines: Array<string> = [
+    header(outcome.rule, MARK[outcome._tag]),
+    indent(meta(outcome.rule), "      "),
+  ];
   switch (outcome._tag) {
     case "Passed":
-      lines.push(indent(`${outcome.probes} probe${outcome.probes === 1 ? "" : "s"}`, "      "))
-      if (outcome.note !== undefined) lines.push(indent(outcome.note, "      "))
-      break
+      lines.push(indent(`${outcome.probes} probe${outcome.probes === 1 ? "" : "s"}`, "      "));
+      if (outcome.note !== undefined) lines.push(indent(outcome.note, "      "));
+      break;
     case "Skipped":
-      lines.push(indent(`not checked: ${outcome.reason}`, "      "))
-      break
+      lines.push(indent(`not checked: ${outcome.reason}`, "      "));
+      break;
     case "Failed": {
-      for (const line of wrap(outcome.rule.requirement, width - 6)) lines.push(indent(line, "      "))
-      lines.push(indent(outcome.rule.reference, "      "))
+      for (const line of wrap(outcome.rule.requirement, width - 6))
+        lines.push(indent(line, "      "));
+      lines.push(indent(outcome.rule.reference, "      "));
       for (const found of outcome.findings) {
-        lines.push(indent(found.detail, "      · "))
+        lines.push(indent(found.detail, "      · "));
         if (found.probe !== undefined) {
           const headers = Object.entries(found.probe.headers)
             .map(([name, value]) => `${name}: ${value}`)
-            .join(", ")
+            .join(", ");
           lines.push(
-            indent(`${found.probe.method} ${found.probe.url}${headers === "" ? "" : `  [${headers}]`}`, "        ")
-          )
+            indent(
+              `${found.probe.method} ${found.probe.url}${headers === "" ? "" : `  [${headers}]`}`,
+              "        ",
+            ),
+          );
           if (found.probe.body !== undefined) {
-            lines.push(indent(`body: ${JSON.stringify(found.probe.body)}`, "        "))
+            lines.push(indent(`body: ${JSON.stringify(found.probe.body)}`, "        "));
           }
         }
-        lines.push(indent(`expected: ${found.expected}`, "        "))
-        lines.push(indent(`observed: ${found.observed}`, "        "))
+        lines.push(indent(`expected: ${found.expected}`, "        "));
+        lines.push(indent(`observed: ${found.observed}`, "        "));
       }
-      break
+      break;
     }
   }
-  return lines.join("\n")
-}
+  return lines.join("\n");
+};
 
 /**
  * Renders the whole report. Failures first within each tier, because that is
@@ -128,60 +135,63 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
  */
 export const format = (
   report: {
-    readonly target: string
-    readonly transport: string
-    readonly version: string
-    readonly outcomes: ReadonlyArray<Outcome>
-    readonly gaps: ReadonlyArray<Gap>
+    readonly target: string;
+    readonly transport: string;
+    readonly version: string;
+    readonly outcomes: ReadonlyArray<Outcome>;
+    readonly gaps: ReadonlyArray<Gap>;
   },
-  options?: { readonly width?: number | undefined }
+  options?: { readonly width?: number | undefined },
 ): string => {
-  const width = options?.width ?? 96
-  const summary = summarise(report.outcomes)
-  const out: Array<string> = []
-  out.push(`JSON:API conformance — ${report.target}`)
-  out.push(`  target: JSON:API v${report.version} · transport: ${report.transport}`)
-  out.push("")
+  const width = options?.width ?? 96;
+  const summary = summarise(report.outcomes);
+  const out: Array<string> = [];
+  out.push(`JSON:API conformance — ${report.target}`);
+  out.push(`  target: JSON:API v${report.version} · transport: ${report.transport}`);
+  out.push("");
 
   for (const tier of ["spec", "profile"] as const) {
-    const outcomes = report.outcomes.filter((outcome) => outcome.rule.tier === tier)
-    if (outcomes.length === 0) continue
-    const tierSummary = summarise(outcomes)
-    out.push(`${TIER_TITLE[tier].toUpperCase()}`)
-    out.push(`  ${tierSummary.failed} failed · ${tierSummary.passed} passed · ${tierSummary.skipped} not checked`)
-    out.push("")
+    const outcomes = report.outcomes.filter((outcome) => outcome.rule.tier === tier);
+    if (outcomes.length === 0) continue;
+    const tierSummary = summarise(outcomes);
+    out.push(`${TIER_TITLE[tier].toUpperCase()}`);
+    out.push(
+      `  ${tierSummary.failed} failed · ${tierSummary.passed} passed · ${tierSummary.skipped} not checked`,
+    );
+    out.push("");
     const ordered = [
       ...outcomes.filter((outcome) => outcome._tag === "Failed"),
       ...outcomes.filter((outcome) => outcome._tag === "Passed"),
-      ...outcomes.filter((outcome) => outcome._tag === "Skipped")
-    ]
+      ...outcomes.filter((outcome) => outcome._tag === "Skipped"),
+    ];
     for (const outcome of ordered) {
-      out.push(indent(renderOutcome(outcome, width), "  "))
-      out.push("")
+      out.push(indent(renderOutcome(outcome, width), "  "));
+      out.push("");
     }
   }
 
-  out.push("NOT COVERED BY THIS KIT")
+  out.push("NOT COVERED BY THIS KIT");
   if (report.gaps.length === 0) {
-    out.push("  (none declared)")
+    out.push("  (none declared)");
   } else {
-    out.push("  Areas the kit does not check at all. A rule that is absent here and")
-    out.push("  absent above is simply unwritten — treat this list as the kit's own")
-    out.push("  statement of its limits, not as a complete account of the specification.")
-    out.push("")
+    out.push("  Areas the kit does not check at all. A rule that is absent here and");
+    out.push("  absent above is simply unwritten — treat this list as the kit's own");
+    out.push("  statement of its limits, not as a complete account of the specification.");
+    out.push("");
     for (const gap of report.gaps) {
-      out.push(`  · ${gap.area}`)
-      for (const line of wrap(gap.reason, width - 6)) out.push(indent(line, "      "))
-      if (gap.tracking.length > 0) out.push(indent(`tracking: ${gap.tracking.join(", ")}`, "      "))
+      out.push(`  · ${gap.area}`);
+      for (const line of wrap(gap.reason, width - 6)) out.push(indent(line, "      "));
+      if (gap.tracking.length > 0)
+        out.push(indent(`tracking: ${gap.tracking.join(", ")}`, "      "));
     }
   }
-  out.push("")
+  out.push("");
   out.push(
     `SUMMARY  ${summary.failed} rule${summary.failed === 1 ? "" : "s"} failed (${summary.findings} finding${
       summary.findings === 1 ? "" : "s"
     }) · ${summary.passed} passed · ${summary.skipped} not checked · ${report.gaps.length} area${
       report.gaps.length === 1 ? "" : "s"
-    } out of scope · ${summary.probes} request${summary.probes === 1 ? "" : "s"} made`
-  )
-  return out.join("\n")
-}
+    } out of scope · ${summary.probes} request${summary.probes === 1 ? "" : "s"} made`,
+  );
+  return out.join("\n");
+};

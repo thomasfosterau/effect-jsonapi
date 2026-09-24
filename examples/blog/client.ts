@@ -17,18 +17,23 @@
  *     façade synthesises locally all reach `Client.errorMessage` — so the
  *     wording cannot drift between the three paths.
  */
-import { Effect, Layer, Option } from "effect"
-import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { ApiError, Atomic, Client } from "@thomasfosterau/effect-jsonapi"
-import { Api } from "./api.js"
-import { BlogLive } from "./handlers.js"
+import { Effect, Layer, Option } from "effect";
+import {
+  HttpClient,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
+import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { ApiError, Atomic, Client } from "@thomasfosterau/effect-jsonapi";
+import { Api } from "./api.js";
+import { BlogLive } from "./handlers.js";
 
 /**
  * The negotiation options both halves share: the blog api speaks the atomic
  * operations extension, so the client advertises it and the server accepts it.
  */
-export const negotiation = { extensions: [Atomic.EXTENSION_URI] }
+export const negotiation = { extensions: [Atomic.EXTENSION_URI] };
 
 /**
  * The typed blog client, negotiating JSON:API on every request.
@@ -37,7 +42,7 @@ export const negotiation = { extensions: [Atomic.EXTENSION_URI] }
  * at all (so a host serving HTML and JSON:API on one origin has nothing to
  * select on) and a bodyless `DELETE` would go out with no `Content-Type`.
  */
-export const blogClient = Client.make(Api, { ...negotiation, baseUrl: "http://blog.example.com" })
+export const blogClient = Client.make(Api, { ...negotiation, baseUrl: "http://blog.example.com" });
 
 /**
  * A 503 the client answers with *itself*, without reaching the server — the
@@ -48,7 +53,7 @@ export class Offline extends ApiError.make<Offline>()("Offline", {
   status: 503,
   code: "offline",
   title: "Service Unavailable",
-  detail: "This article is not available offline"
+  detail: "This article is not available offline",
 }) {}
 
 /**
@@ -59,7 +64,7 @@ export class Offline extends ApiError.make<Offline>()("Offline", {
  * server-served one.
  */
 export const servedOffline = (): Option.Option<Client.ErrorDocument> =>
-  Client.decodeErrorDocument(ApiError.toDocument(new Offline()))
+  Client.decodeErrorDocument(ApiError.toDocument(new Offline()));
 
 /**
  * One message for any failure of a blog call.
@@ -72,9 +77,9 @@ export const describeFailure = (cause: unknown): Effect.Effect<string> =>
   Effect.map(Client.errorDocument(cause), (document) =>
     Option.match(document, {
       onNone: () => "The blog could not be reached",
-      onSome: Client.errorMessage
-    })
-  )
+      onSome: Client.errorMessage,
+    }),
+  );
 
 /**
  * The blog server, served in-process as an `HttpClient` — request encoding,
@@ -87,15 +92,20 @@ export const describeFailure = (cause: unknown): Effect.Effect<string> =>
 export const ServerHttpClient = Layer.effect(
   HttpClient.HttpClient,
   Effect.gen(function* () {
-    const handler = yield* HttpRouter.toHttpEffect(HttpApiBuilder.layer(Api).pipe(Layer.provide(BlogLive)))
+    const handler = yield* HttpRouter.toHttpEffect(
+      HttpApiBuilder.layer(Api).pipe(Layer.provide(BlogLive)),
+    );
     return HttpClient.make(
       Effect.fnUntraced(function* (request) {
         const response = yield* handler.pipe(
-          Effect.provideService(HttpServerRequest.HttpServerRequest, HttpServerRequest.fromClientRequest(request)),
-          Effect.orDie
-        )
-        return HttpServerResponse.toClientResponse(response)
-      }, Effect.scoped)
-    )
-  })
-)
+          Effect.provideService(
+            HttpServerRequest.HttpServerRequest,
+            HttpServerRequest.fromClientRequest(request),
+          ),
+          Effect.orDie,
+        );
+        return HttpServerResponse.toClientResponse(response);
+      }, Effect.scoped),
+    );
+  }),
+);

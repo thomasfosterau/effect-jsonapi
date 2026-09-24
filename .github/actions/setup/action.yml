@@ -1,0 +1,51 @@
+# Composite setup shared by every workflow that needs the toolchain: pnpm +
+# Node.js, the pnpm store cache (keyed on pnpm-lock.yaml by setup-node), and a
+# frozen-lockfile install. `vp` and the dev bins (`tsc`, `docgen`, `tsx`) land
+# in node_modules/.bin, which this adds to PATH so later steps invoke them
+# directly. Copied in shape from effect-drizzle-ext (the library reference).
+#
+# Install scripts: `pnpm install --ignore-scripts` blocks DEPENDENCY lifecycle
+# scripts (a common supply-chain attack vector) from running in CI — see
+# SECURITY.md. The repository's OWN `prepare` script (`vp config &&
+# effect-tsgo patch --typescript --oxlint`, the Effect-patched TypeScript and
+# oxlint binaries every gate runs on) is first-party and is run explicitly as
+# the next step, so the exception is visible on its own line rather than
+# smuggled in by dropping the flag.
+#
+# Callers must run `actions/checkout` BEFORE this (a local composite action
+# needs the repo on disk first).
+name: Setup toolchain
+description: Set up Node.js and pnpm, restore the package cache, install dependencies and patch the toolchain.
+inputs:
+  node-version:
+    description: The Node.js version to set up.
+    required: false
+    default: 22.x
+runs:
+  using: composite
+  steps:
+    # pnpm before Node so setup-node's `cache: pnpm` can resolve the store path.
+    # The pnpm version comes from the `packageManager` field in package.json.
+    - name: Setup pnpm
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    # --ignore-scripts blocks dependency lifecycle scripts; --frozen-lockfile
+    # fails if pnpm-lock.yaml is out of sync with the manifests.
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile --ignore-scripts
+
+    # The one lifecycle script that does run: ours. See the header.
+    - name: Patch the toolchain (repository `prepare` script)
+      shell: bash
+      run: pnpm run prepare
+
+    - name: Expose the local bins
+      shell: bash
+      run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"

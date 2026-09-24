@@ -29,15 +29,17 @@
  *
  * @since 0.1.0
  */
-import type { Schema } from "effect"
-import type { NonEmptyReadonlyArray } from "effect/Array"
-import type { HttpApiEndpoint } from "effect/unstable/httpapi"
-import { HttpApiGroup } from "effect/unstable/httpapi"
-import * as Endpoint from "./Endpoint.js"
-import type * as Idempotency from "./Idempotency.js"
-import type * as Query from "./Query.js"
-import type { Relationships } from "./Relationship.js"
-import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js"
+import type { Schema } from "effect";
+import * as ApiError from "./ApiError.js";
+import type { NonEmptyReadonlyArray } from "effect/Array";
+import type { HttpApiEndpoint } from "effect/unstable/httpapi";
+import { HttpApiGroup } from "effect/unstable/httpapi";
+import * as Endpoint from "./Endpoint.js";
+import type * as Idempotency from "./Idempotency.js";
+import type { AnySurface } from "./Include.js";
+import * as Query from "./Query.js";
+import type { Relationships } from "./Relationship.js";
+import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js";
 
 /**
  * Creates an `HttpApiGroup` named after a resource's type — or after a plain
@@ -80,15 +82,18 @@ export const make: {
   <const Type extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>>(
     resource: { readonly type: Type },
     ...endpoints: Endpoints
-  ): HttpApiGroup.HttpApiGroup<Type, Endpoints[number]>
+  ): HttpApiGroup.HttpApiGroup<Type, Endpoints[number]>;
   <const Name extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>>(
     name: Name,
     ...endpoints: Endpoints
-  ): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>
-} = (nameOrResource: string | { readonly type: string }, ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>) =>
+  ): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>;
+} = (
+  nameOrResource: string | { readonly type: string },
+  ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>
+) =>
   HttpApiGroup.make(typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type).add(
-    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>)
-  ) as never
+    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
+  ) as never;
 
 /**
  * Generates a complete `HttpApiGroup` from a resource definition — the group is
@@ -150,16 +155,24 @@ export const resource = <
   Rels extends Relationships,
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string> = Id<Type>,
-  const Endpoints extends Endpoint.EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> = {},
-  const RelationshipsOpt extends Endpoint.RelationshipsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
+  const Endpoints extends Endpoint.EndpointsOption<
+    Resource<Type, Attributes, Rels, Meta, IdSchema>,
+    Meta
+  > = {},
+  const RelationshipsOpt extends Endpoint.RelationshipsOption<
+    Resource<Type, Attributes, Rels, Meta, IdSchema>
+  > = true,
   const Errors extends ReadonlyArray<Endpoint.ErrorClass> = readonly [],
-  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> = true,
+  const Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>> =
+    true,
   const Fields extends boolean = true,
-  const Sort extends boolean | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
+  const Sort extends
+    | boolean
+    | ReadonlyArray<AttributeKeys<Resource<Type, Attributes, Rels, Meta, IdSchema>>> = true,
   const Page extends Schema.Struct.Fields | undefined = undefined,
   const Filter extends Schema.Struct.Fields | undefined = undefined,
   const GMeta extends Schema.Top = Meta,
-  const GIdem extends Idempotency.Option = false
+  const GIdem extends Idempotency.Option = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: Endpoint.ResourceOptions<
@@ -178,7 +191,7 @@ export const resource = <
     Filter,
     GMeta,
     GIdem
-  >
+  >,
 ): HttpApiGroup.HttpApiGroup<
   Type,
   Endpoint.ResourceEndpoint<
@@ -217,5 +230,234 @@ export const resource = <
       Filter,
       GMeta,
       GIdem
-    >(resource, options)
-  )
+    >(resource, options),
+  );
+
+// ---------------------------------------------------------------------------
+// The flat presets
+// ---------------------------------------------------------------------------
+
+/**
+ * The media type a flat write registers its payload under — `application/json`,
+ * not the JSON:API media type.
+ *
+ * The **external** contract is JSON:API: a host's `Negotiation` verdict
+ * enforces §5 at the seam, and `Negotiation.requestForRouter` then relabels
+ * every dispatched write to `application/json` once, globally, so the router
+ * decodes the already-JSON body. Because that relabel is global, the
+ * registration is all-or-nothing across the writes — one constant, not a
+ * per-endpoint choice.
+ *
+ * @since 0.16.0
+ * @category constants
+ */
+export const FLAT_PAYLOAD_MEDIA_TYPE = "application/json";
+
+/**
+ * The declarations a flat read-only group is built from.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatReadOnlyOptions<
+  R extends Schema.Top,
+  List extends Query.FlatListStruct,
+  Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
+  Surface extends AnySurface | undefined,
+> {
+  readonly resource: R;
+  /** The flat `List<X>` input (the page cursor plus the family's own filters). */
+  readonly list: List;
+  /** Fields of `list` re-keyed to `filter[…]` on the wire — see `Query.flatList`. */
+  readonly filters?: Filters | undefined;
+  /**
+   * The family's include surface (`Include.make`): its `included` union is
+   * what the documents declare, its `paths` the whitelist the handlers
+   * enforce. Omit for a family that serves no walk.
+   */
+  readonly include?: Surface;
+}
+
+/**
+ * The declarations a flat CRUD group is built from.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatOptions<
+  R extends Schema.Top,
+  List extends Query.FlatListStruct,
+  Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
+  Surface extends AnySurface | undefined,
+  Create extends Schema.Top,
+  Update extends Schema.Top,
+> extends FlatReadOnlyOptions<R, List, Filters, Surface> {
+  /** The flat `Create<X>` command input (attributes plus relationship ids) — not the JSON:API envelope. */
+  readonly create: Create;
+  /** The flat `Update<X>` command input, keyed by the required `id`. */
+  readonly update: Update;
+}
+
+const SHARED_FLAT_OPTIONS = {
+  relationships: false,
+  include: false,
+  fields: false,
+  sort: false,
+} as const;
+
+const flatWire = <
+  R extends Schema.Top,
+  List extends Query.FlatListStruct,
+  const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
+  Surface extends AnySurface | undefined,
+>(
+  options: FlatReadOnlyOptions<R, List, Filters, Surface>,
+) => {
+  const included = options.include?.included;
+  return {
+    document: Endpoint.ResourceDocument(options.resource, { included }),
+    collection: Endpoint.FlatCollectionDocument(options.resource, { included }),
+    listQuery: Query.flatList(options.list, { filters: options.filters }),
+  };
+};
+
+/**
+ * A flat read-only `HttpApiGroup`: `list` and `get` only, for a resource
+ * written by a pipeline and never through the api — a write to its URL is a
+ * 404 route, not a 403 guard.
+ *
+ * Returns the group **and** the `list` wire query it built: the server's
+ * collection handler spells its pagination links from the family's own list
+ * query (`Query.canonicalPairs(listQuery)`), so a link's query and a
+ * request's query cannot drift. Reading it back off
+ * `group.endpoints.list.query` would lose the decoded type — `HttpApiGroup`
+ * widens that member to `Schema.Top | undefined`. Call sites destructure:
+ * `const { group, listQuery } = Group.flatReadOnly({ … })`.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { FlatQuery, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Contest = Resource.make("contests", { attributes: { name: Schema.NonEmptyString } })
+ * const ListContests = FlatQuery.listInput({ maxLimit: 100 }, {
+ *   election: Schema.optionalKey(Schema.String)
+ * })
+ *
+ * const { group, listQuery } = Group.flatReadOnly({
+ *   resource: Contest,
+ *   list: ListContests,
+ *   filters: ["election"]
+ * })
+ * console.log(Object.keys(group.endpoints))
+ * // → [ "list", "get" ]
+ * console.log(Schema.decodeUnknownSync(listQuery)({ "filter[election]": "H", "page[limit]": 5 }))
+ * // → { offset: 0, limit: 5, election: "H" }
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const flatReadOnly = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
+  List extends Query.FlatListStruct,
+  const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
+  Surface extends AnySurface | undefined = undefined,
+>(
+  options: FlatReadOnlyOptions<
+    Parameter<Type, Attributes, Rels, Meta, IdSchema>,
+    List,
+    Filters,
+    Surface
+  >,
+) => {
+  const { collection, document, listQuery } = flatWire(options);
+  return {
+    group: resource(options.resource, {
+      ...SHARED_FLAT_OPTIONS,
+      endpoints: {
+        list: { query: listQuery, success: collection },
+        get: { query: Endpoint.FlatGetQuery, success: document },
+        create: false,
+        update: false,
+        delete: false,
+      },
+    }),
+    listQuery,
+  };
+};
+
+/**
+ * A flat CRUD `HttpApiGroup`: the five standard endpoints over one resource
+ * definition, with the flat `Create<X>` / `Update<X>` command inputs as the
+ * write payloads (registered under {@link FLAT_PAYLOAD_MEDIA_TYPE}),
+ * `create` answering 201, `update` declaring the 409 (`ApiError.Conflict`)
+ * an id mismatch answers, `delete` answering 204 with no body.
+ *
+ * Returns `{ group, listQuery }` — see {@link flatReadOnly} for why.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { FlatQuery, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })
+ * const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) })
+ * const CreatePerson = Schema.Struct({ name: Schema.NonEmptyString })
+ * const UpdatePerson = Schema.Struct({ id: Person.Id, name: Schema.optionalKey(Schema.NonEmptyString) })
+ *
+ * const { group } = Group.flat({
+ *   resource: Person,
+ *   list: ListPeople,
+ *   filters: ["q"],
+ *   create: CreatePerson,
+ *   update: UpdatePerson
+ * })
+ * console.log(Object.keys(group.endpoints))
+ * // → [ "list", "get", "create", "update", "delete" ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const flat = <
+  Type extends string,
+  Attributes extends Schema.Struct.Fields,
+  Rels extends Relationships,
+  Meta extends Schema.Top,
+  IdSchema extends Schema.Codec<any, string>,
+  List extends Query.FlatListStruct,
+  Create extends Schema.Top,
+  Update extends Schema.Top,
+  const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
+  Surface extends AnySurface | undefined = undefined,
+>(
+  options: FlatOptions<
+    Parameter<Type, Attributes, Rels, Meta, IdSchema>,
+    List,
+    Filters,
+    Surface,
+    Create,
+    Update
+  >,
+) => {
+  const { collection, document, listQuery } = flatWire(options);
+  const write = { payloadMediaType: FLAT_PAYLOAD_MEDIA_TYPE, success: document } as const;
+  return {
+    group: resource(options.resource, {
+      ...SHARED_FLAT_OPTIONS,
+      endpoints: {
+        list: { query: listQuery, success: collection },
+        get: { query: Endpoint.FlatGetQuery, success: document },
+        create: { ...write, payload: options.create },
+        update: { ...write, payload: options.update, errors: [ApiError.Conflict] },
+        delete: true,
+      },
+    }),
+    listQuery,
+  };
+};

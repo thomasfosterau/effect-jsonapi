@@ -1,15 +1,93 @@
+# Dependabot version-update configuration (the library standard's, via
+# effect-drizzle-ext, whose catalog this workspace mirrors).
+#
+# `groups` collect dependencies that MUST move together: the Effect 4 release
+# line is a lockstep-versioned singleton set; the vitest toolchain is pinned to
+# vite-plus's exact versions; the TypeScript 6/7 pair and @effect/tsgo pin to
+# each other by gitHead (see pnpm-workspace.yaml) and can only be bumped as a
+# set, so their *version* updates are ignored while SECURITY updates stay
+# enabled (the ignore is scoped to the `version-update:semver-*` update types;
+# a bare `dependency-name` ignore would block security updates too).
+#
+# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge`.
 version: 2
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+    cooldown:
+      default-days: 1
+      exclude:
+        - "@thomasfosterau/*"
     groups:
-      dev-dependencies:
-        dependency-type: development
-
-  - package-ecosystem: github-actions
+      effect:
+        patterns:
+          - "effect"
+          - "@effect/docgen"
+          - "@effect/language-service"
+      vitest-toolchain:
+        patterns:
+          - "vitest"
+          - "vite-plus"
+    ignore:
+      - dependency-name: "@effect/tsgo"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "typescript"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "@typescript/native"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vite"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vitest"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+      - dependency-name: "vite-plus"
+        update-types:
+          [
+            "version-update:semver-major",
+            "version-update:semver-minor",
+            "version-update:semver-patch",
+          ]
+  - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: weekly
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "ci"
+      include: "scope"

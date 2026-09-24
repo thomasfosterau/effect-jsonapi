@@ -56,15 +56,22 @@
  *
  * @since 0.1.0
  */
-import type { Schema } from "effect"
-import { Effect, Layer, SchemaIssue } from "effect"
-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest"
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
-import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { BadRequest, NotAcceptable, toDocument, UnsupportedMediaType, type WireDocument } from "./ApiError.js"
-import { pointer } from "./Document.js"
-import type { ErrorSource } from "./Document.js"
-import { baseMediaType, MEDIA_TYPE } from "./internal/media.js"
+import type { Schema } from "effect";
+import { Effect, Layer, SchemaIssue } from "effect";
+import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import { HttpApiMiddleware } from "effect/unstable/httpapi";
+import {
+  BadRequest,
+  NotAcceptable,
+  toDocument,
+  UnsupportedMediaType,
+  type WireDocument,
+} from "./ApiError.js";
+import { pointer } from "./Document.js";
+import type { ErrorSource } from "./Document.js";
+import { indexErrorMeta } from "./internal/errorMeta.js";
+import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -108,8 +115,8 @@ import { baseMediaType, MEDIA_TYPE } from "./internal/media.js"
  */
 export const Span = {
   negotiate: "effect-jsonapi.negotiate",
-  schemaError: "effect-jsonapi.schema_error"
-} as const
+  schemaError: "effect-jsonapi.schema_error",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Content negotiation predicates (JSON:API §5)
@@ -129,51 +136,7 @@ export interface NegotiationOptions {
    *
    * Defaults to none.
    */
-  readonly extensions?: ReadonlyArray<string>
-}
-
-/**
- * Splits one media type entry into its (lowercased) base type, its media type
- * parameters, and its weight.
- *
- * Per RFC 9110 §12.4.2, `q` is not a media type parameter: it is the weight
- * of an `Accept` entry, and it terminates the media type's parameter list.
- * Everything before `q` is a media type parameter (subject to the ext/profile
- * whitelist); `q` itself and everything after it are accept-extension
- * parameters that belong to the header field, not the media type, and are
- * never checked against that whitelist. Splitting is therefore positional,
- * not a name-based filter: `;profile="…";q=0.8` has one media type parameter;
- * `;q=0.8;foo=bar` has none.
- *
- * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`.
- */
-const parseMediaType = (
-  entry: string
-): {
-  readonly base: string
-  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>
-  readonly weight: number
-} => {
-  const [first, ...rest] = entry.split(";")
-  const parameters: Array<readonly [name: string, value: string]> = []
-  let weight = 1
-  let pastWeight = false
-  for (const part of rest) {
-    const eq = part.indexOf("=")
-    const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase()
-    if (pastWeight) continue
-    const value = eq === -1 ? "" : part.slice(eq + 1).trim()
-    if (name === "q") {
-      const parsed = Number(value)
-      weight = Number.isFinite(parsed) ? parsed : 0
-      pastWeight = true
-      continue
-    }
-    // Parameter values may be quoted (ext / profile URI lists always are).
-    const unquoted = value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value
-    parameters.push([name, unquoted] as const)
-  }
-  return { base: baseMediaType(first ?? ""), parameters, weight }
+  readonly extensions?: ReadonlyArray<string>;
 }
 
 /**
@@ -183,20 +146,20 @@ const parseMediaType = (
  */
 const parametersAreAcceptable = (
   parameters: ReadonlyArray<readonly [name: string, value: string]>,
-  extensions: ReadonlyArray<string>
+  extensions: ReadonlyArray<string>,
 ): boolean => {
   for (const [name, value] of parameters) {
-    if (name === "profile") continue
+    if (name === "profile") continue;
     if (name === "ext") {
-      const uris = value.split(" ").filter((uri) => uri !== "")
-      if (!uris.every((uri) => extensions.includes(uri))) return false
-      continue
+      const uris = value.split(" ").filter((uri) => uri !== "");
+      if (!uris.every((uri) => extensions.includes(uri))) return false;
+      continue;
     }
     // Any parameter other than ext / profile is unacceptable.
-    return false
+    return false;
   }
-  return true
-}
+  return true;
+};
 
 /**
  * JSON:API §5: the server MUST respond with 415 if the request `Content-Type`
@@ -212,18 +175,21 @@ const parametersAreAcceptable = (
  * @since 0.1.0
  * @category utils
  */
-export const contentTypeIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
-  if (header === undefined) return true
-  const { base, parameters } = parseMediaType(header.trim())
-  if (base !== MEDIA_TYPE) return true
-  return parametersAreAcceptable(parameters, options?.extensions ?? [])
-}
+export const contentTypeIsAcceptable = (
+  header: string | undefined,
+  options?: NegotiationOptions,
+): boolean => {
+  if (header === undefined) return true;
+  const { base, parameters } = parseMediaType(header.trim());
+  if (base !== MEDIA_TYPE) return true;
+  return parametersAreAcceptable(parameters, options?.extensions ?? []);
+};
 
 /**
  * JSON:API §5: the server MUST respond with 406 if every instance of the
  * JSON:API media type in `Accept` carries media type parameters other than
  * `ext` / `profile` (or unsupported `ext` URIs). An `Accept` containing
- * `*​/*` or `application/*` always satisfies the rule.
+ * `*\/*` or `application/*` always satisfies the rule.
  *
  * A `q` parameter is a weight on the `Accept` entry (RFC 9110 §12.4.2), not a
  * media type parameter, so it never counts against the ext/profile rule. An
@@ -234,19 +200,23 @@ export const contentTypeIsAcceptable = (header: string | undefined, options?: Ne
  * @since 0.1.0
  * @category utils
  */
-export const acceptIsAcceptable = (header: string | undefined, options?: NegotiationOptions): boolean => {
-  if (header === undefined) return true
-  const entries = header.split(",").map((entry) => entry.trim())
+export const acceptIsAcceptable = (
+  header: string | undefined,
+  options?: NegotiationOptions,
+): boolean => {
+  if (header === undefined) return true;
+  const entries = header.split(",").map((entry) => entry.trim());
   for (const entry of entries) {
-    if (entry === "") continue
-    const { base, parameters, weight } = parseMediaType(entry)
-    if (base === "*/*" || base === "application/*") return true
-    if (base !== MEDIA_TYPE) continue
-    if (weight <= 0) continue
-    if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true
+    if (entry === "") continue;
+    const { base, parameters, weight } = parseMediaType(entry);
+    if (base === "*/*" || base === "application/*") return true;
+    if (base !== MEDIA_TYPE) continue;
+    // An unparseable `q` is a refusal here, not a default weight.
+    if ((weight ?? 0) <= 0) continue;
+    if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true;
   }
-  return false
-}
+  return false;
+};
 
 /**
  * Runs JSON:API §5 content negotiation over request headers, independent of
@@ -280,15 +250,15 @@ export const acceptIsAcceptable = (header: string | undefined, options?: Negotia
  */
 export const negotiate = (
   headers: {
-    readonly contentType?: string | undefined
-    readonly accept?: string | undefined
+    readonly contentType?: string | undefined;
+    readonly accept?: string | undefined;
   },
-  options?: NegotiationOptions
+  options?: NegotiationOptions,
 ): UnsupportedMediaType | NotAcceptable | undefined => {
-  if (!contentTypeIsAcceptable(headers.contentType, options)) return new UnsupportedMediaType()
-  if (!acceptIsAcceptable(headers.accept, options)) return new NotAcceptable()
-  return undefined
-}
+  if (!contentTypeIsAcceptable(headers.contentType, options)) return new UnsupportedMediaType();
+  if (!acceptIsAcceptable(headers.accept, options)) return new NotAcceptable();
+  return undefined;
+};
 
 /**
  * The part of a request whose decoding failed — the vocabulary
@@ -297,7 +267,7 @@ export const negotiate = (
  * @since 0.7.0
  * @category models
  */
-export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
+export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload";
 
 /**
  * The JSON:API 400 a request-validation failure produces — the standalone form
@@ -334,12 +304,12 @@ export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload"
  * @category utils
  */
 export const schemaError = (part: RequestPart): BadRequest =>
-  new BadRequest({ detail: `Request ${part.toLowerCase()} failed validation` })
+  new BadRequest({ detail: `Request ${part.toLowerCase()} failed validation` });
 
 // A JSON Pointer (RFC 6901) from an issue path, reusing `Document.pointer`'s
 // escaping so this spelling can't drift from the public constructors'.
 const jsonPointer = (path: ReadonlyArray<string | number>): string =>
-  "/" + path.map((segment) => pointer.escape(String(segment))).join("/")
+  "/" + path.map((segment) => pointer.escape(String(segment))).join("/");
 
 // The `source` of one error object, from the part that failed and the issue's
 // path: query keys are re-bracketed (`["page", "limit"]` → `page[limit]`; a
@@ -347,37 +317,40 @@ const jsonPointer = (path: ReadonlyArray<string | number>): string =>
 // list index — everything after an index is inside a decoded value (the sort
 // codec's `["sort", 0, "field"]`), not part of the wire key; path params and
 // headers take the first segment; bodies take the JSON Pointer.
-const sourceOf = (part: RequestPart, path: ReadonlyArray<string | number>): typeof ErrorSource.Type | undefined => {
+const sourceOf = (
+  part: RequestPart,
+  path: ReadonlyArray<string | number>,
+): typeof ErrorSource.Type | undefined => {
   switch (part) {
     case "Query": {
-      const keys: Array<string> = []
+      const keys: Array<string> = [];
       for (const segment of path) {
-        if (typeof segment !== "string") break
-        keys.push(segment)
+        if (typeof segment !== "string") break;
+        keys.push(segment);
       }
-      if (keys.length === 0) return undefined
+      if (keys.length === 0) return undefined;
       return {
         parameter:
           keys[0]! +
           keys
             .slice(1)
             .map((key) => `[${key}]`)
-            .join("")
-      }
+            .join(""),
+      };
     }
     case "Params": {
-      const key = path.find((segment): segment is string => typeof segment === "string")
-      return key === undefined ? undefined : { parameter: key }
+      const key = path.find((segment): segment is string => typeof segment === "string");
+      return key === undefined ? undefined : { parameter: key };
     }
     case "Headers": {
-      const key = path.find((segment): segment is string => typeof segment === "string")
-      return key === undefined ? undefined : { header: key }
+      const key = path.find((segment): segment is string => typeof segment === "string");
+      return key === undefined ? undefined : { header: key };
     }
     case "Body":
     case "Payload":
-      return path.length === 0 ? undefined : { pointer: jsonPointer(path) }
+      return path.length === 0 ? undefined : { pointer: jsonPointer(path) };
   }
-}
+};
 
 /**
  * The JSON:API 400 document for a request-validation failure, from the
@@ -389,6 +362,13 @@ const sourceOf = (part: RequestPart, path: ReadonlyArray<string | number>): type
  * `/data/attributes/title`) for a body. When no source can be derived (the
  * whole part is malformed) it is the single-error document of
  * {@link schemaError}.
+ *
+ * Where the schema that rejected the value publishes what it *would* have
+ * accepted, the error object carries it as `meta`: a rejected `?include=` path
+ * carries `meta.includablePaths` (the endpoint's whole supported set, as
+ * {@link ApiError.UnsupportedIncludePath} does) and an unknown `?sort=` field
+ * carries `meta.sortableFields`. A caller that guessed wrong learns the legal
+ * vocabulary from the rejection instead of from a second request.
  *
  * How many issues a failure reports is the decoder's choice: HttpApi decodes
  * with the default parse options (`errors: "first"`), so inside
@@ -419,28 +399,35 @@ const sourceOf = (part: RequestPart, path: ReadonlyArray<string | number>): type
  */
 export const schemaErrorDocument = (
   part: RequestPart,
-  error: Schema.SchemaError | SchemaIssue.Issue
+  error: Schema.SchemaError | SchemaIssue.Issue,
 ): typeof WireDocument.Type => {
-  const issue = SchemaIssue.isIssue(error) ? error : error.issue
-  const leaves = SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues
+  const issue = SchemaIssue.isIssue(error) ? error : error.issue;
+  const leaves = SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues;
+  // Error `meta` a schema publishes for its own rejections — the include
+  // whitelist, the sortable fields — indexed once per failure and looked up
+  // per leaf by the path the leaf sits at.
+  const metaAt = indexErrorMeta(issue);
   const errors = leaves.map((leaf) => {
-    const path = (leaf.path ?? []).flatMap((segment) => {
-      const key = typeof segment === "object" ? segment.key : segment
-      return typeof key === "string" || typeof key === "number" ? [key] : []
-    })
-    return { detail: leaf.message, source: sourceOf(part, path) }
-  })
-  if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part))
+    const keys = (leaf.path ?? []).map((segment) =>
+      typeof segment === "object" ? segment.key : segment,
+    );
+    const path = keys.flatMap((key) =>
+      typeof key === "string" || typeof key === "number" ? [key] : [],
+    );
+    return { detail: leaf.message, source: sourceOf(part, path), meta: metaAt(keys) };
+  });
+  if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part));
   return {
-    errors: errors.map(({ detail, source }) => ({
+    errors: errors.map(({ detail, source, meta }) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
       detail,
-      ...(source !== undefined ? { source } : {})
-    }))
-  }
-}
+      ...(source !== undefined ? { source } : {}),
+      ...(meta !== undefined ? { meta } : {}),
+    })),
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Middleware services
@@ -456,7 +443,7 @@ export const schemaErrorDocument = (
  */
 export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotiation>()(
   "effect-jsonapi/ContentNegotiation",
-  { error: [NotAcceptable.wire, UnsupportedMediaType.wire] as const }
+  { error: [NotAcceptable.wire, UnsupportedMediaType.wire] as const },
 ) {}
 
 /**
@@ -466,9 +453,12 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
  * @since 0.1.0
  * @category services
  */
-export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()("effect-jsonapi/SchemaErrors", {
-  error: BadRequest.wire
-}) {}
+export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()(
+  "effect-jsonapi/SchemaErrors",
+  {
+    error: BadRequest.wire,
+  },
+) {}
 
 // ---------------------------------------------------------------------------
 // Layers
@@ -481,14 +471,19 @@ export class SchemaErrors extends HttpApiMiddleware.Service<SchemaErrors>()("eff
  * @since 0.1.0
  * @category constructors
  */
-export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Layer<ContentNegotiation> =>
+export const contentNegotiationLayer = (
+  options?: NegotiationOptions,
+): Layer.Layer<ContentNegotiation> =>
   Layer.effect(
     ContentNegotiation,
     Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
       Effect.gen(function* () {
-        const request = yield* HttpServerRequest
+        const request = yield* HttpServerRequest;
         const error = yield* Effect.sync(() =>
-          negotiate({ contentType: request.headers["content-type"], accept: request.headers["accept"] }, options)
+          negotiate(
+            { contentType: request.headers["content-type"], accept: request.headers["accept"] },
+            options,
+          ),
         ).pipe(
           Effect.tap((error) =>
             Effect.annotateCurrentSpan(
@@ -496,17 +491,18 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
                 ? { "jsonapi.negotiation.outcome": "accepted" }
                 : {
                     "jsonapi.negotiation.outcome": "rejected",
-                    "jsonapi.negotiation.rule": error instanceof UnsupportedMediaType ? "content_type" : "accept"
-                  }
-            )
+                    "jsonapi.negotiation.rule":
+                      error instanceof UnsupportedMediaType ? "content_type" : "accept",
+                  },
+            ),
           ),
-          Effect.withSpan(Span.negotiate)
-        )
-        if (error !== undefined) return yield* Effect.fail(error)
-        return yield* httpEffect
-      })
-    )
-  )
+          Effect.withSpan(Span.negotiate),
+        );
+        if (error !== undefined) return yield* Effect.fail(error);
+        return yield* httpEffect;
+      }),
+    ),
+  );
 
 /**
  * The live {@link ContentNegotiation} implementation (no extensions).
@@ -514,7 +510,7 @@ export const contentNegotiationLayer = (options?: NegotiationOptions): Layer.Lay
  * @since 0.1.0
  * @category layers
  */
-export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNegotiationLayer()
+export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNegotiationLayer();
 
 /**
  * The live {@link SchemaErrors} implementation: answers every request
@@ -527,24 +523,25 @@ export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNe
  * @since 0.1.0
  * @category layers
  */
-export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.layerSchemaErrorTransform(
-  SchemaErrors,
-  // `ResponseHeaders` failures are a server-side bug (the handler's own response
-  // doesn't satisfy its declared schema), not a client request-validation error —
-  // re-fail with the original error instead of mislabeling it a 400.
-  (error) =>
-    error.kind === "ResponseHeaders"
-      ? Effect.fail(error)
-      : Effect.succeed(
-          HttpServerResponse.jsonUnsafe(schemaErrorDocument(error.kind, error.cause), {
-            status: BadRequest.status,
-            contentType: MEDIA_TYPE
-          })
-        ).pipe(
-          Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
-          Effect.withSpan(Span.schemaError)
-        )
-)
+export const SchemaErrorsLive: Layer.Layer<SchemaErrors> =
+  HttpApiMiddleware.layerSchemaErrorTransform(
+    SchemaErrors,
+    // `ResponseHeaders` failures are a server-side bug (the handler's own response
+    // doesn't satisfy its declared schema), not a client request-validation error —
+    // re-fail with the original error instead of mislabeling it a 400.
+    (error) =>
+      error.kind === "ResponseHeaders"
+        ? Effect.fail(error)
+        : Effect.succeed(
+            HttpServerResponse.jsonUnsafe(schemaErrorDocument(error.kind, error.cause), {
+              status: BadRequest.status,
+              contentType: MEDIA_TYPE,
+            }),
+          ).pipe(
+            Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
+            Effect.withSpan(Span.schemaError),
+          ),
+  );
 
 /**
  * A {@link ContentNegotiation} implementation that performs **no** §5 checks —
@@ -573,8 +570,8 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = HttpApiMiddleware.lay
  */
 export const ContentNegotiationPassthrough: Layer.Layer<ContentNegotiation> = Layer.effect(
   ContentNegotiation,
-  Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) => httpEffect)
-)
+  Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) => httpEffect),
+);
 
 /**
  * Everything a JSON:API api needs to run **when its host negotiates content**:
@@ -604,8 +601,8 @@ export const ContentNegotiationPassthrough: Layer.Layer<ContentNegotiation> = La
  */
 export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.mergeAll(
   ContentNegotiationPassthrough,
-  SchemaErrorsLive
-)
+  SchemaErrorsLive,
+);
 
 /**
  * Everything a JSON:API api needs to run: provide this layer alongside your
@@ -631,8 +628,8 @@ export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors>
  */
 export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.mergeAll(
   ContentNegotiationLive,
-  SchemaErrorsLive
-)
+  SchemaErrorsLive,
+);
 
 /**
  * Like {@link layer}, with content-negotiation options — required when the api
@@ -656,5 +653,7 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
  * @since 0.1.0
  * @category layers
  */
-export const layerWith = (options: NegotiationOptions): Layer.Layer<ContentNegotiation | SchemaErrors> =>
-  Layer.mergeAll(contentNegotiationLayer(options), SchemaErrorsLive)
+export const layerWith = (
+  options: NegotiationOptions,
+): Layer.Layer<ContentNegotiation | SchemaErrors> =>
+  Layer.mergeAll(contentNegotiationLayer(options), SchemaErrorsLive);

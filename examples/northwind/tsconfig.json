@@ -1,12 +1,14 @@
 {
-  "extends": "../../tsconfig.json",
+  "$schema": "https://raw.githubusercontent.com/Effect-TS/language-service/refs/heads/main/schema.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "rootDir": "../..",
-    "baseUrl": ".",
-    "types": ["vitest/globals", "node"],
+    "types": ["node"],
+    // Resolve the library to its source, exactly as the root config does, so
+    // the example is type-checked against the live `src/`. Relative to this
+    // file; TypeScript 7 removed `baseUrl`.
     "paths": {
-      "@thomasfosterau/effect-jsonapi": ["../../src/index.ts"]
+      "@thomasfosterau/effect-jsonapi": ["../../src/index.ts"],
+      "@thomasfosterau/effect-jsonapi/schema": ["../../src/schema.ts"]
     }
   },
   "include": ["**/*.ts"],

@@ -3,8 +3,9 @@
  *
  * @internal
  */
-import { Schema, SchemaTransformation } from "effect"
-import type { Term } from "../Sort.js"
+import { Schema, SchemaTransformation } from "effect";
+import type { Term } from "../Sort.js";
+import { errorMeta } from "./errorMeta.js";
 
 /**
  * A comma-separated list codec: `"a,b,c"` ↔ `["a", "b", "c"]`.
@@ -32,11 +33,12 @@ export const CommaSeparated = <S extends Schema.Top>(item: S): CommaSeparated<S>
     Schema.decodeTo(
       Schema.Array(item),
       SchemaTransformation.transform<ReadonlyArray<S["Encoded"]>, string>({
-        decode: (value) => value.split(",").filter((segment) => segment !== "") as ReadonlyArray<S["Encoded"]>,
-        encode: (items) => items.map(String).join(",")
-      })
-    )
-  )
+        decode: (value) =>
+          value.split(",").filter((segment) => segment !== "") as ReadonlyArray<S["Encoded"]>,
+        encode: (items) => items.map(String).join(","),
+      }),
+    ),
+  );
 
 /**
  * The wire form of a repeatable comma-separated parameter.
@@ -55,15 +57,18 @@ export interface Repeatable extends Schema.decodeTo<
   never
 > {}
 
-export const Repeatable: Repeatable = Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
+export const Repeatable: Repeatable = Schema.Union([
+  Schema.String,
+  Schema.Array(Schema.String),
+]).pipe(
   Schema.decodeTo(
     Schema.String,
     SchemaTransformation.transform<string, string | ReadonlyArray<string>>({
       decode: (value) => (Array.isArray(value) ? value.join(",") : (value as string)),
-      encode: (value) => value
-    })
-  )
-) as Repeatable
+      encode: (value) => value,
+    }),
+  ),
+) as Repeatable;
 
 /**
  * Composes {@link Repeatable} under a comma-list item codec — the result of
@@ -79,13 +84,15 @@ export const Repeatable: Repeatable = Schema.Union([Schema.String, Schema.Array(
  * have no such split — they are one schema, decoded directly from the wire
  * value — so they compose `Repeatable` under their item codec here instead.
  */
-export const repeatable = <S extends Schema.Top>(item: S): Schema.decodeTo<S, Repeatable, never, never> =>
-  Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>
+export const repeatable = <S extends Schema.Top>(
+  item: S,
+): Schema.decodeTo<S, Repeatable, never, never> =>
+  Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>;
 
 /**
  * A sort term: an attribute name and a direction — the public `Sort.Term`.
  */
-export type SortTerm<Field extends string> = Term<Field>
+export type SortTerm<Field extends string> = Term<Field>;
 
 /**
  * The schema of a decoded sort list.
@@ -93,8 +100,8 @@ export type SortTerm<Field extends string> = Term<Field>
 export interface Sort<Field extends string> extends Schema.decodeTo<
   Schema.$Array<
     Schema.Struct<{
-      readonly field: Schema.Literals<ReadonlyArray<Field>>
-      readonly direction: Schema.Literals<["asc", "desc"]>
+      readonly field: Schema.Literals<ReadonlyArray<Field>>;
+      readonly direction: Schema.Literals<["asc", "desc"]>;
     }>
   >,
   Schema.String,
@@ -111,10 +118,14 @@ export interface Sort<Field extends string> extends Schema.decodeTo<
  */
 export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => {
   const item = Schema.Struct({
-    field: Schema.Literals(fields as ReadonlyArray<Field>),
-    direction: Schema.Literals(["asc", "desc"] as ["asc", "desc"])
-  })
-  type Encoded = ReadonlyArray<typeof item.Encoded>
+    // The sortable set rides on the literal schema as error `meta`, so the 400
+    // for an unknown field carries `meta.sortableFields` (see `errorMeta`).
+    field: Schema.Literals(fields as ReadonlyArray<Field>).annotate(
+      errorMeta({ sortableFields: fields }),
+    ),
+    direction: Schema.Literals(["asc", "desc"] as ["asc", "desc"]),
+  });
+  type Encoded = ReadonlyArray<typeof item.Encoded>;
   return Schema.String.pipe(
     Schema.decodeTo(
       Schema.Array(item),
@@ -126,48 +137,51 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
             .map((term) =>
               term.startsWith("-")
                 ? { field: term.slice(1), direction: "desc" as const }
-                : { field: term, direction: "asc" as const }
+                : { field: term, direction: "asc" as const },
             ) as unknown as Encoded,
-        encode: (terms) => terms.map((term) => (term.direction === "desc" ? `-${term.field}` : term.field)).join(",")
-      })
-    )
-  )
-}
+        encode: (terms) =>
+          terms
+            .map((term) => (term.direction === "desc" ? `-${term.field}` : term.field))
+            .join(","),
+      }),
+    ),
+  );
+};
 
 /**
  * Reshapes a flat record with bracket keys into nested groups:
  * `{ "page[offset]": "10", include: "a" }` → `{ page: { offset: "10" }, include: "a" }`.
  */
 export const nest = (flat: { readonly [key: string]: unknown }): Record<string, unknown> => {
-  const nested: Record<string, unknown> = {}
+  const nested: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(flat)) {
-    if (value === undefined) continue
-    const match = /^([^[\]]+)\[([^[\]]+)\]$/.exec(key)
+    if (value === undefined) continue;
+    const match = /^([^[\]]+)\[([^[\]]+)\]$/.exec(key);
     if (match === null) {
-      nested[key] = value
+      nested[key] = value;
     } else {
-      const group = (nested[match[1]!] ??= {}) as Record<string, unknown>
-      group[match[2]!] = value
+      const group = (nested[match[1]!] ??= {}) as Record<string, unknown>;
+      group[match[2]!] = value;
     }
   }
-  return nested
-}
+  return nested;
+};
 
 /**
  * Inverse of {@link nest}: flattens nested groups back to bracket keys.
  */
 export const flatten = (nested: { readonly [key: string]: unknown }): Record<string, unknown> => {
-  const flat: Record<string, unknown> = {}
+  const flat: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(nested)) {
-    if (value === undefined) continue
+    if (value === undefined) continue;
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       for (const [sub, subValue] of Object.entries(value)) {
-        if (subValue === undefined) continue
-        flat[`${key}[${sub}]`] = subValue
+        if (subValue === undefined) continue;
+        flat[`${key}[${sub}]`] = subValue;
       }
     } else {
-      flat[key] = value
+      flat[key] = value;
     }
   }
-  return flat
-}
+  return flat;
+};

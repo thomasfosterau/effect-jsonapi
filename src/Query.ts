@@ -47,17 +47,32 @@
  *
  * @since 0.1.0
  */
-import type { SchemaAST, Types } from "effect"
-import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect"
-import * as ApiError from "./ApiError.js"
-import type { Ast, Node } from "./Filter.js"
-import { Ast as AstSchema, PROFILE_URI } from "./Filter.js"
-import type { AnySurface, SurfaceFor } from "./Include.js"
-import type { Pair as CanonicalPair } from "./internal/canonical.js"
-import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js"
-import { CommaSeparated, flatten, nest, Repeatable, repeatable, Sort as SortCodec } from "./internal/codecs.js"
-import type { FieldCodecs } from "./internal/filter.js"
-import { decodeFilter, encodeFilter, isFilterKey, literalEncoder, operatorCheck, prepare } from "./internal/filter.js"
+import type { SchemaAST, Types } from "effect";
+import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import * as ApiError from "./ApiError.js";
+import type { Ast, Node } from "./Filter.js";
+import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
+import type { AnySurface, SurfaceFor } from "./Include.js";
+import type { Pair as CanonicalPair } from "./internal/canonical.js";
+import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js";
+import {
+  CommaSeparated,
+  flatten,
+  nest,
+  Repeatable,
+  repeatable,
+  Sort as SortCodec,
+} from "./internal/codecs.js";
+import { errorMeta } from "./internal/errorMeta.js";
+import type { FieldCodecs } from "./internal/filter.js";
+import {
+  decodeFilter,
+  encodeFilter,
+  isFilterKey,
+  literalEncoder,
+  operatorCheck,
+  prepare,
+} from "./internal/filter.js";
 import type {
   Any,
   AttributeKeys,
@@ -66,9 +81,9 @@ import type {
   IncludeDepth,
   IncludePath,
   IncludePathsTo,
-  RelationshipTargets
-} from "./Resource.js"
-import { allTargets, attributeKeys, filterable, includePaths } from "./Resource.js"
+  RelationshipTargets,
+} from "./Resource.js";
+import { allTargets, attributeKeys, filterable, includePaths } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -81,7 +96,7 @@ import { allTargets, attributeKeys, filterable, includePaths } from "./Resource.
  * Custom strategies are plain `Schema.Struct.Fields` whose values decode from
  * strings.
  */
-const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
 
 /**
  * Options for the {@link Page.offset} pagination factory.
@@ -96,19 +111,19 @@ const PageInt = Schema.FiniteFromString.check(Schema.isInt(), Schema.isGreaterTh
  */
 export interface OffsetPageOptions {
   /** Upper bound on `limit` (inclusive) — a DoS guard. Omit for no cap. */
-  readonly maxLimit?: number
+  readonly maxLimit?: number;
   /** Lower bound on `limit` (inclusive). Defaults to 1. */
-  readonly minLimit?: number
+  readonly minLimit?: number;
   /** Decode default for `limit` when the wire key is absent. Omit → field stays `optionalKey`. */
-  readonly defaultLimit?: number
+  readonly defaultLimit?: number;
   /** Decode default for `offset`. Omit → field stays `optionalKey`. */
-  readonly defaultOffset?: number
+  readonly defaultOffset?: number;
   /**
    * `true` (default): fields decode from query strings (`FiniteFromString`, as `Page.Offset`).
    * `false`: plain numbers (`Schema.Number`) — for hosts that coerce strings at the transport layer
    * and reuse the schema as a numeric input.
    */
-  readonly fromString?: boolean
+  readonly fromString?: boolean;
 }
 
 /**
@@ -121,34 +136,40 @@ export interface OffsetPageOptions {
  */
 export interface NumberPageOptions {
   /** Upper bound on `size` (inclusive) — a DoS guard. Omit for no cap. */
-  readonly maxSize?: number
+  readonly maxSize?: number;
   /** Lower bound on `size` (inclusive). Defaults to 1. */
-  readonly minSize?: number
+  readonly minSize?: number;
   /** Decode default for `size` when the wire key is absent. Omit → field stays `optionalKey`. */
-  readonly defaultSize?: number
+  readonly defaultSize?: number;
   /** Decode default for `number`. Omit → field stays `optionalKey`. */
-  readonly defaultNumber?: number
+  readonly defaultNumber?: number;
   /**
    * `true` (default): fields decode from query strings (`FiniteFromString`, as `Page.Number`).
    * `false`: plain numbers (`Schema.Number`) — for hosts that coerce strings at the transport layer.
    */
-  readonly fromString?: boolean
+  readonly fromString?: boolean;
 }
 
 // The leaf schema a factory field is built from: a plain number when the caller
 // opts out of string decoding, otherwise the wire-string `FiniteFromString`.
-type PageLeaf<O extends { readonly fromString?: boolean }> = O extends { readonly fromString: false }
+type PageLeaf<O extends { readonly fromString?: boolean }> = O extends {
+  readonly fromString: false;
+}
   ? typeof Schema.Number
-  : typeof Schema.FiniteFromString
+  : typeof Schema.FiniteFromString;
 
 // `true` when `O` carries a concrete (non-`undefined`) value for key `K`.
-type HasDefaultKey<O, K extends PropertyKey> = K extends keyof O ? ([O[K]] extends [undefined] ? false : true) : false
+type HasDefaultKey<O, K extends PropertyKey> = K extends keyof O
+  ? [O[K]] extends [undefined]
+    ? false
+    : true
+  : false;
 
 // A defaulted key decodes to a required value (`withDecodingDefaultKey`); an
 // un-defaulted key stays optional (`optionalKey`).
 type PageField<L extends Schema.Top, HasDefault extends boolean> = HasDefault extends true
   ? Schema.withDecodingDefaultKey<L>
-  : Schema.optionalKey<L>
+  : Schema.optionalKey<L>;
 
 /**
  * The `{ offset, limit }` field-map produced by {@link Page.offset} for a given
@@ -158,9 +179,9 @@ type PageField<L extends Schema.Top, HasDefault extends boolean> = HasDefault ex
  * @category models
  */
 export type OffsetPageFields<O extends OffsetPageOptions> = {
-  readonly offset: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultOffset">>
-  readonly limit: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultLimit">>
-}
+  readonly offset: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultOffset">>;
+  readonly limit: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultLimit">>;
+};
 
 /**
  * The `{ number, size }` field-map produced by {@link Page.number} for a given
@@ -170,47 +191,59 @@ export type OffsetPageFields<O extends OffsetPageOptions> = {
  * @category models
  */
 export type NumberPageFields<O extends NumberPageOptions> = {
-  readonly number: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultNumber">>
-  readonly size: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultSize">>
-}
+  readonly number: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultNumber">>;
+  readonly size: PageField<PageLeaf<O>, HasDefaultKey<O, "defaultSize">>;
+};
 
 // Wraps a leaf in `optionalKey`, or — when a default is supplied — in
 // `withDecodingDefaultKey`. `withDecodingDefaultKey` takes the *encoded*
 // default, so a string-coercing field needs a STRING default and a plain-number
 // field a number default.
-const withPageDefault = (leaf: Schema.Top, value: number | undefined, fromString: boolean): Schema.Top =>
+const withPageDefault = (
+  leaf: Schema.Top,
+  value: number | undefined,
+  fromString: boolean,
+): Schema.Top =>
   value === undefined
     ? Schema.optionalKey(leaf)
-    : leaf.pipe(Schema.withDecodingDefaultKey(Effect.succeed(fromString ? String(value) : value)))
+    : leaf.pipe(Schema.withDecodingDefaultKey(Effect.succeed(fromString ? String(value) : value)));
 
 const offsetPage = <const O extends OffsetPageOptions = {}>(options?: O): OffsetPageFields<O> => {
-  const { maxLimit, minLimit = 1, defaultLimit, defaultOffset, fromString = true } = options ?? {}
-  const base = fromString ? Schema.FiniteFromString : Schema.Number
-  const offsetLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+  const { maxLimit, minLimit = 1, defaultLimit, defaultOffset, fromString = true } = options ?? {};
+  const base = fromString ? Schema.FiniteFromString : Schema.Number;
+  const offsetLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
   const limitLeaf =
     maxLimit === undefined
       ? base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minLimit))
-      : base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minLimit), Schema.isLessThanOrEqualTo(maxLimit))
+      : base.check(
+          Schema.isInt(),
+          Schema.isGreaterThanOrEqualTo(minLimit),
+          Schema.isLessThanOrEqualTo(maxLimit),
+        );
   return {
     offset: withPageDefault(offsetLeaf, defaultOffset, fromString),
-    limit: withPageDefault(limitLeaf, defaultLimit, fromString)
-  } as OffsetPageFields<O>
-}
+    limit: withPageDefault(limitLeaf, defaultLimit, fromString),
+  } as OffsetPageFields<O>;
+};
 
 const numberPage = <const O extends NumberPageOptions = {}>(options?: O): NumberPageFields<O> => {
-  const { maxSize, minSize = 1, defaultSize, defaultNumber, fromString = true } = options ?? {}
-  const base = fromString ? Schema.FiniteFromString : Schema.Number
+  const { maxSize, minSize = 1, defaultSize, defaultNumber, fromString = true } = options ?? {};
+  const base = fromString ? Schema.FiniteFromString : Schema.Number;
   // Page numbers are 1-based.
-  const numberLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1))
+  const numberLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1));
   const sizeLeaf =
     maxSize === undefined
       ? base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minSize))
-      : base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(minSize), Schema.isLessThanOrEqualTo(maxSize))
+      : base.check(
+          Schema.isInt(),
+          Schema.isGreaterThanOrEqualTo(minSize),
+          Schema.isLessThanOrEqualTo(maxSize),
+        );
   return {
     number: withPageDefault(numberLeaf, defaultNumber, fromString),
-    size: withPageDefault(sizeLeaf, defaultSize, fromString)
-  } as NumberPageFields<O>
-}
+    size: withPageDefault(sizeLeaf, defaultSize, fromString),
+  } as NumberPageFields<O>;
+};
 
 /**
  * Common pagination strategies, ready to pass as the `page` query option.
@@ -248,17 +281,17 @@ export const Page = {
   /** `?page[offset]=0&page[limit]=10` */
   Offset: {
     offset: Schema.optionalKey(PageInt),
-    limit: Schema.optionalKey(PageInt)
+    limit: Schema.optionalKey(PageInt),
   },
   /** `?page[number]=2&page[size]=25` */
   Number: {
     number: Schema.optionalKey(PageInt),
-    size: Schema.optionalKey(PageInt)
+    size: Schema.optionalKey(PageInt),
   },
   /** `?page[cursor]=opaque&page[size]=25` */
   Cursor: {
     cursor: Schema.optionalKey(Schema.String),
-    size: Schema.optionalKey(PageInt)
+    size: Schema.optionalKey(PageInt),
   },
   /**
    * A configurable `{ offset, limit }` field-map: the bounded / defaulted /
@@ -301,8 +334,8 @@ export const Page = {
    * @since 0.3.0
    * @category constructors
    */
-  number: numberPage
-} as const
+  number: numberPage,
+} as const;
 
 // ---------------------------------------------------------------------------
 // General key bracketing
@@ -317,11 +350,11 @@ export const Page = {
 // one `Schema.encodeKeys` pass rather than nesting renames — nesting would
 // require iterating a previous call's already-renamed keys, silently losing
 // its bracketing the moment a later mapping didn't happen to repeat it.
-const BRACKETED = "~bracketed" as const
+const BRACKETED = "~bracketed" as const;
 
 interface BracketedState<S extends Schema.Struct<Schema.Struct.Fields>> {
-  readonly struct: S
-  readonly mapping: { readonly [key: string]: string }
+  readonly struct: S;
+  readonly mapping: { readonly [key: string]: string };
 }
 
 /**
@@ -335,22 +368,26 @@ interface BracketedState<S extends Schema.Struct<Schema.Struct.Fields>> {
  */
 export interface BracketedKeys<
   S extends Schema.Struct<Schema.Struct.Fields>,
-  Mapping extends { readonly [K in keyof S["fields"]]?: string }
+  Mapping extends { readonly [K in keyof S["fields"]]?: string },
 > extends Schema.encodeKeys<S, Mapping> {
-  readonly [BRACKETED]: BracketedState<S>
+  readonly [BRACKETED]: BracketedState<S>;
 }
 
 // The struct a (possibly already-bracketed) schema was built from.
 type BracketedBase<S> =
-  S extends BracketedKeys<infer B, any> ? B : S extends Schema.Struct<Schema.Struct.Fields> ? S : never
+  S extends BracketedKeys<infer B, any>
+    ? B
+    : S extends Schema.Struct<Schema.Struct.Fields>
+      ? S
+      : never;
 
 // The rename mapping a (possibly already-bracketed) schema carries so far.
-type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : {}
+type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : {};
 
 // The mapping one `bracketKeys(prefix, keys)` call itself contributes.
 type PrefixMapping<Prefix extends string, Keys extends ReadonlyArray<PropertyKey>> = {
-  readonly [K in Keys[number] as K extends string ? K : never]: `${Prefix}[${K & string}]`
-}
+  readonly [K in Keys[number] as K extends string ? K : never]: `${Prefix}[${K & string}]`;
+};
 
 /**
  * Re-keys an arbitrary set of a **flat** query struct's *encoded* keys under a
@@ -415,22 +452,26 @@ export const bracketKeys =
   <
     S extends Schema.Struct<Schema.Struct.Fields> | BracketedKeys<any, any>,
     const Prefix extends string,
-    const Keys extends ReadonlyArray<Extract<keyof BracketedBase<S>["fields"], string>>
+    const Keys extends ReadonlyArray<Extract<keyof BracketedBase<S>["fields"], string>>,
   >(
     prefix: Prefix,
-    keys: Keys
+    keys: Keys,
   ) =>
-  (schema: S): BracketedKeys<BracketedBase<S>, BracketedMapping<S> & PrefixMapping<Prefix, Keys>> => {
-    const state = (schema as { readonly [BRACKETED]?: BracketedState<Schema.Struct<Schema.Struct.Fields>> })[BRACKETED]
-    const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>)
-    const mapping: Record<string, string> = { ...state?.mapping }
-    for (const key of keys) mapping[key] = `${prefix}[${key}]`
-    const wire = struct.pipe(Schema.encodeKeys(mapping))
+  (
+    schema: S,
+  ): BracketedKeys<BracketedBase<S>, BracketedMapping<S> & PrefixMapping<Prefix, Keys>> => {
+    const state = (
+      schema as { readonly [BRACKETED]?: BracketedState<Schema.Struct<Schema.Struct.Fields>> }
+    )[BRACKETED];
+    const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>);
+    const mapping: Record<string, string> = { ...state?.mapping };
+    for (const key of keys) mapping[key] = `${prefix}[${key}]`;
+    const wire = struct.pipe(Schema.encodeKeys(mapping));
     return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
       BracketedBase<S>,
       BracketedMapping<S> & PrefixMapping<Prefix, Keys>
-    >
-  }
+    >;
+  };
 
 /**
  * The struct shape {@link bracketPageKeys} accepts: any struct carrying
@@ -441,9 +482,9 @@ export const bracketKeys =
  */
 export interface OffsetPageStruct extends Schema.Struct<Schema.Struct.Fields> {
   readonly fields: {
-    readonly limit: Schema.Top
-    readonly offset: Schema.Top
-  }
+    readonly limit: Schema.Top;
+    readonly offset: Schema.Top;
+  };
 }
 
 /**
@@ -456,8 +497,8 @@ export interface OffsetPageStruct extends Schema.Struct<Schema.Struct.Fields> {
 export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.encodeKeys<
   S,
   {
-    readonly limit: "page[limit]"
-    readonly offset: "page[offset]"
+    readonly limit: "page[limit]";
+    readonly offset: "page[offset]";
   }
 > {}
 
@@ -512,8 +553,8 @@ export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketP
   // proven comparable while `S` is still generic, nor can `bracketKeys`'s own
   // key-membership check run against a struct type that is itself still generic.
   (schema as unknown as Schema.Struct<Schema.Struct.Fields>).pipe(
-    bracketKeys("page", ["offset", "limit"])
-  ) as unknown as BracketPageKeys<S>
+    bracketKeys("page", ["offset", "limit"]),
+  ) as unknown as BracketPageKeys<S>;
 
 // ---------------------------------------------------------------------------
 // Feature schemas
@@ -522,9 +563,9 @@ export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketP
 // Normalises "one resource or several" to an array (heterogeneous endpoints
 // pass several).
 const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArray<R> =>
-  Array.isArray(resource) ? (resource as ReadonlyArray<R>) : [resource as R]
+  Array.isArray(resource) ? (resource as ReadonlyArray<R>) : [resource as R];
 
-const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)]
+const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(values)];
 
 /**
  * Constrains the `include` paths an endpoint advertises.
@@ -544,9 +585,9 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
  */
 export interface IncludeOptions<R extends Any> {
   /** The exact set of legal paths. Anything else fails decoding (→ 400). */
-  readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>
+  readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>;
   /** How many hops into the relationship graph to derive. Defaults to 2. */
-  readonly depth?: IncludeDepth
+  readonly depth?: IncludeDepth;
   /**
    * The discriminant an `Include.Surface` carries, declared here as `never` so
    * that a surface can never satisfy this arm of {@link IncludeOption}: a
@@ -556,7 +597,7 @@ export interface IncludeOptions<R extends Any> {
    *
    * @internal
    */
-  readonly "~@thomasfosterau/effect-jsonapi/include"?: never
+  readonly "~@thomasfosterau/effect-jsonapi/include"?: never;
 }
 
 /**
@@ -569,7 +610,7 @@ export interface IncludeOptions<R extends Any> {
  * @since 0.9.0
  * @category models
  */
-export type IncludeOption<R extends Any> = boolean | IncludeOptions<R> | SurfaceFor<R>
+export type IncludeOption<R extends Any> = boolean | IncludeOptions<R> | SurfaceFor<R>;
 
 /**
  * The `include` paths an {@link IncludeOption} legalises: a declared
@@ -589,7 +630,7 @@ export type IncludePathsOf<R extends Any, I> = Extract<
         : IncludePath<R>
       : IncludePath<R>,
   string
->
+>;
 
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
@@ -601,7 +642,10 @@ export type IncludePathsOf<R extends Any, I> = Extract<
  * @since 0.1.0
  * @category models
  */
-export interface Include<R extends Any, Paths extends string = IncludePath<R>> extends Schema.decodeTo<
+export interface Include<
+  R extends Any,
+  Paths extends string = IncludePath<R>,
+> extends Schema.decodeTo<
   CommaSeparated<Schema.Literals<ReadonlyArray<Paths>>>,
   Repeatable,
   never,
@@ -614,11 +658,15 @@ export interface Include<R extends Any, Paths extends string = IncludePath<R>> e
 // branch and neither is ever widened back to a graph walk.
 const includePathsFor = (
   resources: ReadonlyArray<Any>,
-  options: IncludeOptions<Any> | AnySurface | undefined
+  options: IncludeOptions<Any> | AnySurface | undefined,
 ): ReadonlyArray<string> =>
   options?.paths !== undefined
     ? dedupe(options.paths as ReadonlyArray<string>)
-    : dedupe(resources.flatMap((r) => includePaths(r, (options as IncludeOptions<Any> | undefined)?.depth ?? 2)))
+    : dedupe(
+        resources.flatMap((r) =>
+          includePaths(r, (options as IncludeOptions<Any> | undefined)?.depth ?? 2),
+        ),
+      );
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
@@ -684,20 +732,211 @@ const includePathsFor = (
  * @since 0.1.0
  * @category constructors
  */
-export const Include = <R extends Any, const O extends IncludeOptions<R> | AnySurface | undefined = undefined>(
+export const Include = <
+  R extends Any,
+  const O extends IncludeOptions<R> | AnySurface | undefined = undefined,
+>(
   resource: R | ReadonlyArray<R>,
-  options?: O
-): Include<R, IncludePathsOf<R, O>> =>
-  repeatable(
+  options?: O,
+): Include<R, IncludePathsOf<R, O>> => {
+  const paths = includePathsFor(
+    toResources(resource),
+    options as IncludeOptions<Any> | AnySurface | undefined,
+  ) as ReadonlyArray<IncludePathsOf<R, O>>;
+  return repeatable(
     CommaSeparated(
-      Schema.Literals(
-        includePathsFor(
-          toResources(resource),
-          options as IncludeOptions<Any> | AnySurface | undefined
-        ) as ReadonlyArray<IncludePathsOf<R, O>>
-      )
-    )
-  ) as Include<R, IncludePathsOf<R, O>>
+      // The whitelist rides on the literal schema as error `meta`, so the 400
+      // `Middleware.schemaErrorDocument` renders for a rejected path carries
+      // `meta.includablePaths` — the same set `ApiError.UnsupportedIncludePath`
+      // publishes — and a caller learns the legal paths without a second call.
+      Schema.Literals(paths).annotate(errorMeta({ includablePaths: paths })),
+    ),
+  ) as Include<R, IncludePathsOf<R, O>>;
+};
+
+/**
+ * The open `?include=` list: a §7.1 path list with **no** whitelist — the
+ * spelling a flat contract advertises when the legal set is enforced by the
+ * handler (`Assemble.resource` / `ResourceHandlers`, which answer
+ * `ApiError.UnsupportedIncludePath` with `meta.includablePaths`) rather than
+ * by the schema.
+ *
+ * Decodes either wire spelling — the comma form (`"a,b"`) or the
+ * repeated-key form (`["a", "b"]`, `UrlParams.toRecord`'s shape for a
+ * repeated key) and any mix — trimming incidental whitespace and dropping
+ * empty segments; encoding is the identity on the array (the client always
+ * sends one, and `UrlParams` expands it to repeated keys).
+ *
+ * Prefer {@link Include} where the endpoint's legal set is known at
+ * schema-build time: it rejects an unknown path with the same
+ * `meta.includablePaths` at decode, before any handler runs.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const decode = Schema.decodeUnknownSync(Query.IncludeList)
+ * console.log(decode("author, comments,,"), decode(["author", "comments.author"]))
+ * // → [ "author", "comments" ] [ "author", "comments.author" ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export const IncludeList: Schema.decodeTo<
+  Schema.$Array<Schema.String>,
+  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>,
+  never,
+  never
+> = Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
+  Schema.decodeTo(
+    Schema.Array(Schema.String),
+    SchemaTransformation.transform<ReadonlyArray<string>, string | ReadonlyArray<string>>({
+      decode: (value) =>
+        (typeof value === "string" ? [value] : value).flatMap((occurrence) =>
+          occurrence
+            .split(",")
+            .map((path) => path.trim())
+            .filter((path) => path !== ""),
+        ),
+      encode: (value) => value,
+    }),
+  ),
+);
+
+/**
+ * The decoded {@link IncludeList}: the §7.1 path list.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type IncludeList = typeof IncludeList.Type;
+
+/**
+ * The `include` field a flat query struct spreads in to advertise the open
+ * `?include=` parameter: `{ include: Schema.optionalKey(Query.IncludeList) }`.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export const includeListField: { readonly include: Schema.optionalKey<typeof IncludeList> } = {
+  include: Schema.optionalKey(IncludeList),
+};
+
+/**
+ * The struct shape {@link flatList} accepts: a flat list input carrying the
+ * `offset` / `limit` page cursor, whatever else it also carries.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatListStruct extends Schema.Struct<Schema.Struct.Fields> {
+  readonly fields: {
+    readonly offset: Schema.Top;
+    readonly limit: Schema.Top;
+    readonly [key: string]: Schema.Top;
+  };
+}
+
+/**
+ * Options of {@link flatList}.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface FlatListOptions<S extends FlatListStruct> {
+  /**
+   * Fields of the struct whose **wire** key moves into the JSON:API
+   * `filter[…]` family, the way the page cursor's moves into `page[…]`:
+   * `filters: ["status"]` advertises `?filter[status]=` and decodes it back to
+   * a flat `status`. Fields not named stay under their flat key.
+   */
+  readonly filters?: ReadonlyArray<Extract<keyof S["fields"], string>> | undefined;
+  /**
+   * Whether to add the open `?include=` parameter ({@link includeListField}).
+   * Defaults to `true`.
+   */
+  readonly include?: boolean | undefined;
+}
+
+/**
+ * The schema {@link flatList} returns: the flat struct plus the `include`
+ * field, page-cursor and filter keys bracketed on the wire.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type FlatList<
+  S extends FlatListStruct,
+  Filters extends ReadonlyArray<string>,
+  IncludeField extends boolean,
+> = BracketedKeys<
+  Schema.Struct<S["fields"] & (IncludeField extends false ? {} : typeof includeListField)>,
+  { readonly offset: "page[offset]"; readonly limit: "page[limit]" } & {
+    readonly [K in Filters[number]]: `filter[${K}]`;
+  }
+>;
+
+/**
+ * A list endpoint's wire query from a **flat** list input — the struct the
+ * rest of an application consumes directly (`{ limit, offset, status }`):
+ * the open `?include=` parameter added ({@link includeListField}), the page
+ * cursor re-keyed to `page[offset]` / `page[limit]` and each named filter to
+ * `filter[<field>]`. The decoded shape is the flat input, unchanged, so the
+ * operation consuming it never sees the difference.
+ *
+ * The `include` field is added *before* the keys are bracketed: a bracketed
+ * schema is a key-rename wrapper rather than a struct, so a field added after
+ * it has nowhere to go. The result is a `Query.FlatQuerySchema`, so
+ * {@link canonicalPairs} applies to it directly — which is how a collection's
+ * pagination links come to carry every parameter the request did.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { FlatQuery, Query } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const ListArticles = Schema.Struct({
+ *   ...FlatQuery.pagination({ maxLimit: 100 }),
+ *   status: Schema.optionalKey(Schema.String)
+ * })
+ * const wire = Query.flatList(ListArticles, { filters: ["status"] })
+ *
+ * console.log(Schema.decodeUnknownSync(wire)({
+ *   "page[limit]": 5, "filter[status]": "open", include: "author"
+ * }))
+ * // → { offset: 0, limit: 5, status: "open", include: [ "author" ] }
+ * console.log(Query.canonicalPairs(wire)({ offset: 0, limit: 5, status: "open", include: ["author"] }))
+ * // → [ [ "include", "author" ], [ "filter[status]", "open" ], [ "page[offset]", "0" ], [ "page[limit]", "5" ] ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const flatList = <
+  S extends FlatListStruct,
+  const Filters extends ReadonlyArray<Extract<keyof S["fields"], string>> = readonly [],
+  const IncludeField extends boolean = true,
+>(
+  list: S,
+  options?: FlatListOptions<S> & {
+    readonly filters?: Filters | undefined;
+    readonly include?: IncludeField | undefined;
+  },
+): FlatList<S, Filters, IncludeField> => {
+  const filters = options?.filters ?? [];
+  const withInclude =
+    options?.include === false
+      ? Schema.Struct(list.fields)
+      : Schema.Struct({ ...list.fields, ...includeListField });
+  // The cast restates what the type parameters already say: `bracketKeys`
+  // checks each key's membership against a struct type that is generic here.
+  return withInclude.pipe(
+    bracketKeys("page", ["offset", "limit"]),
+    bracketKeys("filter", filters as ReadonlyArray<never>),
+  ) as unknown as FlatList<S, Filters, IncludeField>;
+};
 
 /**
  * One requested `include` path, already split on `.` into its segments — the
@@ -710,9 +949,9 @@ export const Include = <R extends Any, const O extends IncludeOptions<R> | AnySu
  */
 export interface IncludePathSegments {
   /** The path as requested, e.g. `"comments.author"`. */
-  readonly path: string
+  readonly path: string;
   /** The path split on `.`, e.g. `["comments", "author"]`. */
-  readonly segments: ReadonlyArray<string>
+  readonly segments: ReadonlyArray<string>;
 }
 
 /**
@@ -724,9 +963,9 @@ export interface IncludePathSegments {
  */
 export interface ValidateIncludePathsOptions {
   /** The whole set of supported paths, matched against the full dotted path. */
-  readonly includable: ReadonlyArray<string>
+  readonly includable: ReadonlyArray<string>;
   /** The maximum number of `.`-separated hops a path may have. */
-  readonly maxDepth: number
+  readonly maxDepth: number;
 }
 
 /**
@@ -777,24 +1016,33 @@ export interface ValidateIncludePathsOptions {
  */
 export const validateIncludePaths = (
   requested: ReadonlyArray<string>,
-  options: ValidateIncludePathsOptions
+  options: ValidateIncludePathsOptions,
 ): Effect.Effect<
   ReadonlyArray<IncludePathSegments>,
   ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath
 > =>
   Effect.forEach(
     requested,
-    (path): Effect.Effect<IncludePathSegments, ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath> => {
-      const segments = path.split(".")
+    (
+      path,
+    ): Effect.Effect<
+      IncludePathSegments,
+      ApiError.UnsupportedIncludeDepth | ApiError.UnsupportedIncludePath
+    > => {
+      const segments = path.split(".");
       if (segments.length > options.maxDepth) {
-        return Effect.fail(new ApiError.UnsupportedIncludeDepth({ path, maxDepth: options.maxDepth }))
+        return Effect.fail(
+          new ApiError.UnsupportedIncludeDepth({ path, maxDepth: options.maxDepth }),
+        );
       }
       if (!options.includable.includes(path)) {
-        return Effect.fail(new ApiError.UnsupportedIncludePath({ path, includablePaths: options.includable }))
+        return Effect.fail(
+          new ApiError.UnsupportedIncludePath({ path, includablePaths: options.includable }),
+        );
       }
-      return Effect.succeed({ path, segments })
-    }
-  )
+      return Effect.succeed({ path, segments });
+    },
+  );
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
@@ -838,9 +1086,9 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @category constructors
  */
 export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
-  repeatable(CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>))) as Fieldset<
-    AttributeKeys<R>
-  >
+  repeatable(
+    CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>)),
+  ) as Fieldset<AttributeKeys<R>>;
 
 /**
  * The decoded `sort` schema: a list of `{ field, direction }` terms. Accepts
@@ -850,7 +1098,12 @@ export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>>
  * @since 0.1.0
  * @category models
  */
-export interface Sort<Field extends string> extends Schema.decodeTo<SortCodec<Field>, Repeatable, never, never> {}
+export interface Sort<Field extends string> extends Schema.decodeTo<
+  SortCodec<Field>,
+  Repeatable,
+  never,
+  never
+> {}
 
 /**
  * Creates the `sort` schema for a set of sortable fields.
@@ -875,7 +1128,7 @@ export interface Sort<Field extends string> extends Schema.decodeTo<SortCodec<Fi
  * @category constructors
  */
 export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> =>
-  repeatable(SortCodec(fields)) as Sort<Field>
+  repeatable(SortCodec(fields)) as Sort<Field>;
 
 // ---------------------------------------------------------------------------
 // The filter codec (docs/filter-grammar.md)
@@ -890,7 +1143,7 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
  * @since 0.13.0
  * @category constants
  */
-export const FILTER_PROFILE_URI: typeof PROFILE_URI = PROFILE_URI
+export const FILTER_PROFILE_URI: typeof PROFILE_URI = PROFILE_URI;
 
 /**
  * The field vocabulary of a resource's filter AST: each key
@@ -901,8 +1154,8 @@ export const FILTER_PROFILE_URI: typeof PROFILE_URI = PROFILE_URI
  * @category type-level
  */
 export type FilterFields<R extends Any> = {
-  readonly [K in FilterableKeys<R>]: Filterable<R>[K]["literal"]["Type"]
-}
+  readonly [K in FilterableKeys<R>]: Filterable<R>[K]["literal"]["Type"];
+};
 
 /**
  * The decoded `filter` of a resource: `Filter.Ast` with `field` narrowed to
@@ -911,7 +1164,7 @@ export type FilterFields<R extends Any> = {
  * @since 0.13.0
  * @category type-level
  */
-export type FilterAst<R extends Any> = Ast<FilterFields<R>>
+export type FilterAst<R extends Any> = Ast<FilterFields<R>>;
 
 /**
  * The schema of a decoded {@link FilterAst} as it sits in a query's nested
@@ -930,7 +1183,10 @@ export interface FilterAstSchema<R extends Any> extends Schema.Codec<FilterAst<R
  * @since 0.13.0
  * @category models
  */
-export interface Filter<R extends Any> extends Schema.Codec<FilterAst<R>, { readonly [key: string]: string }> {}
+export interface Filter<R extends Any> extends Schema.Codec<
+  FilterAst<R>,
+  { readonly [key: string]: string }
+> {}
 
 /**
  * The wire value of one `filter` family key: a string, or — from a repeated
@@ -940,7 +1196,9 @@ export interface Filter<R extends Any> extends Schema.Codec<FilterAst<R>, { read
  * @since 0.13.0
  * @category models
  */
-export interface FilterWireValue extends Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]> {}
+export interface FilterWireValue extends Schema.Union<
+  readonly [Schema.String, Schema.$Array<Schema.String>]
+> {}
 
 /**
  * The runtime {@link FilterWireValue} schema.
@@ -948,13 +1206,16 @@ export interface FilterWireValue extends Schema.Union<readonly [Schema.String, S
  * @since 0.13.0
  * @category schemas
  */
-export const FilterWireValue: FilterWireValue = Schema.Union([Schema.String, Schema.Array(Schema.String)])
+export const FilterWireValue: FilterWireValue = Schema.Union([
+  Schema.String,
+  Schema.Array(Schema.String),
+]);
 
 // Every key starting `filter[` — well formed or not, so a malformed key
 // (`filter[status]x`) reaches the grammar and is rejected, never silently
 // dropped as an excess property. The bare `filter` key is a flat struct field
 // of its own for the same reason.
-const FilterKey = Schema.TemplateLiteral(["filter[", Schema.String])
+const FilterKey = Schema.TemplateLiteral(["filter[", Schema.String]);
 
 /**
  * The wire side of the filter family when `filter: true` is on: every key
@@ -975,50 +1236,59 @@ export interface FilterRest extends Schema.$Record<typeof FilterKey, FilterWireV
  * @since 0.13.0
  * @category schemas
  */
-export const FilterRest: FilterRest = Schema.Record(FilterKey, FilterWireValue)
+export const FilterRest: FilterRest = Schema.Record(FilterKey, FilterWireValue);
 
 // One issue per offending key, or a `Composite` of them when several keys fail.
 const filterIssues = (
   ast: SchemaAST.AST,
   input: unknown,
   issues: ReadonlyArray<SchemaIssue.Issue>,
-  options: SchemaAST.ParseOptions
+  options: SchemaAST.ParseOptions,
 ): SchemaIssue.Issue =>
   issues.length === 1
     ? issues[0]!
-    : new SchemaIssue.Composite(ast, issues as [SchemaIssue.Issue, ...Array<SchemaIssue.Issue>], input, options)
+    : new SchemaIssue.Composite(
+        ast,
+        issues as [SchemaIssue.Issue, ...Array<SchemaIssue.Issue>],
+        input,
+        options,
+      );
 
 // Decodes a record of `filter[...]` keys to a normal-form tree.
 const decodeFilterRecord = (
   fields: FieldCodecs,
   ast: SchemaAST.AST,
   input: { readonly [key: string]: unknown },
-  options: SchemaAST.ParseOptions
+  options: SchemaAST.ParseOptions,
 ): Effect.Effect<Node, SchemaIssue.Issue> => {
-  const decoded = decodeFilter(fields, input)
-  if (decoded._tag === "Issues") return Effect.fail(filterIssues(ast, input, decoded.issues, options))
+  const decoded = decodeFilter(fields, input);
+  if (decoded._tag === "Issues")
+    return Effect.fail(filterIssues(ast, input, decoded.issues, options));
   try {
-    return Effect.succeed(prepare(decoded.node, literalEncoder(fields)).node)
+    return Effect.succeed(prepare(decoded.node, literalEncoder(fields)).node);
   } catch (error) {
-    return Effect.fail(new SchemaIssue.InvalidValue({ message: messageOf(error) }, input, options))
+    return Effect.fail(new SchemaIssue.InvalidValue({ message: messageOf(error) }, input, options));
   }
-}
+};
 
 // Encodes a tree (normalising it first, and checking every field and operator
 // against the declaration) to its canonical `filter[...]` pairs.
 const encodeFilterNode = (
   fields: FieldCodecs,
   node: Node,
-  options: SchemaAST.ParseOptions
+  options: SchemaAST.ParseOptions,
 ): Effect.Effect<Record<string, string>, SchemaIssue.Issue> => {
   try {
-    return Effect.succeed(encodeFilter(prepare(node, literalEncoder(fields), operatorCheck(fields))))
+    return Effect.succeed(
+      encodeFilter(prepare(node, literalEncoder(fields), operatorCheck(fields))),
+    );
   } catch (error) {
-    return Effect.fail(new SchemaIssue.InvalidValue({ message: messageOf(error) }, node, options))
+    return Effect.fail(new SchemaIssue.InvalidValue({ message: messageOf(error) }, node, options));
   }
-}
+};
 
-const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+const messageOf = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 /**
  * Creates the `filter` codec for one resource: the filter grammar
@@ -1076,18 +1346,21 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * @category constructors
  */
 export const Filter = <R extends Any>(resource: R): Filter<R> => {
-  const fields = filterable(resource) as FieldCodecs
-  const from = Schema.Record(Schema.String, FilterWireValue)
+  const fields = filterable(resource) as FieldCodecs;
+  const from = Schema.Record(Schema.String, FilterWireValue);
   return from.pipe(
     Schema.decodeTo(
       AstSchema,
-      SchemaTransformation.transformOrFail<Node, { readonly [key: string]: string | ReadonlyArray<string> }>({
+      SchemaTransformation.transformOrFail<
+        Node,
+        { readonly [key: string]: string | ReadonlyArray<string> }
+      >({
         decode: (record, options) => decodeFilterRecord(fields, from.ast, record, options),
-        encode: (node, options) => encodeFilterNode(fields, node, options)
-      })
-    )
-  ) as unknown as Filter<R>
-}
+        encode: (node, options) => encodeFilterNode(fields, node, options),
+      }),
+    ),
+  ) as unknown as Filter<R>;
+};
 
 // ---------------------------------------------------------------------------
 // The combined query schema
@@ -1103,7 +1376,7 @@ export const Filter = <R extends Any>(resource: R): Filter<R> => {
  * @since 0.13.0
  * @category models
  */
-export type FilterOption = boolean | Schema.Struct.Fields
+export type FilterOption = boolean | Schema.Struct.Fields;
 
 /**
  * Query feature configuration for an endpoint.
@@ -1125,7 +1398,7 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted — `?include=a,b` and `?include=a&include=b`
    * — and decode to the same set.
    */
-  readonly include?: IncludeOption<R>
+  readonly include?: IncludeOption<R> | undefined;
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for this resource and its
    * direct relationship targets. Unknown field names produce a 400.
@@ -1133,7 +1406,7 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
    * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
    */
-  readonly fields?: boolean
+  readonly fields?: boolean | undefined;
   /**
    * Enable `?sort=` — `true` allows sorting on every attribute; pass an array
    * of attribute names to restrict the sortable set. Unknown fields produce a 400.
@@ -1141,12 +1414,12 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted — `?sort=-createdAt,title` and
    * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>>
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>> | undefined;
   /**
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
    * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`).
    */
-  readonly page?: Schema.Struct.Fields
+  readonly page?: Schema.Struct.Fields | undefined;
   /**
    * Enable `?filter[*]=` filtering. `true` turns on the filter grammar
    * (`docs/filter-grammar.md`) over the resource's declared filterable fields
@@ -1160,7 +1433,7 @@ export interface Options<R extends Any> {
    * JSON:API has no family for: each key becomes `filter[<key>]` and its
    * schema must decode from a string.
    */
-  readonly filter?: FilterOption
+  readonly filter?: FilterOption | undefined;
 }
 
 /**
@@ -1172,11 +1445,13 @@ export interface Options<R extends Any> {
  * @since 0.1.0
  * @category type-level
  */
-export type FieldsetResources<R extends Any> = R extends Any ? R | RelationshipTargets<R["relationships"]> : never
+export type FieldsetResources<R extends Any> = R extends Any
+  ? R | RelationshipTargets<R["relationships"]>
+  : never;
 
 // Whether an `include` option turns the parameter on: `true`, or an
 // `IncludeOptions` object. Everything else (`false`, absent) leaves it off.
-type IncludeEnabled<I> = [I] extends [true] ? true : [I] extends [object] ? true : false
+type IncludeEnabled<I> = [I] extends [true] ? true : [I] extends [object] ? true : false;
 
 /**
  * The nested (decoded) struct fields of a query schema.
@@ -1194,9 +1469,9 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
             Schema.Struct<{
               readonly [TypeName in FieldsetResources<R>["type"]]: Schema.optionalKey<
                 Fieldset<AttributeKeys<Extract<FieldsetResources<R>, { type: TypeName }>>>
-              >
+              >;
             }>
-          >
+          >;
         }
       : {}) &
     (O["sort"] extends true
@@ -1204,13 +1479,15 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
       : O["sort"] extends ReadonlyArray<string>
         ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
         : {}) &
-    (O["page"] extends Schema.Struct.Fields ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> } : {}) &
+    (O["page"] extends Schema.Struct.Fields
+      ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> }
+      : {}) &
     ([O["filter"]] extends [true]
       ? { readonly filter: Schema.optionalKey<FilterAstSchema<R>> }
       : O["filter"] extends Schema.Struct.Fields
         ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
         : {})
->
+>;
 
 /**
  * The flat (wire) struct fields of a query schema: every parameter is a
@@ -1222,31 +1499,41 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
  * @category type-level
  */
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
-  (IncludeEnabled<O["include"]> extends true ? { readonly include: Schema.optionalKey<Repeatable> } : {}) &
+  (IncludeEnabled<O["include"]> extends true
+    ? { readonly include: Schema.optionalKey<Repeatable> }
+    : {}) &
     ([O["fields"]] extends [true]
       ? {
-          readonly [TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`]: Schema.optionalKey<Repeatable>
+          readonly [
+            TypeName in FieldsetResources<R>["type"] as `fields[${TypeName}]`
+          ]: Schema.optionalKey<Repeatable>;
         }
       : {}) &
-    (O["sort"] extends true | ReadonlyArray<string> ? { readonly sort: Schema.optionalKey<Repeatable> } : {}) &
+    (O["sort"] extends true | ReadonlyArray<string>
+      ? { readonly sort: Schema.optionalKey<Repeatable> }
+      : {}) &
     (O["page"] extends Schema.Struct.Fields
       ? {
-          readonly [K in keyof O["page"] & string as `page[${K}]`]: Schema.optionalKey<Schema.String>
+          readonly [
+            K in keyof O["page"] & string as `page[${K}]`
+          ]: Schema.optionalKey<Schema.String>;
         }
       : {}) &
     ([O["filter"]] extends [true]
       ? { readonly filter: Schema.optionalKey<FilterWireValue> }
       : O["filter"] extends Schema.Struct.Fields
         ? {
-            readonly [K in keyof O["filter"] & string as `filter[${K}]`]: Schema.optionalKey<Schema.String>
+            readonly [
+              K in keyof O["filter"] & string as `filter[${K}]`
+            ]: Schema.optionalKey<Schema.String>;
           }
         : {})
->
+>;
 
 // Resolves to `T` for every concrete query configuration; needed because the
 // conditional intersections above can't be proven to satisfy `Struct.Fields`
 // while `O` is still generic.
-type AsFields<T> = T extends Schema.Struct.Fields ? T : never
+type AsFields<T> = T extends Schema.Struct.Fields ? T : never;
 
 /**
  * The flat (wire) schema of a query: the bracket-keyed struct of
@@ -1258,7 +1545,7 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never
  */
 export type FlatSchema<R extends Any, O extends Options<R>> = [O["filter"]] extends [true]
   ? Schema.StructWithRest<Schema.Struct<AsFields<FlatFields<R, O>>>, readonly [FilterRest]>
-  : Schema.Struct<AsFields<FlatFields<R, O>>>
+  : Schema.Struct<AsFields<FlatFields<R, O>>>;
 
 /**
  * The full query schema for a resource and feature set: a flat, bracket-keyed
@@ -1317,110 +1604,117 @@ export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema
  */
 export const schema = <R extends Any, const O extends Options<R>>(
   resource: R | ReadonlyArray<R>,
-  options: O
+  options: O,
 ): QuerySchema<R, O> => {
-  const resources = toResources(resource)
-  const nestedFields: Record<string, Schema.Top> = {}
-  const flatFields: Record<string, Schema.Top> = {}
+  const resources = toResources(resource);
+  const nestedFields: Record<string, Schema.Top> = {};
+  const flatFields: Record<string, Schema.Top> = {};
 
-  const include = options.include
+  const include = options.include;
   if (include === true || typeof include === "object") {
     nestedFields.include = Schema.optionalKey(
-      Include(resources, (typeof include === "object" ? include : undefined) as never)
-    )
-    flatFields.include = Schema.optionalKey(Repeatable)
+      Include(resources, (typeof include === "object" ? include : undefined) as never),
+    );
+    flatFields.include = Schema.optionalKey(Repeatable);
   }
 
   if (options.fields === true) {
-    const fieldsetFields: Record<string, Schema.Top> = {}
+    const fieldsetFields: Record<string, Schema.Top> = {};
     for (const target of dedupe([...resources, ...resources.flatMap(allTargets)])) {
-      fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target))
-      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable)
+      fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target));
+      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable);
     }
-    nestedFields.fields = Schema.optionalKey(Schema.Struct(fieldsetFields))
+    nestedFields.fields = Schema.optionalKey(Schema.Struct(fieldsetFields));
   }
 
   if (options.sort === true || (Array.isArray(options.sort) && options.sort.length > 0)) {
     const sortable =
       options.sort === true
         ? dedupe(resources.flatMap((r) => attributeKeys(r)))
-        : (options.sort as ReadonlyArray<string>)
-    nestedFields.sort = Schema.optionalKey(Sort(sortable))
-    flatFields.sort = Schema.optionalKey(Repeatable)
+        : (options.sort as ReadonlyArray<string>);
+    nestedFields.sort = Schema.optionalKey(Sort(sortable));
+    flatFields.sort = Schema.optionalKey(Repeatable);
   }
 
   if (options.page !== undefined) {
-    nestedFields.page = Schema.optionalKey(Schema.Struct(options.page))
+    nestedFields.page = Schema.optionalKey(Schema.Struct(options.page));
     for (const key of Object.keys(options.page)) {
-      flatFields[`page[${key}]`] = Schema.optionalKey(Schema.String)
+      flatFields[`page[${key}]`] = Schema.optionalKey(Schema.String);
     }
   }
 
   // The grammar's field declaration, when `filter: true` is on.
-  let filterFields: FieldCodecs | undefined
+  let filterFields: FieldCodecs | undefined;
   if (options.filter === true) {
     if (resources.length !== 1) {
       throw new Error(
         "Query.schema: `filter: true` derives the filter grammar from one resource's declaration; " +
-          "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead"
-      )
+          "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead",
+      );
     }
-    filterFields = filterable(resources[0]!) as FieldCodecs
-    nestedFields.filter = Schema.optionalKey(AstSchema)
+    filterFields = filterable(resources[0]!) as FieldCodecs;
+    nestedFields.filter = Schema.optionalKey(AstSchema);
     // The bare `filter` key is malformed under the grammar; declared here so
     // it reaches the grammar's rejection rather than being dropped.
-    flatFields.filter = Schema.optionalKey(FilterWireValue)
+    flatFields.filter = Schema.optionalKey(FilterWireValue);
   } else if (typeof options.filter === "object") {
-    nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter))
+    nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter));
     for (const key of Object.keys(options.filter)) {
-      flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String)
+      flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String);
     }
   }
 
-  const flatStruct = Schema.Struct(flatFields)
-  const flat = filterFields === undefined ? flatStruct : Schema.StructWithRest(flatStruct, [FilterRest])
-  const nested = Schema.Struct(nestedFields)
-  const fields = filterFields
+  const flatStruct = Schema.Struct(flatFields);
+  const flat =
+    filterFields === undefined ? flatStruct : Schema.StructWithRest(flatStruct, [FilterRest]);
+  const nested = Schema.Struct(nestedFields);
+  const fields = filterFields;
 
-  type Values = { readonly [x: string]: unknown }
+  type Values = { readonly [x: string]: unknown };
   return flat.pipe(
     Schema.decodeTo(
       nested,
       fields === undefined
         ? SchemaTransformation.transform<Values, Values>({
             decode: (flatValues) => nest(flatValues),
-            encode: (nestedValues) => flatten(nestedValues)
+            encode: (nestedValues) => flatten(nestedValues),
           })
         : // `filter[...]` keys are routed to the grammar ahead of the one-level
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
           SchemaTransformation.transformOrFail<Values, Values>({
             decode: (flatValues, parseOptions) => {
-              const others: Record<string, unknown> = {}
-              const filterKeys: Record<string, unknown> = {}
+              const others: Record<string, unknown> = {};
+              const filterKeys: Record<string, unknown> = {};
               for (const [key, value] of Object.entries(flatValues)) {
-                if (isFilterKey(key)) filterKeys[key] = value
-                else others[key] = value
+                if (isFilterKey(key)) filterKeys[key] = value;
+                else others[key] = value;
               }
-              const nestedValues = nest(others)
-              if (Object.keys(filterKeys).length === 0) return Effect.succeed(nestedValues)
-              return Effect.map(decodeFilterRecord(fields, flat.ast, filterKeys, parseOptions), (filter) => ({
-                ...nestedValues,
-                filter
-              }))
+              const nestedValues = nest(others);
+              if (Object.keys(filterKeys).length === 0) return Effect.succeed(nestedValues);
+              return Effect.map(
+                decodeFilterRecord(fields, flat.ast, filterKeys, parseOptions),
+                (filter) => ({
+                  ...nestedValues,
+                  filter,
+                }),
+              );
             },
             encode: (nestedValues, parseOptions) => {
-              const { filter, ...others } = nestedValues
-              const flatValues = flatten(others)
-              if (filter === undefined) return Effect.succeed(flatValues)
-              return Effect.map(encodeFilterNode(fields, filter as Node, parseOptions), (pairs) => ({
-                ...flatValues,
-                ...pairs
-              }))
-            }
-          })
-    )
-  ) as unknown as QuerySchema<R, O>
-}
+              const { filter, ...others } = nestedValues;
+              const flatValues = flatten(others);
+              if (filter === undefined) return Effect.succeed(flatValues);
+              return Effect.map(
+                encodeFilterNode(fields, filter as Node, parseOptions),
+                (pairs) => ({
+                  ...flatValues,
+                  ...pairs,
+                }),
+              );
+            },
+          }),
+    ),
+  ) as unknown as QuerySchema<R, O>;
+};
 
 // ---------------------------------------------------------------------------
 // The canonical query string
@@ -1433,7 +1727,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
  * @since 0.13.0
  * @category models
  */
-export type Pair = CanonicalPair
+export type Pair = CanonicalPair;
 
 /**
  * A query schema {@link canonical} accepts: any codec whose encoded (wire)
@@ -1452,7 +1746,12 @@ export type Pair = CanonicalPair
  * @since 0.13.0
  * @category models
  */
-export interface FlatQuerySchema extends Schema.Codec<unknown, { readonly [key: string]: unknown }, unknown, never> {}
+export interface FlatQuerySchema extends Schema.Codec<
+  unknown,
+  { readonly [key: string]: unknown },
+  unknown,
+  never
+> {}
 
 /**
  * Serialises ordered query pairs to a query string (no leading `?`): every
@@ -1483,7 +1782,7 @@ export interface FlatQuerySchema extends Schema.Codec<unknown, { readonly [key: 
  * @since 0.13.0
  * @category utils
  */
-export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs
+export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs;
 
 /**
  * The canonically ordered flat pairs of a decoded query — {@link canonical}
@@ -1531,11 +1830,13 @@ export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs
  * @since 0.13.0
  * @category utils
  */
-export const canonicalPairs = <S extends FlatQuerySchema>(schema: S): ((decoded: S["Type"]) => ReadonlyArray<Pair>) => {
-  const encode = Schema.encodeSync(schema)
-  const declared = declaredKeys(schema.ast)
-  return (decoded) => orderPairs(encode(decoded) as { readonly [key: string]: unknown }, declared)
-}
+export const canonicalPairs = <S extends FlatQuerySchema>(
+  schema: S,
+): ((decoded: S["Type"]) => ReadonlyArray<Pair>) => {
+  const encode = Schema.encodeSync(schema);
+  const declared = declaredKeys(schema.ast);
+  return (decoded) => orderPairs(encode(decoded) as { readonly [key: string]: unknown }, declared);
+};
 
 /**
  * The canonical query string of a decoded query: encoded through `schema`,
@@ -1589,7 +1890,9 @@ export const canonicalPairs = <S extends FlatQuerySchema>(schema: S): ((decoded:
  * @since 0.13.0
  * @category utils
  */
-export const canonical = <S extends FlatQuerySchema>(schema: S): ((decoded: S["Type"]) => string) => {
-  const pairs = canonicalPairs(schema)
-  return (decoded) => serialisePairs(pairs(decoded))
-}
+export const canonical = <S extends FlatQuerySchema>(
+  schema: S,
+): ((decoded: S["Type"]) => string) => {
+  const pairs = canonicalPairs(schema);
+  return (decoded) => serialisePairs(pairs(decoded));
+};

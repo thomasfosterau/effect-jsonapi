@@ -28,7 +28,7 @@
  *
  * @since 0.13.0
  */
-import type { Schema } from "effect"
+import type { Schema } from "effect";
 
 /**
  * The annotation key under which an attribute schema carries its sort
@@ -48,7 +48,7 @@ import type { Schema } from "effect"
  * @since 0.13.0
  * @category constants
  */
-export const AnnotationId = "@thomasfosterau/effect-jsonapi/sort"
+export const AnnotationId = "@thomasfosterau/effect-jsonapi/sort";
 
 /**
  * The phantom property key carrying the sort declaration at the *type* level.
@@ -58,7 +58,7 @@ export const AnnotationId = "@thomasfosterau/effect-jsonapi/sort"
  * @since 0.13.0
  * @category type-level
  */
-export type MarkerKey = "~@thomasfosterau/effect-jsonapi/sort"
+export type MarkerKey = "~@thomasfosterau/effect-jsonapi/sort";
 
 /**
  * A schema declared sortable by {@link able}: the schema itself, tagged at the
@@ -68,7 +68,7 @@ export type MarkerKey = "~@thomasfosterau/effect-jsonapi/sort"
  * @since 0.13.0
  * @category type-level
  */
-export type Declared<S extends Schema.Top> = S & { readonly [K in MarkerKey]: true }
+export type Declared<S extends Schema.Top> = S & { readonly [K in MarkerKey]: true };
 
 /**
  * One term of an order: a field and the direction it is ordered in — the
@@ -97,8 +97,8 @@ export type Declared<S extends Schema.Top> = S & { readonly [K in MarkerKey]: tr
  * @category models
  */
 export interface Term<Field extends string = string> {
-  readonly field: Field
-  readonly direction: "asc" | "desc"
+  readonly field: Field;
+  readonly direction: "asc" | "desc";
 }
 
 /**
@@ -138,4 +138,4 @@ export interface Term<Field extends string = string> {
 export const able =
   () =>
   <S extends Schema.Top>(self: S): Declared<S> =>
-    self.annotate({ [AnnotationId]: true }) as unknown as Declared<S>
+    self.annotate({ [AnnotationId]: true }) as unknown as Declared<S>;

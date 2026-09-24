@@ -1,13 +1,16 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "rootDir": ".",
     "types": ["node"],
+    // Resolve the package name to the EMITTED declarations rather than the
+    // sources: this is what consumers actually see, and the two are not
+    // interchangeable (see test/emitted/requirements.types.ts). Only means
+    // anything after `vp run build`; the `typecheck:dist` task depends on it.
     "paths": {
-      "@thomasfosterau/effect-jsonapi": ["./dist/index.d.ts"]
+      "@thomasfosterau/effect-jsonapi": ["./dist/index.d.ts"],
+      "@thomasfosterau/effect-jsonapi/schema": ["./dist/schema.d.ts"]
     }
   },
-  "include": ["test/emitted/**/*"],
+  "include": ["test/emitted"],
   "exclude": ["node_modules", "src"]
 }

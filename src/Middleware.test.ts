@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest"
-import { Effect, Layer, Schema, SchemaIssue, Tracer } from "effect"
-import { HttpRouter } from "effect/unstable/http"
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
-import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js"
-import * as Endpoint from "./Endpoint.js"
-import * as Group from "./Group.js"
-import type { ContentNegotiation, SchemaErrors } from "./Middleware.js"
+import { describe, expect, it } from "vite-plus/test";
+import { Effect, Layer, Schema, SchemaIssue, Tracer } from "effect";
+import { HttpRouter } from "effect/unstable/http";
+import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js";
+import * as Endpoint from "./Endpoint.js";
+import * as Group from "./Group.js";
+import type { ContentNegotiation, SchemaErrors } from "./Middleware.js";
 import {
   acceptIsAcceptable,
   contentTypeIsAcceptable,
@@ -14,119 +14,126 @@ import {
   negotiate,
   schemaError,
   schemaErrorDocument,
-  Span
-} from "./Middleware.js"
-import * as Query from "./Query.js"
-import { make as Resource } from "./Resource.js"
-import { MEDIA_TYPE } from "./internal/media.js"
+  Span,
+} from "./Middleware.js";
+import * as Query from "./Query.js";
+import * as Relationship from "./Relationship.js";
+import { make as Resource } from "./Resource.js";
+import { MEDIA_TYPE } from "./internal/media.js";
 
 describe("contentTypeIsAcceptable", () => {
   it("accepts a missing or plain JSON:API content type", () => {
-    expect(contentTypeIsAcceptable(undefined)).toBe(true)
-    expect(contentTypeIsAcceptable(MEDIA_TYPE)).toBe(true)
-  })
+    expect(contentTypeIsAcceptable(undefined)).toBe(true);
+    expect(contentTypeIsAcceptable(MEDIA_TYPE)).toBe(true);
+  });
 
   it("rejects the JSON:API media type with non ext/profile parameters", () => {
-    expect(contentTypeIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false)
-  })
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false);
+  });
 
   it("leaves other content types to the downstream decoder", () => {
-    expect(contentTypeIsAcceptable("application/json; charset=utf-8")).toBe(true)
-  })
+    expect(contentTypeIsAcceptable("application/json; charset=utf-8")).toBe(true);
+  });
 
   it("splits the media type parameter list positionally at q, same as Accept", () => {
-    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8`)).toBe(true)
-    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true)
-    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
-  })
-})
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8`)).toBe(true);
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true);
+    expect(contentTypeIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false);
+  });
+});
 
 describe("acceptIsAcceptable", () => {
   it("accepts wildcards and the bare media type", () => {
-    expect(acceptIsAcceptable("*/*")).toBe(true)
-    expect(acceptIsAcceptable(MEDIA_TYPE)).toBe(true)
-  })
+    expect(acceptIsAcceptable("*/*")).toBe(true);
+    expect(acceptIsAcceptable(MEDIA_TYPE)).toBe(true);
+  });
 
   it("rejects when every JSON:API instance carries bad parameters", () => {
-    expect(acceptIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false)
-  })
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}; charset=utf-8`)).toBe(false);
+  });
 
   it("treats q as the entry's weight, not a media type parameter", () => {
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.9`)).toBe(true)
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.9`)).toBe(true);
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1`)).toBe(true);
     // whitespace before the parameter name
-    expect(acceptIsAcceptable(`${MEDIA_TYPE}; q=1`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}; q=1`)).toBe(true);
     // a weight of exactly zero is an explicit refusal, not a bad parameter
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0`)).toBe(false)
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.000`)).toBe(false)
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1.0`)).toBe(true)
-  })
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0`)).toBe(false);
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.000`)).toBe(false);
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1.0`)).toBe(true);
+  });
 
   it("weighs each Accept entry independently — a low-weight JSON:API instance is still acceptable", () => {
-    expect(acceptIsAcceptable(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(true)
-    expect(acceptIsAcceptable(`${MEDIA_TYPE}, text/html;q=0.9`)).toBe(true)
-  })
+    expect(acceptIsAcceptable(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(true);
+    expect(acceptIsAcceptable(`${MEDIA_TYPE}, text/html;q=0.9`)).toBe(true);
+  });
 
   it("splits the media type parameter list positionally at q", () => {
     // one media type parameter (profile) plus a weight: acceptable
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};profile="https://example.com/p";q=0.8`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};profile="https://example.com/p";q=0.8`)).toBe(true);
     // no media type parameters — everything after q is an accept-extension
     // parameter and must not be checked against the ext/profile whitelist
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true)
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=0.8;foo=bar`)).toBe(true);
     // a real bad media type parameter (before q) is still rejected
-    expect(acceptIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false)
-  })
-})
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};charset=utf-8;q=0.8`)).toBe(false);
+  });
+});
 
 describe("Middleware.negotiate", () => {
   it("returns undefined for an acceptable request", () => {
-    expect(negotiate({})).toBeUndefined()
-    expect(negotiate({ contentType: MEDIA_TYPE, accept: MEDIA_TYPE })).toBeUndefined()
-    expect(negotiate({ accept: "*/*" })).toBeUndefined()
-  })
+    expect(negotiate({})).toBeUndefined();
+    expect(negotiate({ contentType: MEDIA_TYPE, accept: MEDIA_TYPE })).toBeUndefined();
+    expect(negotiate({ accept: "*/*" })).toBeUndefined();
+  });
 
   it("returns a 415 UnsupportedMediaType for a bad content type", () => {
-    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` })
-    expect(error).toBeInstanceOf(UnsupportedMediaType)
-    expect(error?._tag).toBe("UnsupportedMediaType")
-    expect(UnsupportedMediaType.status).toBe(415)
-  })
+    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` });
+    expect(error).toBeInstanceOf(UnsupportedMediaType);
+    expect(error?._tag).toBe("UnsupportedMediaType");
+    expect(UnsupportedMediaType.status).toBe(415);
+  });
 
   it("returns a 406 NotAcceptable for a bad accept header", () => {
-    const error = negotiate({ accept: `${MEDIA_TYPE}; charset=utf-8` })
-    expect(error).toBeInstanceOf(NotAcceptable)
-    expect(error?._tag).toBe("NotAcceptable")
-    expect(NotAcceptable.status).toBe(406)
-  })
+    const error = negotiate({ accept: `${MEDIA_TYPE}; charset=utf-8` });
+    expect(error).toBeInstanceOf(NotAcceptable);
+    expect(error?._tag).toBe("NotAcceptable");
+    expect(NotAcceptable.status).toBe(406);
+  });
 
   it("checks content type before accept (415 wins)", () => {
     const error = negotiate({
       contentType: `${MEDIA_TYPE}; charset=utf-8`,
-      accept: `${MEDIA_TYPE}; charset=utf-8`
-    })
-    expect(error).toBeInstanceOf(UnsupportedMediaType)
-  })
+      accept: `${MEDIA_TYPE}; charset=utf-8`,
+    });
+    expect(error).toBeInstanceOf(UnsupportedMediaType);
+  });
 
   it("honours supported extensions", () => {
-    const ext = "https://jsonapi.org/ext/atomic"
-    expect(negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] })).toBeUndefined()
-    expect(negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(UnsupportedMediaType)
-  })
+    const ext = "https://jsonapi.org/ext/atomic";
+    expect(
+      negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] }),
+    ).toBeUndefined();
+    expect(negotiate({ contentType: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(
+      UnsupportedMediaType,
+    );
+  });
 
   it("applies the extension list to the Accept header too", () => {
-    const ext = "https://jsonapi.org/ext/atomic"
-    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] })).toBeUndefined()
-    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(NotAcceptable)
-  })
+    const ext = "https://jsonapi.org/ext/atomic";
+    expect(
+      negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` }, { extensions: [ext] }),
+    ).toBeUndefined();
+    expect(negotiate({ accept: `${MEDIA_TYPE}; ext="${ext}"` })).toBeInstanceOf(NotAcceptable);
+  });
 
   it("composes with ApiError.toDocument to render the spec error body", () => {
-    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` })
-    expect(error).toBeInstanceOf(UnsupportedMediaType)
+    const error = negotiate({ contentType: `${MEDIA_TYPE}; charset=utf-8` });
+    expect(error).toBeInstanceOf(UnsupportedMediaType);
     expect(toDocument(error!)).toEqual({
-      errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }]
-    })
-  })
-})
+      errors: [{ status: "415", code: "unsupported_media_type", title: "Unsupported Media Type" }],
+    });
+  });
+});
 
 describe("Middleware.schemaError", () => {
   it("renders the JSON:API 400 for each request part", () => {
@@ -137,104 +144,176 @@ describe("Middleware.schemaError", () => {
           code: "bad_request",
           title: "Bad Request",
           detail: "Request query failed validation",
-          meta: { detail: "Request query failed validation" }
-        }
-      ]
-    })
-    expect(schemaError("Payload").detail).toBe("Request payload failed validation")
-    expect(schemaError("Params").detail).toBe("Request params failed validation")
-  })
-})
+          meta: { detail: "Request query failed validation" },
+        },
+      ],
+    });
+    expect(schemaError("Payload").detail).toBe("Request payload failed validation");
+    expect(schemaError("Params").detail).toBe("Request params failed validation");
+  });
+});
 
 describe("Middleware.schemaErrorDocument", () => {
   const failure = <S extends Schema.Top>(schema: S, input: unknown) => {
-    const result = Schema.decodeUnknownResult(schema as unknown as Schema.Codec<unknown, unknown>)(input, {
-      errors: "all"
-    })
-    if (result._tag === "Success") throw new Error("expected a failure")
-    return result.failure
-  }
+    const result = Schema.decodeUnknownResult(schema as unknown as Schema.Codec<unknown, unknown>)(
+      input,
+      {
+        errors: "all",
+      },
+    );
+    if (result._tag === "Success") throw new Error("expected a failure");
+    return result.failure;
+  };
   const bad = (detail: string, source: object) => ({
     status: "400",
     code: "bad_request",
     title: "Bad Request",
     detail,
-    source
-  })
+    source,
+  });
 
   it("names a query parameter, re-bracketing a nested path and dropping list indices", () => {
     const Query = Schema.Struct({
       page: Schema.Struct({ limit: Schema.FiniteFromString }),
-      sort: Schema.Array(Schema.Literals(["a", "b"]))
-    })
-    expect(schemaErrorDocument("Query", failure(Query, { page: { limit: "x" }, sort: ["a", "c"] }))).toEqual({
+      sort: Schema.Array(Schema.Literals(["a", "b"])),
+    });
+    expect(
+      schemaErrorDocument("Query", failure(Query, { page: { limit: "x" }, sort: ["a", "c"] })),
+    ).toEqual({
       errors: [
         bad("Expected a finite number", { parameter: "page[limit]" }),
-        bad('Expected "a" | "b"', { parameter: "sort" })
-      ]
-    })
+        bad('Expected "a" | "b"', { parameter: "sort" }),
+      ],
+    });
     // a grammar key is already one segment
-    const issue = new SchemaIssue.Pointer(["filter[age][gt]"], new SchemaIssue.InvalidValue({ message: "nope" }))
-    expect(schemaErrorDocument("Query", issue)).toEqual({ errors: [bad("nope", { parameter: "filter[age][gt]" })] })
+    const issue = new SchemaIssue.Pointer(
+      ["filter[age][gt]"],
+      new SchemaIssue.InvalidValue({ message: "nope" }),
+    );
+    expect(schemaErrorDocument("Query", issue)).toEqual({
+      errors: [bad("nope", { parameter: "filter[age][gt]" })],
+    });
     // segments after a list index are inside the decoded value, not the wire key
-    const inside = new SchemaIssue.Pointer(["sort", 0, "field"], new SchemaIssue.InvalidValue({ message: "nope" }))
-    expect(schemaErrorDocument("Query", inside)).toEqual({ errors: [bad("nope", { parameter: "sort" })] })
-  })
+    const inside = new SchemaIssue.Pointer(
+      ["sort", 0, "field"],
+      new SchemaIssue.InvalidValue({ message: "nope" }),
+    );
+    expect(schemaErrorDocument("Query", inside)).toEqual({
+      errors: [bad("nope", { parameter: "sort" })],
+    });
+  });
+
+  it("carries the schema's published vocabulary as `meta` (include paths, sortable fields)", () => {
+    const Person = Resource("people", { attributes: { name: Schema.String } });
+    const Article = Resource("articles", {
+      attributes: { title: Schema.String, createdAt: Schema.String },
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const ListQuery = Query.schema(Article, {
+      include: true,
+      fields: false,
+      sort: ["title", "createdAt"],
+      page: undefined,
+      filter: undefined,
+    });
+    const withMeta = (detail: string, parameter: string, meta: object) => ({
+      ...bad(detail, { parameter }),
+      meta,
+    });
+    // the comma grammar and the repeated-key spelling both reach the same annotation
+    expect(schemaErrorDocument("Query", failure(ListQuery, { include: "author,nope" }))).toEqual({
+      errors: [withMeta('Expected "author"', "include", { includablePaths: ["author"] })],
+    });
+    expect(
+      schemaErrorDocument("Query", failure(ListQuery, { include: ["author", "nope"] })),
+    ).toEqual({
+      errors: [withMeta('Expected "author"', "include", { includablePaths: ["author"] })],
+    });
+    expect(schemaErrorDocument("Query", failure(ListQuery, { sort: "-nope" }))).toEqual({
+      errors: [
+        withMeta('Expected "title" | "createdAt"', "sort", {
+          sortableFields: ["title", "createdAt"],
+        }),
+      ],
+    });
+    // a schema that publishes nothing renders no `meta` member at all
+    const errors = schemaErrorDocument(
+      "Query",
+      failure(Schema.Struct({ limit: Schema.FiniteFromString }), { limit: "x" }),
+    ).errors;
+    expect(errors[0] !== undefined && "meta" in errors[0]).toBe(false);
+  });
 
   it("names a path parameter and a header", () => {
-    const Params = Schema.Struct({ id: Schema.String })
+    const Params = Schema.Struct({ id: Schema.String });
     expect(schemaErrorDocument("Params", failure(Params, { id: 1 }))).toEqual({
-      errors: [bad("Expected string", { parameter: "id" })]
-    })
+      errors: [bad("Expected string", { parameter: "id" })],
+    });
     expect(schemaErrorDocument("Headers", failure(Params, {}))).toEqual({
-      errors: [bad("Missing key", { header: "id" })]
-    })
-  })
+      errors: [bad("Missing key", { header: "id" })],
+    });
+  });
 
   it("points into a body with a JSON Pointer", () => {
     const Body = Schema.Struct({
-      data: Schema.Struct({ attributes: Schema.Struct({ title: Schema.NonEmptyString, "a/b~c": Schema.String }) })
-    })
-    expect(schemaErrorDocument("Payload", failure(Body, { data: { attributes: { title: "", "a/b~c": 1 } } }))).toEqual({
+      data: Schema.Struct({
+        attributes: Schema.Struct({ title: Schema.NonEmptyString, "a/b~c": Schema.String }),
+      }),
+    });
+    expect(
+      schemaErrorDocument(
+        "Payload",
+        failure(Body, { data: { attributes: { title: "", "a/b~c": 1 } } }),
+      ),
+    ).toEqual({
       errors: [
         bad("Expected a value with a length of at least 1", { pointer: "/data/attributes/title" }),
-        bad("Expected string", { pointer: "/data/attributes/a~1b~0c" })
-      ]
-    })
-  })
+        bad("Expected string", { pointer: "/data/attributes/a~1b~0c" }),
+      ],
+    });
+  });
 
   it("falls back to the single-error document when no source can be derived", () => {
-    expect(schemaErrorDocument("Query", failure(Schema.Struct({ limit: Schema.String }), "not an object"))).toEqual(
-      toDocument(schemaError("Query"))
-    )
-    expect(schemaErrorDocument("Body", failure(Schema.String, 1))).toEqual(toDocument(schemaError("Body")))
-  })
-})
+    expect(
+      schemaErrorDocument(
+        "Query",
+        failure(Schema.Struct({ limit: Schema.String }), "not an object"),
+      ),
+    ).toEqual(toDocument(schemaError("Query")));
+    expect(schemaErrorDocument("Body", failure(Schema.String, 1))).toEqual(
+      toDocument(schemaError("Body")),
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Host-negotiated apis: the endpoint constructors without the package's §5
 // ---------------------------------------------------------------------------
 
-const Article = Resource("articles", { attributes: { title: Schema.NonEmptyString } })
+const Article = Resource("articles", { attributes: { title: Schema.NonEmptyString } });
 
 const Api = HttpApi.make("blog").add(
-  Group.make(Article, Endpoint.get(Article), Endpoint.list(Article, { page: Query.Page.Offset, sort: true }))
-)
+  Group.make(
+    Article,
+    Endpoint.get(Article),
+    Endpoint.list(Article, { page: Query.Page.Offset, sort: true }),
+  ),
+);
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
     .handle("get", ({ params }) =>
-      Effect.succeed({ data: Article.make({ id: params.id, attributes: { title: "Hello" } }) })
+      Effect.succeed({ data: Article.make({ id: params.id, attributes: { title: "Hello" } }) }),
     )
-    .handle("list", () => Effect.succeed({ data: [] }))
-)
+    .handle("list", () => Effect.succeed({ data: [] })),
+);
 
 // Drives the api as a real web handler, so arbitrary request headers reach the
 // middleware exactly as they would in production.
 const request = async (
   middlewareLayer: Layer.Layer<ContentNegotiation | SchemaErrors>,
   url: string,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
 ) => {
   // The api layer also advertises the platform services (`FileSystem`,
   // `HttpPlatform`, …) that multipart and file responses would need; none of
@@ -242,17 +321,17 @@ const request = async (
   // rather than by pulling in a platform package for the test.
   const appLayer = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(ArticlesLive),
-    Layer.provide(middlewareLayer)
-  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    Layer.provide(middlewareLayer),
+  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
-  const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+  const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   try {
-    const response = await handler(new Request(url, { headers }))
-    return { status: response.status, body: (await response.json()) as any }
+    const response = await handler(new Request(url, { headers }));
+    return { status: response.status, body: (await response.json()) as any };
   } finally {
-    await dispose()
+    await dispose();
   }
-}
+};
 
 // Like `request`, but provides a recording `Tracer` (the pattern the `effect`
 // package itself uses to test spans — see `Tracer.make`/`Tracer.NativeSpan`)
@@ -261,56 +340,58 @@ const request = async (
 const requestTraced = async (
   middlewareLayer: Layer.Layer<ContentNegotiation | SchemaErrors>,
   url: string,
-  headers: Record<string, string> = {}
+  headers: Record<string, string> = {},
 ) => {
-  const spans: Array<Tracer.NativeSpan> = []
+  const spans: Array<Tracer.NativeSpan> = [];
   const recordingTracer = Tracer.make({
     span: (options) => {
-      const span = new Tracer.NativeSpan(options)
-      spans.push(span)
-      return span
-    }
-  })
+      const span = new Tracer.NativeSpan(options);
+      spans.push(span);
+      return span;
+    },
+  });
 
   const appLayer = HttpApiBuilder.layer(Api).pipe(
     Layer.provide(ArticlesLive),
     Layer.provide(middlewareLayer),
-    Layer.provide(Layer.succeed(Tracer.Tracer, recordingTracer))
-  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>
+    Layer.provide(Layer.succeed(Tracer.Tracer, recordingTracer)),
+  ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
-  const { dispose, handler } = HttpRouter.toWebHandler(appLayer)
+  const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
   try {
-    const response = await handler(new Request(url, { headers }))
-    return { status: response.status, body: (await response.json()) as any, spans }
+    const response = await handler(new Request(url, { headers }));
+    return { status: response.status, body: (await response.json()) as any, spans };
   } finally {
-    await dispose()
+    await dispose();
   }
-}
+};
 
 describe("Middleware.layerHostNegotiated", () => {
-  const url = "http://localhost/articles/1"
+  const url = "http://localhost/articles/1";
 
   it("skips §5 for an Accept header the package's own negotiation would reject", async () => {
     // A host that admits `application/json` for its api: the live middleware
     // 406s it after the host's hook already accepted it.
-    const withPackageNegotiation = await request(layer, url, { accept: "application/json" })
-    expect(withPackageNegotiation.status).toBe(406)
+    const withPackageNegotiation = await request(layer, url, { accept: "application/json" });
+    expect(withPackageNegotiation.status).toBe(406);
 
-    const hostNegotiated = await request(layerHostNegotiated, url, { accept: "application/json" })
-    expect(hostNegotiated.status).toBe(200)
-    expect(hostNegotiated.body.data).toMatchObject({ type: "articles", id: "1" })
-  })
+    const hostNegotiated = await request(layerHostNegotiated, url, { accept: "application/json" });
+    expect(hostNegotiated.status).toBe(200);
+    expect(hostNegotiated.body.data).toMatchObject({ type: "articles", id: "1" });
+  });
 
   it("skips §5 for a content type the package's own negotiation would reject", async () => {
-    const contentType = `${MEDIA_TYPE}; charset=utf-8`
-    expect((await request(layer, url, { "content-type": contentType })).status).toBe(415)
-    expect((await request(layerHostNegotiated, url, { "content-type": contentType })).status).toBe(200)
-  })
+    const contentType = `${MEDIA_TYPE}; charset=utf-8`;
+    expect((await request(layer, url, { "content-type": contentType })).status).toBe(415);
+    expect((await request(layerHostNegotiated, url, { "content-type": contentType })).status).toBe(
+      200,
+    );
+  });
 
   it("keeps the JSON:API 400s — only content negotiation is delegated", async () => {
-    const bad = "http://localhost/articles?page[limit]=not-a-number"
-    const hostNegotiated = await request(layerHostNegotiated, bad)
-    expect(hostNegotiated.status).toBe(400)
+    const bad = "http://localhost/articles?page[limit]=not-a-number";
+    const hostNegotiated = await request(layerHostNegotiated, bad);
+    expect(hostNegotiated.status).toBe(400);
     expect(hostNegotiated.body).toEqual({
       errors: [
         {
@@ -318,91 +399,96 @@ describe("Middleware.layerHostNegotiated", () => {
           code: "bad_request",
           title: "Bad Request",
           detail: "Expected a finite number",
-          source: { parameter: "page[limit]" }
-        }
-      ]
-    })
+          source: { parameter: "page[limit]" },
+        },
+      ],
+    });
     // byte-identical to what the fully-negotiating layer returns
-    expect(hostNegotiated).toEqual(await request(layer, bad))
-  })
+    expect(hostNegotiated).toEqual(await request(layer, bad));
+  });
 
   it("names the whole parameter for a failure inside a decoded value", async () => {
     // the sort codec fails at ["sort", 0, "field"]; the wire key is `sort`
-    const response = await request(layer, "http://localhost/articles?sort=nope")
-    expect(response.status).toBe(400)
-    expect(response.body.errors).toHaveLength(1)
-    expect(response.body.errors[0].source).toEqual({ parameter: "sort" })
-  })
+    const response = await request(layer, "http://localhost/articles?sort=nope");
+    expect(response.status).toBe(400);
+    expect(response.body.errors).toHaveLength(1);
+    expect(response.body.errors[0].source).toEqual({ parameter: "sort" });
+  });
 
   it("serves ordinary JSON:API requests identically to Middleware.layer", async () => {
-    const headers = { accept: MEDIA_TYPE }
-    expect(await request(layerHostNegotiated, url, headers)).toEqual(await request(layer, url, headers))
-  })
-})
+    const headers = { accept: MEDIA_TYPE };
+    expect(await request(layerHostNegotiated, url, headers)).toEqual(
+      await request(layer, url, headers),
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Tracing (#122): the negotiate and schemaError spans
 // ---------------------------------------------------------------------------
 
 describe("tracing", () => {
-  const url = "http://localhost/articles/1"
+  const url = "http://localhost/articles/1";
 
   it("emits Span.negotiate with an accepted outcome for a clean request", async () => {
-    const { spans, status } = await requestTraced(layer, url)
-    expect(status).toBe(200)
-    const span = spans.find((s) => s.name === Span.negotiate)
-    expect(span).toBeDefined()
-    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("accepted")
-    expect(span?.attributes.has("jsonapi.negotiation.rule")).toBe(false)
-    expect(span?.status._tag).toBe("Ended")
-  })
+    const { spans, status } = await requestTraced(layer, url);
+    expect(status).toBe(200);
+    const span = spans.find((s) => s.name === Span.negotiate);
+    expect(span).toBeDefined();
+    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("accepted");
+    expect(span?.attributes.has("jsonapi.negotiation.rule")).toBe(false);
+    expect(span?.status._tag).toBe("Ended");
+  });
 
   it("tags Span.negotiate with the content_type rule on a 415", async () => {
-    const contentType = `${MEDIA_TYPE}; charset=utf-8`
-    const { spans, status } = await requestTraced(layer, url, { "content-type": contentType })
-    expect(status).toBe(415)
-    const span = spans.find((s) => s.name === Span.negotiate)
-    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected")
-    expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("content_type")
+    const contentType = `${MEDIA_TYPE}; charset=utf-8`;
+    const { spans, status } = await requestTraced(layer, url, { "content-type": contentType });
+    expect(status).toBe(415);
+    const span = spans.find((s) => s.name === Span.negotiate);
+    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected");
+    expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("content_type");
     // the raw header value is never captured as an attribute
-    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("charset")
-  })
+    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("charset");
+  });
 
   it("tags Span.negotiate with the accept rule on a 406", async () => {
-    const accept = `${MEDIA_TYPE}; charset=utf-8`
-    const { spans, status } = await requestTraced(layer, url, { accept })
-    expect(status).toBe(406)
-    const span = spans.find((s) => s.name === Span.negotiate)
-    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected")
-    expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("accept")
-  })
+    const accept = `${MEDIA_TYPE}; charset=utf-8`;
+    const { spans, status } = await requestTraced(layer, url, { accept });
+    expect(status).toBe(406);
+    const span = spans.find((s) => s.name === Span.negotiate);
+    expect(span?.attributes.get("jsonapi.negotiation.outcome")).toBe("rejected");
+    expect(span?.attributes.get("jsonapi.negotiation.rule")).toBe("accept");
+  });
 
   it("emits Span.schemaError tagged by the failing request part, with no decode detail attached", async () => {
-    const { spans, status } = await requestTraced(layer, "http://localhost/articles?page[limit]=not-a-number")
-    expect(status).toBe(400)
-    const span = spans.find((s) => s.name === Span.schemaError)
-    expect(span).toBeDefined()
-    expect(span?.attributes.get("jsonapi.request_part")).toBe("Query")
+    const { spans, status } = await requestTraced(
+      layer,
+      "http://localhost/articles?page[limit]=not-a-number",
+    );
+    expect(status).toBe(400);
+    const span = spans.find((s) => s.name === Span.schemaError);
+    expect(span).toBeDefined();
+    expect(span?.attributes.get("jsonapi.request_part")).toBe("Query");
     // only the fixed request-part enum is attached — never the offending
     // parameter name, the decode failure message, or anything else per-request
-    expect([...span!.attributes.keys()]).toEqual(["jsonapi.request_part"])
-    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("limit")
-  })
+    expect([...span!.attributes.keys()]).toEqual(["jsonapi.request_part"]);
+    expect(JSON.stringify([...span!.attributes.values()])).not.toContain("limit");
+  });
 
   it("does not emit Span.schemaError for a request that never fails validation", async () => {
-    const { spans, status } = await requestTraced(layer, url)
-    expect(status).toBe(200)
-    expect(spans.some((s) => s.name === Span.schemaError)).toBe(false)
-  })
+    const { spans, status } = await requestTraced(layer, url);
+    expect(status).toBe(200);
+    expect(spans.some((s) => s.name === Span.schemaError)).toBe(false);
+  });
 
   it("adds no layer and changes no response when nothing provides a Tracer", async () => {
     // every other test in this file drives `layer` / `layerHostNegotiated`
     // without providing a Tracer at all — spans are still created (against
     // the default no-op-exporting native tracer) but nothing about the
     // request/response behavior depends on one being supplied.
-    const traced = await requestTraced(layer, url)
-    const untraced = await request(layer, url)
-    expect(untraced.status).toBe(traced.status)
-    expect(untraced.body).toEqual(traced.body)
-  })
-})
+    const traced = await requestTraced(layer, url);
+    const untraced = await request(layer, url);
+    expect(untraced.status).toBe(traced.status);
+    expect(untraced.body).toEqual(traced.body);
+  });
+});

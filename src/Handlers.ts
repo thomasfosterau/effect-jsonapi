@@ -35,10 +35,10 @@
  *
  * @since 0.1.0
  */
-import { Effect } from "effect"
-import type { JsonApiObject } from "./Document.js"
-import { serialise, withPagePairs } from "./internal/canonical.js"
-import type { Pair } from "./Query.js"
+import { Effect } from "effect";
+import type { JsonApiObject } from "./Document.js";
+import { serialise, withPagePairs } from "./internal/canonical.js";
+import type { Pair } from "./Query.js";
 
 /**
  * The top-level `jsonapi` object *value* (`{ version?, ext?, profile?, meta? }`).
@@ -46,7 +46,7 @@ import type { Pair } from "./Query.js"
  * @since 0.3.0
  * @category models
  */
-export type JsonApiObjectValue = typeof JsonApiObject.Type
+export type JsonApiObjectValue = typeof JsonApiObject.Type;
 
 // ---------------------------------------------------------------------------
 // Identifiable resources (the runtime shape builders work with)
@@ -62,15 +62,15 @@ export type JsonApiObjectValue = typeof JsonApiObject.Type
  * @category models
  */
 export interface ResourceValue {
-  readonly type: string
-  readonly id: string
+  readonly type: string;
+  readonly id: string;
   readonly relationships?: {
     readonly [key: string]: {
-      readonly data?: ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue> | null
-      readonly links?: unknown
-      readonly meta?: unknown
-    }
-  }
+      readonly data?: ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue> | null;
+      readonly links?: unknown;
+      readonly meta?: unknown;
+    };
+  };
 }
 
 /**
@@ -80,8 +80,8 @@ export interface ResourceValue {
  * @category models
  */
 export interface ResourceIdentifierValue {
-  readonly type: string
-  readonly id: string
+  readonly type: string;
+  readonly id: string;
 }
 
 /**
@@ -90,7 +90,7 @@ export interface ResourceIdentifierValue {
  * @since 0.1.0
  * @category models
  */
-export type LinkValue = string | { readonly href: string }
+export type LinkValue = string | { readonly href: string };
 
 /**
  * Top-level links accepted by the document builders.
@@ -99,13 +99,13 @@ export type LinkValue = string | { readonly href: string }
  * @category models
  */
 export interface LinksValue {
-  readonly self?: LinkValue
-  readonly related?: LinkValue
-  readonly describedby?: LinkValue
-  readonly first?: LinkValue | null
-  readonly last?: LinkValue | null
-  readonly prev?: LinkValue | null
-  readonly next?: LinkValue | null
+  readonly self?: LinkValue;
+  readonly related?: LinkValue;
+  readonly describedby?: LinkValue;
+  readonly first?: LinkValue | null;
+  readonly last?: LinkValue | null;
+  readonly prev?: LinkValue | null;
+  readonly next?: LinkValue | null;
 }
 
 /**
@@ -114,10 +114,10 @@ export interface LinksValue {
  * @since 0.1.0
  * @category models
  */
-export type MetaValue = { readonly [key: string]: unknown }
+export type MetaValue = { readonly [key: string]: unknown };
 
 // Simplifies intersections for readable hover types.
-type Simplify<T> = { readonly [K in keyof T]: T[K] } & {}
+type Simplify<T> = { readonly [K in keyof T]: T[K] } & {};
 
 // ---------------------------------------------------------------------------
 // Per-resource transforms
@@ -135,9 +135,9 @@ type Simplify<T> = { readonly [K in keyof T]: T[K] } & {}
  * @category models
  */
 export interface AnyResourceValue extends ResourceValue {
-  readonly attributes?: { readonly [key: string]: unknown }
-  readonly meta?: MetaValue
-  readonly links?: unknown
+  readonly attributes?: { readonly [key: string]: unknown };
+  readonly meta?: MetaValue;
+  readonly links?: unknown;
 }
 
 /**
@@ -155,8 +155,8 @@ export interface AnyResourceValue extends ResourceValue {
  * @category type-level
  */
 export interface TransformLambda {
-  readonly In: unknown
-  readonly Out: unknown
+  readonly In: unknown;
+  readonly Out: unknown;
 }
 
 /**
@@ -166,7 +166,7 @@ export interface TransformLambda {
  * @since 0.15.0
  * @category type-level
  */
-export type Transformed<F extends TransformLambda, R> = (F & { readonly In: R })["Out"]
+export type Transformed<F extends TransformLambda, R> = (F & { readonly In: R })["Out"];
 
 /**
  * The {@link TransformLambda} of a transform that leaves the type alone —
@@ -177,7 +177,7 @@ export type Transformed<F extends TransformLambda, R> = (F & { readonly In: R })
  * @category type-level
  */
 export interface IdentityLambda extends TransformLambda {
-  readonly Out: this["In"]
+  readonly Out: this["In"];
 }
 
 /**
@@ -204,7 +204,7 @@ export interface IdentityLambda extends TransformLambda {
  * @category models
  */
 export interface ResourceTransform<F extends TransformLambda = IdentityLambda> {
-  <R extends ResourceValue>(resource: R): Transformed<F, R>
+  <R extends ResourceValue>(resource: R): Transformed<F, R>;
 }
 
 /**
@@ -243,8 +243,8 @@ export interface ResourceTransform<F extends TransformLambda = IdentityLambda> {
  * @category constructors
  */
 export const transform = <F extends TransformLambda>(
-  f: (resource: AnyResourceValue) => AnyResourceValue
-): ResourceTransform<F> => f as ResourceTransform<F>
+  f: (resource: AnyResourceValue) => AnyResourceValue,
+): ResourceTransform<F> => f as ResourceTransform<F>;
 
 // ---------------------------------------------------------------------------
 // project — sparse fieldsets
@@ -260,7 +260,7 @@ export const transform = <F extends TransformLambda>(
  * @category models
  */
 export interface Fields {
-  readonly [type: string]: ReadonlyArray<string> | undefined
+  readonly [type: string]: ReadonlyArray<string> | undefined;
 }
 
 // The attributes a fieldset selects. A selection known only as an *array* of
@@ -273,7 +273,7 @@ type SelectedAttributes<A, Keys> = [Keys] extends [ReadonlyArray<string>]
     : number extends Keys["length"]
       ? Simplify<Partial<Pick<A, Extract<keyof A, Keys[number]>>>>
       : Simplify<Pick<A, Extract<keyof A, Keys[number]>>>
-  : A
+  : A;
 
 /**
  * The type of a resource with a sparse fieldset applied: `attributes` narrowed
@@ -285,9 +285,13 @@ type SelectedAttributes<A, Keys> = [Keys] extends [ReadonlyArray<string>]
  */
 export type Projected<R, F> = R extends { readonly type: infer T; readonly attributes: infer A }
   ? T extends keyof F
-    ? Simplify<Omit<R, "attributes"> & { readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>> }>
+    ? Simplify<
+        Omit<R, "attributes"> & {
+          readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>>;
+        }
+      >
     : R
-  : R
+  : R;
 
 /**
  * The {@link TransformLambda} of {@link project}.
@@ -296,30 +300,36 @@ export type Projected<R, F> = R extends { readonly type: infer T; readonly attri
  * @category type-level
  */
 export interface ProjectLambda<F> extends TransformLambda {
-  readonly Out: Projected<this["In"], F>
+  readonly Out: Projected<this["In"], F>;
 }
 
-const selectAttributes = (attributes: { readonly [key: string]: unknown }, requested: ReadonlyArray<string>) => {
-  const selected = new Set<string>(requested)
-  const projected: Record<string, unknown> = {}
+const selectAttributes = (
+  attributes: { readonly [key: string]: unknown },
+  requested: ReadonlyArray<string>,
+) => {
+  const selected = new Set<string>(requested);
+  const projected: Record<string, unknown> = {};
   for (const name of Object.keys(attributes)) {
-    if (selected.has(name)) projected[name] = attributes[name]
+    if (selected.has(name)) projected[name] = attributes[name];
   }
-  return projected
-}
+  return projected;
+};
 
-const projectResource = (resource: AnyResourceValue, fields: Fields | undefined): AnyResourceValue => {
-  if (fields === undefined || !Object.hasOwn(fields, resource.type)) return resource
-  const requested = fields[resource.type]
+const projectResource = (
+  resource: AnyResourceValue,
+  fields: Fields | undefined,
+): AnyResourceValue => {
+  if (fields === undefined || !Object.hasOwn(fields, resource.type)) return resource;
+  const requested = fields[resource.type];
   // No requested set for this type is the spec's "every field", not "no
   // field" — and an empty `fields[TYPE]=` is read the same way.
-  if (requested === undefined || requested.length === 0) return resource
-  const attributes = resource.attributes
+  if (requested === undefined || requested.length === 0) return resource;
+  const attributes = resource.attributes;
   // Resource identifiers (and any resource with no attributes) have nothing
   // to project.
-  if (attributes === undefined) return resource
-  return { ...resource, attributes: selectAttributes(attributes, requested) }
-}
+  if (attributes === undefined) return resource;
+  return { ...resource, attributes: selectAttributes(attributes, requested) };
+};
 
 /**
  * Applies a sparse fieldset (§Sparse Fieldsets) to a resource: `attributes` is
@@ -379,23 +389,29 @@ const projectResource = (resource: AnyResourceValue, fields: Fields | undefined)
  * @category constructors
  */
 export const project: {
-  <const F extends Fields>(fields: F | undefined): ResourceTransform<ProjectLambda<F>>
-  <R extends ResourceValue, const F extends Fields>(resource: R, fields: F | undefined): Projected<R, F>
+  <const F extends Fields>(fields: F | undefined): ResourceTransform<ProjectLambda<F>>;
+  <R extends ResourceValue, const F extends Fields>(
+    resource: R,
+    fields: F | undefined,
+  ): Projected<R, F>;
 } = ((...args: ReadonlyArray<unknown>) =>
   args.length >= 2
     ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
-    : (resource: AnyResourceValue) => projectResource(resource, args[0] as Fields | undefined)) as never
+    : (resource: AnyResourceValue) =>
+        projectResource(resource, args[0] as Fields | undefined)) as never;
 
 // ---------------------------------------------------------------------------
 // withMeta — computed per-resource meta
 // ---------------------------------------------------------------------------
 
 // The `meta` a resource already carries, if any.
-type ExistingMeta<R> = R extends { readonly meta?: infer E } ? Exclude<E, undefined> : never
+type ExistingMeta<R> = R extends { readonly meta?: infer E } ? Exclude<E, undefined> : never;
 
 // What `withMeta` leaves under `meta`: the computed members merged over
 // whatever the resource already declared.
-type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never] ? M : Simplify<ExistingMeta<R> & M>
+type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never]
+  ? M
+  : Simplify<ExistingMeta<R> & M>;
 
 /**
  * The type of a resource with computed `meta` merged in. The member stays
@@ -407,7 +423,7 @@ type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never] ? M 
  */
 export type WithMeta<R, M extends MetaValue> = R extends AnyResourceValue
   ? Simplify<Omit<R, "meta"> & { readonly meta?: MergedMeta<R, M> }>
-  : R
+  : R;
 
 /**
  * The {@link TransformLambda} of {@link withMeta}.
@@ -416,18 +432,21 @@ export type WithMeta<R, M extends MetaValue> = R extends AnyResourceValue
  * @category type-level
  */
 export interface WithMetaLambda<M extends MetaValue> extends TransformLambda {
-  readonly Out: WithMeta<this["In"], M>
+  readonly Out: WithMeta<this["In"], M>;
 }
 
-const stampMeta = (resource: AnyResourceValue, computed: MetaValue | undefined): AnyResourceValue => {
-  const merged = { ...resource.meta, ...computed }
-  if (Object.keys(merged).length > 0) return { ...resource, meta: merged }
+const stampMeta = (
+  resource: AnyResourceValue,
+  computed: MetaValue | undefined,
+): AnyResourceValue => {
+  const merged = { ...resource.meta, ...computed };
+  if (Object.keys(merged).length > 0) return { ...resource, meta: merged };
   // An empty `meta` is a *present* meta object to the spec, which is a
   // different statement from having none: emit no member at all.
-  if (resource.meta === undefined) return resource
-  const { meta: _meta, ...rest } = resource
-  return rest
-}
+  if (resource.meta === undefined) return resource;
+  const { meta: _meta, ...rest } = resource;
+  return rest;
+};
 
 /**
  * Builds a {@link ResourceTransform} that stamps computed `meta` onto every
@@ -466,9 +485,11 @@ const stampMeta = (resource: AnyResourceValue, computed: MetaValue | undefined):
  * @category constructors
  */
 export const withMeta = <const M extends MetaValue>(
-  compute: (resource: AnyResourceValue) => M | undefined
+  compute: (resource: AnyResourceValue) => M | undefined,
 ): ResourceTransform<WithMetaLambda<M>> =>
-  ((resource: AnyResourceValue) => stampMeta(resource, compute(resource))) as ResourceTransform<WithMetaLambda<M>>
+  ((resource: AnyResourceValue) => stampMeta(resource, compute(resource))) as ResourceTransform<
+    WithMetaLambda<M>
+  >;
 
 // ---------------------------------------------------------------------------
 // compose
@@ -481,8 +502,11 @@ export const withMeta = <const M extends MetaValue>(
  * @since 0.15.0
  * @category type-level
  */
-export interface ComposeLambda<A extends TransformLambda, B extends TransformLambda> extends TransformLambda {
-  readonly Out: Transformed<B, Transformed<A, this["In"]>>
+export interface ComposeLambda<
+  A extends TransformLambda,
+  B extends TransformLambda,
+> extends TransformLambda {
+  readonly Out: Transformed<B, Transformed<A, this["In"]>>;
 }
 
 /**
@@ -517,54 +541,57 @@ export interface ComposeLambda<A extends TransformLambda, B extends TransformLam
  */
 export const compose = <A extends TransformLambda, B extends TransformLambda>(
   first: ResourceTransform<A>,
-  second: ResourceTransform<B>
+  second: ResourceTransform<B>,
 ): ResourceTransform<ComposeLambda<A, B>> =>
-  ((resource: ResourceValue) => second(first(resource) as ResourceValue)) as unknown as ResourceTransform<
-    ComposeLambda<A, B>
-  >
+  ((resource: ResourceValue) =>
+    second(first(resource) as ResourceValue)) as unknown as ResourceTransform<ComposeLambda<A, B>>;
 
 // ---------------------------------------------------------------------------
 // Compound documents
 // ---------------------------------------------------------------------------
 
-const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}\0${identifier.id}`
+const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}\0${identifier.id}`;
 
 const referencedIdentifiers = (resources: ReadonlyArray<ResourceValue>): Set<string> => {
-  const identifiers = new Set<string>()
+  const identifiers = new Set<string>();
   for (const resource of resources) {
     for (const relationship of Object.values(resource.relationships ?? {})) {
-      const linkage = relationship.data
-      if (linkage === null || linkage === undefined) continue
+      const linkage = relationship.data;
+      if (linkage === null || linkage === undefined) continue;
       for (const identifier of Array.isArray(linkage) ? linkage : [linkage]) {
-        identifiers.add(key(identifier))
+        identifiers.add(key(identifier));
       }
     }
   }
-  return identifiers
-}
+  return identifiers;
+};
 
 // Wraps a transform so it runs at most once per `(type, id)`, handing back
 // the same value everywhere that resource appears in the document. A resource
 // that is both primary data and an `included` member is therefore shaped
 // once, not twice — it cannot come out two ways.
-const memoise = <F extends TransformLambda>(onResource: ResourceTransform<F>): ResourceTransform<F> => {
-  const shaped = new Map<string, unknown>()
+const memoise = <F extends TransformLambda>(
+  onResource: ResourceTransform<F>,
+): ResourceTransform<F> => {
+  const shaped = new Map<string, unknown>();
   return ((resource: ResourceValue) => {
-    const k = key(resource)
-    if (shaped.has(k)) return shaped.get(k)
-    const transformed = onResource(resource)
-    shaped.set(k, transformed)
-    return transformed
-  }) as ResourceTransform<F>
-}
+    const k = key(resource);
+    if (shaped.has(k)) return shaped.get(k);
+    const transformed = onResource(resource);
+    shaped.set(k, transformed);
+    return transformed;
+  }) as ResourceTransform<F>;
+};
 
 // Applies a transform to every resource of an array, or hands the array back
 // when there is none.
 const mapResources = <F extends TransformLambda>(
   resources: ReadonlyArray<ResourceValue>,
-  onResource: ResourceTransform<F> | undefined
+  onResource: ResourceTransform<F> | undefined,
 ): ReadonlyArray<ResourceValue> =>
-  onResource === undefined ? resources : resources.map((resource) => onResource(resource) as ResourceValue)
+  onResource === undefined
+    ? resources
+    : resources.map((resource) => onResource(resource) as ResourceValue);
 
 /**
  * Deduplicates included resources by `(type, id)`, applies the per-resource
@@ -586,49 +613,52 @@ const mapResources = <F extends TransformLambda>(
  * @since 0.1.0
  * @category utils
  */
-export const buildIncluded = <Included extends ResourceValue, F extends TransformLambda = IdentityLambda>(
+export const buildIncluded = <
+  Included extends ResourceValue,
+  F extends TransformLambda = IdentityLambda,
+>(
   primary: ReadonlyArray<ResourceValue>,
   included: ReadonlyArray<Included>,
   options?: {
-    readonly checkLinkage?: boolean
+    readonly checkLinkage?: boolean | undefined;
     /**
      * Applied to every deduplicated included resource, after dedup and before
      * the full-linkage check.
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
-  }
+    readonly onResource?: ResourceTransform<F> | undefined;
+  },
 ): ReadonlyArray<Transformed<F, Included>> => {
   // Dedupe by (type, id)
-  const seen = new Set<string>()
-  const deduped: Array<Included> = []
+  const seen = new Set<string>();
+  const deduped: Array<Included> = [];
   for (const resource of included) {
-    const k = key(resource)
-    if (seen.has(k)) continue
-    seen.add(k)
-    deduped.push(resource)
+    const k = key(resource);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    deduped.push(resource);
   }
 
   // One transform pass over the survivors.
-  const shaped = mapResources(deduped, options?.onResource)
+  const shaped = mapResources(deduped, options?.onResource);
 
   // Full linkage: every included resource is referenced from the document.
   if (options?.checkLinkage !== false) {
-    const referenced = referencedIdentifiers([...primary, ...shaped])
+    const referenced = referencedIdentifiers([...primary, ...shaped]);
     for (const resource of shaped) {
       if (!referenced.has(key(resource))) {
         throw new Error(
           `JSON:API full linkage violation: included resource "${resource.type}:${resource.id}" ` +
             `is not referenced by any resource identifier in the document ` +
-            `(https://jsonapi.org/format/1.1/#document-compound-documents)`
-        )
+            `(https://jsonapi.org/format/1.1/#document-compound-documents)`,
+        );
       }
     }
   }
 
-  return shaped as ReadonlyArray<Transformed<F, Included>>
-}
+  return shaped as ReadonlyArray<Transformed<F, Included>>;
+};
 
 // ---------------------------------------------------------------------------
 // Compound-document include resolution
@@ -649,8 +679,8 @@ export const buildIncluded = <Included extends ResourceValue, F extends Transfor
  * @category models
  */
 export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, R = never> = (
-  ids: ReadonlyArray<string>
-) => Effect.Effect<ReadonlyArray<A>, E, R>
+  ids: ReadonlyArray<string>,
+) => Effect.Effect<ReadonlyArray<A>, E, R>;
 
 /**
  * The registry {@link resolveIncluded} walks: one {@link IncludeTarget} per
@@ -672,15 +702,15 @@ export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, R 
  * @category models
  */
 export interface IncludeTargets {
-  readonly [type: string]: IncludeTarget<ResourceValue, any, any>
+  readonly [type: string]: IncludeTarget<ResourceValue, any, any>;
 }
 
 // The `(resource, error, services)` triple a target's Effect carries.
 type IncludeTargetTypes<T> = T extends (
-  ids: ReadonlyArray<string>
+  ids: ReadonlyArray<string>,
 ) => Effect.Effect<ReadonlyArray<infer A>, infer E, infer R>
   ? { readonly resource: A; readonly error: E; readonly services: R }
-  : never
+  : never;
 
 /**
  * The union of resource values a target registry can produce — the
@@ -691,7 +721,7 @@ type IncludeTargetTypes<T> = T extends (
  */
 export type IncludeTargetResource<Targets extends IncludeTargets> = IncludeTargetTypes<
   Targets[keyof Targets]
->["resource"]
+>["resource"];
 
 /**
  * The union of failures a target registry's loaders can raise.
@@ -699,7 +729,9 @@ export type IncludeTargetResource<Targets extends IncludeTargets> = IncludeTarge
  * @since 0.15.0
  * @category type-level
  */
-export type IncludeTargetError<Targets extends IncludeTargets> = IncludeTargetTypes<Targets[keyof Targets]>["error"]
+export type IncludeTargetError<Targets extends IncludeTargets> = IncludeTargetTypes<
+  Targets[keyof Targets]
+>["error"];
 
 /**
  * The union of services a target registry's loaders require.
@@ -709,7 +741,7 @@ export type IncludeTargetError<Targets extends IncludeTargets> = IncludeTargetTy
  */
 export type IncludeTargetServices<Targets extends IncludeTargets> = IncludeTargetTypes<
   Targets[keyof Targets]
->["services"]
+>["services"];
 
 /**
  * Options of {@link resolveIncluded}.
@@ -723,7 +755,7 @@ export interface ResolveIncludedOptions {
    * `"unbounded"`, which is a level's distinct target types — a number you
    * control, since it is bounded by the registry, not by the request.
    */
-  readonly concurrency?: number | "unbounded" | undefined
+  readonly concurrency?: number | "unbounded" | undefined;
   /**
    * The maximum number of relationship hops to walk. Defaults to `3`, the
    * deepest path `Query.Include` legalises.
@@ -733,53 +765,56 @@ export interface ResolveIncludedOptions {
    * an ergonomic one: raise it only as far as the paths you actually serve
    * need. Segments beyond the cap are not walked.
    */
-  readonly depth?: number | undefined
+  readonly depth?: number | undefined;
 }
 
 // A node of the trie the requested paths form: `["author", "comments.author"]`
 // becomes `{ author: {}, comments: { author: {} } }`. Paths sharing a prefix
 // share the node, so the prefix is walked once however many paths spell it.
 interface PathNode {
-  readonly segment: string
-  readonly children: Map<string, PathNode>
+  readonly segment: string;
+  readonly children: Map<string, PathNode>;
 }
 
 // The requested paths as a trie. `Map` preserves insertion order, so walking
 // it walks the paths in the order the client asked for them.
 const pathTrie = (paths: ReadonlyArray<string>): Map<string, PathNode> => {
-  const root = new Map<string, PathNode>()
+  const root = new Map<string, PathNode>();
   for (const path of paths) {
-    let level = root
+    let level = root;
     for (const segment of path.split(".")) {
-      if (segment === "") continue
-      let node = level.get(segment)
+      if (segment === "") continue;
+      let node = level.get(segment);
       if (node === undefined) {
-        node = { segment, children: new Map() }
-        level.set(segment, node)
+        node = { segment, children: new Map() };
+        level.set(segment, node);
       }
-      level = node.children
+      level = node.children;
     }
   }
-  return root
-}
+  return root;
+};
 
 const isIdentifier = (linkage: LinkageValue): linkage is ResourceIdentifierValue =>
-  linkage !== null && !Array.isArray(linkage)
+  linkage !== null && !Array.isArray(linkage);
 
 // The identifiers one relationship's inline linkage carries. A `paginated`
 // relationship has no `data` — its members are reachable only through the
 // `related` link — so it contributes nothing to a walk.
-const linkageIdentifiers = (resource: ResourceValue, name: string): ReadonlyArray<ResourceIdentifierValue> => {
-  const linkage = resource.relationships?.[name]?.data
-  if (linkage === null || linkage === undefined) return []
-  return isIdentifier(linkage) ? [linkage] : linkage
-}
+const linkageIdentifiers = (
+  resource: ResourceValue,
+  name: string,
+): ReadonlyArray<ResourceIdentifierValue> => {
+  const linkage = resource.relationships?.[name]?.data;
+  if (linkage === null || linkage === undefined) return [];
+  return isIdentifier(linkage) ? [linkage] : linkage;
+};
 
 // One level of the walk: the trie nodes still to read, and the resources to
 // read them off.
 interface Level {
-  readonly nodes: Map<string, PathNode>
-  readonly parents: ReadonlyArray<ResourceValue>
+  readonly nodes: Map<string, PathNode>;
+  readonly parents: ReadonlyArray<ResourceValue>;
 }
 
 const resolve = (
@@ -787,7 +822,7 @@ const resolve = (
   paths: ReadonlyArray<string>,
   targets: IncludeTargets,
   concurrency: number | "unbounded",
-  depth: number
+  depth: number,
 ): Effect.Effect<ReadonlyArray<ResourceValue>, any, any> =>
   Effect.gen(function* () {
     // Every resource the document already holds, keyed `type\0id`. Seeded with
@@ -795,96 +830,102 @@ const resolve = (
     // never emitted into `included` (the spec's one-resource-object-per-`(type,
     // id)` rule spans the whole document), but the walk still steps *through*
     // it, which is what makes a cycle terminate instead of looping.
-    const known = new Map<string, ResourceValue>()
-    for (const resource of primary) known.set(key(resource), resource)
+    const known = new Map<string, ResourceValue>();
+    for (const resource of primary) known.set(key(resource), resource);
 
     // `included`, in walk order.
-    const included: Array<ResourceValue> = []
+    const included: Array<ResourceValue> = [];
 
-    let level: ReadonlyArray<Level> = [{ nodes: pathTrie(paths), parents: primary }]
-    let hops = depth
+    let level: ReadonlyArray<Level> = [{ nodes: pathTrie(paths), parents: primary }];
+    let hops = depth;
 
     while (level.length > 0 && hops > 0) {
-      hops--
+      hops--;
 
       // Every identifier this level reaches, deduplicated across paths, parents
       // and rows, in walk order — and, per branch that has further segments,
       // the keys it reached, so the next level knows its parents.
-      const levelIdentifiers = new Map<string, ResourceIdentifierValue>()
-      const branches: Array<{ readonly nodes: Map<string, PathNode>; readonly keys: ReadonlyArray<string> }> = []
+      const levelIdentifiers = new Map<string, ResourceIdentifierValue>();
+      const branches: Array<{
+        readonly nodes: Map<string, PathNode>;
+        readonly keys: ReadonlyArray<string>;
+      }> = [];
       for (const { nodes, parents } of level) {
         for (const node of nodes.values()) {
-          const keys: Array<string> = []
-          const reached = new Set<string>()
+          const keys: Array<string> = [];
+          const reached = new Set<string>();
           for (const parent of parents) {
             for (const identifier of linkageIdentifiers(parent, node.segment)) {
-              const k = key(identifier)
-              if (reached.has(k)) continue
-              reached.add(k)
-              keys.push(k)
-              if (!levelIdentifiers.has(k)) levelIdentifiers.set(k, identifier)
+              const k = key(identifier);
+              if (reached.has(k)) continue;
+              reached.add(k);
+              keys.push(k);
+              if (!levelIdentifiers.has(k)) levelIdentifiers.set(k, identifier);
             }
           }
-          if (node.children.size > 0) branches.push({ nodes: node.children, keys })
+          if (node.children.size > 0) branches.push({ nodes: node.children, keys });
         }
       }
 
       // One batch per distinct type, holding only the ids the document doesn't
       // already have. A type with no target is not loadable: its references are
       // dropped here.
-      const batches: Array<{ readonly load: IncludeTarget<ResourceValue, any, any>; readonly ids: Array<string> }> = []
-      const byType = new Map<string, Array<string>>()
+      const batches: Array<{
+        readonly load: IncludeTarget<ResourceValue, any, any>;
+        readonly ids: Array<string>;
+      }> = [];
+      const byType = new Map<string, Array<string>>();
       for (const [k, identifier] of levelIdentifiers) {
-        if (known.has(k)) continue
-        if (!Object.hasOwn(targets, identifier.type)) continue
-        const ids = byType.get(identifier.type)
+        if (known.has(k)) continue;
+        if (!Object.hasOwn(targets, identifier.type)) continue;
+        const ids = byType.get(identifier.type);
         if (ids === undefined) {
-          const fresh = [identifier.id]
-          byType.set(identifier.type, fresh)
-          batches.push({ load: targets[identifier.type]!, ids: fresh })
+          const fresh = [identifier.id];
+          byType.set(identifier.type, fresh);
+          batches.push({ load: targets[identifier.type]!, ids: fresh });
         } else {
-          ids.push(identifier.id)
+          ids.push(identifier.id);
         }
       }
 
-      const rows = yield* Effect.forEach(batches, ({ ids, load }) => load(ids), { concurrency })
+      const rows = yield* Effect.forEach(batches, ({ ids, load }) => load(ids), { concurrency });
 
       // Index what came back. A row nobody referenced is ignored: adding it
       // would break the full linkage `buildIncluded` checks.
-      const loaded = new Map<string, ResourceValue>()
+      const loaded = new Map<string, ResourceValue>();
       for (const batch of rows) {
         for (const row of batch) {
-          const k = key(row)
-          if (!levelIdentifiers.has(k) || known.has(k) || loaded.has(k)) continue
-          loaded.set(k, row)
+          const k = key(row);
+          if (!levelIdentifiers.has(k) || known.has(k) || loaded.has(k)) continue;
+          loaded.set(k, row);
         }
       }
 
       // Emit in walk order, not in whichever order the batches completed.
       for (const k of levelIdentifiers.keys()) {
-        const resource = loaded.get(k)
-        if (resource === undefined) continue
-        known.set(k, resource)
-        included.push(resource)
+        const resource = loaded.get(k);
+        if (resource === undefined) continue;
+        known.set(k, resource);
+        included.push(resource);
       }
 
       // Step. A branch's parents are the resources its keys resolved to —
       // whether this level loaded them or an earlier one did — so a shared
       // prefix costs no second query and a diamond is traversed once.
-      const next: Array<Level> = []
+      const next: Array<Level> = [];
       for (const branch of branches) {
-        const parents: Array<ResourceValue> = []
+        const parents: Array<ResourceValue> = [];
         for (const k of branch.keys) {
-          const resource = known.get(k)
-          if (resource !== undefined) parents.push(resource)
+          const resource = known.get(k);
+          if (resource !== undefined) parents.push(resource);
         }
-        if (parents.length > 0) next.push({ nodes: branch.nodes, parents })
+        if (parents.length > 0) next.push({ nodes: branch.nodes, parents });
       }
-      level = next
+      level = next;
     }
 
-    return included
-  })
+    return included;
+  });
 
 /**
  * Resolves the `included` member of a compound document: walks the requested
@@ -995,7 +1036,7 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
   primary: ResourceValue | null | ReadonlyArray<ResourceValue>,
   paths: ReadonlyArray<string> | undefined,
   targets: Targets,
-  options?: ResolveIncludedOptions
+  options?: ResolveIncludedOptions,
 ): Effect.Effect<
   ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
   IncludeTargetError<Targets>,
@@ -1008,12 +1049,12 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
         paths,
         targets,
         options?.concurrency ?? "unbounded",
-        options?.depth ?? 3
+        options?.depth ?? 3,
       )) as Effect.Effect<
     ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
     IncludeTargetError<Targets>,
     IncludeTargetServices<Targets>
-  >
+  >;
 
 /**
  * A top-level JSON:API document *value* — the shape {@link data} and
@@ -1041,48 +1082,52 @@ export type DocumentValue<
   Data,
   Included = never,
   M extends MetaValue = never,
-  J extends JsonApiObjectValue = never
+  J extends JsonApiObjectValue = never,
 > = Simplify<
   { readonly data: Data; readonly links?: LinksValue } & ([Included] extends [never]
     ? {}
     : { readonly included?: ReadonlyArray<Included> }) &
     ([M] extends [never] ? {} : { readonly meta?: M }) &
     ([J] extends [never] ? {} : { readonly jsonapi: J })
->
+>;
 
 // The primary `data` of a document with the transform applied. `data(null)`
 // has no resource to transform, so a nullable primary stays nullable.
-type TransformedData<F extends TransformLambda, R> = R extends null ? null : Transformed<F, R>
+type TransformedData<F extends TransformLambda, R> = R extends null ? null : Transformed<F, R>;
 
 // Appends a query string (no leading `?`) to a path, whichever separator the
 // path needs; a path with no query is returned as is.
 const withQuery = (path: string, query: string): string =>
-  query === "" ? path : path.includes("?") ? `${path}&${query}` : `${path}?${query}`
+  query === "" ? path : path.includes("?") ? `${path}&${query}` : `${path}?${query}`;
 
 // A request's canonical query, however it was handed over.
 const queryString = (query: string | ReadonlyArray<Pair>): string =>
-  typeof query === "string" ? query : serialise(query)
+  typeof query === "string" ? query : serialise(query);
 
 // A link with a query string appended, in either link spelling.
 const linkWithQuery = (link: LinkValue, query: string): LinkValue =>
-  typeof link === "string" ? withQuery(link, query) : { ...link, href: withQuery(link.href, query) }
+  typeof link === "string"
+    ? withQuery(link, query)
+    : { ...link, href: withQuery(link.href, query) };
 
 // The top-level links of a document: `links.self` wins over the `self`
 // option, and `query` is appended to whichever `self` the document ends up
 // with — a `query` with no self link to carry it is a programming error.
 const buildLinks = (options: {
-  readonly self?: string
-  readonly query?: string | ReadonlyArray<Pair>
-  readonly links?: LinksValue
+  readonly self?: string;
+  readonly query?: string | ReadonlyArray<Pair>;
+  readonly links?: LinksValue;
 }): LinksValue | undefined => {
   const links: LinksValue | undefined =
-    options.self !== undefined ? { self: options.self, ...options.links } : options.links
-  if (options.query === undefined) return links
+    options.self !== undefined ? { self: options.self, ...options.links } : options.links;
+  if (options.query === undefined) return links;
   if (links?.self === undefined) {
-    throw new Error("Handlers.collection: `query` needs a self link to be appended to — pass `self` or `links.self`")
+    throw new Error(
+      "Handlers.collection: `query` needs a self link to be appended to — pass `self` or `links.self`",
+    );
   }
-  return { ...links, self: linkWithQuery(links.self, queryString(options.query)) }
-}
+  return { ...links, self: linkWithQuery(links.self, queryString(options.query)) };
+};
 
 // `data` and `primary` are the already-transformed primary resources: the
 // transform runs on them before the document is assembled, and `onResource`
@@ -1092,30 +1137,30 @@ const build = (
   primary: ReadonlyArray<ResourceValue>,
   options:
     | {
-        readonly included?: ReadonlyArray<ResourceValue>
-        readonly meta?: MetaValue
-        readonly jsonapi?: JsonApiObjectValue
-        readonly self?: string
-        readonly query?: string | ReadonlyArray<Pair>
-        readonly links?: LinksValue
-        readonly checkLinkage?: boolean
+        readonly included?: ReadonlyArray<ResourceValue> | undefined;
+        readonly meta?: MetaValue;
+        readonly jsonapi?: JsonApiObjectValue;
+        readonly self?: string;
+        readonly query?: string | ReadonlyArray<Pair>;
+        readonly links?: LinksValue;
+        readonly checkLinkage?: boolean | undefined;
       }
     | undefined,
-  onResource: ResourceTransform<TransformLambda> | undefined
+  onResource: ResourceTransform<TransformLambda> | undefined,
 ) => {
-  const links = options === undefined ? undefined : buildLinks(options)
+  const links = options === undefined ? undefined : buildLinks(options);
   const included =
     options?.included !== undefined && options.included.length > 0
       ? buildIncluded(primary, options.included, { checkLinkage: options.checkLinkage, onResource })
-      : undefined
+      : undefined;
   return {
     data,
     ...(included !== undefined ? { included } : {}),
     ...(links !== undefined ? { links } : {}),
     ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {})
-  }
-}
+    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {}),
+  };
+};
 
 /**
  * Builds a single-resource document value: `{ data, included?, links?, meta?, jsonapi? }`.
@@ -1224,16 +1269,16 @@ export const data = <
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
-  F extends TransformLambda = IdentityLambda
+  F extends TransformLambda = IdentityLambda,
 >(
   resource: R,
   options?: {
-    readonly included?: ReadonlyArray<Included>
-    readonly meta?: M
+    readonly included?: ReadonlyArray<Included> | undefined;
+    readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
-    readonly jsonapi?: J
-    readonly self?: string
-    readonly links?: LinksValue
+    readonly jsonapi?: J;
+    readonly self?: string;
+    readonly links?: LinksValue;
     /**
      * Applied to every resource the document carries — the primary resource
      * and every deduplicated `included` member — exactly once each. See
@@ -1241,21 +1286,25 @@ export const data = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
+    readonly onResource?: ResourceTransform<F> | undefined;
     /** Disable the full-linkage check (it is on by default). */
-    readonly checkLinkage?: boolean
-  }
+    readonly checkLinkage?: boolean | undefined;
+  },
 ): DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J> => {
-  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
+  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const primary =
-    resource === null ? null : onResource === undefined ? resource : (onResource(resource) as ResourceValue)
+    resource === null
+      ? null
+      : onResource === undefined
+        ? resource
+        : (onResource(resource) as ResourceValue);
   return build(primary, primary === null ? [] : [primary], options, onResource) as DocumentValue<
     TransformedData<F, R>,
     Transformed<F, Included>,
     M,
     J
-  >
-}
+  >;
+};
 
 /**
  * Builds a collection document value: `{ data: [...], included?, links?, meta?, jsonapi? }`.
@@ -1328,15 +1377,15 @@ export const collection = <
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
-  F extends TransformLambda = IdentityLambda
+  F extends TransformLambda = IdentityLambda,
 >(
   resources: ReadonlyArray<R>,
   options?: {
-    readonly included?: ReadonlyArray<Included>
-    readonly meta?: M
+    readonly included?: ReadonlyArray<Included> | undefined;
+    readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
-    readonly jsonapi?: J
-    readonly self?: string
+    readonly jsonapi?: J;
+    readonly self?: string;
     /**
      * The request's canonical query — `Query.canonicalPairs(schema)(query)`
      * or the `Query.canonical(schema)(query)` string — appended to the
@@ -1344,8 +1393,8 @@ export const collection = <
      *
      * @since 0.13.0
      */
-    readonly query?: string | ReadonlyArray<Pair>
-    readonly links?: LinksValue
+    readonly query?: string | ReadonlyArray<Pair>;
+    readonly links?: LinksValue;
     /**
      * Applied to every resource the document carries — each member of `data`
      * and every deduplicated `included` member — exactly once each. See
@@ -1353,20 +1402,20 @@ export const collection = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
+    readonly onResource?: ResourceTransform<F> | undefined;
     /** Disable the full-linkage check (it is on by default). */
-    readonly checkLinkage?: boolean
-  }
+    readonly checkLinkage?: boolean | undefined;
+  },
 ): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
-  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
-  const primary = mapResources(resources, onResource)
+  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
+  const primary = mapResources(resources, onResource);
   return build(primary, primary, options, onResource) as DocumentValue<
     ReadonlyArray<Transformed<F, R>>,
     Transformed<F, Included>,
     M,
     J
-  >
-}
+  >;
+};
 
 // ---------------------------------------------------------------------------
 // Relationship linkage & links
@@ -1380,7 +1429,7 @@ export const collection = <
  * @category constructors
  */
 export const relationshipLink = (type: string, id: string, name: string): string =>
-  `/${type}/${id}/relationships/${name}`
+  `/${type}/${id}/relationships/${name}`;
 
 /**
  * The canonical related-resource URL: `/<type>/<id>/<name>`.
@@ -1388,7 +1437,8 @@ export const relationshipLink = (type: string, id: string, name: string): string
  * @since 0.1.0
  * @category constructors
  */
-export const relatedLink = (type: string, id: string, name: string): string => `/${type}/${id}/${name}`
+export const relatedLink = (type: string, id: string, name: string): string =>
+  `/${type}/${id}/${name}`;
 
 /**
  * Builds the relationship object value for a `paginated` relationship: no
@@ -1428,13 +1478,13 @@ export const relatedLink = (type: string, id: string, name: string): string => `
 export const paginatedRelationship = (
   type: string,
   id: string,
-  name: string
+  name: string,
 ): { readonly links: { readonly self: string; readonly related: string } } => ({
   links: {
     self: relationshipLink(type, id, name),
-    related: relatedLink(type, id, name)
-  }
-})
+    related: relatedLink(type, id, name),
+  },
+});
 
 /**
  * The linkage shapes accepted by {@link linkage}: one identifier (to-one),
@@ -1443,14 +1493,20 @@ export const paginatedRelationship = (
  * @since 0.1.0
  * @category models
  */
-export type LinkageValue = ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue> | null
+export type LinkageValue = ResourceIdentifierValue | ReadonlyArray<ResourceIdentifierValue> | null;
 
 // The builder's return type is conditional on its generics for the same
 // reason as `DocumentValue` above.
-type LinkageDocumentValue<Data, M extends MetaValue, J extends JsonApiObjectValue = never> = Simplify<
-  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never] ? {} : { readonly meta?: M }) &
+type LinkageDocumentValue<
+  Data,
+  M extends MetaValue,
+  J extends JsonApiObjectValue = never,
+> = Simplify<
+  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never]
+    ? {}
+    : { readonly meta?: M }) &
     ([J] extends [never] ? {} : { readonly jsonapi: J })
->
+>;
 
 // A transform applies to the *identifiers* a linkage document carries, one by
 // one; the mapped type keeps a tuple a tuple.
@@ -1458,7 +1514,7 @@ type TransformedLinkage<F extends TransformLambda, Data> = Data extends null
   ? null
   : Data extends ReadonlyArray<ResourceIdentifierValue>
     ? { readonly [K in keyof Data]: Transformed<F, Data[K]> }
-    : Transformed<F, Data>
+    : Transformed<F, Data>;
 
 /**
  * Builds a relationship-linkage document value — what relationship-endpoint
@@ -1517,16 +1573,16 @@ export const linkage = <
   const Data extends LinkageValue,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
-  F extends TransformLambda = IdentityLambda
+  F extends TransformLambda = IdentityLambda,
 >(
   data: Data,
   options?: {
-    readonly meta?: M
+    readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
-    readonly jsonapi?: J
-    readonly self?: string
-    readonly related?: string
-    readonly links?: LinksValue
+    readonly jsonapi?: J;
+    readonly self?: string;
+    readonly related?: string;
+    readonly links?: LinksValue;
     /**
      * Applied to every resource identifier the document carries, exactly once
      * each — the slot a relationship document's resources occupy (§8.4 makes
@@ -1538,31 +1594,31 @@ export const linkage = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F>
-  }
+    readonly onResource?: ResourceTransform<F> | undefined;
+  },
 ): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J> => {
   const links: LinksValue | undefined =
     options?.self !== undefined || options?.related !== undefined
       ? {
           ...(options?.self !== undefined ? { self: options.self } : {}),
           ...(options?.related !== undefined ? { related: options.related } : {}),
-          ...options?.links
+          ...options?.links,
         }
-      : options?.links
-  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource)
+      : options?.links;
+  const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const shaped =
     onResource === undefined || data === null
       ? data
       : Array.isArray(data)
         ? mapResources(data as ReadonlyArray<ResourceIdentifierValue>, onResource)
-        : onResource(data as ResourceIdentifierValue)
+        : onResource(data as ResourceIdentifierValue);
   return {
     data: shaped,
     ...(links !== undefined ? { links } : {}),
     ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {})
-  } as LinkageDocumentValue<TransformedLinkage<F, Data>, M, J>
-}
+    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {}),
+  } as LinkageDocumentValue<TransformedLinkage<F, Data>, M, J>;
+};
 
 // ---------------------------------------------------------------------------
 // Pagination links
@@ -1582,15 +1638,22 @@ export interface PaginationLinksOptions {
    * order; each link's `page[*]` pairs take the place of any the list
    * carries.
    */
-  readonly query?: ReadonlyArray<Pair>
+  readonly query?: ReadonlyArray<Pair>;
 }
 
 // A link to one page: the cursor's `page[*]` pairs, slotted into the
 // request's other canonical pairs when given, serialised canonically.
-const withPage = (path: string, page: Record<string, number>, query: ReadonlyArray<Pair> | undefined): string => {
-  const cursor: ReadonlyArray<Pair> = Object.entries(page).map(([key, value]) => [`page[${key}]`, String(value)])
-  return withQuery(path, serialise(query === undefined ? cursor : withPagePairs(query, cursor)))
-}
+const withPage = (
+  path: string,
+  page: Record<string, number>,
+  query: ReadonlyArray<Pair> | undefined,
+): string => {
+  const cursor: ReadonlyArray<Pair> = Object.entries(page).map(([key, value]) => [
+    `page[${key}]`,
+    String(value),
+  ]);
+  return withQuery(path, serialise(query === undefined ? cursor : withPagePairs(query, cursor)));
+};
 
 // The links of an unpageable collection (a non-positive page size, which
 // `page[limit]=0` can request): `self` keeps the request's canonical pairs as
@@ -1600,8 +1663,8 @@ const unpageable = (path: string, query: ReadonlyArray<Pair> | undefined): Links
   first: null,
   prev: null,
   next: null,
-  last: null
-})
+  last: null,
+});
 
 /**
  * Builds the spec's pagination links (`self` / `first` / `prev` / `next` /
@@ -1660,21 +1723,21 @@ export const offsetPaginationLinks = (
   path: string,
   page: { readonly offset?: number; readonly limit?: number },
   total: number,
-  options?: PaginationLinksOptions
+  options?: PaginationLinksOptions,
 ): LinksValue => {
-  const limit = page.limit ?? total
-  const offset = page.offset ?? 0
-  const query = options?.query
-  if (limit <= 0) return unpageable(path, query)
-  const lastOffset = Math.floor(Math.max(total - 1, 0) / limit) * limit
+  const limit = page.limit ?? total;
+  const offset = page.offset ?? 0;
+  const query = options?.query;
+  if (limit <= 0) return unpageable(path, query);
+  const lastOffset = Math.floor(Math.max(total - 1, 0) / limit) * limit;
   return {
     self: withPage(path, { offset, limit }, query),
     first: withPage(path, { offset: 0, limit }, query),
     prev: offset > 0 ? withPage(path, { offset: Math.max(offset - limit, 0), limit }, query) : null,
     next: offset + limit < total ? withPage(path, { offset: offset + limit, limit }, query) : null,
-    last: withPage(path, { offset: lastOffset, limit }, query)
-  }
-}
+    last: withPage(path, { offset: lastOffset, limit }, query),
+  };
+};
 
 /**
  * Builds the spec's pagination links for page-number/size pagination.
@@ -1706,18 +1769,18 @@ export const numberPaginationLinks = (
   path: string,
   page: { readonly number?: number; readonly size?: number },
   total: number,
-  options?: PaginationLinksOptions
+  options?: PaginationLinksOptions,
 ): LinksValue => {
-  const size = page.size ?? total
-  const number = page.number ?? 1
-  const query = options?.query
-  if (size <= 0) return unpageable(path, query)
-  const lastPage = Math.max(Math.ceil(total / size), 1)
+  const size = page.size ?? total;
+  const number = page.number ?? 1;
+  const query = options?.query;
+  if (size <= 0) return unpageable(path, query);
+  const lastPage = Math.max(Math.ceil(total / size), 1);
   return {
     self: withPage(path, { number, size }, query),
     first: withPage(path, { number: 1, size }, query),
     prev: number > 1 ? withPage(path, { number: number - 1, size }, query) : null,
     next: number < lastPage ? withPage(path, { number: number + 1, size }, query) : null,
-    last: withPage(path, { number: lastPage, size }, query)
-  }
-}
+    last: withPage(path, { number: lastPage, size }, query),
+  };
+};

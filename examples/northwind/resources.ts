@@ -33,46 +33,46 @@
  * an employee carries a plain `managerId` attribute, and an employee's direct
  * reports are listed with GET /employees?filter[manager]=<id>.
  */
-import { Schema } from "effect"
-import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+import { Schema } from "effect";
+import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 export const Category = Resource.make("categories", {
   attributes: {
     name: Schema.NonEmptyString,
-    description: Schema.optionalKey(Schema.String)
-  }
-})
+    description: Schema.optionalKey(Schema.String),
+  },
+});
 
 export const Supplier = Resource.make("suppliers", {
   attributes: {
     companyName: Schema.NonEmptyString,
     contactName: Schema.optionalKey(Schema.String),
     country: Schema.NonEmptyString,
-    city: Schema.optionalKey(Schema.String)
-  }
-})
+    city: Schema.optionalKey(Schema.String),
+  },
+});
 
 export const Shipper = Resource.make("shippers", {
   attributes: {
     companyName: Schema.NonEmptyString,
-    phone: Schema.optionalKey(Schema.String)
-  }
-})
+    phone: Schema.optionalKey(Schema.String),
+  },
+});
 
 export const Customer = Resource.make("customers", {
   attributes: {
     companyName: Schema.NonEmptyString,
     contactName: Schema.optionalKey(Schema.String),
     country: Schema.NonEmptyString,
-    city: Schema.optionalKey(Schema.String)
-  }
-})
+    city: Schema.optionalKey(Schema.String),
+  },
+});
 
 export const Territory = Resource.make("territories", {
   attributes: {
     description: Schema.NonEmptyString,
-    region: Schema.NonEmptyString
-  }
-})
+    region: Schema.NonEmptyString,
+  },
+});
 
 export const Employee = Resource.make("employees", {
   attributes: {
@@ -84,42 +84,42 @@ export const Employee = Resource.make("employees", {
     // The self-referential manager link, denormalised onto the employee as a
     // plain attribute (see the module docs): an employee's reports are listed
     // with GET /employees?filter[manager]=<id>.
-    managerId: Schema.optionalKey(Schema.String)
+    managerId: Schema.optionalKey(Schema.String),
   },
   relationships: {
     // Sales territories are few and bounded: inlined identifiers, managed
     // through the /employees/:id/relationships/territories endpoints.
-    territories: Relationship.many(() => Territory)
-  }
-})
+    territories: Relationship.many(() => Territory),
+  },
+});
 
 export const Product = Resource.make("products", {
   attributes: {
     name: Schema.NonEmptyString,
     unitPrice: Schema.Number,
     unitsInStock: Schema.Int,
-    discontinued: Schema.Boolean
+    discontinued: Schema.Boolean,
   },
   relationships: {
     // Every product belongs to a category and comes from a supplier: required
     // to-one relationships, present in the create payload and reassignable
     // through the relationship endpoints.
     category: Relationship.one(() => Category),
-    supplier: Relationship.one(() => Supplier)
-  }
-})
+    supplier: Relationship.one(() => Supplier),
+  },
+});
 
 export const OrderItem = Resource.make("orderItems", {
   attributes: {
     unitPrice: Schema.Number,
     quantity: Schema.Int,
     // Discount as a fraction in [0, 1].
-    discount: Schema.Number
+    discount: Schema.Number,
   },
   relationships: {
-    product: Relationship.one(() => Product)
-  }
-})
+    product: Relationship.one(() => Product),
+  },
+});
 
 export const Order = Resource.make("orders", {
   attributes: {
@@ -129,7 +129,7 @@ export const Order = Resource.make("orders", {
     shippedDate: Schema.optionalKey(Schema.DateFromString),
     freight: Schema.Number,
     shipCity: Schema.optionalKey(Schema.String),
-    shipCountry: Schema.NonEmptyString
+    shipCountry: Schema.NonEmptyString,
   },
   relationships: {
     // An order is always placed by a customer and taken by an employee.
@@ -139,16 +139,16 @@ export const Order = Resource.make("orders", {
     shipper: Relationship.optional(() => Shipper),
     // Line items are unbounded: reachable only through the related link
     // (GET /orders/:id/lineItems), never inlined.
-    lineItems: Relationship.paginated(() => OrderItem)
-  }
-})
+    lineItems: Relationship.paginated(() => OrderItem),
+  },
+});
 
-export type Category = typeof Category.Type
-export type Supplier = typeof Supplier.Type
-export type Shipper = typeof Shipper.Type
-export type Customer = typeof Customer.Type
-export type Territory = typeof Territory.Type
-export type Employee = typeof Employee.Type
-export type Product = typeof Product.Type
-export type OrderItem = typeof OrderItem.Type
-export type Order = typeof Order.Type
+export type Category = typeof Category.Type;
+export type Supplier = typeof Supplier.Type;
+export type Shipper = typeof Shipper.Type;
+export type Customer = typeof Customer.Type;
+export type Territory = typeof Territory.Type;
+export type Employee = typeof Employee.Type;
+export type Product = typeof Product.Type;
+export type OrderItem = typeof OrderItem.Type;
+export type Order = typeof Order.Type;

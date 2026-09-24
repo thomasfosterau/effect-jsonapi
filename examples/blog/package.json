@@ -4,15 +4,12 @@
   "private": true,
   "description": "The classic JSON:API blog example for @thomasfosterau/effect-jsonapi.",
   "type": "module",
-  "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
-  },
   "dependencies": {
     "@thomasfosterau/effect-jsonapi": "workspace:*",
-    "effect": "4.0.0-rc.112"
+    "effect": "catalog:"
   },
   "devDependencies": {
-    "vitest": "^4.0.18"
+    "@types/node": "catalog:",
+    "vite-plus": "catalog:"
   }
 }

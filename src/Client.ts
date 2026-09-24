@@ -100,14 +100,26 @@
  *
  * @since 0.1.0
  */
-import { Effect, Option, Schema } from "effect"
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http"
-import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi"
-import { HttpApiClient } from "effect/unstable/httpapi"
-import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js"
-import { baseMediaType, MEDIA_TYPE, mediaTypeWith } from "./internal/media.js"
-import type { NegotiationOptions as ServerNegotiationOptions } from "./Middleware.js"
-import type { Any, IncludedFor, IncludePath } from "./Resource.js"
+import { Effect, Option, Schema } from "effect";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
+import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
+import { HttpApiClient } from "effect/unstable/httpapi";
+import type { JsonApiObject, Wire } from "./Document.js";
+import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js";
+import type { Pair } from "./internal/canonical.js";
+import { serialise, withPagePairs } from "./internal/canonical.js";
+import { baseMediaType, MEDIA_TYPE, mediaTypeWith } from "./internal/media.js";
+import type { NegotiationOptions as ServerNegotiationOptions } from "./Middleware.js";
+import * as Relationship from "./Relationship.js";
+import type {
+  Any,
+  IncludedFor,
+  IncludePath,
+  IncludePathsTo,
+  RelationshipName,
+  Target,
+} from "./Resource.js";
+import { relationships } from "./Resource.js";
 
 /**
  * The minimal shape of a compound document value.
@@ -116,7 +128,7 @@ import type { Any, IncludedFor, IncludePath } from "./Resource.js"
  * @category models
  */
 export interface AnyDocument {
-  readonly included?: ReadonlyArray<unknown> | undefined
+  readonly included?: ReadonlyArray<unknown> | undefined;
 }
 
 /**
@@ -127,8 +139,8 @@ export interface AnyDocument {
  * @category type-level
  */
 export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> & {
-  readonly included?: ReadonlyArray<Included["Type"]>
-}
+  readonly included?: ReadonlyArray<Included["Type"]>;
+};
 
 /**
  * Narrows a response document's `included` member to the resources reachable
@@ -186,21 +198,21 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
 export const narrowIncluded: {
   <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(
     resource: R,
-    include: Paths
+    include: Paths,
   ): <Doc extends AnyDocument, E, Req>(
-    effect: Effect.Effect<Doc, E, Req>
-  ) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>
+    effect: Effect.Effect<Doc, E, Req>,
+  ) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>;
   <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>, Doc extends AnyDocument>(
     resource: R,
     include: Paths,
-    document: Doc
-  ): NarrowedDocument<Doc, IncludedFor<R, Paths>>
+    document: Doc,
+  ): NarrowedDocument<Doc, IncludedFor<R, Paths>>;
 } = ((...args: ReadonlyArray<unknown>) =>
   args.length >= 3
     ? // data-first: the document itself
       args[2]
     : // data-last: an identity function over the effect
-      (effect: unknown) => effect) as never
+      (effect: unknown) => effect) as never;
 
 // ---------------------------------------------------------------------------
 // Content negotiation (JSON:API §5), client side
@@ -247,9 +259,10 @@ export interface NegotiationOptions extends ServerNegotiationOptions {}
  * @since 0.15.0
  * @category constructors
  */
-export const mediaType = (options?: NegotiationOptions): string => mediaTypeWith(options?.extensions)
+export const mediaType = (options?: NegotiationOptions): string =>
+  mediaTypeWith(options?.extensions);
 
-const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"])
+const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
 /**
  * Whether a request method mutates state, and therefore carries a
@@ -277,7 +290,8 @@ const MUTATING_METHODS: ReadonlySet<string> = new Set(["POST", "PATCH", "PUT", "
  * @since 0.15.0
  * @category guards
  */
-export const isMutatingMethod = (method: string): boolean => MUTATING_METHODS.has(method.toUpperCase())
+export const isMutatingMethod = (method: string): boolean =>
+  MUTATING_METHODS.has(method.toUpperCase());
 
 // A `Content-Type` the transform may relabel: an absent one, one already at the
 // JSON:API media type (possibly with different `ext` parameters), or the
@@ -286,10 +300,10 @@ export const isMutatingMethod = (method: string): boolean => MUTATING_METHODS.ha
 // about the representation, not a mislabelled JSON:API body, and is left alone:
 // only the label changes, never the bytes, and never the meaning.
 const isRelabellable = (header: string | undefined): boolean => {
-  if (header === undefined || header === "") return true
-  const base = baseMediaType(header)
-  return base === MEDIA_TYPE || base === "application/json"
-}
+  if (header === undefined || header === "") return true;
+  const base = baseMediaType(header);
+  return base === MEDIA_TYPE || base === "application/json";
+};
 
 /**
  * Stamps the JSON:API negotiation headers on one request, with the given
@@ -314,17 +328,17 @@ const isRelabellable = (header: string | undefined): boolean => {
  * @category combinators
  */
 export const jsonApiHeadersWith = (
-  options?: NegotiationOptions
+  options?: NegotiationOptions,
 ): ((request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest) => {
-  const type = mediaType(options)
+  const type = mediaType(options);
   return (request) => {
-    const accepted = HttpClientRequest.setHeader(request, "accept", type)
-    if (!isMutatingMethod(accepted.method)) return accepted
+    const accepted = HttpClientRequest.setHeader(request, "accept", type);
+    if (!isMutatingMethod(accepted.method)) return accepted;
     return isRelabellable(accepted.headers["content-type"])
       ? HttpClientRequest.setHeader(accepted, "content-type", type)
-      : accepted
-  }
-}
+      : accepted;
+  };
+};
 
 /**
  * Stamps the JSON:API negotiation headers on one request: `Accept` on every
@@ -359,8 +373,9 @@ export const jsonApiHeadersWith = (
  * @since 0.15.0
  * @category combinators
  */
-export const jsonApiHeaders: (request: HttpClientRequest.HttpClientRequest) => HttpClientRequest.HttpClientRequest =
-  jsonApiHeadersWith()
+export const jsonApiHeaders: (
+  request: HttpClientRequest.HttpClientRequest,
+) => HttpClientRequest.HttpClientRequest = jsonApiHeadersWith();
 
 /**
  * Applies {@link jsonApiHeadersWith} to every request an `HttpClient` sends.
@@ -387,11 +402,11 @@ export const jsonApiHeaders: (request: HttpClientRequest.HttpClientRequest) => H
  * @category combinators
  */
 export const transformWith = (
-  options?: NegotiationOptions
+  options?: NegotiationOptions,
 ): (<E, R>(client: HttpClient.HttpClient.With<E, R>) => HttpClient.HttpClient.With<E, R>) => {
-  const headers = jsonApiHeadersWith(options)
-  return (client) => HttpClient.mapRequest(client, headers)
-}
+  const headers = jsonApiHeadersWith(options);
+  return (client) => HttpClient.mapRequest(client, headers);
+};
 
 /**
  * Applies {@link jsonApiHeaders} to every request an `HttpClient` sends: the
@@ -420,8 +435,9 @@ export const transformWith = (
  * @since 0.15.0
  * @category combinators
  */
-export const transform: <E, R>(client: HttpClient.HttpClient.With<E, R>) => HttpClient.HttpClient.With<E, R> =
-  transformWith()
+export const transform: <E, R>(
+  client: HttpClient.HttpClient.With<E, R>,
+) => HttpClient.HttpClient.With<E, R> = transformWith();
 
 /**
  * Options for {@link make}: the negotiation options, plus the options
@@ -432,17 +448,34 @@ export const transform: <E, R>(client: HttpClient.HttpClient.With<E, R>) => Http
  */
 export interface MakeOptions extends NegotiationOptions {
   /** The base URL every request is resolved against. */
-  readonly baseUrl?: URL | string | undefined
+  readonly baseUrl?: URL | string | undefined;
   /**
    * A further transformation of the underlying `HttpClient` — authentication
    * headers, retries, tracing. It is applied *after* the JSON:API negotiation
    * transform, so it can override the headers if it needs to.
    */
-  readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined
+  readonly transformClient?: ((client: HttpClient.HttpClient) => HttpClient.HttpClient) | undefined;
   /** A transformation of each endpoint's response effect. */
   readonly transformResponse?:
-    | ((effect: Effect.Effect<unknown, unknown, unknown>) => Effect.Effect<unknown, unknown, unknown>)
-    | undefined
+    | ((
+        effect: Effect.Effect<unknown, unknown, unknown>,
+      ) => Effect.Effect<unknown, unknown, unknown>)
+    | undefined;
+  /**
+   * Fail every call the server answered with an error response as a decoded
+   * {@link ErrorResponse} — its status, a readable message and the JSON:API
+   * error document when the body carried one — instead of the raw
+   * `HttpClientError` ({@link failWithErrorResponse}, applied before
+   * `transformResponse`). Transport faults carrying no response pass through
+   * unchanged.
+   *
+   * The generated client's *static* error type is `HttpApiClient`'s and
+   * cannot name the class; match at runtime with {@link isErrorResponse} or
+   * `Effect.catchTag("ErrorResponse", …)`.
+   *
+   * @since 0.16.0
+   */
+  readonly decodeErrors?: boolean | undefined;
 }
 
 /**
@@ -489,28 +522,37 @@ export interface MakeOptions extends NegotiationOptions {
  */
 export const make = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
   api: HttpApi.HttpApi<ApiId, Groups>,
-  options?: MakeOptions
+  options?: MakeOptions,
 ): Effect.Effect<
   HttpApiClient.Client<Groups>,
   never,
   HttpClient.HttpClient | HttpApiGroup.MiddlewareClient<Groups>
 > => {
-  const negotiate = transformWith(options)
+  const negotiate = transformWith(options);
+  const transformResponse = options?.transformResponse;
   return HttpApiClient.make(api, {
     baseUrl: options?.baseUrl,
-    transformResponse: options?.transformResponse,
+    transformResponse:
+      options?.decodeErrors === true
+        ? (effect) => {
+            const decoded = failWithErrorResponse(effect);
+            return transformResponse === undefined ? decoded : transformResponse(decoded);
+          }
+        : transformResponse,
     transformClient: (client) => {
-      const negotiated = negotiate(client)
-      return options?.transformClient === undefined ? negotiated : options.transformClient(negotiated)
-    }
-  })
-}
+      const negotiated = negotiate(client);
+      return options?.transformClient === undefined
+        ? negotiated
+        : options.transformClient(negotiated);
+    },
+  });
+};
 
 // ---------------------------------------------------------------------------
 // Error documents
 // ---------------------------------------------------------------------------
 
-const WireDocument = ErrorDocumentSchema(ErrorObject)
+const WireDocument = ErrorDocumentSchema(ErrorObject);
 
 /**
  * A decoded JSON:API error document — the shape every `ApiError` encodes to,
@@ -524,9 +566,9 @@ const WireDocument = ErrorDocumentSchema(ErrorObject)
  * @since 0.15.0
  * @category models
  */
-export type ErrorDocument = typeof WireDocument.Type
+export type ErrorDocument = typeof WireDocument.Type;
 
-const decodeWireDocument = Schema.decodeUnknownOption(WireDocument)
+const decodeWireDocument = Schema.decodeUnknownOption(WireDocument);
 
 /**
  * Best-effort decode of a response body into a JSON:API error document.
@@ -568,13 +610,13 @@ const decodeWireDocument = Schema.decodeUnknownOption(WireDocument)
  */
 export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> => {
   try {
-    return decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body)
+    return decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body);
   } catch {
     // A body that isn't JSON at all, or a decoder that threw on a hostile
     // value: there is no document here, and this is an error path already.
-    return Option.none()
+    return Option.none();
   }
-}
+};
 
 /**
  * Best-effort decode of the error document carried by a failed HTTP call.
@@ -609,15 +651,15 @@ export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument>
  * @category constructors
  */
 export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<ErrorDocument>> => {
-  const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined
-  if (response === undefined) return Effect.succeed(Option.none())
+  const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined;
+  if (response === undefined) return Effect.succeed(Option.none());
   return response.text.pipe(
     Effect.map(decodeErrorDocument),
     // The body may be unreadable (already consumed, a broken stream): that is
     // still "no document", never a second failure on top of the first.
-    Effect.catchCause(() => Effect.succeed(Option.none<ErrorDocument>()))
-  )
-}
+    Effect.catchCause(() => Effect.succeed(Option.none<ErrorDocument>())),
+  );
+};
 
 /**
  * The default message {@link errorMessage} falls back to when an error
@@ -626,7 +668,7 @@ export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<Error
  * @since 0.15.0
  * @category constants
  */
-export const DEFAULT_ERROR_MESSAGE = "Request could not be completed"
+export const DEFAULT_ERROR_MESSAGE = "Request could not be completed";
 
 /**
  * The first human-readable message in an error document: the first error
@@ -656,6 +698,799 @@ export const DEFAULT_ERROR_MESSAGE = "Request could not be completed"
  * @category accessors
  */
 export const errorMessage = (document: ErrorDocument): string => {
-  const first = document.errors[0] as ErrorDocument["errors"][number] | undefined
-  return first?.detail ?? first?.title ?? DEFAULT_ERROR_MESSAGE
+  const first = document.errors[0] as ErrorDocument["errors"][number] | undefined;
+  return first?.detail ?? first?.title ?? DEFAULT_ERROR_MESSAGE;
+};
+
+// ---------------------------------------------------------------------------
+// Error responses
+// ---------------------------------------------------------------------------
+
+/**
+ * A call the server answered with an error response, decoded: the HTTP
+ * status, a readable message (the document's first `detail` / `title`, or
+ * `Request failed (<status>)` when the body carried no document) and the
+ * JSON:API error document when there was one.
+ *
+ * The client-side counterpart of `ServerErrors.JsonapiError`, and the shape
+ * an application's SSR boundary and form actions match on.
+ *
+ * @since 0.16.0
+ * @category errors
+ */
+export class ErrorResponse extends Schema.TaggedError<ErrorResponse>()("ErrorResponse", {
+  status: Schema.Number,
+  message: Schema.String,
+  document: Schema.Option(WireDocument),
+}) {}
+
+/**
+ * Whether a value is an {@link ErrorResponse}.
+ *
+ * @since 0.16.0
+ * @category guards
+ */
+export const isErrorResponse = (u: unknown): u is ErrorResponse => u instanceof ErrorResponse;
+
+/**
+ * The {@link ErrorResponse} behind a failed call, when the failure is an
+ * `HttpClientError` carrying a response: its status, and its body decoded
+ * through {@link errorDocument}. `none` for anything else — a transport
+ * fault, a decode failure, a value that is no `HttpClientError` at all — so
+ * a defect keeps its original cause.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Option } from "effect"
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // a transport fault carries no response, so there is no error response to read
+ * console.log(Effect.runSync(Client.toErrorResponse(new Error("connection reset"))))
+ * // → { _id: "Option", _tag: "None" }
+ * ```
+ *
+ * @since 0.16.0
+ * @category errors
+ */
+export const toErrorResponse = (cause: unknown): Effect.Effect<Option.Option<ErrorResponse>> => {
+  if (!HttpClientError.isHttpClientError(cause) || cause.response === undefined) {
+    return Effect.succeed(Option.none());
+  }
+  const status = cause.response.status;
+  return errorDocument(cause).pipe(
+    Effect.map((document) =>
+      Option.some(
+        new ErrorResponse({
+          status,
+          message: Option.match(document, {
+            onNone: () => `Request failed (${status})`,
+            onSome: errorMessage,
+          }),
+          document,
+        }),
+      ),
+    ),
+  );
+};
+
+/**
+ * Re-fails a call the server answered with an error response as its decoded
+ * {@link ErrorResponse}; every other failure passes through unchanged. What
+ * {@link make}'s `decodeErrors` applies to every endpoint.
+ *
+ * @since 0.16.0
+ * @category combinators
+ */
+export const failWithErrorResponse = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | ErrorResponse, R> =>
+  Effect.catch(effect, (cause) =>
+    toErrorResponse(cause).pipe(
+      Effect.flatMap((response): Effect.Effect<never, E | ErrorResponse> =>
+        Option.match(response, {
+          onNone: () => Effect.fail(cause),
+          onSome: (decoded) => Effect.fail(decoded),
+        }),
+      ),
+    ),
+  );
+
+// ---------------------------------------------------------------------------
+// Documents as the client reads them
+// ---------------------------------------------------------------------------
+
+/**
+ * One member of a compound document's `included` array as the client reads
+ * it — a resource of some type resolved by an `?include=` walk, typed
+ * structurally because the type varies per include path.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface IncludedResource {
+  readonly type: string;
+  readonly id: string;
+  readonly attributes?: { readonly [key: string]: unknown } | undefined;
+  readonly relationships?: { readonly [key: string]: unknown } | undefined;
+  readonly links?: { readonly [key: string]: unknown } | undefined;
+  readonly meta?: { readonly [key: string]: unknown } | undefined;
 }
+
+/**
+ * The top-level `meta` and `links` members as the client reads them: open
+ * records, since the document schema declares them so.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface DocumentMembers {
+  readonly meta?: { readonly [key: string]: unknown } | undefined;
+  readonly links?: { readonly [key: string]: unknown } | undefined;
+  readonly jsonapi?: typeof JsonApiObject.Type | undefined;
+}
+
+/**
+ * A single-resource document for `R` as the client reads it — the wire form
+ * (`Document.Wire`: string links), `included` narrowed to `Included` when
+ * the endpoint's include targets are a known union.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface ResourceDocument<R, Included = IncludedResource> extends DocumentMembers {
+  readonly data: Wire<R>;
+  readonly included?: ReadonlyArray<Included> | undefined;
+}
+
+/**
+ * A collection document for `R` as the client reads it.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface CollectionDocument<R, Included = IncludedResource> extends DocumentMembers {
+  readonly data: ReadonlyArray<Wire<R>>;
+  readonly included?: ReadonlyArray<Included> | undefined;
+}
+
+/**
+ * `meta.totalCount` off a collection document (or its `meta` member) — the
+ * unpaged count of rows matching the request that a server's collection
+ * assembler reports. `0` when absent or not a number.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * console.log(Client.readTotalCount({ data: [], meta: { totalCount: 42 } }), Client.readTotalCount({ data: [] }))
+ * // → 42 0
+ * ```
+ *
+ * @since 0.16.0
+ * @category readers
+ */
+export const readTotalCount = (
+  source:
+    | {
+        readonly meta?: { readonly [key: string]: unknown } | undefined;
+        readonly [member: string]: unknown;
+      }
+    | undefined,
+): number => {
+  const totalCount = source?.meta?.["totalCount"];
+  return typeof totalCount === "number" ? totalCount : 0;
+};
+
+/**
+ * Whether an offset-paginated window has a next page, from the real unpaged
+ * `totalCount` a list read reports alongside its window. Correct at the
+ * boundary a `data.length === limit` heuristic gets wrong: a collection whose
+ * size is an exact multiple of `limit` reports `offset + limit === totalCount`
+ * here rather than advertising a next page that renders empty.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * console.log(Client.hasNextPage(0, 10, 25), Client.hasNextPage(20, 10, 25), Client.hasNextPage(10, 10, 20))
+ * // → true false false
+ * ```
+ *
+ * @since 0.16.0
+ * @category readers
+ */
+export const hasNextPage = (offset: number, limit: number, totalCount: number): boolean =>
+  offset + limit < totalCount;
+
+// ---------------------------------------------------------------------------
+// Call-site inputs
+// ---------------------------------------------------------------------------
+
+/**
+ * Loose call-site input for a wrapper: every field optional and explicitly
+ * `undefined`-tolerant, matching how a page builds inputs
+ * (`{ limit: x ?? 50, q: maybeUndefined }`). {@link decodeInput} strips the
+ * `undefined` members and decodes through the schema, so required fields and
+ * bounds are still enforced.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type LooseInput<T> = { readonly [K in keyof T]?: T[K] | undefined };
+
+/**
+ * Drops explicitly-`undefined` members, so an absent key and a key set to
+ * `undefined` decode alike.
+ *
+ * @since 0.16.0
+ * @category utils
+ */
+export const stripUndefined = <T extends object>(
+  input: T,
+): { readonly [K in keyof T]: Exclude<T[K], undefined> } =>
+  Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined)) as {
+    readonly [K in keyof T]: Exclude<T[K], undefined>;
+  };
+
+/**
+ * A decoder for a loose call-site input: strips `undefined` members, then
+ * decodes through `schema` — the flat list input with its decoding defaults,
+ * a command input, an id.
+ *
+ * @example
+ * ```ts
+ * import { Effect, Schema } from "effect"
+ * import { Client, FlatQuery } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) })
+ * const decode = Client.decodeInput(ListPeople)
+ * console.log(Effect.runSync(decode({ limit: 5, q: undefined })))
+ * // → { offset: 0, limit: 5 }
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const decodeInput =
+  <S extends Schema.Top>(schema: S) =>
+  (
+    input: LooseInput<S["Encoded"]>,
+  ): Effect.Effect<S["Type"], Schema.SchemaError, S["DecodingServices"]> =>
+    Schema.decodeUnknownEffect(
+      schema as unknown as Schema.Codec<S["Type"], S["Encoded"], S["DecodingServices"]>,
+    )(stripUndefined(input as object));
+
+// ---------------------------------------------------------------------------
+// Hydrating `included`
+// ---------------------------------------------------------------------------
+
+/**
+ * A document's `included` member indexed by `(type, id)` — the key a
+ * relationship ref is matched on. Build it once per document and resolve
+ * each arm through it, so a resource with five relationships is five lookups
+ * per ref rather than five scans of the whole set.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type IncludedIndex = ReadonlyMap<string, IncludedResource>;
+
+const refKey = (ref: { readonly type: string; readonly id: string }): string =>
+  `${ref.type}:${ref.id}`;
+
+/**
+ * Indexes a document's `included` member for ref lookup; an absent member
+ * indexes to nothing.
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const indexIncluded = (
+  included: ReadonlyArray<IncludedResource> | undefined,
+): IncludedIndex => new Map((included ?? []).map((resource) => [refKey(resource), resource]));
+
+/**
+ * The minimum shape a resource value exposes for its linkage to be read: a
+ * decoded resource's `relationships` member, structurally.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface LinkedResource {
+  readonly relationships?: { readonly [key: string]: unknown } | undefined;
+}
+
+/** The refs one relationship key carries: `[]` for absent, `null` or empty linkage. */
+const refsOf = (
+  resource: LinkedResource | undefined,
+  key: string,
+): ReadonlyArray<{ readonly type: string; readonly id: string }> => {
+  const linkage = resource?.relationships?.[key];
+  if (linkage === null || typeof linkage !== "object") return [];
+  const data = (linkage as { readonly data?: unknown }).data;
+  if (data === null || data === undefined || typeof data !== "object") return [];
+  return (Array.isArray(data) ? data : [data]) as ReadonlyArray<{
+    readonly type: string;
+    readonly id: string;
+  }>;
+};
+
+const lookup = (
+  refs: ReadonlyArray<{ readonly type: string; readonly id: string }>,
+  index: IncludedIndex,
+): ReadonlyArray<IncludedResource> =>
+  refs.flatMap((ref) => {
+    const found = index.get(refKey(ref));
+    return found === undefined ? [] : [found];
+  });
+
+/**
+ * What {@link related} resolves a relationship to: the target's decoded value
+ * as an `Option` for a to-one relationship, an array for a to-many.
+ *
+ * @since 0.16.0
+ * @category type-level
+ */
+export type Related<R extends Any, K> =
+  R["relationships"][K & keyof R["relationships"]] extends Relationship.ToOne<Any>
+    ? Option.Option<Target<R, K>["Type"]>
+    : ReadonlyArray<Target<R, K>["Type"]>;
+
+/**
+ * The resource definition at the **end** of a dotted include path — what
+ * {@link walk} resolves to. (`IncludedFor` is the union of every hop, which
+ * is what a document's `included` carries; this is the last hop alone.)
+ *
+ * @since 0.16.0
+ * @category type-level
+ */
+export type PathTarget<R extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
+  ? PathTarget<Target<R, Head>, Rest>
+  : Target<R, Path>;
+
+/**
+ * Resolves one relationship of a resource value through the document's
+ * `included` index, typed by the resource definition: an `Option` of the
+ * target for a to-one relationship, an array in linkage order for a to-many.
+ * A ref that didn't resolve — a target the include walk didn't hoist, or one
+ * the viewer may not see — is `none` / skipped, never a failure.
+ *
+ * @example
+ * ```ts
+ * import { Option, Schema } from "effect"
+ * import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { author: Relationship.one(() => Person), reviewers: Relationship.many(() => Person) }
+ * })
+ * const document = {
+ *   data: {
+ *     type: "articles", id: "1", attributes: { title: "Hi" },
+ *     relationships: { author: { data: { type: "people", id: "9" } }, reviewers: { data: [{ type: "people", id: "2" }] } }
+ *   },
+ *   included: [{ type: "people", id: "9", attributes: { name: "Ada" } }]
+ * }
+ * const index = Client.indexIncluded(document.included)
+ * const author = Client.related(Article, document.data, "author", index)
+ * console.log(Option.map(author, (person) => person.attributes.name))
+ * // → { _id: "Option", _tag: "Some", value: "Ada" }
+ * console.log(Client.related(Article, document.data, "reviewers", index))
+ * // → []
+ * ```
+ *
+ * @since 0.16.0
+ * @category readers
+ */
+export const related = <R extends Any, const K extends RelationshipName<R>>(
+  resource: R,
+  data: LinkedResource | undefined,
+  key: K,
+  index: IncludedIndex,
+): Related<R, K> => {
+  const resolved = lookup(refsOf(data, key), index);
+  const descriptor = relationships(resource)[key] as Relationship.Descriptor | undefined;
+  // The values in the index are the target's decoded resources; the
+  // definition says which type each key resolves to.
+  return (
+    descriptor !== undefined && Relationship.isToOne(descriptor)
+      ? Option.fromUndefinedOr(resolved[0])
+      : resolved
+  ) as Related<R, K>;
+};
+
+/**
+ * Resolves a dotted include path — the two-hop `authors.contributor` shape,
+ * where the middle resource is a relator carrying the credit's shape rather
+ * than a name — hop by hop through the index, returning the resources at
+ * the **end** of the path in linkage order, deduplicated. A hop that doesn't
+ * resolve contributes nothing.
+ *
+ * @since 0.16.0
+ * @category readers
+ */
+export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
+  _resource: R,
+  data: LinkedResource | undefined,
+  path: P,
+  index: IncludedIndex,
+): ReadonlyArray<PathTarget<R, P>["Type"]> => {
+  let level: ReadonlyArray<LinkedResource | undefined> = [data];
+  for (const segment of path.split(".")) {
+    const seen = new Set<string>();
+    level = level.flatMap((parent) =>
+      lookup(refsOf(parent, segment), index).filter((found) => {
+        const key = refKey(found);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }),
+    );
+  }
+  return level as ReadonlyArray<PathTarget<R, P>["Type"]>;
+};
+
+/**
+ * The hydrated view of one document: its `included` indexed once, and
+ * {@link related} / {@link walk} bound to the resource definition and the
+ * index, so a component resolves each arm with a key or a path alone.
+ *
+ * @example
+ * ```ts
+ * import { Option, Schema } from "effect"
+ * import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })
+ * const Credit = Resource.make("credits", {
+ *   attributes: { role: Schema.String },
+ *   relationships: { contributor: Relationship.one(() => Person) }
+ * })
+ * const Book = Resource.make("books", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: { authors: Relationship.many(() => Credit), publisher: Relationship.optional(() => Person) }
+ * })
+ * const document = {
+ *   data: {
+ *     type: "books", id: "b1", attributes: { title: "Dune" },
+ *     relationships: {
+ *       authors: { data: [{ type: "credits", id: "c1" }, { type: "credits", id: "c2" }] },
+ *       publisher: { data: null }
+ *     }
+ *   },
+ *   included: [
+ *     { type: "credits", id: "c1", attributes: { role: "author" }, relationships: { contributor: { data: { type: "people", id: "p1" } } } },
+ *     { type: "credits", id: "c2", attributes: { role: "author" }, relationships: { contributor: { data: { type: "people", id: "p1" } } } },
+ *     { type: "people", id: "p1", attributes: { name: "Frank Herbert" } }
+ *   ]
+ * }
+ * const book = Client.hydrate(Book, document)
+ * console.log(book.walk("authors.contributor").map((person) => person.attributes.name))
+ * // → [ "Frank Herbert" ]
+ * console.log(Option.isNone(book.related("publisher")))
+ * // → true
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const hydrate = <R extends Any>(
+  resource: R,
+  document: {
+    readonly data: LinkedResource | null;
+    readonly included?: ReadonlyArray<IncludedResource> | undefined;
+  },
+): {
+  readonly index: IncludedIndex;
+  readonly related: <const K extends RelationshipName<R>>(key: K) => Related<R, K>;
+  readonly walk: <const P extends IncludePathsTo<R, 3>>(
+    path: P,
+  ) => ReadonlyArray<PathTarget<R, P>["Type"]>;
+} => {
+  const index = indexIncluded(document.included);
+  const data = document.data ?? undefined;
+  return {
+    index,
+    related: (key) => related(resource, data, key, index),
+    walk: (path) => walk(resource, data, path, index),
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Page cursors
+// ---------------------------------------------------------------------------
+
+/**
+ * An offset / limit page position — the `page[offset]` / `page[limit]` pair
+ * a list page carries in its own URL and passes through to the api.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface PageCursor {
+  readonly offset: number;
+  readonly limit: number;
+}
+
+/**
+ * Options of {@link readPageCursor} and {@link pageHref}.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface PageCursorOptions {
+  /**
+   * The bracket prefix. Defaults to `"page"`; a page holding two
+   * independently paginated lists names one prefix per list so their
+   * cursors don't collide.
+   */
+  readonly key?: string | undefined;
+  /** The limit read when the URL names none, or names one that is malformed. Defaults to `50`. */
+  readonly defaultLimit?: number | undefined;
+  /** The largest limit honoured; a larger one is clamped. Defaults to `100`. */
+  readonly maxLimit?: number | undefined;
+}
+
+const nonNegativeInt = (raw: string | null): number | undefined => {
+  if (raw === null || raw.trim() === "") return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
+const searchParamsOf = (source: URL | URLSearchParams | string): URLSearchParams =>
+  source instanceof URLSearchParams
+    ? source
+    : source instanceof URL
+      ? source.searchParams
+      : new URL(source, "http://cursor.invalid").searchParams;
+
+/**
+ * Reads a page cursor off a URL, its search params or a query string:
+ * `<key>[offset]` (default `0`) and `<key>[limit]` (default `defaultLimit`),
+ * each falling back to its default when absent or malformed rather than
+ * failing the page — a mistyped URL should still render a list — and the
+ * limit clamped to `[1, maxLimit]`, so a page never hands a user-controlled
+ * number onward unbounded.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * console.log(Client.readPageCursor(new URL("https://example.test/people?page[offset]=20&page[limit]=10")))
+ * // → { offset: 20, limit: 10 }
+ * console.log(Client.readPageCursor("?page[limit]=999&page[offset]=-1", { defaultLimit: 24 }))
+ * // → { offset: 0, limit: 100 }
+ * ```
+ *
+ * @since 0.16.0
+ * @category readers
+ */
+export const readPageCursor = (
+  source: URL | URLSearchParams | string,
+  options?: PageCursorOptions,
+): PageCursor => {
+  const key = options?.key ?? "page";
+  const params = searchParamsOf(source);
+  const limit = nonNegativeInt(params.get(`${key}[limit]`)) ?? options?.defaultLimit ?? 50;
+  const offset = nonNegativeInt(params.get(`${key}[offset]`)) ?? 0;
+  return { offset, limit: Math.min(Math.max(limit, 1), options?.maxLimit ?? 100) };
+};
+
+/**
+ * The href for `cursor` from `base` (a path, optionally with a query string
+ * and fragment): the cursor's two parameters replaced, every other parameter
+ * preserved. A relative `base` yields a relative href.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * console.log(Client.pageHref("/people?filter[q]=ada&page[offset]=0", { offset: 10, limit: 10 }))
+ * // → /people?filter[q]=ada&page[offset]=10&page[limit]=10
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const pageHref = (
+  base: string,
+  cursor: PageCursor,
+  options?: Pick<PageCursorOptions, "key">,
+): string => {
+  const key = options?.key ?? "page";
+  const url = new URL(base, "http://cursor.invalid");
+  url.searchParams.set(`${key}[offset]`, String(cursor.offset));
+  url.searchParams.set(`${key}[limit]`, String(cursor.limit));
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+
+/**
+ * The page's own query keys, as it has them: a blank or absent value means
+ * "not applied" and is left off the link rather than written as an empty key.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type PageFilters = { readonly [key: string]: string | undefined };
+
+const appliedFilters = (filters: PageFilters): Array<[string, string]> =>
+  Object.entries(filters).flatMap(([key, value]): Array<[string, string]> =>
+    value === undefined || value === "" ? [] : [[key, value]],
+  );
+
+/**
+ * An `href(offset)` builder for a public index page: the bare path for the
+ * first page (so the canonical URL and the "page 1" link agree) and
+ * `?page[offset]=` plus the page's filters beyond it. A filtered list that
+ * silently drops its filter on page 2 is not a filtered list.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const href = Client.filteredPageHref("/people", { q: "ada", role: "" })
+ * console.log(href(0), href(24))
+ * // → /people?q=ada /people?page%5Boffset%5D=24&q=ada
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const filteredPageHref =
+  (path: string, filters: PageFilters = {}, options?: Pick<PageCursorOptions, "key">) =>
+  (offset: number): string => {
+    const key = options?.key ?? "page";
+    const cursor: Array<[string, string]> = offset > 0 ? [[`${key}[offset]`, String(offset)]] : [];
+    const query = new URLSearchParams([...cursor, ...appliedFilters(filters)]).toString();
+    return query === "" ? path : `${path}?${query}`;
+  };
+
+/**
+ * An `href(offset)` builder for a page that states the whole window in its
+ * URL (`page[limit]` and `page[offset]`, the first page included) plus the
+ * page's filters — so an operator can widen it from the address bar.
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const windowedPageHref =
+  (
+    path: string,
+    limit: number,
+    filters: PageFilters = {},
+    options?: Pick<PageCursorOptions, "key">,
+  ) =>
+  (offset: number): string => {
+    const key = options?.key ?? "page";
+    const cursor: Array<[string, string]> = [
+      [`${key}[limit]`, String(limit)],
+      [`${key}[offset]`, String(offset)],
+    ];
+    const query = new URLSearchParams([...cursor, ...appliedFilters(filters)]).toString();
+    return `${path}?${query}`;
+  };
+
+/**
+ * The href for `cursor` carrying the request's **canonical** query — the
+ * pairs `Query.canonicalPairs(listQuery)(query)` produced, in the order it
+ * produced them (`include`, `fields[*]`, `filter[*]`, `sort`, then the
+ * cursor) — with the request's own `page[*]` pairs replaced by `cursor`. The
+ * spelling a server's collection links use: two equal queries give one href,
+ * whatever the wire spelling they came from, which is what makes the href
+ * usable as a cache key.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const pairs = [["include", "birthPlace"], ["filter[q]", "ada"], ["page[offset]", "0"], ["page[limit]", "10"]] as const
+ * console.log(Client.canonicalPageHref("/people", pairs, { offset: 10, limit: 10 }))
+ * // → /people?include=birthPlace&filter[q]=ada&page[offset]=10&page[limit]=10
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const canonicalPageHref = (
+  path: string,
+  query: ReadonlyArray<Pair>,
+  cursor: PageCursor,
+): string => {
+  const pairs = withPagePairs(query, [
+    ["page[offset]", String(cursor.offset)],
+    ["page[limit]", String(cursor.limit)],
+  ]);
+  return `${path}?${serialise(pairs)}`;
+};
+
+/**
+ * One entry in a rendered page window.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export type PageWindowItem =
+  | {
+      readonly kind: "page";
+      /** 1-based page number. */
+      readonly page: number;
+      readonly offset: number;
+      readonly current: boolean;
+    }
+  | { readonly kind: "gap"; readonly after: number };
+
+/**
+ * The page-window arithmetic behind a pagination control.
+ *
+ * @since 0.16.0
+ * @category models
+ */
+export interface PageWindow {
+  /** 1-based current page. */
+  readonly page: number;
+  /** Total pages; at least 1. */
+  readonly pageCount: number;
+  /** 1-based index of the first row shown, or 0 when there are no rows. */
+  readonly from: number;
+  /** 1-based index of the last row shown, or 0 when there are no rows. */
+  readonly to: number;
+  /** The previous page's offset, when there is one. */
+  readonly prev: Option.Option<number>;
+  /** The next page's offset, when there is one. */
+  readonly next: Option.Option<number>;
+  /** First page, last page, and `siblings` either side of the current page, with gaps. */
+  readonly items: ReadonlyArray<PageWindowItem>;
+}
+
+/**
+ * The window of page links to render around the current position: the first
+ * and last pages always, plus `siblings` pages either side of the current
+ * one, with a gap marker wherever the sequence skips. Pure, so the component
+ * that renders it is markup only.
+ *
+ * @example
+ * ```ts
+ * import { Client } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const window = Client.pageWindow({ offset: 40, limit: 10 }, 95)
+ * console.log(window.page, window.pageCount, window.from, window.to)
+ * // → 5 10 41 50
+ * console.log(window.items.map((item) => (item.kind === "gap" ? "…" : item.page)))
+ * // → [ 1, "…", 4, 5, 6, "…", 10 ]
+ * ```
+ *
+ * @since 0.16.0
+ * @category constructors
+ */
+export const pageWindow = (cursor: PageCursor, total: number, siblings = 1): PageWindow => {
+  const limit = Math.max(1, cursor.limit);
+  const offset = Math.max(0, cursor.offset);
+  const pageCount = Math.max(1, Math.ceil(Math.max(0, total) / limit));
+  const current = Math.min(pageCount, Math.floor(offset / limit) + 1);
+  const wanted = [
+    ...new Set(
+      [1, pageCount, ...Array.from({ length: siblings * 2 + 1 }, (_, i) => current - siblings + i)]
+        .filter((n) => n >= 1 && n <= pageCount)
+        .sort((a, b) => a - b),
+    ),
+  ];
+  const items = wanted.flatMap((n, i): ReadonlyArray<PageWindowItem> => {
+    const entry: PageWindowItem = {
+      kind: "page",
+      page: n,
+      offset: (n - 1) * limit,
+      current: n === current,
+    };
+    const previous = i > 0 ? (wanted[i - 1] ?? n) : n;
+    return n - previous > 1 ? [{ kind: "gap", after: previous }, entry] : [entry];
+  });
+  return {
+    page: current,
+    pageCount,
+    from: total > 0 ? (current - 1) * limit + 1 : 0,
+    to: total > 0 ? Math.min(total, current * limit) : 0,
+    prev: current > 1 ? Option.some((current - 2) * limit) : Option.none(),
+    next: current < pageCount ? Option.some(current * limit) : Option.none(),
+    items,
+  };
+};

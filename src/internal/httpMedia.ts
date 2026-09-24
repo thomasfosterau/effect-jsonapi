@@ -14,13 +14,13 @@
  * @since 0.15.0
  * @internal
  */
-import type { Schema } from "effect"
-import { HttpApiSchema } from "effect/unstable/httpapi"
-import { ATOMIC_MEDIA_TYPE } from "./media.js"
+import type { Schema } from "effect";
+import { HttpApiSchema } from "effect/unstable/httpapi";
+import { ATOMIC_MEDIA_TYPE } from "./media.js";
 
-export { asJsonApi, asMediaType } from "../MediaType.js"
+export { asJsonApi, asMediaType } from "../MediaType.js";
 
-const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const
+const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const;
 
 /**
  * Marks a schema as an atomic operations *response* body: the JSON:API media
@@ -37,6 +37,6 @@ const JSONAPI_ATOMIC = { contentType: ATOMIC_MEDIA_TYPE } as const
  * @internal
  */
 export const asJsonApiAtomic = <S extends Schema.Top>(schema: S, status?: number) => {
-  const body = schema.pipe(HttpApiSchema.asJson(JSONAPI_ATOMIC))
-  return status === undefined ? body : body.pipe(HttpApiSchema.status(status))
-}
+  const body = schema.pipe(HttpApiSchema.asJson(JSONAPI_ATOMIC));
+  return status === undefined ? body : body.pipe(HttpApiSchema.status(status));
+};

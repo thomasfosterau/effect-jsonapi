@@ -1,4 +1,5 @@
 {
+  "$schema": "https://www.schemastore.org/package",
   "name": "@thomasfosterau/effect-jsonapi",
   "version": "0.14.0",
   "description": "Type-safe, spec-compliant JSON:API v1.1 on Effect's HttpApi.",
@@ -16,7 +17,7 @@
     "url": "https://github.com/thomasfosterau/effect-jsonapi/issues"
   },
   "license": "MIT",
-  "author": "Thomas Foster",
+  "author": "Thomas Foster <me@thomasfoster.au>",
   "repository": {
     "type": "git",
     "url": "https://github.com/thomasfosterau/effect-jsonapi.git"
@@ -24,7 +25,7 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE.md"
   ],
   "type": "module",
   "sideEffects": false,
@@ -44,38 +45,37 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc",
-    "typecheck": "tsc -p tsconfig.test.json && pnpm --filter \"./examples/*\" run typecheck",
-    "typecheck:dist": "pnpm run build && tsc -p tsconfig.dist.json",
-    "lint": "oxlint --deny-warnings src test examples",
-    "lint:fix": "oxlint --fix src test examples",
-    "format": "oxfmt",
-    "format:check": "oxfmt --check",
-    "test": "vitest run && pnpm --filter \"./examples/*\" run test",
-    "test:watch": "vitest",
-    "docgen": "docgen",
-    "check": "pnpm run typecheck && pnpm run typecheck:dist && pnpm run lint && pnpm run format:check && pnpm run test",
+    "prepare": "vp config && effect-tsgo patch --typescript --oxlint",
     "changeset": "changeset",
-    "version": "changeset version",
-    "release": "npm publish && changeset tag",
-    "prepublishOnly": "pnpm run build"
+    "version": "changeset version && pnpm install --lockfile-only",
+    "release": "pnpm publish --access public --no-git-checks && changeset tag",
+    "prepublishOnly": "vp run build",
+    "fallow": "fallow --summary",
+    "fallow:audit": "fallow audit"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.1",
-    "@effect/docgen": "^0.5.2",
-    "@types/node": "^25.1.0",
-    "effect": "4.0.0-rc.112",
-    "oxfmt": "^0.55.0",
-    "oxlint": "^1.70.0",
-    "tsx": "^4.22.4",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "@changesets/cli": "catalog:",
+    "@effect/docgen": "catalog:",
+    "@effect/language-service": "catalog:",
+    "@effect/tsgo": "catalog:",
+    "@mpsuesser/oxlint-plugin-effect": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript/native": "catalog:",
+    "effect": "catalog:",
+    "effect-solutions": "catalog:",
+    "fallow": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-rc.112"
+    "effect": "catalog:peers"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22",
+    "pnpm": ">=11"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@11.27.0"
 }

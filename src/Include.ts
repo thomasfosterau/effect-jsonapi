@@ -62,13 +62,13 @@
  *
  * @since 0.15.0
  */
-import { Schema } from "effect"
-import type { Any, IncludableKeys, Target } from "./Resource.js"
+import { Schema } from "effect";
+import type { Any, IncludableKeys, Target } from "./Resource.js";
 
 // The discriminant key both a branch and a surface carry, so neither can be
 // confused with a resource definition (or with `Query.IncludeOptions`, whose
 // keys are `paths` / `depth`).
-const TAG = "~@thomasfosterau/effect-jsonapi/include"
+const TAG = "~@thomasfosterau/effect-jsonapi/include";
 
 // ---------------------------------------------------------------------------
 // Depth
@@ -98,7 +98,7 @@ const TAG = "~@thomasfosterau/effect-jsonapi/include"
  * @since 0.15.0
  * @category constants
  */
-export const MAX_DEPTH = 6
+export const MAX_DEPTH = 6;
 
 /**
  * The type-level counterpart of {@link MAX_DEPTH}.
@@ -106,15 +106,17 @@ export const MAX_DEPTH = 6
  * @since 0.15.0
  * @category type-level
  */
-export type MaxDepth = typeof MAX_DEPTH
+export type MaxDepth = typeof MAX_DEPTH;
 
 // The recursion budget, as a tuple whose *length* is `MAX_DEPTH`. A tuple
 // counter is used rather than arithmetic on a numeric literal because it costs
 // one instantiation per level and can never diverge.
-type Budget = readonly [unknown, unknown, unknown, unknown, unknown, unknown]
+type Budget = readonly [unknown, unknown, unknown, unknown, unknown, unknown];
 
 // One hop's worth of budget spent.
-type Spend<D extends ReadonlyArray<unknown>> = D extends readonly [unknown, ...infer Rest] ? Rest : readonly []
+type Spend<D extends ReadonlyArray<unknown>> = D extends readonly [unknown, ...infer Rest]
+  ? Rest
+  : readonly [];
 
 // ---------------------------------------------------------------------------
 // The declaration
@@ -131,11 +133,11 @@ type Spend<D extends ReadonlyArray<unknown>> = D extends readonly [unknown, ...i
  * @category models
  */
 export interface AnyBranch {
-  readonly "~@thomasfosterau/effect-jsonapi/include": "branch"
+  readonly "~@thomasfosterau/effect-jsonapi/include": "branch";
   /** The resource this key points at. */
-  readonly target: Any
+  readonly target: Any;
   /** The surface reachable *through* it. */
-  readonly children: AnySpec
+  readonly children: AnySpec;
 }
 
 /**
@@ -149,7 +151,7 @@ export interface AnyBranch {
  * @category models
  */
 export interface AnySpec {
-  readonly [key: string]: Any | AnyBranch
+  readonly [key: string]: Any | AnyBranch;
 }
 
 /**
@@ -160,8 +162,8 @@ export interface AnySpec {
  * @category models
  */
 export interface Branch<R extends Any, S extends AnySpec> extends AnyBranch {
-  readonly target: R
-  readonly children: S
+  readonly target: R;
+  readonly children: S;
 }
 
 /**
@@ -180,13 +182,13 @@ export interface Branch<R extends Any, S extends AnySpec> extends AnyBranch {
  * @category models
  */
 export type Spec<R extends Any> = {
-  readonly [K in IncludableKeys<R>]?: Target<R, K> | Branch<Target<R, K>, AnySpec>
-}
+  readonly [K in IncludableKeys<R>]?: Target<R, K> | Branch<Target<R, K>, AnySpec>;
+};
 
 // Resolves to `T` for every concrete declaration; needed because `Spec<R>`
 // can't be proven to satisfy `AnySpec` while `R` is still generic. The same
 // device as `Resource`'s `AsFields`.
-type AsSpec<T> = T extends AnySpec ? T : never
+type AsSpec<T> = T extends AnySpec ? T : never;
 
 /**
  * Declares that a relationship key's target can itself be walked: the key
@@ -220,16 +222,19 @@ type AsSpec<T> = T extends AnySpec ? T : never
  * @since 0.15.0
  * @category constructors
  */
-export const nested = <R extends Any, const S extends Spec<R>>(target: R, children: S): Branch<R, AsSpec<S>> => {
+export const nested = <R extends Any, const S extends Spec<R>>(
+  target: R,
+  children: S,
+): Branch<R, AsSpec<S>> => {
   // Annotated rather than cast, so that `TAG` drifting from the discriminant
   // the interfaces declare would be a compile error here.
   const branch: Branch<R, AsSpec<S>> = {
     [TAG]: "branch",
     target,
-    children: children as AsSpec<S>
-  }
-  return branch
-}
+    children: children as AsSpec<S>,
+  };
+  return branch;
+};
 
 /**
  * Whether a value is a {@link nested} branch rather than a resource
@@ -256,7 +261,7 @@ export const nested = <R extends Any, const S extends Spec<R>>(target: R, childr
  * @category guards
  */
 export const isBranch = (u: unknown): u is AnyBranch =>
-  typeof u === "object" && u !== null && (u as Record<string, unknown>)[TAG] === "branch"
+  typeof u === "object" && u !== null && (u as Record<string, unknown>)[TAG] === "branch";
 
 // ---------------------------------------------------------------------------
 // The derivations
@@ -270,8 +275,10 @@ export const isBranch = (u: unknown): u is AnyBranch =>
 type PathsAt<S, D extends ReadonlyArray<unknown>> = D extends readonly []
   ? never
   : {
-      [K in keyof S & string]: S[K] extends { readonly children: infer C } ? K | `${K}.${PathsAt<C, Spend<D>>}` : K
-    }[keyof S & string]
+      [K in keyof S & string]: S[K] extends { readonly children: infer C }
+        ? K | `${K}.${PathsAt<C, Spend<D>>}`
+        : K;
+    }[keyof S & string];
 
 /**
  * The dotted `?include=` paths a declaration legalises, as a union of string
@@ -285,7 +292,7 @@ type PathsAt<S, D extends ReadonlyArray<unknown>> = D extends readonly []
  * @since 0.15.0
  * @category type-level
  */
-export type Paths<S extends AnySpec> = PathsAt<S, Budget>
+export type Paths<S extends AnySpec> = PathsAt<S, Budget>;
 
 // The target derivation, structurally identical to `PathsAt` — same walk, same
 // budget, so the union can never describe a different set of hops than the
@@ -295,8 +302,8 @@ type MembersAt<S, D extends ReadonlyArray<unknown>> = D extends readonly []
   : {
       [K in keyof S]: S[K] extends { readonly target: infer T; readonly children: infer C }
         ? T | MembersAt<C, Spend<D>>
-        : S[K]
-    }[keyof S]
+        : S[K];
+    }[keyof S];
 
 /**
  * The resource definitions a declaration brings into a compound document —
@@ -311,7 +318,7 @@ type MembersAt<S, D extends ReadonlyArray<unknown>> = D extends readonly []
  * @since 0.15.0
  * @category type-level
  */
-export type Members<S extends AnySpec> = Extract<MembersAt<S, Budget>, Any>
+export type Members<S extends AnySpec> = Extract<MembersAt<S, Budget>, Any>;
 
 /**
  * The `included` union a declaration derives: a `Schema.Union` over its
@@ -337,12 +344,12 @@ export interface Included<S extends AnySpec> extends Schema.Union<ReadonlyArray<
  * @category models
  */
 export interface AnySurface {
-  readonly "~@thomasfosterau/effect-jsonapi/include": "surface"
-  readonly resource: Any
-  readonly paths: ReadonlyArray<string>
-  readonly included: Schema.Top
-  readonly targets: ReadonlyMap<string, Any>
-  has(path: string): boolean
+  readonly "~@thomasfosterau/effect-jsonapi/include": "surface";
+  readonly resource: Any;
+  readonly paths: ReadonlyArray<string>;
+  readonly included: Schema.Top;
+  readonly targets: ReadonlyMap<string, Any>;
+  has(path: string): boolean;
 }
 
 /**
@@ -357,31 +364,31 @@ export interface AnySurface {
  * @category models
  */
 export interface Surface<R extends Any, S extends AnySpec> {
-  readonly "~@thomasfosterau/effect-jsonapi/include": "surface"
+  readonly "~@thomasfosterau/effect-jsonapi/include": "surface";
   /** The resource whose surface this is. */
-  readonly resource: R
+  readonly resource: R;
   /** The declaration itself. */
-  readonly spec: S
+  readonly spec: S;
   /**
    * The accepted dotted paths, every depth, in walk order (a parent always
    * precedes the paths below it). The whitelist {@link Query.Include}
    * validates against — as whole paths, never head segments.
    */
-  readonly paths: ReadonlyArray<Paths<S>>
+  readonly paths: ReadonlyArray<Paths<S>>;
   /** The `included` member's union: every resource the walk can hoist. */
-  readonly included: Included<S>
+  readonly included: Included<S>;
   /**
    * Each accepted path mapped to the resource definition it resolves to.
    * Because nesting only ever adds paths, every prefix of an accepted path is
    * itself an accepted path, so a resolver stepping one level at a time can
    * look up the target type of each hop it is about to load.
    */
-  readonly targets: ReadonlyMap<string, Members<S>>
+  readonly targets: ReadonlyMap<string, Members<S>>;
   /**
    * Whether a path is on the whitelist — the whole dotted path, not its head
    * segment.
    */
-  has(path: string): path is Paths<S>
+  has(path: string): path is Paths<S>;
 }
 
 /**
@@ -391,7 +398,7 @@ export interface Surface<R extends Any, S extends AnySpec> {
  * @since 0.15.0
  * @category models
  */
-export type SurfaceFor<R extends Any> = AnySurface & { readonly resource: R }
+export type SurfaceFor<R extends Any> = AnySurface & { readonly resource: R };
 
 /**
  * Whether a value is a declared include {@link Surface} — as opposed to a
@@ -418,65 +425,75 @@ export type SurfaceFor<R extends Any> = AnySurface & { readonly resource: R }
  * @category guards
  */
 export const isSurface = (u: unknown): u is AnySurface =>
-  typeof u === "object" && u !== null && (u as Record<string, unknown>)[TAG] === "surface"
+  typeof u === "object" && u !== null && (u as Record<string, unknown>)[TAG] === "surface";
 
 // ---------------------------------------------------------------------------
 // The walk
 // ---------------------------------------------------------------------------
 
 interface Entry {
-  readonly path: string
-  readonly target: Any
+  readonly path: string;
+  readonly target: Any;
 }
 
 // Checks one hop against the resource graph, so a surface cannot advertise a
 // path the resource doesn't have. `owner` is absent for the standalone
 // projections, which take a declaration without a resource to check it against.
 const checkHop = (owner: Any, key: string, target: Any, path: string): void => {
-  const descriptor = owner.relationships[key]
+  const descriptor = owner.relationships[key];
   if (descriptor === undefined) {
-    throw new Error(`Include: "${path}" — resource "${owner.type}" declares no relationship "${key}"`)
+    throw new Error(
+      `Include: "${path}" — resource "${owner.type}" declares no relationship "${key}"`,
+    );
   }
   if (descriptor.kind === "paginated") {
     throw new Error(
       `Include: "${path}" — relationship "${key}" on "${owner.type}" is paginated; ` +
-        "a paginated relationship carries no inline linkage and is never included"
-    )
+        "a paginated relationship carries no inline linkage and is never included",
+    );
   }
-  const declared = descriptor.ref()
+  const declared = descriptor.ref();
   if (declared.type !== target.type) {
     throw new Error(
       `Include: "${path}" — relationship "${key}" on "${owner.type}" targets "${declared.type}", ` +
-        `but the surface declares "${target.type}"`
-    )
+        `but the surface declares "${target.type}"`,
+    );
   }
-}
+};
 
 // The one walk every projection reads: depth-first, a parent emitted before
 // everything below it, so `paths` order is walk order and a prefix always
 // precedes the paths it prefixes.
-const walk = (owner: Any | undefined, spec: AnySpec, prefix: string, depth: number, out: Array<Entry>): void => {
+const walk = (
+  owner: Any | undefined,
+  spec: AnySpec,
+  prefix: string,
+  depth: number,
+  out: Array<Entry>,
+): void => {
   for (const [key, value] of Object.entries(spec)) {
     // `Spec` marks every key optional, so an explicitly-undefined key is
     // representable; it declares nothing.
-    if (value === undefined) continue
-    const path = prefix === "" ? key : `${prefix}.${key}`
+    if (value === undefined) continue;
+    const path = prefix === "" ? key : `${prefix}.${key}`;
     if (depth > MAX_DEPTH) {
-      throw new Error(`Include: "${path}" is ${depth} hops deep, past the ${MAX_DEPTH}-hop maximum (Include.MAX_DEPTH)`)
+      throw new Error(
+        `Include: "${path}" is ${depth} hops deep, past the ${MAX_DEPTH}-hop maximum (Include.MAX_DEPTH)`,
+      );
     }
-    const branch = isBranch(value)
-    const target = branch ? value.target : (value as Any)
-    if (owner !== undefined) checkHop(owner, key, target, path)
-    out.push({ path, target })
-    if (branch) walk(target, value.children, path, depth + 1, out)
+    const branch = isBranch(value);
+    const target = branch ? value.target : (value as Any);
+    if (owner !== undefined) checkHop(owner, key, target, path);
+    out.push({ path, target });
+    if (branch) walk(target, value.children, path, depth + 1, out);
   }
-}
+};
 
 const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> => {
-  const out: Array<Entry> = []
-  walk(owner, spec, "", 1, out)
-  return out
-}
+  const out: Array<Entry> = [];
+  walk(owner, spec, "", 1, out);
+  return out;
+};
 
 // ---------------------------------------------------------------------------
 // The projections
@@ -510,15 +527,15 @@ const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> 
  * @category accessors
  */
 export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>> => {
-  const seen = new Set<string>()
-  const out: Array<string> = []
+  const seen = new Set<string>();
+  const out: Array<string> = [];
   for (const entry of entriesOf(undefined, spec)) {
-    if (seen.has(entry.path)) continue
-    seen.add(entry.path)
-    out.push(entry.path)
+    if (seen.has(entry.path)) continue;
+    seen.add(entry.path);
+    out.push(entry.path);
   }
-  return out as unknown as ReadonlyArray<Paths<S>>
-}
+  return out as unknown as ReadonlyArray<Paths<S>>;
+};
 
 /**
  * The `included` union a declaration derives: one flat `Schema.Union` over
@@ -558,15 +575,15 @@ export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>
  * @category accessors
  */
 export const included = <const S extends AnySpec>(spec: S): Included<S> => {
-  const seen = new Set<Any>()
-  const members: Array<Any> = []
+  const seen = new Set<Any>();
+  const members: Array<Any> = [];
   for (const entry of entriesOf(undefined, spec)) {
-    if (seen.has(entry.target)) continue
-    seen.add(entry.target)
-    members.push(entry.target)
+    if (seen.has(entry.target)) continue;
+    seen.add(entry.target);
+    members.push(entry.target);
   }
-  return Schema.Union(members) as unknown as Included<S>
-}
+  return Schema.Union(members) as unknown as Included<S>;
+};
 
 /**
  * Declares a resource's `?include=` surface — the one declaration the
@@ -623,29 +640,32 @@ export const included = <const S extends AnySpec>(spec: S): Included<S> => {
  * @since 0.15.0
  * @category constructors
  */
-export const make = <R extends Any, const S extends Spec<R>>(resource: R, spec: S): Surface<R, AsSpec<S>> => {
-  const entries = entriesOf(resource, spec as AsSpec<S>)
+export const make = <R extends Any, const S extends Spec<R>>(
+  resource: R,
+  spec: S,
+): Surface<R, AsSpec<S>> => {
+  const entries = entriesOf(resource, spec as AsSpec<S>);
   if (entries.length === 0) {
     throw new Error(
       `Include.make: the surface for "${resource.type}" declares no paths; ` +
-        "omit the `include` option entirely for an endpoint that serves no walk"
-    )
+        "omit the `include` option entirely for an endpoint that serves no walk",
+    );
   }
 
-  const seenPath = new Set<string>()
-  const targets = new Map<string, Any>()
-  const declared: Array<string> = []
-  const seenTarget = new Set<Any>()
-  const members: Array<Any> = []
+  const seenPath = new Set<string>();
+  const targets = new Map<string, Any>();
+  const declared: Array<string> = [];
+  const seenTarget = new Set<Any>();
+  const members: Array<Any> = [];
   for (const entry of entries) {
     if (!seenPath.has(entry.path)) {
-      seenPath.add(entry.path)
-      declared.push(entry.path)
-      targets.set(entry.path, entry.target)
+      seenPath.add(entry.path);
+      declared.push(entry.path);
+      targets.set(entry.path, entry.target);
     }
     if (!seenTarget.has(entry.target)) {
-      seenTarget.add(entry.target)
-      members.push(entry.target)
+      seenTarget.add(entry.target);
+      members.push(entry.target);
     }
   }
 
@@ -658,7 +678,7 @@ export const make = <R extends Any, const S extends Spec<R>>(resource: R, spec: 
     paths: declared,
     included: Schema.Union(members),
     targets,
-    has: (path: string) => seenPath.has(path)
-  }
-  return { ...surface, spec } as unknown as Surface<R, AsSpec<S>>
-}
+    has: (path: string) => seenPath.has(path),
+  };
+  return { ...surface, spec } as unknown as Surface<R, AsSpec<S>>;
+};

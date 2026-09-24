@@ -17,6 +17,7 @@ jobs:
     # publisher binding, so a fork cannot publish on your behalf).
     if: github.repository == 'thomasfosterau/effect-jsonapi'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # Requires manual approval via a protected GitHub Environment named
     # "release". See PUBLISHING.md for the one-time setup.
     environment: release
@@ -30,38 +31,27 @@ jobs:
         # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN).
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Installs the pnpm version pinned by the package.json "packageManager"
-      # field. Must run before setup-node so its pnpm cache can find the store.
-      - name: Setup pnpm
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 22.x
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-
-      # The publish step uses the npm CLI (not pnpm) so it can use npm OIDC
-      # Trusted Publishing, which requires npm >= 11.5.1. pnpm does not yet
-      # support OIDC trusted publishing (https://github.com/pnpm/pnpm/issues/9812).
-      - name: Upgrade npm (OIDC trusted publishing)
-        run: npm install -g npm@latest
-
-      # --ignore-scripts stops a compromised dependency from running install
-      # scripts in the privileged publish job (the Shai-Hulud vector).
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
+      # Installs with --ignore-scripts (dependency install scripts never run in
+      # the privileged publish job — the Shai-Hulud vector) and then runs only
+      # the repository's own `prepare` script; see the action's header.
+      - name: Setup toolchain
+        uses: ./.github/actions/setup
 
       - name: Build
-        run: pnpm run build
+        run: vp run build
 
       # When changesets are pending, this opens/updates a "Version Packages" PR
       # (via `pnpm run version`). Once that PR is merged (no changesets remain),
-      # it runs `pnpm run release`, which publishes with `npm publish` (OIDC
-      # trusted publishing — there is no NPM_TOKEN to steal; provenance is
-      # attached automatically) and then `changeset tag`. The action parses the
-      # "New tag:" output, pushes the tags and creates the GitHub releases.
+      # it runs `pnpm run release`, which publishes with `pnpm publish` — npm
+      # OIDC trusted publishing (there is no NPM_TOKEN to steal; provenance is
+      # attached automatically) — and then `changeset tag`. The action parses
+      # the "New tag:" output, pushes the tags and creates the GitHub releases.
+      #
+      # `pnpm publish`, not `npm publish`: pnpm 11 supports trusted publishing
+      # (it mints the OIDC token and the provenance statement itself), and it
+      # is what rewrites the `catalog:peers` specifiers in package.json into
+      # the peer ranges consumers actually see — npm would publish the literal
+      # `catalog:` protocol.
       #
       # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
       # devDependencies) and renamed its inputs from v1's `version` / `publish`

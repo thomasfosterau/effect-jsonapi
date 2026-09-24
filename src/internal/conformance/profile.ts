@@ -20,8 +20,8 @@
  * @since 0.15.0
  * @internal
  */
-import { Effect } from "effect"
-import { PROFILE_URI } from "../../Filter.js"
+import { Effect } from "effect";
+import { PROFILE_URI } from "../../Filter.js";
 import {
   type Context,
   coverageNote,
@@ -39,30 +39,42 @@ import {
   type RuleImpl,
   settle,
   skip,
-  withQuery
-} from "./core.js"
+  withQuery,
+} from "./core.js";
 
-const GRAMMAR = "https://github.com/thomasfosterau/effect-jsonapi/blob/main/docs/filter-grammar.md"
+const GRAMMAR = "https://github.com/thomasfosterau/effect-jsonapi/blob/main/docs/filter-grammar.md";
 
-const filterRule = (id: string, section: string, anchor: string, level: Rule["level"], requirement: string): Rule => ({
+const filterRule = (
+  id: string,
+  section: string,
+  anchor: string,
+  level: Rule["level"],
+  requirement: string,
+): Rule => ({
   id,
   tier: "profile",
   section: `filter-grammar/v1 ${section}`,
   reference: `${GRAMMAR}#${anchor}`,
   level,
-  requirement
-})
+  requirement,
+});
 
-const conventionRule = (id: string, section: string, level: Rule["level"], requirement: string): Rule => ({
+const conventionRule = (
+  id: string,
+  section: string,
+  level: Rule["level"],
+  requirement: string,
+): Rule => ({
   id,
   tier: "profile",
   section,
   reference: "https://github.com/thomasfosterau/effect-jsonapi#readme",
   level,
-  requirement
-})
+  requirement,
+});
 
-const readable = (ctx: Context) => probeable(ctx, ["collection", "resource", "related", "relationship"])
+const readable = (ctx: Context) =>
+  probeable(ctx, ["collection", "resource", "related", "relationship"]);
 
 /**
  * Endpoints that speak the filter grammar — `filter: true`, which admits
@@ -70,11 +82,13 @@ const readable = (ctx: Context) => probeable(ctx, ["collection", "resource", "re
  * (`filter: { q: Schema.String }`) does **not** implement the profile, so the
  * grammar rules skip rather than fail against it.
  */
-const grammarEndpoints = (ctx: Context): ReadonlyArray<{ readonly endpoint: Discovered; readonly path: string }> =>
-  readable(ctx).resolved.filter(({ endpoint }) => endpoint.filterGrammar)
+const grammarEndpoints = (
+  ctx: Context,
+): ReadonlyArray<{ readonly endpoint: Discovered; readonly path: string }> =>
+  readable(ctx).resolved.filter(({ endpoint }) => endpoint.filterGrammar);
 
 const NO_GRAMMAR =
-  "no endpoint declares the filter grammar (`filter: true`); endpoints using the per-key `filter: { … }` escape hatch do not implement the profile"
+  "no endpoint declares the filter grammar (`filter: true`); endpoints using the per-key `filter: { … }` escape hatch do not implement the profile";
 
 /**
  * A field name the target is known to accept in a filter position, learned from
@@ -83,17 +97,17 @@ const NO_GRAMMAR =
  */
 const learnField = (ctx: Context, path: string) =>
   Effect.gen(function* () {
-    const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
-    const body = observation.body
-    if (!isRecord(body)) return undefined
-    const data = body["data"]
-    const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined
-    if (first === undefined) return undefined
-    const attributes = first["attributes"]
-    if (!isRecord(attributes)) return undefined
-    const keys = Object.keys(attributes)
-    return keys.length === 0 ? undefined : { field: keys[0]!, value: attributes[keys[0]!] }
-  })
+    const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
+    const body = observation.body;
+    if (!isRecord(body)) return undefined;
+    const data = body["data"];
+    const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
+    if (first === undefined) return undefined;
+    const attributes = first["attributes"];
+    if (!isRecord(attributes)) return undefined;
+    const keys = Object.keys(attributes);
+    return keys.length === 0 ? undefined : { field: keys[0]!, value: attributes[keys[0]!] };
+  });
 
 // ---------------------------------------------------------------------------
 // The filter grammar profile
@@ -105,37 +119,37 @@ const advertisesProfile: RuleImpl = {
     "§5 Profile URI",
     "5-profile-uri",
     "MUST",
-    `A server implementing the filter grammar MUST advertise it on the media type of responses from the endpoints that implement it: \`profile="${PROFILE_URI}"\`.`
+    `A server implementing the filter grammar MUST advertise it on the media type of responses from the endpoints that implement it: \`profile="${PROFILE_URI}"\`.`,
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const targets = grammarEndpoints(ctx)
-      if (targets.length === 0) return skip(advertisesProfile.rule, NO_GRAMMAR)
-      const findings: Array<Finding> = []
+      const targets = grammarEndpoints(ctx);
+      if (targets.length === 0) return skip(advertisesProfile.rule, NO_GRAMMAR);
+      const findings: Array<Finding> = [];
       for (const { path } of targets) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
-        if (observation.status < 200 || observation.status >= 300) continue
-        const header = observation.contentType
+        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
+        if (observation.status < 200 || observation.status >= 300) continue;
+        const header = observation.contentType;
         const profiles =
           header === undefined
             ? []
             : parseMediaType(header)
                 .parameters.filter(([name]) => name === "profile")
-                .flatMap(([, value]) => value.split(" "))
+                .flatMap(([, value]) => value.split(" "));
         if (!profiles.includes(PROFILE_URI)) {
           findings.push(
             finding(advertisesProfile.rule, {
               detail: `${path} speaks the filter grammar but does not advertise the profile`,
               expected: `a \`profile\` parameter containing ${PROFILE_URI}`,
               observed: header === undefined ? "no Content-Type" : header,
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(advertisesProfile.rule, targets.length, findings)
-    })
-}
+      return settle(advertisesProfile.rule, targets.length, findings);
+    }),
+};
 
 /**
  * The three distinct rejections §2 requires, each probed against a field the
@@ -148,60 +162,67 @@ const rejections: RuleImpl = {
     "§2 Surface syntax, §4 Closed operator core, §7 Error pointers",
     "2-surface-syntax",
     "MUST",
-    "An operator outside the closed core, an undeclared field, a malformed key depth, a repeated `filter[…]` key and a literal that fails the attribute's codec MUST each be rejected with 400 Bad Request and one error object whose `source.parameter` names the offending flat key."
+    "An operator outside the closed core, an undeclared field, a malformed key depth, a repeated `filter[…]` key and a literal that fails the attribute's codec MUST each be rejected with 400 Bad Request and one error object whose `source.parameter` names the offending flat key.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = grammarEndpoints(ctx)[0]
-      if (target === undefined) return skip(rejections.rule, NO_GRAMMAR)
-      const learned = yield* learnField(ctx, target.path)
+      const target = grammarEndpoints(ctx)[0];
+      if (target === undefined) return skip(rejections.rule, NO_GRAMMAR);
+      const learned = yield* learnField(ctx, target.path);
       if (learned === undefined) {
         return skip(
           rejections.rule,
-          `${target.path} returned no resource with attributes, so no field is known to be declared filterable`
-        )
+          `${target.path} returned no resource with attributes, so no field is known to be declared filterable`,
+        );
       }
       const probes: ReadonlyArray<{
-        readonly key: string
-        readonly value: string
-        readonly why: string
-        readonly repeat?: boolean
+        readonly key: string;
+        readonly value: string;
+        readonly why: string;
+        readonly repeat?: boolean;
       }> = [
-        { key: `filter[${learned.field}][definitelyNotAnOperator]`, value: "1", why: "an operator outside the core" },
+        {
+          key: `filter[${learned.field}][definitelyNotAnOperator]`,
+          value: "1",
+          why: "an operator outside the core",
+        },
         { key: "filter[definitelyNotAField]", value: "1", why: "an undeclared field" },
         {
           key: `filter[${learned.field}][gt][extra]`,
           value: "1",
-          why: "a key deeper than the grammar admits"
+          why: "a key deeper than the grammar admits",
         },
-        { key: `filter[${learned.field}]`, value: "a", why: "a repeated filter key", repeat: true }
-      ]
-      const findings: Array<Finding> = []
+        { key: `filter[${learned.field}]`, value: "a", why: "a repeated filter key", repeat: true },
+      ];
+      const findings: Array<Finding> = [];
       for (const probe of probes) {
         const pairs: ReadonlyArray<readonly [string, string]> =
           probe.repeat === true
             ? [
                 [probe.key, probe.value],
-                [probe.key, "b"]
+                [probe.key, "b"],
               ]
-            : [[probe.key, probe.value]]
-        const observation = yield* ctx.request({ url: withQuery(target.path, pairs), headers: jsonApiAccept })
+            : [[probe.key, probe.value]];
+        const observation = yield* ctx.request({
+          url: withQuery(target.path, pairs),
+          headers: jsonApiAccept,
+        });
         if (observation.status !== 400) {
           findings.push(
             finding(rejections.rule, {
               detail: `${probe.why} (\`${probe.key}\`) was not rejected`,
               expected: "400 Bad Request",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
-          continue
+              probe: observation.probe,
+            }),
+          );
+          continue;
         }
         const parameters = errorObjectsOf(observation.body)
           .map((error) => error["source"])
           .filter(isRecord)
           .map((source) => source["parameter"])
-          .filter((parameter): parameter is string => typeof parameter === "string")
+          .filter((parameter): parameter is string => typeof parameter === "string");
         if (!parameters.includes(probe.key)) {
           findings.push(
             finding(rejections.rule, {
@@ -211,14 +232,14 @@ const rejections: RuleImpl = {
                 parameters.length === 0
                   ? "no error object carried `source.parameter`"
                   : `source.parameter: ${parameters.map((p) => JSON.stringify(p)).join(", ")}`,
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(rejections.rule, probes.length, findings)
-    })
-}
+      return settle(rejections.rule, probes.length, findings);
+    }),
+};
 
 const spellingEquivalence: RuleImpl = {
   rule: filterRule(
@@ -226,59 +247,67 @@ const spellingEquivalence: RuleImpl = {
     "§2.2 Shorthand, §3 Canonical encoding",
     "3-canonical-encoding",
     "MUST",
-    "Shorthand is the desugared spelling of the group form and the canonical string is a function of the AST alone, so every URL that decodes to the same tree — whatever its key order, ids or `[eq]`/bare spelling — MUST produce the same response."
+    "Shorthand is the desugared spelling of the group form and the canonical string is a function of the AST alone, so every URL that decodes to the same tree — whatever its key order, ids or `[eq]`/bare spelling — MUST produce the same response.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const target = grammarEndpoints(ctx)[0]
-      if (target === undefined) return skip(spellingEquivalence.rule, NO_GRAMMAR)
-      const learned = yield* learnField(ctx, target.path)
+      const target = grammarEndpoints(ctx)[0];
+      if (target === undefined) return skip(spellingEquivalence.rule, NO_GRAMMAR);
+      const learned = yield* learnField(ctx, target.path);
       if (learned === undefined || typeof learned.value !== "string") {
         return skip(
           spellingEquivalence.rule,
-          `${target.path} returned no resource with a string attribute to build equivalent filters from`
-        )
+          `${target.path} returned no resource with a string attribute to build equivalent filters from`,
+        );
       }
-      const field = learned.field
-      const value = learned.value
-      const spellings: ReadonlyArray<readonly [string, ReadonlyArray<readonly [string, string]>]> = [
-        ["bare shorthand", [[`filter[${field}]`, value]]],
-        ["explicit `[eq]` shorthand", [[`filter[${field}][eq]`, value]]],
+      const field = learned.field;
+      const value = learned.value;
+      const spellings: ReadonlyArray<readonly [string, ReadonlyArray<readonly [string, string]>]> =
         [
-          "group form",
+          ["bare shorthand", [[`filter[${field}]`, value]]],
+          ["explicit `[eq]` shorthand", [[`filter[${field}][eq]`, value]]],
           [
-            [`filter[c0][condition][path]`, field],
-            [`filter[c0][condition][operator]`, "eq"],
-            [`filter[c0][condition][value]`, value]
-          ]
-        ],
-        [
-          "group form, keys permuted",
+            "group form",
+            [
+              [`filter[c0][condition][path]`, field],
+              [`filter[c0][condition][operator]`, "eq"],
+              [`filter[c0][condition][value]`, value],
+            ],
+          ],
           [
-            [`filter[x][condition][value]`, value],
-            [`filter[x][condition][path]`, field],
-            [`filter[x][condition][operator]`, "eq"]
-          ]
-        ]
-      ]
-      const findings: Array<Finding> = []
-      const observations: Array<{ readonly label: string; readonly status: number; readonly body: string }> = []
+            "group form, keys permuted",
+            [
+              [`filter[x][condition][value]`, value],
+              [`filter[x][condition][path]`, field],
+              [`filter[x][condition][operator]`, "eq"],
+            ],
+          ],
+        ];
+      const findings: Array<Finding> = [];
+      const observations: Array<{
+        readonly label: string;
+        readonly status: number;
+        readonly body: string;
+      }> = [];
       for (const [label, pairs] of spellings) {
-        const observation = yield* ctx.request({ url: withQuery(target.path, pairs), headers: jsonApiAccept })
-        observations.push({ label, status: observation.status, body: observation.text })
+        const observation = yield* ctx.request({
+          url: withQuery(target.path, pairs),
+          headers: jsonApiAccept,
+        });
+        observations.push({ label, status: observation.status, body: observation.text });
         if (observation.status !== 200) {
           findings.push(
             finding(spellingEquivalence.rule, {
               detail: `the ${label} spelling of \`${field} eq ${JSON.stringify(value)}\` was not accepted`,
               expected: "200 OK — every spelling decodes to the same tree",
               observed: describe(observation),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      const accepted = observations.filter((observation) => observation.status === 200)
-      const reference = accepted[0]
+      const accepted = observations.filter((observation) => observation.status === 200);
+      const reference = accepted[0];
       if (reference !== undefined) {
         for (const observation of accepted.slice(1)) {
           if (observation.body !== reference.body) {
@@ -288,17 +317,17 @@ const spellingEquivalence: RuleImpl = {
                 expected: "byte-identical responses for URLs that decode to the same tree",
                 observed: `${reference.label}: ${reference.body.slice(0, 120)}… vs ${observation.label}: ${observation.body.slice(
                   0,
-                  120
+                  120,
                 )}…`,
-                probe: undefined
-              })
-            )
+                probe: undefined,
+              }),
+            );
           }
         }
       }
-      return settle(spellingEquivalence.rule, spellings.length, findings)
-    })
-}
+      return settle(spellingEquivalence.rule, spellings.length, findings);
+    }),
+};
 
 // ---------------------------------------------------------------------------
 // Library conventions
@@ -309,33 +338,34 @@ const jsonApiMember: RuleImpl = {
     "profile/document/jsonapi-member",
     "Library convention — version advertisement",
     "SHOULD",
-    'The spec makes the top-level `jsonapi` member optional, but a v1.1 server SHOULD advertise the version it implements: every response document carries `jsonapi: { version: "1.1" }`.'
+    'The spec makes the top-level `jsonapi` member optional, but a v1.1 server SHOULD advertise the version it implements: every response document carries `jsonapi: { version: "1.1" }`.',
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = readable(ctx)
-      if (resolved.length === 0) return skip(jsonApiMember.rule, noProbeReason("JSON:API read endpoint", unresolved))
-      const findings: Array<Finding> = []
+      const { resolved, unresolved } = readable(ctx);
+      if (resolved.length === 0)
+        return skip(jsonApiMember.rule, noProbeReason("JSON:API read endpoint", unresolved));
+      const findings: Array<Finding> = [];
       for (const { path } of resolved) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
-        if (observation.status < 200 || observation.status >= 300) continue
-        const body = observation.body
-        if (!isRecord(body)) continue
-        const jsonapi = body["jsonapi"]
+        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
+        if (observation.status < 200 || observation.status >= 300) continue;
+        const body = observation.body;
+        if (!isRecord(body)) continue;
+        const jsonapi = body["jsonapi"];
         if (!isRecord(jsonapi) || jsonapi["version"] !== "1.1") {
           findings.push(
             finding(jsonApiMember.rule, {
               detail: `${path} answered a document that does not advertise the JSON:API version`,
               expected: `jsonapi: { version: "1.1" }`,
               observed: jsonapi === undefined ? "no `jsonapi` member" : JSON.stringify(jsonapi),
-              probe: observation.probe
-            })
-          )
+              probe: observation.probe,
+            }),
+          );
         }
       }
-      return settle(jsonApiMember.rule, resolved.length, findings, coverageNote(unresolved))
-    })
-}
+      return settle(jsonApiMember.rule, resolved.length, findings, coverageNote(unresolved));
+    }),
+};
 
 /**
  * JSON:API's comma grammar and the repeated-key spelling denote the same set.
@@ -347,43 +377,43 @@ const repeatedKeySpelling: RuleImpl = {
     "profile/query/repeated-key-spelling",
     "Library convention — comma-separated query families",
     "MUST",
-    "Every comma-separated query family accepts both the comma spelling (`?include=a,b`) and the repeated-key spelling (`?include=a&include=b`), and the two denote the same set."
+    "Every comma-separated query family accepts both the comma spelling (`?include=a,b`) and the repeated-key spelling (`?include=a&include=b`), and the two denote the same set.",
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = readable(ctx)
+      const { resolved, unresolved } = readable(ctx);
       if (resolved.length === 0) {
-        return skip(repeatedKeySpelling.rule, noProbeReason("JSON:API read endpoint", unresolved))
+        return skip(repeatedKeySpelling.rule, noProbeReason("JSON:API read endpoint", unresolved));
       }
-      const findings: Array<Finding> = []
-      let probes = 0
-      let evaluated = 0
+      const findings: Array<Finding> = [];
+      let probes = 0;
+      let evaluated = 0;
       for (const { endpoint, path } of resolved) {
         // Learn two accepted values per family from the target itself: a
         // repeated-key probe only means something for values the comma spelling
         // already accepts.
-        const families = yield* learnFamilies(ctx, endpoint, path)
+        const families = yield* learnFamilies(ctx, endpoint, path);
         for (const family of families) {
-          const comma = withQuery(path, [[family.key, family.values.join(",")]])
+          const comma = withQuery(path, [[family.key, family.values.join(",")]]);
           const repeated = withQuery(
             path,
-            family.values.map((value) => [family.key, value] as const)
-          )
-          const commaObservation = yield* ctx.request({ url: comma, headers: jsonApiAccept })
-          probes += 1
-          if (commaObservation.status !== 200) continue
-          const repeatedObservation = yield* ctx.request({ url: repeated, headers: jsonApiAccept })
-          probes += 1
-          evaluated += 1
+            family.values.map((value) => [family.key, value] as const),
+          );
+          const commaObservation = yield* ctx.request({ url: comma, headers: jsonApiAccept });
+          probes += 1;
+          if (commaObservation.status !== 200) continue;
+          const repeatedObservation = yield* ctx.request({ url: repeated, headers: jsonApiAccept });
+          probes += 1;
+          evaluated += 1;
           if (repeatedObservation.status !== 200) {
             findings.push(
               finding(repeatedKeySpelling.rule, {
                 detail: `\`?${family.key}=${family.values.join(",")}\` is accepted but the repeated-key spelling of the same set is not`,
                 expected: "200 OK — the two spellings denote the same set",
                 observed: describe(repeatedObservation),
-                probe: repeatedObservation.probe
-              })
-            )
+                probe: repeatedObservation.probe,
+              }),
+            );
           } else if (repeatedObservation.text !== commaObservation.text) {
             findings.push(
               finding(repeatedKeySpelling.rule, {
@@ -391,23 +421,23 @@ const repeatedKeySpelling: RuleImpl = {
                 expected: "byte-identical responses",
                 observed: `comma: ${commaObservation.text.slice(0, 120)}… vs repeated: ${repeatedObservation.text.slice(
                   0,
-                  120
+                  120,
                 )}…`,
-                probe: repeatedObservation.probe
-              })
-            )
+                probe: repeatedObservation.probe,
+              }),
+            );
           }
         }
       }
       if (evaluated === 0) {
         return skip(
           repeatedKeySpelling.rule,
-          "no endpoint accepted a two-value comma spelling to compare the repeated-key spelling against"
-        )
+          "no endpoint accepted a two-value comma spelling to compare the repeated-key spelling against",
+        );
       }
-      return settle(repeatedKeySpelling.rule, probes, findings)
-    })
-}
+      return settle(repeatedKeySpelling.rule, probes, findings);
+    }),
+};
 
 /**
  * Two accepted values for each comma-separated family this endpoint declares,
@@ -417,34 +447,39 @@ const repeatedKeySpelling: RuleImpl = {
  */
 const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
   Effect.gen(function* () {
-    const observation = yield* ctx.request({ url: path, headers: jsonApiAccept })
-    const body = observation.body
-    const out: Array<{ readonly key: string; readonly values: ReadonlyArray<string> }> = []
-    if (!isRecord(body)) return out
-    const data = body["data"]
-    const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined
-    if (first === undefined) return out
-    const attributes = first["attributes"]
-    const attributeKeys = isRecord(attributes) ? Object.keys(attributes) : []
-    const type = first["type"]
-    if (typeof type === "string" && endpoint.queryKeys.includes(`fields[${type}]`) && attributeKeys.length >= 2) {
-      out.push({ key: `fields[${type}]`, values: [attributeKeys[0]!, attributeKeys[1]!] })
+    const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
+    const body = observation.body;
+    const out: Array<{ readonly key: string; readonly values: ReadonlyArray<string> }> = [];
+    if (!isRecord(body)) return out;
+    const data = body["data"];
+    const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
+    if (first === undefined) return out;
+    const attributes = first["attributes"];
+    const attributeKeys = isRecord(attributes) ? Object.keys(attributes) : [];
+    const type = first["type"];
+    if (
+      typeof type === "string" &&
+      endpoint.queryKeys.includes(`fields[${type}]`) &&
+      attributeKeys.length >= 2
+    ) {
+      out.push({ key: `fields[${type}]`, values: [attributeKeys[0]!, attributeKeys[1]!] });
     }
     if (endpoint.queryKeys.includes("sort") && attributeKeys.length >= 2) {
-      out.push({ key: "sort", values: [attributeKeys[0]!, attributeKeys[1]!] })
+      out.push({ key: "sort", values: [attributeKeys[0]!, attributeKeys[1]!] });
     }
-    const relationships = first["relationships"]
+    const relationships = first["relationships"];
     if (endpoint.queryKeys.includes("include") && isRecord(relationships)) {
       // Only relationships carrying inline linkage are includable; a paginated
       // relationship is links-only and `?include=` of it is a legitimate 400.
       const includable = Object.keys(relationships).filter((name) => {
-        const relationship = relationships[name]
-        return isRecord(relationship) && "data" in relationship
-      })
-      if (includable.length >= 2) out.push({ key: "include", values: [includable[0]!, includable[1]!] })
+        const relationship = relationships[name];
+        return isRecord(relationship) && "data" in relationship;
+      });
+      if (includable.length >= 2)
+        out.push({ key: "include", values: [includable[0]!, includable[1]!] });
     }
-    return out
-  })
+    return out;
+  });
 
 /**
  * The profile suite, in report order.
@@ -456,5 +491,5 @@ export const rules: ReadonlyArray<RuleImpl> = [
   rejections,
   spellingEquivalence,
   jsonApiMember,
-  repeatedKeySpelling
-]
+  repeatedKeySpelling,
+];

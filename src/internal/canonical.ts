@@ -6,11 +6,11 @@
  *
  * @internal
  */
-import { SchemaAST } from "effect"
-import { compareCodePoints, isFilterKey, keySegments } from "./filter.js"
+import { SchemaAST } from "effect";
+import { compareCodePoints, isFilterKey, keySegments } from "./filter.js";
 
 /** One flat `(key, value)` query pair, both sides un-encoded. */
-export type Pair = readonly [key: string, value: string]
+export type Pair = readonly [key: string, value: string];
 
 /**
  * The canonical order of the families: `include`, `fields[*]`, `filter[*]`,
@@ -28,13 +28,13 @@ export const rank = (key: string): number =>
           ? 3
           : key.startsWith("page[")
             ? 4
-            : 5
+            : 5;
 
-const byKey = (a: Pair, b: Pair): number => compareCodePoints(a[0], b[0])
+const byKey = (a: Pair, b: Pair): number => compareCodePoints(a[0], b[0]);
 
 // Whether a `filter[...]` key is in the grammar's group form (three bracket
 // segments): `filter[g0][group][conjunction]`, `filter[c0][condition][path]`.
-const isGroupFormKey = (key: string): boolean => (keySegments(key)?.length ?? 0) >= 3
+const isGroupFormKey = (key: string): boolean => (keySegments(key)?.length ?? 0) >= 3;
 
 /**
  * The wire keys a schema declares, in declaration order — the property
@@ -42,9 +42,11 @@ const isGroupFormKey = (key: string): boolean => (keySegments(key)?.length ?? 0)
  * not an object literal.
  */
 export const declaredKeys = (ast: SchemaAST.AST): ReadonlyArray<string> => {
-  const encoded = SchemaAST.toEncoded(ast)
-  return encoded._tag === "Objects" ? encoded.propertySignatures.map((signature) => String(signature.name)) : []
-}
+  const encoded = SchemaAST.toEncoded(ast);
+  return encoded._tag === "Objects"
+    ? encoded.propertySignatures.map((signature) => String(signature.name))
+    : [];
+};
 
 // The pairs of one encoded key: a scalar is one pair; an array is one pair
 // per item — the repeated-key spelling `UrlParams.toRecord` decodes back to
@@ -52,13 +54,15 @@ export const declaredKeys = (ast: SchemaAST.AST): ReadonlyArray<string> => {
 // of the set (the query schema already joins it; a consumer's flat schema
 // may not have). `undefined` and `null` have no wire form and are omitted.
 const pairsOf = (key: string, value: unknown): ReadonlyArray<Pair> => {
-  if (value === undefined || value === null) return []
-  if (typeof value === "string") return [[key, value]]
+  if (value === undefined || value === null) return [];
+  if (typeof value === "string") return [[key, value]];
   if (Array.isArray(value)) {
-    return key === "include" ? [[key, value.map(String).join(",")]] : value.map((item) => [key, String(item)])
+    return key === "include"
+      ? [[key, value.map(String).join(",")]]
+      : value.map((item) => [key, String(item)]);
   }
-  return [[key, String(value)]]
-}
+  return [[key, String(value)]];
+};
 
 /**
  * Orders the pairs of an encoded flat query canonically:
@@ -82,11 +86,11 @@ const pairsOf = (key: string, value: unknown): ReadonlyArray<Pair> => {
  */
 export const orderPairs = (
   flat: { readonly [key: string]: unknown },
-  declared: ReadonlyArray<string> = []
+  declared: ReadonlyArray<string> = [],
 ): ReadonlyArray<Pair> => {
-  const families: Array<Array<Pair>> = [[], [], [], [], [], []]
+  const families: Array<Array<Pair>> = [[], [], [], [], [], []];
   for (const [key, value] of Object.entries(flat)) {
-    families[rank(key)]!.push(...pairsOf(key, value))
+    families[rank(key)]!.push(...pairsOf(key, value));
   }
   const [include, fields, filter, sort, page, other] = families as [
     Array<Pair>,
@@ -94,22 +98,23 @@ export const orderPairs = (
     Array<Pair>,
     Array<Pair>,
     Array<Pair>,
-    Array<Pair>
-  ]
-  fields.sort(byKey)
-  if (!filter.some(([key]) => isGroupFormKey(key))) filter.sort(byKey)
+    Array<Pair>,
+  ];
+  fields.sort(byKey);
+  if (!filter.some(([key]) => isGroupFormKey(key))) filter.sort(byKey);
   const position = (key: string): number => {
-    const index = declared.indexOf(key)
-    return index === -1 ? Number.POSITIVE_INFINITY : index
-  }
-  page.sort((a, b) => position(a[0]) - position(b[0]) || byKey(a, b))
-  other.sort(byKey)
-  return [...include, ...fields, ...filter, ...sort, ...page, ...other]
-}
+    const index = declared.indexOf(key);
+    return index === -1 ? Number.POSITIVE_INFINITY : index;
+  };
+  page.sort((a, b) => position(a[0]) - position(b[0]) || byKey(a, b));
+  other.sort(byKey);
+  return [...include, ...fields, ...filter, ...sort, ...page, ...other];
+};
 
 // RFC 3986 percent-encoding (`encodeURIComponent`: spaces are `%20`, never
 // `+`; commas `%2C`), with the family brackets left readable in keys.
-const encodeKey = (key: string): string => encodeURIComponent(key).replace(/%5B/g, "[").replace(/%5D/g, "]")
+const encodeKey = (key: string): string =>
+  encodeURIComponent(key).replace(/%5B/g, "[").replace(/%5D/g, "]");
 
 /**
  * Serialises ordered pairs to a query string (no leading `?`): each key and
@@ -117,20 +122,23 @@ const encodeKey = (key: string): string => encodeURIComponent(key).replace(/%5B/
  * `&`.
  */
 export const serialise = (pairs: Iterable<Pair>): string =>
-  Array.from(pairs, ([key, value]) => `${encodeKey(key)}=${encodeURIComponent(value)}`).join("&")
+  Array.from(pairs, ([key, value]) => `${encodeKey(key)}=${encodeURIComponent(value)}`).join("&");
 
 /**
  * Slots a page cursor's pairs into an already canonically ordered pair list:
  * any `page[*]` pairs the list carries are replaced, and the cursor takes the
  * `page` family's position (after `sort`, before a consumer's own keys).
  */
-export const withPagePairs = (query: ReadonlyArray<Pair>, page: ReadonlyArray<Pair>): ReadonlyArray<Pair> => {
-  const before: Array<Pair> = []
-  const after: Array<Pair> = []
+export const withPagePairs = (
+  query: ReadonlyArray<Pair>,
+  page: ReadonlyArray<Pair>,
+): ReadonlyArray<Pair> => {
+  const before: Array<Pair> = [];
+  const after: Array<Pair> = [];
   for (const pair of query) {
-    const r = rank(pair[0])
-    if (r < 4) before.push(pair)
-    else if (r > 4) after.push(pair)
+    const r = rank(pair[0]);
+    if (r < 4) before.push(pair);
+    else if (r > 4) after.push(pair);
   }
-  return [...before, ...page, ...after]
-}
+  return [...before, ...page, ...after];
+};

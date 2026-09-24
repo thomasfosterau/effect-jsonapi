@@ -6,16 +6,16 @@
  * within two releases — one `import type` added to `Resource.ts` is enough to
  * break it silently. So this walks the real import graph instead.
  */
-import { spawnSync } from "node:child_process"
-import * as fs from "node:fs"
-import * as path from "node:path"
-import { fileURLToPath } from "node:url"
-import ts from "typescript"
-import { describe, expect, it } from "vitest"
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+import { describe, expect, it } from "vite-plus/test";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url))
-const SRC = path.join(ROOT, "src")
-const DIST = path.join(ROOT, "dist")
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+const SRC = path.join(ROOT, "src");
+const DIST = path.join(ROOT, "dist");
 
 /**
  * Every module the schema-only entry point is allowed to reach. Pinned rather
@@ -25,6 +25,7 @@ const DIST = path.join(ROOT, "dist")
 const SCHEMA_TIER = [
   "Document.ts",
   "Filter.ts",
+  "FlatQuery.ts",
   "Include.ts",
   "Relationship.ts",
   "Resource.ts",
@@ -32,8 +33,9 @@ const SCHEMA_TIER = [
   "internal/filter.ts",
   "internal/media.ts",
   "internal/operators.ts",
-  "schema.ts"
-]
+  "internal/schemaExt.ts",
+  "schema.ts",
+];
 
 /**
  * The modules that resolve `effect/unstable/httpapi`, and so stay out.
@@ -52,9 +54,16 @@ const SCHEMA_TIER = [
  * endpoints from an `HttpApi` value, so it is unambiguously HTTP-tier; its
  * internals come with it (`internal/conformance/report.ts` imports nothing but
  * types, but it is reachable only from the tier that does).
+ *
+ * The server skeleton (`Assemble`, `Negotiation`, `Registry`,
+ * `ResourceHandlers`, `ServerErrors`) is HTTP-tier by construction: it builds
+ * on `Handlers`, `Query`, `Middleware` and `HttpApiBuilder`. `FlatQuery` is
+ * the one server-skeleton module that is pure schema, and so is in the
+ * schema tier with the `internal/schemaExt.ts` helpers it re-exports.
  */
 const HTTP_TIER = [
   "ApiError.ts",
+  "Assemble.ts",
   "Atomic.ts",
   "Client.ts",
   "Conformance.ts",
@@ -65,15 +74,20 @@ const HTTP_TIER = [
   "Lid.ts",
   "MediaType.ts",
   "Middleware.ts",
+  "Negotiation.ts",
   "Query.ts",
+  "Registry.ts",
+  "ResourceHandlers.ts",
+  "ServerErrors.ts",
   "internal/canonical.ts",
   "internal/codecs.ts",
   "internal/conformance/core.ts",
   "internal/conformance/profile.ts",
   "internal/conformance/report.ts",
   "internal/conformance/spec.ts",
-  "internal/httpMedia.ts"
-]
+  "internal/errorMeta.ts",
+  "internal/httpMedia.ts",
+];
 
 /**
  * Module specifiers of `file`, read off the AST.
@@ -87,99 +101,117 @@ const HTTP_TIER = [
  * without the peer, which is the surface this test is protecting.
  */
 const specifiersOf = (file: string): ReadonlyArray<string> => {
-  const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true)
-  const found: Array<string> = []
+  const source = ts.createSourceFile(
+    file,
+    fs.readFileSync(file, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const found: Array<string> = [];
   const visit = (node: ts.Node): void => {
     if (
       (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
       node.moduleSpecifier !== undefined &&
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
-      found.push(node.moduleSpecifier.text)
+      found.push(node.moduleSpecifier.text);
     } else if (
       ts.isImportEqualsDeclaration(node) &&
       ts.isExternalModuleReference(node.moduleReference) &&
       ts.isStringLiteral(node.moduleReference.expression)
     ) {
-      found.push(node.moduleReference.expression.text)
+      found.push(node.moduleReference.expression.text);
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
       node.arguments.length > 0 &&
       ts.isStringLiteral(node.arguments[0])
     ) {
-      found.push(node.arguments[0].text)
+      found.push(node.arguments[0].text);
     }
-    ts.forEachChild(node, visit)
-  }
-  visit(source)
-  return found
-}
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
+};
 
 const resolveRelative = (from: string, specifier: string): string | null => {
-  const base = path.resolve(path.dirname(from), specifier)
-  const candidates = [base.replace(/\.js$/, ".ts"), `${base}.ts`, path.join(base, "index.ts"), base]
-  return candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) ?? null
-}
+  const base = path.resolve(path.dirname(from), specifier);
+  const candidates = [
+    base.replace(/\.js$/, ".ts"),
+    `${base}.ts`,
+    path.join(base, "index.ts"),
+    base,
+  ];
+  return (
+    candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) ??
+    null
+  );
+};
 
 interface Graph {
   /** Files reached, relative to the entry's own directory. */
-  readonly modules: ReadonlyArray<string>
+  readonly modules: ReadonlyArray<string>;
   /** Bare specifiers reached, each mapped to the chain of files that reached it. */
-  readonly externals: ReadonlyMap<string, ReadonlyArray<string>>
+  readonly externals: ReadonlyMap<string, ReadonlyArray<string>>;
 }
 
 /** Walks the transitive import graph from `entry`, recording how each external was reached. */
 const graphFrom = (entry: string, dir: string): Graph => {
-  const modules = new Set<string>()
-  const externals = new Map<string, ReadonlyArray<string>>()
+  const modules = new Set<string>();
+  const externals = new Map<string, ReadonlyArray<string>>();
   const walk = (file: string, trail: ReadonlyArray<string>): void => {
-    if (modules.has(file)) return
-    modules.add(file)
-    const here = [...trail, path.relative(dir, file)]
+    if (modules.has(file)) return;
+    modules.add(file);
+    const here = [...trail, path.relative(dir, file)];
     for (const specifier of specifiersOf(file)) {
       if (specifier.startsWith(".")) {
-        const resolved = resolveRelative(file, specifier)
+        const resolved = resolveRelative(file, specifier);
         // An unresolvable relative import is a broken graph, not a pass.
-        expect(resolved, `${path.relative(dir, file)} imports unresolvable "${specifier}"`).not.toBeNull()
-        walk(resolved as string, here)
+        expect(
+          resolved,
+          `${path.relative(dir, file)} imports unresolvable "${specifier}"`,
+        ).not.toBeNull();
+        walk(resolved as string, here);
       } else if (!externals.has(specifier)) {
-        externals.set(specifier, here)
+        externals.set(specifier, here);
       }
     }
-  }
-  walk(entry, [])
+  };
+  walk(entry, []);
   return {
     modules: [...modules].map((file) => path.relative(dir, file)).sort(),
-    externals
-  }
-}
+    externals,
+  };
+};
 
 const unstable = (graph: Graph): ReadonlyArray<string> =>
   [...graph.externals.entries()]
-    .filter(([specifier]) => specifier === "effect/unstable" || specifier.startsWith("effect/unstable/"))
+    .filter(
+      ([specifier]) => specifier === "effect/unstable" || specifier.startsWith("effect/unstable/"),
+    )
     .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`)
-    .sort()
+    .sort();
 
 describe("schema-only entry point", () => {
-  const schema = graphFrom(path.join(SRC, "schema.ts"), SRC)
-  const root = graphFrom(path.join(SRC, "index.ts"), SRC)
+  const schema = graphFrom(path.join(SRC, "schema.ts"), SRC);
+  const root = graphFrom(path.join(SRC, "index.ts"), SRC);
 
   it("resolves no unstable effect surface at all", () => {
-    expect(unstable(schema)).toEqual([])
-  })
+    expect(unstable(schema)).toEqual([]);
+  });
 
   it("declares `effect` as its only external", () => {
-    expect([...schema.externals.keys()].sort()).toEqual(["effect"])
-  })
+    expect([...schema.externals.keys()].sort()).toEqual(["effect"]);
+  });
 
   it("reaches exactly the modules assigned to the schema tier", () => {
-    expect(schema.modules).toEqual([...SCHEMA_TIER].sort())
-  })
+    expect(schema.modules).toEqual([...SCHEMA_TIER].sort());
+  });
 
   it("reaches none of the HTTP-tier modules", () => {
-    expect(schema.modules.filter((module) => HTTP_TIER.includes(module))).toEqual([])
-  })
+    expect(schema.modules.filter((module) => HTTP_TIER.includes(module))).toEqual([]);
+  });
 
   /**
    * The control. Without it every assertion above could pass because the
@@ -189,25 +221,27 @@ describe("schema-only entry point", () => {
    * cannot be trusted to see it above.
    */
   it("is checked by a walker that does detect httpapi (control: the root barrel)", () => {
-    expect(unstable(root).join("\n")).toContain("effect/unstable/httpapi")
+    expect(unstable(root).join("\n")).toContain("effect/unstable/httpapi");
     // Every tier module except the schema barrel itself: the two entry points
     // are peers, so the root reaches the modules, not the other entry point.
-    const tierModules = SCHEMA_TIER.filter((module) => module !== "schema.ts")
-    expect(root.modules).toEqual([...tierModules, ...HTTP_TIER, "index.ts"].sort())
-  })
-})
+    const tierModules = SCHEMA_TIER.filter((module) => module !== "schema.ts");
+    expect(root.modules).toEqual([...tierModules, ...HTTP_TIER, "index.ts"].sort());
+  });
+});
 
 describe("root entry point", () => {
   it("still exports every namespace, unchanged", async () => {
-    const index = await import("@thomasfosterau/effect-jsonapi")
+    const index = await import("@thomasfosterau/effect-jsonapi");
     expect(Object.keys(index).sort()).toEqual([
       "ApiError",
+      "Assemble",
       "Atomic",
       "Client",
       "Conformance",
       "Document",
       "Endpoint",
       "Filter",
+      "FlatQuery",
       "Group",
       "Handlers",
       "Idempotency",
@@ -216,44 +250,48 @@ describe("root entry point", () => {
       "MEDIA_TYPE",
       "MediaType",
       "Middleware",
+      "Negotiation",
       "Query",
+      "Registry",
       "Relationship",
       "Resource",
-      "Sort"
-    ])
-  })
+      "ResourceHandlers",
+      "ServerErrors",
+      "Sort",
+    ]);
+  });
 
   it("exposes the same module objects the subpath does", async () => {
-    const index = await import("@thomasfosterau/effect-jsonapi")
-    const schema = await import("@thomasfosterau/effect-jsonapi/schema")
+    const index = await import("@thomasfosterau/effect-jsonapi");
+    const schema = await import("@thomasfosterau/effect-jsonapi/schema");
     // Not a second API: same modules, fewer of them.
     for (const name of Object.keys(schema)) {
       expect(index[name as keyof typeof index], `${name} differs between entry points`).toBe(
-        schema[name as keyof typeof schema]
-      )
+        schema[name as keyof typeof schema],
+      );
     }
-  })
-})
+  });
+});
 
 describe("package exports map", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
-    exports: Record<string, { types: string; default: string }>
-  }
+    exports: Record<string, { types: string; default: string }>;
+  };
 
   it("publishes the root unchanged and the schema subpath alongside it", () => {
     expect(manifest.exports).toEqual({
       ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
-      "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" }
-    })
-  })
+      "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" },
+    });
+  });
 
   it("points every declared subpath at a real source module", () => {
     for (const [subpath, target] of Object.entries(manifest.exports)) {
-      const source = path.join(SRC, `${path.basename(target.default, ".js")}.ts`)
-      expect(fs.existsSync(source), `${subpath} -> ${target.default} has no source`).toBe(true)
+      const source = path.join(SRC, `${path.basename(target.default, ".js")}.ts`);
+      expect(fs.existsSync(source), `${subpath} -> ${target.default} has no source`).toBe(true);
     }
-  })
-})
+  });
+});
 
 /**
  * `tsc` emits one file per module and rewrites no specifiers, so the source
@@ -263,18 +301,18 @@ describe("package exports map", () => {
  * than silently passing when `dist/` is absent.
  */
 describe("built artifact", () => {
-  const built = path.join(DIST, "schema.js")
-  const hasDist = fs.existsSync(built)
+  const built = path.join(DIST, "schema.js");
+  const hasDist = fs.existsSync(built);
 
   it.skipIf(!hasDist)("ships a schema entry point that resolves no unstable effect surface", () => {
-    expect(unstable(graphFrom(built, DIST))).toEqual([])
-  })
+    expect(unstable(graphFrom(built, DIST))).toEqual([]);
+  });
 
   it.skipIf(!hasDist)("ships declarations for both entry points", () => {
     for (const file of ["index.js", "index.d.ts", "schema.js", "schema.d.ts"]) {
-      expect(fs.existsSync(path.join(DIST, file)), `dist/${file} missing`).toBe(true)
+      expect(fs.existsSync(path.join(DIST, file)), `dist/${file} missing`).toBe(true);
     }
-  })
+  });
 
   /**
    * The end-to-end statement, and the one that does not depend on the walker
@@ -290,16 +328,16 @@ describe("built artifact", () => {
         fileURLToPath(new URL("./fixtures/forbid-unstable-peer.mjs", import.meta.url)),
         "--input-type=module",
         "-e",
-        `await import(${JSON.stringify(entry)}); console.log("LOADED")`
+        `await import(${JSON.stringify(entry)}); console.log("LOADED")`,
       ],
-      { cwd: ROOT, encoding: "utf8" }
-    )
+      { cwd: ROOT, encoding: "utf8" },
+    );
 
   it.skipIf(!hasDist)("loads the schema subpath with effect/unstable unresolvable", () => {
-    const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi/schema")
-    expect(`${result.stdout}${result.stderr}`).toContain("LOADED")
-    expect(result.status).toBe(0)
-  })
+    const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi/schema");
+    expect(`${result.stdout}${result.stderr}`).toContain("LOADED");
+    expect(result.status).toBe(0);
+  });
 
   /**
    * Control again. If blocking `effect/unstable/*` does not stop the root
@@ -316,10 +354,10 @@ describe("built artifact", () => {
    * asserted deterministically by the static walker above.
    */
   it.skipIf(!hasDist)("is checked by hooks that do block the root barrel (control)", () => {
-    const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi")
-    const output = `${result.stdout}${result.stderr}`
-    expect(output).toContain("FORBIDDEN_PEER:effect/unstable/")
-    expect(output).not.toContain("LOADED")
-    expect(result.status).not.toBe(0)
-  })
-})
+    const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi");
+    const output = `${result.stdout}${result.stderr}`;
+    expect(output).toContain("FORBIDDEN_PEER:effect/unstable/");
+    expect(output).not.toContain("LOADED");
+    expect(result.status).not.toBe(0);
+  });
+});

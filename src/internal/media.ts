@@ -27,7 +27,7 @@
  * @since 0.1.0
  * @category constants
  */
-export const MEDIA_TYPE = "application/vnd.api+json"
+export const MEDIA_TYPE = "application/vnd.api+json";
 
 /**
  * The atomic operations extension URI, per https://jsonapi.org/ext/atomic/
@@ -36,7 +36,7 @@ export const MEDIA_TYPE = "application/vnd.api+json"
  * @category constants
  * @internal
  */
-export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic"
+export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic";
 
 /**
  * The base media type of one `Content-Type` / `Accept` entry: everything
@@ -50,7 +50,8 @@ export const ATOMIC_EXTENSION_URI = "https://jsonapi.org/ext/atomic"
  * @category utils
  * @internal
  */
-export const baseMediaType = (entry: string): string => (entry.split(";", 1)[0] ?? "").trim().toLowerCase()
+export const baseMediaType = (entry: string): string =>
+  (entry.split(";", 1)[0] ?? "").trim().toLowerCase();
 
 /**
  * The JSON:API media type carrying an `ext` parameter for the given extension
@@ -66,7 +67,9 @@ export const baseMediaType = (entry: string): string => (entry.split(";", 1)[0] 
  * @internal
  */
 export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): string =>
-  extensions === undefined || extensions.length === 0 ? MEDIA_TYPE : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`
+  extensions === undefined || extensions.length === 0
+    ? MEDIA_TYPE
+    : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`;
 
 /**
  * The JSON:API media type carrying the atomic operations `ext` parameter.
@@ -75,4 +78,61 @@ export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): s
  * @category constants
  * @internal
  */
-export const ATOMIC_MEDIA_TYPE = mediaTypeWith([ATOMIC_EXTENSION_URI])
+export const ATOMIC_MEDIA_TYPE = mediaTypeWith([ATOMIC_EXTENSION_URI]);
+
+/**
+ * Splits one media type entry into its (lowercased) base type, its media type
+ * parameters, and its weight.
+ *
+ * Per RFC 9110 §12.4.2, `q` is not a media type parameter: it is the weight
+ * of an `Accept` entry, and it terminates the media type's parameter list.
+ * Everything before `q` is a media type parameter (subject to the ext/profile
+ * whitelist); `q` itself and everything after it are accept-extension
+ * parameters that belong to the header field, not the media type, and are
+ * never checked against that whitelist. Splitting is therefore positional,
+ * not a name-based filter: `;profile="…";q=0.8` has one media type parameter;
+ * `;q=0.8;foo=bar` has none.
+ *
+ * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`,
+ * and is `undefined` when the entry carries a `q` that is not a number — the
+ * two callers disagree on what that means (the §5 middleware treats it as a
+ * refusal, a host's representation negotiation as the default weight), so the
+ * parser reports it rather than deciding.
+ *
+ * @internal
+ */
+/** One `;`-separated part of a media type entry, split at its first `=`. */
+const parseParameter = (part: string): readonly [name: string, value: string] => {
+  const eq = part.indexOf("=");
+  const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase();
+  const value = eq === -1 ? "" : part.slice(eq + 1).trim();
+  return [name, value];
+};
+
+/** A parameter value with its surrounding double quotes removed (ext / profile URI lists are quoted). */
+const unquote = (value: string): string =>
+  value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value;
+
+export const parseMediaType = (
+  entry: string,
+): {
+  readonly base: string;
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
+  readonly weight: number | undefined;
+} => {
+  const [first, ...rest] = entry.split(";");
+  const parameters: Array<readonly [name: string, value: string]> = [];
+  let weight: number | undefined = 1;
+  for (const part of rest) {
+    const [name, value] = parseParameter(part);
+    // `q` terminates the media type's parameter list; it and everything after
+    // it are accept-extension parameters of the header field.
+    if (name === "q") {
+      const parsed = Number(value);
+      weight = Number.isFinite(parsed) ? parsed : undefined;
+      break;
+    }
+    parameters.push([name, unquote(value)] as const);
+  }
+  return { base: baseMediaType(first ?? ""), parameters, weight };
+};

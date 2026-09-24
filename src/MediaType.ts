@@ -10,9 +10,9 @@
  *
  * @since 0.15.0
  */
-import type { Schema } from "effect"
-import { HttpApiSchema } from "effect/unstable/httpapi"
-import { MEDIA_TYPE } from "./internal/media.js"
+import type { Schema } from "effect";
+import { HttpApiSchema } from "effect/unstable/httpapi";
+import { MEDIA_TYPE } from "./internal/media.js";
 
 /**
  * Marks a schema as a JSON:API body and optionally sets its HTTP status.
@@ -57,9 +57,9 @@ import { MEDIA_TYPE } from "./internal/media.js"
  * @category combinators
  */
 export const asJsonApi = <S extends Schema.Top>(schema: S, status?: number) => {
-  const body = schema.pipe(HttpApiSchema.asJson({ contentType: MEDIA_TYPE }))
-  return status === undefined ? body : body.pipe(HttpApiSchema.status(status))
-}
+  const body = schema.pipe(HttpApiSchema.asJson({ contentType: MEDIA_TYPE }));
+  return status === undefined ? body : body.pipe(HttpApiSchema.status(status));
+};
 
 /**
  * Marks a schema as a body at an arbitrary media type.
@@ -99,4 +99,4 @@ export const asJsonApi = <S extends Schema.Top>(schema: S, status?: number) => {
  * @category combinators
  */
 export const asMediaType = <S extends Schema.Top>(schema: S, contentType: string) =>
-  schema.pipe(HttpApiSchema.asJson({ contentType }))
+  schema.pipe(HttpApiSchema.asJson({ contentType }));
