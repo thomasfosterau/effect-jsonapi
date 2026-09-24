@@ -1,9 +1,14 @@
 name: CI
 
-# ONE job, ONE required check: the pipeline's task graph lives in
-# vite.config.ts (the root `check` aggregate), not in GitHub Actions `needs:`.
-# Copied in shape from effect-drizzle-ext (the library reference); the docgen
-# step is this repository's own contribution to the template.
+# ONE job, run once per matrix Node.js line: the pipeline's task graph lives
+# in vite.config.ts (the root `check` aggregate), not in GitHub Actions
+# `needs:`. Copied in shape from effect-drizzle-ext (the library reference);
+# the docgen step and the Node matrix are this repository's own.
+#
+# The job name and the matrix are load-bearing: the `main` ruleset requires the
+# checks "Lint, type-check, build & test (20.x)" and "… (22.x)", which GitHub
+# derives from this `name` plus the matrix value. Renaming either leaves the
+# required checks unreported and every PR blocked.
 
 on:
   push:
@@ -15,16 +20,20 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# No permissions by default; the single job grants only read access.
+# No permissions by default; the job grants only read access.
 permissions: {}
 
 jobs:
   ci:
-    name: Format, lint, type-check, test, build & docgen
+    name: Lint, type-check, build & test
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20.x, 22.x]
     env:
       # A modest ceiling for every Node process in the pipeline. NODE_OPTIONS
       # is inherited by every child, including each vitest fork.
@@ -36,6 +45,10 @@ jobs:
         with:
           persist-credentials: false
 
+      # Always Node 22: pnpm 11 refuses to run below 22.13, and `vp pack`
+      # (tsdown) calls `Promise.withResolvers`, which Node 20 lacks. The
+      # library itself is what the matrix tests; the toolchain that installs and
+      # bundles it is not.
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
@@ -43,29 +56,48 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: node_modules/.vite/task-cache
-          key: vp-task-v1-${{ runner.os }}-${{ github.sha }}
+          key: vp-task-v1-${{ runner.os }}-node-${{ matrix.node-version }}-${{ github.sha }}
           restore-keys: |
-            vp-task-v1-${{ runner.os }}-
+            vp-task-v1-${{ runner.os }}-node-${{ matrix.node-version }}-
+
+      # Built on the toolchain's Node before any switch below, so the `check`
+      # graph's `build` dependency is a task-cache hit on every row.
+      - name: Build
+        run: vp run build
+
+      # Everything from here runs on the matrix Node. setup-node prepends its
+      # bin directory to PATH, so the local bins are re-added in front of it.
+      - name: Switch to Node.js ${{ matrix.node-version }}
+        if: matrix.node-version != '22.x'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Expose the local bins ahead of the matrix Node
+        if: matrix.node-version != '22.x'
+        run: |
+          echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Report the Node.js version under test
+        run: node --version
 
       - name: Format and lint
         run: vp check
 
       # The sources, the colocated and type-level tests, every example, and the
-      # emitted declarations (which builds `dist/` first — see
-      # test/emitted/requirements.types.ts for why consumers see something the
-      # source-resolved check does not).
+      # emitted declarations (see test/emitted/requirements.types.ts for why
+      # consumers see something the source-resolved check does not).
       - name: Type gates (sources, type-level tests, examples, emitted declarations)
         run: vp run --concurrency-limit 2 check
 
       - name: Unit tests
         run: vp run -r test:unit
 
-      - name: Build
-        run: vp run build
-
       # Type-checks AND runs every JSDoc @example, and generates the API docs.
       - name: Verify documentation examples (docgen)
         run: vp run docgen
 
+      # pnpm 11 needs Node 22, and the audit does not depend on the Node line.
       - name: Audit
+        if: matrix.node-version == '22.x'
         run: pnpm audit --audit-level high
