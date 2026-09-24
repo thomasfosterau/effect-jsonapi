@@ -2599,6 +2599,17 @@ describe("HTTP round-trip with repeated ?include= keys", () => {
       400,
     );
   });
+
+  it("names the parameter and publishes the includable paths on the 400", async () => {
+    const response = await request("http://localhost/articles/1?include=author.nope");
+    expect(response.status).toBe(400);
+    expect(response.body.errors).toHaveLength(1);
+    expect(response.body.errors[0]).toMatchObject({
+      status: "400",
+      source: { parameter: "include" },
+      meta: { includablePaths: expect.arrayContaining(["author", "comments", "comments.author"]) },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

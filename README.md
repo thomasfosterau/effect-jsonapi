@@ -80,6 +80,11 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
   - [Resolving `included` — one batch per level](#resolving-included--one-batch-per-level)
   - [The per-resource transform pass (`onResource`)](#the-per-resource-transform-pass-onresource)
   - [Narrowing `included` by the requested include paths](#narrowing-included-by-the-requested-include-paths)
+- [5. The server skeleton](#5-the-server-skeleton)
+  - [The flat contract](#the-flat-contract)
+  - [The error seam](#the-error-seam)
+  - [The negotiation verdict](#the-negotiation-verdict)
+  - [The assembler, the handlers and the registry](#the-assembler-the-handlers-and-the-registry)
 - [Query parameters](#query-parameters)
   - [Constraining the advertised include paths](#constraining-the-advertised-include-paths)
   - [Declaring the include surface once](#declaring-the-include-surface-once)
@@ -89,6 +94,7 @@ import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
 - [Examples](#examples)
 - [Metadata](#metadata)
 - [Limitations](#limitations)
+- Guides: [Adopting the 0.14 surfaces in an existing api](./docs/guides/adopting-0.14.md)
 
 ## Quick start
 
@@ -1392,6 +1398,151 @@ const message =
 
 The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response — a supported entry point, not an internal of the cause-based one — so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](./examples/blog/client.ts).
 
+### The client helpers: error responses, hydration, page cursors
+
+The consuming side of a JSON:API `HttpApi` grows the same handful of helpers in every application: a client whose failures arrive decoded, readers for the collection document's page math, a resolver from relationship linkage to the `included` resources behind it, and the `page[offset]` / `page[limit]` cursor a list page carries in its own URL. `Client` carries them.
+
+```ts
+import { Effect, Option } from "effect";
+import { Client } from "@thomasfosterau/effect-jsonapi";
+
+// Every call the server answered with an error response fails as a decoded
+// `Client.ErrorResponse` — status, message, the error document when there was
+// one — instead of the raw HttpClientError. Transport faults pass through.
+const client = yield * Client.make(Api, { baseUrl: "https://example.test", decodeErrors: true });
+const people =
+  yield *
+  client.people
+    .list({ query: { limit: 10, offset: 0 } })
+    .pipe(
+      Effect.catchTag("ErrorResponse", (error) =>
+        Effect.fail(new PageError({ status: error.status, message: error.message })),
+      ),
+    );
+
+// the page math, from the real unpaged total the server reports
+const total = Client.readTotalCount(people); // meta.totalCount, 0 when absent
+const more = Client.hasNextPage(0, 10, total); // correct at an exact multiple of the page size
+```
+
+`Client.hydrate` resolves a document's linkage against its `included` member, typed by the resource definition: a to-one relationship is an `Option` of its target, a to-many an array in linkage order, a dotted path — the two-hop `authors.contributor` shape, where the middle resource is a relator carrying the credit's shape rather than a name — resolves to the resources at the end of it. A ref the include walk didn't hoist (or the viewer may not see) is skipped, never a failure, so `included` is legitimately a subset of the linkage.
+
+```ts
+const book = Client.hydrate(Book, document); // `included` indexed once
+const authors = book.walk("authors.contributor"); // ReadonlyArray<Person>, deduplicated
+const publisher = book.related("publisher"); // Option<Person>
+```
+
+The page cursor is one reader and a few href builders, so no page hands a user-controlled number onward unbounded and no filtered list drops its filter on page 2:
+
+```ts
+const cursor = Client.readPageCursor(url, { defaultLimit: 24, maxLimit: 100 }); // { offset, limit }, clamped
+const href = Client.filteredPageHref("/people", { q }); // href(offset): bare path on page 1
+const next = Client.canonicalPageHref("/people", pairs, { offset: 24, limit: 24 }); // the server's own link spelling
+const window = Client.pageWindow(cursor, total); // first, last, siblings, gaps — for the control to render
+```
+
+## 5. The server skeleton
+
+Three applications built on this package each grew the same two thousand lines on top of it: an error catalogue and the seam that turns a failure into an error document, a content-negotiation verdict for an api that shares its URLs with rendered pages, a document assembler that stamps per-viewer `meta` and stringifies links, a handler factory over "the operations", and a registry that checks every family against its group at module init. That scaffolding lives here now, as the modules below. Each is optional — an api built from `Group.make` and `HttpApiBuilder` directly never meets them — and each is generic in what an application owns: its viewer, its transaction boundary, its cache, its database's errors.
+
+### The flat contract
+
+A _flat_ contract is one whose list inputs are one struct the rest of the application consumes directly — `{ limit, offset, status, sort }` — and whose write payloads are flat command inputs rather than the JSON:API envelope. `FlatQuery` is the grammar such a struct is built from (bounded pagination with decoding defaults, the `?sort=` string in both wire spellings, a `filter[ids]` list, a slug attribute), `Query.flatList` puts it on the wire, and `Group.flat` / `Group.flatReadOnly` derive the standard endpoint set from it:
+
+```ts
+import { FlatQuery, Group, Include, Resource } from "@thomasfosterau/effect-jsonapi";
+
+const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) });
+//    { offset: 0, limit: 50, sort?: SortField[], q?: string } once decoded
+
+const { group: peopleGroup, listQuery: peopleListQuery } = Group.flat({
+  resource: Person,
+  list: ListPeople,
+  filters: ["q"], // ?filter[q]= on the wire, `q` once decoded
+  include: Include.make(Person, { birthPlace: Place }),
+  create: CreatePerson,
+  update: UpdatePerson, // carries `id`; a mismatch with `:id` is the 409
+});
+// GET /people        → 200 collection, ?page[offset]= ?page[limit]= ?filter[q]= ?include=
+// GET /people/:id    → 200 document,   ?include=
+// POST /people       → 201, PATCH /people/:id → 200 (declares 409), DELETE /people/:id → 204
+```
+
+The documents the endpoints declare are the **wire** form of the resource (`Document.wire`: string links, since the assembler stringifies every `URL` it is handed), and the `listQuery` handed back beside the group is what the collection handler spells its pagination links from — the same schema the endpoint decodes, so a link's query and a request's query cannot drift. `Endpoint.flatRelated` is the §7.4 related-resource endpoint in the same style, for a longhand group.
+
+### The error seam
+
+`ServerErrors` holds the catalogue an operation fails with (`NotFound`, `Unauthorized`, `Forbidden`, `Redirect`, `HttpError`, `ValidationFailure`), the `JsonapiError` carrier for a one-off, and `fromTaggedError`, which maps any of them — and any `ApiError.make` class, `ApiError.Conflict` and the package's own include / sort errors included — to its error document. `respond` wraps a handler with it:
+
+```ts
+import { Option } from "effect";
+import { ServerErrors } from "@thomasfosterau/effect-jsonapi";
+
+const boundary = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  ServerErrors.respond(effect, {
+    // the arms only the application can recognise — a driver's unique violation, say
+    materialise: (cause) =>
+      isUniqueViolation(cause)
+        ? Option.some(
+            new ServerErrors.JsonapiError({
+              status: 409,
+              errors: [{ status: "409", code: "conflict" }],
+            }),
+          )
+        : Option.none(),
+  });
+// NotFound → 404 not-found · Forbidden → 403 auth.forbidden · ApiError.Conflict → 409 conflict
+// anything unmapped → logged, then an opaque 500 `internal`
+```
+
+### The negotiation verdict
+
+An api on bare resource URLs shared with its pages decides, per request and before any routing, whether `/people/1` answers a page or a document. `Negotiation.make({ api })` derives the route table from every endpoint the api declares and answers that from the request line and headers alone, so a web front door and the api it forwards to share one verdict:
+
+```ts
+import { Negotiation } from "@thomasfosterau/effect-jsonapi";
+
+const { isApiPath, negotiate } = Negotiation.make({ api: Api });
+
+// in the framework hook:
+const verdict = negotiate(request);
+if (verdict.error) return Negotiation.errorResponse(verdict.error); // §5: 406 / 415
+if (verdict.dispatch) return apiHandler(Negotiation.requestForRouter(request), context);
+// otherwise render the page; `verdict.representation` is the cache-key token
+```
+
+A read dispatches when a clean JSON:API instance wins `Accept`; a write when its `Content-Type` is the JSON:API media type; a browser navigation, an `application/json` client and a bare `*/*` all fall through. Pair it with `Middleware.layerHostNegotiated` on the api side, which leaves the host the single negotiating authority.
+
+### The assembler, the handlers and the registry
+
+`Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set. `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
+
+```ts
+import { Assemble, Registry, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+
+const peopleFamily = {
+  group: "people",
+  handlers: ResourceHandlers.make({
+    segment: "people",
+    listQuery: peopleListQuery,                    // the family's own list query, for the links
+    linkBase,                                      // Effect<string>: the absolute origin
+    viewer,                                        // Effect<User | null>: the request's viewer
+    capabilities: Assemble.roleCapabilities((user) => user?.role === "admin"),
+    transact,                                      // the boundary every write runs inside
+    cache,                                         // read-through on get, write-through on writes
+    include: { includable: PERSON_INCLUDE.paths, targets },
+    ops: { list, get, create, update, delete },    // the application's Effect-native operations
+  }),
+} satisfies Registry.FamilyFor<typeof peopleGroup>  // every handler's success channel checked
+                                                    // against its endpoint's declared document
+
+const { handler } = Registry.webHandler(Api, [peopleFamily, contestsFamily], {
+  respond: boundary,
+})
+// (request: Request, context: Context<User | Database | …>) => Promise<Response>
+```
+
 ## Query parameters
 
 | Family | Wire form | Decoded form |
@@ -1402,7 +1553,7 @@ The decode is genuinely best-effort: a non-conforming body degrades to `Option.n
 | `page[*]` | `?page[offset]=0&page[limit]=10` | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom) |
 | `filter[*]` | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](./docs/filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
 
-Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar — unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry `source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`). HttpApi decodes a request with `errors: "first"`, so a query yields one error object — except the `filter` family, whose codec reports every offending key together.
+Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar — unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry `source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`) — and, where the schema publishes what it would have accepted, the legal vocabulary as `meta`: a rejected `include` path carries `meta.includablePaths` (the endpoint's whole supported set, as `ApiError.UnsupportedIncludePath` does) and an unknown `sort` field `meta.sortableFields`, so a caller that guessed wrong needs no second request. HttpApi decodes a request with `errors: "first"`, so a query yields one error object — except the `filter` family, whose codec reports every offending key together.
 
 Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](./docs/filter-grammar.md) §2). Encoding always emits the single comma form.
 

@@ -25,6 +25,7 @@ const DIST = path.join(ROOT, "dist");
 const SCHEMA_TIER = [
   "Document.ts",
   "Filter.ts",
+  "FlatQuery.ts",
   "Include.ts",
   "Relationship.ts",
   "Resource.ts",
@@ -32,6 +33,7 @@ const SCHEMA_TIER = [
   "internal/filter.ts",
   "internal/media.ts",
   "internal/operators.ts",
+  "internal/schemaExt.ts",
   "schema.ts",
 ];
 
@@ -52,9 +54,16 @@ const SCHEMA_TIER = [
  * endpoints from an `HttpApi` value, so it is unambiguously HTTP-tier; its
  * internals come with it (`internal/conformance/report.ts` imports nothing but
  * types, but it is reachable only from the tier that does).
+ *
+ * The server skeleton (`Assemble`, `Negotiation`, `Registry`,
+ * `ResourceHandlers`, `ServerErrors`) is HTTP-tier by construction: it builds
+ * on `Handlers`, `Query`, `Middleware` and `HttpApiBuilder`. `FlatQuery` is
+ * the one server-skeleton module that is pure schema, and so is in the
+ * schema tier with the `internal/schemaExt.ts` helpers it re-exports.
  */
 const HTTP_TIER = [
   "ApiError.ts",
+  "Assemble.ts",
   "Atomic.ts",
   "Client.ts",
   "Conformance.ts",
@@ -65,13 +74,18 @@ const HTTP_TIER = [
   "Lid.ts",
   "MediaType.ts",
   "Middleware.ts",
+  "Negotiation.ts",
   "Query.ts",
+  "Registry.ts",
+  "ResourceHandlers.ts",
+  "ServerErrors.ts",
   "internal/canonical.ts",
   "internal/codecs.ts",
   "internal/conformance/core.ts",
   "internal/conformance/profile.ts",
   "internal/conformance/report.ts",
   "internal/conformance/spec.ts",
+  "internal/errorMeta.ts",
   "internal/httpMedia.ts",
 ];
 
@@ -220,12 +234,14 @@ describe("root entry point", () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
     expect(Object.keys(index).sort()).toEqual([
       "ApiError",
+      "Assemble",
       "Atomic",
       "Client",
       "Conformance",
       "Document",
       "Endpoint",
       "Filter",
+      "FlatQuery",
       "Group",
       "Handlers",
       "Idempotency",
@@ -234,9 +250,13 @@ describe("root entry point", () => {
       "MEDIA_TYPE",
       "MediaType",
       "Middleware",
+      "Negotiation",
       "Query",
+      "Registry",
       "Relationship",
       "Resource",
+      "ResourceHandlers",
+      "ServerErrors",
       "Sort",
     ]);
   });

@@ -65,6 +65,14 @@ export * as Document from "./Document.js";
 export * as Filter from "./Filter.js";
 
 /**
+ * The flat list-input grammar — pure schema, so a client-safe models package
+ * can declare its list inputs with it.
+ *
+ * @since 0.16.0
+ */
+export * as FlatQuery from "./FlatQuery.js";
+
+/**
  * Declared `?include=` surfaces (`Include.make`, `Include.nested`) — one nested
  * declaration the accepted-path whitelist and the `included` union both
  * project from. Schema-tier because it derives both from resource definitions

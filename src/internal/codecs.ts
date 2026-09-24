@@ -5,6 +5,7 @@
  */
 import { Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
+import { errorMeta } from "./errorMeta.js";
 
 /**
  * A comma-separated list codec: `"a,b,c"` ↔ `["a", "b", "c"]`.
@@ -117,7 +118,11 @@ export interface Sort<Field extends string> extends Schema.decodeTo<
  */
 export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => {
   const item = Schema.Struct({
-    field: Schema.Literals(fields as ReadonlyArray<Field>),
+    // The sortable set rides on the literal schema as error `meta`, so the 400
+    // for an unknown field carries `meta.sortableFields` (see `errorMeta`).
+    field: Schema.Literals(fields as ReadonlyArray<Field>).annotate(
+      errorMeta({ sortableFields: fields }),
+    ),
     direction: Schema.Literals(["asc", "desc"] as ["asc", "desc"]),
   });
   type Encoded = ReadonlyArray<typeof item.Encoded>;
