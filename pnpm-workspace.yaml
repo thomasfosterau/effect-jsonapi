@@ -19,9 +19,11 @@
 # Versions are kept in lockstep with the consuming applications' catalogs
 # (website / gardeneria / preferenceflow) wherever the two overlap — effect,
 # vite-plus, the TypeScript 6/7 pair, @effect/tsgo, fallow — so the library
-# builds against exactly what they run. The only deliberate deviation is
+# builds against exactly what they run. Two deliberate deviations:
 # `vite-plus`, pinned one release ahead of the applications so that the
-# `oxlint` it carries is one `@effect/tsgo` 0.45 can patch (see both notes).
+# `oxlint` it carries is one `@effect/tsgo` 0.45 can patch (see both notes);
+# and `effect`, which tracks the `rc` dist-tag ahead of the applications'
+# lockstep (see that entry).
 packages:
   - "."
   - "examples/*"
@@ -52,9 +54,10 @@ catalog:
   "@effect/tsgo": 0.45.0
   "@mpsuesser/oxlint-plugin-effect": ^0.5.0
   "@types/node": ^26.4.1
-  # Ahead of the applications' rc.112 until their rc.115 lockstep lands
-  # (website #2024): rc.112 is below the published peer floor (see
-  # `catalogs.peers`), so the library cannot build against it.
+  # Deliberately tracks the `rc` dist-tag, ahead of the applications'
+  # lockstep, so the gate runs the version the Effect canary floats to. What
+  # consumers may resolve is the `catalogs.peers` range, whose floor is
+  # verified separately.
   effect: 4.0.0-rc.117
   effect-solutions: ^0.5.3
   fallow: 3.28.0

@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) imple
 npm install @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.113`). Node.js 20 or newer is required.
+`effect` is a peer dependency (`>=4.0.0-rc.113`). Node.js 22 or newer is required.
 
 ### Importing without the HTTP surface
 

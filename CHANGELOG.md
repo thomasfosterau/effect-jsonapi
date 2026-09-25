@@ -4,7 +4,7 @@
 
 ### Minor Changes
 
-- 78657c9: Raise the Effect peer dependency floor from `>=4.0.0-beta.104` to `>=4.0.0-rc.112`. This is a breaking change for consumers resolving Effect below the new floor, which was necessary because semver sorts `rc` versions above `beta` versions. The previous range allowed applications to land on a version that sibling libraries (effect-auth, legation) cannot co-install with.
+- 78657c9: Raise the Effect peer dependency floor from `>=4.0.0-beta.104` to `>=4.0.0-rc.113`. This is a breaking change for consumers resolving Effect below the new floor, which was necessary because semver sorts `rc` versions above `beta` versions. The previous range allowed applications to land on a version that sibling libraries (effect-auth, legation) cannot co-install with.
 - cbb1636: Add `Include` — declare a resource's `?include=` surface once
   
   Serving compound documents needs three things to agree: the whitelist of accepted dotted paths, the `included` union the success schema declares (`HttpApiBuilder` strips a resolved `included` the schema doesn't admit), and the advertised `include` parameter. Until now those were separate declarations over separate inputs, so they could drift.
@@ -83,7 +83,7 @@
   
   Effect `4.0.0-rc.113` renamed `SchemaTransformation.transformOrFail` to `SchemaTransformation.transformEffect`. The options are unchanged. The filter grammar (`Query.Filter`), the combined query schema's `filter[...]` routing (`Query.schema`) and the filter-literal codecs now call `transformEffect`. Decoding, encoding and error output do not change. Before this, every `effect` release from `rc.113` up was inside the declared range but failed to compile.
   
-  No Effect release has both names, so one range cannot cover `rc.112` and `rc.113+`. This release therefore publishes `>=4.0.0-rc.113`, still open at the top as the shared Effect-floor policy requires. It supersedes the `>=4.0.0-rc.112` floor in the other peer-floor entry of this release, which never reached npm. **This is breaking for consumers on `effect@4.0.0-rc.112`**: move Effect to `rc.113` or later (the applications' `rc.115` lockstep qualifies), or stay on `effect-jsonapi@0.14.x`.
+  No Effect release has both names, so one range cannot cover `rc.112` and `rc.113+`. This release therefore publishes `>=4.0.0-rc.113`, still open at the top as the shared Effect-floor policy requires. **This is breaking for consumers on `effect@4.0.0-rc.112`**: move Effect to `rc.113` or later, or stay on `effect-jsonapi@0.14.x`.
 - 4b443ef: **`Handlers.data` / `Handlers.collection` / `Handlers.linkage` accept a `jsonapi` option.**
   
   `Handlers.DocumentValue` declared an optional top-level `jsonapi?: JsonApiObjectValue` member, but no builder accepted or emitted it — the type promised a member the implementation could never produce, so the only way to attach the top-level `jsonapi` object to a built document was a cast (#103).
