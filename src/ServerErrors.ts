@@ -33,7 +33,7 @@
  * @since 0.16.0
  */
 import { Effect, Match, Option, Predicate, Schema } from "effect";
-import type * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/unstable/http";
 import * as ApiError from "./ApiError.js";
 import * as Document from "./Document.js";
@@ -211,6 +211,13 @@ export const pathToJsonPointer: (path: ReadonlyArray<PropertyKey>) => string = t
 const ATTRIBUTES_PREFIX: ReadonlyArray<PropertyKey> = ["data", "attributes"];
 
 /**
+ * Effect's default issue formatter. An issue node has no `toString` of its
+ * own — `String(issue)` renders `[object Object]` — so every `detail` drawn
+ * from a schema issue goes through this.
+ */
+const formatIssue = SchemaIssue.makeFormatterDefault();
+
+/**
  * Options of {@link schemaIssueToErrors}.
  *
  * @since 0.16.0
@@ -231,7 +238,9 @@ export interface SchemaIssueOptions {
 /**
  * One JSON:API error object per leaf of an Effect Schema issue tree:
  * `source.pointer` from the accumulated path (under `prefix`), `code` from
- * the leaf's `_tag`, `detail` from its formatted message.
+ * the leaf's `_tag`, `detail` from its message as Effect's default issue
+ * formatter (`SchemaIssue.makeFormatterDefault`) renders it — for a failed
+ * check, the check's own message.
  *
  * This is the seam for a decode a handler runs itself (a form body, a
  * command input); request-part decoding inside `HttpApi` is already rendered
@@ -245,8 +254,8 @@ export interface SchemaIssueOptions {
  * const Input = Schema.Struct({ name: Schema.String })
  * const failed = Schema.decodeUnknownEffect(Input)({ name: 42 }).pipe(Effect.flip, Effect.runSync)
  * const errors = ServerErrors.schemaIssueToErrors(failed.issue)
- * console.log(errors[0]?.code, errors[0]?.source)
- * // → InvalidType { pointer: "/data/attributes/name" }
+ * console.log(errors[0]?.code, errors[0]?.source, errors[0]?.detail)
+ * // → InvalidType { pointer: "/data/attributes/name" } Expected string
  * ```
  *
  * @since 0.16.0
@@ -258,12 +267,12 @@ export const schemaIssueToErrors = (
 ): ReadonlyArray<ErrorObject> => {
   const status = String(options?.status ?? 400);
   const prefix = options?.prefix ?? ATTRIBUTES_PREFIX;
-  return issueLeaves(issue).map(({ path, issue: leaf }) => {
+  return issueLeaves(issue).map(({ path, issue: leaf, describedBy }) => {
     const pointer = pathToJsonPointer([...prefix, ...path]);
     return {
       status,
       code: leaf._tag,
-      detail: String(leaf),
+      detail: formatIssue(describedBy),
       ...(pointer === "" ? {} : { source: { pointer } }),
     };
   });
@@ -310,7 +319,10 @@ const pathSegment = (segment: string | number | { readonly key: unknown }): Prop
 const validationIssueToError = (issue: unknown): ErrorObject => {
   const base = { status: "400", code: "validation", title: "Validation failed" } as const;
   return Option.match(decodeValidationIssue(issue), {
-    onNone: () => ({ ...base, detail: String(issue) }),
+    onNone: () => ({
+      ...base,
+      detail: SchemaIssue.isIssue(issue) ? formatIssue(issue) : String(issue),
+    }),
     onSome: (decoded) => {
       if (Predicate.isString(decoded)) return { ...base, detail: decoded };
       const pointer = pathToJsonPointer([

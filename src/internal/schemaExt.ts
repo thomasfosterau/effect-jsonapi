@@ -10,7 +10,7 @@
  * @internal
  */
 import type { SchemaIssue } from "effect";
-import { JsonPointer, Option } from "effect";
+import { JsonPointer, Option, Predicate } from "effect";
 
 /**
  * The value an update actually **supplies** for a clearable, tri-state field
@@ -39,7 +39,24 @@ export const pathToJsonPointer = (path: ReadonlyArray<PropertyKey>): string =>
 export interface IssueLeaf {
   readonly path: ReadonlyArray<PropertyKey>;
   readonly issue: SchemaIssue.Issue;
+  /**
+   * The node a formatter renders this leaf's message from: the leaf itself,
+   * or the `Filter` directly wrapping it. A failed check's leaf is a bare
+   * `InvalidValue`; what the check expected — and any `message` annotation
+   * on it — lives on the `Filter`.
+   */
+  readonly describedBy: SchemaIssue.Issue;
 }
+
+/**
+ * A failed check's leaf is a bare `InvalidValue` directly under its `Filter`;
+ * the check's message is the `Filter`'s. Any other leaf describes itself.
+ */
+const describedBy = (
+  leaf: SchemaIssue.Issue,
+  filter: Option.Option<SchemaIssue.Filter>,
+): SchemaIssue.Issue =>
+  Predicate.isTagged(leaf, "InvalidValue") ? Option.getOrElse(filter, () => leaf) : leaf;
 
 /**
  * Flattens an Effect Schema issue tree to its leaves, accumulating every
@@ -47,12 +64,18 @@ export interface IssueLeaf {
  *
  * `Pointer` extends the path and recurses; `Composite` and a non-empty
  * `AnyOf` recurse into each child at the same path (one leaf per rejected
- * union member); `Filter` and `Encoding` recurse into their inner issue; an
- * empty `AnyOf` (a literal-union no-match) and every other node is a leaf.
+ * union member); `Filter` and `Encoding` recurse into their inner issue (a
+ * `Filter` directly over an `InvalidValue` becomes that leaf's
+ * `describedBy`); an empty `AnyOf` (a literal-union no-match) and every other
+ * node is a leaf.
  */
 export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> => {
   const leaves: Array<IssueLeaf> = [];
-  const walk = (current: SchemaIssue.Issue, path: ReadonlyArray<PropertyKey>): void => {
+  const walk = (
+    current: SchemaIssue.Issue,
+    path: ReadonlyArray<PropertyKey>,
+    filter: Option.Option<SchemaIssue.Filter> = Option.none(),
+  ): void => {
     switch (current._tag) {
       case "Pointer":
         walk(current.issue, [...path, ...current.path]);
@@ -62,17 +85,19 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
         return;
       case "AnyOf":
         if (current.issues.length === 0) {
-          leaves.push({ path, issue: current });
+          leaves.push({ path, issue: current, describedBy: current });
           return;
         }
         for (const child of current.issues) walk(child, path);
         return;
       case "Filter":
+        walk(current.issue, path, Option.some(current));
+        return;
       case "Encoding":
         walk(current.issue, path);
         return;
       default:
-        leaves.push({ path, issue: current });
+        leaves.push({ path, issue: current, describedBy: describedBy(current, filter) });
     }
   };
   walk(issue, []);

@@ -35,9 +35,13 @@ describe("pathToJsonPointer", () => {
 });
 
 /** Decode through a schema and return the raised issue tree. */
-const issueFor = <S extends Schema.Top>(schema: S, input: unknown): SchemaIssue.Issue => {
+const issueFor = <S extends Schema.Top>(
+  schema: S,
+  input: unknown,
+  options?: { readonly errors: "first" | "all" },
+): SchemaIssue.Issue => {
   const exit = Effect.runSyncExit(
-    Schema.decodeUnknownEffect(schema as unknown as Schema.Codec<S["Type"]>)(input),
+    Schema.decodeUnknownEffect(schema as unknown as Schema.Codec<S["Type"]>)(input, options),
   );
   if (Exit.isSuccess(exit)) throw new Error("expected schema to fail");
   const error = Cause.findErrorOption(exit.cause);
@@ -126,6 +130,61 @@ describe("schemaIssueToErrors", () => {
     const errors = ServerErrors.schemaIssueToErrors(encoding);
     expect(errors).toHaveLength(1);
     expect(errors[0]?.code).toBe("InvalidType");
+  });
+
+  it("renders each leaf's `detail` with Effect's default issue formatter", () => {
+    const schema = Schema.Struct({
+      name: Schema.String,
+      seats: Schema.Number,
+      slug: Schema.String.check(Schema.isMinLength(3)),
+      handle: Schema.String.check(
+        Schema.makeFilter((s) => s.startsWith("@"), {
+          identifier: "Handle",
+          title: "handle",
+          description: "a string starting with @",
+          message: "Handles start with @",
+        }),
+      ),
+      kind: Schema.Literals(["a", "b"]),
+    });
+    const errors = ServerErrors.schemaIssueToErrors(
+      issueFor(schema, { seats: "four", slug: "ab", handle: "x", kind: "c" }, { errors: "all" }),
+      { status: 422 },
+    );
+    // An issue node has no `toString` of its own: `String(leaf)` renders
+    // `[object Object]`, which the length-only assertion above accepted.
+    expect(errors).toEqual([
+      {
+        status: "422",
+        code: "MissingKey",
+        detail: "Missing key",
+        source: { pointer: "/data/attributes/name" },
+      },
+      {
+        status: "422",
+        code: "InvalidType",
+        detail: "Expected number",
+        source: { pointer: "/data/attributes/seats" },
+      },
+      {
+        status: "422",
+        code: "InvalidValue",
+        detail: "Expected a value with a length of at least 3",
+        source: { pointer: "/data/attributes/slug" },
+      },
+      {
+        status: "422",
+        code: "InvalidValue",
+        detail: "Handles start with @",
+        source: { pointer: "/data/attributes/handle" },
+      },
+      {
+        status: "422",
+        code: "AnyOf",
+        detail: 'Expected "a" | "b"',
+        source: { pointer: "/data/attributes/kind" },
+      },
+    ]);
   });
 
   it("emits one error per branch for a non-empty AnyOf, one leaf for an empty one", () => {
@@ -248,6 +307,19 @@ describe("fromTaggedError", () => {
         source: { pointer: "/data/attributes" },
       },
       { status: "400", code: "validation", title: "Validation failed", detail: "42" },
+    ]);
+  });
+
+  it("formats a schema issue handed to ValidationFailure rather than stringifying it", () => {
+    const issue = issueFor(Schema.Struct({ name: Schema.String }), {});
+    const error = mapped(new ServerErrors.ValidationFailure({ issues: [issue] }));
+    expect(error.errors).toEqual([
+      {
+        status: "400",
+        code: "validation",
+        title: "Validation failed",
+        detail: 'Missing key\n  at ["name"]',
+      },
     ]);
   });
 
