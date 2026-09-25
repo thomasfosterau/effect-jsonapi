@@ -111,6 +111,12 @@ export class HttpError extends Schema.TaggedError<HttpError>()("HttpError", {
  * `/data/attributes`). Answered as one `400 validation` error object per
  * issue.
  *
+ * An Effect `SchemaIssue` passed as an issue is rendered with Effect's
+ * default formatter as one error object, with no `source` and a multi-line
+ * `detail`: each leaf's message, followed by an `at <path>` line when it has
+ * a path. For one error object per leaf, each with its own
+ * `source.pointer`, use {@link schemaIssueToErrors} instead.
+ *
  * @since 0.16.0
  * @category catalogue
  */
