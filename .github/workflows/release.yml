@@ -25,6 +25,23 @@ jobs:
       contents: write # push the version commit/tag and the "Version Packages" PR branch
       pull-requests: write # open/update the "Version Packages" PR
       id-token: write # OIDC: prove this workflow's identity to npm (no token needed)
+    env:
+      # pnpm 11 defaults `verify-deps-before-run` to `install`: before any
+      # `pnpm run` / `pnpm exec` (the setup action's `pnpm run prepare`, then
+      # `pnpm run version` / `pnpm run release`) it compares node_modules with
+      # the manifests and, if a manifest looks newer than the last install,
+      # re-installs WITH lifecycle scripts, ignoring the setup action's
+      # `--ignore-scripts`. That re-install runs every `allowBuilds`
+      # dependency's build script (`esbuild`, `fallow`, `msgpackr-extract`)
+      # inside this job, which holds `id-token: write`. It triggers whenever a
+      # manifest's mtime moves after the install, e.g. a `git checkout` /
+      # `git reset --hard` by the Changesets action before `pnpm run version`.
+      # Set here rather than in `.github/actions/setup` because that action
+      # is shared with CI and the canary, which keep the default (a job-level
+      # `env` reaches the composite action's steps too). pnpm 11 reads only
+      # the `pnpm_config_*` spelling for this setting;
+      # `npm_config_verify_deps_before_run` is ignored.
+      pnpm_config_verify_deps_before_run: "false"
     steps:
       - name: Checkout
         # The Changesets action pushes the version branch, so it needs the
@@ -33,7 +50,9 @@ jobs:
 
       # Installs with --ignore-scripts (dependency install scripts never run in
       # the privileged publish job — the Shai-Hulud vector) and then runs only
-      # the repository's own `prepare` script; see the action's header.
+      # the repository's own `prepare` script; see the action's header. That
+      # only holds because `pnpm_config_verify_deps_before_run` is off for
+      # this job (see the job `env` above).
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
@@ -43,15 +62,24 @@ jobs:
       # When changesets are pending, this opens/updates a "Version Packages" PR
       # (via `pnpm run version`). Once that PR is merged (no changesets remain),
       # it runs `pnpm run release`, which publishes with `pnpm publish` — npm
-      # OIDC trusted publishing (there is no NPM_TOKEN to steal; provenance is
-      # attached automatically) — and then `changeset tag`. The action parses
-      # the "New tag:" output, pushes the tags and creates the GitHub releases.
+      # OIDC trusted publishing (there is no NPM_TOKEN to steal) — and then
+      # `changeset tag`. The action parses the "New tag:" output, pushes the
+      # tags and creates the GitHub releases.
       #
-      # `pnpm publish`, not `npm publish`: pnpm 11 supports trusted publishing
-      # (it mints the OIDC token and the provenance statement itself), and it
-      # is what rewrites the `catalog:peers` specifiers in package.json into
-      # the peer ranges consumers actually see — npm would publish the literal
-      # `catalog:` protocol.
+      # `pnpm publish`, not `npm publish`: pnpm 11 performs trusted publishing
+      # itself (it mints the OIDC token; it no longer delegates to the npm
+      # CLI, so npm is never upgraded here), and it is what rewrites the
+      # `catalog:peers` specifiers in package.json into the peer ranges
+      # consumers actually see — npm would publish the literal `catalog:`
+      # protocol.
+      #
+      # Provenance: pnpm 11 takes settings like `provenance` only from
+      # `pnpm_config_*` (an `NPM_CONFIG_PROVENANCE` would be ignored), and none
+      # is set here. Left unset, pnpm attaches provenance by itself only when
+      # the OIDC token reports a public repository AND the registry reports
+      # the package as public; while this repository is private it skips it
+      # with a warning (ERR_PNPM_PROVENANCE_INSUFFICIENT_INFORMATION). Forcing
+      # it on would make npm reject a publish from a private repo.
       #
       # v2 of the action pairs with Changesets CLI v3 (`@changesets/cli` in
       # devDependencies) and renamed its inputs from v1's `version` / `publish`
@@ -65,4 +93,3 @@ jobs:
           pr-title: "chore: version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_CONFIG_PROVENANCE: "true"
