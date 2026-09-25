@@ -47,7 +47,7 @@
   "scripts": {
     "prepare": "vp config && effect-tsgo patch --typescript --oxlint",
     "changeset": "changeset",
-    "version": "changeset version && pnpm install --lockfile-only",
+    "version": "changeset version && vp fmt && pnpm install --lockfile-only",
     "release": "pnpm publish --access public --no-git-checks && changeset tag",
     "prepublishOnly": "vp run build",
     "fallow": "fallow --summary",
