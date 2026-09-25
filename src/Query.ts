@@ -1351,7 +1351,7 @@ export const Filter = <R extends Any>(resource: R): Filter<R> => {
   return from.pipe(
     Schema.decodeTo(
       AstSchema,
-      SchemaTransformation.transformOrFail<
+      SchemaTransformation.transformEffect<
         Node,
         { readonly [key: string]: string | ReadonlyArray<string> }
       >({
@@ -1681,7 +1681,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
           })
         : // `filter[...]` keys are routed to the grammar ahead of the one-level
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
-          SchemaTransformation.transformOrFail<Values, Values>({
+          SchemaTransformation.transformEffect<Values, Values>({
             decode: (flatValues, parseOptions) => {
               const others: Record<string, unknown> = {};
               const filterKeys: Record<string, unknown> = {};

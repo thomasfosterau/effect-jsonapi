@@ -52,7 +52,10 @@ catalog:
   "@effect/tsgo": 0.45.0
   "@mpsuesser/oxlint-plugin-effect": ^0.5.0
   "@types/node": ^26.4.1
-  effect: 4.0.0-rc.112
+  # Ahead of the applications' rc.112 until their rc.115 lockstep lands
+  # (website #2024): rc.112 is below the published peer floor (see
+  # `catalogs.peers`), so the library cannot build against it.
+  effect: 4.0.0-rc.117
   effect-solutions: ^0.5.3
   fallow: 3.28.0
   # The runtime `@effect/docgen` executes examples under.
@@ -79,12 +82,18 @@ catalog:
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.0-rc.112` peer would reject a consumer on rc.115). `pnpm publish`
+# `4.0.0-rc.117` peer would reject a consumer on rc.115). `pnpm publish`
 # replaces `catalog:peers` with these ranges in the published manifest — which
 # is why the release publishes with pnpm, not npm.
+#
+# The `effect` floor is the oldest release the sources compile against, open
+# at the top per the shared Effect-floor policy (#115). rc.113 renamed
+# `SchemaTransformation.transformOrFail` to `transformEffect` with no overlap
+# release, so rc.112 and rc.113+ cannot both be admitted (#171). Raising the
+# floor means re-running the gate against the new floor, not only the pin.
 catalogs:
   peers:
-    effect: ">=4.0.0-rc.112"
+    effect: ">=4.0.0-rc.113"
 
 overrides:
   vite: "catalog:"

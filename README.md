@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) imple
 npm install @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-beta.104`). Node.js 20 or newer is required.
+`effect` is a peer dependency (`>=4.0.0-rc.113`). Node.js 20 or newer is required.
 
 ### Importing without the HTTP surface
 
@@ -47,7 +47,7 @@ import { HttpApi } from "effect/unstable/httpapi";
 import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
 ```
 
-> **Status**: built against `effect@>=4.0.0-beta.104` (the v4 beta). The `effect/unstable/httpapi` surface may shift between betas.
+> **Status**: built against `effect@>=4.0.0-rc.113` (the v4 release candidates). The `effect/unstable/httpapi` surface may shift between prereleases.
 
 ## Contents
 
