@@ -2176,7 +2176,7 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
   Schema.String.pipe(
     Schema.decodeTo(
       target,
-      SchemaTransformation.transformOrFail<unknown, string>({
+      SchemaTransformation.transformEffect<unknown, string>({
         decode: (input, options) => {
           const value = parseScalar(kind, input);
           return value === undefined
