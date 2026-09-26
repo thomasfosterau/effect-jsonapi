@@ -138,17 +138,21 @@ describe("schemaIssueToErrors", () => {
       seats: Schema.Number,
       slug: Schema.String.check(Schema.isMinLength(3)),
       handle: Schema.String.check(
-        Schema.makeFilter((s) => s.startsWith("@"), {
-          identifier: "Handle",
-          title: "handle",
-          description: "a string starting with @",
-          message: "Handles start with @",
-        }),
+        // oxlint-disable-next-line effect/require-filter-metadata -- only the annotation under test
+        Schema.makeFilter((s) => s.startsWith("@"), { message: "Handles start with @" }),
+      ),
+      code: Schema.String.check(
+        // oxlint-disable-next-line effect/require-filter-metadata -- only the annotation under test
+        Schema.makeFilter((s) => s.length === 4, { expected: "a four-character code" }),
       ),
       kind: Schema.Literals(["a", "b"]),
     });
     const errors = ServerErrors.schemaIssueToErrors(
-      issueFor(schema, { seats: "four", slug: "ab", handle: "x", kind: "c" }, { errors: "all" }),
+      issueFor(
+        schema,
+        { seats: "four", slug: "ab", handle: "x", code: "abc", kind: "c" },
+        { errors: "all" },
+      ),
       { status: 422 },
     );
     // An issue node has no `toString` of its own: `String(leaf)` renders
@@ -180,10 +184,57 @@ describe("schemaIssueToErrors", () => {
       },
       {
         status: "422",
+        code: "InvalidValue",
+        detail: "Expected a four-character code",
+        source: { pointer: "/data/attributes/code" },
+      },
+      {
+        status: "422",
         code: "AnyOf",
         detail: 'Expected "a" | "b"',
         source: { pointer: "/data/attributes/kind" },
       },
+    ]);
+  });
+
+  it("takes a struct-level check's message for the leaves it points at", () => {
+    const Passwords = Schema.Struct({ password: Schema.String, confirm: Schema.String });
+    const bare = new SchemaIssue.InvalidValue(undefined);
+    const own = new SchemaIssue.InvalidValue({ message: "Repeat the password" });
+    const matching = (issue: Schema.FilterIssue | ReadonlyArray<Schema.FilterIssue>) =>
+      Passwords.check(
+        // oxlint-disable-next-line effect/require-filter-metadata -- only the annotation under test
+        Schema.makeFilter((value) => value.password === value.confirm || issue, {
+          message: "Passwords must match",
+        }),
+      );
+    const input = { password: "a", confirm: "b" };
+    const detailsFor = (schema: Schema.Top) =>
+      ServerErrors.schemaIssueToErrors(issueFor(schema, input)).map((e) => [e.source, e.detail]);
+
+    // A pointed issue: Effect's own formatter renders the check's message too.
+    const pointed = matching({ path: ["confirm"], issue: bare });
+    expect(SchemaIssue.makeFormatterDefault()(issueFor(pointed, input))).toBe(
+      "Passwords must match",
+    );
+    expect(detailsFor(pointed)).toEqual([
+      [{ pointer: "/data/attributes/confirm" }, "Passwords must match"],
+    ]);
+    // An array of them: one error per pointed leaf, each with the check's message.
+    expect(
+      detailsFor(
+        matching([
+          { path: ["password"], issue: bare },
+          { path: ["confirm"], issue: bare },
+        ]),
+      ),
+    ).toEqual([
+      [{ pointer: "/data/attributes/password" }, "Passwords must match"],
+      [{ pointer: "/data/attributes/confirm" }, "Passwords must match"],
+    ]);
+    // A leaf carrying its own message keeps it.
+    expect(detailsFor(matching({ path: ["confirm"], issue: own }))).toEqual([
+      [{ pointer: "/data/attributes/confirm" }, "Repeat the password"],
     ]);
   });
 
