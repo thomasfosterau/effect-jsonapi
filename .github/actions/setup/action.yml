@@ -21,6 +21,15 @@ inputs:
     description: The Node.js version to set up.
     required: false
     default: 22.x
+  run-prepare:
+    description: >-
+      "false" skips the repository's `prepare` step (git hooks + the
+      effect-tsgo patch). Only the Release job sets it, because it holds
+      `id-token: write` and its build emits a byte-identical `dist/` on the
+      unpatched toolchain; CI and the canary keep the default ("true"), since
+      every type/lint gate runs on the patched binaries.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -41,8 +50,10 @@ runs:
       shell: bash
       run: pnpm install --frozen-lockfile --ignore-scripts
 
-    # The one lifecycle script that does run: ours. See the header.
+    # The one lifecycle script that does run: ours. See the header. Skipped
+    # when the caller passes `run-prepare: "false"` (the Release job).
     - name: Patch the toolchain (repository `prepare` script)
+      if: inputs.run-prepare == 'true'
       shell: bash
       run: pnpm run prepare
 
