@@ -7,8 +7,8 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Option, Schema } from "effect";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import { HttpApi } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
 import * as Client from "./Client.js";
 import * as Endpoint from "./Endpoint.js";

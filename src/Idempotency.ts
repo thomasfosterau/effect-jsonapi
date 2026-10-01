@@ -53,11 +53,11 @@
  * @since 0.15.0
  */
 import { Effect, Layer, Schema, SchemaTransformation } from "effect";
-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
-import type * as ServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import type { HttpApiEndpoint } from "effect/unstable/httpapi";
-import { HttpApiMiddleware } from "effect/unstable/httpapi";
+import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import type * as ServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import type { HttpApiEndpoint } from "effect/http-api";
+import { HttpApiMiddleware } from "effect/http-api";
 import { make as makeApiError } from "./ApiError.js";
 import type { JsonApiObject } from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";

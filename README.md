@@ -12,11 +12,11 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) imple
 npm install @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.113`). Node.js 22 or newer is required.
+`effect` is a peer dependency (`>=4.0.0-rc.118`). Node.js 22 or newer is required.
 
 ### Importing without the HTTP surface
 
-The package root exports everything and is the import you want by default. It reaches `effect/unstable/httpapi`, because the error classes, endpoints, groups, media type combinators and middleware are built on Effect's `HttpApi`.
+The package root exports everything and is the import you want by default. It reaches `effect/http-api`, because the error classes, endpoints, groups, media type combinators and middleware are built on Effect's `HttpApi`.
 
 Consumers that only want JSON:API's **wire types without the server** — a client decoding documents, a loader mapping them into something else, a CLI or code generator producing them — can import the same modules from a schema-only subpath whose only dependency is `effect` itself:
 
@@ -26,7 +26,7 @@ import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema";
 
 `/schema` re-exports `Client`, `Document`, `Filter`, `Relationship`, `Resource`, `Sort` and `MEDIA_TYPE` — the modules whose import graph is `effect` alone. Error _documents_ are covered, since `Document.ErrorDocument` and `Document.ErrorObject` are document schemas; it is `ApiError`'s error _classes_ that carry HTTP status and content-type annotations.
 
-This matters beyond bundle size. `effect/unstable/*` is pre-stable, so every unnecessary dependency on it is a version-compatibility surface that shifts between releases: tree-shaking may drop the code, but it cannot drop the dependency — only an entry point can.
+This matters beyond bundle size. `effect/http` and `effect/http-api` are still release-candidate APIs, so every unnecessary dependency on them is a version-compatibility surface that shifts between releases: tree-shaking may drop the code, but it cannot drop the dependency — only an entry point can.
 
 The tier is derived from the real import graph and pinned by a test, not from what each module looks like it ought to be. `Query`, `Handlers`, `Lid` and `Atomic` read as schema-only but are currently outside it: `Query.constrainInclude` fails with `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`, which are `HttpApi`-bound error classes, and the other three reach `Query`.
 
@@ -43,11 +43,11 @@ It is a packaging seam, not a second API. Every symbol is the same object under 
 
 ```ts
 import { Schema } from "effect";
-import { HttpApi } from "effect/unstable/httpapi";
+import { HttpApi } from "effect/http-api";
 import { Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
 ```
 
-> **Status**: built against `effect@>=4.0.0-rc.113` (the v4 release candidates). The `effect/unstable/httpapi` surface may shift between prereleases.
+> **Status**: built against `effect@>=4.0.0-rc.118` (the v4 release candidates). The `effect/http-api` surface may shift between prereleases.
 
 ## Contents
 
@@ -102,7 +102,7 @@ A complete read API — resource, error, endpoints, handlers, server — in one 
 
 ```ts
 import { Effect, Layer, Schema } from "effect";
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {
   ApiError,
   Endpoint,
@@ -1136,7 +1136,7 @@ JSON:API v1.1 specifies no idempotency mechanism. The header name and the three 
 
 ```ts
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
@@ -1216,7 +1216,7 @@ To serve it (with `@effect/platform-node`):
 ```ts
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
 import { Layer } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 
 HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),

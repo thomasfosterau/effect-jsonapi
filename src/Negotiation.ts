@@ -320,7 +320,7 @@ const wins = (entries: ReadonlyArray<AcceptEntry>, predicate: (entry: AcceptEntr
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { HttpApi } from "effect/http-api"
  * import { Endpoint, Group, MEDIA_TYPE, Negotiation, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })

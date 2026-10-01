@@ -33,7 +33,7 @@
  * @example
  * ```ts
  * import { Effect, Layer, Schema } from "effect"
- * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
  * import {
  *   Conformance,
  *   Endpoint,
@@ -81,16 +81,11 @@ import { Data, Effect, Layer } from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
-import {
-  HttpClient,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http";
-import type { Etag } from "effect/unstable/http";
-import type { HttpPlatform } from "effect/unstable/http/HttpPlatform";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
-import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
+import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import type { Etag } from "effect/http";
+import type { HttpPlatform } from "effect/http/HttpPlatform";
+import { HttpApiBuilder } from "effect/http-api";
+import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Core from "./internal/conformance/core.js";
 import * as ProfileRules from "./internal/conformance/profile.js";
 import * as ReportFormat from "./internal/conformance/report.js";
@@ -625,7 +620,7 @@ const execute = (
  * @example
  * ```ts
  * import { Effect, Layer, Schema } from "effect"
- * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
  * import {
  *   Conformance,
  *   Endpoint,
@@ -717,8 +712,8 @@ export const verify = Effect.fnUntraced(function* <
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { FetchHttpClient, HttpClient } from "effect/unstable/http"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { FetchHttpClient, HttpClient } from "effect/http"
+ * import { HttpApi } from "effect/http-api"
  * import { Conformance, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {

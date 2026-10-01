@@ -1,13 +1,13 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Layer, Result, Schema } from "effect";
-import { HttpRouter } from "effect/unstable/http";
+import { HttpRouter } from "effect/http";
 import {
   HttpApi,
   HttpApiBuilder,
   HttpApiEndpoint,
   HttpApiSchema,
   HttpApiTest,
-} from "effect/unstable/httpapi";
+} from "effect/http-api";
 import * as ApiError from "./ApiError.js";
 import * as Document from "./Document.js";
 import * as Endpoint from "./Endpoint.js";

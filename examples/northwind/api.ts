@@ -20,7 +20,7 @@
  *   suppliers — a single global catalog search
  */
 import { Schema } from "effect";
-import { HttpApi } from "effect/unstable/httpapi";
+import { HttpApi } from "effect/http-api";
 import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {
   CategoryNotFound,

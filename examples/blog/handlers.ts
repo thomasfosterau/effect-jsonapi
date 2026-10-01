@@ -13,7 +13,7 @@
  * schema on the way out.
  */
 import { Effect, Layer, Match } from "effect";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Handlers, Lid, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "./api.js";
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js";

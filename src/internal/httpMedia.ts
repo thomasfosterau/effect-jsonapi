@@ -2,7 +2,7 @@
  * The media type annotation helpers, as the package's own modules consume
  * them.
  *
- * These bind a schema to `effect/unstable/httpapi`, so they are kept out of
+ * These bind a schema to `effect/http-api`, so they are kept out of
  * `./media.js` — that module holds the media type *constants*, which the
  * schema-only entry point reaches and which must stay free of the HTTP
  * surface.
@@ -15,7 +15,7 @@
  * @internal
  */
 import type { Schema } from "effect";
-import { HttpApiSchema } from "effect/unstable/httpapi";
+import { HttpApiSchema } from "effect/http-api";
 import { ATOMIC_MEDIA_TYPE } from "./media.js";
 
 export { asJsonApi, asMediaType } from "../MediaType.js";

@@ -32,8 +32,8 @@
 import type { Schema } from "effect";
 import * as ApiError from "./ApiError.js";
 import type { NonEmptyReadonlyArray } from "effect/Array";
-import type { HttpApiEndpoint } from "effect/unstable/httpapi";
-import { HttpApiGroup } from "effect/unstable/httpapi";
+import type { HttpApiEndpoint } from "effect/http-api";
+import { HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import type * as Idempotency from "./Idempotency.js";
 import type { AnySurface } from "./Include.js";
@@ -49,7 +49,7 @@ import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js";
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { HttpApi } from "effect/http-api"
  * import { Endpoint, Group, Query, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
@@ -108,7 +108,7 @@ export const make: {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { HttpApi } from "effect/http-api"
  * import { ApiError, Group, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {

@@ -68,8 +68,8 @@
  * @example
  * ```ts
  * import { Effect, Option, Schema } from "effect"
- * import { FetchHttpClient } from "effect/unstable/http"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { FetchHttpClient } from "effect/http"
+ * import { HttpApi } from "effect/http-api"
  * import { Client, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
@@ -101,9 +101,9 @@
  * @since 0.1.0
  */
 import { Effect, Option, Schema } from "effect";
-import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
-import type { HttpApi, HttpApiGroup } from "effect/unstable/httpapi";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
+import type { HttpApi, HttpApiGroup } from "effect/http-api";
+import { HttpApiClient } from "effect/http-api";
 import type { JsonApiObject, Wire } from "./Document.js";
 import { ErrorDocument as ErrorDocumentSchema, ErrorObject } from "./Document.js";
 import type { Pair } from "./internal/canonical.js";
@@ -314,7 +314,7 @@ const isRelabellable = (header: string | undefined): boolean => {
  *
  * @example
  * ```ts
- * import { HttpClientRequest } from "effect/unstable/http"
+ * import { HttpClientRequest } from "effect/http"
  * import { Atomic, Client } from "@thomasfosterau/effect-jsonapi"
  *
  * const stamp = Client.jsonApiHeadersWith({ extensions: [Atomic.EXTENSION_URI] })
@@ -358,7 +358,7 @@ export const jsonApiHeadersWith = (
  *
  * @example
  * ```ts
- * import { HttpClientRequest } from "effect/unstable/http"
+ * import { HttpClientRequest } from "effect/http"
  * import { Client } from "@thomasfosterau/effect-jsonapi"
  *
  * const read = Client.jsonApiHeaders(HttpClientRequest.get("/articles/1"))
@@ -385,7 +385,7 @@ export const jsonApiHeaders: (
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { HttpClient } from "effect/unstable/http"
+ * import { HttpClient } from "effect/http"
  * import { Atomic, Client } from "@thomasfosterau/effect-jsonapi"
  *
  * const program = Effect.gen(function* () {
@@ -421,7 +421,7 @@ export const transformWith = (
  * @example
  * ```ts
  * import { Effect } from "effect"
- * import { HttpClient } from "effect/unstable/http"
+ * import { HttpClient } from "effect/http"
  * import { Client } from "@thomasfosterau/effect-jsonapi"
  *
  * const program = Effect.gen(function* () {
@@ -496,8 +496,8 @@ export interface MakeOptions extends NegotiationOptions {
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { FetchHttpClient } from "effect/unstable/http"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { FetchHttpClient } from "effect/http"
+ * import { HttpApi } from "effect/http-api"
  * import { Client, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {

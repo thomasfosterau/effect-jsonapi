@@ -36,7 +36,7 @@ catalog:
   # examples under `tsx`, hence that entry below. Drives TypeScript through the
   # JS API, so it sees the TS6 side of the split.
   "@effect/docgen": ^0.5.2
-  "@effect/language-service": ^0.87.2
+  "@effect/language-service": ^0.87.3
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
   # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
   # with an Effect-patched build matched by gitHead, so this pins in lockstep
@@ -58,7 +58,7 @@ catalog:
   # lockstep, so the gate runs the version the Effect canary floats to. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
   # verified separately.
-  effect: 4.0.0-rc.117
+  effect: 4.0.0-rc.118
   effect-solutions: ^0.5.3
   fallow: 3.30.0
   # The runtime `@effect/docgen` executes examples under.
@@ -85,18 +85,21 @@ catalog:
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.0-rc.117` peer would reject a consumer on rc.115). `pnpm publish`
+# `4.0.0-rc.118` peer would reject a consumer on rc.117). `pnpm publish`
 # replaces `catalog:peers` with these ranges in the published manifest — which
 # is why the release publishes with pnpm, not npm.
 #
 # The `effect` floor is the oldest release the sources compile against, open
 # at the top per the shared Effect-floor policy (#115). rc.113 renamed
 # `SchemaTransformation.transformOrFail` to `transformEffect` with no overlap
-# release, so rc.112 and rc.113+ cannot both be admitted (#171). Raising the
-# floor means re-running the gate against the new floor, not only the pin.
+# release, so rc.112 and rc.113+ cannot both be admitted (#171). rc.118 removed
+# every `effect/unstable/*` path with no compat export (`effect/unstable/httpapi`
+# became `effect/http-api`), so no earlier release resolves the emitted
+# declarations (#193). Raising the floor means re-running the gate against the
+# new floor, not only the pin.
 catalogs:
   peers:
-    effect: ">=4.0.0-rc.113"
+    effect: ">=4.0.0-rc.118"
 
 overrides:
   vite: "catalog:"
@@ -116,6 +119,12 @@ overrides:
   # ships the fix in range.
   "brace-expansion@2": ">=2.1.4"
   "js-yaml@3": ">=3.15.2"
+  # `@mpsuesser/oxlint-plugin-effect` (^0.5.0) declares a peer on an `effect`
+  # beta and ships no rc.118 build, so the singleton override above would force
+  # it onto rc.118. Pin the plugin's own `effect` to the beta it was built
+  # against (owner decision, website#2015). Remove this once the plugin ships an
+  # rc.118 build.
+  "@mpsuesser/oxlint-plugin-effect>effect": "4.0.0-beta.100"
 nodeLinker: hoisted
 allowBuilds:
   esbuild: true

@@ -2,7 +2,7 @@
  * JSON:API media type constants.
  *
  * Deliberately import-free: these constants are reachable from the
- * schema-only entry point, so binding them to `effect/unstable/httpapi` here
+ * schema-only entry point, so binding them to `effect/http-api` here
  * would put the HTTP surface back into that entry point's graph. The
  * annotation helpers that *do* need `HttpApiSchema` live in the public
  * {@link MediaType} module, re-exported for internal use from `./httpMedia.js`.

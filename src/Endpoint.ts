@@ -77,7 +77,7 @@
  * @since 0.1.0
  */
 import { Schema } from "effect";
-import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi";
+import { HttpApiEndpoint, HttpApiSchema } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument, wire } from "./Document.js";
 import type { WireSchema } from "./Document.js";
@@ -3034,7 +3034,7 @@ const pick = (config: Record<string, unknown>, key: string, fallback: unknown): 
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { HttpApi } from "effect/http-api"
  * import { ApiError, Endpoint, Group, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
@@ -3388,7 +3388,7 @@ export interface FlatDocumentOptions<Included extends Schema.Top> {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApiEndpoint } from "effect/unstable/httpapi"
+ * import { HttpApiEndpoint } from "effect/http-api"
  * import { Endpoint, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
@@ -3525,7 +3525,7 @@ export interface FlatRelatedOptions<Key extends string> {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApiGroup } from "effect/unstable/httpapi"
+ * import { HttpApiGroup } from "effect/http-api"
  * import { Endpoint, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } })

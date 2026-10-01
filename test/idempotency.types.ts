@@ -11,7 +11,7 @@
  * annotations are the assertions.
  */
 import { Schema } from "effect";
-import type { HttpApiGroup } from "effect/unstable/httpapi";
+import type { HttpApiGroup } from "effect/http-api";
 import { Endpoint, Group, Idempotency, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const Article = Resource.make("articles", {

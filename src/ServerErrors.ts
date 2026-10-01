@@ -34,7 +34,7 @@
  */
 import { Effect, Match, Option, Predicate, Schema } from "effect";
 import * as SchemaIssue from "effect/SchemaIssue";
-import { HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as Document from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
-import { HttpApi, OpenApi } from "effect/unstable/httpapi";
+import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Group from "./Group.js";

@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
-import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import { MEDIA_TYPE } from "./internal/media.js";

@@ -8,8 +8,8 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Layer, Schema } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";

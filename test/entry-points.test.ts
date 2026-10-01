@@ -38,7 +38,7 @@ const SCHEMA_TIER = [
 ];
 
 /**
- * The modules that resolve `effect/unstable/httpapi`, and so stay out.
+ * The modules that resolve `effect/http-api`, and so stay out.
  *
  * `ApiError`, `Client`, `Endpoint`, `Group`, `Idempotency`, `MediaType` and
  * `Middleware` bind JSON:API to Effect's `HttpApi` directly — `Client` since it
@@ -96,7 +96,7 @@ const HTTP_TIER = [
  * `export * as ns from "..."`, which is the only form either barrel uses — a
  * check built on it passes vacuously for exactly the files that matter here.
  *
- * Type-only imports count. A `import type ... from "effect/unstable/httpapi"`
+ * Type-only imports count. A `import type ... from "effect/http-api"`
  * emits no runtime edge, but it still makes the published `.d.ts` unresolvable
  * without the peer, which is the surface this test is protecting.
  */
@@ -185,11 +185,16 @@ const graphFrom = (entry: string, dir: string): Graph => {
   };
 };
 
-const unstable = (graph: Graph): ReadonlyArray<string> =>
+/** Whether `specifier` is part of Effect's HTTP surface: `effect/http` or `effect/http-api`, or a module under either. */
+const isHttpSurface = (specifier: string): boolean =>
+  specifier === "effect/http" ||
+  specifier.startsWith("effect/http/") ||
+  specifier === "effect/http-api" ||
+  specifier.startsWith("effect/http-api/");
+
+const httpSurface = (graph: Graph): ReadonlyArray<string> =>
   [...graph.externals.entries()]
-    .filter(
-      ([specifier]) => specifier === "effect/unstable" || specifier.startsWith("effect/unstable/"),
-    )
+    .filter(([specifier]) => isHttpSurface(specifier))
     .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`)
     .sort();
 
@@ -197,8 +202,8 @@ describe("schema-only entry point", () => {
   const schema = graphFrom(path.join(SRC, "schema.ts"), SRC);
   const root = graphFrom(path.join(SRC, "index.ts"), SRC);
 
-  it("resolves no unstable effect surface at all", () => {
-    expect(unstable(schema)).toEqual([]);
+  it("resolves no HTTP surface of effect at all", () => {
+    expect(httpSurface(schema)).toEqual([]);
   });
 
   it("declares `effect` as its only external", () => {
@@ -217,11 +222,11 @@ describe("schema-only entry point", () => {
    * The control. Without it every assertion above could pass because the
    * walker stopped finding imports rather than because the property holds —
    * which is precisely how this test would rot. The root barrel genuinely does
-   * reach `effect/unstable/httpapi`, so a walker that cannot see it here
+   * reach `effect/http-api`, so a walker that cannot see it here
    * cannot be trusted to see it above.
    */
-  it("is checked by a walker that does detect httpapi (control: the root barrel)", () => {
-    expect(unstable(root).join("\n")).toContain("effect/unstable/httpapi");
+  it("is checked by a walker that does detect http-api (control: the root barrel)", () => {
+    expect(httpSurface(root).join("\n")).toContain("effect/http-api");
     // Every tier module except the schema barrel itself: the two entry points
     // are peers, so the root reaches the modules, not the other entry point.
     const tierModules = SCHEMA_TIER.filter((module) => module !== "schema.ts");
@@ -304,8 +309,8 @@ describe("built artifact", () => {
   const built = path.join(DIST, "schema.js");
   const hasDist = fs.existsSync(built);
 
-  it.skipIf(!hasDist)("ships a schema entry point that resolves no unstable effect surface", () => {
-    expect(unstable(graphFrom(built, DIST))).toEqual([]);
+  it.skipIf(!hasDist)("ships a schema entry point that resolves no HTTP surface of effect", () => {
+    expect(httpSurface(graphFrom(built, DIST))).toEqual([]);
   });
 
   it.skipIf(!hasDist)("ships declarations for both entry points", () => {
@@ -317,15 +322,15 @@ describe("built artifact", () => {
   /**
    * The end-to-end statement, and the one that does not depend on the walker
    * above being right: resolve the published subpath through Node's real
-   * `exports` map, in a process where `effect/unstable/*` cannot be resolved
+   * `exports` map, in a process where `effect/http` and `effect/http-api` cannot be resolved
    * at all.
    */
-  const loadWithoutUnstable = (entry: string) =>
+  const loadWithoutHttp = (entry: string) =>
     spawnSync(
       process.execPath,
       [
         "--import",
-        fileURLToPath(new URL("./fixtures/forbid-unstable-peer.mjs", import.meta.url)),
+        fileURLToPath(new URL("./fixtures/forbid-http-peer.mjs", import.meta.url)),
         "--input-type=module",
         "-e",
         `await import(${JSON.stringify(entry)}); console.log("LOADED")`,
@@ -333,30 +338,33 @@ describe("built artifact", () => {
       { cwd: ROOT, encoding: "utf8" },
     );
 
-  it.skipIf(!hasDist)("loads the schema subpath with effect/unstable unresolvable", () => {
-    const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi/schema");
-    expect(`${result.stdout}${result.stderr}`).toContain("LOADED");
-    expect(result.status).toBe(0);
-  });
+  it.skipIf(!hasDist)(
+    "loads the schema subpath with effect/http and effect/http-api unresolvable",
+    () => {
+      const result = loadWithoutHttp("@thomasfosterau/effect-jsonapi/schema");
+      expect(`${result.stdout}${result.stderr}`).toContain("LOADED");
+      expect(result.status).toBe(0);
+    },
+  );
 
   /**
-   * Control again. If blocking `effect/unstable/*` does not stop the root
+   * Control again. If blocking `effect/http` and `effect/http-api` does not stop the root
    * barrel, it was never being blocked, and the assertion above proves
    * nothing.
    *
    * Which specifier surfaces is deliberately not pinned. The root graph
-   * carries several forbidden peers — `effect/unstable/httpapi`,
-   * `effect/unstable/http` and the `http/HttpServer*` submodules — and Node
+   * carries several forbidden peers — `effect/http-api`,
+   * `effect/http` and the `http/HttpServer*` submodules — and Node
    * links a module's dependencies concurrently, so the first rejection to
    * surface is a race between them. Asserting one exact specifier would pass
    * or fail on module ordering rather than on the property being protected.
-   * That the root barrel really does reach `effect/unstable/httpapi` is
+   * That the root barrel really does reach `effect/http-api` is
    * asserted deterministically by the static walker above.
    */
   it.skipIf(!hasDist)("is checked by hooks that do block the root barrel (control)", () => {
-    const result = loadWithoutUnstable("@thomasfosterau/effect-jsonapi");
+    const result = loadWithoutHttp("@thomasfosterau/effect-jsonapi");
     const output = `${result.stdout}${result.stderr}`;
-    expect(output).toContain("FORBIDDEN_PEER:effect/unstable/");
+    expect(output).toContain("FORBIDDEN_PEER:effect/http");
     expect(output).not.toContain("LOADED");
     expect(result.status).not.toBe(0);
   });

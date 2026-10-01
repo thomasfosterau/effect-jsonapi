@@ -13,8 +13,8 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Layer, Option, Schema } from "effect";
-import { HttpRouter } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpRouter } from "effect/http";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {
   ApiError,
   Client,

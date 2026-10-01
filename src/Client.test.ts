@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Option, Schema } from "effect";
-import {
-  HttpClient,
-  HttpClientError,
-  HttpClientRequest,
-  HttpClientResponse,
-} from "effect/unstable/http";
-import { HttpApi, HttpApiClient } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
+import { HttpApi, HttpApiClient } from "effect/http-api";
 import { Conflict, make as ApiErrorMake, toDocument } from "./ApiError.js";
 import { EXTENSION_URI } from "./Atomic.js";
 import {
