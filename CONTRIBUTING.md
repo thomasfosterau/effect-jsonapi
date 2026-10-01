@@ -1,6 +1,6 @@
 # Contributing to effect-jsonapi
 
-Thank you for your interest in contributing to `@thomasfosterau/effect-jsonapi`! Maintained by Thomas Foster, with a workflow meant to be approachable for both humans and coding agents. Conventions are in [AGENTS.md](AGENTS.md); this file is the setup, the commands and the checklists.
+Setup, commands and checklists for `@thomasfosterau/effect-jsonapi`; conventions are in [AGENTS.md](AGENTS.md).
 
 ## Development setup
 
@@ -20,17 +20,9 @@ Thank you for your interest in contributing to `@thomasfosterau/effect-jsonapi`!
 
    This also installs the Vite+ git hooks (`vp config`) and, through the root `prepare` script, swaps the native `tsc` and `oxlint` binaries for their Effect-patched builds (`effect-tsgo patch --typescript --oxlint`). Every gate below runs on those.
 
-3. Run the gates:
+3. Run the gates listed in [AGENTS.md → Verification](AGENTS.md#verification), in that order.
 
-   ```bash
-   vp check                 # format + lint
-   vp run check             # every type gate
-   vp run -r test:unit      # every test suite
-   vp run build             # dist/
-   vp run docgen            # every JSDoc @example, executed
-   ```
-
-In an agent session the committed SessionStart hook ([.claude/hooks/session-start.sh](.claude/hooks/session-start.sh)) does the install and links `vp`, `tsx` and `fallow` so they resolve from a non-interactive shell; the devcontainer's `postCreateCommand` invokes the same file.
+Agent sessions and the devcontainer are provisioned by the SessionStart hook; see [AGENTS.md → Agent sessions](AGENTS.md#agent-sessions).
 
 ## Development workflow
 
@@ -54,7 +46,7 @@ The repository is validated by the same commands in CI. Run them locally before 
 
 - TypeScript throughout, compiled under `tsconfig.base.json` — `strict`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, `erasableSyntaxOnly` — by the native TypeScript 7 compiler.
 - Formatting is enforced by oxfmt through `vp fmt`; the house style is oxfmt's defaults (semicolons, double quotes, trailing commas, print width 100, Markdown prose unwrapped). The pre-commit hook formats staged files; don't fight it.
-- Linting is enforced by oxlint through `vp lint`: the `@effect/tsgo` presets plus `@mpsuesser/oxlint-plugin-effect`'s recommended set. Rules that still had findings when the preset was adopted sit at `warn` in `vite.config.ts` as a staged rollout — a new finding under one of them is still a defect to fix, and a rule whose count reaches zero gets flipped back to `error`.
+- Linting is enforced by oxlint through `vp lint`: the `@effect/tsgo` presets plus `@mpsuesser/oxlint-plugin-effect`'s recommended set. The `warn` tier is a staged rollout; see [AGENTS.md → Common pitfalls](AGENTS.md#common-pitfalls).
 - Use Effect's `Schema` patterns; derive everything from a single resource definition where possible.
 - Document public APIs with JSDoc (see [Documentation](#documentation)).
 
@@ -69,7 +61,7 @@ Public API documentation follows the same JSDoc conventions as the `effect` pack
 - **Module header.** Each module starts with a JSDoc block describing the module, ending with a `@since` tag.
 - **Every public export** gets a JSDoc block containing, in order:
   1. A concise description of what it is and when to reach for it.
-  2. An `@example` for the principal, user-facing APIs (constructors, combinators, guards). Examples must be self-contained — include the imports — and use the public per-module surface exactly as a consumer would (e.g. `Resource.make(...)`, `Endpoint.fetch(...)`, importing the namespaces from the package root). Ground examples in real, type-checked usage from `examples/` and `test/` rather than inventing. [`@effect/docgen`](https://github.com/Effect-TS/docgen) compiles **and runs** every example (via `vp run docgen`, also in CI), so each one must be a complete program that type-checks and executes without throwing. Define every value an example references (use a function parameter or `Effect.gen` for context like handlers/clients you don't want to construct), and don't use `declare const` (it emits no runtime value).
+  2. An `@example` for the principal, user-facing APIs (constructors, combinators, guards) — it must compile and run under `vp run docgen`; see [AGENTS.md](AGENTS.md#vp-run-docgen-executes-your-examples) for the rules.
   3. A `@since` tag (use the version the symbol was introduced; `0.1.0` for the initial surface).
   4. A `@category` tag. Use a consistent vocabulary: `constructors`, `combinators`, `models`, `schemas`, `guards`, `accessors`, `layers`, `services`, `errors`, `constants`, `type-level`, `utils`.
 - Keep the existing prose when refining docs — improve clarity, don't delete useful explanation.
@@ -80,7 +72,7 @@ Public API documentation follows the same JSDoc conventions as the `effect` pack
 ## Testing
 
 - Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`) and import from `vite-plus/test`; each worked example is a standalone workspace package under `examples/` that carries its own end-to-end tests (e.g. `examples/northwind/test/`). `vp run -r test:unit` runs them all across the workspace.
-- Type-level expectations are asserted in `test/*.types.ts` files (checked by `vp run check` via `@ts-expect-error`), not at runtime. `test/emitted/*.types.ts` asserts the _built_ declarations instead, and only means anything after a build — the `typecheck:dist` task depends on `build` for exactly that reason.
+- Type-level expectations are asserted in `test/*.types.ts` files, not at runtime; see [AGENTS.md](AGENTS.md#type-level-tests-testtypests).
 - `test/entry-points.test.ts` walks the real import graph of both entry points, in `src/` and in `dist/`, to prove the schema-only subpath resolves `effect` and nothing else.
 
 ## Changesets
@@ -103,30 +95,11 @@ Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pr
 
 ## Pre-PR checklist
 
-1. `vp check`
-2. `vp run check`
-3. `vp run -r test:unit`
-4. `vp run build`
-5. `vp run docgen`
-6. `fallow audit --base origin/main`
-7. A changeset (`pnpm changeset`) for every change to the published package.
-8. `git fetch origin main && git rebase origin/main`
-9. Docs: `README.md` for any exported change; `AGENTS.md` for a new term or invariant.
+1. The gates and the changeset in [AGENTS.md → Verification](AGENTS.md#verification).
+2. `git fetch origin main && git rebase origin/main`
+3. Docs: `README.md` for any exported change; `AGENTS.md` for a new term or invariant.
 
-## Commit messages
-
-- Use clear and descriptive commit messages with a conventional prefix (`feat:`, `fix:`, `docs:`, `chore:`, `style:`).
-- Reference issue numbers when applicable.
-
-## Pull request process
-
-1. Create a branch off `main`.
-2. Make your changes and commit them with clear messages.
-3. Add a changeset if the published package is affected (see above).
-4. Push and open a pull request against `main`.
-5. Ensure your PR has a clear description of the changes, includes tests for new functionality, passes the gates above, and updates documentation if needed.
-
-## The library template checklist
+## Library template (programme standard)
 
 The shape this repository has is the library standard every `@thomasfosterau/*` library repository is built on. To scaffold another one (or to bring an existing one up to date), copy these verbatim and then adjust names — the terms are `thomasfosterau/effect-web#1`'s, extended by the four pieces this repository contributed:
 
@@ -134,8 +107,8 @@ The shape this repository has is the library standard every `@thomasfosterau/*` 
 - **`vite.config.ts`** (root, plus one per package) — from `effect-drizzle-ext` / here: oxlint with `@effect/tsgo/oxlint-presets` `recommended` + `@mpsuesser/oxlint-plugin-effect`'s recommended config and `vite-plus/prefer-vite-plus-imports: error`; a staged-rollout `warn` tier for preset rules with findings; the task graph `check` / `typecheck` / `build` / `typecheck:dist` / `test:unit` / `docgen` with `dependsOn: [{ task: "build", from: "dependencies" }]` where a package consumes a sibling's `dist/`.
 - **`tsconfig.base.json`** — from `effect-drizzle-ext` / here: `$schema` from `@effect/tsgo`, `module: preserve`, `erasableSyntaxOnly`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, the `@effect/language-service` plugin with `ignoreEffectWarningsInTscExitCode`; the TypeScript 6/7 split (`typescript: npm:@typescript/typescript6@6.0.2`, `@typescript/native: npm:typescript@7.0.2`) with `prepare: vp config && effect-tsgo patch --typescript --oxlint`.
 - **Build** — `vp pack` (tsdown, `platform: "neutral"`, `dts: true`, `format: "esm"`, `fixedExtension: false`), one bundle per entry point, `"sideEffects": false`, `exports` pointing at `dist/`, plus **`typecheck:dist`** (`tsconfig.dist.json` mapping the package name to the emitted `.d.ts`, with a `test/emitted/*.types.ts` fixture) — the emitted declarations are what consumers see, and they are not what `src/` resolves to.
-- **`.github/actions/setup`** + **`.github/workflows/ci.yml`** — from here: composite setup (`pnpm install --frozen-lockfile --ignore-scripts`, then the repository's own `pnpm run prepare` as its own step), task-cache restore, `vp check` → `vp run check` → `vp run -r test:unit` → `vp run build` → `vp run docgen` → `pnpm audit --audit-level high`; `permissions: {}` at the top of every workflow, `persist-credentials: false` on checkout, SHA-pinned actions.
-- **`.github/workflows/release.yml`** + **`PUBLISHING.md`** + **`SECURITY.md`** — from here: OIDC trusted publishing via `pnpm publish` (pnpm 11 mints the token itself, so no npm upgrade in the job; it also rewrites `catalog:peers`), the protected `release` environment, `changesets/action` v2.1.2 with `version-script` / `publish-script`, `pnpm_config_verify_deps_before_run: "false"` on the release job (so the `--ignore-scripts` install stays the only one), `run-prepare: "false"` for the setup action there and `pnpm publish --ignore-scripts` (no lifecycle script in the id-token job), no forced provenance (pnpm adds it by itself once the repository and package are public; `NPM_CONFIG_PROVENANCE` is ignored by pnpm 11), no `NPM_TOKEN`. `.changeset/config.json` schema 4.0.0, `baseBranch: main`, `privatePackages: { version: false, tag: false }`, `@changesets/cli ^3`.
+- **`.github/actions/setup`** + **`.github/workflows/ci.yml`** — from here: composite setup (`pnpm install --frozen-lockfile --ignore-scripts`, then the repository's own `pnpm run prepare` as its own step), task-cache restore, `vp run build` (on the toolchain Node, before the matrix switch) → `vp check` → `vp run check` → `vp run -r test:unit` → `vp run docgen` → `pnpm audit --audit-level high`; `permissions: {}` at the top of every workflow, `persist-credentials: false` on checkout, SHA-pinned actions.
+- **`.github/workflows/release.yml`** + **`PUBLISHING.md`** + **`SECURITY.md`** — from here: OIDC trusted publishing via `pnpm publish --ignore-scripts` from the protected `release` environment, no `NPM_TOKEN`, `.changeset/config.json` schema 4.0.0 with `baseBranch: main`. Each setting and its reason: [SECURITY.md](SECURITY.md#supply-chain-hardening) and the comments in `release.yml`.
 - **`.github/workflows/effect-canary.yml`** — from here: weekly float of the catalog's `effect` entry to `effect@rc` (`sed` the catalog, `pnpm install --no-frozen-lockfile --ignore-scripts --config.minimumReleaseAge=0`, `pnpm run prepare`), typecheck + test + docgen with `continue-on-error`, an issue opened or refreshed on failure, never on push or pull_request.
 - **`.github/dependabot.yml`** — from `effect-drizzle-ext` / here: weekly, grouped `effect` / `vitest-toolchain`, `cooldown` 1 day excluding `@thomasfosterau/*`, version updates of the gitHead-locked set (`@effect/tsgo`, `typescript`, `@typescript/native`, `vite`, `vitest`, `vite-plus`) ignored while security updates stay on, the `github-actions` ecosystem.
 - **`.claude/settings.json`**, **`.claude/hooks/session-start.sh`**, **`.claude/hooks/fallow-gate.sh`**, **`.fallowrc.json`**, **`.vite-hooks/pre-commit`**, **`.editorconfig`** — from `effect-drizzle-ext` / here. The session-start hook is what makes `vp` resolve in a non-interactive shell; the devcontainer's `postCreateCommand` invokes the same file.
@@ -145,14 +118,6 @@ The shape this repository has is the library standard every `@thomasfosterau/*` 
 - **The reformat** — one isolated `vp fmt` commit, listed in `.git-blame-ignore-revs` and named in `CONTRIBUTING.md`.
 
 Done when `pnpm install --frozen-lockfile` then `vp check`, `vp run check`, `vp run -r test:unit`, `vp run build` and `vp run docgen` all pass; CI is green on `main`; the `release` environment exists and the Release workflow opens a "Version Packages" PR when a changeset is present; a fresh agent session can run the gates without manual setup.
-
-## Reporting issues
-
-When reporting issues, please include a clear description of the problem, steps to reproduce, expected and actual behaviour, environment details (Node.js version, OS, `effect` version) and relevant code samples or error messages.
-
-## Feature requests
-
-Feature requests are welcome! Check if the feature has already been requested, provide a clear use case, and explain how it aligns with the JSON:API specification.
 
 ## Scope
 
