@@ -1,48 +1,10 @@
 /**
- * effect-jsonapi — Type-safe, spec-compliant JSON:API v1.1 on Effect's HttpApi.
+ * effect-jsonapi — type-safe, spec-compliant JSON:API v1.1 on Effect's HttpApi.
  *
- * Every module is exported as a namespace from the package root, following the
- * convention of `effect` and `@effect/platform`:
- *
- * ```ts
- * import {
- *   ApiError,
- *   Atomic,
- *   Client,
- *   Conformance,
- *   Document,
- *   Endpoint,
- *   Filter,
- *   Group,
- *   Handlers,
- *   Idempotency,
- *   Include,
- *   Lid,
- *   Middleware,
- *   Query,
- *   Relationship,
- *   Resource,
- *   Sort
- * } from "@thomasfosterau/effect-jsonapi"
- *
- * const Person = Resource.make("people", {
- *   attributes: { firstName: Schema.NonEmptyString, lastName: Schema.NonEmptyString }
- * })
- *
- * const Article = Resource.make("articles", {
- *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
- *   relationships: {
- *     author: Relationship.one(() => Person),
- *     comments: Relationship.paginated(() => Comment)
- *   }
- * })
- *
- * const articles = Group.make(
- *   Article,
- *   Endpoint.get(Article, { include: true }),
- *   Endpoint.list(Article, { page: Query.Page.Offset })
- * )
- * ```
+ * Every module is exported as a namespace from the package root; import what
+ * you use: `import { Endpoint, Group, Query, Resource } from
+ * "@thomasfosterau/effect-jsonapi"`. The schema-only subset, whose import
+ * graph is `effect` alone, is `@thomasfosterau/effect-jsonapi/schema`.
  *
  * @packageDocumentation
  * @since 0.1.0

@@ -867,7 +867,7 @@ export interface CollectionDocument<R, Included = IncludedResource> extends Docu
  * ```
  *
  * @since 0.16.0
- * @category readers
+ * @category accessors
  */
 export const readTotalCount = (
   source:
@@ -897,7 +897,7 @@ export const readTotalCount = (
  * ```
  *
  * @since 0.16.0
- * @category readers
+ * @category accessors
  */
 export const hasNextPage = (offset: number, limit: number, totalCount: number): boolean =>
   offset + limit < totalCount;
@@ -1081,7 +1081,7 @@ export type PathTarget<R extends Any, Path> = Path extends `${infer Head}.${infe
  * ```
  *
  * @since 0.16.0
- * @category readers
+ * @category accessors
  */
 export const related = <R extends Any, const K extends RelationshipName<R>>(
   resource: R,
@@ -1108,7 +1108,7 @@ export const related = <R extends Any, const K extends RelationshipName<R>>(
  * resolve contributes nothing.
  *
  * @since 0.16.0
- * @category readers
+ * @category accessors
  */
 export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
   _resource: R,
@@ -1263,7 +1263,7 @@ const searchParamsOf = (source: URL | URLSearchParams | string): URLSearchParams
  * ```
  *
  * @since 0.16.0
- * @category readers
+ * @category accessors
  */
 export const readPageCursor = (
   source: URL | URLSearchParams | string,

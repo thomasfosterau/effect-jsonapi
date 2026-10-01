@@ -329,7 +329,7 @@ export const make =
  * ```
  *
  * @since 0.3.0
- * @category encoding
+ * @category utils
  */
 export const toDocument = (error: object): typeof WireDocument.Type => {
   const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire;

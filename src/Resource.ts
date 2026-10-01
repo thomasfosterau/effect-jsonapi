@@ -740,7 +740,7 @@ const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
  * `createInput` and the Atomic `add` operation.
  *
  * @since 0.5.0
- * @category utilities
+ * @category utils
  */
 export const createAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
   const result: Record<string, Schema.Top> = {};
@@ -766,7 +766,7 @@ export const createAttributeFields = (fields: Schema.Struct.Fields): Record<stri
  * `updateInput` and the Atomic `update` operation.
  *
  * @since 0.5.0
- * @category utilities
+ * @category utils
  */
 export const updateAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
   const result: Record<string, Schema.Top> = {};

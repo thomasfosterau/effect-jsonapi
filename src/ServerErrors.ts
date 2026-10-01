@@ -49,7 +49,7 @@ import { issueLeaves, pathToJsonPointer as toPointer } from "./internal/schemaEx
  * Answered as `404 not-found`.
  *
  * @since 0.16.0
- * @category catalogue
+ * @category errors
  */
 export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
   resource: Schema.String,
@@ -61,7 +61,7 @@ export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
  * `401 auth.unauthorised`.
  *
  * @since 0.16.0
- * @category catalogue
+ * @category errors
  */
 export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
   message: Schema.optional(Schema.String),
@@ -72,7 +72,7 @@ export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthoriz
  * as `403 auth.forbidden`.
  *
  * @since 0.16.0
- * @category catalogue
+ * @category errors
  */
 export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
   message: Schema.optional(Schema.String),
@@ -84,7 +84,7 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
  * it into a `Location` header.
  *
  * @since 0.16.0
- * @category catalogue
+ * @category errors
  */
 export class Redirect extends Schema.TaggedError<Redirect>()("Redirect", {
   to: Schema.String,
@@ -97,7 +97,7 @@ export class Redirect extends Schema.TaggedError<Redirect>()("Redirect", {
  * conflict path (`code: "conflict"`).
  *
  * @since 0.16.0
- * @category catalogue
+ * @category errors
  */
 export class HttpError extends Schema.TaggedError<HttpError>()("HttpError", {
   status: Schema.Number,
@@ -118,7 +118,7 @@ export class HttpError extends Schema.TaggedError<HttpError>()("HttpError", {
  * `source.pointer`, use {@link schemaIssueToErrors} instead.
  *
  * @since 0.16.0
- * @category catalogue
+ * @category errors
  */
 export class ValidationFailure extends Schema.TaggedError<ValidationFailure>()(
   "ValidationFailure",
@@ -404,7 +404,7 @@ const apiErrorToJsonapi = (error: { readonly constructor: ApiErrorConstructor })
  * ```
  *
  * @since 0.16.0
- * @category mapping
+ * @category utils
  */
 export const fromTaggedError: (error: unknown) => Option.Option<JsonapiError> =
   Match.type<unknown>().pipe(

@@ -208,7 +208,7 @@ const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DEL
  * ```
  *
  * @since 0.16.0
- * @category predicates
+ * @category guards
  */
 export const isMutatingMethod = (method: string): boolean =>
   WRITE_METHODS.has(method.toUpperCase());
