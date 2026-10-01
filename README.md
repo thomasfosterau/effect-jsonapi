@@ -1216,11 +1216,17 @@ To serve it (with `@effect/platform-node`):
 ```ts
 import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
 import { Layer } from "effect"
+import { HttpRouter } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 
-HttpApiBuilder.layer(Api).pipe(
+const ApiLive = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),
-  Layer.provide(Middleware.layer),    // content negotiation + JSON:API 400s
+  Layer.provide(Middleware.layer) // content negotiation + JSON:API 400s
+)
+
+// rc.118 builds a fresh router per entrypoint: serve the API layer through
+// `HttpRouter.serve` (or `toWebHandler`), not through a router you provide.
+HttpRouter.serve(ApiLive).pipe(
   Layer.provide(NodeHttpServer.layer(...)),
   Layer.launch,
   NodeRuntime.runMain

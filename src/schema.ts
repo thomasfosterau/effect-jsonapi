@@ -29,7 +29,7 @@
  * with `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth` when
  * constraining include paths, and those are `HttpApi`-bound error classes, so
  * `Query` — and `Handlers`, `Lid` and `Atomic`, which reach `Query` — resolve
- * `httpapi` transitively. Freeing them means separating `ApiError`'s error
+ * `http-api` transitively. Freeing them means separating `ApiError`'s error
  * classes from their wire annotations, which is a change to a public module
  * rather than a packaging one.
  *

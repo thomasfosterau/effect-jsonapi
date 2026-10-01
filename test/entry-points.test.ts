@@ -309,8 +309,9 @@ describe("built artifact", () => {
   const built = path.join(DIST, "schema.js");
   const hasDist = fs.existsSync(built);
 
-  it.skipIf(!hasDist)("ships a schema entry point that resolves no HTTP surface of effect", () => {
+  it.skipIf(!hasDist)("ships a schema entry point that resolves `effect` alone", () => {
     expect(httpSurface(graphFrom(built, DIST))).toEqual([]);
+    expect([...graphFrom(built, DIST).externals.keys()]).toEqual(["effect"]);
   });
 
   it.skipIf(!hasDist)("ships declarations for both entry points", () => {
@@ -322,7 +323,7 @@ describe("built artifact", () => {
   /**
    * The end-to-end statement, and the one that does not depend on the walker
    * above being right: resolve the published subpath through Node's real
-   * `exports` map, in a process where `effect/http` and `effect/http-api` cannot be resolved
+   * `exports` map, in a process where no non-core Effect namespace (`effect/http`, `effect/rpc`, ...) can be resolved
    * at all.
    */
   const loadWithoutHttp = (entry: string) =>
@@ -339,7 +340,7 @@ describe("built artifact", () => {
     );
 
   it.skipIf(!hasDist)(
-    "loads the schema subpath with effect/http and effect/http-api unresolvable",
+    "loads the schema subpath with every non-core effect namespace unresolvable",
     () => {
       const result = loadWithoutHttp("@thomasfosterau/effect-jsonapi/schema");
       expect(`${result.stdout}${result.stderr}`).toContain("LOADED");
