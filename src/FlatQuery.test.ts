@@ -115,6 +115,16 @@ describe("slug", () => {
     expect(() => decode(FlatQuery.slug({ maxLength: 3 }))("abcd")).toThrow();
   });
 
+  it("pins the length check's representation id and message (effect-forms keys on the id)", () => {
+    const check = FlatQuery.slug({ maxLength: 3 }).ast.checks?.[0];
+    expect(check?.annotations?.["representation"]).toMatchObject({
+      id: "effect/schema/isBetweenLength",
+    });
+    expect(() => decode(FlatQuery.slug({ maxLength: 3 }))("abcd")).toThrow(
+      "Expected a value with a length between 1 and 3",
+    );
+  });
+
   it("projects the resource, create and update shapes", () => {
     const Post = Resource.make("posts", {
       attributes: { title: Schema.NonEmptyString, ...FlatQuery.slugResourceFields(Slug) },

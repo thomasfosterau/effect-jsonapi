@@ -1,6 +1,8 @@
 /**
- * Node module-resolution hooks that make Effect's HTTP surface (`effect/http`, `effect/http-api` and the
- * modules under them) unresolvable.
+ * Node module-resolution hooks that make every non-core Effect namespace
+ * (`effect/http`, `effect/http-api`, `effect/rpc`, `effect/socket`, ... and the
+ * modules under them) unresolvable. Core `effect` and `effect/<Module>` stay
+ * resolvable.
  *
  * Registered by `test/entry-points.test.ts` in a child process so the built
  * entry points can be loaded against a dependency set where the HTTP surface
@@ -11,15 +13,33 @@
  */
 import { register } from "node:module";
 
+const NAMESPACES = [
+  "ai",
+  "cli",
+  "cluster",
+  "devtools",
+  "encoding",
+  "eventlog",
+  "http",
+  "http-api",
+  "net",
+  "observability",
+  "persistence",
+  "process",
+  "reactivity",
+  "rpc",
+  "schema",
+  "socket",
+  "sql",
+  "workers",
+  "workflow",
+];
+
 register(
   `data:text/javascript,
     export async function resolve (specifier, context, next) {
-      if (
-        specifier === "effect/http" ||
-        specifier.startsWith("effect/http/") ||
-        specifier === "effect/http-api" ||
-        specifier.startsWith("effect/http-api/")
-      ) {
+      const namespaces = ${JSON.stringify(NAMESPACES)};
+      if (namespaces.some((n) => specifier === "effect/" + n || specifier.startsWith("effect/" + n + "/"))) {
         throw new Error("FORBIDDEN_PEER:" + specifier)
       }
       return next(specifier, context)
