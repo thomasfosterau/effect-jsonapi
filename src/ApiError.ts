@@ -31,7 +31,7 @@
  */
 import type { Cause } from "effect";
 import { Schema, SchemaTransformation } from "effect";
-import { HttpApiSchema } from "effect/unstable/httpapi";
+import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { asJsonApi } from "./internal/httpMedia.js";

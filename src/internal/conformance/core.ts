@@ -8,8 +8,8 @@
  * @internal
  */
 import { Effect, SchemaAST } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
-import type { HttpApi, HttpApiEndpoint } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
 // ---------------------------------------------------------------------------

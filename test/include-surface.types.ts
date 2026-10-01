@@ -29,7 +29,7 @@
  * `@ts-expect-error` expects.
  */
 import { Schema } from "effect";
-import type { HttpApiEndpoint } from "effect/unstable/httpapi";
+import type { HttpApiEndpoint } from "effect/http-api";
 import { Endpoint, Include, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 // Asserts that a value is assignable to `Expected`.

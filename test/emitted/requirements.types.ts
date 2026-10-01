@@ -22,7 +22,7 @@
  * anything after a build.
  */
 import { Effect, Schema } from "effect";
-import { HttpApi, HttpApiClient } from "effect/unstable/httpapi";
+import { HttpApi, HttpApiClient } from "effect/http-api";
 import { Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const Person = Resource.make("people", { attributes: { name: Schema.String } });

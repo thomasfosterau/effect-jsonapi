@@ -166,7 +166,7 @@ A **supported entry point**, not a dev-only fixture: it compiles to `dist` and s
 
 Two packaging questions are deliberately **not** pre-empted:
 
-- **[#117](https://github.com/thomasfosterau/effect-jsonapi/issues/117) (subpath exports).** `Conformance` imports `effect/unstable/http` and `effect/unstable/httpapi`, so it is unambiguously in the HTTP tier wherever #117 draws the line. Adding a subpath now would pre-empt a decision #117 wants made deliberately.
+- **[#117](https://github.com/thomasfosterau/effect-jsonapi/issues/117) (subpath exports).** `Conformance` imports `effect/http` and `effect/http-api`, so it is unambiguously in the HTTP tier wherever #117 draws the line. Adding a subpath now would pre-empt a decision #117 wants made deliberately.
 - **[#121](https://github.com/thomasfosterau/effect-jsonapi/issues/121) (`sideEffects`, `src` in `files`).** The module is pure — rule data and functions, no top-level effects — so it is compatible with `sideEffects: false` whenever that lands.
 
 ## 8. Running it against this repo

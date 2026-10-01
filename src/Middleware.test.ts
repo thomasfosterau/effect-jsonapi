@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Layer, Schema, SchemaIssue, Tracer } from "effect";
-import { HttpRouter } from "effect/unstable/http";
-import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpRouter } from "effect/http";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";

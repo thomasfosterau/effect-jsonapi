@@ -11,7 +11,7 @@
  * @since 0.15.0
  */
 import type { Schema } from "effect";
-import { HttpApiSchema } from "effect/unstable/httpapi";
+import { HttpApiSchema } from "effect/http-api";
 import { MEDIA_TYPE } from "./internal/media.js";
 
 /**
@@ -25,7 +25,7 @@ import { MEDIA_TYPE } from "./internal/media.js";
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApiEndpoint } from "effect/unstable/httpapi"
+ * import { HttpApiEndpoint } from "effect/http-api"
  * import { Document, MediaType, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
@@ -73,7 +73,7 @@ export const asJsonApi = <S extends Schema.Top>(schema: S, status?: number) => {
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { HttpApiEndpoint } from "effect/unstable/httpapi"
+ * import { HttpApiEndpoint } from "effect/http-api"
  * import { MediaType, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {

@@ -484,7 +484,7 @@ export interface SlugOptions {
 export const slug = (options?: SlugOptions): Schema.String => {
   const reserved = new Set(options?.reserved ?? []);
   return Schema.String.check(
-    Schema.isLengthBetween(1, options?.maxLength ?? 200),
+    Schema.isBetweenLength(1, options?.maxLength ?? 200),
     Schema.isPattern(SLUG_PATTERN, {
       message: `must be lowercase letters, numbers, and hyphens (e.g. "my-post-title")`,
     }),

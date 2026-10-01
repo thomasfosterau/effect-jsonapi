@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Effect, Schema } from "effect";
-import { UrlParams } from "effect/unstable/http";
+import { UrlParams } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";

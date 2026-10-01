@@ -5,7 +5,7 @@
  */
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Result, Schema } from "effect";
-import { HttpApiTest, OpenApi } from "effect/unstable/httpapi";
+import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import { ArticleNotFound, TitleTaken } from "../errors.js";

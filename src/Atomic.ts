@@ -1380,7 +1380,7 @@ export const result = <const R extends ResourceValue | null, const M extends Met
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
  * import { Atomic, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
@@ -1468,7 +1468,7 @@ const isOperationValue = (value: unknown): value is { readonly op: string } =>
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { HttpApi, HttpApiBuilder } from "effect/unstable/httpapi"
+ * import { HttpApi, HttpApiBuilder } from "effect/http-api"
  * import { Atomic, Endpoint, Group, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {

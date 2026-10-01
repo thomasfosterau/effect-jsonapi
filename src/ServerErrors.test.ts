@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Option, Schema, SchemaIssue } from "effect";
-import { HttpServerResponse } from "effect/unstable/http";
+import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as ServerErrors from "./ServerErrors.js";
 

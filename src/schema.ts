@@ -5,10 +5,10 @@
  * graph depends on `effect` alone, so a consumer that wants JSON:API's *wire
  * types without the server* — a client decoding documents, a loader mapping
  * them into something else, a CLI or code generator producing them — never
- * resolves `effect/unstable/httpapi`.
+ * resolves `effect/http-api`.
  *
- * That matters beyond bundle size. `effect/unstable/*` is pre-stable, so every
- * unnecessary dependency on it is a version-compatibility surface that shifts
+ * That matters beyond bundle size. `effect/http` and `effect/http-api` are still
+ * release-candidate APIs, so every unnecessary dependency on them is a version-compatibility surface that shifts
  * between releases: tree-shaking may drop the code, but it cannot drop the
  * dependency. Only an entry point can.
  *

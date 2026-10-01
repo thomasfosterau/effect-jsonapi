@@ -14,7 +14,7 @@
  * schema on the way out.
  */
 import { Effect, Layer } from "effect";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpApiBuilder } from "effect/http-api";
 import { Handlers, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "./api.js";
 import {

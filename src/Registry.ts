@@ -29,10 +29,10 @@
  */
 import type * as Context from "effect/Context";
 import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
-import type { HttpServerResponse } from "effect/unstable/http";
-import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http";
-import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
+import type { HttpServerResponse } from "effect/http";
+import { Etag, HttpPlatform, HttpRouter } from "effect/http";
+import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
+import { HttpApiBuilder } from "effect/http-api";
 import * as Middleware from "./Middleware.js";
 import * as ServerErrors from "./ServerErrors.js";
 
@@ -171,7 +171,7 @@ export class FamilyMismatch extends Schema.TaggedError<FamilyMismatch>()("Family
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { HttpApi } from "effect/http-api"
  * import { Endpoint, Group, Registry, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
@@ -361,7 +361,7 @@ export interface WebHandler<R> {
  * @example
  * ```ts
  * import { Context, Effect, Schema } from "effect"
- * import { HttpApi } from "effect/unstable/httpapi"
+ * import { HttpApi } from "effect/http-api"
  * import { Assemble, Endpoint, Group, MEDIA_TYPE, Registry, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })

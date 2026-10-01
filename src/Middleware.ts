@@ -58,9 +58,9 @@
  */
 import type { Schema } from "effect";
 import { Effect, Layer, SchemaIssue } from "effect";
-import { HttpServerRequest } from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import { HttpApiMiddleware } from "effect/unstable/httpapi";
+import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { HttpApiMiddleware } from "effect/http-api";
 import {
   BadRequest,
   NotAcceptable,

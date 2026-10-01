@@ -18,13 +18,8 @@
  *     wording cannot drift between the three paths.
  */
 import { Effect, Layer, Option } from "effect";
-import {
-  HttpClient,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/unstable/http";
-import { HttpApiBuilder } from "effect/unstable/httpapi";
+import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
 import { ApiError, Atomic, Client } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "./api.js";
 import { BlogLive } from "./handlers.js";

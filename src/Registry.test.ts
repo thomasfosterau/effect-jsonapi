@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Context, Effect, Option, Schema } from "effect";
-import { HttpApi } from "effect/unstable/httpapi";
+import { HttpApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Group from "./Group.js";

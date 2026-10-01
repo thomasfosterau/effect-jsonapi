@@ -10,8 +10,8 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Option } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
-import { HttpApiClient } from "effect/unstable/httpapi";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpApiClient } from "effect/http-api";
 import { ApiError, Client, MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import {
