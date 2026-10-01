@@ -2,7 +2,7 @@
 
 Design note for `Conformance` — the executable specification a server is driven through to prove it implements JSON:API v1.1, and this package's profile. Tracks [#120](https://github.com/thomasfosterau/effect-jsonapi/issues/120) (epic [#115](https://github.com/thomasfosterau/effect-jsonapi/issues/115)).
 
-**Status:** v1 implemented. 31 rules across two tiers, eight declared coverage gaps.
+**Status:** v1 implemented. 36 rules (31 `spec`, 5 `profile`), eight declared coverage gaps; `Conformance.rules` and `Conformance.gaps` are the live lists.
 
 ## 0. Why it exists
 

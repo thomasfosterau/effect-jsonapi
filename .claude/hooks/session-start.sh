@@ -55,7 +55,7 @@
 #
 # This hook hydrates NO secrets, and this repository needs none: every gate
 # (`vp check`, `vp run check`, `vp run -r test:unit`, `vp run build`,
-# `pnpm run docgen`) runs offline against the lockfile. Publishing is the
+# `vp run docgen`) runs offline against the lockfile. Publishing is the
 # release workflow's job and uses npm OIDC trusted publishing (PUBLISHING.md),
 # so there is no token to hydrate anywhere.
 #
@@ -136,7 +136,7 @@ SHIM
 
 # ── 1. Repo binaries the documented workflows invoke directly ─────────────────
 # AGENTS.md's fallow gate runs `fallow audit …` before every commit, and
-# `pnpm run docgen` executes the JSDoc examples under `tsx`. Both resolve only
+# `vp run docgen` executes the JSDoc examples under `tsx`. Both resolve only
 # from node_modules/.bin. `vp` is included for the remote/web runner, where the
 # global launcher does not exist.
 for tool in tsx fallow; do
@@ -169,7 +169,7 @@ fi
 # ── 3. Dependencies ──────────────────────────────────────────────────────────
 # Unconditional, not only when node_modules is absent: a prebaked container can
 # carry a tree built from an OLDER lockfile, and stale dependencies masquerade
-# as trunk breakage. `--frozen-lockfile` is a sub-second no-op when in sync.
+# as breakage on `main`. `--frozen-lockfile` is a sub-second no-op when in sync.
 if [ -f "$PROJECT_DIR/pnpm-lock.yaml" ]; then
   log "syncing dependencies against the lockfile…"
   (cd "$PROJECT_DIR" && vp install --frozen-lockfile >/dev/null 2>&1) \

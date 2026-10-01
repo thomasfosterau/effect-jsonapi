@@ -32,7 +32,7 @@ catalogMode: strict
 
 catalog:
   "@changesets/cli": ^3.0.3
-  # Compiles AND executes every JSDoc `@example` (`pnpm run docgen`); runs the
+  # Compiles AND executes every JSDoc `@example` (`vp run docgen`); runs the
   # examples under `tsx`, hence that entry below. Drives TypeScript through the
   # JS API, so it sees the TS6 side of the split.
   "@effect/docgen": ^0.5.2
@@ -141,7 +141,7 @@ peerDependencyRules:
     vitest: "*"
     # @effect/docgen declares `typescript ^5.2.2` and drives it through the JS
     # API, which the TS6 alias above still provides (TS6 is the last JS-based
-    # compiler line); `pnpm run docgen` is the proof, in CI on every push.
+    # compiler line); `vp run docgen` is the proof, in CI on every push.
     "@effect/docgen>typescript": "6"
 
 # Supply-chain delay (owner's policy, gardeneria #1149): hold newly published
