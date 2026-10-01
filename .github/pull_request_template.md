@@ -12,7 +12,12 @@ Tick what you ran, in the order of [AGENTS.md → Verification](https://github.c
 - [ ] `vp run -r test:unit`
 - [ ] `vp run docgen` (every JSDoc `@example` compiled and executed)
 - [ ] `fallow audit --base origin/main`
-- [ ] A changeset under `.changeset/` for every published-package change
+
+## Changeset
+
+Which `.changeset/*.md` this adds and its bump, or why none is needed (docs-, CI- and tooling-only changes need none).
+
+- [ ] A changeset under `.changeset/` for every change to published behaviour
 
 ## Notes
 

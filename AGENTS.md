@@ -99,7 +99,7 @@ Before you report work as done, run the gates below in order and quote each comm
 5. `vp run -r test:unit`
 6. `vp run docgen`
 7. `fallow audit --base origin/main`
-8. A changeset under `.changeset/` for every change to the published package.
+8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
 
 None needs a credential, a database, a browser or Docker. CI also runs `pnpm audit --audit-level high`.
 

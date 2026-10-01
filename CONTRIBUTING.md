@@ -26,7 +26,7 @@ Agent sessions and the devcontainer are provisioned by the SessionStart hook; se
 
 ## Development workflow
 
-The repository is validated by the same commands in CI. Run them locally before opening a PR.
+Every command on its own; the ordered pre-push run is [AGENTS.md → Verification](AGENTS.md#verification).
 
 | Command | Description |
 | --- | --- |
@@ -71,7 +71,7 @@ Public API documentation follows the same JSDoc conventions as the `effect` pack
 
 ## Testing
 
-- Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`) and import from `vite-plus/test`; each worked example is a standalone workspace package under `examples/` that carries its own end-to-end tests (e.g. `examples/northwind/test/`). `vp run -r test:unit` runs them all across the workspace.
+- Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`) (imports follow [AGENTS.md → Conventions](AGENTS.md#conventions)); each worked example is a standalone workspace package under `examples/` that carries its own end-to-end tests (e.g. `examples/northwind/test/`). `vp run -r test:unit` runs them all across the workspace.
 - Type-level expectations are asserted in `test/*.types.ts` files, not at runtime; see [AGENTS.md](AGENTS.md#type-level-tests-testtypests).
 - `test/entry-points.test.ts` walks the real import graph of both entry points, in `src/` and in `dist/`, to prove the schema-only subpath resolves `effect` and nothing else.
 
@@ -91,7 +91,7 @@ Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pr
 
 ## CI expectations
 
-[ci.yml](.github/workflows/ci.yml) runs one job on every push and pull request, once on Node.js 20.x and once on 22.x: `vp run build`, `vp check`, `vp run check`, `vp run -r test:unit`, `vp run docgen`, and `pnpm audit --audit-level high` on the 22.x row. Installing and bundling always run on Node 22, because pnpm 11 and `vp pack` need it; the job then switches to the matrix Node for every gate. The job name and the matrix produce the two check names the `main` ruleset requires, `Lint, type-check, build & test (20.x)` and `(22.x)`, so renaming either blocks every PR. Installs are `pnpm install --frozen-lockfile --ignore-scripts` followed by an explicit `pnpm run prepare` (the composite action in `.github/actions/setup` explains the exception). [effect-canary.yml](.github/workflows/effect-canary.yml) floats the catalog's `effect` entry to the newest `rc` prerelease weekly and files an issue when the gate goes red; it never blocks a PR. [release.yml](.github/workflows/release.yml) runs the Changesets action on `main` under the protected `release` environment.
+[ci.yml](.github/workflows/ci.yml) runs one job on every push and pull request, once on Node.js 20.x and once on 22.x: the gates in [AGENTS.md → Verification](AGENTS.md#verification), build first, plus `pnpm audit --audit-level high` on the 22.x row. Installing and bundling always run on Node 22, because pnpm 11 and `vp pack` need it; the job then switches to the matrix Node for every gate. The job name and the matrix produce the two check names the `main` ruleset requires, `Lint, type-check, build & test (20.x)` and `(22.x)`, so renaming either blocks every PR. Installs are `pnpm install --frozen-lockfile --ignore-scripts` followed by an explicit `pnpm run prepare` (the composite action in `.github/actions/setup` explains the exception). [effect-canary.yml](.github/workflows/effect-canary.yml) floats the catalog's `effect` entry to the newest `rc` prerelease weekly and files an issue when the gate goes red; it never blocks a PR. [release.yml](.github/workflows/release.yml) runs the Changesets action on `main` under the protected `release` environment.
 
 ## Pre-PR checklist
 
@@ -117,7 +117,7 @@ The shape this repository has is the library standard every `@thomasfosterau/*` 
 - **The type-level test slot** — from here: `test/*.types.ts` included by the root `tsconfig.json` (package name mapped to `./src`), asserted with `@ts-expect-error` and checked by `vp run check`; TypeScript 7 anchors overload failures per property, so a directive covers exactly the next line.
 - **The reformat** — one isolated `vp fmt` commit, listed in `.git-blame-ignore-revs` and named in `CONTRIBUTING.md`.
 
-Done when `pnpm install --frozen-lockfile` then `vp check`, `vp run check`, `vp run -r test:unit`, `vp run build` and `vp run docgen` all pass; CI is green on `main`; the `release` environment exists and the Release workflow opens a "Version Packages" PR when a changeset is present; a fresh agent session can run the gates without manual setup.
+Done when the gates in [AGENTS.md → Verification](AGENTS.md#verification) pass; CI is green on `main`; the `release` environment exists and the Release workflow opens a "Version Packages" PR when a changeset is present; a fresh agent session can run the gates without manual setup.
 
 ## Scope
 

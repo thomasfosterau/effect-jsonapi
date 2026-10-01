@@ -8,7 +8,7 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 2. **Merge to `main`.** The [`release`](./.github/workflows/release.yml) workflow runs and, while changesets are pending, opens or updates a **"Version Packages"** PR that applies the version bump and rolls the changesets into `CHANGELOG.md`.
 3. **Merge the "Version Packages" PR.** With no changesets left, the workflow publishes the new version to npm via `pnpm publish` and trusted publishing (no provenance while the repository is private — see below), then tags the commit and creates the GitHub release.
 
-The publish step is `pnpm publish --ignore-scripts` from the protected `release` environment via npm trusted publishing (OIDC); `changeset tag` then emits the `New tag:` lines the Changesets action uses to push the tag and create the GitHub release. Nothing requests provenance, so none is attached while the repository is private. Why each setting in the release job is what it is: [SECURITY.md](./SECURITY.md#supply-chain-hardening).
+The publish step is `pnpm publish --ignore-scripts` from the protected `release` environment via npm trusted publishing (OIDC); `changeset tag` then emits the `New tag:` lines the Changesets action uses to push the tag and create the GitHub release. Nothing requests provenance; pnpm attaches it only for a public repository, so releases carry none while this one is private. Why each setting in the release job is what it is: [SECURITY.md](./SECURITY.md#supply-chain-hardening).
 
 ## Maintainer setup (one-time)
 
