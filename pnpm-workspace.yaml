@@ -58,7 +58,7 @@ catalog:
   # lockstep, so the gate runs the version the Effect canary floats to. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
   # verified separately.
-  effect: 4.0.0-rc.118
+  effect: 4.0.0
   effect-solutions: ^0.5.3
   fallow: 3.30.0
   # The runtime `@effect/docgen` executes examples under.

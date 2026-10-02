@@ -92,7 +92,10 @@ export interface Id<Type extends string> extends Schema.brand<Schema.String, `${
  * @category constructors
  */
 export const Id = <const Type extends string>(type: Type): Id<Type> =>
-  Schema.String.pipe(Schema.brand(`${type}Id` as `${Type}Id`));
+  // effect 4.0.0 requires a concrete brand key (`B & EnsureSingleBrandKey<B>`),
+  // which a template over the generic `Type` cannot prove; the explicit type
+  // argument carries the brand and the runtime string is only a label.
+  Schema.String.pipe(Schema.brand<`${Type}Id`>(`${type}Id` as never));
 
 /**
  * The resource-identifier schema for a resource type: `{ type, id, meta? }`.
@@ -3149,7 +3152,7 @@ export const extend = <
   const id =
     options?.id ??
     (options?.inheritId === true
-      ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`))
+      ? base.Id.pipe(Schema.brand<`${Type}Id`>(`${type}Id` as never))
       : undefined);
   return make(type, {
     id,
