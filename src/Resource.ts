@@ -92,7 +92,15 @@ export interface Id<Type extends string> extends Schema.brand<Schema.String, `${
  * @category constructors
  */
 export const Id = <const Type extends string>(type: Type): Id<Type> =>
-  Schema.String.pipe(Schema.brand(`${type}Id` as `${Type}Id`));
+  // SAFETY: effect 4.0.0 types the brand identifier as `B & EnsureSingleBrandKey<B>`,
+  // which a template over the generic `Type` cannot satisfy, so the argument is
+  // cast to the parameter type. This deliberately bypasses the single-brand-key
+  // guard: `Type` is generic, so a `string` or union `type` still yields a brand,
+  // exactly as on rc.118. The explicit type argument carries the brand; the
+  // runtime string is only a label.
+  Schema.String.pipe(
+    Schema.brand<`${Type}Id`>(`${type}Id` as Parameters<typeof Schema.brand<`${Type}Id`>>[0]),
+  );
 
 /**
  * The resource-identifier schema for a resource type: `{ type, id, meta? }`.
@@ -3149,7 +3157,12 @@ export const extend = <
   const id =
     options?.id ??
     (options?.inheritId === true
-      ? base.Id.pipe(Schema.brand(`${type}Id` as `${Type}Id`))
+      ? // SAFETY: as in `Id`: the cast bypasses effect 4.0.0's single-brand-key
+        // guard, which a generic `Type` cannot satisfy; behaviour is unchanged
+        // from rc.118.
+        base.Id.pipe(
+          Schema.brand<`${Type}Id`>(`${type}Id` as Parameters<typeof Schema.brand<`${Type}Id`>>[0]),
+        )
       : undefined);
   return make(type, {
     id,
