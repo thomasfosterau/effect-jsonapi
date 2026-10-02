@@ -16,7 +16,7 @@
 - **Relative imports carry a `.js` extension** (`./Resource.js`), unlike the `.ts` used in effect-web and prosekit-utilities.
 - **Tests import from `vite-plus/test`**, never `vitest`.
 - **Every export has a doc comment** with a summary, an `@example` for principal APIs, `@since` and a `@category` from the vocabulary in [CONTRIBUTING.md](CONTRIBUTING.md#documentation).
-- **Schema-backed errors are `Schema.TaggedError<Self>()(tag, fields)`** — the spelling in the pinned `effect` rc; `Schema.TaggedErrorClass` was the beta-line name.
+- **Schema-backed errors are `Schema.TaggedError<Self>()(tag, fields)`** — the spelling in the pinned `effect`; `Schema.TaggedErrorClass` was the beta-line name.
 
 ### `vp run docgen` executes your examples
 
@@ -129,7 +129,7 @@ Issues are the backlog: when you find work you can't do now, file an issue rathe
 
 **IMPORTANT:** Consult effect-solutions before writing Effect code (`vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…`: data-modeling, services-and-layers, error-handling, testing, basics); never guess at an Effect pattern.
 
-The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that rc the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When effect-solutions and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
+The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When effect-solutions and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
 
 ## Agent sessions
 
