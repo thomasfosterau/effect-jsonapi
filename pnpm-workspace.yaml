@@ -54,7 +54,7 @@ catalog:
   "@effect/tsgo": 0.45.0
   "@mpsuesser/oxlint-plugin-effect": ^0.5.0
   "@types/node": ^26.4.1
-  # Deliberately tracks the `rc` dist-tag, ahead of the applications'
+  # Deliberately tracks the `latest` dist-tag, ahead of the applications'
   # lockstep, so the gate runs the version the Effect canary floats to. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
   # verified separately.

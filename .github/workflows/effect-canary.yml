@@ -1,6 +1,6 @@
 name: Effect Canary
 
-# Runs the gate against the newest Effect *prerelease* (the "rc" npm dist-tag)
+# Runs the gate against the newest Effect release (the "latest" npm dist-tag)
 # instead of the version pinned in the catalog / pnpm-lock.yaml, so upstream
 # breakage surfaces here on a schedule rather than in a consumer's build.
 #
@@ -23,7 +23,7 @@ permissions: {}
 
 jobs:
   canary:
-    name: Typecheck, test & docgen against effect@rc
+    name: Typecheck, test & docgen against effect@latest
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -43,24 +43,27 @@ jobs:
       - name: Setup toolchain
         uses: ./.github/actions/setup
 
-      # Float the whole workspace onto the newest Effect prerelease. Every
+      # Float the whole workspace onto the newest Effect release. Every
       # package references `effect` through the strict catalog (a version
       # literal anywhere else is rejected at install), so the float is one
       # edit to the catalog entry followed by a non-frozen install — not a
       # `pnpm add` per package. The peer range under `catalogs.peers` is left
-      # alone: it is what consumers see, not what this run tests. The "rc"
-      # dist-tag is the pre-4.0 release-candidate line this repo currently
-      # tracks (see the `effect` catalog entry) — switch this to "beta" or
-      # "next" if the project moves to tracking a different prerelease line.
+      # alone: it is what consumers see, not what this run tests. The
+      # "latest" dist-tag is the stable 4.x line the `effect` catalog entry
+      # tracks. Don't point this at "rc" or "beta": both stopped moving when
+      # 4.0.0 shipped, so they re-test an old prerelease below the pin.
+      # The `sed` is scoped to the top-level `catalog:` block, because the
+      # `overrides:` block carries its own `  effect: "catalog:"` line that an
+      # unscoped substitution would also rewrite to a version literal.
       # `minimumReleaseAge` is lifted for the run: the point of a canary is to
       # see the newest publish, not the one-day-old one.
-      - name: Install latest Effect prerelease
+      - name: Install latest Effect release
         run: |
           set -euo pipefail
-          latest="$(pnpm view effect@rc version)"
+          latest="$(pnpm view effect@latest version)"
           echo "floating effect to ${latest}"
-          sed -i -E "s/^(  effect: ).*$/\1${latest}/" pnpm-workspace.yaml
-          grep -E "^  effect: ${latest}$" pnpm-workspace.yaml
+          sed -i -E "/^catalog:$/,/^[^ #]/ s/^(  effect: ).*$/\1${latest}/" pnpm-workspace.yaml
+          test "$(grep -cE "^  effect: ${latest}$" pnpm-workspace.yaml)" -eq 1
           pnpm install --no-frozen-lockfile --ignore-scripts --config.minimumReleaseAge=0
           pnpm run prepare
 
@@ -100,19 +103,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          title="Effect canary is red against effect@rc"
+          title="Effect canary is red against effect@latest"
 
           body=$(jq -n \
             --arg run "$RUN_URL" \
             --arg typecheck "$TYPECHECK_OUTCOME" \
             --arg test "$TEST_OUTCOME" \
             --arg docgen "$DOCGEN_OUTCOME" \
-            '"The scheduled Effect canary failed against the latest `effect` prerelease (the `rc` npm dist-tag).\n\n" +
+            '"The scheduled Effect canary failed against the newest `effect` release (the `latest` npm dist-tag).\n\n" +
              "- typecheck: " + $typecheck + "\n" +
              "- test: " + $test + "\n" +
              "- docgen: " + $docgen + "\n\n" +
              "Run: " + $run + "\n\n" +
-             "This does not block any PR by itself — it means the next Effect prerelease is likely to break this library once it stabilizes. Investigate the run, then either fix the break ahead of time or close this out if it turns out to be a fluke in that prerelease."')
+             "This does not block any PR by itself — it means the newest Effect release breaks this library, ahead of the catalog pin being bumped to it. Investigate the run, then either fix the break ahead of time or close this out if it turns out to be a fluke in that release."')
 
           existing=$(curl -sS -G \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
