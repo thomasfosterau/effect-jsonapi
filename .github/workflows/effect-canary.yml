@@ -61,9 +61,15 @@ jobs:
         run: |
           set -euo pipefail
           latest="$(pnpm view effect@latest version)"
+          if [ -z "$latest" ]; then
+            echo "::error::pnpm view effect@latest returned no version"
+            exit 1
+          fi
           echo "floating effect to ${latest}"
           sed -i -E "/^catalog:$/,/^[^ #]/ s/^(  effect: ).*$/\1${latest}/" pnpm-workspace.yaml
-          test "$(grep -cE "^  effect: ${latest}$" pnpm-workspace.yaml)" -eq 1
+          # Exact whole-line, fixed-string match: the version's dots are not
+          # regex wildcards, and only the catalog entry may carry it.
+          test "$(grep -cxF "  effect: ${latest}" pnpm-workspace.yaml)" -eq 1
           pnpm install --no-frozen-lockfile --ignore-scripts --config.minimumReleaseAge=0
           pnpm run prepare
 
