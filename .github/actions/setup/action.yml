@@ -26,7 +26,7 @@ inputs:
       "false" skips the repository's `prepare` step (git hooks + the
       effect-tsgo patch). Only the Release job sets it, because it holds
       `id-token: write` and its build emits a byte-identical `dist/` on the
-      unpatched toolchain; CI and the canary keep the default ("true"), since
+      unpatched toolchain; CI keeps the default ("true"), since
       every type/lint gate runs on the patched binaries.
     required: false
     default: "true"
