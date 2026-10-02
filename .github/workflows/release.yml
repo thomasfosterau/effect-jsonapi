@@ -37,7 +37,7 @@ jobs:
       # manifest's mtime moves after the install, e.g. a `git checkout` /
       # `git reset --hard` by the Changesets action before `pnpm run version`.
       # Set here rather than in `.github/actions/setup` because that action
-      # is shared with CI and the canary, which keep the default (a job-level
+      # is shared with CI, which keeps the default (a job-level
       # `env` reaches the composite action's steps too). pnpm 11 reads only
       # the `pnpm_config_*` spelling for this setting;
       # `npm_config_verify_deps_before_run` is ignored.
