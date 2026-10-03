@@ -83,7 +83,7 @@ This project uses [Changesets](https://github.com/changesets/changesets) to mana
 pnpm changeset
 ```
 
-Pick the appropriate bump (`patch` / `minor` / `major`) and write a user-facing summary. The changeset file is committed alongside your change; releases are published automatically when the "Version Packages" PR is merged into `main`. See [PUBLISHING.md](./PUBLISHING.md) for the full release flow and one-time maintainer setup.
+Pick the appropriate bump (`patch` / `minor` / `major`) and write a user-facing summary. The changeset file is committed alongside your change; releases are published automatically when the "Version Packages" PR is merged into `trunk`. See [PUBLISHING.md](./PUBLISHING.md) for the full release flow and one-time maintainer setup.
 
 ## Git hooks
 
@@ -91,12 +91,12 @@ Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pr
 
 ## CI expectations
 
-[ci.yml](.github/workflows/ci.yml) runs one job on every push and pull request, on the latest stable Node.js (`node-version: latest`; Release uses the same setup): the gates in [AGENTS.md → Verification](AGENTS.md#verification), build first, plus `pnpm audit --audit-level high`. The job name is the check name the `main` ruleset requires, `Lint, type-check, build & test`, so renaming it blocks every PR. Installs are `pnpm install --frozen-lockfile --ignore-scripts` followed by an explicit `pnpm run prepare` (the composite action in `.github/actions/setup` explains the exception). [release.yml](.github/workflows/release.yml) runs the Changesets action on `main` under the protected `release` environment.
+[ci.yml](.github/workflows/ci.yml) runs one job on every push and pull request, on the latest stable Node.js (`node-version: latest`; Release uses the same setup): the gates in [AGENTS.md → Verification](AGENTS.md#verification), build first, plus `pnpm audit --audit-level high`. The job name is the check name the `Default` ruleset on `trunk` requires, `Lint, type-check, build & test`, so renaming it blocks every PR. Installs are `pnpm install --frozen-lockfile --ignore-scripts` followed by an explicit `pnpm run prepare` (the composite action in `.github/actions/setup` explains the exception). [release.yml](.github/workflows/release.yml) runs the Changesets action on `trunk` under the protected `release` environment.
 
 ## Pre-PR checklist
 
 1. The gates and the changeset in [AGENTS.md → Verification](AGENTS.md#verification).
-2. `git fetch origin main && git rebase origin/main`
+2. `git fetch origin trunk && git rebase origin/trunk`
 3. Docs: `README.md` for any exported change; `AGENTS.md` for a new term or invariant.
 
 ## Library template (programme standard)
@@ -108,7 +108,7 @@ The shape this repository has is the library standard every `@thomasfosterau/*` 
 - **`tsconfig.base.json`** — from `effect-drizzle-ext` / here: `$schema` from `@effect/tsgo`, `module: preserve`, `erasableSyntaxOnly`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, the `@effect/language-service` plugin with `ignoreEffectWarningsInTscExitCode`; the TypeScript 6/7 split (`typescript: npm:@typescript/typescript6@6.0.2`, `@typescript/native: npm:typescript@7.0.2`) with `prepare: vp config && effect-tsgo patch --typescript --oxlint`.
 - **Build** — `vp pack` (tsdown, `platform: "neutral"`, `dts: true`, `format: "esm"`, `fixedExtension: false`), one bundle per entry point, `"sideEffects": false`, `exports` pointing at `dist/`, plus **`typecheck:dist`** (`tsconfig.dist.json` mapping the package name to the emitted `.d.ts`, with a `test/emitted/*.types.ts` fixture) — the emitted declarations are what consumers see, and they are not what `src/` resolves to.
 - **`.github/actions/setup`** + **`.github/workflows/ci.yml`** — from here: composite setup (`pnpm install --frozen-lockfile --ignore-scripts`, then the repository's own `pnpm run prepare` as its own step), task-cache restore, `vp run build` → `vp check` → `vp run check` → `vp run -r test:unit` → `vp run docgen` → `pnpm audit --audit-level high`; `permissions: {}` at the top of every workflow, `persist-credentials: false` on checkout, SHA-pinned actions.
-- **`.github/workflows/release.yml`** + **`PUBLISHING.md`** + **`SECURITY.md`** — from here: OIDC trusted publishing via `pnpm publish --ignore-scripts` from the protected `release` environment, no `NPM_TOKEN`, `.changeset/config.json` schema 4.0.0 with `baseBranch: main`. Each setting and its reason: [SECURITY.md](SECURITY.md#supply-chain-hardening) and the comments in `release.yml`.
+- **`.github/workflows/release.yml`** + **`PUBLISHING.md`** + **`SECURITY.md`** — from here: OIDC trusted publishing via `pnpm publish --ignore-scripts` from the protected `release` environment, no `NPM_TOKEN`, `.changeset/config.json` schema 4.0.0 with `baseBranch: trunk`. Each setting and its reason: [SECURITY.md](SECURITY.md#supply-chain-hardening) and the comments in `release.yml`.
 - **`.github/dependabot.yml`** — from `effect-drizzle-ext` / here: weekly, grouped `effect` / `vitest-toolchain`, `cooldown` 1 day excluding `@thomasfosterau/*`, version updates of the gitHead-locked set (`@effect/tsgo`, `typescript`, `@typescript/native`, `vite`, `vitest`, `vite-plus`) ignored while security updates stay on, the `github-actions` ecosystem.
 - **`.claude/settings.json`**, **`.claude/hooks/session-start.sh`**, **`.claude/hooks/fallow-gate.sh`**, **`.fallowrc.json`**, **`.vite-hooks/pre-commit`**, **`.editorconfig`** — from `effect-drizzle-ext` / here. The session-start hook is what makes `vp` resolve in a non-interactive shell; the devcontainer's `postCreateCommand` invokes the same file.
 - **`AGENTS.md`** as the file with `CLAUDE.md -> AGENTS.md`, a per-package `CLAUDE.md` carrying that package's import boundary in a multi-package workspace, `README.md`, `CONTRIBUTING.md`, `LICENSE` (MIT).
@@ -116,7 +116,7 @@ The shape this repository has is the library standard every `@thomasfosterau/*` 
 - **The type-level test slot** — from here: `test/*.types.ts` included by the root `tsconfig.json` (package name mapped to `./src`), asserted with `@ts-expect-error` and checked by `vp run check`; TypeScript 7 anchors overload failures per property, so a directive covers exactly the next line.
 - **The reformat** — one isolated `vp fmt` commit, listed in `.git-blame-ignore-revs` and named in `CONTRIBUTING.md`.
 
-Done when the gates in [AGENTS.md → Verification](AGENTS.md#verification) pass; CI is green on `main`; the `release` environment exists and the Release workflow opens a "Version Packages" PR when a changeset is present; a fresh agent session can run the gates without manual setup.
+Done when the gates in [AGENTS.md → Verification](AGENTS.md#verification) pass; CI is green on `trunk`; the `release` environment exists and the Release workflow opens a "Version Packages" PR when a changeset is present; a fresh agent session can run the gates without manual setup.
 
 ## Scope
 

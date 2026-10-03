@@ -1,17 +1,17 @@
 ## Summary
 
-Describe what changed and why. If this closes an issue, add `Closes #N` so it auto-closes on merge to `main`.
+Describe what changed and why. If this closes an issue, add `Closes #N` so it auto-closes on merge to `trunk`.
 
 ## Verification
 
-Tick what you ran, in the order of [AGENTS.md → Verification](https://github.com/thomasfosterau/effect-jsonapi/blob/main/AGENTS.md#verification), and quote any failure. Pre-commit covers format + lint; there is no pre-push hook.
+Tick what you ran, in the order of [AGENTS.md → Verification](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/AGENTS.md#verification), and quote any failure. Pre-commit covers format + lint; there is no pre-push hook.
 
 - [ ] `vp run build`
 - [ ] `vp check`
 - [ ] `vp run check` (sources, type-level tests, examples, emitted declarations)
 - [ ] `vp run -r test:unit`
 - [ ] `vp run docgen` (every JSDoc `@example` compiled and executed)
-- [ ] `fallow audit --base origin/main`
+- [ ] `fallow audit --base origin/trunk`
 
 ## Changeset
 

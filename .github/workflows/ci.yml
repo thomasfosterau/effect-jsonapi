@@ -7,19 +7,20 @@ name: CI
 # from effect-drizzle-ext (the library reference); the docgen step is this
 # repository's own.
 #
-# The job name is load-bearing: the `main` ruleset requires the check
-# "Lint, type-check, build & test", which GitHub derives from this `name`.
-# Renaming it leaves the required check unreported and every PR blocked.
+# The job name is load-bearing: the `Default` ruleset on `trunk` requires
+# the check "Lint, type-check, build & test", which GitHub derives from this
+# `name`. Renaming it leaves the required check unreported and every PR
+# blocked.
 
 on:
   push:
-    branches: [main]
+    branches: [trunk]
   pull_request:
-    branches: [main]
+    branches: [trunk]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/trunk' }}
 
 # No permissions by default; the job grants only read access.
 permissions: {}
