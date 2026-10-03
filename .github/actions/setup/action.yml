@@ -18,9 +18,12 @@ name: Setup toolchain
 description: Set up Node.js and pnpm, restore the package cache, install dependencies and patch the toolchain.
 inputs:
   node-version:
-    description: The Node.js version to set up.
+    description: >-
+      The Node.js version to set up. Defaults to `latest`, the newest stable
+      release: CI and Release both run on it, the one Node line every
+      repository in the programme tests on (#211).
     required: false
-    default: 22.x
+    default: latest
   run-prepare:
     description: >-
       "false" skips the repository's `prepare` step (git hooks + the
