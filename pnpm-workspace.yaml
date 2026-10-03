@@ -21,7 +21,7 @@
 # vite-plus, the TypeScript 6/7 pair, @effect/tsgo, fallow — so the library
 # builds against exactly what they run. Two deliberate deviations:
 # `vite-plus`, pinned one release ahead of the applications so that the
-# `oxlint` it carries is one `@effect/tsgo` 0.45 can patch (see both notes);
+# `oxlint` it carries is one `@effect/tsgo` 0.47 can patch (see both notes);
 # and `effect`, which tracks the `latest` dist-tag ahead of the applications'
 # lockstep (see that entry).
 packages:
@@ -40,18 +40,21 @@ catalog:
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
   # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
   # with an Effect-patched build matched by gitHead, so this pins in lockstep
-  # with `@typescript/native` below (0.45.0 ships against typescript 7.0.2).
+  # with `@typescript/native` below (0.47.2 ships against typescript 7.0.2).
   #
   # The root `prepare` script runs `effect-tsgo patch --typescript --oxlint`,
   # so this ALSO pins in lockstep with the `oxlint` that `vite-plus` pulls in
   # (see that entry). Each @effect/tsgo release ships artifacts for an explicit
   # set of component versions and hard-errors
   # (UnsupportedTargetPackageVersionError) on anything else, failing
-  # `pnpm install` itself rather than a later task: 0.45.0 supports typescript
-  # 7.0.2 / 7.1.0-dev.20260909.1 and oxlint 1.81.0 / 1.82.0. Read the
+  # `pnpm install` itself rather than a later task: 0.47.2 supports typescript
+  # 7.0.2 / 7.1.0-dev.20260929.1, oxlint 1.82.0-1.86.0 and oxlint-tsgolint
+  # 7.0.2001 / 7.0.2003. 0.47.0 is also the first release with the
+  # `unstableApiUsage` rule that tsconfig.base.json lowers to "suggestion"
+  # (#205). Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.45.0
+  "@effect/tsgo": 0.47.2
   "@mpsuesser/oxlint-plugin-effect": ^0.5.0
   "@types/node": ^26.4.1
   # Deliberately tracks the `latest` dist-tag, ahead of the applications'
@@ -76,11 +79,12 @@ catalog:
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override forces
-  # every resolution to the catalog singleton. 0.3.2 carries oxlint 1.82.0 —
-  # the newest release @effect/tsgo 0.45.0 can patch (0.3.0 carries 1.79.0,
-  # which it cannot; 0.3.3 carries 1.83.0, which it cannot yet).
-  vite-plus: 0.3.2
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.2
+  # every resolution to the catalog singleton. 0.3.3 carries oxlint 1.83.0 and
+  # oxlint-tsgolint 7.0.2001, both in @effect/tsgo 0.47.2's components table,
+  # and keeps vitest 4.1.11 (1.0.0 carries oxlint 1.85.0 but moves vitest to
+  # 5.x, a separate upgrade).
+  vite-plus: 0.3.3
+  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
