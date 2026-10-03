@@ -42,7 +42,8 @@ import {
   withQuery,
 } from "./core.js";
 
-const GRAMMAR = "https://github.com/thomasfosterau/effect-jsonapi/blob/main/docs/filter-grammar.md";
+const GRAMMAR =
+  "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md";
 
 const filterRule = (
   id: string,

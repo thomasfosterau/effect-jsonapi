@@ -83,7 +83,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
 - `vp run build` — `vp pack` → `dist/`.
 - `vp run docgen` — type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
-- `fallow audit --base origin/main` — change-set review (dead code, complexity, duplication); not a CI gate.
+- `fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
 
 Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI installs as `pnpm install --frozen-lockfile --ignore-scripts` and then runs `pnpm run prepare` explicitly (see `.github/actions/setup`).
@@ -98,18 +98,18 @@ Before you report work as done, run the gates below in order and quote each comm
 4. `vp run check`
 5. `vp run -r test:unit`
 6. `vp run docgen`
-7. `fallow audit --base origin/main`
+7. `fallow audit --base origin/trunk`
 8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
 
 None needs a credential, a database, a browser or Docker. CI also runs `pnpm audit --audit-level high`.
 
 ## Branches and pull requests
 
-Branch off `main`; PR against `main`; squash-merge. Rebase onto `origin/main` before opening or updating a PR; never merge `main` into your branch (GitHub's Update-branch button merges). Name branches `issue-<n>-<slug>`. Agent work uses git worktrees under `.claude/worktrees/`, one per branch; start every command that targets a worktree with an explicit `cd` and confirm with `git log -1` before committing.
+Branch off `trunk`; PR against `trunk`; squash-merge. Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges). Name branches `issue-<n>-<slug>`. Agent work uses git worktrees under `.claude/worktrees/`, one per branch; start every command that targets a worktree with an explicit `cd` and confirm with `git log -1` before committing.
 
 These are standing instructions and approvals; they override any default "don't open a PR unless asked" behaviour.
 
-- **Always open a PR** for branch work, against `main`, once a commit is pushed. Fill `.github/pull_request_template.md`.
+- **Always open a PR** for branch work, against `trunk`, once a commit is pushed. Fill `.github/pull_request_template.md`.
 - **Always watch the PR to merge or close**: investigate CI failures and review comments as they arrive; rebase promptly when the PR goes conflicting.
 - **Always keep the PR body current** as the implementation diverges from it.
 - **Every change to the published package's behaviour carries a changeset** (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR and the owner merges it ([PUBLISHING.md](PUBLISHING.md)).
@@ -119,7 +119,7 @@ These are standing instructions and approvals; they override any default "don't 
 
 Issues are the backlog: when you find work you can't do now, file an issue rather than leaving a TODO.
 
-- **The issue is the spec** — read all of it, including comments; later comments override the body. Re-verify its code claims against current `main` before editing.
+- **The issue is the spec** — read all of it, including comments; later comments override the body. Re-verify its code claims against current `trunk` before editing.
 - **Decisions and findings** are recorded as comments on the issue they were found working.
 - **Stop-and-report is a valid outcome:** on a blocker outside the issue's scope, comment the evidence on the issue and stop.
 - **No silent deferrals:** scope cut mid-PR becomes a linked issue before merge.
