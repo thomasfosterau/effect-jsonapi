@@ -62,6 +62,13 @@
           "preferSchemaOverJson": "warning",
           "processEnv": "warning",
           "processEnvInEffect": "warning",
+          // Effect marks much of `effect/http` and `effect/http-api`
+          // `@stability unstable`, so at "warning" every import of the HTTP
+          // surface this library is built on would warn. "suggestion" keeps
+          // the hint in the editor without drowning the type gate (#205).
+          // The rule exists from @effect/tsgo 0.47.0; earlier releases accept
+          // and ignore the key.
+          "unstableApiUsage": "suggestion",
           "unsafeEffectTypeAssertion": "warning"
         }
       }
