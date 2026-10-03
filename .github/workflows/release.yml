@@ -68,12 +68,27 @@ jobs:
       # When changesets are pending, this opens/updates a "Version Packages" PR
       # (via `pnpm run version`). Once that PR is merged (no changesets remain),
       # it runs `pnpm run release`, which publishes with `pnpm publish
-      # --ignore-scripts` — npm OIDC trusted publishing (there is no NPM_TOKEN
-      # to steal) — and then `changeset tag`. `--ignore-scripts` keeps the
-      # package's `prepublishOnly` (`vp run build`, already done by the Build
-      # step above) and `prepare` (`effect-tsgo patch`) out of this job; the
-      # tarball is byte-identical either way. The action parses the "New tag:" output, pushes the
-      # tags and creates the GitHub releases.
+      # --recursive --ignore-scripts` — npm OIDC trusted publishing (there is
+      # no NPM_TOKEN to steal) — and then `changeset git-tag`. `--ignore-scripts`
+      # keeps the package's `prepublishOnly` (`vp run build`, already done by
+      # the Build step above) and `prepare` (`effect-tsgo patch`) out of this
+      # job; the tarball is byte-identical either way.
+      #
+      # The publish branch runs on EVERY push to trunk with no pending
+      # changesets, not only the Version Packages merge, so it must be a no-op
+      # when the current version is already on npm. `--recursive` is what makes
+      # it one: a recursive `pnpm publish` skips any workspace package whose
+      # version the registry already has ("There are no new packages that
+      # should be published") and exits 0, as `changeset publish` does, while
+      # a single-package `pnpm publish` tries to publish over it and exits 1.
+      # The root is a workspace member and the examples are private, so the
+      # recursive publish covers exactly this package.
+      #
+      # The action passes `CHANGESETS_OUTPUT` (a temp NDJSON path) to the
+      # script; `changeset git-tag` reads it from the environment and appends
+      # one `git-tag` event per tag it creates. The action reads that file to
+      # push the tags and create the GitHub releases. Already-tagged versions
+      # (checked locally and on the remote) produce no event.
       #
       # `pnpm publish`, not `npm publish`: pnpm 11 performs trusted publishing
       # itself (it mints the OIDC token; it no longer delegates to the npm
