@@ -48,7 +48,7 @@
     "prepare": "vp config && effect-tsgo patch --typescript --oxlint",
     "changeset": "changeset",
     "version": "changeset version && vp fmt && pnpm install --lockfile-only",
-    "release": "pnpm publish --access public --no-git-checks --ignore-scripts && changeset tag",
+    "release": "pnpm publish --recursive --access public --no-git-checks --ignore-scripts && changeset git-tag",
     "prepublishOnly": "vp run build",
     "fallow": "fallow --summary",
     "fallow:audit": "fallow audit"
