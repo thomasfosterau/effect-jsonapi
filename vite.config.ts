@@ -98,7 +98,6 @@ export default defineConfig({
       "effect/use-console-service": "warn",
       "effect/require-effect-concurrency": "warn",
       "effect/use-random-service": "warn",
-      "effect/use-command-executor-service": "warn",
       "effect/prefer-duration-constructors": "warn",
       "effect/effect-promise-vs-trypromise": "warn",
       "effect/effect-catchall-default": "warn",

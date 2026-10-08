@@ -11,8 +11,10 @@
  * pipeline for exactly the examples it skips:
  *
  * - modules are `<srcDir>/**\/*.ts` minus `exclude`, from `docgen.json`;
- * - a class counts when it is a top-level `export` and its last JSDoc block
- *   carries neither `@internal` nor `@ignore`;
+ * - a class counts when it is top-level and exported (by an `export`
+ *   modifier or a local `export { … }` / `export default`, as ts-morph's
+ *   `isExported()` reads it) and its last JSDoc block carries neither
+ *   `@internal` nor `@ignore`;
  * - each `@example` loses its code fence (docgen's `fencedExampleRegex`), its
  *   package-name imports are rewritten to `../../src`, and an `assert` import
  *   is added when it uses `assert.`;
@@ -115,8 +117,31 @@ const handleImports = (code: string): string => {
   return source.includes("assert.") ? `import * as assert from 'assert'\n${source}` : source;
 };
 
-const isExported = (node: ts.ClassDeclaration): boolean =>
-  (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0;
+// The local names a module exports without an `export` modifier on the
+// declaration: `export { X }`, `export { X as Y }`, `export type { X }` and
+// `export default X`. ts-morph's `isExported()`, which docgen calls, counts
+// a class exported through any of them.
+const isLocalExportList = (statement: ts.Statement): statement is ts.ExportDeclaration =>
+  ts.isExportDeclaration(statement) && statement.moduleSpecifier === undefined;
+const localName = (element: ts.ExportSpecifier): string =>
+  (element.propertyName ?? element.name).text;
+const exportListNames = (statement: ts.Statement): ReadonlyArray<string> => {
+  const clause = isLocalExportList(statement) ? statement.exportClause : undefined;
+  return clause !== undefined && ts.isNamedExports(clause) ? clause.elements.map(localName) : [];
+};
+const exportDefaultNames = (statement: ts.Statement): ReadonlyArray<string> =>
+  ts.isExportAssignment(statement) && ts.isIdentifier(statement.expression)
+    ? [statement.expression.text]
+    : [];
+const exportedNames = (sourceFile: ts.SourceFile): ReadonlyArray<string> =>
+  sourceFile.statements.flatMap((statement) => [
+    ...exportListNames(statement),
+    ...exportDefaultNames(statement),
+  ]);
+
+const isExported = (node: ts.ClassDeclaration, exported: ReadonlyArray<string>): boolean =>
+  (ts.getCombinedModifierFlags(node) & ts.ModifierFlags.Export) !== 0 ||
+  (node.name !== undefined && exported.includes(node.name.text));
 
 // docgen's `shouldNotIgnore`.
 const isIgnoreTag = (tag: Tag): boolean => tag.title === "internal" || tag.title === "ignore";
@@ -129,9 +154,10 @@ const classExamples = (file: string): ReadonlyArray<ExampleFile> => {
     true,
   );
   const prefix = file.split(path.sep).join("-");
+  const exported = exportedNames(sourceFile);
   return sourceFile.statements
     .filter(ts.isClassDeclaration)
-    .filter(isExported)
+    .filter((node) => isExported(node, exported))
     .flatMap((node) => {
       // docgen reads the last JSDoc block only.
       const jsDoc = ts.getJSDocCommentsAndTags(node).filter(ts.isJSDoc).at(-1);
@@ -160,10 +186,14 @@ const run = (command: string, args: ReadonlyArray<string>): void => {
   }
 };
 
+// `exclude` is applied by globbing it and dropping the matches, not through
+// `globSync`'s own `exclude` option: that option takes glob patterns only
+// from Node 22.14, and `engines` admits every Node 22.
+const excluded = fs.globSync([...(config.exclude ?? [])]);
 const examples = Arr.sort(
-  fs.globSync(path.join(config.srcDir ?? "src", "**", "*.ts"), {
-    exclude: [...(config.exclude ?? [])],
-  }),
+  fs
+    .globSync(path.join(config.srcDir ?? "src", "**", "*.ts"))
+    .filter((file) => !excluded.includes(file)),
   Order.String,
 ).flatMap(classExamples);
 
