@@ -544,10 +544,10 @@ export const skip = (rule: Rule, reason: string): Skipped => ({ _tag: "Skipped",
 
 /**
  * An `Error` as `Name: message`, or the name alone when it carries no message.
- * Both go through a template, so a `name` that is not a string but coerces to
- * one (a number, say) still renders; one that cannot coerce (a Symbol, or an
- * object whose `toString` throws) throws here, and the defect's message falls
- * back to {@link UNRENDERABLE}.
+ * Both go through a template, so a `name` or `message` that is not a string
+ * but coerces to one (a number, say) still renders; one that cannot coerce (a
+ * Symbol, or an object whose `toString` throws) throws here, and the defect's
+ * message falls back to {@link UNRENDERABLE}.
  */
 const errorMessage = (error: Error): string =>
   error.message === "" ? `${error.name}` : `${error.name}: ${error.message}`;
@@ -567,7 +567,7 @@ const capped = (message: string): string => {
   return `${message.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end)}…`;
 };
 
-/** `Errored.message` for a defect that throws when it is inspected. */
+/** `Errored.message` for a defect the kit cannot read at all — see {@link renderThrown}. */
 const UNRENDERABLE = "[unrenderable defect]";
 
 /**
@@ -577,11 +577,13 @@ const UNRENDERABLE = "[unrenderable defect]";
  * as an `Error`; capped at {@link MESSAGE_LIMIT}. Total, so the report the
  * caller is building survives whatever it is given. Only a value that cannot be
  * read at all renders as {@link UNRENDERABLE}: one `Predicate.isError` throws
- * on (a revoked `Proxy`, or one whose traps throw), or an `Error` whose
- * `message` or `name` getter throws or whose `name` cannot become a string (a
- * Symbol, say). `Formatter.format` reads past a part of any other value that
- * throws and marks that part itself — `[toString threw]` for an object whose
- * `toString` throws, `[property access threw]` for a getter that throws.
+ * on (a revoked `Proxy`, or one whose `getPrototypeOf` trap throws), or an
+ * `Error` whose `name` or `message` throws when read or cannot become a string
+ * (a Symbol, or an object whose `toString` throws). `Formatter.format` reads
+ * past a part of any other value that throws and marks that part itself —
+ * `[toString threw]` for an object whose `toString` throws,
+ * `[property access threw]` for a getter that throws, `[inspection threw]` for
+ * a `Proxy` whose `get` trap throws.
  *
  * Shared by a rule's `Errored.message` and the write fixture's skip reasons and
  * `cleanup-failed` details, so a value renders the same wherever it surfaces.

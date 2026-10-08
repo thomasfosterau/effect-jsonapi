@@ -230,11 +230,12 @@ export interface Finding extends Core.Finding {}
  * transport that throws, or a bug in the kit, not a finding about the server —
  * with the defect's `message` (capped at 500 UTF-16 code units, a longer one
  * ending in `…`; `[unrenderable defect]` for a value the kit cannot read at
- * all — a revoked `Proxy` or one whose traps throw, or an `Error` whose
- * `message` or `name` getter throws or whose `name` is a Symbol) and the
- * `defect` itself. Any other value that throws when part of it is read —
- * an object whose `toString` throws, say — renders with `Formatter.format`'s
- * own marker for that part, such as `[toString threw]`.
+ * all — a revoked `Proxy`, or one whose `getPrototypeOf` trap throws, or an
+ * `Error` whose `name` or `message` throws when read or cannot become a string
+ * (a Symbol, or an object whose `toString` throws)) and the `defect` itself.
+ * Any other value that throws when part of it is read — an object whose
+ * `toString` throws, say — renders with `Formatter.format`'s own marker for
+ * that part, such as `[toString threw]`.
  *
  * `Skipped` is load-bearing. A rule that needs a write endpoint against an api
  * that has none, or a sample id the caller did not supply, must not be counted

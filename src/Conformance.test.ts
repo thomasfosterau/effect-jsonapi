@@ -411,6 +411,36 @@ describe("Conformance: the report", () => {
     );
   });
 
+  it("hangs an expected or observed value that spans lines under its label", () => {
+    // `observed` quotes the server — a `type` of `"a\nb"`, say: its next line
+    // must not start at the label column, where it would read as a field.
+    const text = Conformance.format({
+      target: "fixture",
+      version: "1.1",
+      transport: "in-process",
+      outcomes: [
+        {
+          _tag: "Failed",
+          rule,
+          probes: 1,
+          findings: [
+            {
+              rule,
+              detail: "d",
+              expected: "x\ny",
+              observed: "a\nb:1",
+              probe: undefined,
+            },
+          ],
+        },
+      ],
+      gaps: [],
+    });
+    expect(text).toContain(
+      "          expected: x\n            y\n          observed: a\n            b:1",
+    );
+  });
+
   it("lists the writes still in place before those that are gone", () => {
     const text = Conformance.format({
       target: "fixture",
@@ -778,6 +808,24 @@ describe("Conformance: detects a deliberately broken server", () => {
     expect(await observedWith("spec/document/no-duplicate-resources", [twice, twice])).toEqual([
       "people:9 at /included/0 and /included/1",
     ]);
+  });
+
+  // `String({"toString":1})` throws: naming the duplicate must not kill the rule.
+  it("names a duplicated included resource whose id is not a string by its lid", async () => {
+    const twice = { type: "people", id: { toString: 1 }, lid: "9", attributes: {} };
+    expect(await observedWith("spec/document/no-duplicate-resources", [twice, twice])).toEqual([
+      "people:9 at /included/0 and /included/1",
+    ]);
+  });
+
+  // The kit keys a resource by its `lid` whenever its `id` is not a string, so
+  // the label names the `lid` too, not an `id` the comparison ignored.
+  it("names an included resource by the member its identity is keyed on", async () => {
+    const twice = { type: "people", id: 7, lid: "8", attributes: {} };
+    expect(await observedWith("spec/document/no-duplicate-resources", [twice, twice])).toEqual([
+      "people:8 at /included/0 and /included/1",
+    ]);
+    expect(await observedWith("spec/document/full-linkage", [twice])).toEqual(["people:8"]);
   });
 
   broken(
@@ -1684,6 +1732,13 @@ describe("Conformance: the write fixture", () => {
     ),
   );
 
+  /** An object `String` and a template literal both throw on. */
+  const toStringThrows = {
+    toString: (): never => {
+      throw new FixtureBroke({ message: "no string" });
+    },
+  };
+
   /** What each value a fixture member throws or fails with renders as in the report. */
   const fixtureValues = [
     {
@@ -1698,11 +1753,7 @@ describe("Conformance: the write fixture", () => {
     // Not unrenderable: `Formatter.format` catches the throw and says so itself.
     {
       value: "an object whose toString throws",
-      thrown: {
-        toString: (): never => {
-          throw new FixtureBroke({ message: "no string" });
-        },
-      },
+      thrown: toStringThrows,
       rendered: "[toString threw]",
     },
     {
@@ -1713,6 +1764,12 @@ describe("Conformance: the write fixture", () => {
     {
       value: "an error whose message getter throws",
       thrown: messageThrows,
+      rendered: "[unrenderable defect]",
+    },
+    // The `Name: message` template cannot turn this `name` into a string.
+    {
+      value: "an error named by an object whose toString throws",
+      thrown: Object.assign(new FixtureBroke({ message: "broke" }), { name: toStringThrows }),
       rendered: "[unrenderable defect]",
     },
     {

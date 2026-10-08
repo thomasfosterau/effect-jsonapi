@@ -570,20 +570,26 @@ const includedRequiresData: RuleImpl = {
 };
 
 /**
- * A resource as `type:id` — `type:lid` when it has no `id` — for a finding's
- * `observed`. A string member reads as itself; anything else through
- * `Formatter.format`, because the server's JSON can put an object there and
- * `String({"toString":1})` throws: naming a malformed resource must not kill
- * the rule that reports it.
+ * A resource as `type:id` for a finding's `observed`, naming the member
+ * `identity` keys it on: its `id` when that is a string, else its `lid` when
+ * that is — so a duplicate keyed on `lid` is not named by an `id` the
+ * comparison ignored. With neither a string, there is no key, and the label
+ * falls back to whichever of the two is present. A string member reads as
+ * itself; anything else through `Formatter.format`, because the server's JSON
+ * can put an object there and `String({"toString":1})` throws: naming a
+ * malformed resource must not kill the rule that reports it.
  */
 const resourceLabel = (resource: {
   readonly type?: unknown;
   readonly id?: unknown;
   readonly lid?: unknown;
-}): string =>
-  Arr.map([resource.type, resource.id ?? resource.lid], (value) =>
+}): string => {
+  const { id, lid } = resource;
+  const member = Predicate.isString(id) ? id : Predicate.isString(lid) ? lid : (id ?? lid);
+  return Arr.map([resource.type, member], (value) =>
     Predicate.isString(value) ? value : Formatter.format(value),
   ).join(":");
+};
 
 /**
  * The `included` members of a document that cannot be reached from its

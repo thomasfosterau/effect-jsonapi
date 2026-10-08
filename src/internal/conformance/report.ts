@@ -148,8 +148,8 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
             lines.push(indent(`body: ${JSON.stringify(found.probe.body)}`, "        "));
           }
         }
-        lines.push(indent(`expected: ${found.expected}`, "        "));
-        lines.push(indent(`observed: ${found.observed}`, "        "));
+        lines.push(hang(`expected: ${found.expected}`, "        ", "          "));
+        lines.push(hang(`observed: ${found.observed}`, "        ", "          "));
       }
       break;
     }
