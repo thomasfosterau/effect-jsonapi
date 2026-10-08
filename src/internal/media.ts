@@ -80,6 +80,27 @@ export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): s
  */
 export const ATOMIC_MEDIA_TYPE = mediaTypeWith([ATOMIC_EXTENSION_URI]);
 
+/** One `;`-separated part of a media type entry, split at its first `=`. */
+const parseParameter = (part: string): readonly [name: string, value: string] => {
+  const eq = part.indexOf("=");
+  const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase();
+  const value = eq === -1 ? "" : part.slice(eq + 1).trim();
+  return [name, value];
+};
+
+/** A parameter value with its surrounding double quotes removed (ext / profile URI lists are quoted). */
+const unquote = (value: string): string =>
+  value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value;
+
+/**
+ * RFC 9110 §12.4.2: `qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] )`.
+ * The `weight` rule is `OWS ";" OWS "q=" qvalue`, so a quoted value is not a
+ * `qvalue` either. `Number()` alone would read `""` and `"0x0"` as `0` (a
+ * refusal), `"-1"` and `"1e-9"` as weights at or below zero, and `"2"` as a
+ * weight above the `1` ceiling.
+ */
+const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
+
 /**
  * Splits one media type entry into its (lowercased) base type, its media type
  * parameters, and its weight.
@@ -94,25 +115,14 @@ export const ATOMIC_MEDIA_TYPE = mediaTypeWith([ATOMIC_EXTENSION_URI]);
  * `;q=0.8;foo=bar` has none.
  *
  * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`,
- * and is `undefined` when the entry carries a `q` that is not a number — the
- * two callers disagree on what that means (the §5 middleware treats it as a
+ * and is `undefined` when the entry carries a malformed `q` — one outside the
+ * `qvalue` grammar (`0` to `1`, at most three decimals). The two callers
+ * disagree on what a malformed weight means (the §5 middleware treats it as a
  * refusal, a host's representation negotiation as the default weight), so the
  * parser reports it rather than deciding.
  *
  * @internal
  */
-/** One `;`-separated part of a media type entry, split at its first `=`. */
-const parseParameter = (part: string): readonly [name: string, value: string] => {
-  const eq = part.indexOf("=");
-  const name = (eq === -1 ? part : part.slice(0, eq)).trim().toLowerCase();
-  const value = eq === -1 ? "" : part.slice(eq + 1).trim();
-  return [name, value];
-};
-
-/** A parameter value with its surrounding double quotes removed (ext / profile URI lists are quoted). */
-const unquote = (value: string): string =>
-  value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value;
-
 export const parseMediaType = (
   entry: string,
 ): {
@@ -128,8 +138,7 @@ export const parseMediaType = (
     // `q` terminates the media type's parameter list; it and everything after
     // it are accept-extension parameters of the header field.
     if (name === "q") {
-      const parsed = Number(value);
-      weight = Number.isFinite(parsed) ? parsed : undefined;
+      weight = QVALUE.test(value) ? Number(value) : undefined;
       break;
     }
     parameters.push([name, unquote(value)] as const);

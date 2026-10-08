@@ -72,6 +72,20 @@ describe("acceptIsAcceptable", () => {
     expect(acceptIsAcceptable(`${MEDIA_TYPE};q=1.0`)).toBe(true);
   });
 
+  // `q=abc` was already skipped; an empty, signed, hex, exponent or
+  // out-of-range q now is too, rather than reading as whatever Number() says.
+  it.each(["abc", "", "0x0", "-1", "1e-9", "2", "1.0001"])(
+    "treats q=%s, outside the RFC 9110 qvalue grammar, like an unparseable q — a refusal here",
+    (q) => {
+      expect(acceptIsAcceptable(`${MEDIA_TYPE};q=${q}`)).toBe(false);
+    },
+  );
+
+  it("does not let a malformed q mask a well-formed instance, or a wildcard", () => {
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=2, ${MEDIA_TYPE};q=0.5`)).toBe(true);
+    expect(acceptIsAcceptable(`${MEDIA_TYPE};q=, */*;q=0.1`)).toBe(true);
+  });
+
   it("weighs each Accept entry independently — a low-weight JSON:API instance is still acceptable", () => {
     expect(acceptIsAcceptable(`text/html;q=0.9, ${MEDIA_TYPE};q=0.8`)).toBe(true);
     expect(acceptIsAcceptable(`${MEDIA_TYPE}, text/html;q=0.9`)).toBe(true);
