@@ -224,6 +224,63 @@ describe("alternates and the fallback", () => {
   });
 });
 
+describe("onExplicitRefusal", () => {
+  const refusing = Negotiation.make({
+    api: Api,
+    onExplicitRefusal: "notAcceptable",
+    alternates: [{ mediaType: "text/markdown", matches: Negotiation.detailPages(["contests"]) }],
+  });
+
+  it('defaults to falling through on a lone `q=0`, as does an explicit "fallthrough"', () => {
+    expectHtmlFallthrough(negotiate(get("/contests", `${MEDIA_TYPE};q=0`)));
+    const explicit = Negotiation.make({ api: Api, onExplicitRefusal: "fallthrough" });
+    expectHtmlFallthrough(explicit.negotiate(get("/contests", `${MEDIA_TYPE};q=0`)));
+  });
+
+  it("406s a lone `q=0` JSON:API range, with a detail distinct from the §6.3.2 406", () => {
+    const verdict = refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0`));
+    expect(verdict.dispatch).toBe(false);
+    expect(verdict.error).toBe(Negotiation.NOT_ACCEPTABLE_REFUSED);
+    expect(verdict.error?.status).toBe(406);
+    expect(verdict.error?.code).toBe(Negotiation.NOT_ACCEPTABLE.code);
+    expect(verdict.error?.detail).not.toBe(Negotiation.NOT_ACCEPTABLE.detail);
+    expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0.0, text/html;q=0`)).error).toBe(
+      Negotiation.NOT_ACCEPTABLE_REFUSED,
+    );
+  });
+
+  it("serves the host's representation, or an alternate, when another range has `q > 0`", () => {
+    expectHtmlFallthrough(
+      refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0, text/html;q=0.5`)),
+    );
+    expect(
+      refusing.negotiate(get(`/contests/${UUID}`, `${MEDIA_TYPE};q=0, text/markdown;q=0.5`)),
+    ).toEqual({ representation: "text/markdown", dispatch: false });
+  });
+
+  it("treats `application/json` or a wildcard alongside the refusal as acceptable", () => {
+    expectHtmlFallthrough(
+      refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0, application/json`)),
+    );
+    expectHtmlFallthrough(refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0, */*;q=0.1`)));
+  });
+
+  it("dispatches when another clean JSON:API instance is acceptable", () => {
+    expect(
+      refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0, ${MEDIA_TYPE};ext=atomic`)),
+    ).toEqual({ representation: MEDIA_TYPE, dispatch: true });
+  });
+
+  it("leaves the §6.3.2 406, page-only paths, writes and a missing Accept as they were", () => {
+    expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};version=1;q=0`)).error).toBe(
+      Negotiation.NOT_ACCEPTABLE,
+    );
+    expectHtmlFallthrough(refusing.negotiate(get("/about", `${MEDIA_TYPE};q=0`)));
+    expectHtmlFallthrough(refusing.negotiate(get("/contests")));
+    expect(refusing.negotiate(write("POST", "/people", MEDIA_TYPE)).dispatch).toBe(true);
+  });
+});
+
 describe("isMutatingMethod", () => {
   it("classifies mutating methods", () => {
     for (const m of ["POST", "put", "Patch", "DELETE"])

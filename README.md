@@ -1493,6 +1493,20 @@ if (verdict.dispatch) return apiHandler(Negotiation.requestForRouter(request), c
 
 A read dispatches when a clean JSON:API instance wins `Accept`; a write when its `Content-Type` is the JSON:API media type; a browser navigation, an `application/json` client and a bare `*/*` all fall through. Pair it with `Middleware.layerHostNegotiated` on the api side, which leaves the host the single negotiating authority.
 
+A read whose `Accept` refuses JSON:API outright (`application/vnd.api+json;q=0`) and names nothing else acceptable falls through too, by default — RFC 9110 reads `q=0` as "not acceptable", so the JSON:API instance just doesn't win. A host that would rather answer that client a 406 opts in:
+
+```ts
+const { negotiate } = Negotiation.make({ api: Api, onExplicitRefusal: "notAcceptable" });
+const read = (accept: string) =>
+  new Request("https://example.test/people", { headers: { accept } });
+
+negotiate(read("application/vnd.api+json;q=0")).error; // Negotiation.NOT_ACCEPTABLE_REFUSED (406)
+negotiate(read("application/vnd.api+json;q=0, text/html;q=0.5")); // the page, as before
+negotiate(read("application/vnd.api+json;q=0, application/json")); // the page, as before
+```
+
+The refusal applies only when no range of any media type carries `q > 0`; another range — `text/html`, `application/json`, `*/*`, an alternate, another JSON:API instance — is negotiated as without the option. `NOT_ACCEPTABLE_REFUSED` shares `NOT_ACCEPTABLE`'s status and `code`; its `detail` names the RFC 9110 rule rather than the §6.3.2 media-type-parameter one, so the two 406s can be told apart.
+
 ### The assembler, the handlers and the registry
 
 `Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set. `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
