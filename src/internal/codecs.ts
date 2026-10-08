@@ -148,21 +148,56 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
   );
 };
 
+// Assigns an own, enumerable data property. Plain assignment would run the
+// `__proto__` accessor for a key spelled `__proto__` (a client controls every
+// key), re-parenting the record — or, for a group read back through it,
+// writing into `Object.prototype`.
+const define = <V>(record: Record<string, V>, key: string, value: V): void => {
+  Object.defineProperty(record, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+};
+
+const bracketKey = /^([^[\]]+)\[([^[\]]+)\]$/;
+
 /**
  * Reshapes a flat record with bracket keys into nested groups:
  * `{ "page[offset]": "10", include: "a" }` → `{ page: { offset: "10" }, include: "a" }`.
+ *
+ * Only one level is reshaped: `a[b]` joins group `a`; any other key — bare,
+ * deeper (`a[b][c]`), empty-bracketed (`a[]`) — is copied under its own
+ * spelling. A bracket key whose group name a bare key already holds
+ * (`?x=1&x[y]=2`, in either order) is likewise copied under its own spelling,
+ * so the bare value is kept and nothing is overwritten or thrown; the nested
+ * struct then drops whichever spelling it doesn't declare. Every key is
+ * written as an own property, so `__proto__` is an ordinary name here.
  */
 export const nest = (flat: { readonly [key: string]: unknown }): Record<string, unknown> => {
   const nested: Record<string, unknown> = {};
+  const bracketed: Array<readonly [key: string, group: string, member: string, value: unknown]> =
+    [];
   for (const [key, value] of Object.entries(flat)) {
     if (value === undefined) continue;
-    const match = /^([^[\]]+)\[([^[\]]+)\]$/.exec(key);
-    if (match === null) {
-      nested[key] = value;
-    } else {
-      const group = (nested[match[1]!] ??= {}) as Record<string, unknown>;
-      group[match[2]!] = value;
+    const match = bracketKey.exec(key);
+    if (match === null) define(nested, key, value);
+    else bracketed.push([key, match[1]!, match[2]!, value]);
+  }
+  const groups = new Map<string, Record<string, unknown>>();
+  for (const [key, name, member, value] of bracketed) {
+    let group = groups.get(name);
+    if (group === undefined) {
+      if (Object.hasOwn(nested, name)) {
+        define(nested, key, value);
+        continue;
+      }
+      group = {};
+      groups.set(name, group);
+      define(nested, name, group);
     }
+    define(group, member, value);
   }
   return nested;
 };
@@ -177,10 +212,10 @@ export const flatten = (nested: { readonly [key: string]: unknown }): Record<str
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       for (const [sub, subValue] of Object.entries(value)) {
         if (subValue === undefined) continue;
-        flat[`${key}[${sub}]`] = subValue;
+        define(flat, `${key}[${sub}]`, subValue);
       }
     } else {
-      flat[key] = value;
+      define(flat, key, value);
     }
   }
   return flat;

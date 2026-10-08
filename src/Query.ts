@@ -1671,13 +1671,22 @@ export const schema = <R extends Any, const O extends Options<R>>(
   const fields = filterFields;
 
   type Values = { readonly [x: string]: unknown };
+  // A struct with no fields is effect's `{}`: it accepts any object and hands
+  // it on *unchanged*, where a struct with fields drops the keys it doesn't
+  // declare. So an endpoint whose query declares nothing would pass every
+  // parameter through to the handler (typed `{}`) and into `nest`. Keeping
+  // only the declared keys makes the empty case drop them too (#260); with
+  // fields it is a no-op, the struct having dropped the rest already.
+  const declared = new Set(Object.keys(flatFields));
+  const declaredOnly = (values: Values): Values =>
+    Object.fromEntries(Object.entries(values).filter(([key]) => declared.has(key)));
   return flat.pipe(
     Schema.decodeTo(
       nested,
       fields === undefined
         ? SchemaTransformation.transform<Values, Values>({
-            decode: (flatValues) => nest(flatValues),
-            encode: (nestedValues) => flatten(nestedValues),
+            decode: (flatValues) => nest(declaredOnly(flatValues)),
+            encode: (nestedValues) => declaredOnly(flatten(nestedValues)),
           })
         : // `filter[...]` keys are routed to the grammar ahead of the one-level
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.

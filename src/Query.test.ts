@@ -1,10 +1,14 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Effect, Schema } from "effect";
-import { UrlParams } from "effect/http";
+import { afterEach, describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { Effect, Layer, Schema } from "effect";
+import { HttpRouter, UrlParams } from "effect/http";
+import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
+import * as Endpoint from "./Endpoint.js";
+import * as Group from "./Group.js";
+import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
-import { make as Resource } from "./Resource.js";
+import { attribute, make as Resource } from "./Resource.js";
 
 const Person = Resource("people", {
   attributes: {
@@ -1051,5 +1055,133 @@ describe("Query.validateIncludePaths", () => {
     );
     expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludePath);
     expect(thrown).toMatchObject({ path: "comments.body" });
+  });
+});
+
+describe("Query.schema: undeclared parameters never reach the decoded query (issue #260)", () => {
+  // The wire record `UrlParams.toRecord` builds for a query string — what an
+  // `HttpApiEndpoint` decodes its `query` schema from.
+  const wire = (search: string) =>
+    UrlParams.toRecord(UrlParams.fromInput(new URLSearchParams(search)));
+
+  // Undeclared keys, including every bare/bracketed collision the one-level
+  // reshaper could meet.
+  const undeclared = [
+    "x=1",
+    "x=1&x[y]=2",
+    "x[y]=1&x=2",
+    "x=1&x=2&x[y]=3",
+    "x[y]=1&x[y][z]=2",
+    "x[y][z]=1&x[y]=2",
+    "a[]=1",
+    "a[]=1&a[]=2&a=3",
+    "[x]=1&x[]=2&[]=3",
+    `a${"[b]".repeat(2000)}=1&a=2&a[b]=3`,
+    "fooBar=1&fooBar[x]=2",
+    "lang=en&lang[region]=au",
+    "__proto__=1",
+    "__proto__[polluted]=yes",
+    "constructor[prototype][polluted]=yes",
+  ];
+
+  // A reshaper that wrote through `__proto__` would pollute every object in
+  // the process; undo it so one failure doesn't cascade into the rest.
+  const polluted = () => Object.hasOwn(Object.prototype, "polluted");
+  afterEach(() => {
+    Reflect.deleteProperty(Object.prototype, "polluted");
+  });
+
+  const Tag = Resource("tags", {
+    attributes: { label: attribute(Schema.String, { filter: true }) },
+  });
+  const empty = Query.schema(Tag, {});
+  const grammar = Query.schema(Tag, { filter: true });
+  const all = Query.schema(Article, {
+    include: true,
+    fields: true,
+    sort: true,
+    page: Query.Page.Offset,
+    filter: { author: Schema.String },
+  });
+
+  // One schema per shape of flat struct `Query.schema` builds: empty, each
+  // family on its own, every family together, and the `filter: true` grammar.
+  const schemas: ReadonlyArray<readonly [string, Schema.Codec<unknown, unknown>]> = [
+    ["empty", empty],
+    ["sort", Query.schema(Tag, { sort: true })],
+    ["fields", Query.schema(Tag, { fields: true })],
+    ["page", Query.schema(Tag, { page: Query.Page.Offset })],
+    ["filter map", Query.schema(Tag, { filter: { label: Schema.String } })],
+    ["filter: true", grammar],
+    ["all", all],
+  ];
+
+  describe.each(schemas)("%s", (_, schema) => {
+    it.each(undeclared)("?%s decodes to {}", (search) => {
+      expect(Schema.decodeUnknownSync(schema)(wire(search))).toEqual({});
+      expect(polluted()).toBe(false);
+    });
+  });
+
+  it("an empty query schema encodes an undeclared key to nothing (client side)", () => {
+    expect(Schema.encodeUnknownSync(empty)({ x: "1", y: { z: "2" } })).toEqual({});
+  });
+
+  it("declared parameters decode unchanged alongside undeclared ones", () => {
+    expect(
+      Schema.decodeUnknownSync(all)(
+        wire(
+          "include=author&fields[articles]=title&sort=-createdAt&page[limit]=5&filter[author]=9" +
+            "&x=1&x[y]=2&page=3&include[x]=4&fields=5&filter=6&__proto__[polluted]=yes",
+        ),
+      ),
+    ).toEqual({
+      include: ["author"],
+      fields: { articles: ["title"] },
+      sort: [{ field: "createdAt", direction: "desc" }],
+      page: { limit: 5 },
+      filter: { author: "9" },
+    });
+    expect(
+      Schema.decodeUnknownSync(grammar)(wire("filter[label]=a&x=1&x[y]=2&page[limit]=5")),
+    ).toEqual({ filter: { _tag: "Compare", op: "eq", field: "label", value: "a" } });
+  });
+
+  describe("end to end: an endpoint whose query declares nothing", () => {
+    const received: Array<unknown> = [];
+    const get = Endpoint.get(Person);
+    const Api = HttpApi.make("undeclared").add(Group.make(Person, get));
+    const PeopleLive = HttpApiBuilder.group(Api, "people", (handlers) =>
+      handlers.handle("get", ({ params, query }) => {
+        received.push(query);
+        return Effect.succeed({
+          data: {
+            type: "people" as const,
+            id: params.id,
+            attributes: { firstName: "A", lastName: "B" },
+          },
+        });
+      }),
+    );
+
+    const request = async (url: string) => {
+      const appLayer = HttpApiBuilder.layer(Api).pipe(
+        Layer.provide(PeopleLive),
+        Layer.provide(Middleware.layer),
+      ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+      const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+      try {
+        return (await handler(new Request(url))).status;
+      } finally {
+        await dispose();
+      }
+    };
+
+    it.each(undeclared)("answers 200 to ?%s and hands the handler {}", async (search) => {
+      received.length = 0;
+      expect(await request(`http://localhost/people/1?${search}`)).toBe(200);
+      expect(received).toEqual([{}]);
+      expect(polluted()).toBe(false);
+    });
   });
 });

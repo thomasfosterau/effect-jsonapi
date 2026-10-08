@@ -1613,6 +1613,8 @@ Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and �
 
 Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](./docs/filter-grammar.md) §2). Encoding always emits the single comma form.
 
+A parameter the endpoint's query does not declare never reaches the handler: decoding drops it, on an endpoint whose query declares no family at all (its decoded `query` is then `{}`) as on any other, and no spelling of one — `?x=1&x[y]=2`, `?a[]=1`, `?x[y][z]=1` — can make the query fail to decode ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)).
+
 ### Declaring filterable and sortable attributes
 
 Filterability is a per-resource property, declared per attribute: which attributes, which operators, and (from the attribute's own schema) what literal type. The declaration lives on the attribute schema itself: pipe it through `Filter.able` / `Sort.able` — Effect-native combinators in the manner of `Schema.brand` — and it rides with the schema as an annotation (`Filter.AnnotationId` / `Sort.AnnotationId`), the single source of truth `Resource.filterable` / `Resource.sortable` read back. An attribute declared with neither — or a plain `Schema` attribute — is not filterable and not sortable, so the declaration fails closed the way `include` / `fields` / `sort` already do.
