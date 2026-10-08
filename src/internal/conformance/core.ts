@@ -7,8 +7,8 @@
  * @since 0.15.0
  * @internal
  */
-import { Effect, SchemaAST } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { Array as Arr, Effect, MutableHashSet, Option, SchemaAST } from "effect";
+import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
@@ -292,8 +292,9 @@ export interface Fixture {
   readonly update?: (() => Omit<Payload, "type">) | undefined;
   /**
    * Removes a resource the kit created, by the id the server assigned it. Run
-   * for every resource the kit created and did not itself delete — after the
-   * rule that made it, whether that rule passed, failed or died.
+   * for every resource the kit created, could identify and did not itself
+   * delete — after the rule that made it, whether that rule passed, failed or
+   * died. It runs uninterruptibly, so one that never completes hangs the run.
    */
   readonly cleanup?: ((id: string) => Effect.Effect<unknown, unknown>) | undefined;
 }
@@ -310,7 +311,10 @@ export type Disposal = "deleted" | "cleaned-up" | "cleanup-failed" | "left";
 /** @internal */
 export interface WriteRecord {
   readonly type: string;
-  /** The id the server answered with, or `undefined` when the response named none. */
+  /**
+   * The id the server answered with, or `undefined` when the response named
+   * none — or named one the kit would not act on (`detail` says which).
+   */
   readonly id: string | undefined;
   /** The id of the rule whose probe created it. */
   readonly rule: string;
@@ -389,6 +393,13 @@ export interface Context {
    * of it — the run's audit trail. Appended to by `./write.ts` only.
    */
   readonly writes: Array<{ -readonly [K in keyof WriteRecord]: WriteRecord[K] }>;
+  /**
+   * The `idKey` of every resource a successful `GET` has shown the run —
+   * primary, included, or named by a relationship. The server held each of
+   * them before the kit asked, so a create response naming one did not make
+   * it. Filled by `observing`.
+   */
+  readonly observed: MutableHashSet.MutableHashSet<string>;
   readonly request: (probe: {
     readonly method?: string;
     readonly url: string;
@@ -414,19 +425,16 @@ const headerRecord = (
  * never `application/json`, which a JSON:API server is entitled to refuse
  * before reading the body.
  */
-const clientRequest = (
-  method: string,
-  url: string,
-  headers: Readonly<Record<string, string>>,
-  body: unknown,
-): HttpClientRequest.HttpClientRequest => {
-  const request = HttpClientRequest.make(method as "GET")(url, { headers });
-  return body === undefined
+const clientRequest = (url: string, probe: Probe): HttpClientRequest.HttpClientRequest => {
+  // SAFETY: `make` is typed over the `HttpMethod` literals; every probe's method
+  // is a literal a rule wrote or a discovered endpoint's method, each of which
+  // is one of them, and "GET" is only the narrowest spelling of that union.
+  const request = HttpClientRequest.make(probe.method as "GET")(url, { headers: probe.headers });
+  return probe.body === undefined
     ? request
-    : HttpClientRequest.bodyText(
+    : HttpClientRequest.setBody(
         request,
-        JSON.stringify(body),
-        headers["content-type"] ?? MEDIA_TYPE,
+        HttpBody.jsonUnsafe(probe.body, probe.headers["content-type"] ?? MEDIA_TYPE),
       );
 };
 
@@ -447,7 +455,7 @@ export const runner =
         ? probe.url
         : `${baseUrl.replace(/\/$/, "")}${probe.url}`;
       const record: Probe = { method, url: probe.url, headers, body: probe.body };
-      const request = clientRequest(method, url, headers, probe.body);
+      const request = clientRequest(url, record);
       const result = yield* Effect.result(client.execute(request));
       if (result._tag === "Failure") {
         return {
@@ -589,6 +597,13 @@ export const resourcesOf = (
 };
 
 /**
+ * The comparable string `identity` gives a resource with this `type` and `id`.
+ *
+ * @internal
+ */
+export const idKey = (type: string, id: string): string => JSON.stringify(["id", type, id]);
+
+/**
  * A resource object's `(type, id)` identity as a comparable string, or
  * `undefined` when it carries no usable identity.
  *
@@ -598,7 +613,7 @@ export const identity = (resource: Readonly<Record<string, unknown>>): string | 
   const type = resource["type"];
   if (typeof type !== "string") return undefined;
   const id = resource["id"];
-  if (typeof id === "string") return JSON.stringify(["id", type, id]);
+  if (typeof id === "string") return idKey(type, id);
   const lid = resource["lid"];
   if (typeof lid === "string") return JSON.stringify(["lid", type, lid]);
   return undefined;
@@ -628,6 +643,35 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
   }
   return out;
 };
+
+/** Every identity a response's document shows: its resource objects' own, and those their relationships name. */
+const shownBy = (observation: Observation): ReadonlyArray<string> =>
+  Arr.flatMap(resourcesOf(observation.body), ({ resource }) => [
+    ...Option.toArray(Option.fromUndefinedOr(identity(resource))),
+    ...linkageOf(resource),
+  ]);
+
+/**
+ * Wraps a probe runner so that every resource a 2xx `GET` shows is added to
+ * `observed` — see `Context.observed`.
+ *
+ * @internal
+ */
+export const observing =
+  (
+    request: Context["request"],
+    observed: MutableHashSet.MutableHashSet<string>,
+  ): Context["request"] =>
+  (probe) =>
+    request(probe).pipe(
+      Effect.tap((observation) =>
+        Effect.sync(() => {
+          const read = (probe.method ?? "GET") === "GET";
+          if (!read || observation.status < 200 || observation.status >= 300) return;
+          Arr.forEach(shownBy(observation), (key) => MutableHashSet.add(observed, key));
+        }),
+      ),
+    );
 
 /** @internal */
 export const errorObjectsOf = (body: unknown): ReadonlyArray<Readonly<Record<string, unknown>>> => {

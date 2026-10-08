@@ -52,8 +52,8 @@ const SCHEMA_TIER = [
  *
  * `Conformance` drives a server over a real HTTP transport and discovers its
  * endpoints from an `HttpApi` value, so it is unambiguously HTTP-tier; its
- * internals come with it (`internal/conformance/report.ts` imports nothing but
- * types, but it is reachable only from the tier that does).
+ * internals come with it (`internal/conformance/report.ts` imports nothing
+ * HTTP-bound itself, but it is reachable only from the tier that does).
  *
  * The server skeleton (`Assemble`, `Negotiation`, `Registry`,
  * `ResourceHandlers`, `ServerErrors`) is HTTP-tier by construction: it builds

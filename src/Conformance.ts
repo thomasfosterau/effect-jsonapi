@@ -32,8 +32,13 @@
  *
  * **Writes are opt-in and disposable.** The rules that change state run only
  * with `mutating: true` and a {@link WriteFixture} per type in `writes`. They
- * act only on resources they created from it, dispose of each however the rule
- * ended, and list every one in {@link Report.writes}.
+ * act on the id the server's create response named only after checking it
+ * names a resource of the type the kit sent, under an id that is a URL path
+ * segment of its own and is neither an `ids` sample, nor one a read in the run
+ * returned, nor one the run already holds; they dispose of each resource
+ * however the rule ended, and list every one in {@link Report.writes}. The
+ * check refuses only ids evidently not the kit's own — any other id is
+ * trusted — so run writes only against data you can afford to have modified.
  *
  * @example
  * ```ts
@@ -82,7 +87,7 @@
  *
  * @since 0.15.0
  */
-import { Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer, MutableHashSet } from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
@@ -305,7 +310,10 @@ export interface WritePayload extends Core.Payload {}
  *   assigned. It runs for every resource the kit created and did not itself
  *   delete, after the rule that made it — whether that rule passed, failed or
  *   died — and a cleanup that fails is recorded in {@link Report.writes} rather
- *   than aborting the run.
+ *   than aborting the run. It requires no services (its `R` is `never`), so
+ *   close over or provide whatever it needs up front. It runs uninterruptibly,
+ *   as a release step, so a `cleanup` that never completes hangs the run —
+ *   give one that talks to a remote store its own timeout.
  *
  * Every member is optional, and each one gates only its own rules: a type with
  * no `create` skips every write rule naming `writes["<type>"].create`, and a
@@ -315,8 +323,19 @@ export interface WritePayload extends Core.Payload {}
  * created in place and says so in {@link Report.writes}, so never omit it
  * against a server whose state outlives the run.
  *
- * The write rules act only on resources they created themselves — never on a
- * `ids` sample — and run only when {@link Options.mutating} is `true`.
+ * The write rules run only when {@link Options.mutating} is `true`, and act on
+ * the id the server's create response named only after checking it: the
+ * response must name a resource of the type `create` returned, under an id
+ * that is a URL path segment of its own (not `""`, `.` or `..`), is not an
+ * `ids` sample, was not returned by a successful `GET` earlier in the run, and
+ * is not one the run already holds a resource for that has not been removed.
+ * A refused id is recorded as named and never updated, deleted or passed to
+ * `cleanup`. The check refuses only ids that are evidently not the kit's own:
+ * any other id is trusted, because a server that names some other existing
+ * resource cannot be told from an honest one — so supply `writes` only for a
+ * server and data you can afford to have modified. A create answered with anything but
+ * a 2xx is taken to have created nothing, so nothing is recorded or cleaned up
+ * for it.
  *
  * @example
  * ```ts
@@ -354,7 +373,9 @@ export interface WriteFixture extends Core.Fixture {}
  * `disposal` is `"deleted"` when the kit's own DELETE probe removed it,
  * `"cleaned-up"` when the fixture's `cleanup` did, `"cleanup-failed"` when
  * `cleanup` failed (with the cause in `detail`), and `"left"` when nothing
- * removed it — no `cleanup` was supplied, or the response named no id.
+ * removed it — no `cleanup` was supplied, the response named no id, or it
+ * named one the kit would not act on. In the last two cases `id` is
+ * `undefined` and `detail` says what the response named, if anything.
  *
  * @example
  * ```ts
@@ -584,7 +605,7 @@ export const gaps: ReadonlyArray<Gap> = [
     area: "Write semantics beyond the success responses",
     reason:
       "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — on resources it creates and disposes of itself. Still unchecked: the 409 Conflict rules (a `type` the endpoint does not serve, a duplicate client-generated id), creation with a client-generated id (201 or 204), relationship mutation through `/relationships/…` (replacement, append, removal), and whether a write was actually stored, which needs the resource read back. The fixture makes each of these probe-able; they are not yet written.",
-    tracking: ["#162", "#237"],
+    tracking: ["#237"],
   },
   {
     area: "Atomic operations processing",
@@ -743,11 +764,13 @@ const execute = (
 ): Effect.Effect<Report> =>
   Effect.gen(function* () {
     const resolved = resolveOptions(baseUrl, options);
+    const observed = MutableHashSet.empty<string>();
     const ctx: Core.Context = {
       endpoints: Core.discover(api),
       options: resolved,
-      request: Core.runner(client, resolved.baseUrl),
+      request: Core.observing(Core.runner(client, resolved.baseUrl), observed),
       writes: [],
+      observed,
     };
     const outcomes: Array<Outcome> = [];
     for (const implementation of selected(options)) {

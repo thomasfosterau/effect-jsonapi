@@ -5,14 +5,15 @@
  * Each rule is one normative sentence with its section and a probe that decides
  * it. Rules that would change the target's state are gated behind
  * `mutating: true` and report `Skipped` otherwise, and act only on resources
- * they created themselves from the caller's `writes` fixture (`./write.ts`),
- * never on a sample id; rules whose shape this api has no endpoint for report
+ * they created themselves from the caller's `writes` fixture (`./write.ts`) —
+ * never on a sample id, nor on an id a create response names for anything but
+ * what the kit sent; rules whose shape this api has no endpoint for report
  * `Skipped` naming what was missing. Nothing here silently passes.
  *
  * @since 0.15.0
  * @internal
  */
-import { Effect } from "effect";
+import { Array as Arr, Effect, Match, Option, Predicate, Result, Schema } from "effect";
 import { MEDIA_TYPE } from "../media.js";
 import {
   atomicMediaType,
@@ -41,13 +42,15 @@ import {
 } from "./core.js";
 import {
   type Accepted,
+  atomicIdentity,
   atomicTargets,
   buildUpdate,
   decided,
   onAccepted,
   overTargets,
+  ownId,
   pathFor,
-  primaryId,
+  primaryIdentity,
   type Target,
   targets,
   undecided,
@@ -165,8 +168,18 @@ const contentTypeParameters: RuleImpl = {
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = probeable(ctx, ["create", "update", "relationshipWrite"]);
-      const target = resolved[0];
+      const roles = ["create", "update", "relationshipWrite"] as const;
+      const { resolved, unresolved } = probeable(ctx, roles);
+      // The create endpoint first: of the three it is the one whose URL names
+      // no existing resource, so even a server that ignores the media type has
+      // nothing of the caller's to change. Then an update, whose `{}` body
+      // names no member to change, before a relationship write, whose URL is
+      // a relationship of the caller's `ids` sample.
+      const target = Arr.head(
+        Arr.flatMap(roles, (role) =>
+          Arr.filter(resolved, ({ endpoint }) => endpoint.role === role),
+        ),
+      ).pipe(Option.getOrUndefined);
       if (target === undefined) {
         return skip(contentTypeParameters.rule, noProbeReason("write endpoint", unresolved));
       }
@@ -175,7 +188,10 @@ const contentTypeParameters: RuleImpl = {
         method: target.endpoint.method,
         url: target.path,
         headers: { accept: MEDIA_TYPE, "content-type": `${MEDIA_TYPE};charset=utf-8` },
-        body: { data: { type: target.endpoint.segment ?? "unknown", attributes: {} } },
+        // A body no endpoint can apply: the rule decides on the media type
+        // alone, and this probe runs without `mutating: true`, so a server that
+        // reads the body before the Content-Type must find nothing to write.
+        body: {},
       });
       if (observation.status !== 415) {
         findings.push(
@@ -1214,8 +1230,9 @@ const resourceNotFound: RuleImpl = {
 // Writes
 //
 // Every write probe acts on a disposable target it created itself from the
-// caller's `writes` fixture — never on a sample id — and `./write.ts` disposes
-// of that target however the probe ends.
+// caller's `writes` fixture — never on a sample id, and never on an id the
+// create response names for anything but the resource the kit sent — and
+// `./write.ts` disposes of that target however the probe ends.
 // ---------------------------------------------------------------------------
 
 /** One create probe per type with a fixture, decided by `decide` on success. */
@@ -1246,7 +1263,7 @@ const createResponseDocument: RuleImpl = {
     "Creating Resources",
     "crud-creating-responses-201",
     "MUST",
-    "If a POST request did not include a client-generated id and the requested resource has been created, the server MUST respond with 201 Created and a document that contains the created resource as primary data.",
+    "If the requested resource has been created successfully and the server changes the resource in any way (for example, by assigning an id), the server MUST return a 201 Created response and a document that contains the resource as primary data.",
   ),
   run: (ctx) =>
     overCreates(ctx, createResponseDocument.rule, (target, { observation, payload }) => {
@@ -1257,17 +1274,19 @@ const createResponseDocument: RuleImpl = {
       if (observation.status !== 201)
         return decided(1, [
           finding(createResponseDocument.rule, {
-            detail: `creating a "${target.key}" resource without a client-generated id did not answer 201`,
+            detail: `creating a "${target.key}" resource without a client-generated id — so the server assigned one — did not answer 201`,
             expected: "201 Created",
             observed: describe(observation),
             probe: observation.probe,
           }),
         ]);
-      const data = isRecord(observation.body) ? observation.body["data"] : undefined;
-      const ok = isRecord(data) && data["type"] === payload.type && typeof data["id"] === "string";
+      const carried = Option.exists(
+        primaryIdentity(observation),
+        (named) => named.type === payload.type,
+      );
       return decided(
         1,
-        ok
+        carried
           ? []
           : [
               finding(createResponseDocument.rule, {
@@ -1281,6 +1300,13 @@ const createResponseDocument: RuleImpl = {
     }),
 };
 
+/** The response's header names, for an `observed` line. */
+const headerNames = (observation: Observation): string =>
+  Arr.match(Arr.fromRecord(observation.headers), {
+    onEmpty: () => "(none)",
+    onNonEmpty: (headers) => headers.map(([name]) => name).join(", "),
+  });
+
 const createLocation: RuleImpl = {
   rule: rule(
     "spec/status/create-location",
@@ -1292,16 +1318,19 @@ const createLocation: RuleImpl = {
   run: (ctx) =>
     overCreates(ctx, createLocation.rule, (target, { observation }) => {
       if (observation.status !== 201) return not201(target, observation);
-      const location = observation.headers["location"];
+      const located = Option.exists(
+        Option.fromUndefinedOr(observation.headers["location"]),
+        (location) => location !== "",
+      );
       return decided(
         1,
-        location !== undefined && location !== ""
+        located
           ? []
           : [
               finding(createLocation.rule, {
                 detail: `the 201 creating a "${target.key}" resource carried no \`Location\` header`,
                 expected: "a `Location` header identifying the created resource",
-                observed: `${describe(observation)} — headers: ${Object.keys(observation.headers).join(", ") || "(none)"}`,
+                observed: `${describe(observation)} — headers: ${headerNames(observation)}`,
                 probe: observation.probe,
               }),
             ],
@@ -1309,22 +1338,24 @@ const createLocation: RuleImpl = {
     }),
 };
 
-/** A link member's URL, whether spelled as a string or as a link object. */
-const href = (link: unknown): string | undefined =>
-  typeof link === "string"
-    ? link
-    : isRecord(link) && typeof link["href"] === "string"
-      ? link["href"]
-      : undefined;
+/** A link member, spelled as a URL string or as a link object. */
+const Link = Schema.Union([Schema.String, Schema.Struct({ href: Schema.String })]);
+
+const decodeSelfLink = Schema.decodeUnknownOption(
+  Schema.Struct({ data: Schema.Struct({ links: Schema.Struct({ self: Link }) }) }),
+);
+
+/** The URL of the primary resource's `links.self`, whichever way it is spelled. */
+const selfLink = (observation: Observation): Option.Option<string> =>
+  decodeSelfLink(observation.body).pipe(
+    Option.map(({ data }) =>
+      Predicate.isString(data.links.self) ? data.links.self : data.links.self.href,
+    ),
+  );
 
 /** A URL resolved against the target's origin, so a relative and an absolute spelling compare equal. */
-const absolute = (url: string, base: string): string => {
-  try {
-    return new URL(url, base).href;
-  } catch {
-    return url;
-  }
-};
+const absolute = (url: string, base: string): string =>
+  Result.try({ try: () => new URL(url, base).href, catch: () => url }).pipe(Result.merge);
 
 const createLocationMatchesSelf: RuleImpl = {
   rule: rule(
@@ -1337,24 +1368,22 @@ const createLocationMatchesSelf: RuleImpl = {
   run: (ctx) =>
     overCreates(ctx, createLocationMatchesSelf.rule, (target, { observation }) => {
       if (observation.status !== 201) return not201(target, observation);
-      const location = observation.headers["location"];
-      const data = isRecord(observation.body) ? observation.body["data"] : undefined;
-      const self =
-        isRecord(data) && isRecord(data["links"]) ? href(data["links"]["self"]) : undefined;
-      if (location === undefined || self === undefined)
+      const location = Option.fromUndefinedOr(observation.headers["location"]);
+      const self = selfLink(observation);
+      if (Option.isNone(location) || Option.isNone(self))
         return undecided(
-          `the 201 creating a "${target.key}" resource carried ${location === undefined ? "no `Location` header" : "no `data.links.self`"}, so there was nothing to compare`,
+          `the 201 creating a "${target.key}" resource carried ${Option.isNone(location) ? "no `Location` header" : "no `data.links.self`"}, so there was nothing to compare`,
         );
       const base = ctx.options.baseUrl;
       return decided(
         1,
-        absolute(location, base) === absolute(self, base)
+        absolute(location.value, base) === absolute(self.value, base)
           ? []
           : [
               finding(createLocationMatchesSelf.rule, {
                 detail: `the 201 creating a "${target.key}" resource names two different locations for it`,
                 expected: `\`Location\` and \`data.links.self\` the same URL`,
-                observed: `Location: ${location} · data.links.self: ${self}`,
+                observed: `Location: ${location.value} · data.links.self: ${self.value}`,
                 probe: observation.probe,
               }),
             ],
@@ -1368,7 +1397,7 @@ const updateResponse: RuleImpl = {
     "Updating Resources",
     "crud-updating-responses",
     "MUST",
-    "A server MUST respond to a successful update with 200 OK and a document whose primary data is the updated resource, 204 No Content with no response document, or 202 Accepted.",
+    "A successful update is answered 202 Accepted when its processing has not completed; 200 OK and a document that contains the updated resource as primary data — or, when the server does not change the targeted resource in ways other than those specified by the request, a document that contains no primary data; or 204 No Content with no response document.",
   ),
   run: (ctx) =>
     overTargets(ctx, updateResponse.rule, targets(ctx, "update"), "update endpoint", (target) =>
@@ -1378,18 +1407,21 @@ const updateResponse: RuleImpl = {
         target,
         viaCreateEndpoint(ctx, target),
         onAccepted(target, (created) =>
-          Effect.gen(function* () {
-            const id = created.entry.id;
-            if (id === undefined) return undecided(`the create response named no id to update`);
-            const patch = buildUpdate(target);
-            if (typeof patch === "string") return undecided(patch);
-            const observation = yield* ctx.request({
-              method: target.endpoint.method,
-              url: pathFor(target.endpoint, id),
-              headers: writeHeaders,
-              body: { data: { ...patch, type: created.payload.type, id } },
-            });
-            return judgeUpdate(target, created.payload.type, id, observation);
+          Result.match(Result.all({ id: ownId(created), patch: buildUpdate(target) }), {
+            onFailure: (reason) => Effect.succeed(undecided(reason)),
+            onSuccess: ({ id, patch }) =>
+              ctx
+                .request({
+                  method: target.endpoint.method,
+                  url: pathFor(target.endpoint, id),
+                  headers: writeHeaders,
+                  body: { data: { ...patch, type: created.payload.type, id } },
+                })
+                .pipe(
+                  Effect.map((observation) =>
+                    judgeUpdate(target, created.payload.type, id, observation),
+                  ),
+                ),
           }),
         ),
       ),
@@ -1408,6 +1440,36 @@ const judgeUpdate = (
       )
     : decided(2, updateFindings(target, type, id, observation));
 
+/** A finding of `rule` against `observation`, observed as `describe` renders it unless given. */
+const against =
+  (rule: Rule, observation: Observation) =>
+  (detail: string, expected: string, observed = describe(observation)): ReadonlyArray<Finding> => [
+    finding(rule, { detail, expected, observed, probe: observation.probe }),
+  ];
+
+/**
+ * The 2xx answers an update and a delete share: 202 Accepted is always
+ * conformant, a 204 must carry no body, a 200 is judged by `on200`, and any
+ * other status is `otherwise`.
+ */
+const judgeWriteSuccess = (
+  observation: Observation,
+  write: string,
+  broken: ReturnType<typeof against>,
+  on200: () => ReadonlyArray<Finding>,
+  otherwise: () => ReadonlyArray<Finding>,
+): ReadonlyArray<Finding> =>
+  Match.value(observation.status).pipe(
+    Match.when(202, (): ReadonlyArray<Finding> => []),
+    Match.when(204, () =>
+      observation.text === ""
+        ? []
+        : broken(`a 204 ${write} response carried a body`, "an empty body"),
+    ),
+    Match.when(200, on200),
+    Match.orElse(otherwise),
+  );
+
 /** What is wrong with a 2xx answer to an update, if anything. */
 const updateFindings = (
   target: Target,
@@ -1415,36 +1477,48 @@ const updateFindings = (
   id: string,
   observation: Observation,
 ): ReadonlyArray<Finding> => {
-  const broken = (detail: string, expected: string) => [
-    finding(updateResponse.rule, {
-      detail,
-      expected,
-      observed: describe(observation),
-      probe: observation.probe,
-    }),
-  ];
-  switch (observation.status) {
-    case 202:
-      return [];
-    case 204:
-      return observation.text === ""
-        ? []
-        : broken("a 204 update response carried a body", "an empty body");
-    case 200: {
-      const data = isRecord(observation.body) ? observation.body["data"] : undefined;
-      return isRecord(data) && data["type"] === type && data["id"] === id
+  const broken = against(updateResponse.rule, observation);
+  return judgeWriteSuccess(
+    observation,
+    "update",
+    broken,
+    () => {
+      if (!isRecord(observation.body))
+        return broken(
+          `the 200 updating ${type}:${id} carried no response document`,
+          "a JSON:API document",
+        );
+      // JSON:API 1.1: a 200 MAY carry no primary data when the server changed
+      // nothing beyond the request — a document that is then still a document,
+      // so it carries `meta` (one of `data` / `errors` / `meta` is required, and
+      // `errors` is no answer to a success); when it carries `data`, that is
+      // the resource.
+      if (!Predicate.hasProperty(observation.body, "data"))
+        return Predicate.hasProperty(observation.body, "meta") &&
+          !Predicate.hasProperty(observation.body, "errors")
+          ? []
+          : broken(
+              `the 200 updating ${type}:${id} carries neither primary data nor a top-level \`meta\`${
+                Predicate.hasProperty(observation.body, "errors") ? " (it carries `errors`)" : ""
+              }`,
+              "`data` that is the updated resource, or no primary data and a top-level `meta`",
+            );
+      return Option.exists(
+        primaryIdentity(observation),
+        (named) => named.type === type && named.id === id,
+      )
         ? []
         : broken(
-            `the 200 updating ${type}:${id} does not carry the updated resource as primary data`,
-            `a document whose \`data\` is the "${type}" resource "${id}"`,
+            `the 200 updating ${type}:${id} carries primary data that is not the updated resource`,
+            `no \`data\`, or \`data\` that is the "${type}" resource "${id}"`,
           );
-    }
-    default:
-      return broken(
+    },
+    () =>
+      broken(
         `updating a "${target.key}" resource answered neither 200, 204 nor 202`,
-        "200 with the updated resource, 204, or 202",
-      );
-  }
+        "200 with a document, 204, or 202",
+      ),
+  );
 };
 
 const deleteResponse: RuleImpl = {
@@ -1468,62 +1542,62 @@ const deleteResponse: RuleImpl = {
           target,
           viaCreateEndpoint(ctx, target),
           onAccepted(target, (created) =>
-            Effect.gen(function* () {
-              const id = created.entry.id;
-              if (id === undefined) return undecided(`the create response named no id to delete`);
-              const observation = yield* ctx.request({
-                method: target.endpoint.method,
-                url: pathFor(target.endpoint, id),
-                headers: jsonApiAccept,
-              });
-              // A completed deletion is the disposal; anything else still owes a cleanup.
-              if (observation.status === 200 || observation.status === 204)
-                created.entry.disposal = "deleted";
-              return decided(2, judgeDelete(observation));
+            Result.match(ownId(created), {
+              onFailure: (reason) => Effect.succeed(undecided(reason)),
+              onSuccess: (id) =>
+                ctx
+                  .request({
+                    method: target.endpoint.method,
+                    url: pathFor(target.endpoint, id),
+                    headers: jsonApiAccept,
+                  })
+                  .pipe(
+                    // A completed deletion is the disposal; anything else still owes a cleanup.
+                    Effect.tap((observation) =>
+                      Effect.sync(() => {
+                        if (observation.status === 200 || observation.status === 204)
+                          created.entry.disposal = "deleted";
+                      }),
+                    ),
+                    Effect.map((observation) => decided(2, judgeDelete(observation))),
+                  ),
             }),
           ),
         ),
     ),
 };
 
+/** The top-level members a 200 DELETE may carry: `meta`, and the members every document may. */
+const metaOnly = (member: string): boolean =>
+  member === "meta" || member === "jsonapi" || member === "links";
+
 const judgeDelete = (observation: Observation): ReadonlyArray<Finding> => {
-  if (observation.status === 202) return [];
-  if (observation.status === 204)
-    return observation.text === ""
-      ? []
-      : [
-          finding(deleteResponse.rule, {
-            detail: "a 204 DELETE response carried a body",
-            expected: "an empty body",
-            observed: describe(observation),
-            probe: observation.probe,
-          }),
-        ];
-  if (observation.status === 200) {
-    const body = observation.body;
-    const members = isRecord(body) ? Object.keys(body) : [];
-    const onlyMeta =
-      isRecord(body) &&
-      members.every((member) => member === "meta" || member === "jsonapi" || member === "links");
-    return onlyMeta
-      ? []
-      : [
-          finding(deleteResponse.rule, {
-            detail: "a 200 DELETE response carried members other than `meta`",
-            expected: "only top-level `meta`",
-            observed: `top-level members: ${members.join(", ") || "(none)"}`,
-            probe: observation.probe,
-          }),
-        ];
-  }
-  return [
-    finding(deleteResponse.rule, {
-      detail: "deleting the resource the kit had just created produced neither 204, 200 nor 202",
-      expected: "204, 200 with only `meta`, or 202",
-      observed: describe(observation),
-      probe: observation.probe,
-    }),
-  ];
+  const broken = against(deleteResponse.rule, observation);
+  return judgeWriteSuccess(
+    observation,
+    "DELETE",
+    broken,
+    () => {
+      const members = isRecord(observation.body)
+        ? Arr.map(Arr.fromRecord(observation.body), ([member]) => member)
+        : [];
+      return isRecord(observation.body) && Arr.every(members, metaOnly)
+        ? []
+        : broken(
+            "a 200 DELETE response carried members other than `meta`",
+            "only top-level `meta`",
+            `top-level members: ${Arr.match(members, {
+              onEmpty: () => "(none)",
+              onNonEmpty: (named) => named.join(", "),
+            })}`,
+          );
+    },
+    () =>
+      broken(
+        "deleting the resource the kit had just created produced neither 204, 200 nor 202",
+        "204, 200 with only `meta`, or 202",
+      ),
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -1566,19 +1640,13 @@ const atomicMalformedRejected: RuleImpl = {
     }),
 };
 
-/** The id the first `atomic:results` entry's resource carries. */
-const atomicResultId = (body: unknown): string | undefined => {
-  if (!isRecord(body)) return undefined;
-  const results = body["atomic:results"];
-  return Array.isArray(results) ? primaryId(results[0]) : undefined;
-};
-
 const atomicResponseExt: RuleImpl = {
-  rule: atomicRule(
+  rule: rule(
     "spec/atomic/response-ext-parameter",
-    "Atomic Operations — Media Type",
+    "Content Negotiation — Universal Responsibilities (with the Atomic Operations extension)",
+    "content-negotiation-all",
     "MUST",
-    "A server that processes an atomic operations request MUST respond with the `ext` parameter naming the extension URI on the response's `Content-Type`.",
+    "Clients and servers MUST specify the `ext` media type parameter in the `Content-Type` header when they have applied one or more extensions to a JSON:API document — so a response to an atomic operations request, which applies that extension, names its URI in `ext`.",
   ),
   run: (ctx) => {
     const endpoint = operationsEndpoint(ctx);
@@ -1601,7 +1669,7 @@ const atomicResponseExt: RuleImpl = {
           ctx,
           atomicResponseExt.rule,
           target,
-          { send, idOf: atomicResultId },
+          { send, identify: atomicIdentity },
           onAccepted(target, ({ observation }) =>
             Effect.succeed(judgeAtomicMediaType(target, observation)),
           ),

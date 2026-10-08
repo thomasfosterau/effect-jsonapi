@@ -7,10 +7,11 @@
  * once it has been shown to report the right things against a broken one.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Layer, Match, MutableHashMap, Option, Predicate, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import type { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
+import type { HttpApiGroup } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
@@ -74,8 +75,16 @@ interface CannedRequest {
   readonly body?: unknown;
 }
 
-const requestBody = (body: HttpClientRequest.HttpClientRequest["body"]): unknown =>
-  body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(body.body)) : undefined;
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+/** The JSON a request carries, or `undefined` when it carries none. */
+const requestJson = (body: HttpClientRequest.HttpClientRequest["body"]) =>
+  Match.value(body).pipe(
+    Match.tag("Uint8Array", ({ body: bytes }) =>
+      Option.getOrUndefined(parseJson(new TextDecoder().decode(bytes))),
+    ),
+    Match.orElse(() => undefined),
+  );
 
 const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.HttpClient =>
   HttpClient.make((request, url) =>
@@ -88,7 +97,7 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
         method: request.method,
         path: `${url.pathname}${url.search}`,
         headers,
-        body: requestBody(request.body),
+        body: requestJson(request.body),
       });
       const status = canned.status ?? 200;
       const contentType = canned.contentType ?? MEDIA_TYPE;
@@ -97,28 +106,30 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
         request,
         new Response(hasBody ? JSON.stringify(canned.body) : null, {
           status,
-          headers: { ...canned.headers, ...(hasBody ? { "content-type": contentType } : {}) },
+          headers: hasBody
+            ? { ...canned.headers, "content-type": contentType }
+            : { ...canned.headers },
         }),
       );
     }),
   );
 
-const verifyCanned = (
-  serve: (request: {
-    readonly method: string;
-    readonly path: string;
-    readonly headers: Headers;
-  }) => Canned,
-  options?: Conformance.Options,
-) =>
-  Effect.runPromise(
-    Conformance.verifyWith(api, {
-      client: cannedClient(serve),
-      baseUrl: "http://fixture.test",
-      ids: { articles: "1" },
-      ...options,
-    }),
-  );
+/** A run of `target` against the canned server `serve`. */
+const verifyOver =
+  <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+    target: HttpApi.HttpApi<ApiId, Groups>,
+  ) =>
+  (serve: (request: CannedRequest) => Canned, options?: Conformance.Options) =>
+    Effect.runPromise(
+      Conformance.verifyWith(target, {
+        client: cannedClient(serve),
+        baseUrl: "http://fixture.test",
+        ids: { articles: "1" },
+        ...options,
+      }),
+    );
+
+const verifyCanned = verifyOver(api);
 
 const failed = (report: Conformance.Report): ReadonlyArray<string> =>
   report.outcomes.filter((outcome) => outcome._tag === "Failed").map((outcome) => outcome.rule.id);
@@ -348,6 +359,25 @@ describe("Conformance: the report", () => {
     expect(text).toContain("SUMMARY");
     // The citation is what makes it a report rather than a diff.
     expect(text).toContain(Conformance.rules[1]!.reference);
+  });
+
+  it("lists the writes still in place before those that are gone", () => {
+    const text = Conformance.format({
+      target: "fixture",
+      version: "1.1",
+      transport: "http",
+      outcomes: [],
+      gaps: [],
+      writes: [
+        { type: "articles", id: "1", rule: "r/a", disposal: "deleted", detail: undefined },
+        { type: "articles", id: "2", rule: "r/b", disposal: "left", detail: "no cleanup" },
+        { type: "articles", id: undefined, rule: "r/c", disposal: "left", detail: "named x" },
+      ],
+    });
+    expect(text).toContain("3 resources created · 2 still in place");
+    expect(text.indexOf("articles:2")).toBeLessThan(text.indexOf("articles:1"));
+    expect(text.indexOf("articles:(id unknown)")).toBeLessThan(text.indexOf("articles:1"));
+    expect(text.indexOf("articles:2")).toBeLessThan(text.indexOf("articles:(id unknown)"));
   });
 
   it("counts skips separately from passes, so a vacuous run cannot read as a clean one", () => {
@@ -932,7 +962,7 @@ describe("Conformance: the filter grammar profile", () => {
  * The write rules skip against every api above — none has a write endpoint —
  * and against any target without a `writes` fixture. This is the api and the
  * canned server that make them run: create, update and delete endpoints, an
- * atomic operations endpoint, and a server whose writes land in a `Map` the
+ * atomic operations endpoint, and a server whose writes land in a store the
  * fixture's `cleanup` removes from, so a test can see exactly what was left.
  */
 describe("Conformance: the write fixture", () => {
@@ -948,6 +978,8 @@ describe("Conformance: the write fixture", () => {
     )
     .add(Group.make("operations", Endpoint.operations([Article])));
 
+  const verifyWrites = verifyOver(writeApi);
+
   const WRITE_RULES = [
     "spec/status/create-response-document",
     "spec/status/create-location",
@@ -959,221 +991,483 @@ describe("Conformance: the write fixture", () => {
 
   const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
 
-  type Stored = Readonly<Record<string, unknown>>;
+  const Attributes = Schema.Record(Schema.String, Schema.Unknown);
+  type Attributes = typeof Attributes.Type;
+  const NewArticle = Schema.Struct({
+    type: Schema.Literal("articles"),
+    attributes: Schema.optionalKey(Attributes),
+  });
+  const decodeCreate = Schema.decodeUnknownOption(Schema.Struct({ data: NewArticle }));
+  const decodeOperations = Schema.decodeUnknownOption(
+    Schema.Struct({
+      "atomic:operations": Schema.Array(
+        Schema.Struct({ op: Schema.Literal("add"), data: NewArticle }),
+      ),
+    }),
+  );
+  const decodeUpdate = Schema.decodeUnknownOption(
+    Schema.Struct({
+      data: Schema.Struct({
+        type: Schema.Literal("articles"),
+        id: Schema.String,
+        attributes: Schema.optionalKey(Attributes),
+      }),
+    }),
+  );
 
-  const unsupported: Canned = {
-    status: 415,
-    body: { errors: [{ status: "415", title: "Unsupported Media Type" }] },
-  };
+  type Store = MutableHashMap.MutableHashMap<string, Attributes>;
+
+  const refusal = (status: number, title: string): Canned => ({
+    status,
+    body: { errors: [{ status: `${status}`, title }] },
+  });
 
   const parameterised = (request: CannedRequest): boolean =>
     /;\s*(?!ext=|profile=)[a-z]+=/i.test(request.headers.get("content-type") ?? "");
 
-  /** A server that implements create / update / delete / `add` correctly, over `store`. */
-  const writeServer = (store: Map<string, Stored>) => {
+  /**
+   * A server that implements create / update / delete / `add` correctly, over
+   * `store`. It refuses a body that is not a resource object it can apply with
+   * a 400, as a real one would. `negotiates: false` drops its §Content
+   * Negotiation check, so it applies whatever it can whatever the media type;
+   * `reuseIds` hands out the next free id, so an id comes back once its
+   * resource is gone — as a `size + 1` store or a SQLite rowid does.
+   */
+  const writeServer = (
+    store: Store,
+    options: { readonly negotiates?: boolean; readonly reuseIds?: boolean } = {},
+  ) => {
     let next = 100;
-    const resource = (id: string, attributes: unknown) => ({
+    const resource = (id: string, attributes: Attributes) => ({
       type: "articles",
       id,
       attributes,
       links: { self: `/articles/${id}` },
     });
-    const create = (data: Stored) => {
-      const id = `${next++}`;
-      store.set(id, data);
-      return resource(id, data["attributes"]);
+    const create = (attributes: Attributes) => {
+      const id = options.reuseIds === true ? `${100 + MutableHashMap.size(store)}` : `${next++}`;
+      MutableHashMap.set(store, id, attributes);
+      return resource(id, attributes);
     };
-    const created = (data: Stored): Canned => {
-      const made = create(data);
-      return { status: 201, headers: { location: made.links.self }, body: { data: made } };
-    };
-    const operations = (body: Stored): Canned => {
-      const list = body["atomic:operations"];
-      if (!Array.isArray(list))
-        return { status: 400, body: { errors: [{ status: "400", title: "Bad Request" }] } };
-      const results = list.map((operation: Stored) => ({
-        data: create(operation["data"] as Stored),
-      }));
-      return { contentType: atomicType, body: { "atomic:results": results } };
-    };
-    /** PATCH and DELETE on a stored article; `undefined` for anything else. */
-    const onStored = (request: CannedRequest, data: Stored): Canned | undefined => {
+    const onCreate = (request: CannedRequest): Canned =>
+      Option.match(decodeCreate(request.body), {
+        onNone: () => refusal(400, "Bad Request"),
+        onSome: ({ data }) => {
+          const made = create(data.attributes ?? {});
+          return { status: 201, headers: { location: made.links.self }, body: { data: made } };
+        },
+      });
+    const onOperations = (request: CannedRequest): Canned =>
+      Option.match(decodeOperations(request.body), {
+        onNone: () => refusal(400, "Bad Request"),
+        onSome: (body) => ({
+          contentType: atomicType,
+          body: {
+            "atomic:results": body["atomic:operations"].map(({ data }) => ({
+              data: create(data.attributes ?? {}),
+            })),
+          },
+        }),
+      });
+    /** PATCH and DELETE on a stored article; none for anything else. */
+    const onStored = (request: CannedRequest): Option.Option<Canned> => {
       const id = /^\/articles\/([^/?]+)$/.exec(request.path)?.[1];
-      if (id === undefined || !store.has(id)) return undefined;
+      if (id === undefined || !MutableHashMap.has(store, id)) return Option.none();
       if (request.method === "PATCH")
-        return { body: { data: resource(id, { ...(data["attributes"] as object) }) } };
-      if (request.method !== "DELETE") return undefined;
-      store.delete(id);
-      return { status: 204 };
+        return Option.some(
+          Option.match(decodeUpdate(request.body), {
+            onNone: () => refusal(400, "Bad Request"),
+            onSome: ({ data }) => ({ body: { data: resource(id, data.attributes ?? {}) } }),
+          }),
+        );
+      if (request.method !== "DELETE") return Option.none();
+      MutableHashMap.remove(store, id);
+      return Option.some({ status: 204 });
     };
     return (request: CannedRequest): Canned => {
       // §Content Negotiation first: a parameterised JSON:API Content-Type is a
       // 415 before anything is written.
-      if (parameterised(request)) return unsupported;
-      const body = (request.body ?? {}) as Stored;
-      const data = (body["data"] ?? {}) as Stored;
+      if (options.negotiates !== false && parameterised(request))
+        return refusal(415, "Unsupported Media Type");
       const route = `${request.method} ${request.path}`;
-      if (route === "POST /articles") return created(data);
-      if (route === "POST /operations") return operations(body);
-      return onStored(request, data) ?? conformantServe(request);
+      if (route === "POST /articles") return onCreate(request);
+      if (route === "POST /operations") return onOperations(request);
+      return Option.getOrElse(onStored(request), () => conformantServe(request));
     };
   };
 
   let sequence = 0;
-  const fixture = (store: Map<string, Stored>): Conformance.WriteFixture => ({
+  /** The fixture over `store`, with every id `cleanup` is called with appended to `cleaned`. */
+  const fixture = (store: Store, cleaned: Array<string>): Conformance.WriteFixture => ({
     create: () => ({
       type: "articles",
       attributes: { title: `probe ${++sequence}`, body: "" },
       relationships: { author: { data: { type: "people", id: "9" } } },
     }),
     update: () => ({ attributes: { title: `probe ${++sequence} (updated)` } }),
-    cleanup: (id) => Effect.sync(() => store.delete(id)),
+    cleanup: (id) =>
+      Effect.sync(() => {
+        cleaned.push(id);
+        MutableHashMap.remove(store, id);
+      }),
   });
 
-  const verifyWrites = (serve: (request: CannedRequest) => Canned, options?: Conformance.Options) =>
-    Effect.runPromise(
-      Conformance.verifyWith(writeApi, {
-        client: cannedClient(serve),
-        baseUrl: "http://fixture.test",
-        ids: { articles: "1" },
-        ...options,
-      }),
-    );
-
-  /** A conformant run over a fresh store, with `change` applied to every answer. */
+  /**
+   * A conformant run over a fresh store, with `change` applied to every
+   * answer. `seen` is every request as `METHOD /path`, `cleaned` every id the
+   * fixture's `cleanup` was called with.
+   */
   const run = async (
     change: (canned: Canned, request: CannedRequest) => Canned = (canned) => canned,
-    options?: (store: Map<string, Stored>) => Conformance.Options,
+    options?: (store: Store, cleaned: Array<string>) => Conformance.Options,
+    server: { readonly reuseIds?: boolean } = {},
   ) => {
-    const store = new Map<string, Stored>();
-    const serve = writeServer(store);
-    const report = await verifyWrites((request) => change(serve(request), request), {
-      mutating: true,
-      writes: { articles: fixture(store) },
-      ...options?.(store),
-    });
-    return { report, store };
+    const store: Store = MutableHashMap.empty();
+    const cleaned: Array<string> = [];
+    const seen: Array<string> = [];
+    const serve = writeServer(store, server);
+    const report = await verifyWrites(
+      (request) => {
+        seen.push(`${request.method} ${request.path}`);
+        return change(serve(request), request);
+      },
+      {
+        mutating: true,
+        writes: { articles: fixture(store, cleaned) },
+        ...options?.(store, cleaned),
+      },
+    );
+    return { report, store, seen, cleaned, writes: report.writes ?? [] };
   };
 
-  it("runs every write rule against a conformant server, on targets it created", async () => {
-    const { report, store } = await run();
-    expect(failed(report)).toEqual([]);
-    for (const id of WRITE_RULES) expect(outcomeFor(report, id)._tag).toBe("Passed");
-    // Every creation is on the record, and nothing outlived the run.
-    const writes = report.writes ?? [];
-    expect(writes.length).toBe(WRITE_RULES.length);
-    expect(writes.map((write) => write.rule)).toEqual(WRITE_RULES);
-    for (const write of writes) expect(["deleted", "cleaned-up"]).toContain(write.disposal);
-    expect(writes.find((write) => write.rule === "spec/status/delete-response")?.disposal).toBe(
-      "deleted",
+  const disposals = (writes: ReadonlyArray<Conformance.Write>) =>
+    writes.map((write) => write.disposal);
+
+  const skippedFor = (reason: string) =>
+    expect.objectContaining({ _tag: "Skipped", reason: expect.stringContaining(reason) });
+
+  /** Every write rule's outcome: all of them `Passed`, or all `Skipped` naming `reason`. */
+  const everyWriteRule = (report: Conformance.Report, reason?: string) =>
+    expect(WRITE_RULES.map((id) => outcomeFor(report, id))).toEqual(
+      WRITE_RULES.map(() =>
+        reason === undefined ? expect.objectContaining({ _tag: "Passed" }) : skippedFor(reason),
+      ),
     );
-    expect(store.size).toBe(0);
+
+  it("runs every write rule against a conformant server, on targets it created", async () => {
+    const { report, store, writes } = await run();
+    expect(failed(report)).toEqual([]);
+    everyWriteRule(report);
+    // Every creation is on the record, and nothing outlived the run.
+    expect(writes.map((write) => write.rule)).toEqual(WRITE_RULES);
+    expect(disposals(writes)).toEqual([
+      "cleaned-up",
+      "cleaned-up",
+      "cleaned-up",
+      "cleaned-up",
+      "deleted",
+      "cleaned-up",
+    ]);
+    expect(MutableHashMap.size(store)).toBe(0);
   });
 
   it("never writes without `mutating: true`, even with a fixture", async () => {
-    const { report, store } = await run(undefined, () => ({ mutating: false }));
-    for (const id of WRITE_RULES) {
-      const outcome = outcomeFor(report, id);
-      expect(outcome._tag).toBe("Skipped");
-      if (outcome._tag === "Skipped") expect(outcome.reason).toContain("mutating: true");
-    }
-    expect(report.writes).toEqual([]);
-    expect(store.size).toBe(0);
+    const { report, store, writes } = await run(undefined, () => ({ mutating: false }));
+    everyWriteRule(report, "mutating: true");
+    expect(writes).toEqual([]);
+    expect(MutableHashMap.size(store)).toBe(0);
   });
 
   it("skips — never passes — a type with no fixture, naming the key it wanted", async () => {
     const { report } = await run(undefined, () => ({ writes: {} }));
-    for (const id of WRITE_RULES) {
-      const outcome = outcomeFor(report, id);
-      expect(outcome._tag).toBe("Skipped");
-      if (outcome._tag === "Skipped") expect(outcome.reason).toContain(`writes["articles"].create`);
-    }
+    everyWriteRule(report, `writes["articles"].create`);
   });
 
   it("skips only the rules of an absent sub-key — a create-only fixture still creates", async () => {
-    const { report, store } = await run(undefined, (store) => {
-      const { update: _update, ...createOnly } = fixture(store);
+    const { report, store } = await run(undefined, (store, cleaned) => {
+      const { update: _update, ...createOnly } = fixture(store, cleaned);
       return { writes: { articles: createOnly } };
     });
-    const update = outcomeFor(report, "spec/status/update-response");
-    expect(update._tag).toBe("Skipped");
-    if (update._tag === "Skipped") expect(update.reason).toContain(`writes["articles"].update`);
+    expect(outcomeFor(report, "spec/status/update-response")).toEqual(
+      skippedFor(`writes["articles"].update`),
+    );
     expect(outcomeFor(report, "spec/status/create-response-document")._tag).toBe("Passed");
     expect(outcomeFor(report, "spec/status/delete-response")._tag).toBe("Passed");
-    expect(store.size).toBe(0);
+    expect(MutableHashMap.size(store)).toBe(0);
   });
 
   it("reports a payload the server rejects as not checked, never as a pass", async () => {
     const { report } = await run((canned, request) =>
       request.method === "POST" && request.path === "/articles"
-        ? { status: 422, body: { errors: [{ status: "422", title: "Unprocessable" }] } }
+        ? refusal(422, "Unprocessable")
         : canned,
     );
-    const outcome = outcomeFor(report, "spec/status/create-response-document");
-    expect(outcome._tag).toBe("Skipped");
-    if (outcome._tag === "Skipped") expect(outcome.reason).toContain("did not accept");
+    expect(outcomeFor(report, "spec/status/create-response-document")).toEqual(
+      skippedFor("did not accept"),
+    );
   });
 
   it("cleans up after a rule that fails", async () => {
-    const { report, store } = await run((canned) => {
+    const { report, store, writes } = await run((canned) => {
       const { location: _location, ...headers } = canned.headers ?? {};
       return { ...canned, headers };
     });
     expect(failed(report)).toEqual(["spec/status/create-location"]);
-    expect(store.size).toBe(0);
-    for (const write of report.writes ?? [])
-      expect(["deleted", "cleaned-up"]).toContain(write.disposal);
+    expect(MutableHashMap.size(store)).toBe(0);
+    expect(disposals(writes)).not.toContain("left");
   });
 
+  class TransportFellOver extends Schema.TaggedError<TransportFellOver>()(
+    "TransportFellOver",
+    {},
+  ) {}
+
   it("cleans up after a rule that dies", async () => {
-    const store = new Map<string, Stored>();
+    const store: Store = MutableHashMap.empty();
     const serve = writeServer(store);
     const exit = await Effect.runPromiseExit(
       Conformance.verifyWith(writeApi, {
         client: cannedClient((request) => {
-          if (request.method === "PATCH") throw new Error("the transport fell over");
+          if (request.method === "PATCH") throw new TransportFellOver();
           return serve(request);
         }),
         baseUrl: "http://fixture.test",
         ids: { articles: "1" },
         mutating: true,
-        writes: { articles: fixture(store) },
+        writes: { articles: fixture(store, []) },
         only: ["spec/status/update-response"],
       }),
     );
     expect(exit._tag).toBe("Failure");
     // The resource the update rule created was still removed.
-    expect(store.size).toBe(0);
+    expect(MutableHashMap.size(store)).toBe(0);
   });
 
   it("records a cleanup that fails, rather than aborting the run", async () => {
-    const { report, store } = await run(undefined, (store) => ({
-      writes: { articles: { ...fixture(store), cleanup: () => Effect.fail("store offline") } },
+    const { report, store, writes } = await run(undefined, (store, cleaned) => ({
+      writes: {
+        articles: { ...fixture(store, cleaned), cleanup: () => Effect.fail("store offline") },
+      },
     }));
     expect(failed(report)).toEqual([]);
-    const stuck = (report.writes ?? []).filter((write) => write.disposal === "cleanup-failed");
+    const stuck = writes.filter((write) => write.disposal === "cleanup-failed");
     // Every creation but the one the kit's own DELETE removed.
     expect(stuck.length).toBe(WRITE_RULES.length - 1);
     expect(stuck[0]?.detail).toContain("store offline");
-    expect(store.size).toBe(WRITE_RULES.length - 1);
+    expect(MutableHashMap.size(store)).toBe(WRITE_RULES.length - 1);
     expect(Conformance.format(report)).toContain("CLEANUP FAILED");
   });
 
   it("leaves what it created in place without a cleanup, and says so", async () => {
-    const { report, store } = await run(undefined, (store) => {
-      const { cleanup: _cleanup, ...noCleanup } = fixture(store);
+    const { report, store, writes } = await run(undefined, (store, cleaned) => {
+      const { cleanup: _cleanup, ...noCleanup } = fixture(store, cleaned);
       return { writes: { articles: noCleanup } };
     });
     expect(failed(report)).toEqual([]);
-    const left = (report.writes ?? []).filter((write) => write.disposal === "left");
+    const left = writes.filter((write) => write.disposal === "left");
     expect(left.length).toBe(WRITE_RULES.length - 1);
     expect(left[0]?.detail).toContain(`writes["articles"].cleanup`);
-    expect(store.size).toBe(WRITE_RULES.length - 1);
+    expect(MutableHashMap.size(store)).toBe(WRITE_RULES.length - 1);
     const text = Conformance.format(report);
     expect(text).toContain("WRITES");
     expect(text).toContain(`${WRITE_RULES.length - 1} still in place`);
     expect(text).toContain("LEFT IN PLACE");
+    // What is still there is listed before what is gone.
+    expect(text.indexOf("LEFT IN PLACE")).toBeLessThan(text.indexOf("deleted by the kit"));
   });
+
+  // -------------------------------------------------------------------------
+  // The kit acts only on what it created
+  // -------------------------------------------------------------------------
+
+  /**
+   * Every successful create answer names `type:id` instead of the resource the
+   * server made — through `POST /articles` and through an atomic `add` alike.
+   */
+  const naming =
+    (type: string, id: string) =>
+    (canned: Canned, request: CannedRequest): Canned => {
+      const named = { type, id, attributes: {} };
+      if (request.method === "POST" && request.path === "/articles" && canned.status === 201)
+        return { ...canned, body: { data: named } };
+      if (request.method === "POST" && request.path === "/operations" && canned.status !== 400)
+        return { ...canned, body: { "atomic:results": [{ data: named }] } };
+      return canned;
+    };
+
+  /**
+   * A create answer naming something the kit did not create: the kit must not
+   * PATCH it, DELETE it or hand it to `cleanup`, and the record must say what
+   * was named and that it was left alone.
+   */
+  const untouched = (name: string, type: string, id: string) =>
+    it(name, async () => {
+      const { report, seen, cleaned, writes } = await run(naming(type, id));
+      expect(seen).not.toContain(`PATCH /articles/${id}`);
+      expect(seen).not.toContain(`DELETE /articles/${id}`);
+      expect(cleaned).not.toContain(id);
+      expect(writes).toEqual(
+        WRITE_RULES.map(() =>
+          expect.objectContaining({
+            id: undefined,
+            disposal: "left",
+            detail: expect.stringMatching(new RegExp(`\`${type}:${id}\`.*not touched`)),
+          }),
+        ),
+      );
+      // The rules that act on the created resource decide nothing on it.
+      expect(outcomeFor(report, "spec/status/update-response")).toEqual(skippedFor("not touched"));
+      expect(outcomeFor(report, "spec/status/delete-response")).toEqual(skippedFor("not touched"));
+    });
+
+  untouched("does not act on a created resource of another type", "people", "9");
+  untouched("does not act on the `ids` sample a create answer names", "articles", "1");
+
+  // `encodeURIComponent` leaves `.` alone and a URL's dot segments are
+  // resolved before it is sent, so these ids would put the kit's PATCH and
+  // DELETE on `/` or on the collection rather than on anything it created.
+  it.each(["..", ".", ""])(
+    "does not act on the id %j, which is no path segment of its own",
+    async (id) => {
+      const { report, seen, cleaned, writes } = await run(naming("articles", id));
+      expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
+      expect(cleaned).toEqual([]);
+      expect(writes).toEqual(
+        WRITE_RULES.map(() =>
+          expect.objectContaining({
+            id: undefined,
+            disposal: "left",
+            detail: expect.stringContaining(
+              `\`articles:${id}\`, which is not a URL path segment of its own`,
+            ),
+          }),
+        ),
+      );
+      expect(outcomeFor(report, "spec/status/update-response")).toEqual(skippedFor("not touched"));
+      expect(outcomeFor(report, "spec/status/delete-response")).toEqual(skippedFor("not touched"));
+    },
+  );
+
+  it("does not act on an id a read earlier in the run returned", async () => {
+    // The read probes are shown articles:7, and every create answer then names it.
+    const { seen, cleaned, writes } = await run((canned, request) =>
+      request.method === "GET" &&
+      request.path.startsWith("/articles/1") &&
+      canned.status === undefined
+        ? { body: { data: { type: "articles", id: "7", attributes: {} } } }
+        : naming("articles", "7")(canned, request),
+    );
+    expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
+    expect(cleaned).toEqual([]);
+    expect(writes).toEqual(
+      WRITE_RULES.map(() =>
+        expect.objectContaining({
+          id: undefined,
+          disposal: "left",
+          detail: expect.stringContaining("`articles:7`, which the kit did not create (a read"),
+        }),
+      ),
+    );
+  });
+
+  it("does not act on an id it already holds a live record for", async () => {
+    // Every create answer names articles:500, and cleanup fails — so after the
+    // first create, articles:500 is on the record as still in place.
+    const { seen, cleaned, writes } = await run(naming("articles", "500"), (store, cleaned) => ({
+      writes: {
+        articles: {
+          ...fixture(store, cleaned),
+          cleanup: (id) =>
+            Effect.sync(() => cleaned.push(id)).pipe(Effect.andThen(Effect.fail("store offline"))),
+        },
+      },
+    }));
+    expect(cleaned).toEqual(["500"]);
+    expect(seen).not.toContain("PATCH /articles/500");
+    expect(seen).not.toContain("DELETE /articles/500");
+    expect(writes.map((write) => [write.id, write.disposal])).toEqual([
+      ["500", "cleanup-failed"],
+      ...WRITE_RULES.slice(1).map(() => [undefined, "left"]),
+    ]);
+    expect(writes[1]?.detail).toMatch(/`articles:500`.*not touched/);
+  });
+
+  it("accepts an id the server reuses once the kit has removed its first holder", async () => {
+    const { report, store, writes } = await run(undefined, undefined, { reuseIds: true });
+    expect(failed(report)).toEqual([]);
+    expect(writes.map((write) => write.id)).toEqual(WRITE_RULES.map(() => "100"));
+    expect(disposals(writes)).not.toContain("left");
+    expect(MutableHashMap.size(store)).toBe(0);
+  });
+
+  it("passes a 200 update with no primary data — JSON:API 1.1 allows it when nothing else changed", async () => {
+    const { report } = await run((canned, request) =>
+      request.method === "PATCH" && canned.status === undefined
+        ? { body: { meta: { updated: true } } }
+        : canned,
+    );
+    expect(outcomeFor(report, "spec/status/update-response")._tag).toBe("Passed");
+    expect(failed(report)).toEqual([]);
+  });
+
+  it("sends the parameterised Content-Type probe a body nothing can apply, to the create endpoint", async () => {
+    // A server that skips §Content Negotiation and applies any resource object
+    // it is sent: the rule fails it, and it has had nothing to apply.
+    const store: Store = MutableHashMap.empty();
+    const serve = writeServer(store, { negotiates: false });
+    const probes: Array<CannedRequest> = [];
+    const report = await verifyWrites(
+      (request) => {
+        if (parameterised(request)) probes.push(request);
+        return serve(request);
+      },
+      { only: ["spec/content-negotiation/request-content-type-parameters"] },
+    );
+    expect(failed(report)).toEqual(["spec/content-negotiation/request-content-type-parameters"]);
+    expect(probes.map(({ method, path, body }) => ({ method, path, body }))).toEqual([
+      { method: "POST", path: "/articles", body: {} },
+    ]);
+    expect(MutableHashMap.size(store)).toBe(0);
+  });
+
+  /** The parameterised Content-Type probes a run of `target` sends, as `METHOD /path`. */
+  const contentTypeProbes = async <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+    target: HttpApi.HttpApi<ApiId, Groups>,
+  ) => {
+    const serve = writeServer(MutableHashMap.empty());
+    const probes: Array<string> = [];
+    await verifyOver(target)(
+      (request) => {
+        if (parameterised(request)) probes.push(`${request.method} ${request.path}`);
+        return serve(request);
+      },
+      { only: ["spec/content-negotiation/request-content-type-parameters"] },
+    );
+    return probes;
+  };
+
+  it("sends the parameterised Content-Type probe to the create endpoint even when it is discovered last", async () => {
+    const createLast = HttpApi.make("createLast").add(
+      Group.make(
+        Article,
+        Endpoint.updateRelationship(Article, "author"),
+        Endpoint.update(Article),
+        Endpoint.create(Article),
+      ),
+    );
+    expect(await contentTypeProbes(createLast)).toEqual(["POST /articles"]);
+  });
+
+  it("without a create endpoint, sends the parameterised Content-Type probe to an update before a relationship write", async () => {
+    const noCreate = HttpApi.make("noCreate").add(
+      Group.make(Article, Endpoint.updateRelationship(Article, "author"), Endpoint.update(Article)),
+    );
+    expect(await contentTypeProbes(noCreate)).toEqual(["PATCH /articles/1"]);
+  });
+
+  // -------------------------------------------------------------------------
+  // One deliberate defect at a time
+  // -------------------------------------------------------------------------
 
   /** One deliberate defect, and the kit must report exactly that rule. */
   const brokenWrite = (
@@ -1183,21 +1477,28 @@ describe("Conformance: the write fixture", () => {
     leaves = 0,
   ) =>
     it(name, async () => {
-      const { report, store } = await run(change);
+      const { report, store, writes } = await run(change);
       expect(failed(report)).toEqual([id]);
       const outcome = outcomeFor(report, id);
-      if (outcome._tag === "Failed") {
-        for (const found of outcome.findings) {
-          expect(found.expected).not.toBe("");
-          expect(found.observed).not.toBe("");
-          expect(found.probe?.method).toMatch(/POST|PATCH|DELETE/);
-        }
-      }
-      expect(store.size).toBe(leaves);
-      // …and whatever is left is on the record as left.
-      expect((report.writes ?? []).filter((write) => write.disposal === "left").length).toBe(
-        leaves,
+      const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+      // Each finding says what it wanted, what it got, and which write it sent.
+      expect(
+        findings.map((found) => ({
+          expected: found.expected !== "",
+          observed: found.observed !== "",
+          method: found.probe?.method,
+        })),
+      ).toEqual(
+        findings.map(() => ({
+          expected: true,
+          observed: true,
+          method: expect.stringMatching(/POST|PATCH|DELETE/),
+        })),
       );
+      expect(findings).not.toEqual([]);
+      expect(MutableHashMap.size(store)).toBe(leaves);
+      // …and whatever is left is on the record as left.
+      expect(writes.filter((write) => write.disposal === "left").length).toBe(leaves);
     });
 
   /** A successful `POST /articles` — not the 415 the negotiation rule provokes. */
@@ -1246,6 +1547,33 @@ describe("Conformance: the write fixture", () => {
   );
 
   brokenWrite(
+    "an update answered 200 with no document at all",
+    "spec/status/update-response",
+    (canned, request) => (request.method === "PATCH" ? { status: 200 } : canned),
+  );
+
+  brokenWrite(
+    "an update answered 200 with an empty document",
+    "spec/status/update-response",
+    (canned, request) => (request.method === "PATCH" ? { body: {} } : canned),
+  );
+
+  brokenWrite(
+    "an update answered 200 with an error document",
+    "spec/status/update-response",
+    (canned, request) =>
+      request.method === "PATCH"
+        ? { body: { errors: [{ status: "200", title: "Updated" }] } }
+        : canned,
+  );
+
+  brokenWrite(
+    "an update answered 200 with null primary data",
+    "spec/status/update-response",
+    (canned, request) => (request.method === "PATCH" ? { body: { data: null } } : canned),
+  );
+
+  brokenWrite(
     "a 200 DELETE carrying primary data",
     "spec/status/delete-response",
     (canned, request) =>
@@ -1263,7 +1591,6 @@ describe("Conformance: the write fixture", () => {
         : canned,
   );
 });
-
 // ---------------------------------------------------------------------------
 // In-process: the same rules over the real router
 // ---------------------------------------------------------------------------
