@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Schema, SchemaIssue, Tracer } from "effect";
+import { Effect, ErrorReporter, Layer, Schema, SchemaIssue, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
-import { HttpApi, HttpApiBuilder } from "effect/http-api";
+import {
+  HttpApi,
+  HttpApiBuilder,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiSchema,
+} from "effect/http-api";
 import { NotAcceptable, toDocument, UnsupportedMediaType } from "./ApiError.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
-import type { ContentNegotiation, SchemaErrors } from "./Middleware.js";
+import type { ContentNegotiation } from "./Middleware.js";
 import {
   acceptIsAcceptable,
   contentTypeIsAcceptable,
   layer,
   layerHostNegotiated,
   negotiate,
+  SchemaErrors,
   schemaError,
   schemaErrorDocument,
   Span,
@@ -19,6 +26,8 @@ import {
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import { make as Resource } from "./Resource.js";
+import { platformLayer } from "./Registry.js";
+import { SERVER_ERROR } from "./ServerErrors.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 
 describe("contentTypeIsAcceptable", () => {
@@ -280,8 +289,8 @@ describe("Middleware.schemaErrorDocument", () => {
         failure(Schema.Struct({ limit: Schema.String }), "not an object"),
       ),
     ).toEqual(toDocument(schemaError("Query")));
-    expect(schemaErrorDocument("Body", failure(Schema.String, 1))).toEqual(
-      toDocument(schemaError("Body")),
+    expect(schemaErrorDocument("Payload", failure(Schema.String, 1))).toEqual(
+      toDocument(schemaError("Payload")),
     );
   });
 });
@@ -490,5 +499,133 @@ describe("tracing", () => {
     const untraced = await request(layer, url);
     expect(untraced.status).toBe(traced.status);
     expect(untraced.body).toEqual(traced.body);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Response-side schema failures are server bugs, not client 400s (#208)
+// ---------------------------------------------------------------------------
+
+describe("SchemaErrorsLive and response encoding", () => {
+  // `{ data: [] }` for a single-resource `get`: a success the endpoint's own
+  // schema rejects, so HttpApi fails while *encoding the response* — the
+  // `HttpApiSchemaError` it raises then carries `kind: "Body"`, whereas a bad
+  // request body is `kind: "Payload"`.
+  const MisencodingApi = HttpApi.make("misencoding").add(
+    Group.make(Article, Endpoint.get(Article), Endpoint.create(Article)),
+  );
+  const MisencodingLive = HttpApiBuilder.group(MisencodingApi, "articles", (handlers) =>
+    handlers
+      .handle("get", () =>
+        // SAFETY: the point of the test — a success the endpoint's schema rejects.
+        Effect.succeed({ data: [] } as never),
+      )
+      .handle("create", ({ payload }) =>
+        Effect.succeed({
+          data: Article.make({ id: Article.Id.make("1"), attributes: payload.data.attributes }),
+        }),
+      ),
+  );
+
+  // A raw endpoint whose declared response header its handler gets wrong, so
+  // the failure is `kind: "ResponseHeaders"` — the other response-side kind.
+  const HeaderApi = HttpApi.make("misencoded-header").add(
+    HttpApiGroup.make("counts").add(
+      HttpApiEndpoint.get("count", "/count", {
+        success: HttpApiSchema.WithHeaders(Schema.String, { "x-count": Schema.NonEmptyString }),
+      }).middleware(SchemaErrors),
+    ),
+  );
+  const HeaderLive = HttpApiBuilder.group(HeaderApi, "counts", (handlers) =>
+    handlers.handle("count", () =>
+      Effect.succeed(HttpApiSchema.withHeaders({ body: "ok", headers: { "x-count": "" } })),
+    ),
+  );
+
+  const MisencodingApp = HttpApiBuilder.layer(MisencodingApi).pipe(Layer.provide(MisencodingLive));
+  const HeaderApp = HttpApiBuilder.layer(HeaderApi).pipe(Layer.provide(HeaderLive));
+
+  // Serves one request with the live middleware, a recording error reporter
+  // and a recording tracer, returning what each of them saw.
+  const serve = async (
+    input: Request,
+    app: typeof MisencodingApp | typeof HeaderApp = MisencodingApp,
+  ) => {
+    const reports: Array<{ readonly error: Error; readonly severity: string }> = [];
+    const spans: Array<Tracer.NativeSpan> = [];
+    const recordingTracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+    const appLayer = app.pipe(
+      Layer.provide(layer),
+      Layer.provide(
+        ErrorReporter.layer([
+          ErrorReporter.make(({ error, severity }) => reports.push({ error, severity })),
+        ]),
+      ),
+      Layer.provide(Layer.succeed(Tracer.Tracer, recordingTracer)),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(input).finally(dispose);
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: await response.json(),
+      reports,
+      spans,
+    };
+  };
+
+  it("answers a success its own schema rejects with a JSON:API 500, not a client 400", async () => {
+    const response = await serve(new Request("http://localhost/articles/1"));
+    expect(response.status).toBe(500);
+    expect(response.contentType).toContain(MEDIA_TYPE);
+    expect(response.body).toEqual(SERVER_ERROR.toDocument());
+    // no request part failed, so no request-validation span either
+    expect(response.spans.some((span) => span.name === Span.schemaError)).toBe(false);
+  });
+
+  it("reports the encode failure as a server error", async () => {
+    const { reports } = await serve(new Request("http://localhost/articles/1"));
+    expect(reports.map(({ severity }) => severity)).toEqual(["Error"]);
+    expect(reports.map(({ error }) => error.message)).toEqual([expect.stringContaining("(Body)")]);
+  });
+
+  it("treats a response header its own schema rejects the same way", async () => {
+    const response = await serve(new Request("http://localhost/count"), HeaderApp);
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual(SERVER_ERROR.toDocument());
+    expect(response.reports.map((report) => report.severity)).toEqual(["Error"]);
+  });
+
+  it("still answers a malformed request body with the JSON:API 400", async () => {
+    const response = await serve(
+      new Request("http://localhost/articles", {
+        method: "POST",
+        headers: { "content-type": MEDIA_TYPE },
+        body: '{ "data": { "type": "articles", "attributes": { "title": "" } } }',
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [
+        {
+          status: "400",
+          code: "bad_request",
+          title: "Bad Request",
+          detail: "Expected a value with a length of at least 1",
+          source: { pointer: "/data/attributes/title" },
+        },
+      ],
+    });
+    const span = response.spans.find((s) => s.name === Span.schemaError);
+    expect(span?.attributes.get("jsonapi.request_part")).toBe("Payload");
+    // a client error is the caller's mistake, not the server's: nothing is reported
+    expect(response.reports).toEqual([]);
   });
 });
