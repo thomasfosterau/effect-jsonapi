@@ -125,7 +125,7 @@ After unescaping, each item is decoded by the attribute's **literal codec**, der
 | `boolean` | `true` \| `false` | via attribute schema |
 | `X \| null` (`Schema.NullOr`) | as `X`; `null` is never a literal | via `X` |
 
-`DateFromString` is a `string` on the wire, so `filter[createdAt][gte]=2026-01-01T00:00:00.000Z` decodes to a `Date` and re-encodes via the attribute's own encoder (`toISOString()`), which is also the ISO-8601 UTC text [§6.2](#62-comparison-domains) compares. An attribute whose encoded form is not one of these (a struct, an array) cannot be declared filterable; the declaration may supply an explicit literal codec (`Codec<Type, string>`) for the rare case.
+`DateFromString` is a `string` on the wire, so `filter[createdAt][gte]=2026-01-01T00:00:00.000Z` decodes to a `Date` and re-encodes via the attribute's own encoder (`toISOString()`), which is also the ISO-8601 UTC text [§6.2](#62-comparison-domains) compares. An attribute whose encoded form is not one of these (a struct, an array) cannot be declared filterable; the declaration may supply an explicit literal codec (`Codec<Type, string>`) for the rare case. An explicit codec must not decode any wire string to `null`: NULL is never a literal ([F-NULL-1](#64-null)), so a value it decodes to `null` is a 400 like any other bad literal, and `isnull` stays the only way to name NULL.
 
 Because literals go through the attribute schema, `filter[priceCents][gt]=abc` and `filter[status]=bogus` (on a literal-union attribute) are 400s with `source.parameter` naming the key, not silent no-matches.
 
@@ -441,7 +441,7 @@ Below, `V` is `value(resource, field)` ([§6.4](#64-null) for what makes it NULL
 | string                | `eq` against the string `"null"`           |
 | number, boolean       | **400**, `source.parameter` naming the key |
 
-A tree built in memory can hold a `null` where a literal belongs; it is not a valid tree, and encoding it fails rather than producing a URL. Servers that accept a filter tree from anywhere but this codec must reject a `null` literal themselves.
+A tree built in memory can hold a `null` where a literal belongs; it is not a valid tree, and encoding it fails rather than producing a URL, with a message that names the field and points at `isnull`. Servers that accept a filter tree from anywhere but this codec must reject a `null` literal themselves.
 
 **F-NULL-3.** A `NULL` value is never _produced_ by evaluation either: the three-valued result of a comparison against NULL is UNKNOWN ([F-CMP-1](#631-comparison-eq-ne-lt-lte-gt-gte)), which is a truth value, not a value of the field.
 

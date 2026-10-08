@@ -522,9 +522,58 @@ describe("Resource.filterable / Resource.sortable", () => {
 
     it("refuses to encode a non-finite number, so decode ∘ encode stays total", () => {
       const literal = filterable(Product).stock.literal;
-      expect(() => Schema.encodeUnknownSync(literal)(Number.NaN)).toThrow();
-      expect(() => Schema.encodeUnknownSync(literal)(Number.POSITIVE_INFINITY)).toThrow();
+      // the message names the value as written, not as `JSON.stringify` renders
+      // it ("null"), so it cannot be mistaken for a NULL literal
+      expect(() => Schema.encodeUnknownSync(literal)(Number.NaN)).toThrow(
+        "Expected a finite number to encode as a filter literal, got NaN",
+      );
+      expect(() => Schema.encodeUnknownSync(literal)(Number.POSITIVE_INFINITY)).toThrow(
+        "Expected a finite number to encode as a filter literal, got Infinity",
+      );
+      expect(() => Schema.encodeUnknownSync(literal)(Number.NEGATIVE_INFINITY)).toThrow(
+        "Expected a finite number to encode as a filter literal, got -Infinity",
+      );
+      // the same message reaches a tree's encoder
+      expect(() => Filter.normalise(Filter.eq("stock", Number.NaN), filterable(Product))).toThrow(
+        "Expected a finite number to encode as a filter literal, got NaN",
+      );
       expect(Schema.encodeUnknownSync(literal)(1.5)).toBe("1.5");
+      // any other value is refused by the attribute's own schema first, before
+      // the literal's encoder sees it
+      expect(() => Schema.encodeUnknownSync(literal)("1")).toThrow("Expected number");
+    });
+
+    it("refuses a NULL literal in a tree with a hint at isnull, whatever the field's literal codec", () => {
+      const Nullables = Resource("nullables", {
+        attributes: {
+          title: attribute(Schema.String, { filter: ["eq", "in"] }),
+          age: attribute(Schema.Number, { filter: ["eq"] }),
+          rating: attribute(Schema.NullOr(Schema.Number), { filter: ["eq", "isnull"] }),
+          deletedAt: attribute(Schema.NullOr(Schema.DateFromString), { filter: ["gte"] }),
+          flag: attribute(Schema.Boolean, { filter: ["eq"] }),
+          // an explicit codec: the hint does not depend on derivation
+          code: attribute(Schema.String, { filter: ["eq"], filterLiteral: Schema.String }),
+        },
+        relationships: { supplier: Relationship.one(() => Supplier, { filter: ["eq"] }) },
+      });
+      const fields = filterable(Nullables);
+      const hint = (field: string) =>
+        `NULL is not a filter literal for field "${field}" (use the isnull operator)`;
+      const normalise = (node: Filter.Node) => () => Filter.normalise(node, fields);
+      // SAFETY: a deliberately ill-typed literal — the case under test is a tree
+      // built around the types, which the runtime must still refuse.
+      const NULL = null as never;
+      expect(normalise(Filter.eq("title", NULL))).toThrow(hint("title"));
+      expect(normalise(Filter.eq("age", NULL))).toThrow(hint("age"));
+      expect(normalise(Filter.eq("rating", NULL))).toThrow(hint("rating"));
+      expect(normalise(Filter.gte("deletedAt", NULL))).toThrow(hint("deletedAt"));
+      expect(normalise(Filter.eq("flag", NULL))).toThrow(hint("flag"));
+      expect(normalise(Filter.eq("code", NULL))).toThrow(hint("code"));
+      expect(normalise(Filter.eq("supplier", NULL))).toThrow(hint("supplier"));
+      // in a list, too
+      expect(normalise(Filter.isIn("title", ["a", NULL]))).toThrow(hint("title"));
+      // and isnull is the way to say it
+      expect(normalise(Filter.isNull("rating"))).not.toThrow();
     });
 
     it("lets readOnlyAttribute carry filter and sort declarations, piped or as sugar", () => {

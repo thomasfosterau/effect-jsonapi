@@ -29,17 +29,32 @@ export interface FieldCodecs {
 }
 
 /**
+ * A field, operator, literal or node the engine refuses. A `Schema.TaggedError`
+ * is an `Error`, so the callers that turn a throw into a schema issue read its
+ * `message` unchanged.
+ */
+class InvalidFilter extends Schema.TaggedError<InvalidFilter>()("InvalidFilter", {
+  message: Schema.String,
+}) {}
+
+/**
  * Encodes one literal of a field to its wire string, before escaping. Throws
  * when the field is unknown or the literal does not encode.
  */
 export type LiteralEncoder = (field: string, value: unknown) => string;
 
-/** A `LiteralEncoder` over a declaration's literal codecs. */
+/**
+ * A `LiteralEncoder` over a declaration's literal codecs. A `null` literal is
+ * refused here, ahead of the codec, with a pointer at `isnull`: NULL is never a
+ * literal (`docs/filter-grammar.md` F-NULL-1), and the codec's own type check
+ * would only say what it expected.
+ */
 export const literalEncoder =
   (fields: FieldCodecs): LiteralEncoder =>
   (field, value) => {
     const codec = fields[field];
-    if (codec === undefined) throw new Error(unknownField(field));
+    if (codec === undefined) throw new InvalidFilter({ message: unknownField(field) });
+    if (value === null) throw new InvalidFilter({ message: nullLiteral(field) });
     return Schema.encodeUnknownSync(codec.literal as Schema.Codec<unknown, string>)(value);
   };
 
@@ -57,13 +72,15 @@ export const operatorCheck =
   }): OperatorCheck =>
   (field, operator) => {
     const codec = fields[field];
-    if (codec === undefined) throw new Error(unknownField(field));
+    if (codec === undefined) throw new InvalidFilter({ message: unknownField(field) });
     if (codec.operators !== undefined && !codec.operators.includes(operator)) {
-      throw new Error(undeclaredOperator(field, operator, codec.operators));
+      throw new InvalidFilter({ message: undeclaredOperator(field, operator, codec.operators) });
     }
   };
 
 const unknownField = (field: string): string => `Unknown filter field ${JSON.stringify(field)}`;
+const nullLiteral = (field: string): string =>
+  `NULL is not a filter literal for field ${JSON.stringify(field)} (use the isnull operator)`;
 const undeclaredOperator = (
   field: string,
   operator: string,
@@ -572,7 +589,8 @@ export const prepare = (
     case "In":
     case "NotIn": {
       check(node.field, node._tag === "In" ? "in" : "nin");
-      if (node.values.length === 0) throw new Error(`A ${node._tag} node needs at least one value`);
+      if (node.values.length === 0)
+        throw new InvalidFilter({ message: `A ${node._tag} node needs at least one value` });
       const items = sortedUnique(
         node.values.map((value) => ({ wire: escape(encode(node.field, value)), value })),
         (a, b) => compareCodePoints(a.wire, b.wire),
@@ -623,7 +641,9 @@ export const prepare = (
       };
     }
     default:
-      throw new Error(`Unknown filter node ${quote((node as { readonly _tag?: unknown })._tag)}`);
+      throw new InvalidFilter({
+        message: `Unknown filter node ${quote((node as { readonly _tag?: unknown })._tag)}`,
+      });
   }
 };
 
