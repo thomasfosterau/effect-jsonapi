@@ -186,6 +186,8 @@ describe("2. Handlers.resolveIncluded replaces planIncludes / include-targets", 
       path: "entries.nope",
       includablePaths: ["entries", "entries.bibliography"],
     });
+    // and names the rejected parameter, as the decode-time 400 does
+    expect(ApiError.toDocument(rejected).errors[0]?.source).toEqual({ parameter: "include" });
   });
 });
 

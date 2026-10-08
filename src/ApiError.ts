@@ -425,15 +425,10 @@ export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as con
 // Query-parameter errors — JSON:API §Query Parameters requires a 400 when a
 // server doesn't support a requested `include` path, `sort` field or
 // `fields[TYPE]` member; each carries what *is* supported in `meta`, so a
-// rejection is the only round trip a client needs to learn the legal set.
-//
-// None of the four set `source.parameter` yet: `ApiError.Config` has no way
-// to declare a `source` (constant or derived from fields) — see
-// https://github.com/thomasfosterau/effect-jsonapi/issues/108. Adding a
-// one-off `source` mechanism just for this family would fork the pattern
-// #108 is meant to establish for every declared error, so these wait for it;
-// once `Config.source` lands, each of the four below gets
-// `source: (e) => ({ parameter: ... })`.
+// rejection is the only round trip a client needs to learn the legal set —
+// and `source.parameter` names the query parameter that was rejected
+// (`include`, `sort` or `fields[TYPE]`), the same member the schema-error
+// middleware sets on a decode-time 400.
 // ---------------------------------------------------------------------------
 
 /**
@@ -457,6 +452,7 @@ export const Standard = [BadRequest, NotAcceptable, UnsupportedMediaType] as con
  * //      code: "unsupported.include-path",
  * //      title: "Unsupported Include Path",
  * //      detail: "Include path \"author.employer\" is not supported...",
+ * //      source: { parameter: "include" },
  * //      meta: { path: "author.employer", includablePaths: [...] }
  * //    }] }
  * ```
@@ -478,6 +474,7 @@ export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()(
       `Include path "${e.path}" is not supported; supported paths: ${
         e.includablePaths.length > 0 ? e.includablePaths.join(", ") : "(none)"
       }`,
+    source: { parameter: "include" },
   },
 ) {}
 
@@ -501,6 +498,7 @@ export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()(
  * //      code: "unsupported.include-depth",
  * //      title: "Unsupported Include Depth",
  * //      detail: "Include path \"author.employer.address\" exceeds the maximum include depth of 2",
+ * //      source: { parameter: "include" },
  * //      meta: { path: "author.employer.address", maxDepth: 2 }
  * //    }] }
  * ```
@@ -519,6 +517,7 @@ export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()(
       maxDepth: Schema.Number,
     },
     detail: (e) => `Include path "${e.path}" exceeds the maximum include depth of ${e.maxDepth}`,
+    source: { parameter: "include" },
   },
 ) {}
 
@@ -543,6 +542,7 @@ export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()(
  * //      code: "unsupported.sort-field",
  * //      title: "Unsupported Sort Field",
  * //      detail: "Sort field \"internalScore\" is not supported...",
+ * //      source: { parameter: "sort" },
  * //      meta: { field: "internalScore", sortableFields: [...] }
  * //    }] }
  * ```
@@ -562,6 +562,7 @@ export class UnsupportedSortField extends make<UnsupportedSortField>()("Unsuppor
     `Sort field "${e.field}" is not supported; supported fields: ${
       e.sortableFields.length > 0 ? e.sortableFields.join(", ") : "(none)"
     }`,
+  source: { parameter: "sort" },
 }) {}
 
 /**
@@ -586,6 +587,7 @@ export class UnsupportedSortField extends make<UnsupportedSortField>()("Unsuppor
  * //      code: "unsupported.fieldset",
  * //      title: "Unsupported Fieldset Member",
  * //      detail: "Field \"internalNotes\" is not a supported attribute of \"articles\"...",
+ * //      source: { parameter: "fields[articles]" },
  * //      meta: { type: "articles", field: "internalNotes", attributes: [...] }
  * //    }] }
  * ```
@@ -608,6 +610,7 @@ export class UnsupportedFieldsetMember extends make<UnsupportedFieldsetMember>()
       `Field "${e.field}" is not a supported attribute of "${e.type}"; supported attributes: ${
         e.attributes.length > 0 ? e.attributes.join(", ") : "(none)"
       }`,
+    source: (e) => ({ parameter: `fields[${e.type}]` }),
   },
 ) {}
 

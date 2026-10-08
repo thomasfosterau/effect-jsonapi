@@ -223,7 +223,7 @@ describe("ApiError.make source", () => {
 });
 
 describe("query-parameter errors", () => {
-  it("UnsupportedIncludePath encodes the requested path and the includable set into meta", () => {
+  it("UnsupportedIncludePath encodes source.parameter, the requested path and the includable set", () => {
     const error = new ApiError.UnsupportedIncludePath({
       path: "author.employer",
       includablePaths: ["author", "comments", "comments.author"],
@@ -237,6 +237,7 @@ describe("query-parameter errors", () => {
           title: "Unsupported Include Path",
           detail:
             'Include path "author.employer" is not supported; supported paths: author, comments, comments.author',
+          source: { parameter: "include" },
           meta: {
             path: "author.employer",
             includablePaths: ["author", "comments", "comments.author"],
@@ -266,7 +267,7 @@ describe("query-parameter errors", () => {
     );
   });
 
-  it("UnsupportedIncludeDepth encodes the requested path and the depth cap into meta", () => {
+  it("UnsupportedIncludeDepth encodes source.parameter, the requested path and the depth cap", () => {
     const error = new ApiError.UnsupportedIncludeDepth({
       path: "comments.author.employer",
       maxDepth: 2,
@@ -279,6 +280,7 @@ describe("query-parameter errors", () => {
           code: "unsupported.include-depth",
           title: "Unsupported Include Depth",
           detail: 'Include path "comments.author.employer" exceeds the maximum include depth of 2',
+          source: { parameter: "include" },
           meta: { path: "comments.author.employer", maxDepth: 2 },
         },
       ],
@@ -294,7 +296,7 @@ describe("query-parameter errors", () => {
     expect(decoded.maxDepth).toBe(2);
   });
 
-  it("UnsupportedSortField encodes the requested field and the sortable set into meta", () => {
+  it("UnsupportedSortField encodes source.parameter, the requested field and the sortable set", () => {
     const error = new ApiError.UnsupportedSortField({
       field: "internalScore",
       sortableFields: ["title", "createdAt"],
@@ -307,6 +309,7 @@ describe("query-parameter errors", () => {
           code: "unsupported.sort-field",
           title: "Unsupported Sort Field",
           detail: 'Sort field "internalScore" is not supported; supported fields: title, createdAt',
+          source: { parameter: "sort" },
           meta: { field: "internalScore", sortableFields: ["title", "createdAt"] },
         },
       ],
@@ -325,7 +328,7 @@ describe("query-parameter errors", () => {
     expect(decoded.sortableFields).toEqual(["title"]);
   });
 
-  it("UnsupportedFieldsetMember encodes the type, requested member and attributes into meta", () => {
+  it("UnsupportedFieldsetMember encodes source.parameter, the type, requested member and attributes", () => {
     const error = new ApiError.UnsupportedFieldsetMember({
       type: "articles",
       field: "internalNotes",
@@ -340,10 +343,17 @@ describe("query-parameter errors", () => {
           title: "Unsupported Fieldset Member",
           detail:
             'Field "internalNotes" is not a supported attribute of "articles"; supported attributes: title, body',
+          source: { parameter: "fields[articles]" },
           meta: { type: "articles", field: "internalNotes", attributes: ["title", "body"] },
         },
       ],
     });
+    // The parameter names the rejected type, not a fixed `fields[articles]`.
+    expect(
+      ApiError.toDocument(
+        new ApiError.UnsupportedFieldsetMember({ type: "people", field: "x", attributes: [] }),
+      ).errors[0]?.source,
+    ).toEqual({ parameter: "fields[people]" });
   });
 
   it("UnsupportedFieldsetMember meta round-trips through the wire schema", () => {
