@@ -6,6 +6,7 @@ import * as ApiError from "./ApiError.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
 import * as Group from "./Group.js";
+import { literalEncoder, operatorCheck } from "./internal/filter.js";
 import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
@@ -662,6 +663,46 @@ describe("Query.Filter: rejections name the offending key", () => {
     expect(decode(encode(Filter.isNull("deletedAt", true)))).toEqual(
       Filter.isNull("deletedAt", true),
     );
+  });
+
+  // `Resource.filterable` is a plain object, so a field name that is an
+  // `Object.prototype` member must read as undeclared, not as the inherited
+  // value (#260).
+  const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"];
+
+  it("rejects a field named after an Object.prototype member in every spelling", () => {
+    for (const name of inherited) {
+      const message = `Unknown filter field ${JSON.stringify(name)}`;
+      expect(failures({ [`filter[${name}]`]: "x" })).toEqual([{ key: `filter[${name}]`, message }]);
+      expect(failures({ [`filter[${name}][eq]`]: "x" })).toEqual([
+        { key: `filter[${name}][eq]`, message },
+      ]);
+      expect(
+        failures({
+          "filter[c][condition][path]": name,
+          "filter[c][condition][operator]": "eq",
+          "filter[c][condition][value]": "x",
+        }),
+      ).toEqual([{ key: "filter[c][condition][path]", message }]);
+    }
+  });
+
+  it("refuses on encode a field named after an Object.prototype member", () => {
+    for (const name of inherited) {
+      const message = `Unknown filter field ${JSON.stringify(name)}`;
+      for (const tree of [eq(name, "x"), Filter.isIn(name, ["x"]), Filter.isNull(name)]) {
+        const result = Schema.encodeUnknownResult(codec)(tree);
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") expect(result.failure.message).toBe(message);
+        expect(() => Filter.normalise(tree, fields)).toThrow(
+          expect.objectContaining({ _tag: "InvalidFilter", message }),
+        );
+      }
+      // each guard on its own, since `prepare` runs the operator check first
+      const invalid = expect.objectContaining({ _tag: "InvalidFilter", message });
+      expect(() => literalEncoder(fields)(name, "x")).toThrow(invalid);
+      expect(() => operatorCheck(fields)(name, "eq")).toThrow(invalid);
+    }
   });
 
   it("rejects an empty record: an absent filter is Query.schema's concern", () => {
@@ -1440,6 +1481,25 @@ describe("Endpoint.list with filter: true, end to end", () => {
     const decoded = Schema.decodeUnknownSync(ApiError.BadRequest.wire)(response.body);
     expect(decoded).toBeInstanceOf(ApiError.BadRequest);
     expect(decoded.detail).toBe('Unknown filter field "body"');
+  });
+
+  it("answers 400, not 500, for a field named after an Object.prototype member", async () => {
+    for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+      for (const [query, parameter] of [
+        [`filter[${name}]=x`, `filter[${name}]`],
+        [`filter[${name}][gt]=1`, `filter[${name}][gt]`],
+        [
+          `filter[c][condition][path]=${name}&filter[c][condition][operator]=eq&filter[c][condition][value]=x`,
+          "filter[c][condition][path]",
+        ],
+      ] as const) {
+        const response = await request(`http://localhost/articles?${query}`);
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+          errors: [error(`Unknown filter field ${JSON.stringify(name)}`, parameter)],
+        });
+      }
+    }
   });
 
   it("answers one error object per offending key", async () => {
