@@ -1176,7 +1176,15 @@ What it guarantees, and why each one matters:
 | **Unresolvable refs dropped** | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document |
 | **`undefined` when unasked** | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing" |
 
-Because every resource is reached _through_ a document resource's linkage, full linkage holds by construction — the builders' check becomes a guard rather than a live constraint. Per-viewer visibility rides along for free: every hop loads through the same authorised loader, so the deepest hop of an anonymous caller's walk excludes exactly what their direct read would.
+Because every resource is reached _through_ a document resource's linkage, full linkage holds by construction **for the array the resolver returns**: handed unchanged to `Handlers.data` / `Handlers.collection` with the same primary data, the builders' check is a guard over the resolver's own output rather than a live constraint. It is live again when anything between the walk and the document changes linkage, because the check runs on the resources the document actually emits:
+
+- an `onResource` transform that removes or rewrites `relationships` — on the primary data it orphans the first level of `included`, on an included resource everything reached only through it (`Handlers.project` and `Handlers.withMeta` leave `relationships` alone; `Handlers.transform` is unconstrained);
+- editing the array — dropping a member can orphan what was reached through it, and an appended resource was never reached at all;
+- building the document from different primary data than the walk started from.
+
+So a resolver-built document is not, by itself, a reason to pass `checkLinkage: false`: keep the check on unless you know none of these applies.
+
+Per-viewer visibility rides along for free: every hop loads through the same authorised loader, so the deepest hop of an anonymous caller's walk excludes exactly what their direct read would.
 
 `paginated` relationships carry no inline linkage, so they contribute nothing to a walk — which is why they are excluded from `?include=` paths to begin with.
 
@@ -1775,7 +1783,7 @@ const query2 = ListArticles2.pipe(
 | Relationships hold at least one of `data` / `links` / `meta` | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related` |
 | Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
 | Related resource endpoints (`related` links) | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many |
-| Compound documents: no duplicate resources, full linkage | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so linkage holds by construction; `Handlers.data` / `Handlers.collection` re-check (runtime check) |
+| Compound documents: no duplicate resources, full linkage | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so its output is fully linked by construction; `Handlers.data` / `Handlers.collection` deduplicate against the primary data and check full linkage on the resources they emit, after `onResource` (runtime check — the one that catches a transform that rewrites `relationships`, [so keep it on](#resolving-included--one-batch-per-level)) |
 | Compound documents never inline unbounded relationships | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction |
 | `errors` array is never empty | non-empty check on the error document schema |
 | 200 / 201 / 204 status codes per operation | set by the endpoint constructors |

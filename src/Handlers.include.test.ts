@@ -666,6 +666,41 @@ describe("Handlers.resolveIncluded — composing a document", () => {
     expect(db.log()).toEqual(["people:9,2"]);
   });
 
+  // The by-construction guarantee covers the resolver's output, not what a
+  // transform makes of it: the check runs on the emitted resources (#152).
+  it("keeps the linkage check live: a transform that strips `relationships` is caught", async () => {
+    const db = store(graph);
+    const included = await run(
+      Handlers.resolveIncluded(article1, ["comments.author"], db.targets("people", "comments")),
+    );
+    expect(ids(included)).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+
+    const stripFrom = (type: string) =>
+      Handlers.transform<Handlers.IdentityLambda>((resource) => {
+        if (resource.type !== type) return resource;
+        const { relationships: _relationships, ...rest } = resource;
+        return rest;
+      });
+
+    // On an included member: people:2 was reached only through comments:12.
+    expect(() => Handlers.data(article1, { included, onResource: stripFrom("comments") })).toThrow(
+      /full linkage violation: included resource "people:2"/,
+    );
+    // On the primary data: the first level is orphaned.
+    expect(() => Handlers.data(article1, { included, onResource: stripFrom("articles") })).toThrow(
+      /full linkage violation: included resource "comments:5"/,
+    );
+    // A transform that leaves `relationships` alone keeps the guarantee.
+    expect(
+      ids(
+        Handlers.data(article1, {
+          included,
+          onResource: Handlers.withMeta(() => ({ seen: true })),
+        }).included,
+      ),
+    ).toEqual(["comments:5", "comments:12", "people:9", "people:2"]);
+  });
+
   it("omits the member entirely when the client asked for nothing", async () => {
     const db = store(graph);
     const document = await run(

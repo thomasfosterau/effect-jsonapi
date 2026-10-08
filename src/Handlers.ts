@@ -628,6 +628,14 @@ export const buildIncluded = <
   primary: ReadonlyArray<ResourceValue>,
   included: ReadonlyArray<Included>,
   options?: {
+    /**
+     * `false` skips the full-linkage check, which is on by default. The check
+     * runs on the resources the document emits, after dedup and `onResource`,
+     * so `included` from {@link resolveIncluded} is not on its own a reason to
+     * skip it: a transform that touches `relationships` can orphan members the
+     * resolver linked. Skip it only when you know every emitted `included`
+     * member is referenced by the emitted document.
+     */
     readonly checkLinkage?: boolean | undefined;
     /**
      * Applied to every deduplicated included resource, after dedup and before
@@ -969,9 +977,28 @@ const resolve = (
  * - **`undefined` when nothing was requested**, so the caller omits the member.
  *   An empty array is the different statement "your walk resolved to nothing".
  *
- * Because every resource is reached *through* a document resource's linkage,
- * full linkage holds by construction — {@link buildIncluded}'s check becomes a
- * guard rather than a live constraint.
+ * **Full linkage holds by construction — for the array this returns.** Every
+ * member is reached *through* the linkage of the primary data the walk started
+ * from, or of a member before it. Handed unchanged to {@link data} or
+ * {@link collection} with that same primary data, {@link buildIncluded}'s
+ * check is a guard over the resolver's own output rather than a live
+ * constraint. The guarantee covers what the walk produces, not the document a
+ * builder then emits, so it no longer holds when:
+ *
+ * - an `onResource` transform removes or rewrites `relationships`. The check
+ *   runs on the transformed resources the document emits, so stripping the
+ *   primary data's `relationships` orphans the first level of `included`, and
+ *   stripping a member's orphans everything reached only through it.
+ *   {@link project} and {@link withMeta} leave `relationships` alone;
+ *   {@link transform} is unconstrained;
+ * - the array is edited: a member taken out can orphan what was reached
+ *   through it, and a resource added was never reached at all;
+ * - the builder is given different primary data from the resources the walk
+ *   started from.
+ *
+ * So a resolver-built document is not, by itself, a reason to pass
+ * `checkLinkage: false`: keep the check on unless you know none of these
+ * applies.
  *
  * A `paginated` relationship carries no inline linkage, so it contributes
  * nothing to a walk; its members are reachable only through the `related` link,
@@ -1303,7 +1330,14 @@ export const data = <
      * @since 0.15.0
      */
     readonly onResource?: ResourceTransform<F> | undefined;
-    /** Disable the full-linkage check (it is on by default). */
+    /**
+     * `false` skips the full-linkage check, which is on by default. The check
+     * runs on the resources the document emits, after dedup and `onResource`,
+     * so `included` from {@link resolveIncluded} is not on its own a reason to
+     * skip it: a transform that touches `relationships` can orphan members the
+     * resolver linked. Skip it only when you know every emitted `included`
+     * member is referenced by the emitted document.
+     */
     readonly checkLinkage?: boolean | undefined;
   },
 ): DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J> => {
@@ -1420,7 +1454,14 @@ export const collection = <
      * @since 0.15.0
      */
     readonly onResource?: ResourceTransform<F> | undefined;
-    /** Disable the full-linkage check (it is on by default). */
+    /**
+     * `false` skips the full-linkage check, which is on by default. The check
+     * runs on the resources the document emits, after dedup and `onResource`,
+     * so `included` from {@link resolveIncluded} is not on its own a reason to
+     * skip it: a transform that touches `relationships` can orphan members the
+     * resolver linked. Skip it only when you know every emitted `included`
+     * member is referenced by the emitted document.
+     */
     readonly checkLinkage?: boolean | undefined;
   },
 ): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
