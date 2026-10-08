@@ -617,8 +617,8 @@ const mapResources = <F extends TransformLambda>(
  * primary data; called directly, pass `primary` as the document will emit it.
  *
  * The check is per reference: a member passes when any resource in the
- * document — primary or another included member — references it, not only
- * when it is reachable from the primary data.
+ * document — primary or included, the member itself among them — references
+ * it, not only when it is reachable from the primary data.
  *
  * The transform is keyed off the resource as given, so it must not change a
  * resource's `type` or `id`.
@@ -999,11 +999,12 @@ const resolve = (
  *   primary data's `relationships` orphans every member that only the primary
  *   data referenced, and stripping a member's orphans every member that only
  *   it referenced. The check is per reference, not reachability from the
- *   primary data: a member another member still references passes.
+ *   primary data: a member that any included member, itself among them,
+ *   still references passes.
  *   {@link project} and {@link withMeta} leave `relationships` alone;
  *   {@link transform} is unconstrained;
- * - the array is edited: a member taken out can orphan what was reached
- *   through it, and a resource added was never reached at all;
+ * - the array is edited: a member taken out can orphan what only it
+ *   referenced, and a resource added was never reached at all;
  * - the builder is given different primary data from the resources the walk
  *   started from.
  *
