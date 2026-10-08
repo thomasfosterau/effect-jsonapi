@@ -88,8 +88,9 @@ export default defineConfig({
       // This rule and `no-known-value-widening` only check the built-in
       // `Record<K, V>` while no local binding is named `Record`, so importing
       // effect's `Record` module under that name hides every such site in
-      // the file (#275). Never bind it as `Record`: alias it (`Record as R`,
-      // or `Rec` where `R` is already the file's resource type parameter).
+      // the file (#275). Never bind it as `Record`: spell the alias `Rec`
+      // everywhere (`import { Record as Rec } from "effect"`), never `R`,
+      // which is the resource type parameter in many files.
       "effect/no-unsafe-dictionary-type": "warn",
       "effect/no-runtime-typeof": "warn",
       "effect/use-clock-service": "warn",

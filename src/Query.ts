@@ -1691,12 +1691,8 @@ export const schema = <R extends Any, const O extends Options<R>>(
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
           SchemaTransformation.transformEffect<Values, Values>({
             decode: (flatValues, parseOptions) => {
-              const others: Record<string, unknown> = {};
-              const filterKeys: Record<string, unknown> = {};
-              for (const [key, value] of Object.entries(flatValues)) {
-                if (isFilterKey(key)) filterKeys[key] = value;
-                else others[key] = value;
-              }
+              const filterKeys = Rec.filter(flatValues, (_, key) => isFilterKey(key));
+              const others = Rec.filter(flatValues, (_, key) => !isFilterKey(key));
               const nestedValues = nest(others);
               if (Object.keys(filterKeys).length === 0) return Effect.succeed(nestedValues);
               return Effect.map(

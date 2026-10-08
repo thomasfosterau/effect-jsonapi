@@ -72,7 +72,7 @@ import {
   Layer,
   Option,
   Predicate,
-  Record,
+  Record as Rec,
   Schema,
   SchemaAST,
   SchemaIssue,
@@ -608,7 +608,7 @@ const rejectQueryParameters = (
       code: BadRequest.code,
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
       detail: Option.getOrElse(
-        Record.get(SUPPORT_FAMILIES, baseName(parameter)),
+        Rec.get(SUPPORT_FAMILIES, baseName(parameter)),
         () =>
           `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
           "names made only of the letters a-z for the specification; an implementation-" +
@@ -936,7 +936,7 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
       if (Option.isSome(declared)) {
         const params = yield* ParsedSearchParams;
         const rejected = rejectQueryParameters(
-          Record.keys(params),
+          Rec.keys(params),
           declared.value,
           allowedQueryParameters,
         );

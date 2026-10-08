@@ -45,7 +45,7 @@
  *
  * @since 0.1.0
  */
-import { Array as Arr, Effect, HashMap, HashSet, Option, Record } from "effect";
+import { Array as Arr, Effect, HashMap, HashSet, Option, Record as Rec } from "effect";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
@@ -568,7 +568,7 @@ const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}
 // The keys of every resource identifier in a resource's inline relationship
 // linkage — the edges the full-linkage walk follows out of it.
 const linkageKeys = (resource: ResourceValue): Array<string> =>
-  Arr.flatMap(Record.values(resource.relationships ?? {}), ({ data: linkage }) =>
+  Arr.flatMap(Rec.values(resource.relationships ?? {}), ({ data: linkage }) =>
     linkage === null || linkage === undefined
       ? []
       : Arr.map(Array.isArray(linkage) ? linkage : [linkage], key),

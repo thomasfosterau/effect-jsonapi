@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Option, Record as R, Schema, SchemaTransformation } from "effect";
+import { Option, Record as Rec, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
 import { define } from "./define.js";
 import { errorMeta } from "./errorMeta.js";
@@ -169,8 +169,8 @@ export const nest = <V>(flat: {
   const nested: Record<string, V | Record<string, V>> = {};
   // Whether a bare key holds `name`, wherever it sits in `flat`.
   const holdsBare = (name: string): boolean =>
-    Option.getOrUndefined(R.get(flat, name)) !== undefined;
-  for (const [key, value] of R.toEntries(flat)) {
+    Option.getOrUndefined(Rec.get(flat, name)) !== undefined;
+  for (const [key, value] of Rec.toEntries(flat)) {
     if (value === undefined) continue;
     const [, name, member] = bracketKey.exec(key) ?? [];
     if (name === undefined || member === undefined || holdsBare(name)) {
@@ -178,7 +178,7 @@ export const nest = <V>(flat: {
     } else {
       // No bare key holds the name, so an own entry under it is a group this
       // loop made.
-      const group = Option.getOrElse(R.get(nested, name), () => {
+      const group = Option.getOrElse(Rec.get(nested, name), () => {
         const made = {};
         define(nested, name, made);
         return made;
