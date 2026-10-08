@@ -460,10 +460,10 @@ describe("the per-resource transform pass", () => {
     ).toEqual([{ type: "articles", id: "2", attributes: relatedArticle.attributes }]);
   });
 
-  it("checks linkage per reference, not reachability from the primary data", () => {
-    // Pins the current, non-transitive check: a member referenced by another
-    // member passes even when the primary data no longer reaches either of
-    // them. #239 tracks making it transitive, which turns this into a throw.
+  it("checks reachability from the primary data — a cycle the primary data no longer reaches throws (#239)", () => {
+    // `people:9` and `articles:2` reference each other, but once the transform
+    // strips `articles:1`'s relationships nothing in the primary data reaches
+    // either, so neither can be linked to it.
     const stripRelationships = Handlers.transform<Handlers.IdentityLambda>((resource) => {
       if (resource.type !== "articles" || resource.id !== "1") return resource;
       const { relationships: _relationships, ...rest } = resource;
@@ -487,12 +487,56 @@ describe("the per-resource transform pass", () => {
       attributes: { title: "Yo" },
       relationships: { author: { data: { type: "people", id: "9" } } },
     };
-    const document = Handlers.data(primary, {
-      included: [person, other],
-      onResource: stripRelationships,
-    });
-    expect(document.data).toEqual({ type: "articles", id: "1", attributes: { title: "Hi" } });
-    expect(document.included).toEqual([person, other]);
+    expect(() =>
+      Handlers.data(primary, { included: [person, other], onResource: stripRelationships }),
+    ).toThrow(/full linkage violation: included resource "people:9"/);
+    // Untransformed, the primary data reaches both: `people:9` directly,
+    // `articles:2` through it.
+    expect(Handlers.data(primary, { included: [person, other] }).included).toEqual([person, other]);
+  });
+
+  it("rejects a member whose only reference is its own (#239)", () => {
+    const manager = {
+      type: "people",
+      id: "9",
+      attributes: { name: "Ann" },
+      relationships: { manager: { data: { type: "people", id: "9" } } },
+    };
+    const unlinked = { type: "articles", id: "1", attributes: { title: "Hi" } };
+    expect(() => Handlers.data(unlinked, { included: [manager] })).toThrow(
+      /full linkage violation: included resource "people:9"/,
+    );
+    expect(() => Handlers.buildIncluded([unlinked], [manager])).toThrow(/full linkage/);
+  });
+
+  it("rejects every member of a chain the primary data no longer reaches (#239)", () => {
+    // articles:1 → people:9 → companies:3. Stripping articles:1's
+    // relationships orphans people:9, and companies:3 with it, though
+    // people:9 still references companies:3.
+    const primary = {
+      type: "articles",
+      id: "1",
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+    const person = {
+      type: "people",
+      id: "9",
+      relationships: { employer: { data: { type: "companies", id: "3" } } },
+    };
+    const company = { type: "companies", id: "3", attributes: { name: "ACME" } };
+    expect(Handlers.buildIncluded([primary], [person, company])).toEqual([person, company]);
+    const { relationships: _relationships, ...stripped } = primary;
+    expect(() => Handlers.buildIncluded([stripped], [person, company])).toThrow(
+      /full linkage violation: included resource "people:9"/,
+    );
+    expect(() => Handlers.buildIncluded([stripped], [company, person])).toThrow(
+      /full linkage violation: included resource "companies:3"/,
+    );
+    // A collection reaches a member through any of its primary resources.
+    const sibling = { ...primary, id: "2" };
+    expect(
+      Handlers.collection([stripped, sibling], { included: [company, person] }).included,
+    ).toEqual([company, person]);
   });
 
   it("buildIncluded drops members already present as primary data (#147)", () => {
