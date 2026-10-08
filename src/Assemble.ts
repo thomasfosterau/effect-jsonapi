@@ -158,15 +158,21 @@ export interface CollectionDocument<R extends ResourceLike> {
 
 /**
  * An unpaginated collection document as {@link unpaginatedCollection}
- * assembles it: the whole collection as `data`, with no `meta` — there is no
- * page math to surface, so no `meta.totalCount` and no `first` / `last` /
- * `prev` / `next` links the endpoint wouldn't honour.
+ * assembles it: the whole collection as `data`, with no page math — no
+ * `meta.totalCount` and no `first` / `last` / `prev` / `next` links the
+ * endpoint wouldn't honour.
  *
  * The top-level `links` member is the collection's own `self` link, and
  * `Self` is the type of the `self` option the document was assembled with:
  * `undefined` (the default — no `self` passed) means no `links` member at
  * all, `string` means `links.self` is always present, and `string |
  * undefined` (a `self` the caller may not have) means `links` is optional.
+ *
+ * The top-level `meta` member is the caller's own document-level metadata,
+ * passed through as given, and `M` is the type of the `meta` option, decided
+ * the same way: `undefined` (the default — no `meta` passed) means no `meta`
+ * member at all, an object type means `meta` is that type and always
+ * present, and an object type `| undefined` means `meta` is optional.
  *
  * @since 0.17.0
  * @category models
@@ -175,6 +181,8 @@ export type UnpaginatedCollectionDocument<
   R extends ResourceLike,
   // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `self` option's type, not a runtime value: `undefined` selects the linkless document
   Self extends string | undefined = undefined,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `meta` option's type, not a runtime value: `undefined` selects the document with no `meta`
+  M extends Handlers.MetaValue | undefined = undefined,
 > = {
   readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
   readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
@@ -183,7 +191,12 @@ export type UnpaginatedCollectionDocument<
   ? unknown
   : [Self] extends [string]
     ? { readonly links: { readonly self: string } }
-    : { readonly links?: { readonly self: string } });
+    : { readonly links?: { readonly self: string } }) &
+  ([M] extends [undefined]
+    ? unknown
+    : [undefined] extends [M]
+      ? { readonly meta?: Exclude<M, undefined> }
+      : { readonly meta: M });
 
 /**
  * A §8.4 relationship document as {@link relationship} assembles it: the
@@ -383,14 +396,17 @@ export interface CollectionOptions<
 
 /**
  * {@link unpaginatedCollection}'s options: {@link CollectionOptions} plus the
- * collection's own `self` link and the request query it carries. `Self` is
- * the type of `self` as passed, and decides whether the document type has a
- * `links` member ({@link UnpaginatedCollectionDocument}).
+ * collection's own `self` link, the request query it carries and the
+ * document's top-level `meta`. `Self` is the type of `self` as passed, and
+ * decides whether the document type has a `links` member; `M` is the type of
+ * `meta` as passed, and decides whether it has a `meta` member
+ * ({@link UnpaginatedCollectionDocument}).
  *
- * `Self` is decided from a concrete type, so a caller forwarding its own
- * generic parameter (`<S extends string | undefined>(self: S) => …`) widens
- * it at the call site — `self: self as string | undefined` (or `as string`)
- * — otherwise `query` is rejected and `links` stays unresolved.
+ * `Self` and `M` are decided from a concrete type, so a caller forwarding its
+ * own generic parameter (`<S extends string | undefined>(self: S) => …`)
+ * widens it at the call site — `self: self as string | undefined` (or `as
+ * string`), and likewise `meta` to its object type — otherwise `query` is
+ * rejected and `links` / `meta` stay unresolved.
  *
  * @since 0.17.0
  * @category models
@@ -400,6 +416,8 @@ export interface UnpaginatedCollectionOptions<
   Targets extends Handlers.IncludeTargets = never,
   // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `self` option as passed; an `Option` there would stop a caller forwarding its own optional `self`
   Self extends string | undefined = undefined,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `meta` option as passed; an `Option` there would stop a caller forwarding its own optional `meta`
+  M extends Handlers.MetaValue | undefined = undefined,
 > extends CollectionOptions<V, Targets> {
   /**
    * The collection's own absolute URL, emitted as the document's
@@ -424,6 +442,27 @@ export interface UnpaginatedCollectionOptions<
    */
   // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
   readonly query?: ([Self] extends [undefined] ? never : ReadonlyArray<Query.Pair>) | undefined;
+  /**
+   * The document's top-level `meta` — document-level metadata that isn't
+   * page math: a generation timestamp, a cache hint, an application-specific
+   * summary — emitted as given. Omit it (or pass `undefined`) and the
+   * document has no `meta` member. `totalCount` is not special-cased: one
+   * passed here is emitted verbatim and, with a `self`, makes the document
+   * structurally assignable to {@link CollectionDocument} — a caller that
+   * wants a paginated total wants {@link collection} and its page math.
+   *
+   * `M` is inferred `const`, as on `Handlers.collection`: the document emits
+   * this very value, so an object literal keeps its literal type. Its
+   * constraint is `Handlers.MetaValue`, which a value typed by an `interface`
+   * without an index signature doesn't satisfy (as on `Handlers.collection`):
+   * spread it (`{ ...stamp }`) or declare its type with a `type` alias.
+   *
+   * An explicit `undefined` is accepted only when `M` already admits it, as
+   * for `self`, so a caller's own bare-optional `o.meta` forwards as is while
+   * a `meta` that infers as an object type keeps the document's `meta`
+   * required.
+   */
+  readonly meta?: M | ([undefined] extends [M] ? undefined : never);
 }
 
 /**
@@ -744,8 +783,8 @@ export const resource = <
  * link coercion, the batched walk, the caller's pre-resolved `included`, the
  * per-resource transform and the `jsonapi` member. `top` is the only thing
  * the two differ by — the pagination `meta` / `links`, or the collection's
- * own `self` (with the query it carries), or nothing — and the document type
- * `D` that difference produces.
+ * own `self` (with the query it carries) and the caller's own `meta`, or
+ * nothing — and the document type `D` that difference produces.
  */
 const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
   resources: ReadonlyArray<ResourceLike>,
@@ -847,9 +886,20 @@ export const collection = <
  * and serialised as {@link collection}'s pagination links are, so the link
  * names the request the document answers. Without `self` the document has
  * no `links` member at all.
+ *
+ * Pass `meta` — document-level metadata that isn't page math, such as a
+ * generation timestamp or a cache hint — and the document carries it as the
+ * top-level `meta`, as given, typed as passed (an object literal keeps its
+ * literal type). Without it the document has no `meta` member.
+ * `meta.totalCount` is not special-cased: it is emitted verbatim, and with a
+ * `self` the document is then structurally a {@link CollectionDocument}; a
+ * collection whose total matters is a page of something, and goes through
+ * {@link collection}.
+ *
  * The return type ({@link UnpaginatedCollectionDocument}) follows the
- * `self` passed: no `links` without one, `links.self` required with a
- * `string`, optional with a `string | undefined`; it never has `meta`.
+ * `self` and `meta` passed: no `links` / `meta` member without one, the
+ * member required when the option's type excludes `undefined`, and optional
+ * when it admits it (a caller forwarding its own optional).
  *
  * @example
  * ```ts
@@ -880,6 +930,14 @@ export const collection = <
  * }))
  * console.log(linked.links.self)
  * // → https://example.test/colours?include=family
+ *
+ * // …with document-level `meta`, typed as passed
+ * const stamped = Effect.runSync(Assemble.unpaginatedCollection(colours, {
+ *   self: "https://example.test/colours",
+ *   meta: { generatedAt: "2026-10-08T00:00:00Z" }
+ * }))
+ * console.log(stamped.meta.generatedAt, stamped.links.self)
+ * // → 2026-10-08T00:00:00Z https://example.test/colours
  * ```
  *
  * @since 0.17.0
@@ -891,28 +949,30 @@ export const unpaginatedCollection = <
   Targets extends Handlers.IncludeTargets = never,
   // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `self` option as passed
   Self extends string | undefined = undefined,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `meta` option as passed
+  const M extends Handlers.MetaValue | undefined = undefined,
 >(
   resources: ReadonlyArray<R>,
-  options: UnpaginatedCollectionOptions<V, Targets, Self> = {},
+  options: UnpaginatedCollectionOptions<V, Targets, Self, M> = {},
 ): Effect.Effect<
-  // `Self` is widened to `string`, so a literal `self` doesn't leak into the type.
-  UnpaginatedCollectionDocument<R, Self extends string ? string : undefined>,
+  // `Self` is widened to `string`, so a literal `self` doesn't leak into the
+  // type; `M` is not, since the document emits that very value.
+  UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
-> =>
-  assembleCollection<
-    UnpaginatedCollectionDocument<R, Self extends string ? string : undefined>,
-    V,
-    Targets
-  >(
-    resources,
-    options,
+> => {
+  const links =
     options.self === undefined
       ? {}
       : options.query === undefined
         ? { self: options.self }
-        : { self: options.self, query: options.query },
-  );
+        : { self: options.self, query: options.query };
+  return assembleCollection<
+    UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
+    V,
+    Targets
+  >(resources, options, options.meta === undefined ? links : { ...links, meta: options.meta });
+};
 
 /**
  * Input of {@link relationship}.

@@ -9,7 +9,10 @@
  *   mistakable for a paginated `CollectionDocument`;
  * - given a `self` (#242), its document has `links.self` — required for a
  *   `string`, optional for a `string | undefined` — and still no `meta`;
- *   `query` rides on `self` and is rejected without it.
+ *   `query` rides on `self` and is rejected without it;
+ * - given a `meta` (#253), its document has `meta` typed as passed —
+ *   required for an object type, optional for one `| undefined` — alongside
+ *   `links` or without it, and still no `meta` member when none is passed.
  *
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
  * assertions.
@@ -121,6 +124,10 @@ declare const optionallyLinkedDocument: Assemble.UnpaginatedCollectionDocument<P
 assertType<MaybeSelf>(optionallyLinkedDocument.links?.self);
 // @ts-expect-error — `links` may be absent
 assertType<string>(optionallyLinkedDocument.links.self);
+// …and is genuinely optional, not required-but-maybe-`undefined`: a linkless
+// document is one of the optionally-linked ones.
+declare const linkless: Assemble.UnpaginatedCollectionDocument<Person>;
+assertType<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>>(linkless);
 
 // The same `self` forwarded from the caller's own bare-optional option: under
 // `exactOptionalPropertyTypes`, `o.self` reads as `string | undefined` and has
@@ -178,3 +185,121 @@ assertType<
     >
   >
 >(true);
+
+// ── A top-level `meta`, when given, and only then ───────────────────
+
+// The caller's own document-level metadata: not page math.
+type Generated = { readonly generatedAt: string; readonly cache: "fresh" | "stale" };
+declare const generated: Generated;
+const stamped = Assemble.unpaginatedCollection(people, { meta: generated });
+assertType<
+  Equals<
+    typeof stamped,
+    Effect.Effect<
+      Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>,
+      Assemble.IncludeError,
+      never
+    >
+  >
+>(true);
+declare const stampedDocument: Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>;
+assertType<string>(stampedDocument.meta.generatedAt);
+assertType<"fresh" | "stale">(stampedDocument.meta.cache);
+// @ts-expect-error — `meta` is passed through as given: no `totalCount` appears
+assertType<number>(stampedDocument.meta.totalCount);
+// @ts-expect-error — a `meta` is not a `self`: still no top-level `links`
+assertType<unknown>(stampedDocument.links);
+// @ts-expect-error — nor is it a paginated document
+assertType<Assemble.CollectionDocument<Person>>(stampedDocument);
+
+// An object literal keeps its literal type (`M` is `const`, as on
+// `Handlers.collection`): the document emits that very value, so the type is
+// truthful — unlike `self`, which is a switch and always types as `string`.
+const literal = Assemble.unpaginatedCollection(people, { meta: { generatedAt: "now" } });
+assertType<
+  Equals<
+    typeof literal,
+    Effect.Effect<
+      Assemble.UnpaginatedCollectionDocument<Person, undefined, { readonly generatedAt: "now" }>,
+      Assemble.IncludeError,
+      never
+    >
+  >
+>(true);
+
+// …so a document assembled from a literal `meta` still fits a document type
+// declared with a union member, which a widened `{ cache: string }` would not.
+declare const generatedAt: string;
+const fresh = Assemble.unpaginatedCollection(people, { meta: { generatedAt, cache: "fresh" } });
+export const cached: Effect.Effect<
+  Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>,
+  Assemble.IncludeError
+> = fresh;
+
+// Alongside a `self` link: both members, each typed as passed.
+const both = Assemble.unpaginatedCollection(people, {
+  self: "https://example.test/people",
+  query: pairs,
+  meta: generated,
+});
+assertType<
+  Equals<
+    typeof both,
+    Effect.Effect<
+      Assemble.UnpaginatedCollectionDocument<Person, string, Generated>,
+      Assemble.IncludeError,
+      never
+    >
+  >
+>(true);
+declare const bothDocument: Assemble.UnpaginatedCollectionDocument<Person, string, Generated>;
+assertType<string>(bothDocument.links.self);
+assertType<string>(bothDocument.meta.generatedAt);
+
+// A `meta` forwarded from the caller's own bare-optional option: under
+// `exactOptionalPropertyTypes`, `o.meta` reads as `Generated | undefined` and
+// has to be accepted; the document's `meta` is then optional.
+declare const callerMeta: { readonly self?: string; readonly meta?: Generated };
+// oxlint-disable-next-line effect/prefer-option-over-null -- the union under test: the type of a `meta` the caller may not have
+type MaybeGenerated = Generated | undefined;
+const forwardedMeta = Assemble.unpaginatedCollection(people, {
+  self: callerMeta.self,
+  meta: callerMeta.meta,
+});
+assertType<
+  Equals<
+    typeof forwardedMeta,
+    Effect.Effect<
+      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, MaybeGenerated>,
+      Assemble.IncludeError,
+      never
+    >
+  >
+>(true);
+declare const forwardedMetaDocument: Assemble.UnpaginatedCollectionDocument<
+  Person,
+  MaybeSelf,
+  MaybeGenerated
+>;
+assertType<MaybeGenerated>(forwardedMetaDocument.meta);
+// @ts-expect-error — `meta` may be absent
+assertType<string>(forwardedMetaDocument.meta.generatedAt);
+// …and is genuinely optional, not required-but-maybe-`undefined`: a document
+// with no `meta` is one of the optionally-stamped ones.
+declare const metaless: Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>;
+assertType<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, MaybeGenerated>>(metaless);
+
+// An explicit `undefined` is no `meta` at all.
+const unstamped = Assemble.unpaginatedCollection(people, { meta: undefined });
+assertType<
+  Equals<
+    typeof unstamped,
+    Effect.Effect<Assemble.UnpaginatedCollectionDocument<Person>, Assemble.IncludeError, never>
+  >
+>(true);
+
+// JSON:API `meta` is an object.
+// @ts-expect-error — not an object
+export const scalarMeta = Assemble.unpaginatedCollection(people, { meta: 1 });
+// @ts-expect-error — `null` is not a `meta` either
+export const nullMeta = Assemble.unpaginatedCollection(people, { meta: null });
