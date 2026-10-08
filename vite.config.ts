@@ -98,7 +98,6 @@ export default defineConfig({
       "effect/use-console-service": "warn",
       "effect/require-effect-concurrency": "warn",
       "effect/use-random-service": "warn",
-      "effect/use-command-executor-service": "warn",
       "effect/prefer-duration-constructors": "warn",
       "effect/effect-promise-vs-trypromise": "warn",
       "effect/effect-catchall-default": "warn",
@@ -155,10 +154,10 @@ export default defineConfig({
       // Build/test configs, the docgen runner and the module-hook fixture are
       // evaluated by Vite / Vitest / Node in bare Node, before any Effect
       // runtime exists — there is no `Config` provider to read from and no
-      // `FileSystem` service to call, so `process.env` and `node:*` are the
-      // only things that work there.
+      // `FileSystem` or `ChildProcess` service to call, so `process.env` and
+      // `node:*` are the only things that work there.
       {
-        files: ["**/vite.config.ts", "test/fixtures/**", "test/entry-points.test.ts"],
+        files: ["**/vite.config.ts", "scripts/**", "test/fixtures/**", "test/entry-points.test.ts"],
         rules: {
           "effect/avoid-node-imports": "off",
           "effect/avoid-sync-fs": "off",
@@ -166,6 +165,7 @@ export default defineConfig({
           "effect/use-console-service": "off",
           "effect/use-filesystem-service": "off",
           "effect/use-path-service": "off",
+          "effect/use-command-executor-service": "off",
           "effect/avoid-native-fetch": "off",
           "effect/effect-promise-vs-trypromise": "off",
         },
@@ -230,9 +230,11 @@ export default defineConfig({
       },
       // Type-checks AND executes every JSDoc `@example`, and generates the API
       // docs under docs/. Not part of `check`: it is a separate CI step, so a
-      // broken example fails visibly on its own line.
+      // broken example fails visibly on its own line. docgen itself skips the
+      // `@example` in a class's own doc comment (#276); the second sub-task
+      // checks and runs those through the same pipeline.
       docgen: {
-        command: "docgen",
+        command: "docgen && tsx scripts/docgen-class-examples.ts",
         cache: false,
       },
     },
