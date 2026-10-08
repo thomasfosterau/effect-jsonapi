@@ -353,9 +353,9 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
 
 /**
  * {@link collection}'s options: the shared {@link Options} plus compound
- * members the caller already resolved (every one must be referenced by a
- * resource in the document; the per-reference full-linkage check raises
- * otherwise, and #239 tracks making it transitive).
+ * members the caller already resolved (every one must be reachable from the
+ * page's primary data through resource linkage — directly, or through other
+ * included members; the full-linkage check raises otherwise).
  *
  * @since 0.16.0
  * @category models

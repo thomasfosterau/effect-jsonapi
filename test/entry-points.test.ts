@@ -88,6 +88,7 @@ const HTTP_TIER = [
   "internal/conformance/write.ts",
   "internal/errorMeta.ts",
   "internal/httpMedia.ts",
+  "internal/linkage.ts",
 ];
 
 /**

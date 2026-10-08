@@ -8,9 +8,9 @@
  *   - `included` resources are deduplicated by `(type, id)`, against each
  *     other and against the primary data — a compound document carries one
  *     resource object per `(type, id)` pair
- *   - full linkage: every included resource must be referenced by a resource
- *     identifier somewhere in the document (data's relationships or another
- *     included resource's relationships)
+ *   - full linkage: every included resource must be reachable from the
+ *     primary data by following resource linkage — the primary data's
+ *     relationships, then other included resources' relationships
  *
  * They also take an `onResource` hook — a per-resource transform run **once
  * per resource, in every slot**: the primary `data`, every deduplicated
@@ -37,9 +37,10 @@
  *
  * @since 0.1.0
  */
-import { Array as Arr, Effect } from "effect";
+import { Array as Arr, Effect, HashMap, HashSet, Option, Record } from "effect";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
+import { reachable } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
 
 /**
@@ -554,19 +555,14 @@ export const compose = <A extends TransformLambda, B extends TransformLambda>(
 
 const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}\0${identifier.id}`;
 
-const referencedIdentifiers = (resources: ReadonlyArray<ResourceValue>): Set<string> => {
-  const identifiers = new Set<string>();
-  for (const resource of resources) {
-    for (const relationship of Object.values(resource.relationships ?? {})) {
-      const linkage = relationship.data;
-      if (linkage === null || linkage === undefined) continue;
-      for (const identifier of Array.isArray(linkage) ? linkage : [linkage]) {
-        identifiers.add(key(identifier));
-      }
-    }
-  }
-  return identifiers;
-};
+// The keys of every resource identifier in a resource's inline relationship
+// linkage — the edges the full-linkage walk follows out of it.
+const linkageKeys = (resource: ResourceValue): Array<string> =>
+  Arr.flatMap(Record.values(resource.relationships ?? {}), ({ data: linkage }) =>
+    linkage === null || linkage === undefined
+      ? []
+      : Arr.map(Array.isArray(linkage) ? linkage : [linkage], key),
+  );
 
 // Wraps a transform so it runs at most once per `(type, id)`, handing back
 // the same value everywhere that resource appears in the document. A resource
@@ -598,7 +594,8 @@ const mapResources = <F extends TransformLambda>(
 /**
  * Deduplicates included resources by `(type, id)`, applies the per-resource
  * transform, and verifies the spec's full-linkage rule: every included
- * resource must be referenced by a resource identifier in the document.
+ * resource must be reachable from the primary data by following resource
+ * linkage.
  *
  * Dedup is document-wide: a resource already present in `primary` is dropped
  * from `included` rather than repeated, since a compound document MUST NOT
@@ -616,9 +613,12 @@ const mapResources = <F extends TransformLambda>(
  * passed. {@link data} and {@link collection} pass their already-transformed
  * primary data; called directly, pass `primary` as the document will emit it.
  *
- * The check is per reference: a member passes when any resource in the
- * document — primary or included, the member itself among them — references
- * it, not only when it is reachable from the primary data.
+ * The check walks reachability from the primary data, the same walk the
+ * conformance kit's `spec/document/full-linkage` rule makes: it starts from
+ * the identifiers in `primary`'s relationships and follows the relationships
+ * of each `included` member it reaches. A member passes only when that walk
+ * reaches it. Being referenced is not enough: a cycle of members the primary
+ * data no longer reaches, or a member whose only reference is its own, fails.
  *
  * The transform is keyed off the resource as given, so it must not change a
  * resource's `type` or `id`.
@@ -638,12 +638,12 @@ export const buildIncluded = <
   options?: {
     /**
      * `false` skips the full-linkage check, which is on by default. The check
-     * runs on the `included` members after dedup and `onResource`, against
-     * `primary` as passed — so pass `primary` as the document will emit it.
+     * walks from `primary` as passed through the `included` members after
+     * dedup and `onResource` — so pass `primary` as the document will emit it.
      * `included` from {@link resolveIncluded} is not on its own a reason to
      * skip it: a transform that touches `relationships` can orphan members the
      * resolver linked. Skip it only when you know every emitted `included`
-     * member is referenced by the emitted document.
+     * member is reachable from the emitted primary data.
      */
     readonly checkLinkage?: boolean | undefined;
     /**
@@ -669,14 +669,18 @@ export const buildIncluded = <
   // One transform pass over the survivors.
   const shaped = mapResources(deduped, options?.onResource);
 
-  // Full linkage: every included resource is referenced from the document.
+  // Full linkage: every included resource is reachable from the primary data,
+  // through its linkage and then through other included members' linkage.
   if (options?.checkLinkage !== false) {
-    const referenced = referencedIdentifiers([...primary, ...shaped]);
+    const members = HashMap.fromIterable(Arr.map(shaped, (resource) => [key(resource), resource]));
+    const linked = reachable(Arr.flatMap(primary, linkageKeys), (k) =>
+      Option.match(HashMap.get(members, k), { onNone: () => [], onSome: linkageKeys }),
+    );
     for (const resource of shaped) {
-      if (!referenced.has(key(resource))) {
+      if (!HashSet.has(linked, key(resource))) {
         throw new Error(
           `JSON:API full linkage violation: included resource "${resource.type}:${resource.id}" ` +
-            `is not referenced by any resource identifier in the document ` +
+            `is not reachable from the primary data through resource linkage ` +
             `(https://jsonapi.org/format/1.1/#document-compound-documents)`,
         );
       }
@@ -995,16 +999,17 @@ const resolve = (
  * builder then emits, so it no longer holds when:
  *
  * - an `onResource` transform removes or rewrites `relationships`. The check
- *   runs on the transformed resources the document emits, so stripping the
- *   primary data's `relationships` orphans every member that only the primary
- *   data referenced, and stripping a member's orphans every member that only
- *   it referenced. The check is per reference, not reachability from the
- *   primary data: a member that any included member, itself among them,
- *   still references passes.
+ *   walks the transformed resources the document emits, from the primary
+ *   data, so stripping the primary data's `relationships` orphans every member
+ *   reachable only through them, and stripping a member's orphans every member
+ *   reachable only through it — however many hops on. A member other members
+ *   still reference is orphaned all the same once the walk cannot reach it: a
+ *   cycle of members, or a member that references itself, does not link
+ *   itself to the document.
  *   {@link project} and {@link withMeta} leave `relationships` alone;
  *   {@link transform} is unconstrained;
- * - the array is edited: a member taken out can orphan what only it
- *   referenced, and a resource added was never reached at all;
+ * - the array is edited: a member taken out can orphan everything reachable
+ *   only through it, and a resource added was never reached at all;
  * - the builder is given different primary data from the resources the walk
  *   started from.
  *
@@ -1348,7 +1353,7 @@ export const data = <
      * so `included` from {@link resolveIncluded} is not on its own a reason to
      * skip it: a transform that touches `relationships` can orphan members the
      * resolver linked. Skip it only when you know every emitted `included`
-     * member is referenced by the emitted document.
+     * member is reachable from the emitted primary data.
      */
     readonly checkLinkage?: boolean | undefined;
   },
@@ -1472,7 +1477,7 @@ export const collection = <
      * so `included` from {@link resolveIncluded} is not on its own a reason to
      * skip it: a transform that touches `relationships` can orphan members the
      * resolver linked. Skip it only when you know every emitted `included`
-     * member is referenced by the emitted document.
+     * member is reachable from the emitted primary data.
      */
     readonly checkLinkage?: boolean | undefined;
   },
