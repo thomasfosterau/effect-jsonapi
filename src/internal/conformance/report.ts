@@ -10,7 +10,7 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Result } from "effect";
+import { Array as Arr, Predicate, Result } from "effect";
 import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
 
 /** @internal */
@@ -18,6 +18,8 @@ export interface Summary {
   readonly passed: number;
   readonly failed: number;
   readonly skipped: number;
+  /** Rules that died before reaching a verdict. */
+  readonly errored: number;
   readonly findings: number;
   readonly probes: number;
 }
@@ -27,6 +29,7 @@ export const summarise = (outcomes: ReadonlyArray<Outcome>): Summary => {
   let passed = 0;
   let failed = 0;
   let skipped = 0;
+  let errored = 0;
   let findings = 0;
   let probes = 0;
   for (const outcome of outcomes) {
@@ -43,12 +46,23 @@ export const summarise = (outcomes: ReadonlyArray<Outcome>): Summary => {
       case "Skipped":
         skipped += 1;
         break;
+      case "Errored":
+        errored += 1;
+        break;
     }
   }
-  return { passed, failed, skipped, findings, probes };
+  return { passed, failed, skipped, errored, findings, probes };
 };
 
-const MARK = { Passed: "PASS", Failed: "FAIL", Skipped: "SKIP" } as const;
+const MARK = { Passed: "PASS", Failed: "FAIL", Skipped: "SKIP", Errored: "DIED" } as const;
+
+/** The order outcomes are listed in within a tier: what the run could not decide, then what it found. */
+const ORDER = ["Errored", "Failed", "Passed", "Skipped"] as const satisfies ReadonlyArray<
+  Outcome["_tag"]
+>;
+
+/** `" · N died"`, or nothing when no rule died — a run without a defect reads as it always has. */
+const died = (errored: number): string => (errored === 0 ? "" : ` · ${errored} died`);
 
 const TIER_TITLE: Readonly<Record<Tier, string>> = {
   spec: "JSON:API v1.1 — the specification",
@@ -98,6 +112,9 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
       break;
     case "Skipped":
       lines.push(indent(`not checked: ${outcome.reason}`, "      "));
+      break;
+    case "Errored":
+      lines.push(indent(`not decided — the rule died: ${outcome.message}`, "      "));
       break;
     case "Failed": {
       for (const line of wrap(outcome.rule.requirement, width - 6))
@@ -170,8 +187,10 @@ const renderWrites = (writes: ReadonlyArray<WriteRecord>): ReadonlyArray<string>
   });
 
 /**
- * Renders the whole report. Failures first within each tier, because that is
- * what a reader came for; then passes, then the rules that did not run.
+ * Renders the whole report. Within each tier the rules that died come first —
+ * the run could not decide them, so the report is incomplete there — then
+ * failures, because that is what a reader came for; then passes, then the
+ * rules that did not run.
  *
  * @internal
  */
@@ -199,14 +218,12 @@ export const format = (
     const tierSummary = summarise(outcomes);
     out.push(`${TIER_TITLE[tier].toUpperCase()}`);
     out.push(
-      `  ${tierSummary.failed} failed · ${tierSummary.passed} passed · ${tierSummary.skipped} not checked`,
+      `  ${tierSummary.failed} failed${died(tierSummary.errored)} · ${tierSummary.passed} passed · ${tierSummary.skipped} not checked`,
     );
     out.push("");
-    const ordered = [
-      ...outcomes.filter((outcome) => outcome._tag === "Failed"),
-      ...outcomes.filter((outcome) => outcome._tag === "Passed"),
-      ...outcomes.filter((outcome) => outcome._tag === "Skipped"),
-    ];
+    const ordered = Arr.flatMap(ORDER, (tag) =>
+      Arr.filter(outcomes, (outcome) => Predicate.isTagged(outcome, tag)),
+    );
     for (const outcome of ordered) {
       out.push(indent(renderOutcome(outcome, width), "  "));
       out.push("");
@@ -234,7 +251,7 @@ export const format = (
   out.push(
     `SUMMARY  ${summary.failed} rule${summary.failed === 1 ? "" : "s"} failed (${summary.findings} finding${
       summary.findings === 1 ? "" : "s"
-    }) · ${summary.passed} passed · ${summary.skipped} not checked · ${report.gaps.length} area${
+    })${died(summary.errored)} · ${summary.passed} passed · ${summary.skipped} not checked · ${report.gaps.length} area${
       report.gaps.length === 1 ? "" : "s"
     } out of scope · ${summary.probes} request${summary.probes === 1 ? "" : "s"} made`,
   );

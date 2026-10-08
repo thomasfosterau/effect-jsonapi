@@ -87,7 +87,17 @@
  *
  * @since 0.15.0
  */
-import { Array as Arr, Data, Effect, Layer, MutableHashSet, Order } from "effect";
+import {
+  Array as Arr,
+  Data,
+  Effect,
+  Layer,
+  MutableHashSet,
+  Option,
+  Order,
+  Predicate,
+  Schema,
+} from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
@@ -215,12 +225,20 @@ export interface Finding extends Core.Finding {}
 
 /**
  * What became of one rule in a run: `Passed` with the number of requests it
- * made, `Failed` with its findings, or `Skipped` with the reason it could not
- * be decided against this target.
+ * made, `Failed` with its findings, `Skipped` with the reason it could not
+ * be decided against this target, or `Errored` when the rule died — a defect
+ * in the kit, a fixture or the transport, not a finding about the server —
+ * with the defect's `message` and the `defect` itself.
  *
  * `Skipped` is load-bearing. A rule that needs a write endpoint against an api
  * that has none, or a sample id the caller did not supply, must not be counted
  * as a pass — the report says so and names what was missing.
+ *
+ * `Errored` (since 0.17.0) keeps one rule's defect from costing the run the
+ * rest of its report: every other rule still runs and is reported, and so is
+ * {@link Report.writes}. It is neither a pass nor a finding — {@link assert}
+ * dies on it. Interruption is not turned into an outcome: it still stops the
+ * run.
  *
  * @example
  * ```ts
@@ -234,6 +252,8 @@ export interface Finding extends Core.Finding {}
  *       return `${outcome.rule.id} broken in ${outcome.findings.length} way(s)`
  *     case "Skipped":
  *       return `${outcome.rule.id} not checked: ${outcome.reason}`
+ *     case "Errored":
+ *       return `${outcome.rule.id} died: ${outcome.message}`
  *   }
  * }
  *
@@ -447,7 +467,8 @@ export interface Report {
  * Counts over a report.
  *
  * `skipped` and `gaps` are as important as `failed`: a run with no failures and
- * twenty skips has proved very little, and the numbers say so.
+ * twenty skips has proved very little, and the numbers say so. `errored`
+ * (since 0.17.0) counts the rules that died before reaching a verdict.
  *
  * @example
  * ```ts
@@ -529,6 +550,16 @@ export class ContractViolation extends Data.TaggedError("ContractViolation")<{
   observed: ${this.observed}${more}`;
   }
 }
+
+/**
+ * The defect {@link assert} dies with on a rule that died: the rule's id, a
+ * message naming it and the defect, and the defect itself as `cause`.
+ */
+class RuleDied extends Schema.TaggedError<RuleDied>()("RuleDied", {
+  rule: Schema.String,
+  message: Schema.String,
+  cause: Schema.Unknown,
+}) {}
 
 // ---------------------------------------------------------------------------
 // The catalogue
@@ -788,7 +819,7 @@ const execute = (
         ...Arr.filter(chosen, ({ implementation }) => implementation.creates === true),
       ],
       ({ implementation, index }) =>
-        Effect.map(implementation.run(ctx), (outcome) => ({ outcome, index })),
+        Effect.map(Core.runRule(implementation, ctx), (outcome) => ({ outcome, index })),
       { concurrency: 1 },
     );
     const outcomes = Arr.map(
@@ -954,10 +985,12 @@ export const verifyWith = <ApiId extends string, Groups extends HttpApiGroup.Con
 // ---------------------------------------------------------------------------
 
 /**
- * Renders a report as text: each tier's failures first with the rule, its
- * citation and the request that decided it, then the rules that passed, then the
- * rules that did not run and why, then the declared coverage gaps and a summary
- * line.
+ * Renders a report as text: each tier's rules that died first (marked `DIED`,
+ * with the defect's message), then its failures with the rule, its citation and
+ * the request that decided it, then the rules that passed, then the rules that
+ * did not run and why, then the declared coverage gaps and a summary line. The
+ * count of rules that died appears in the tier and summary lines only when one
+ * did.
  *
  * The three "not checked" kinds stay distinct on purpose. A rule can be absent
  * because this api has no endpoint of that shape, because the caller withheld a
@@ -1066,6 +1099,13 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
  * about coverage rather than about conformance; read {@link summarise} or print
  * {@link format} if a run must also prove it checked enough.
  *
+ * A rule that died (`Errored`) is neither: the run could not decide it, so the
+ * gate cannot pass, and it is not a finding about the server, so it is not a
+ * `ContractViolation`. `assert` dies on the first one instead — before looking
+ * at failures — with a `RuleDied` defect whose message names the rule and the
+ * defect's, and whose `cause` is the original defect. That keeps the gate as strict as when a
+ * rule's defect killed the whole run, while the report itself stays readable.
+ *
  * @example
  * ```ts
  * import { Effect } from "effect"
@@ -1104,18 +1144,34 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
  * @since 0.15.0
  * @category combinators
  */
-export const assert = (report: Report): Effect.Effect<Report, ContractViolation> => {
-  const all = findings(report);
-  const first = all[0];
-  if (first === undefined) return Effect.succeed(report);
-  return Effect.fail(
-    new ContractViolation({
-      rule: first.rule,
-      detail: first.detail,
-      expected: first.expected,
-      observed: first.observed,
-      probe: first.probe,
-      remaining: all.length - 1,
-    }),
+export const assert = (report: Report): Effect.Effect<Report, ContractViolation> =>
+  Option.match(
+    Arr.findFirst(report.outcomes, (outcome) =>
+      Predicate.isTagged(outcome, "Errored") ? Option.some(outcome) : Option.none(),
+    ),
+    {
+      onSome: (died) =>
+        Effect.die(
+          new RuleDied({
+            rule: died.rule.id,
+            message: `${died.rule.id} died: ${died.message}`,
+            cause: died.defect,
+          }),
+        ),
+      onNone: () => {
+        const all = findings(report);
+        const first = all[0];
+        if (first === undefined) return Effect.succeed(report);
+        return Effect.fail(
+          new ContractViolation({
+            rule: first.rule,
+            detail: first.detail,
+            expected: first.expected,
+            observed: first.observed,
+            probe: first.probe,
+            remaining: all.length - 1,
+          }),
+        );
+      },
+    },
   );
-};

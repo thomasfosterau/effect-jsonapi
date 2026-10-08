@@ -7,7 +7,17 @@
  * once it has been shown to report the right things against a broken one.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Match, MutableHashMap, Option, Predicate, Schema } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  Layer,
+  Match,
+  MutableHashMap,
+  Option,
+  Predicate,
+  Schema,
+} from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import type { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -426,6 +436,53 @@ describe("Conformance: the report", () => {
     expect(violation.remaining).toBe(1);
     expect(violation.message).toContain(rule.requirement);
     expect(violation.message).toContain(rule.reference);
+  });
+
+  it("prints and counts a rule that died apart from failures, and assert dies on it", async () => {
+    const report: Conformance.Report = {
+      target: "t",
+      version: "1.1",
+      transport: "in-process",
+      outcomes: [
+        { _tag: "Passed", rule, probes: 2, note: undefined },
+        { _tag: "Errored", rule, message: "the transport fell over", defect: "fell over" },
+      ],
+      gaps: [],
+    };
+    expect(Conformance.summarise(report)).toMatchObject({ passed: 1, failed: 0, errored: 1 });
+    const text = Conformance.format(report);
+    expect(text).toContain(`DIED  ${rule.id}`);
+    expect(text).toContain("not decided — the rule died: the transport fell over");
+    expect(text).toContain("1 died");
+    // A rule that died is listed before one that passed.
+    expect(text.indexOf("DIED")).toBeLessThan(text.indexOf("PASS"));
+    // Nothing died, nothing said.
+    expect(Conformance.format({ ...report, outcomes: report.outcomes.slice(0, 1) })).not.toContain(
+      "died",
+    );
+
+    // The gate does not pass a run that could not decide a rule: it dies,
+    // naming the rule, even when another rule also failed.
+    const diesNaming = async (gated: Conformance.Report) => {
+      const exit = await Effect.runPromiseExit(Conformance.assert(gated));
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+      expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain(
+        `${rule.id} died: the transport fell over`,
+      );
+    };
+    await diesNaming(report);
+    await diesNaming({
+      ...report,
+      outcomes: [
+        ...report.outcomes,
+        {
+          _tag: "Failed",
+          rule,
+          probes: 1,
+          findings: [{ rule, detail: "d", expected: "e", observed: "o", probe: undefined }],
+        },
+      ],
+    });
   });
 });
 
@@ -1222,24 +1279,57 @@ describe("Conformance: the write fixture", () => {
     {},
   ) {}
 
-  it("cleans up after a rule that dies", async () => {
+  it("reports a rule that dies as Errored, and still reports every other rule and the writes", async () => {
+    const { report, store, writes } = await run((canned, request) => {
+      if (request.method === "PATCH") throw new TransportFellOver();
+      return canned;
+    });
+    // The run is not lost: every rule is reported, in the suite's order.
+    expect(report.outcomes.map((outcome) => outcome.rule.id)).toEqual(
+      Conformance.rules.map((rule) => rule.id),
+    );
+    // Only the rule whose probe died is Errored, and it names the defect.
+    const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
+    expect(errored.map((outcome) => outcome.rule.id)).toEqual(["spec/status/update-response"]);
+    expect(errored[0]).toMatchObject({ message: "TransportFellOver" });
+    expect(Predicate.isTagged(errored[0], "Errored") && errored[0].defect).toBeInstanceOf(
+      TransportFellOver,
+    );
+    // The rules after it still ran, the write rules among them.
+    expect(failed(report)).toEqual([]);
+    const survivors = WRITE_RULES.filter((id) => id !== "spec/status/update-response");
+    expect(survivors.map((id) => outcomeFor(report, id)._tag)).toEqual(
+      survivors.map(() => "Passed"),
+    );
+    // The ledger survives, the dead rule's creation included, and it was
+    // cleaned up.
+    expect(writes.map((write) => write.rule)).toEqual(WRITE_RULES);
+    expect(disposals(writes)).not.toContain("left");
+    expect(MutableHashMap.size(store)).toBe(0);
+    expect(Conformance.summarise(report).errored).toBe(1);
+    const text = Conformance.format(report);
+    expect(text).toContain("DIED  spec/status/update-response");
+    expect(text).toContain("not decided — the rule died: TransportFellOver");
+  });
+
+  it("still propagates interruption, cleaning up what the interrupted rule created", async () => {
     const store: Store = MutableHashMap.empty();
-    const serve = writeServer(store);
+    const cleaned: Array<string> = [];
+    const serve = cannedClient(writeServer(store));
     const exit = await Effect.runPromiseExit(
       Conformance.verifyWith(writeApi, {
-        client: cannedClient((request) => {
-          if (request.method === "PATCH") throw new TransportFellOver();
-          return serve(request);
-        }),
+        client: HttpClient.make((request) =>
+          request.method === "PATCH" ? Effect.interrupt : serve.execute(request),
+        ),
         baseUrl: "http://fixture.test",
         ids: { articles: "1" },
         mutating: true,
-        writes: { articles: fixture(store, []) },
-        only: ["spec/status/update-response"],
+        writes: { articles: fixture(store, cleaned) },
       }),
     );
-    expect(exit._tag).toBe("Failure");
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     // The resource the update rule created was still removed.
+    expect(cleaned.length).toBeGreaterThan(0);
     expect(MutableHashMap.size(store)).toBe(0);
   });
 

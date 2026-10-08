@@ -7,7 +7,7 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Effect, MutableHashSet, Option, SchemaAST } from "effect";
+import { Array as Arr, Cause, Effect, MutableHashSet, Option, SchemaAST } from "effect";
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
@@ -72,8 +72,21 @@ export interface Skipped {
   readonly reason: string;
 }
 
+/**
+ * A rule that died — a defect, not a finding — before it reached a verdict.
+ * `message` renders the defect; `defect` is the value as it was thrown.
+ *
+ * @internal
+ */
+export interface Errored {
+  readonly _tag: "Errored";
+  readonly rule: Rule;
+  readonly message: string;
+  readonly defect: unknown;
+}
+
 /** @internal */
-export type Outcome = Passed | Failed | Skipped;
+export type Outcome = Passed | Failed | Skipped | Errored;
 
 /** @internal */
 export interface Gap {
@@ -517,6 +530,36 @@ export const pass = (rule: Rule, probes: number, note?: string): Passed => ({
 
 /** @internal */
 export const skip = (rule: Rule, reason: string): Skipped => ({ _tag: "Skipped", rule, reason });
+
+/**
+ * Renders the errors a defect pretty-prints as, `Name: message` each (or the
+ * name alone when it carries no message), so a thrown tagged error with no
+ * message still says what it was.
+ */
+const defectMessage = (errors: ReadonlyArray<Error>): string =>
+  errors
+    .map((error) => (error.message === "" ? error.name : `${error.name}: ${error.message}`))
+    .join("; ");
+
+/**
+ * Runs one rule, turning a defect into its `Errored` outcome so that one rule
+ * that dies cannot cost the run every other rule's outcome and its writes
+ * ledger. Interruption is not caught: it is a request to stop the whole run,
+ * not something one rule did, so it still propagates.
+ *
+ * @internal
+ */
+export const runRule = (implementation: RuleImpl, ctx: Context): Effect.Effect<Outcome> =>
+  implementation.run(ctx).pipe(
+    Effect.catchDefect((defect) =>
+      Effect.succeed<Outcome>({
+        _tag: "Errored",
+        rule: implementation.rule,
+        message: defectMessage(Cause.prettyErrors(Cause.die(defect))),
+        defect,
+      }),
+    ),
+  );
 
 /**
  * Turns a rule's collected findings into its outcome: no findings is a pass,

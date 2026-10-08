@@ -1905,7 +1905,9 @@ Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this
 
 **It says what it did not check.** Every rule that could not run reports why — no endpoint of that shape, no sample id, no write fixture, a mutating probe not opted into — and `Conformance.gaps` declares the areas the kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering correctness, the write rules beyond the success responses, atomic processing), each with its reason and tracking issue. Both are printed in every report, and skips are counted separately from passes, so a run that proved little cannot read as a clean bill of health.
 
-Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule, its requirement, its citation and the request that decided it.
+**A rule that dies does not cost you the report.** A defect in one rule — a fixture that throws, a transport that falls over — becomes that rule's `Errored` outcome (printed as `DIED`, with the defect's message, and counted as `errored` by `Conformance.summarise`); every other rule still runs and is reported, and so is `report.writes`. Interruption is not caught: it still stops the run, after the cleanup of whatever the interrupted rule created.
+
+Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule, its requirement, its citation and the request that decided it. A rule that died is not a finding about your server, but the run could not decide it either, so `assert` dies on it — naming the rule and the defect — rather than passing.
 
 Full design note, including the coverage ledger and what it would take to close each gap: [`docs/conformance.md`](./docs/conformance.md).
 
