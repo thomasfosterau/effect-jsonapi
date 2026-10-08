@@ -48,7 +48,7 @@
  * @since 0.1.0
  */
 import type { SchemaAST, Types } from "effect";
-import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Effect, Record, Schema, SchemaIssue, SchemaTransformation } from "effect";
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
@@ -1671,13 +1671,21 @@ export const schema = <R extends Any, const O extends Options<R>>(
   const fields = filterFields;
 
   type Values = { readonly [x: string]: unknown };
+  // A struct with no fields is effect's `{}`: it accepts any object and hands
+  // it on *unchanged*, where a struct with fields drops the keys it doesn't
+  // declare. So an endpoint whose query declares nothing would pass every
+  // parameter through to the handler (typed `{}`) and into `nest`. Keeping
+  // only the declared keys makes the empty case drop them too (#260); with
+  // fields it is a no-op, the struct having dropped the rest already.
+  const declaredOnly = (values: Values): Values =>
+    Record.filter(values, (_, key) => Record.has(flatFields, key));
   return flat.pipe(
     Schema.decodeTo(
       nested,
       fields === undefined
         ? SchemaTransformation.transform<Values, Values>({
-            decode: (flatValues) => nest(flatValues),
-            encode: (nestedValues) => flatten(nestedValues),
+            decode: (flatValues) => nest(declaredOnly(flatValues)),
+            encode: (nestedValues) => declaredOnly(flatten(nestedValues)),
           })
         : // `filter[...]` keys are routed to the grammar ahead of the one-level
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.

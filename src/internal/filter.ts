@@ -5,7 +5,7 @@
  *
  * @internal
  */
-import { Schema, SchemaIssue } from "effect";
+import { Option, Record, Schema, SchemaIssue } from "effect";
 import type { Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 
@@ -37,6 +37,13 @@ class InvalidFilter extends Schema.TaggedError<InvalidFilter>()("InvalidFilter",
   message: Schema.String,
 }) {}
 
+// A field's declaration, or `undefined` when the field is undeclared. Only an
+// own entry counts: the declaration is a plain object (`Resource.filterable`)
+// and the field name comes from the request, so `constructor`, `__proto__`,
+// `toString`, … must read as undeclared, not as an `Object.prototype` member.
+const declaration = <V>(fields: { readonly [field: string]: V }, field: string) =>
+  Option.getOrUndefined(Record.get(fields, field));
+
 /**
  * Encodes one literal of a field to its wire string, before escaping. Throws
  * when the field is unknown or the literal does not encode.
@@ -52,7 +59,7 @@ export type LiteralEncoder = (field: string, value: unknown) => string;
 export const literalEncoder =
   (fields: FieldCodecs): LiteralEncoder =>
   (field, value) => {
-    const codec = fields[field];
+    const codec = declaration(fields, field);
     if (codec === undefined) throw new InvalidFilter({ message: unknownField(field) });
     if (value === null) throw new InvalidFilter({ message: nullLiteral(field) });
     return Schema.encodeUnknownSync(codec.literal as Schema.Codec<unknown, string>)(value);
@@ -71,7 +78,7 @@ export const operatorCheck =
     readonly [field: string]: { readonly operators?: ReadonlyArray<string> | undefined };
   }): OperatorCheck =>
   (field, operator) => {
-    const codec = fields[field];
+    const codec = declaration(fields, field);
     if (codec === undefined) throw new InvalidFilter({ message: unknownField(field) });
     if (codec.operators !== undefined && !codec.operators.includes(operator)) {
       throw new InvalidFilter({ message: undeclaredOperator(field, operator, codec.operators) });
@@ -228,7 +235,7 @@ export const decodeFilter = (
     op: string | undefined,
     raw: string,
   ): Node | undefined => {
-    const codec = fields[field];
+    const codec = declaration(fields, field);
     if (codec === undefined) return fail(keys.field, unknownField(field), field);
     let items: ReadonlyArray<string>;
     let operator: string;

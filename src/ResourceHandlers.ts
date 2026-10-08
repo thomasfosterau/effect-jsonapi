@@ -731,7 +731,9 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
 > => {
   const byType = new Map<string, Array<string>>();
   for (const ref of refs) {
-    if (!(ref.type in targets)) continue;
+    // An own entry only, as `Handlers` loads: a ref typed `constructor` or
+    // `toString` names no target, not an `Object.prototype` member.
+    if (!Object.hasOwn(targets, ref.type)) continue;
     const ids = byType.get(ref.type) ?? [];
     if (!ids.includes(ref.id)) ids.push(ref.id);
     byType.set(ref.type, ids);
