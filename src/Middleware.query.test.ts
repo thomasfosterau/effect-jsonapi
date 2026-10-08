@@ -225,6 +225,72 @@ describe("allowedQueryParameters", () => {
   });
 });
 
+describe("allowedQueryParameters entries", () => {
+  // Each entry is a family base name made only of a-z, the only names the
+  // check ever rejects. Anything else could never match one, so it is refused
+  // when the layer is built rather than left to admit nothing.
+  const invalid = [
+    "lang[region]",
+    "lang[]",
+    "Lang",
+    "LANG",
+    " lang",
+    "lang ",
+    "la ng",
+    "lang\n",
+    "",
+  ];
+
+  it.each(invalid)("refuses %j when schemaErrorsLayer is built", (entry) => {
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] });
+    expect(build).toThrow(Middleware.InvalidAllowedQueryParameter);
+    expect(build).toThrow(
+      expect.objectContaining({
+        _tag: "InvalidAllowedQueryParameter",
+        parameter: entry,
+        message: expect.stringContaining(`"${entry}"`),
+      }),
+    );
+  });
+
+  it.each(invalid)("refuses %j when layerWith is built", (entry) => {
+    expect(() => Middleware.layerWith({ allowedQueryParameters: ["lang", entry] })).toThrow(
+      Middleware.InvalidAllowedQueryParameter,
+    );
+  });
+
+  it.each(invalid)("refuses %j in a checkQueryParameters call", (entry) => {
+    expect(() =>
+      Middleware.checkQueryParameters(["lang"], { allowedQueryParameters: [entry] }),
+    ).toThrow(Middleware.InvalidAllowedQueryParameter);
+  });
+
+  it("names the base name to list for a bracketed entry", () => {
+    expect(() =>
+      Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang[region]"] }),
+    ).toThrow('List its base name "lang"');
+  });
+
+  it("says a name with any other character needs no entry", () => {
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: ["Lang"] });
+    expect(build).toThrow("needs no entry");
+    expect(build).not.toThrow("List its base name");
+  });
+
+  it("says an empty entry names no parameter", () => {
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [""] });
+    expect(build).toThrow("An empty entry names no parameter; remove it.");
+    expect(build).not.toThrow("needs no entry");
+  });
+
+  it("accepts base names made only of a-z, the specification's families included", () => {
+    expect(() =>
+      Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang", "ref", "page"] }),
+    ).not.toThrow();
+    expect(() => Middleware.layerWith({ allowedQueryParameters: [] })).not.toThrow();
+  });
+});
+
 describe("Middleware.checkQueryParameters", () => {
   const check = Middleware.checkQueryParameters;
 
@@ -269,7 +335,7 @@ describe("Middleware.checkQueryParameters", () => {
 
 describe("what an endpoint's query schema declares", () => {
   // Endpoints whose query schemas the declared-name walk must read: a union
-  // of structs, and a record that admits any name.
+  // of structs, a suspended struct, and a record that admits any name.
   const QueryVariantsApi = HttpApi.make("variants").add(
     HttpApiGroup.make("variants")
       .add(
@@ -282,6 +348,12 @@ describe("what an endpoint's query schema declares", () => {
         }).middleware(Middleware.SchemaErrors),
       )
       .add(
+        HttpApiEndpoint.get("suspended", "/suspended", {
+          query: Schema.suspend(() => Schema.Struct({ a: Schema.optionalKey(Schema.String) })),
+          success: Schema.String,
+        }).middleware(Middleware.SchemaErrors),
+      )
+      .add(
         HttpApiEndpoint.get("open", "/open", {
           query: Schema.Record(Schema.String, Schema.String),
           success: Schema.String,
@@ -289,7 +361,10 @@ describe("what an endpoint's query schema declares", () => {
       ),
   );
   const QueryVariantsLive = HttpApiBuilder.group(QueryVariantsApi, "variants", (handlers) =>
-    handlers.handle("union", () => Effect.succeed("ok")).handle("open", () => Effect.succeed("ok")),
+    handlers
+      .handle("union", () => Effect.succeed("ok"))
+      .handle("suspended", () => Effect.succeed("ok"))
+      .handle("open", () => Effect.succeed("ok")),
   );
   const serve = async (url: string) => {
     const appLayer = HttpApiBuilder.layer(QueryVariantsApi).pipe(
@@ -306,6 +381,13 @@ describe("what an endpoint's query schema declares", () => {
     expect((await serve("/union?a=1")).status).toBe(200);
     expect((await serve("/union?b=1")).status).toBe(200);
     const rejected = await serve("/union?a=1&unknown=1");
+    expect(rejected.status).toBe(400);
+    expect(rejected.body).toEqual({ errors: [rejection("unknown")] });
+  });
+
+  it("reads through a suspended schema", async () => {
+    expect((await serve("/suspended?a=1")).status).toBe(200);
+    const rejected = await serve("/suspended?a=1&unknown=1");
     expect(rejected.status).toBe(400);
     expect(rejected.body).toEqual({ errors: [rejection("unknown")] });
   });

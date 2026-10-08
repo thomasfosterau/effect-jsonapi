@@ -1268,6 +1268,8 @@ Layer.provide(
 );
 ```
 
+Each entry must be such a base name: `lang[region]`, `Lang`, ` lang` or `""` throws `Middleware.InvalidAllowedQueryParameter` when the layer is built, rather than silently admitting nothing (list a bracketed member by its base name; a name with any other character is never rejected, so it needs no entry).
+
 An allowed name never reaches the endpoint's decoded `query`, which keeps only what its `query` schema declares — also when that schema declares nothing ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)); it is only no longer rejected. `Middleware.checkQueryParameters(names, { declared, allowedQueryParameters })` is the same check standalone, for a hook that decodes requests itself: it returns the 400 document, or `undefined`.
 
 And to call it — the same definitions drive a fully typed client:
