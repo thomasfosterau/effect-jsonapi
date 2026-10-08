@@ -240,12 +240,11 @@ export interface Finding extends Core.Finding {}
  * rest of its report: every other rule still runs and is reported, and so is
  * {@link Report.writes}. It is neither a pass nor a finding — {@link assert}
  * dies on it. Interruption is not turned into an outcome: it still stops the
- * run. A write fixture that throws a value the kit can render is not a
- * defect: a `create` or `update` that throws one skips the rules it would have
- * driven, naming the member, and a `cleanup` that fails with or throws one is
- * recorded in {@link Report.writes}. One that throws a value the kit can't
- * render (a revoked `Proxy`, say) is still reported as `Errored` until
- * {@link https://github.com/thomasfosterau/effect-jsonapi/issues/271 #271}.
+ * run. A write fixture member that throws is not a defect, whatever it
+ * throws: a `create` or `update` that throws skips the rules it would have
+ * driven, naming the member, and a `cleanup` that fails or throws is recorded
+ * in {@link Report.writes}. The value is rendered as `message` is, so one that
+ * throws when inspected reads `[unrenderable defect]` there too.
  *
  * @example
  * ```ts

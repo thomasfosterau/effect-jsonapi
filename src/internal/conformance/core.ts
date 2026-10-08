@@ -571,6 +571,36 @@ const capped = (message: string): string => {
 const UNRENDERABLE = "[unrenderable defect]";
 
 /**
+ * A thrown or failed value as one report line: an `Error` by its name and
+ * message, so a thrown tagged error with no message still says what it was;
+ * anything else — a string, `null`, a plain object — as itself, not dressed up
+ * as an `Error`; capped at {@link MESSAGE_LIMIT}. Total: a value that throws
+ * when inspected (a revoked `Proxy`, a getter that throws, an `Error` whose
+ * `name` is a Symbol) renders as {@link UNRENDERABLE} rather than throwing in
+ * turn, so the report the caller is building survives it.
+ *
+ * Shared by a rule's `Errored.message` and the write fixture's skip reasons and
+ * `cleanup-failed` details, so a value renders the same wherever it surfaces.
+ *
+ * @internal
+ */
+// oxlint-disable-next-line effect/no-unknown-parameters -- renders whatever a rule or fixture threw or failed with; a thrown value has no schema to parse it by
+export const renderThrown = (thrown: unknown): string =>
+  Result.merge(
+    Result.try({
+      try: () =>
+        capped(
+          Predicate.isError(thrown)
+            ? errorMessage(thrown)
+            : Predicate.isString(thrown)
+              ? thrown
+              : Formatter.format(thrown),
+        ),
+      catch: () => UNRENDERABLE,
+    }),
+  );
+
+/**
  * Runs one rule, turning a defect into its `Errored` outcome so that one rule
  * that dies cannot cost the run every other rule's outcome and its writes
  * ledger. `run` is suspended, so a throw before it returns its Effect — kit
@@ -586,26 +616,7 @@ export const runRule = (implementation: RuleImpl, ctx: Context): Effect.Effect<O
       Effect.succeed<Outcome>({
         _tag: "Errored",
         rule: implementation.rule,
-        // The defect's message for a report line: an `Error` by its name and
-        // message, so a thrown tagged error with no message still says what
-        // it was; anything else thrown — a string, `null`, a plain object —
-        // as itself, not dressed up as an `Error`. Rendering is total: a
-        // defect that throws when inspected (a revoked `Proxy`, a getter that
-        // throws) gets a fixed marker rather than killing the run the
-        // `Errored` outcome exists to keep.
-        message: Result.merge(
-          Result.try({
-            try: () =>
-              capped(
-                Predicate.isError(defect)
-                  ? errorMessage(defect)
-                  : Predicate.isString(defect)
-                    ? defect
-                    : Formatter.format(defect),
-              ),
-            catch: () => UNRENDERABLE,
-          }),
-        ),
+        message: renderThrown(defect),
         defect,
       }),
     ),

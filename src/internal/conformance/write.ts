@@ -48,6 +48,7 @@ import {
   type Observation,
   type Outcome,
   type Payload,
+  renderThrown,
   resolvePath,
   type Rule,
   settle,
@@ -312,7 +313,7 @@ export interface Via {
 const build = (target: Target): Result.Result<Payload, string> =>
   Result.try({
     try: target.create,
-    catch: (error) => `writes["${target.key}"].create threw: ${String(error)}`,
+    catch: (error) => `writes["${target.key}"].create threw: ${renderThrown(error)}`,
   });
 
 /**
@@ -327,7 +328,7 @@ export const buildUpdate = (target: Target): Result.Result<Patch, string> =>
     onSome: (update) =>
       Result.try({
         try: update,
-        catch: (error) => `writes["${target.key}"].update threw: ${String(error)}`,
+        catch: (error) => `writes["${target.key}"].update threw: ${renderThrown(error)}`,
       }),
   });
 
@@ -444,7 +445,13 @@ const record = (
   return entry;
 };
 
-/** Runs the fixture's `cleanup` on `id`, recording how it ended; never fails. */
+/**
+ * Runs the fixture's `cleanup` on `id`, recording how it ended; never fails or
+ * dies. `detail` renders what it failed with, or the defect it threw or died
+ * with, through {@link renderThrown} — not `Cause.pretty`, which itself throws
+ * on a value it cannot inspect, and would turn a failed cleanup into a defect
+ * of the release step.
+ */
 const runCleanup = (
   entry: Entry,
   id: string,
@@ -459,7 +466,7 @@ const runCleanup = (
         },
         onFailure: (cause) => {
           entry.disposal = "cleanup-failed";
-          entry.detail = Cause.pretty(cause).split("\n")[0];
+          entry.detail = renderThrown(Cause.squash(cause));
         },
       }),
     ),
@@ -480,8 +487,9 @@ const disposeEntry = (target: Target, entry: Entry): Effect.Effect<void> => {
 
 /**
  * Disposes of what a probe created, unless the probe's own DELETE already did.
- * Never fails: a cleanup that fails or dies is recorded, not propagated, so one
- * bad cleanup cannot cost the rest of the run its report.
+ * Never fails or dies: a cleanup that fails, throws or dies is recorded, not
+ * propagated — whatever it fails with, since {@link renderThrown} is total —
+ * so one bad cleanup cannot cost the rest of the run its report.
  */
 const dispose = (target: Target, created: Created): Effect.Effect<void> =>
   Created.$match(created, {
