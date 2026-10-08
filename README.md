@@ -1145,7 +1145,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 )
 ```
 
-The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` and checked for **full linkage** (every included resource must be referenced in the document). Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
+The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` — against itself and against the primary `data`, so a resource that is both a hit and an include target is emitted once, as primary data — and checked for **full linkage** (every included resource must be referenced in the document). Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
 
 ### Resolving `included` — one batch per level
 

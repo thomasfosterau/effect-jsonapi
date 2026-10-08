@@ -75,6 +75,23 @@ describe("Handlers.data", () => {
     const doc = Handlers.data(article, { included: [stranger], checkLinkage: false });
     expect(doc.included).toEqual([stranger]);
   });
+
+  it("does not repeat the primary resource in `included` (#147)", () => {
+    // An article that links to itself: a `related` include resolves back to
+    // the primary resource, which a document carries once, as `data`.
+    const selfLinked = {
+      ...article,
+      relationships: {
+        ...article.relationships,
+        related: { data: [{ type: "articles", id: "1" }] },
+      },
+    };
+    expect(Handlers.data(selfLinked, { included: [selfLinked, author] }).included).toEqual([
+      author,
+    ]);
+    // …and when it was the only candidate, there is no `included` member at all.
+    expect(Handlers.data(selfLinked, { included: [selfLinked] })).toEqual({ data: selfLinked });
+  });
 });
 
 describe("Handlers.collection", () => {
@@ -94,6 +111,21 @@ describe("Handlers.collection", () => {
 
   it("builds an empty collection", () => {
     expect(Handlers.collection([])).toEqual({ data: [] });
+  });
+
+  it("does not repeat primary data in `included` for a heterogeneous collection (#147)", () => {
+    // `/search?include=author`: `people:9` is both a search hit (primary data)
+    // and the author of another hit. A compound document MUST NOT include more
+    // than one resource object for each `(type, id)` pair.
+    const doc = Handlers.collection([article, author], { included: [author, comment] });
+    expect(doc.data).toEqual([article, author]);
+    expect(doc.included).toEqual([comment]);
+  });
+
+  it("omits `included` when every candidate is already primary data (#147)", () => {
+    expect(Handlers.collection([article, author], { included: [author, author] })).toEqual({
+      data: [article, author],
+    });
   });
 
   it("appends the request's canonical query to the self link", () => {
@@ -390,10 +422,9 @@ describe("the per-resource transform pass", () => {
     expect(seen).toEqual(["articles:1", "people:9", "comments:5"]);
   });
 
-  it("runs at most once per (type, id), even for a resource landing in two slots", () => {
-    // Not a document the builders police, but the transform still cannot
-    // produce two shapes for one resource: the second slot reuses the first
-    // slot's result.
+  it("runs once for a resource offered as both primary data and an `included` member", () => {
+    // The builders emit it once, as primary data (#147), and shape it once:
+    // the transform's result for the primary slot is the one the document carries.
     const selfReferential = {
       type: "articles",
       id: "1",
@@ -409,7 +440,7 @@ describe("the per-resource transform pass", () => {
       },
     });
     expect(runs).toBe(1);
-    expect(document.included?.[0]).toBe(document.data);
+    expect(document.included).toBeUndefined();
   });
 
   it("runs before the full-linkage check — a transform that breaks linkage is caught", () => {
@@ -427,6 +458,10 @@ describe("the per-resource transform pass", () => {
         checkLinkage: false,
       }).included,
     ).toEqual([{ type: "articles", id: "2", attributes: relatedArticle.attributes }]);
+  });
+
+  it("buildIncluded drops members already present as primary data (#147)", () => {
+    expect(Handlers.buildIncluded([article, author], [author, comment, author])).toEqual([comment]);
   });
 
   it("buildIncluded applies it to the deduplicated members", () => {
