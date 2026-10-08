@@ -995,11 +995,12 @@ const resolve = (
  *   target, an id the batch didn't return, a row the viewer may not see: all
  *   are normal outcomes, and simply absent from `included`. A loader's own
  *   failure propagates and fails the document.
- * - **`undefined` when nothing was requested**, so the builders omit the
- *   member. An empty array is the different statement "your walk resolved to
- *   nothing", and {@link data} / {@link collection} emit it as `included: []`
- *   — §Fetching Includes requires the key in every response to a request
- *   carrying `include`.
+ * - **`undefined` when nothing was requested** (`paths` is `undefined`), so
+ *   the builders omit the member. An empty array is the different statement
+ *   "your walk resolved to nothing" — including for an empty `paths`, which is
+ *   a bare `?include=`: the request carried `include` — and {@link data} /
+ *   {@link collection} emit it as `included: []`, because §Fetching Includes
+ *   requires the key in every response to a request carrying `include`.
  *
  * **Full linkage holds by construction — for the array this returns.** Every
  * member is reached *through* the linkage of the primary data the walk started
@@ -1106,15 +1107,17 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
   IncludeTargetError<Targets>,
   IncludeTargetServices<Targets>
 > =>
-  (paths === undefined || paths.length === 0
+  (paths === undefined
     ? Effect.succeed(undefined)
-    : resolve(
-        primary === null ? [] : Array.isArray(primary) ? primary : [primary as ResourceValue],
-        paths,
-        targets,
-        options?.concurrency ?? "unbounded",
-        options?.depth ?? 3,
-      )) as Effect.Effect<
+    : paths.length === 0
+      ? Effect.succeed([])
+      : resolve(
+          primary === null ? [] : Array.isArray(primary) ? primary : [primary as ResourceValue],
+          paths,
+          targets,
+          options?.concurrency ?? "unbounded",
+          options?.depth ?? 3,
+        )) as Effect.Effect<
     ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
     IncludeTargetError<Targets>,
     IncludeTargetServices<Targets>
@@ -1125,17 +1128,18 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
  * {@link collection} return, named so consumers can annotate their own
  * document-assembling functions instead of hand-rolling the envelope type.
  *
- * The `jsonapi` member is *conditional* on `J`, the same way `included` is
- * conditional on `Included` and `meta` on `M`: it is present (and required,
- * not optional — a builder that infers `J` from an argument has one to put
- * there) only when a caller actually passed the `jsonapi` option, so the
+ * The `jsonapi` member is *conditional* on `J`, the same way `meta` is
+ * conditional on `M`: it is present (and required, not optional — a builder
+ * that infers `J` from an argument has one to put there) only when a caller actually passed the `jsonapi` option, so the
  * return type of `Handlers.data(article, { jsonapi: Document.v1_1 })` carries
  * `jsonapi: Document.JsonApiObjectValue` and the return type of
  * `Handlers.data(article)` has no `jsonapi` member at all — no cast needed
- * either way.
+ * either way. `included` is always declared, optional: a builder emits any
+ * array it is given, so `Handlers.data(article, { included: [] })` — whose
+ * literal `[]` infers `Included = never` — still reads back `included: []`.
  *
  * The type stays *conditional* on its generics so TypeScript only infers
- * `Included` / `M` / `J` from arguments — never from the expected (contextual)
+ * `M` / `J` from arguments — never from the expected (contextual)
  * return type of a handler, which breaks down inside `pipe(Effect.map(...))`
  * chains.
  *
@@ -1148,10 +1152,11 @@ export type DocumentValue<
   M extends MetaValue = never,
   J extends JsonApiObjectValue = never,
 > = Simplify<
-  { readonly data: Data; readonly links?: LinksValue } & ([Included] extends [never]
-    ? {}
-    : { readonly included?: ReadonlyArray<Included> }) &
-    ([M] extends [never] ? {} : { readonly meta?: M }) &
+  {
+    readonly data: Data;
+    readonly included?: ReadonlyArray<Included>;
+    readonly links?: LinksValue;
+  } & ([M] extends [never] ? {} : { readonly meta?: M }) &
     ([J] extends [never] ? {} : { readonly jsonapi: J })
 >;
 

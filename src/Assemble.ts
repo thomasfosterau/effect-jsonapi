@@ -358,7 +358,12 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
    * caller wants. Empty / missing means the full resource.
    */
   readonly fields?: Handlers.Fields | undefined;
-  /** The requested `?include=` paths (JSON:API §7.1 dot paths). */
+  /**
+   * The requested `?include=` paths (JSON:API §7.1 dot paths), or `undefined`
+   * when the request carried no `include`. Presence is the signal: any array,
+   * even the `[]` a bare `?include=` decodes to, answers with the `included`
+   * key.
+   */
   readonly include?: ReadonlyArray<string> | undefined;
   /**
    * The legal include paths — anything else fails
@@ -685,9 +690,10 @@ const asValue = (resource: ResourceLike): Handlers.ResourceValue =>
 
 /**
  * Validates the requested paths, then walks them. `undefined` means the
- * request carried no `include`, and only that: a request that did gets an
- * array, `[]` when there is no registry to walk through, so the document
- * keeps its `included` key (§Fetching Includes, #232).
+ * request carried no `include`, and only that: a request that did — even a
+ * bare `?include=`, which decodes to `[]` — gets an array, `[]` when there is
+ * no registry to walk through or no path to walk, so the document keeps its
+ * `included` key (§Fetching Includes, #232).
  */
 const walk = <Targets extends Handlers.IncludeTargets>(
   primary: ReadonlyArray<ResourceLike>,
@@ -699,8 +705,8 @@ const walk = <Targets extends Handlers.IncludeTargets>(
   | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
-  const include = options.include ?? [];
-  if (include.length === 0) return Effect.succeed(undefined);
+  const include = options.include;
+  if (include === undefined) return Effect.succeed(undefined);
   const depth = options.depth ?? MAX_INCLUDE_DEPTH;
   return Query.validateIncludePaths(include, {
     includable: options.includable ?? [],

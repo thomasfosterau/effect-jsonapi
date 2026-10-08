@@ -106,6 +106,19 @@ describe("northwind example: fetching", () => {
     ]);
   });
 
+  it("omits `included` when the request carries no `include` (#232)", async () => {
+    const { list, one } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const one = yield* client.products.get({ params: { id: Product.Id.make("1") }, query: {} });
+        const list = yield* client.products.list({ query: {} });
+        return { list, one };
+      }),
+    );
+    expect(one).not.toHaveProperty("included");
+    expect(list).not.toHaveProperty("included");
+  });
+
   it("narrows `included` to the requested include paths on the client", async () => {
     const include = ["category"] as const;
     const document = await run(

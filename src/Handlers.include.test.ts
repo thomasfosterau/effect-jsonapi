@@ -97,13 +97,19 @@ const graph: ReadonlyArray<Handlers.ResourceValue> = [
 const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
 describe("Handlers.resolveIncluded — nothing requested", () => {
-  it("resolves to undefined when no paths were requested, so the member is omitted", async () => {
+  it("resolves to undefined when no `include` was requested, so the member is omitted", async () => {
     const db = store(graph);
     expect(
       await run(Handlers.resolveIncluded(article1, undefined, db.targets("people"))),
     ).toBeUndefined();
-    expect(await run(Handlers.resolveIncluded(article1, [], db.targets("people")))).toBeUndefined();
     // and nothing was loaded to find that out
+    expect(db.calls).toEqual([]);
+  });
+
+  it("resolves to [] for `?include=` with no paths: the request carried `include` (#232)", async () => {
+    const db = store(graph);
+    expect(await run(Handlers.resolveIncluded(article1, [], db.targets("people")))).toEqual([]);
+    // nothing to walk, so nothing loaded
     expect(db.calls).toEqual([]);
   });
 

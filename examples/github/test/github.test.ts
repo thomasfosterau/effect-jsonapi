@@ -78,6 +78,41 @@ describe("github example: fetching", () => {
     expect(document.included?.map((resource) => resource.type)).toEqual(["users"]);
   });
 
+  it("omits `included` when the request carries no `include` (#232)", async () => {
+    const { list, one } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const one = yield* client.repositories.get({
+          params: { id: Repository.Id.make("1") },
+          query: {},
+        });
+        const list = yield* client.repositories.list({ query: {} });
+        return { list, one };
+      }),
+    );
+    expect(one).not.toHaveProperty("included");
+    expect(list).not.toHaveProperty("included");
+  });
+
+  it("answers `?include=` with no paths with an empty `included` (#232)", async () => {
+    // `include: []` goes on the wire as a bare `?include=`, which decodes to
+    // `[]`: the request carried `include`, so the compound document keeps its
+    // key (§Fetching Includes), empty because no path names anything to load.
+    const { list, one } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const one = yield* client.repositories.get({
+          params: { id: Repository.Id.make("1") },
+          query: { include: [] },
+        });
+        const list = yield* client.repositories.list({ query: { include: [] } });
+        return { list, one };
+      }),
+    );
+    expect(one.included).toEqual([]);
+    expect(list.included).toEqual([]);
+  });
+
   it("resolves 2-hop include paths: issue → repository → owner", async () => {
     const document = await run(
       Effect.gen(function* () {
