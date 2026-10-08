@@ -5,7 +5,7 @@
  *
  * @internal
  */
-import { Option, Record, Schema, SchemaIssue } from "effect";
+import { Option, Record as Rec, Schema, SchemaIssue } from "effect";
 import type { Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 
@@ -42,7 +42,7 @@ class InvalidFilter extends Schema.TaggedError<InvalidFilter>()("InvalidFilter",
 // and the field name comes from the request, so `constructor`, `__proto__`,
 // `toString`, … must read as undeclared, not as an `Object.prototype` member.
 const declaration = <V>(fields: { readonly [field: string]: V }, field: string) =>
-  Option.getOrUndefined(Record.get(fields, field));
+  Option.getOrUndefined(Rec.get(fields, field));
 
 /**
  * Encodes one literal of a field to its wire string, before escaping. Throws

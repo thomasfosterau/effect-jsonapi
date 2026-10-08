@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import * as R from "effect/Record";
+import * as Rec from "effect/Record";
 import { Schema } from "effect";
 import * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -356,7 +356,7 @@ describe("Handlers.project", () => {
       const resource = {
         type: "articles",
         id: "3",
-        attributes: R.fromEntries([
+        attributes: Rec.fromEntries([
           [key, { inner: 2 }],
           ["title", "T"],
           ["body", "B"],

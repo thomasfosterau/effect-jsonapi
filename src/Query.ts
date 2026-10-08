@@ -48,7 +48,7 @@
  * @since 0.1.0
  */
 import type { SchemaAST, Types } from "effect";
-import { Effect, Record, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Effect, Record as Rec, Schema, SchemaIssue, SchemaTransformation } from "effect";
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
@@ -1678,7 +1678,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
   // only the declared keys makes the empty case drop them too (#260); with
   // fields it is a no-op, the struct having dropped the rest already.
   const declaredOnly = (values: Values): Values =>
-    Record.filter(values, (_, key) => Record.has(flatFields, key));
+    Rec.filter(values, (_, key) => Rec.has(flatFields, key));
   return flat.pipe(
     Schema.decodeTo(
       nested,
@@ -1691,12 +1691,8 @@ export const schema = <R extends Any, const O extends Options<R>>(
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
           SchemaTransformation.transformEffect<Values, Values>({
             decode: (flatValues, parseOptions) => {
-              const others: Record<string, unknown> = {};
-              const filterKeys: Record<string, unknown> = {};
-              for (const [key, value] of Object.entries(flatValues)) {
-                if (isFilterKey(key)) filterKeys[key] = value;
-                else others[key] = value;
-              }
+              const filterKeys = Rec.filter(flatValues, (_, key) => isFilterKey(key));
+              const others = Rec.filter(flatValues, (_, key) => !isFilterKey(key));
               const nestedValues = nest(others);
               if (Object.keys(filterKeys).length === 0) return Effect.succeed(nestedValues);
               return Effect.map(

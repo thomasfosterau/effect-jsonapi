@@ -6,7 +6,7 @@
  * relationship document.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Exit, Record as R, Schema } from "effect";
+import { Effect, Exit, Record as Rec, Schema } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -928,7 +928,7 @@ describe("helpers", () => {
     const linked = Assemble.toWireSafeResource({
       type: "things",
       id: "2",
-      attributes: R.fromEntries([["__proto__", { at: new URL("https://example.test/a") }]]),
+      attributes: Rec.fromEntries([["__proto__", { at: new URL("https://example.test/a") }]]),
     });
     expect(toJson(linked.attributes)).toBe('{"__proto__":{"at":"https://example.test/a"}}');
   });
@@ -965,11 +965,11 @@ describe("helpers", () => {
       const coerced = Assemble.toWireSafeResource({
         type: "things",
         id: "1",
-        attributes: R.fromEntries([
+        attributes: Rec.fromEntries([
           [key, { at: new URL("https://example.test/a") }],
           ["title", "T"],
         ]),
-        meta: R.fromEntries([[key, 1]]),
+        meta: Rec.fromEntries([[key, 1]]),
       });
       const { attributes, meta } = coerced;
       expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);

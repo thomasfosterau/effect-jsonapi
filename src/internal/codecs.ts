@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Option, Record, Schema, SchemaTransformation } from "effect";
+import { Option, Record as Rec, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
 import { define } from "./define.js";
 import { errorMeta } from "./errorMeta.js";
@@ -163,12 +163,14 @@ const bracketKey = /^([^[\]]+)\[([^[\]]+)\]$/;
  * struct then drops whichever spelling it doesn't declare. Every key is
  * written as an own property, so `__proto__` is an ordinary name here.
  */
-export const nest = (flat: { readonly [key: string]: unknown }): Record<string, unknown> => {
-  const nested: Record<string, unknown> = {};
+export const nest = <V>(flat: {
+  readonly [key: string]: V;
+}): Record<string, V | Record<string, V>> => {
+  const nested: Record<string, V | Record<string, V>> = {};
   // Whether a bare key holds `name`, wherever it sits in `flat`.
   const holdsBare = (name: string): boolean =>
-    Option.getOrUndefined(Record.get(flat, name)) !== undefined;
-  for (const [key, value] of Record.toEntries(flat)) {
+    Option.getOrUndefined(Rec.get(flat, name)) !== undefined;
+  for (const [key, value] of Rec.toEntries(flat)) {
     if (value === undefined) continue;
     const [, name, member] = bracketKey.exec(key) ?? [];
     if (name === undefined || member === undefined || holdsBare(name)) {
@@ -176,11 +178,11 @@ export const nest = (flat: { readonly [key: string]: unknown }): Record<string, 
     } else {
       // No bare key holds the name, so an own entry under it is a group this
       // loop made.
-      const group = Option.getOrElse(Record.get(nested, name), () => {
+      const group = Option.getOrElse(Rec.get(nested, name), () => {
         const made = {};
         define(nested, name, made);
         return made;
-      }) as Record<string, unknown>;
+      }) as Record<string, V>;
       define(group, member, value);
     }
   }

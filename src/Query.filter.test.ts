@@ -1275,6 +1275,32 @@ describe("Query.schema with filter: true", () => {
     expect(decodeQuery({ "page[limit]": "5" })).toEqual({ page: { limit: 5 } });
   });
 
+  // The decode splits the flat record into the filter keys and the rest
+  // before either is read (#275); a key named after an `Object.prototype`
+  // member must land on its own side as an ordinary name (#260, #264).
+  it.each(inherited)(
+    "routes filter[%s] to the grammar and a bare key of that name nowhere",
+    (name) => {
+      const result = Schema.decodeUnknownResult(query)({
+        [`filter[${name}]`]: "x",
+        "page[limit]": "5",
+      });
+      if (result._tag === "Success") throw new Error("expected the decode to fail");
+      expect(
+        SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
+          key: String(issue.path?.[0]),
+          message: issue.message,
+        })),
+      ).toEqual([{ key: `filter[${name}]`, message: `Unknown filter field "${name}"` }]);
+      // An own `__proto__` key, as `UrlParams.toRecord` writes one.
+      const wire = JSON.parse(
+        `{"${name}": "x", "${name}[polluted]": "yes", "filter[status]": "open", "page[limit]": "5"}`,
+      );
+      expect(decodeQuery(wire)).toEqual({ filter: eq("status", "open"), page: { limit: 5 } });
+      expect(Object.hasOwn(Object.prototype, "polluted")).toBe(false);
+    },
+  );
+
   it("encodes the nested shape back to canonical flat keys", () => {
     const encoded = Schema.encodeSync(query)({
       filter: Filter.or(eq("status", "open"), Filter.isNull("deletedAt")),
