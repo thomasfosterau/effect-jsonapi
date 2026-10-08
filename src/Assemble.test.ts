@@ -6,7 +6,7 @@
  * relationship document.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Record as R, Schema } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -110,6 +110,22 @@ const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
 };
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
+
+// A free-form resource read from JSON text, as a handler gets one from a
+// database driver, and the JSON text a value serialises to.
+const OpenRecord = Schema.Record(Schema.String, Schema.Unknown);
+const parseResource = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      type: Schema.String,
+      id: Schema.String,
+      attributes: OpenRecord,
+      meta: Schema.optionalKey(OpenRecord),
+    }),
+  ),
+);
+const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const ids = (resources: ReadonlyArray<Assemble.ResourceLike> | undefined) =>
   resources?.map((r) => `${r.type}:${r.id}`);
 
@@ -886,6 +902,58 @@ describe("helpers", () => {
     });
     expect(coerced.attributes).toEqual({ at: "2026-01-01T00:00:00.000Z", list: [null, 1] });
     expect(coerced.links?.self).toBe("https://example.test/t/1");
+  });
+
+  // A value parsed from JSON (or read by a database driver) can carry
+  // `__proto__` as an own key; a copy that assigned it would run the
+  // prototype setter, dropping the member and re-parenting the copy onto its
+  // value (#269).
+  it("keeps a member keyed __proto__ as an own data member, coerced like any other", () => {
+    const json =
+      '{"type":"things","id":"1","attributes":{"settings":{"kept":1,"__proto__":{"inner":2}}},' +
+      '"meta":{"__proto__":{"source":"driver"}}}';
+    const coerced = Assemble.toWireSafeResource(parseResource(json));
+    const settings = coerced.attributes["settings"];
+    expect(Object.getPrototypeOf(settings)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyNames(settings)).toEqual(["kept", "__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(settings, "__proto__")?.value).toEqual({ inner: 2 });
+    expect(Object.getPrototypeOf(coerced.meta)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyNames(coerced.meta)).toEqual(["__proto__"]);
+    // The wire form is the input's, byte for byte.
+    expect(toJson(coerced)).toBe(json);
+    expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
+    expect(Object.hasOwn(Object.prototype, "source")).toBe(false);
+
+    // A value under the member is still deep-coerced.
+    const linked = Assemble.toWireSafeResource({
+      type: "things",
+      id: "2",
+      attributes: R.fromEntries([["__proto__", { at: new URL("https://example.test/a") }]]),
+    });
+    expect(toJson(linked.attributes)).toBe('{"__proto__":{"at":"https://example.test/a"}}');
+  });
+
+  it("carries a __proto__ member through an assembled document's attributes and meta", async () => {
+    const document = await run(
+      Assemble.resource(
+        Assemble.toWireSafeResource(
+          parseResource(
+            '{"type":"things","id":"1","attributes":{"__proto__":{"inner":2},"title":"T","hidden":0},' +
+              '"meta":{"__proto__":{"source":"driver"}}}',
+          ),
+        ),
+        { fields: { things: ["__proto__", "title"] } },
+      ),
+    );
+    const { attributes, meta } = document.data;
+    expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyNames(attributes)).toEqual(["__proto__", "title"]);
+    expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
+    expect(toJson(document.data)).toBe(
+      '{"type":"things","id":"1","attributes":{"__proto__":{"inner":2},"title":"T"},' +
+        '"meta":{"__proto__":{"source":"driver"}}}',
+    );
+    expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
   });
 
   it("stringifies a link object's href too", () => {

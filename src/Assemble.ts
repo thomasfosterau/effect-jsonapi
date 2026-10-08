@@ -48,6 +48,7 @@ import { Effect } from "effect";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
+import { define } from "./internal/define.js";
 import * as Query from "./Query.js";
 
 // ---------------------------------------------------------------------------
@@ -628,7 +629,8 @@ const toWireValue = (value: unknown): unknown => {
     if (typeof withToJson.toJSON === "function") return toWireValue(withToJson.toJSON());
     const out: { [key: string]: unknown } = {};
     for (const [key, entry] of Object.entries(value)) {
-      if (entry !== undefined) out[key] = toWireValue(entry);
+      // An own `__proto__` member (as `JSON.parse` gives) stays a member.
+      if (entry !== undefined) define(out, key, toWireValue(entry));
     }
     return out;
   }
@@ -639,7 +641,8 @@ const toWireValue = (value: unknown): unknown => {
  * Deep-coerces runtime-only values to their wire form — `Date` → ISO string,
  * `URL` → href, an explicitly-`undefined` member dropped, an `undefined`
  * array element `null`, a `toJSON` honoured — mirroring `JSON.stringify`'s
- * value semantics without serialising.
+ * value semantics without serialising. Every member is copied as an own
+ * property, so one keyed `__proto__` (as `JSON.parse` gives) stays a member.
  *
  * Needed for a document whose members cross into a structurally-open
  * (`Schema.Unknown` / open `Record`) response schema: the response encoder
