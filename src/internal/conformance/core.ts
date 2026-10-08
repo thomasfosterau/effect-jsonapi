@@ -8,7 +8,7 @@
  * @internal
  */
 import { Effect, SchemaAST } from "effect";
-import { HttpClient, HttpClientRequest } from "effect/http";
+import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
@@ -292,8 +292,9 @@ export interface Fixture {
   readonly update?: (() => Omit<Payload, "type">) | undefined;
   /**
    * Removes a resource the kit created, by the id the server assigned it. Run
-   * for every resource the kit created and did not itself delete — after the
-   * rule that made it, whether that rule passed, failed or died.
+   * for every resource the kit created, could identify and did not itself
+   * delete — after the rule that made it, whether that rule passed, failed or
+   * died. It runs uninterruptibly, so one that never completes hangs the run.
    */
   readonly cleanup?: ((id: string) => Effect.Effect<unknown, unknown>) | undefined;
 }
@@ -310,7 +311,10 @@ export type Disposal = "deleted" | "cleaned-up" | "cleanup-failed" | "left";
 /** @internal */
 export interface WriteRecord {
   readonly type: string;
-  /** The id the server answered with, or `undefined` when the response named none. */
+  /**
+   * The id the server answered with, or `undefined` when the response named
+   * none — or named one the kit would not act on (`detail` says which).
+   */
   readonly id: string | undefined;
   /** The id of the rule whose probe created it. */
   readonly rule: string;
@@ -414,19 +418,16 @@ const headerRecord = (
  * never `application/json`, which a JSON:API server is entitled to refuse
  * before reading the body.
  */
-const clientRequest = (
-  method: string,
-  url: string,
-  headers: Readonly<Record<string, string>>,
-  body: unknown,
-): HttpClientRequest.HttpClientRequest => {
-  const request = HttpClientRequest.make(method as "GET")(url, { headers });
-  return body === undefined
+const clientRequest = (url: string, probe: Probe): HttpClientRequest.HttpClientRequest => {
+  // SAFETY: `make` is typed over the `HttpMethod` literals; every probe's method
+  // is a literal a rule wrote or a discovered endpoint's method, each of which
+  // is one of them, and "GET" is only the narrowest spelling of that union.
+  const request = HttpClientRequest.make(probe.method as "GET")(url, { headers: probe.headers });
+  return probe.body === undefined
     ? request
-    : HttpClientRequest.bodyText(
+    : HttpClientRequest.setBody(
         request,
-        JSON.stringify(body),
-        headers["content-type"] ?? MEDIA_TYPE,
+        HttpBody.jsonUnsafe(probe.body, probe.headers["content-type"] ?? MEDIA_TYPE),
       );
 };
 
@@ -447,7 +448,7 @@ export const runner =
         ? probe.url
         : `${baseUrl.replace(/\/$/, "")}${probe.url}`;
       const record: Probe = { method, url: probe.url, headers, body: probe.body };
-      const request = clientRequest(method, url, headers, probe.body);
+      const request = clientRequest(url, record);
       const result = yield* Effect.result(client.execute(request));
       if (result._tag === "Failure") {
         return {

@@ -131,16 +131,19 @@ describe("northwind: JSON:API conformance", () => {
   });
 
   it("ran the write rules against targets it created, and left nothing behind", () => {
-    for (const id of [
+    const writeRules = [
       "spec/status/create-response-document",
       "spec/status/update-response",
       "spec/status/delete-response",
-    ]) {
-      expect(report.outcomes.find((outcome) => outcome.rule.id === id)?._tag).toBe("Passed");
-    }
+    ];
+    expect(
+      writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),
+    ).toEqual(writeRules.map(() => "Passed"));
     const writes = report.writes ?? [];
     expect(writes.length).toBeGreaterThan(0);
-    for (const write of writes) expect(["deleted", "cleaned-up"]).toContain(write.disposal);
+    expect(writes.map((write) => write.disposal)).toEqual(
+      writes.map(() => expect.stringMatching(/^(deleted|cleaned-up)$/)),
+    );
   });
 
   it("renders a report that states what it did not check", () => {

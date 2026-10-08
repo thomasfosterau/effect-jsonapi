@@ -10,6 +10,7 @@
  * @since 0.15.0
  * @internal
  */
+import { Array as Arr, Result } from "effect";
 import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
 
 /** @internal */
@@ -134,29 +135,39 @@ const DISPOSAL: Readonly<Record<Disposal, string>> = {
   left: "LEFT IN PLACE",
 };
 
+/** Still on the target as far as the kit knows: nothing it did removed it. */
+const remains = (write: WriteRecord): boolean =>
+  write.disposal === "left" || write.disposal === "cleanup-failed";
+
+const renderWrite = (write: WriteRecord): ReadonlyArray<string> => [
+  `  ${write.type}:${write.id ?? "(id unknown)"}  ${DISPOSAL[write.disposal]}${
+    write.detail === undefined ? "" : ` — ${write.detail}`
+  }`,
+  `      created by ${write.rule}`,
+];
+
 /**
  * The audit trail of a run that wrote: every resource the kit created and what
- * became of it, with what is still there called out first. Nothing at all when
- * no write rule ran, so a read-only run's report is unchanged.
+ * became of it — what is still there first, then what is gone, each in
+ * creation order. Nothing at all when no write rule ran, so a read-only run's
+ * report is unchanged.
  */
-const renderWrites = (writes: ReadonlyArray<WriteRecord>): ReadonlyArray<string> => {
-  if (writes.length === 0) return [];
-  const remaining = writes.filter(
-    (write) => write.disposal === "left" || write.disposal === "cleanup-failed",
-  ).length;
-  const out: Array<string> = [
-    "WRITES",
-    `  ${writes.length} resource${writes.length === 1 ? "" : "s"} created · ${remaining} still in place`,
-    "",
-  ];
-  for (const write of writes) {
-    const detail = write.detail === undefined ? "" : ` — ${write.detail}`;
-    out.push(`  ${write.type}:${write.id ?? "(no id)"}  ${DISPOSAL[write.disposal]}${detail}`);
-    out.push(`      created by ${write.rule}`);
-  }
-  out.push("");
-  return out;
-};
+const renderWrites = (writes: ReadonlyArray<WriteRecord>): ReadonlyArray<string> =>
+  Arr.match(writes, {
+    onEmpty: () => [],
+    onNonEmpty: (all) => {
+      const [gone, remaining] = Arr.partition(all, (write) =>
+        remains(write) ? Result.fail(write) : Result.succeed(write),
+      );
+      return [
+        "WRITES",
+        `  ${all.length} resource${all.length === 1 ? "" : "s"} created · ${remaining.length} still in place`,
+        "",
+        ...Arr.flatMap([...remaining, ...gone], renderWrite),
+        "",
+      ];
+    },
+  });
 
 /**
  * Renders the whole report. Failures first within each tier, because that is

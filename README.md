@@ -1877,7 +1877,7 @@ Conformance.verify(Api, {
 });
 ```
 
-Each write rule creates its own target from `create` and never touches an `ids` sample; `cleanup` runs after the rule that made it whether that rule passed, failed or died; and `report.writes` (printed under `WRITES`) lists everything the run created and what became of it. A type with no fixture skips its write rules naming the missing key. `cleanup` may be omitted for a target you throw away (an in-process store) — the report then lists what was left — but supply it against anything that outlives the run.
+Each write rule creates its own target from `create`, and acts only on the id the server's create response named, after checking it: the response must name a resource of the type `create` returned, under an id that is neither an `ids` sample nor one the run already holds — anything else is recorded as named and never updated, deleted or passed to `cleanup`. `cleanup` runs after the rule that made it whether that rule passed, failed or died; and `report.writes` (printed under `WRITES`) lists everything the run created and what became of it. A type with no fixture skips its write rules naming the missing key. `cleanup` may be omitted for a target you throw away (an in-process store) — the report then lists what was left — but supply it against anything that outlives the run.
 
 Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this package's filter grammar profile and the conventions it adds where the spec declines to have one. Pass `tiers: ["spec"]` to hold a server to the specification without adopting any of this library's opinions.
 
