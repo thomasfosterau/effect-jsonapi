@@ -515,16 +515,22 @@ describe("Assemble.unpaginatedCollection", () => {
       }),
     );
     expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
-    const { targets } = registry([place]);
+    // `election-1` is primary data and also in the caller's `included`, beside
+    // a candidate the contest links to but the collection doesn't hold. Only
+    // the repeat is dropped: the candidate survives, so the assertion fails
+    // both when the dedupe is lost and when `included` is dropped wholesale.
+    const { calls, targets } = registry([election]);
     const deduped = await run(
-      Assemble.unpaginatedCollection([person("a"), place], {
-        included: [place],
-        include: ["birthPlace"],
-        includable: ["birthPlace"],
+      Assemble.unpaginatedCollection([contest("x"), election], {
+        included: [election, candidate("c-1")],
+        include: ["election"],
+        includable: ["election"],
         targets,
       }),
     );
-    expect(deduped.included).toBeUndefined();
+    expect(calls).toEqual([]);
+    expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
+    expect(ids(deduped.included)).toEqual(["candidates:c-1"]);
     expect(
       (await run(Assemble.unpaginatedCollection(whole, { included: [] }))).included,
     ).toBeUndefined();

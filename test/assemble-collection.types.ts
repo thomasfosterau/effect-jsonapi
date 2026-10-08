@@ -11,7 +11,7 @@
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
  * assertions.
  */
-import { Effect } from "effect";
+import type { Effect } from "effect";
 import { Assemble, Handlers } from "@thomasfosterau/effect-jsonapi";
 
 /** Pins a value to an expected type without using it (`noUnusedLocals`). */
