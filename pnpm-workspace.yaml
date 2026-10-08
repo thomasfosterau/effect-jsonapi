@@ -111,18 +111,22 @@ overrides:
   # `effect` MUST be a singleton (see the header): force every resolution to
   # the catalog version so a hoisting reshuffle cannot introduce a second copy.
   effect: "catalog:"
-  # Advisory floors for transitive dependencies of the docs toolchain, which
-  # `pnpm audit --audit-level high` (CI's last step) gates. Neither is reached
+  # Advisory floors for transitive dependencies of the dev toolchain, which
+  # `pnpm audit --audit-level high` (CI's last step) gates. None is reached
   # by the published package: `brace-expansion` arrives via
   # @effect/docgen > glob > minimatch (GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg,
   # GHSA-rgw5-rvv9-x895 — patched in 2.1.4); `js-yaml` 3.x via
   # @effect/docgen > @effect/markdown-toc > gray-matter and effect-solutions >
   # gray-matter (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh —
-  # patched in 3.15.2). Scoped to the affected major so a 4.x/5.x consumer
-  # elsewhere in the tree keeps its own range. Drop each once its dependent
-  # ships the fix in range.
+  # patched in 3.15.2); `shell-quote` via @changesets/cli > launch-editor
+  # (GHSA-pqg4-j6r4-53mv — patched in 1.11.0; launch-editor's `^1.10.0`
+  # admits the fix, but the floor is what moves the locked 1.10.0 and keeps
+  # it from coming back). Scoped to the affected major so a consumer of another
+  # major elsewhere in the tree keeps its own range. Drop each once its
+  # dependent's own range floor excludes the vulnerable versions.
   "brace-expansion@2": ">=2.1.4"
   "js-yaml@3": ">=3.15.2"
+  "shell-quote@1": ">=1.11.0"
   # `@mpsuesser/oxlint-plugin-effect` (^0.5.0) declares a peer on an `effect`
   # beta and ships no rc.118 build, so the singleton override above would force
   # it onto rc.118. Pin the plugin's own `effect` to the beta it was built
