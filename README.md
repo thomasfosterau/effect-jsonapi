@@ -1519,7 +1519,7 @@ The refusal applies only when no range of any media type carries `q > 0`; anothe
 
 `Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set.
 
-`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no `links` and no `meta` — and its `UnpaginatedCollectionDocument` type has neither member, so no `next` / `last` link the endpoint doesn't honour is advertised:
+`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no pagination `links` (and no `links` member at all unless `self` is given) and no `meta` — and its `UnpaginatedCollectionDocument` type has no `meta` and no pagination links, so no `next` / `last` link the endpoint doesn't honour is advertised:
 
 ```ts
 const document = Assemble.unpaginatedCollection(colours, {
@@ -1529,6 +1529,17 @@ const document = Assemble.unpaginatedCollection(colours, {
 });
 // Effect<UnpaginatedCollectionDocument<Colour>, …>
 // succeeds with { data: [...], included: [...], jsonapi: { version: "1.1" } }
+```
+
+To give the collection its own `self` link, pass `self` (its absolute URL) and, optionally, `query` — the request's canonical pairs (`Query.canonicalPairs(listQuery)(query)`), serialised onto `self` the way `Assemble.collection` serialises them onto its pagination links. The document then carries `links: { self }` and still no `meta`; the return type follows the `self` you pass (`links` required for a `string`, optional for a `string | undefined`), and `query` is a type error without `self`. With no `self` the output is exactly as above:
+
+```ts
+const document = Assemble.unpaginatedCollection(colours, {
+  self: "https://example.test/colours",
+  query: Query.canonicalPairs(listQuery)(query),
+});
+// Effect<UnpaginatedCollectionDocument<Colour, string>, …>
+// succeeds with { data: [...], links: { self: "https://example.test/colours?sort=name" }, jsonapi: … }
 ```
 
 `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:

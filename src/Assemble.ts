@@ -158,18 +158,32 @@ export interface CollectionDocument<R extends ResourceLike> {
 
 /**
  * An unpaginated collection document as {@link unpaginatedCollection}
- * assembles it: the whole collection as `data`, with no top-level `links` and
- * no `meta` — there is no page math to surface, so no `meta.totalCount` and
- * no `first` / `last` / `prev` / `next` links the endpoint wouldn't honour.
+ * assembles it: the whole collection as `data`, with no `meta` — there is no
+ * page math to surface, so no `meta.totalCount` and no `first` / `last` /
+ * `prev` / `next` links the endpoint wouldn't honour.
+ *
+ * The top-level `links` member is the collection's own `self` link, and
+ * `Self` is the type of the `self` option the document was assembled with:
+ * `undefined` (the default — no `self` passed) means no `links` member at
+ * all, `string` means `links.self` is always present, and `string |
+ * undefined` (a `self` the caller may not have) means `links` is optional.
  *
  * @since 0.17.0
  * @category models
  */
-export interface UnpaginatedCollectionDocument<R extends ResourceLike> {
+export type UnpaginatedCollectionDocument<
+  R extends ResourceLike,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `self` option's type, not a runtime value: `undefined` selects the linkless document
+  Self extends string | undefined = undefined,
+> = {
   readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
   readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
-}
+} & ([Self] extends [undefined]
+  ? unknown
+  : [Self] extends [string]
+    ? { readonly links: { readonly self: string } }
+    : { readonly links?: { readonly self: string } });
 
 /**
  * A §8.4 relationship document as {@link relationship} assembles it: the
@@ -365,6 +379,51 @@ export interface CollectionOptions<
   Targets extends Handlers.IncludeTargets = never,
 > extends Options<V, Targets> {
   readonly included?: ReadonlyArray<ResourceLike> | undefined;
+}
+
+/**
+ * {@link unpaginatedCollection}'s options: {@link CollectionOptions} plus the
+ * collection's own `self` link and the request query it carries. `Self` is
+ * the type of `self` as passed, and decides whether the document type has a
+ * `links` member ({@link UnpaginatedCollectionDocument}).
+ *
+ * `Self` is decided from a concrete type, so a caller forwarding its own
+ * generic parameter (`<S extends string | undefined>(self: S) => …`) widens
+ * it at the call site — `self: self as string | undefined` (or `as string`)
+ * — otherwise `query` is rejected and `links` stays unresolved.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface UnpaginatedCollectionOptions<
+  V = unknown,
+  Targets extends Handlers.IncludeTargets = never,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `self` option as passed; an `Option` there would stop a caller forwarding its own optional `self`
+  Self extends string | undefined = undefined,
+> extends CollectionOptions<V, Targets> {
+  /**
+   * The collection's own absolute URL, emitted as the document's
+   * `links.self`. Supplied by the handler, as {@link Pagination.baseUrl} is,
+   * so the assembler stays request-agnostic. Omit it (or pass `undefined`)
+   * and the document has no `links` member.
+   *
+   * An explicit `undefined` is accepted only when `Self` already admits it,
+   * so a caller's own bare-optional `o.self` (read as `string | undefined`
+   * under `exactOptionalPropertyTypes`) forwards as is, while a `self` that
+   * infers as `string` keeps `links.self` required.
+   */
+  readonly self?: Self | ([undefined] extends [Self] ? undefined : never);
+  /**
+   * The rest of the request's query as canonical wire pairs
+   * (`Query.canonicalPairs(listQuery)(query)`) — `?include=`, each
+   * `?filter[…]=`, `?sort=` — appended to `links.self` and serialised
+   * canonically, as the pagination links of a {@link collection} carry
+   * theirs, so `self` names the request the document answers. It rides on
+   * `self`: a call with no `self` can't pass it, and a `self` that turns out
+   * `undefined` drops it with the `links` member.
+   */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
+  readonly query?: ([Self] extends [undefined] ? never : ReadonlyArray<Query.Pair>) | undefined;
 }
 
 /**
@@ -683,14 +742,20 @@ export const resource = <
 /**
  * The shared body of {@link collection} and {@link unpaginatedCollection}:
  * link coercion, the batched walk, the caller's pre-resolved `included`, the
- * per-resource transform and the `jsonapi` member. `page` is the only thing
- * the two differ by — the pagination `meta` / `links`, or nothing — and
- * the document type `D` that difference produces.
+ * per-resource transform and the `jsonapi` member. `top` is the only thing
+ * the two differ by — the pagination `meta` / `links`, or the collection's
+ * own `self` (with the query it carries), or nothing — and the document type
+ * `D` that difference produces.
  */
 const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
   resources: ReadonlyArray<ResourceLike>,
   options: CollectionOptions<V, Targets>,
-  page: { readonly meta?: Handlers.MetaValue; readonly links?: Handlers.LinksValue },
+  top: {
+    readonly meta?: Handlers.MetaValue;
+    readonly links?: Handlers.LinksValue;
+    readonly self?: string;
+    readonly query?: ReadonlyArray<Query.Pair>;
+  },
 ): Effect.Effect<
   D,
   IncludeError | Handlers.IncludeTargetError<Targets>,
@@ -701,7 +766,7 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
     Effect.map((resolved) => {
       const included = [...(options.included ?? []), ...(resolved ?? [])];
       const built = Handlers.collection(wired.map(asValue), {
-        ...page,
+        ...top,
         ...(included.length === 0
           ? {}
           : { included: included.map((r) => asValue(stringifyLinks(r))) }),
@@ -709,7 +774,7 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
       });
       // SAFETY: `Handlers.collection` types its value over the builders' loose
       // `ResourceValue`; the value is `D` by construction — the wired, stamped
-      // resources, `included` only when non-empty, exactly the `page` members
+      // resources, `included` only when non-empty, exactly the `top` members
       // the caller's `D` declares, and the `jsonapi` member.
       return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as D;
     }),
@@ -775,8 +840,16 @@ export const collection = <
  * into `included` alongside any members the caller resolved itself, the
  * `jsonapi` member set — but no `meta.totalCount` and no pagination links,
  * so the document doesn't advertise `next` / `last` cursors the endpoint
- * doesn't honour. The return type ({@link UnpaginatedCollectionDocument})
- * has neither member.
+ * doesn't honour.
+ *
+ * Pass `self` — the collection's absolute URL — and the document carries it
+ * as `links.self`, with `query` (the request's canonical pairs) appended
+ * and serialised as {@link collection}'s pagination links are, so the link
+ * names the request the document answers. Without `self` the document has
+ * no `links` member at all.
+ * The return type ({@link UnpaginatedCollectionDocument}) follows the
+ * `self` passed: no `links` without one, `links.self` required with a
+ * `string`, optional with a `string | undefined`; it never has `meta`.
  *
  * @example
  * ```ts
@@ -796,6 +869,17 @@ export const collection = <
  * }))
  * console.log(document.data.length, document.included?.length, "links" in document, "meta" in document)
  * // → 2 1 false false
+ *
+ * // …with the collection's own `self` link, carrying the request's query
+ * const linked = Effect.runSync(Assemble.unpaginatedCollection(colours, {
+ *   self: "https://example.test/colours",
+ *   query: [["include", "family"]],
+ *   include: ["family"],
+ *   includable: ["family"],
+ *   targets: { families }
+ * }))
+ * console.log(linked.links.self)
+ * // → https://example.test/colours?include=family
  * ```
  *
  * @since 0.17.0
@@ -805,14 +889,30 @@ export const unpaginatedCollection = <
   R extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `self` option as passed
+  Self extends string | undefined = undefined,
 >(
   resources: ReadonlyArray<R>,
-  options: CollectionOptions<V, Targets> = {},
+  options: UnpaginatedCollectionOptions<V, Targets, Self> = {},
 ): Effect.Effect<
-  UnpaginatedCollectionDocument<R>,
+  // `Self` is widened to `string`, so a literal `self` doesn't leak into the type.
+  UnpaginatedCollectionDocument<R, Self extends string ? string : undefined>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
-> => assembleCollection<UnpaginatedCollectionDocument<R>, V, Targets>(resources, options, {});
+> =>
+  assembleCollection<
+    UnpaginatedCollectionDocument<R, Self extends string ? string : undefined>,
+    V,
+    Targets
+  >(
+    resources,
+    options,
+    options.self === undefined
+      ? {}
+      : options.query === undefined
+        ? { self: options.self }
+        : { self: options.self, query: options.query },
+  );
 
 /**
  * Input of {@link relationship}.
