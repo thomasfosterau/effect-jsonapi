@@ -545,9 +545,9 @@ describe("the per-resource transform pass", () => {
   });
 
   it("walks a long chain of included members without overflowing the stack (#239)", () => {
-    // articles:1 → people:0 → people:1 → … → people:9999: one walk level per
+    // articles:1 → people:0 → people:1 → … → people:29999: one walk level per
     // member, so a walk that recursed per level would exhaust the stack.
-    const length = 10_000;
+    const length = 30_000;
     const primary = {
       type: "articles",
       id: "1",
