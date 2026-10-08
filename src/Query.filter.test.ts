@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Effect, Layer, Schema, SchemaIssue } from "effect";
+import { Effect, Layer, Schema, SchemaGetter, SchemaIssue } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -445,6 +445,33 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
     // (`gte`: `eq` is not declared on deletedAt, which would fail for that instead)
     expect(() => encode(Filter.gte("deletedAt", NULL))).toThrow(hint("deletedAt"));
     expect(() => encode(Filter.isIn("title", ["a", NULL]))).toThrow(hint("title"));
+  });
+
+  it("F-NULL-1: an explicit literal codec that decodes a wire string to null is a 400", () => {
+    // a codec that spells NULL as "none" — legal as a codec, but it would put a
+    // NULL in a literal position, which no tree may hold
+    const NoneAsNull = Schema.String.pipe(
+      Schema.decodeTo(Schema.NullOr(Schema.String), {
+        decode: SchemaGetter.transform((s: string) => (s === "none" ? null : s)),
+        encode: SchemaGetter.transform((value: string | null) => value ?? "none"),
+      }),
+    );
+    expect(Schema.decodeUnknownSync(NoneAsNull)("none")).toBeNull();
+    const Legacy = Resource("legacy", {
+      attributes: {
+        code: attribute(Schema.NullOr(Schema.String), {
+          filter: ["eq", "in"],
+          filterLiteral: NoneAsNull,
+        }),
+      },
+    });
+    const legacy = Schema.decodeUnknownSync(Query.Filter(Legacy));
+    const hint = 'NULL is not a filter literal for field "code" (use the isnull operator)';
+    // refused on decode, scalar or list item, rather than read as Compare(eq, code, null)
+    expect(() => legacy({ "filter[code]": "none" })).toThrow(hint);
+    expect(() => legacy({ "filter[code][in]": "a,none" })).toThrow(hint);
+    // every other literal still decodes through the codec
+    expect(legacy({ "filter[code]": "a" })).toEqual(eq("code", "a"));
   });
 
   it("F-ORD-1: every field's literals are a JSON scalar of the domain §6.2 compares in", () => {

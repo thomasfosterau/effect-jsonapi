@@ -490,7 +490,9 @@ const declare = (
  *     operator names (that subset), or `false` (default); `Filter.able(filter)`.
  *   - `filterLiteral` — an explicit `Codec<Type, string>` for the wire literal,
  *     for the rare attribute whose encoded form is not a JSON scalar;
- *     `Filter.able(filter, { literal })`.
+ *     `Filter.able(filter, { literal })`. It must not decode any wire string
+ *     to `null`: NULL is never a literal, so a filter that decodes to one is
+ *     a 400 (and a tree holding one does not encode); `isnull` names it.
  *   - `sort` — `true` to allow `?sort=`; `Sort.able()`.
  *
  * The descriptor rides on the attribute's schema value, so it is carried through
@@ -2197,23 +2199,21 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
               )
             : Effect.succeed(value);
         },
-        // `NaN` / `Infinity` are numbers `Schema.Number` admits but the decoder
-        // above rejects; refusing them here keeps `decode ∘ encode` total.
-        // `target` has already checked the type, so for a number kind they are
-        // the only values that fail, and they are rendered with `String`:
+        // `target` has already validated and encoded the value, so it arrives
+        // here as a scalar of `kind`; the one thing left to refuse is a
+        // non-finite number — `NaN` / `±Infinity` are numbers `Schema.Number`
+        // admits but the decoder above rejects, and refusing them keeps
+        // `decode ∘ encode` total. They are rendered with `String`:
         // `JSON.stringify` writes all three as `null`, which reads as a NULL
-        // literal. (`null` itself never reaches here — `target` rejects it
-        // first; the tree encoder in `internal/filter.ts` names it.)
+        // literal. (`null` itself never reaches here either — `target`
+        // rejects it first; the tree encoder in `internal/filter.ts` names it.)
         encode: (value, options) =>
-          typeof value === kind && (kind !== "number" || Number.isFinite(value))
+          kind !== "number" || Number.isFinite(value)
             ? Effect.succeed(String(value))
             : Effect.fail(
                 new SchemaIssue.InvalidValue(
                   {
-                    message:
-                      kind === "number"
-                        ? `Expected a finite number to encode as a filter literal, got ${String(value)}`
-                        : `Expected a ${kind} to encode as a filter literal, got ${JSON.stringify(value)}`,
+                    message: `Expected a finite number to encode as a filter literal, got ${String(value)}`,
                   },
                   value,
                   options,

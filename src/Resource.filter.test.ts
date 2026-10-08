@@ -538,6 +538,9 @@ describe("Resource.filterable / Resource.sortable", () => {
         "Expected a finite number to encode as a filter literal, got NaN",
       );
       expect(Schema.encodeUnknownSync(literal)(1.5)).toBe("1.5");
+      // any other value is refused by the attribute's own schema first, before
+      // the literal's encoder sees it
+      expect(() => Schema.encodeUnknownSync(literal)("1")).toThrow("Expected number");
     });
 
     it("refuses a NULL literal in a tree with a hint at isnull, whatever the field's literal codec", () => {

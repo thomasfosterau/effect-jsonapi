@@ -282,7 +282,10 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  * schema's encoded form — `string`, `number`, `boolean`, or `Schema.NullOr` of
  * one — when the resource is made; see `Resource.filterable`. For the rare
  * attribute whose encoded form is not a JSON scalar, pass `literal`, an
- * explicit `Codec<Type, string>` (its `Type` must admit the attribute's).
+ * explicit `Codec<Type, string>` (its `Type` must admit the attribute's). It
+ * must not decode any wire string to `null`: NULL is never a literal, so a
+ * filter that decodes to one is a 400 (and a tree holding one does not
+ * encode); `isnull` names it.
  *
  * Definition-time errors: an empty array, and an operator outside the core
  * (also a compile error).
