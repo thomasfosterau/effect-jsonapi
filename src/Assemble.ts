@@ -157,6 +157,21 @@ export interface CollectionDocument<R extends ResourceLike> {
 }
 
 /**
+ * An unpaginated collection document as {@link unpaginatedCollection}
+ * assembles it: the whole collection as `data`, with no top-level `links` and
+ * no `meta` — there is no page math to surface, so no `meta.totalCount` and
+ * no `first` / `last` / `prev` / `next` links the endpoint wouldn't honour.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface UnpaginatedCollectionDocument<R extends ResourceLike> {
+  readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
+  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly jsonapi: typeof JSONAPI_MEMBER;
+}
+
+/**
  * A §8.4 relationship document as {@link relationship} assembles it: the
  * linkage as `data`, the (post-mutation) parent and any extras as `included`.
  *
@@ -665,13 +680,50 @@ export const resource = <
 };
 
 /**
+ * The shared body of {@link collection} and {@link unpaginatedCollection}:
+ * link coercion, the batched walk, the caller's pre-resolved `included`, the
+ * per-resource transform and the `jsonapi` member. `page` is the only thing
+ * the two differ by — the pagination `meta` / `links`, or nothing — and
+ * the document type `D` that difference produces.
+ */
+const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
+  resources: ReadonlyArray<ResourceLike>,
+  options: CollectionOptions<V, Targets>,
+  page: { readonly meta?: Handlers.MetaValue; readonly links?: Handlers.LinksValue },
+): Effect.Effect<
+  D,
+  IncludeError | Handlers.IncludeTargetError<Targets>,
+  Handlers.IncludeTargetServices<Targets>
+> => {
+  const wired = resources.map(stringifyLinks);
+  return walk(wired, options).pipe(
+    Effect.map((resolved) => {
+      const included = [...(options.included ?? []), ...(resolved ?? [])];
+      const built = Handlers.collection(wired.map(asValue), {
+        ...page,
+        ...(included.length === 0
+          ? {}
+          : { included: included.map((r) => asValue(stringifyLinks(r))) }),
+        onResource: onResourceFor(options),
+      });
+      // SAFETY: `Handlers.collection` types its value over the builders' loose
+      // `ResourceValue`; the value is `D` by construction — the wired, stamped
+      // resources, `included` only when non-empty, exactly the `page` members
+      // the caller's `D` declares, and the `jsonapi` member.
+      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as D;
+    }),
+  );
+};
+
+/**
  * Assembles a JSON:API document around a collection page: every resource
  * stamped and projected as {@link resource} does, `meta.totalCount` and the
  * five pagination links (`Handlers.offsetPaginationLinks`, carrying the
  * request's other query pairs) surfacing the page math, and the page's
  * `include` walk resolved **batched** — one loader call per distinct target
  * type per level across the whole page — into `included`. Members the caller
- * resolved itself (`included`) are emitted alongside.
+ * resolved itself (`included`) are emitted alongside. A collection served
+ * whole, with no page math, goes through {@link unpaginatedCollection}.
  *
  * @example
  * ```ts
@@ -703,28 +755,63 @@ export const collection = <
   CollectionDocument<R>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
-> => {
-  const wired = resources.map(stringifyLinks);
-  return walk(wired, options).pipe(
-    Effect.map((resolved) => {
-      const included = [...(options.included ?? []), ...(resolved ?? [])];
-      const built = Handlers.collection(wired.map(asValue), {
-        meta: { totalCount: pagination.totalCount },
-        links: Handlers.offsetPaginationLinks(
-          pagination.baseUrl,
-          { offset: pagination.offset, limit: pagination.limit },
-          pagination.totalCount,
-          pagination.query === undefined ? undefined : { query: pagination.query },
-        ),
-        ...(included.length === 0
-          ? {}
-          : { included: included.map((r) => asValue(stringifyLinks(r))) }),
-        onResource: onResourceFor(options),
-      });
-      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as CollectionDocument<R>;
-    }),
-  );
-};
+> =>
+  assembleCollection<CollectionDocument<R>, V, Targets>(resources, options, {
+    meta: { totalCount: pagination.totalCount },
+    links: Handlers.offsetPaginationLinks(
+      pagination.baseUrl,
+      { offset: pagination.offset, limit: pagination.limit },
+      pagination.totalCount,
+      pagination.query === undefined ? undefined : { query: pagination.query },
+    ),
+  });
+
+/**
+ * Assembles a JSON:API document around a whole, **unpaginated** collection —
+ * a small fixed list, or a to-many related collection served in one piece.
+ * Everything {@link collection} does except the page math: every resource
+ * stamped and projected, the `include` walk validated and resolved batched
+ * into `included` alongside any members the caller resolved itself, the
+ * `jsonapi` member set — but no `meta.totalCount` and no pagination links,
+ * so the document doesn't advertise `next` / `last` cursors the endpoint
+ * doesn't honour. The return type ({@link UnpaginatedCollectionDocument})
+ * has neither member.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Assemble, Handlers } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const colours = ["red", "green"].map((id) => ({
+ *   type: "colours", id, attributes: { name: id },
+ *   relationships: { family: { data: { type: "families", id: "primary" } } }
+ * }))
+ * const families: Handlers.IncludeTarget = (ids) =>
+ *   Effect.succeed(ids.map((id) => ({ type: "families", id, attributes: { name: "Primary" } })))
+ * const document = Effect.runSync(Assemble.unpaginatedCollection(colours, {
+ *   include: ["family"],
+ *   includable: ["family"],
+ *   targets: { families }
+ * }))
+ * console.log(document.data.length, document.included?.length, "links" in document, "meta" in document)
+ * // → 2 1 false false
+ * ```
+ *
+ * @since 0.17.0
+ * @category constructors
+ */
+export const unpaginatedCollection = <
+  R extends ResourceLike,
+  V = unknown,
+  Targets extends Handlers.IncludeTargets = never,
+>(
+  resources: ReadonlyArray<R>,
+  options: CollectionOptions<V, Targets> = {},
+): Effect.Effect<
+  UnpaginatedCollectionDocument<R>,
+  IncludeError | Handlers.IncludeTargetError<Targets>,
+  Handlers.IncludeTargetServices<Targets>
+> => assembleCollection<UnpaginatedCollectionDocument<R>, V, Targets>(resources, options, {});
 
 /**
  * Input of {@link relationship}.

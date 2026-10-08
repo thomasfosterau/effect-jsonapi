@@ -433,6 +433,124 @@ describe("Assemble.collection", () => {
   });
 });
 
+describe("Assemble.unpaginatedCollection", () => {
+  const whole = [person("a"), person("b"), person("c")];
+
+  it("emits the whole collection with the jsonapi member and no page math", async () => {
+    const document = await run(Assemble.unpaginatedCollection(whole));
+    expect(ids(document.data)).toEqual(["people:a", "people:b", "people:c"]);
+    expect(document.jsonapi).toEqual({ version: "1.1" });
+    expect(document).not.toHaveProperty("links");
+    expect(document).not.toHaveProperty("meta");
+    expect(document).not.toHaveProperty("included");
+    expect((await run(Assemble.unpaginatedCollection([]))).data).toEqual([]);
+  });
+
+  it("coerces links, stamps per-viewer meta and projects fieldsets on every resource", async () => {
+    const document = await run(
+      Assemble.unpaginatedCollection(whole, {
+        viewer: ADMIN,
+        capabilities: familyCapabilities,
+        fields: { people: ["name"] },
+      }),
+    );
+    expect(document.data.map((resource) => resource.meta)).toEqual(
+      whole.map(() => ({ canEdit: true, canDelete: true })),
+    );
+    expect(document.data.map((resource) => resource.attributes)).toEqual(
+      whole.map((resource) => ({ name: resource.attributes["name"] })),
+    );
+    expect(document.data.map((resource) => resource.links?.self)).toEqual(
+      whole.map((resource) => `https://example.test/people/${resource.id}`),
+    );
+  });
+
+  it("resolves the include walk in one batch per target type, deduplicated", async () => {
+    const { calls, targets } = registry([place]);
+    const document = await run(
+      Assemble.unpaginatedCollection(whole, {
+        viewer: NON_ADMIN,
+        capabilities: familyCapabilities,
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      }),
+    );
+    expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
+    expect(ids(document.included)).toEqual(["places:place-1"]);
+    expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+  });
+
+  it("walks a nested path level by level", async () => {
+    const { targets } = registry([election, event]);
+    const document = await run(
+      Assemble.unpaginatedCollection([contest("x"), contest("y")], {
+        include: ["election.electionEvent"],
+        includable: ["election", "election.electionEvent"],
+        targets,
+      }),
+    );
+    expect(ids(document.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+  });
+
+  it("rejects an include path outside the whitelist before any loader runs", async () => {
+    const { calls, targets } = registry([place]);
+    const error = await run(
+      Effect.flip(
+        Assemble.unpaginatedCollection(whole, {
+          include: ["candidacies"],
+          includable: ["birthPlace"],
+          targets,
+        }),
+      ),
+    );
+    expect(error).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+    expect(calls).toEqual([]);
+  });
+
+  it("emits pre-resolved included members, deduplicated against the primary data", async () => {
+    const withIncluded = await run(
+      Assemble.unpaginatedCollection(whole, {
+        included: [{ ...place, links: { self: new URL("https://example.test/places/place-1") } }],
+      }),
+    );
+    expect(withIncluded.included?.[0]?.links?.self).toBe("https://example.test/places/place-1");
+    const { targets } = registry([place]);
+    const deduped = await run(
+      Assemble.unpaginatedCollection([person("a"), place], {
+        included: [place],
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      }),
+    );
+    expect(deduped.included).toBeUndefined();
+    expect(
+      (await run(Assemble.unpaginatedCollection(whole, { included: [] }))).included,
+    ).toBeUndefined();
+  });
+
+  it("assembles what `collection` does, less its links and meta", async () => {
+    const options = {
+      viewer: NON_ADMIN,
+      capabilities: familyCapabilities,
+      include: ["birthPlace"],
+      includable: ["birthPlace"],
+      targets: registry([place]).targets,
+    };
+    const { links, meta, ...paged } = await run(
+      Assemble.collection(
+        whole,
+        { totalCount: 3, offset: 0, limit: 10, baseUrl: "https://example.test/people" },
+        options,
+      ),
+    );
+    expect(links.self).toBeDefined();
+    expect(meta.totalCount).toBe(3);
+    expect(await run(Assemble.unpaginatedCollection(whole, options))).toEqual(paged);
+  });
+});
+
 describe("Assemble.relationship", () => {
   it("answers the linkage as data, the parent (and extras) as included, and the related link", () => {
     const document = Assemble.relationship({

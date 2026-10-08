@@ -1522,6 +1522,18 @@ const { handler } = Registry.webHandler(Api, [peopleFamily, contestsFamily], {
 // (request: Request, context: Context<User | Database | …>) => Promise<Response>
 ```
 
+`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no `links` and no `meta` — and its `UnpaginatedCollectionDocument` type has neither member, so no `next` / `last` link the endpoint doesn't honour is advertised:
+
+```ts
+const document = Assemble.unpaginatedCollection(colours, {
+  include: ["family"],
+  includable: ["family"],
+  targets: { families },
+});
+// Effect<UnpaginatedCollectionDocument<Colour>, …>
+// succeeds with { data: [...], included: [...], jsonapi: { version: "1.1" } }
+```
+
 ## Query parameters
 
 | Family | Wire form | Decoded form |
