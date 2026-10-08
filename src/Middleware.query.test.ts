@@ -7,6 +7,7 @@ import * as Group from "./Group.js";
 import type { ContentNegotiation, SchemaErrors } from "./Middleware.js";
 import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
+import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
 
@@ -298,9 +299,7 @@ describe("Middleware.checkQueryParameters", () => {
     expect(check([])).toBeUndefined();
     expect(
       check([
-        "include",
         "fields[articles]",
-        "sort",
         "page[limit]",
         "filter[age][gt]",
         "filter",
@@ -312,6 +311,24 @@ describe("Middleware.checkQueryParameters", () => {
         "[odd]",
       ]),
     ).toBeUndefined();
+  });
+
+  it("rejects `include` and `sort` unless declared or allowed (#261)", () => {
+    expect(check(["include", "sort[x]"])).toEqual({
+      errors: [
+        expect.objectContaining({
+          detail: expect.stringContaining('does not support the "include" parameter'),
+          source: { parameter: "include" },
+        }),
+        expect.objectContaining({
+          detail: expect.stringContaining('does not support the "sort" parameter'),
+          source: { parameter: "sort[x]" },
+        }),
+      ],
+    });
+    expect(check(["include", "sort"], { declared: ["include", "sort"] })).toBeUndefined();
+    expect(check(["sort"], { declared: ["include"] })?.errors).toHaveLength(1);
+    expect(check(["include"], { allowedQueryParameters: ["include"] })).toBeUndefined();
   });
 
   it("rejects an all-lowercase base name nothing declares, naming the whole parameter", () => {
@@ -394,5 +411,222 @@ describe("what an endpoint's query schema declares", () => {
 
   it("stands aside for a schema that admits any name", async () => {
     expect((await serve("/open?unknown=1")).status).toBe(200);
+  });
+});
+
+describe("spec families an endpoint does not support (#261)", () => {
+  // JSON:API 1.1 §Inclusion of Related Resources: "If an endpoint does not
+  // support the `include` parameter, it MUST respond with `400 Bad Request`
+  // to any requests that include it." §Sorting: "If the server does not
+  // support sorting as specified in the query parameter `sort`, it MUST
+  // return `400 Bad Request`." An endpoint supports either by declaring it
+  // in its `query` schema.
+  const Person = Resource.make("people", {
+    attributes: { name: Schema.NonEmptyString },
+  });
+  const Post = Resource.make("posts", {
+    attributes: { title: Schema.NonEmptyString },
+    relationships: { author: Relationship.one(() => Person) },
+  });
+  // A resource with no attributes, so `sort: true` legalises no field, and
+  // no relationships, so an include allow-list can only be empty.
+  const Tag = Resource.make("tags", { attributes: {} });
+
+  const FamiliesApi = HttpApi.make("families")
+    .add(
+      Group.make(
+        Post,
+        Endpoint.get(Post, { include: true }),
+        Endpoint.list(Post, { sort: true }),
+        Endpoint.delete(Post),
+      ),
+    )
+    .add(Group.make(Person, Endpoint.get(Person), Endpoint.list(Person, { sort: [] })))
+    .add(
+      Group.make(
+        Tag,
+        Endpoint.get(Tag, { include: { paths: [] } }),
+        Endpoint.list(Tag, { sort: true }),
+      ),
+    );
+
+  // The decoded `query` each handler call received.
+  const queries: Array<unknown> = [];
+  const FamiliesLive = Layer.mergeAll(
+    HttpApiBuilder.group(FamiliesApi, "posts", (handlers) =>
+      handlers
+        .handle("get", ({ params, query }) => {
+          queries.push(query);
+          return Effect.succeed({
+            data: Post.make({ id: params.id, attributes: { title: "Hello" } }),
+          });
+        })
+        .handle("list", ({ query }) => {
+          queries.push(query);
+          return Effect.succeed({ data: [] });
+        })
+        .handle("delete", () => Effect.void),
+    ),
+    HttpApiBuilder.group(FamiliesApi, "people", (handlers) =>
+      handlers
+        .handle("get", ({ params }) =>
+          Effect.succeed({ data: Person.make({ id: params.id, attributes: { name: "Ada" } }) }),
+        )
+        .handle("list", () => Effect.succeed({ data: [] })),
+    ),
+    HttpApiBuilder.group(FamiliesApi, "tags", (handlers) =>
+      handlers
+        .handle("get", ({ params, query }) => {
+          queries.push(query);
+          return Effect.succeed({ data: Tag.make({ id: params.id, attributes: {} }) });
+        })
+        .handle("list", ({ query }) => {
+          queries.push(query);
+          return Effect.succeed({ data: [] });
+        }),
+    ),
+  );
+
+  const serve = async (
+    url: string,
+    middlewareLayer: Layer.Layer<ContentNegotiation | SchemaErrors> = Middleware.layer,
+    init: RequestInit = {},
+  ) => {
+    const appLayer = HttpApiBuilder.layer(FamiliesApi).pipe(
+      Layer.provide(FamiliesLive),
+      Layer.provide(middlewareLayer),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(new Request(`http://localhost${url}`, init)).finally(dispose);
+    const text = await response.text();
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: text === "" ? undefined : decodeJson(text),
+    };
+  };
+
+  const unsupported = (parameter: string, family: "include" | "sort") => ({
+    status: "400",
+    code: "bad_request",
+    title: "Bad Request",
+    detail: expect.stringContaining(
+      family === "include"
+        ? `does not support the "include" parameter`
+        : `does not support the "sort" parameter`,
+    ),
+    source: { parameter },
+  });
+
+  it.each([
+    ["the single-resource fetch of a resource with no relationships", "/people/1?include=author"],
+    ["a collection fetch that declares sort but not include", "/posts?include=author"],
+    ["an empty value", "/people/1?include="],
+    ["the repeated-key spelling", "/people/1?include=author&include=author"],
+  ])("rejects `include` on %s, naming it", async (_, url) => {
+    const response = await serve(url);
+    expect(response.status).toBe(400);
+    expect(response.contentType).toContain("application/vnd.api+json");
+    expect(response.body).toEqual({ errors: [unsupported("include", "include")] });
+  });
+
+  it.each([
+    ["a single-resource fetch", "/posts/1?sort=title"],
+    ["a collection fetch declared with no sortable field", "/people?sort=name"],
+    ["an empty value", "/posts/1?sort="],
+  ])("rejects `sort` on %s, naming it", async (_, url) => {
+    const response = await serve(url);
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ errors: [unsupported("sort", "sort")] });
+  });
+
+  it("rejects a bracketed member of an unsupported family, naming the whole parameter", async () => {
+    const response = await serve("/people/1?include[x]=author");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ errors: [unsupported("include[x]", "include")] });
+  });
+
+  it("rejects both families on an endpoint that declares no query schema at all", async () => {
+    const response = await serve("/posts/1?include=author&sort=title", Middleware.layer, {
+      method: "DELETE",
+    });
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [unsupported("include", "include"), unsupported("sort", "sort")],
+    });
+  });
+
+  it("answers one error object per offending parameter, beside a reserved unknown one", async () => {
+    const response = await serve("/people/1?sort=name&unknown=1&include=author&fooBar=1");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [
+        unsupported("sort", "sort"),
+        rejection("unknown"),
+        unsupported("include", "include"),
+      ],
+    });
+  });
+
+  it("leaves a family the endpoint declares to its query schema", async () => {
+    queries.length = 0;
+    expect((await serve("/posts/1?include=author")).status).toBe(200);
+    expect((await serve("/posts?sort=-title")).status).toBe(200);
+    expect(queries).toEqual([
+      { include: ["author"] },
+      { sort: [{ field: "title", direction: "desc" }] },
+    ]);
+    // the family's codec still answers a value it cannot process
+    const path = await serve("/posts/1?include=nope");
+    expect(path.status).toBe(400);
+    expect(path.body.errors[0].source).toEqual({ parameter: "include" });
+    expect(path.body.errors[0].meta).toEqual({ includablePaths: ["author"] });
+    const field = await serve("/posts?sort=nope");
+    expect(field.status).toBe(400);
+    expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
+  });
+
+  // An endpoint that declares the family with an empty vocabulary
+  // (`include: { paths: [] }`, or `sort: true` over no attributes) does
+  // declare the parameter: its codec answers every value naming something,
+  // and an empty value requests nothing.
+  it("leaves a declared family with an empty vocabulary to its codec", async () => {
+    const path = await serve("/tags/1?include=author");
+    expect(path.status).toBe(400);
+    expect(path.body.errors[0].source).toEqual({ parameter: "include" });
+    expect(path.body.errors[0].meta).toEqual({ includablePaths: [] });
+    const field = await serve("/tags?sort=name");
+    expect(field.status).toBe(400);
+    expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
+    expect(field.body.errors[0].meta).toEqual({ sortableFields: [] });
+    queries.length = 0;
+    expect((await serve("/tags/1?include=")).status).toBe(200);
+    expect((await serve("/tags?sort=")).status).toBe(200);
+    expect(queries).toEqual([{ include: [] }, { sort: [] }]);
+  });
+
+  // Whether `fields[TYPE]`, `page[…]` and `filter[…]` on an endpoint that
+  // declares none of that family are rejected too is the owner's decision
+  // (#261); until it is taken they stay ignored, as before.
+  it.each(["fields[people]=name", "page[limit]=1", "filter[name]=Ada", "filter=x"])(
+    "still ignores the undeclared `?%s`",
+    async (query) => {
+      expect((await serve(`/people/1?${query}`)).status).toBe(200);
+    },
+  );
+
+  it("applies under the host-negotiated layer too", async () => {
+    const response = await serve("/people/1?include=author", Middleware.layerHostNegotiated);
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ errors: [unsupported("include", "include")] });
+  });
+
+  it("admits a family listed in allowedQueryParameters, which the endpoint then ignores", async () => {
+    queries.length = 0;
+    const allowing = Middleware.layerWith({ allowedQueryParameters: ["sort"] });
+    expect((await serve("/posts/1?sort=title", allowing)).status).toBe(200);
+    expect(queries).toEqual([{}]);
+    expect((await serve("/posts?include=author", allowing)).status).toBe(400);
   });
 });

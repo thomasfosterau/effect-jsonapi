@@ -24,8 +24,9 @@
  *     reports every offending key together. It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z and that neither the specification defines nor the endpoint
- *     declares (JSON:API 1.1 §Query Parameters; see
- *     {@link checkQueryParameters}).
+ *     declares (JSON:API 1.1 §Query Parameters), and an `include` or `sort`
+ *     parameter on an endpoint that does not declare it (§Inclusion of
+ *     Related Resources, §Sorting; see {@link checkQueryParameters}).
  *
  * Both middlewares are attached automatically by the `Endpoint` constructors,
  * so any `HttpApi` containing JSON:API endpoints will fail to build (at the
@@ -465,9 +466,24 @@ export const schemaErrorDocument = (
 // Reserved query parameter names (JSON:API 1.1 §Query Parameters)
 // ---------------------------------------------------------------------------
 
-// The query parameter families JSON:API 1.1 itself defines. Whether a given
-// endpoint supports one is its query schema's business, not this check's.
-const SPEC_FAMILIES: ReadonlyArray<string> = ["include", "fields", "sort", "page", "filter"];
+// The query parameter families JSON:API 1.1 defines that this check passes
+// through: an endpoint's query schema decodes one it declares and ignores one
+// it does not. Whether an undeclared one should be a 400 too is an open
+// decision (#261).
+const SPEC_FAMILIES: ReadonlyArray<string> = ["fields", "page", "filter"];
+
+// The families JSON:API 1.1 requires an endpoint that does not support them to
+// answer with a 400 (§Inclusion of Related Resources, §Sorting), each with the
+// detail its rejection carries. An endpoint supports one by declaring it.
+const SUPPORT_FAMILIES: Readonly<Record<string, string>> = {
+  include:
+    'This endpoint does not support the "include" parameter. JSON:API requires an ' +
+    "endpoint that does not support inclusion of related resources to reject any " +
+    "request that carries it.",
+  sort:
+    'This endpoint does not support the "sort" parameter. JSON:API requires a server ' +
+    "that does not support the requested sorting to reject it.",
+};
 
 // A family base name made only of a-z is reserved for the specification.
 const RESERVED_BASE_NAME = /^[a-z]+$/;
@@ -498,7 +514,10 @@ export interface QueryParameterOptions {
    *
    * JSON:API 1.1 reserves these names for the specification, so accepting one
    * is a deliberate deviation: prefer renaming the parameter (`langCode`,
-   * `x-lang`) when the host controls it. Defaults to none.
+   * `x-lang`) when the host controls it. Listing `include` or `sort` admits
+   * it on an endpoint that does not support it, which then ignores it
+   * instead of answering the 400 the specification requires. Defaults to
+   * none.
    *
    * An entry that is not such a base name — a bracketed member (`lang[x]`),
    * a name with any other character (`Lang`, ` lang`), or `""` — is refused
@@ -583,11 +602,14 @@ const rejectQueryParameters = (
       status: String(BadRequest.status),
       code: BadRequest.code,
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
-      detail:
-        `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
-        "names made only of the letters a-z for the specification; an implementation-" +
-        "specific parameter's name must contain at least one other character, such as " +
-        "a capital letter.",
+      detail: Option.getOrElse(
+        Record.get(SUPPORT_FAMILIES, baseName(parameter)),
+        () =>
+          `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
+          "names made only of the letters a-z for the specification; an implementation-" +
+          "specific parameter's name must contain at least one other character, such as " +
+          "a capital letter.",
+      ),
       source: { parameter },
     })),
   });
@@ -603,7 +625,9 @@ const rejectQueryParameters = (
 export interface QueryParameterCheck extends QueryParameterOptions {
   /**
    * The query parameter names the endpoint's own query schema declares
-   * (`q`, `page[limit]`, …); each admits its whole family. Defaults to none.
+   * (`q`, `page[limit]`, …); each admits its whole family. An endpoint that
+   * supports `include` or `sort` lists it here: undeclared, either is
+   * rejected. Defaults to none.
    */
   readonly declared?: ReadonlyArray<string> | undefined;
 }
@@ -611,9 +635,11 @@ export interface QueryParameterCheck extends QueryParameterOptions {
 /**
  * JSON:API 1.1 §Query Parameters: a query parameter whose family base name is
  * made only of the letters a-z is reserved for the specification, so a server
- * that does not know how to process one MUST answer 400 Bad Request. Returns
- * that 400 document — one error object per offending parameter, each naming
- * it in `source.parameter` — or `undefined` when every parameter is
+ * that does not know how to process one MUST answer 400 Bad Request. And
+ * §Inclusion of Related Resources and §Sorting require the same 400 for an
+ * `include` or `sort` parameter on an endpoint that does not support it.
+ * Returns that 400 document — one error object per offending parameter, each
+ * naming it in `source.parameter` — or `undefined` when every parameter is
  * acceptable.
  *
  * A parameter is acceptable when its family base name (everything before the
@@ -622,9 +648,12 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * - contains any character outside a-z (`fooBar`, `x-trace`, `foo_bar`,
  *   `ext:name`) — an implementation-specific or extension parameter, ignored
  *   here as before;
- * - is one of the specification's own families (`include`, `fields`, `sort`,
- *   `page`, `filter`), which the endpoint's query schema decodes or ignores;
- * - is the base of a name in `declared`; or
+ * - is `fields`, `page` or `filter`, the specification's families the
+ *   endpoint's query schema decodes when it declares them and ignores
+ *   otherwise;
+ * - is the base of a name in `declared` — the only way `include` and `sort`
+ *   are acceptable besides the allow-list, since an endpoint that does not
+ *   declare them does not support them; or
  * - is listed in `allowedQueryParameters`.
  *
  * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
@@ -847,7 +876,9 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * endpoint's query schema declares: a parameter whose family base name is made
  * only of a-z, that is neither one of the specification's families nor
  * declared nor allowed, is answered with the JSON:API 400 naming it in
- * `source.parameter` (JSON:API 1.1 §Query Parameters). Then every request
+ * `source.parameter` (JSON:API 1.1 §Query Parameters), and so is an
+ * `include` or `sort` parameter the endpoint neither declares nor allows
+ * (§Inclusion of Related Resources, §Sorting). Then every request
  * validation failure is answered as {@link SchemaErrorsLive} describes.
  *
  * The `Endpoint` constructors attach {@link SchemaErrors} after
@@ -926,6 +957,14 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * names, carrying any other character (`?fooBar=1`, `?x-trace=1`), are
  * ignored as before. {@link schemaErrorsLayer} accepts extra lowercase names
  * a host needs.
+ *
+ * Likewise an `include` or `sort` parameter on an endpoint whose `query`
+ * schema does not declare it — `?include=author` on `Endpoint.get(R)`
+ * without `include`, `?sort=title` on `Endpoint.get(R)`, which never
+ * declares `sort` — is a 400 naming it, whatever its value (an empty
+ * `?include=` too): JSON:API 1.1 requires an endpoint that does not support
+ * inclusion or the requested sorting to reject it. An undeclared
+ * `fields[TYPE]`, `page[…]` or `filter[…]` is still ignored.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
