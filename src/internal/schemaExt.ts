@@ -119,33 +119,41 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
   return leaves;
 };
 
-// Every enumerable own key of a struct's input that declares no fields, each
-// an `UnexpectedKey` at its own path: the issue `onExcessProperty: "error"`
-// reports for a struct with fields. `Reflect.ownKeys` sees an own `__proto__`
-// key (`JSON.parse` makes one) as an ordinary key.
-const noMembers = Schema.makeFilter<object>(
+// A struct that declares no fields parses any non-nullish input (in the
+// pinned effect it is a bare not-nullish check), so this filter first answers
+// a non-object the way a struct with fields does: "Expected object" at the
+// member itself. `Predicate.isObject` is the test that struct applies
+// (`typeof "object"`, not `null`, not an array). Otherwise each enumerable own
+// key of the input is an `UnexpectedKey` at its own path, the issue
+// `onExcessProperty: "error"` reports for a struct with fields;
+// `Reflect.ownKeys` rather than `Object.keys` so a symbol key counts too.
+// No `identifier` / `title` / `description`: an identifier makes each site a
+// named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
+// document and renders a `null` member as "Expected <identifier>", and a title
+// or description would be copied into that document too.
+// oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
+const noMembers = Schema.makeFilter<unknown>(
   (input, ast) =>
-    Reflect.ownKeys(input)
-      .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
-      .map((key) => ({
-        path: [key],
-        issue: new SchemaIssue.UnexpectedKey(
-          ast,
-          Object.getOwnPropertyDescriptor(input, key)?.value,
-        ),
-      })),
-  {
-    identifier: "noMembers",
-    title: "no members",
-    description: "rejects every member of an object whose struct declares no fields",
-    toJsonSchema: () => ({ type: "object", additionalProperties: false }),
-  },
+    !Predicate.isObject(input)
+      ? "Expected object"
+      : Reflect.ownKeys(input)
+          .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
+          .map((key) => ({
+            path: [key],
+            issue: new SchemaIssue.UnexpectedKey(
+              ast,
+              Object.getOwnPropertyDescriptor(input, key)?.value,
+            ),
+          })),
+  { toJsonSchema: () => ({ type: "object", additionalProperties: false }) },
 );
 
 /**
  * `Schema.Struct(fields)`, closed when `fields` is empty: a struct that
  * declares no fields rejects every member of its input, each as an
- * `UnexpectedKey` issue at that member's path ("Expected no excess property").
+ * `UnexpectedKey` issue at that member's path ("Expected no excess property"),
+ * and rejects a non-object or an array at its own path ("Expected object"),
+ * as a struct with fields does.
  *
  * In the pinned `effect`, a struct **with** fields drops input keys it doesn't
  * declare, but a struct with **no** fields is a bare not-nullish check that

@@ -4,7 +4,8 @@
  * with no attributes or no relationships, or one whose every attribute or
  * relationship is excluded from that write) answers 400 with a
  * `source.pointer` at the undeclared member, through the real middleware
- * stack, instead of handing the member to the handler.
+ * stack, instead of handing the member to the handler. A non-object member
+ * answers 400 `Expected object` at the member, as a struct with fields does.
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
@@ -236,13 +237,103 @@ describe("a request body member the resource doesn't declare (#270)", () => {
     const response = await send(
       "POST",
       "/flags",
-      '{"data":{"type":"flags","attributes":{"a":1,"b/c":2}}}',
+      '{"data":{"type":"flags","attributes":{"a":1,"b/c":2,"a~b/c":3}}}',
     );
     expect(response.status).toBe(400);
     expect(errorsOf(response.text).map(({ source }) => source)).toEqual([
       { pointer: "/data/attributes/a" },
       { pointer: "/data/attributes/b~1c" },
+      { pointer: "/data/attributes/a~0b~1c" },
     ]);
+  });
+});
+
+describe("a non-object member answers 400 at the member, whether or not it declares fields (#270)", () => {
+  // A struct that declares no fields parses any non-nullish input in the
+  // pinned effect, so a non-object reaches its member check; that check
+  // answers it exactly as a struct with fields does: "Expected object" at the
+  // member itself. An array is not an object to either.
+  const values = ['"x"', "5", "true", "[]", '["a"]'] as const;
+
+  const sites: ReadonlyArray<
+    readonly [
+      name: string,
+      method: "POST" | "PATCH",
+      path: string,
+      body: (v: string) => string,
+      pointer: string,
+    ]
+  > = [
+    [
+      "createPayload attributes (none declared)",
+      "POST",
+      "/flags",
+      (v) => `{"data":{"type":"flags","attributes":${v}}}`,
+      "/data/attributes",
+    ],
+    [
+      "updatePayload attributes (none declared)",
+      "PATCH",
+      "/flags/1",
+      (v) => `{"data":{"type":"flags","id":"1","attributes":${v}}}`,
+      "/data/attributes",
+    ],
+    [
+      "createPayload relationships (none declared)",
+      "POST",
+      "/notes",
+      (v) => `{"data":{"type":"notes","attributes":{"body":"b"},"relationships":${v}}}`,
+      "/data/relationships",
+    ],
+    [
+      "updatePayload relationships (none declared)",
+      "PATCH",
+      "/notes/1",
+      (v) => `{"data":{"type":"notes","id":"1","relationships":${v}}}`,
+      "/data/relationships",
+    ],
+    [
+      "atomic add attributes (none declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"add","data":{"type":"flags","attributes":${v}}}`),
+      "/atomic:operations/0/data/attributes",
+    ],
+    // The reference: members that declare fields.
+    [
+      "createPayload attributes (declared)",
+      "POST",
+      "/notes",
+      (v) => `{"data":{"type":"notes","attributes":${v}}}`,
+      "/data/attributes",
+    ],
+    [
+      "updatePayload relationships (declared)",
+      "PATCH",
+      "/flags/1",
+      (v) => `{"data":{"type":"flags","id":"1","relationships":${v}}}`,
+      "/data/relationships",
+    ],
+  ];
+
+  describe.each(sites)("%s", (_, method, path, body, pointer) => {
+    it.each(values)("%s answers 400 Expected object and never calls the handler", async (v) => {
+      received.length = 0;
+      const response = await send(method, path, body(v));
+      expect(response.status).toBe(400);
+      const errors = errorsOf(response.text);
+      const atMember = errors.filter(({ source }) => source.pointer.startsWith(pointer));
+      expect(path === "/operations" ? atMember : errors).toEqual([
+        {
+          status: "400",
+          code: "bad_request",
+          title: "Bad Request",
+          detail: "Expected object",
+          source: { pointer },
+        },
+      ]);
+      expect(received).toEqual([]);
+    });
   });
 });
 
