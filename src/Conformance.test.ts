@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import {
+  Array as Arr,
   Cause,
   Deferred,
   Effect,
@@ -380,6 +381,36 @@ describe("Conformance: the report", () => {
     expect(text).toContain(Conformance.rules[1]!.reference);
   });
 
+  it("marks only the first line of a finding that spans lines as a finding", () => {
+    // A detail can quote what the server sent — a member name, say — and that
+    // can hold a newline: its next line hangs under it, not as a second `·`.
+    const text = Conformance.format({
+      target: "fixture",
+      version: "1.1",
+      transport: "in-process",
+      outcomes: [
+        {
+          _tag: "Failed",
+          rule,
+          probes: 1,
+          findings: [
+            {
+              rule,
+              detail: "the member `a\nb` is not allowed",
+              expected: "x",
+              observed: "y",
+              probe: undefined,
+            },
+          ],
+        },
+      ],
+      gaps: [],
+    });
+    expect(text).toContain(
+      "        · the member `a\n          b` is not allowed\n          expected: x\n",
+    );
+  });
+
   it("lists the writes still in place before those that are gone", () => {
     const text = Conformance.format({
       target: "fixture",
@@ -717,6 +748,37 @@ describe("Conformance: detects a deliberately broken server", () => {
         return included.length === 0 ? body : { ...body, included: [...included, included[0]] };
       }),
   );
+
+  /** The `observed` of `id`'s findings against a server whose documents carry `included`. */
+  const observedWith = async (id: string, included: ReadonlyArray<unknown>) => {
+    const report = await verifyCanned((request) =>
+      withData(conformantServe(request), (body) => ({ ...body, included })),
+    );
+    const outcome = outcomeFor(report, id);
+    expect(outcome._tag).toBe("Failed");
+    return Predicate.isTagged(outcome, "Failed")
+      ? Arr.dedupe(outcome.findings.map((found) => found.observed))
+      : [];
+  };
+
+  // `{"toString":1}` is valid JSON that `String` cannot convert: an orphan
+  // carrying one is still a finding, not a rule that dies rendering it.
+  it("names an orphaned included resource whose type or id is not a string", async () => {
+    expect(
+      await observedWith("spec/document/full-linkage", [
+        { type: { toString: 1 }, id: "2", attributes: {} },
+        { type: "people", id: { valueOf: 1 }, attributes: {} },
+        { type: "people", lid: "9", attributes: {} },
+      ]),
+    ).toEqual([`{"toString":1}:2, people:{"valueOf":1}, people:9`]);
+  });
+
+  it("names a duplicated included resource by its lid when it has no id", async () => {
+    const twice = { type: "people", lid: "9", attributes: {} };
+    expect(await observedWith("spec/document/no-duplicate-resources", [twice, twice])).toEqual([
+      "people:9 at /included/0 and /included/1",
+    ]);
+  });
 
   broken(
     "a resource object with a non-string id",
@@ -1599,6 +1661,29 @@ describe("Conformance: the write fixture", () => {
     },
   });
 
+  /** An error whose `name` getter throws: reading it, as the `Name: message` template does, throws. */
+  const nameThrows = Object.defineProperty(new FixtureBroke({ message: "broke" }), "name", {
+    get: (): string => {
+      throw new FixtureBroke({ message: "no name" });
+    },
+  });
+
+  /**
+   * A `Proxy` every one of whose traps throws: unlike a revoked one, it is
+   * live, but `instanceof`, a property read and `String` all throw on it.
+   */
+  const trapsThrow = new Proxy(
+    {},
+    new Proxy(
+      {},
+      {
+        get: () => (): never => {
+          throw new FixtureBroke({ message: "trap" });
+        },
+      },
+    ),
+  );
+
   /** What each value a fixture member throws or fails with renders as in the report. */
   const fixtureValues = [
     {
@@ -1609,6 +1694,22 @@ describe("Conformance: the write fixture", () => {
     // `__proto__` in a literal sets the prototype: `String` finds no `toString` on it.
     { value: "a null-prototype object", thrown: { __proto__: null }, rendered: "{}" },
     { value: "a revoked Proxy", thrown: revoked, rendered: "[unrenderable defect]" },
+    { value: "a Proxy whose traps throw", thrown: trapsThrow, rendered: "[unrenderable defect]" },
+    // Not unrenderable: `Formatter.format` catches the throw and says so itself.
+    {
+      value: "an object whose toString throws",
+      thrown: {
+        toString: (): never => {
+          throw new FixtureBroke({ message: "no string" });
+        },
+      },
+      rendered: "[toString threw]",
+    },
+    {
+      value: "an error whose name getter throws",
+      thrown: nameThrows,
+      rendered: "[unrenderable defect]",
+    },
     {
       value: "an error whose message getter throws",
       thrown: messageThrows,
@@ -1719,6 +1820,24 @@ describe("Conformance: the write fixture", () => {
       expected(report, writes, rendered);
     },
   );
+
+  it("keeps a cleanup failure that spans lines inside its write's entry", async () => {
+    const { report, writes } = await run(undefined, (store, cleaned) => ({
+      writes: {
+        articles: {
+          ...fixture(store, cleaned),
+          cleanup: () => Effect.fail(new FixtureBroke({ message: "a\nb" })),
+        },
+      },
+    }));
+    const [stuck] = writes.filter((write) => write.disposal === "cleanup-failed");
+    expect(stuck?.detail).toBe("FixtureBroke: a\nb");
+    // The second line hangs under the entry, as a rule's message does, rather
+    // than starting at the margin where it would read as a line of its own.
+    expect(Conformance.format(report)).toContain(
+      `  articles:${stuck?.id}  CLEANUP FAILED — FixtureBroke: a\n      b\n      created by ${stuck?.rule}\n`,
+    );
+  });
 
   it("leaves what it created in place without a cleanup, and says so", async () => {
     const { report, store, writes } = await run(undefined, (store, cleaned) => {

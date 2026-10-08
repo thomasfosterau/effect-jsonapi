@@ -574,10 +574,14 @@ const UNRENDERABLE = "[unrenderable defect]";
  * A thrown or failed value as one report line: an `Error` by its name and
  * message, so a thrown tagged error with no message still says what it was;
  * anything else — a string, `null`, a plain object — as itself, not dressed up
- * as an `Error`; capped at {@link MESSAGE_LIMIT}. Total: a value that throws
- * when inspected (a revoked `Proxy`, a getter that throws, an `Error` whose
- * `name` is a Symbol) renders as {@link UNRENDERABLE} rather than throwing in
- * turn, so the report the caller is building survives it.
+ * as an `Error`; capped at {@link MESSAGE_LIMIT}. Total, so the report the
+ * caller is building survives whatever it is given. Only a value that cannot be
+ * read at all renders as {@link UNRENDERABLE}: one `Predicate.isError` throws
+ * on (a revoked `Proxy`, or one whose traps throw), or an `Error` whose
+ * `message` or `name` getter throws or whose `name` cannot become a string (a
+ * Symbol, say). `Formatter.format` reads past a part of any other value that
+ * throws and marks that part itself — `[toString threw]` for an object whose
+ * `toString` throws, `[property access threw]` for a getter that throws.
  *
  * Shared by a rule's `Errored.message` and the write fixture's skip reasons and
  * `cleanup-failed` details, so a value renders the same wherever it surfaces.

@@ -76,6 +76,18 @@ const indent = (text: string, by: string): string =>
     .join("\n");
 
 /**
+ * `text` with its first line after `first` and every later one after `rest`:
+ * a hanging indent, so a value that spans lines — a rendered error, a member
+ * name quoted from the server — stays inside the entry it belongs to instead
+ * of reading as an entry of its own.
+ */
+const hang = (text: string, first: string, rest: string): string =>
+  text
+    .split("\n")
+    .map((line, index) => `${index === 0 ? first : rest}${line}`)
+    .join("\n");
+
+/**
  * Hard-wraps prose at `width`, preserving the leading indent. Rule text is the
  * part of a report a reader actually has to read, so it must not run off the
  * terminal.
@@ -121,7 +133,7 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
         lines.push(indent(line, "      "));
       lines.push(indent(outcome.rule.reference, "      "));
       for (const found of outcome.findings) {
-        lines.push(indent(found.detail, "      · "));
+        lines.push(hang(found.detail, "      · ", "        "));
         if (found.probe !== undefined) {
           const headers = Object.entries(found.probe.headers)
             .map(([name, value]) => `${name}: ${value}`)
@@ -157,9 +169,13 @@ const remains = (write: WriteRecord): boolean =>
   write.disposal === "left" || write.disposal === "cleanup-failed";
 
 const renderWrite = (write: WriteRecord): ReadonlyArray<string> => [
-  `  ${write.type}:${write.id ?? "(id unknown)"}  ${DISPOSAL[write.disposal]}${
-    write.detail === undefined ? "" : ` — ${write.detail}`
-  }`,
+  hang(
+    `${write.type}:${write.id ?? "(id unknown)"}  ${DISPOSAL[write.disposal]}${
+      write.detail === undefined ? "" : ` — ${write.detail}`
+    }`,
+    "  ",
+    "      ",
+  ),
   `      created by ${write.rule}`,
 ];
 

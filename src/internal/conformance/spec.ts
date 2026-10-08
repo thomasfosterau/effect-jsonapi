@@ -16,6 +16,7 @@
 import {
   Array as Arr,
   Effect,
+  Formatter,
   HashMap,
   HashSet,
   Match,
@@ -569,6 +570,22 @@ const includedRequiresData: RuleImpl = {
 };
 
 /**
+ * A resource as `type:id` — `type:lid` when it has no `id` — for a finding's
+ * `observed`. A string member reads as itself; anything else through
+ * `Formatter.format`, because the server's JSON can put an object there and
+ * `String({"toString":1})` throws: naming a malformed resource must not kill
+ * the rule that reports it.
+ */
+const resourceLabel = (resource: {
+  readonly type?: unknown;
+  readonly id?: unknown;
+  readonly lid?: unknown;
+}): string =>
+  Arr.map([resource.type, resource.id ?? resource.lid], (value) =>
+    Predicate.isString(value) ? value : Formatter.format(value),
+  ).join(":");
+
+/**
  * The `included` members of a document that cannot be reached from its
  * primary data through resource linkage, in document order — the violations
  * `spec/document/full-linkage` reports.
@@ -631,12 +648,7 @@ const fullLinkage: RuleImpl = {
               finding(fullLinkage.rule, {
                 detail: `${where} answered ${orphans.length} included resource(s) unreachable from the primary data`,
                 expected: "every `included` resource reachable through resource linkage",
-                observed: orphans
-                  .map(
-                    (resource) =>
-                      `${String(resource["type"])}:${String(resource["id"] ?? resource["lid"])}`,
-                  )
-                  .join(", "),
+                observed: orphans.map(resourceLabel).join(", "),
                 probe: observation.probe,
               }),
             ];
@@ -665,10 +677,7 @@ const noDuplicateResources: RuleImpl = {
           if (key === undefined) continue;
           const first = seen.get(key);
           if (first === undefined) seen.set(key, pointer);
-          else
-            duplicates.push(
-              `${String(resource["type"])}:${String(resource["id"])} at ${first} and ${pointer}`,
-            );
+          else duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`);
         }
         return duplicates.length === 0
           ? []
