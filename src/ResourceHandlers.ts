@@ -31,7 +31,7 @@
  *
  * @since 0.16.0
  */
-import { Effect, Record } from "effect";
+import { Effect } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -733,7 +733,7 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
   for (const ref of refs) {
     // An own entry only, as `Handlers` loads: a ref typed `constructor` or
     // `toString` names no target, not an `Object.prototype` member.
-    if (!Record.has(targets, ref.type)) continue;
+    if (!Object.hasOwn(targets, ref.type)) continue;
     const ids = byType.get(ref.type) ?? [];
     if (!ids.includes(ref.id)) ids.push(ref.id);
     byType.set(ref.type, ids);
