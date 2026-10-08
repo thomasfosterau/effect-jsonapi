@@ -798,6 +798,19 @@ export const errorObjectsOf = (body: unknown): ReadonlyArray<Readonly<Record<str
 };
 
 /**
+ * The `source.parameter` of every error object a response's document carries
+ * that has one — the query parameters the server says caused the errors.
+ *
+ * @internal
+ */
+export const sourceParametersOf = (observation: Observation): ReadonlyArray<string> =>
+  errorObjectsOf(observation.body)
+    .map((error) => error["source"])
+    .filter(isRecord)
+    .map((source) => source["parameter"])
+    .filter(Predicate.isString);
+
+/**
  * Appends query pairs to a path, percent-encoding values but leaving brackets
  * readable in keys — the spelling `Query.serialise` emits, and the one a server
  * actually receives from a browser.
