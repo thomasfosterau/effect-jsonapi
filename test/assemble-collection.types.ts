@@ -100,7 +100,9 @@ assertType<Assemble.CollectionDocument<Person>>(linkedDocument);
 
 // A `self` the caller may not have (`exactOptionalPropertyTypes` threading):
 // `links` is optional, so it has to be checked before it is read.
-declare const optionalSelf: string | undefined;
+// oxlint-disable-next-line effect/prefer-option-over-null -- the union under test: the type of a `self` the caller may not have
+type MaybeSelf = string | undefined;
+declare const optionalSelf: MaybeSelf;
 const optionallyLinked = Assemble.unpaginatedCollection(people, {
   self: optionalSelf,
   query: pairs,
@@ -109,19 +111,35 @@ assertType<
   Equals<
     typeof optionallyLinked,
     Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, string | undefined>,
+      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>,
       Assemble.IncludeError,
       never
     >
   >
 >(true);
-declare const optionallyLinkedDocument: Assemble.UnpaginatedCollectionDocument<
-  Person,
-  string | undefined
->;
-assertType<string | undefined>(optionallyLinkedDocument.links?.self);
+declare const optionallyLinkedDocument: Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>;
+assertType<MaybeSelf>(optionallyLinkedDocument.links?.self);
 // @ts-expect-error — `links` may be absent
 assertType<string>(optionallyLinkedDocument.links.self);
+
+// The same `self` forwarded from the caller's own bare-optional option: under
+// `exactOptionalPropertyTypes`, `o.self` reads as `string | undefined` and has
+// to be accepted, with the same optional `links`.
+declare const callerOptions: { readonly self?: string };
+const forwarded = Assemble.unpaginatedCollection(people, {
+  self: callerOptions.self,
+  query: pairs,
+});
+assertType<
+  Equals<
+    typeof forwarded,
+    Effect.Effect<
+      Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>,
+      Assemble.IncludeError,
+      never
+    >
+  >
+>(true);
 
 // An explicit `undefined` is no `self` at all.
 const unlinked = Assemble.unpaginatedCollection(people, { self: undefined });

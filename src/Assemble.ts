@@ -173,6 +173,7 @@ export interface CollectionDocument<R extends ResourceLike> {
  */
 export type UnpaginatedCollectionDocument<
   R extends ResourceLike,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `self` option's type, not a runtime value: `undefined` selects the linkless document
   Self extends string | undefined = undefined,
 > = {
   readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
@@ -386,12 +387,18 @@ export interface CollectionOptions<
  * the type of `self` as passed, and decides whether the document type has a
  * `links` member ({@link UnpaginatedCollectionDocument}).
  *
+ * `Self` is decided from a concrete type, so a caller forwarding its own
+ * generic parameter (`<S extends string | undefined>(self: S) => …`) widens
+ * it at the call site — `self: self as string | undefined` (or `as string`)
+ * — otherwise `query` is rejected and `links` stays unresolved.
+ *
  * @since 0.17.0
  * @category models
  */
 export interface UnpaginatedCollectionOptions<
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `self` option as passed; an `Option` there would stop a caller forwarding its own optional `self`
   Self extends string | undefined = undefined,
 > extends CollectionOptions<V, Targets> {
   /**
@@ -399,8 +406,13 @@ export interface UnpaginatedCollectionOptions<
    * `links.self`. Supplied by the handler, as {@link Pagination.baseUrl} is,
    * so the assembler stays request-agnostic. Omit it (or pass `undefined`)
    * and the document has no `links` member.
+   *
+   * An explicit `undefined` is accepted only when `Self` already admits it,
+   * so a caller's own bare-optional `o.self` (read as `string | undefined`
+   * under `exactOptionalPropertyTypes`) forwards as is, while a `self` that
+   * infers as `string` keeps `links.self` required.
    */
-  readonly self?: Self;
+  readonly self?: Self | ([undefined] extends [Self] ? undefined : never);
   /**
    * The rest of the request's query as canonical wire pairs
    * (`Query.canonicalPairs(listQuery)(query)`) — `?include=`, each
@@ -410,6 +422,7 @@ export interface UnpaginatedCollectionOptions<
    * `self`: a call with no `self` can't pass it, and a `self` that turns out
    * `undefined` drops it with the `links` member.
    */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
   readonly query?: ([Self] extends [undefined] ? never : ReadonlyArray<Query.Pair>) | undefined;
 }
 
@@ -876,6 +889,7 @@ export const unpaginatedCollection = <
   R extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `self` option as passed
   Self extends string | undefined = undefined,
 >(
   resources: ReadonlyArray<R>,
