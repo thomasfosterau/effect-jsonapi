@@ -189,7 +189,7 @@ export const nest = (flat: { readonly [key: string]: unknown }): Record<string, 
       // No bare key holds the name, so an own entry under it is a group this
       // loop made.
       const group = Option.getOrElse(Record.get(nested, name), () => {
-        const made: Record<string, unknown> = {};
+        const made = {};
         define(nested, name, made);
         return made;
       }) as Record<string, unknown>;
