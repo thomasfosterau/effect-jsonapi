@@ -348,6 +348,17 @@ describe("Middleware.checkQueryParameters", () => {
     const names = new URLSearchParams("q=hello&unknown=1&unknown=2").keys();
     expect(check(names, { declared: ["q"] })).toEqual({ errors: [rejection("unknown")] });
   });
+
+  // `URLSearchParams#keys` yields a repeated key once per occurrence, so this
+  // is where the check's own deduplication shows: over HTTP the middleware
+  // reads the parsed search params' record keys, already one per name.
+  it("answers a repeated unsupported `include` or `sort` once (#261)", () => {
+    const names = new URLSearchParams("include=a&sort=x&include=a&sort=y").keys();
+    expect(check(names)?.errors.map((error) => error.source)).toEqual([
+      { parameter: "include" },
+      { parameter: "sort" },
+    ]);
+  });
 });
 
 describe("what an endpoint's query schema declares", () => {
@@ -417,10 +428,15 @@ describe("what an endpoint's query schema declares", () => {
 describe("spec families an endpoint does not support (#261)", () => {
   // JSON:API 1.1 §Inclusion of Related Resources: "If an endpoint does not
   // support the `include` parameter, it MUST respond with `400 Bad Request`
-  // to any requests that include it." §Sorting: "If the server does not
-  // support sorting as specified in the query parameter `sort`, it MUST
-  // return `400 Bad Request`." An endpoint supports either by declaring it
-  // in its `query` schema.
+  // to any requests that include it." §Sorting, on an endpoint that responds
+  // with a resource collection: "If the server does not support sorting as
+  // specified in the query parameter `sort`, it MUST return `400 Bad
+  // Request`." On any other endpoint, `sort` falls under the general
+  // §Implementation-Specific Query Parameters rule: "If a server encounters a
+  // query parameter that does not follow the naming conventions above, or the
+  // server does not know how to process it as a query parameter from this
+  // specification, it MUST return `400 Bad Request`." An endpoint supports
+  // either by declaring it in its `query` schema.
   const Person = Resource.make("people", {
     attributes: { name: Schema.NonEmptyString },
   });
@@ -523,7 +539,6 @@ describe("spec families an endpoint does not support (#261)", () => {
     ["the single-resource fetch of a resource with no relationships", "/people/1?include=author"],
     ["a collection fetch that declares sort but not include", "/posts?include=author"],
     ["an empty value", "/people/1?include="],
-    ["the repeated-key spelling", "/people/1?include=author&include=author"],
   ])("rejects `include` on %s, naming it", async (_, url) => {
     const response = await serve(url);
     expect(response.status).toBe(400);
@@ -616,6 +631,40 @@ describe("spec families an endpoint does not support (#261)", () => {
     },
   );
 
+  // The same precedence as #148's: `SchemaErrors` is the outer middleware,
+  // so the 400 wins over a 406 or 415 the same request would otherwise get.
+  describe("is decided before content negotiation", () => {
+    // `schemaErrorsLayer` wired directly, beside the live negotiation, as
+    // well as through `Middleware.layer`.
+    const direct = Layer.mergeAll(
+      Middleware.ContentNegotiationLive,
+      Middleware.schemaErrorsLayer(),
+    );
+    const layers = [
+      ["Middleware.layer", Middleware.layer],
+      ["schemaErrorsLayer beside ContentNegotiationLive", direct],
+    ] as const;
+    const parameterised = "application/vnd.api+json; charset=utf-8";
+
+    it.each(layers)("over an unacceptable Accept (406), under %s", async (_, middleware) => {
+      const accept = { headers: { accept: parameterised } };
+      const response = await serve("/posts/1?sort=title", middleware, accept);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ errors: [unsupported("sort", "sort")] });
+      // without the unsupported parameter, the same request is the 406
+      expect((await serve("/posts/1", middleware, accept)).status).toBe(406);
+    });
+
+    it.each(layers)("over an unsupported Content-Type (415), under %s", async (_, middleware) => {
+      const contentType = { headers: { "content-type": parameterised } };
+      const response = await serve("/people/1?include=author", middleware, contentType);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ errors: [unsupported("include", "include")] });
+      // without the unsupported parameter, the same request is the 415
+      expect((await serve("/people/1", middleware, contentType)).status).toBe(415);
+    });
+  });
+
   it("applies under the host-negotiated layer too", async () => {
     const response = await serve("/people/1?include=author", Middleware.layerHostNegotiated);
     expect(response.status).toBe(400);
@@ -628,5 +677,17 @@ describe("spec families an endpoint does not support (#261)", () => {
     expect((await serve("/posts/1?sort=title", allowing)).status).toBe(200);
     expect(queries).toEqual([{}]);
     expect((await serve("/posts?include=author", allowing)).status).toBe(400);
+  });
+
+  // Allowing a family only switches off the 400 where it is undeclared: an
+  // endpoint that declares it still decodes it, value and codec errors alike.
+  it("still decodes a family listed in allowedQueryParameters on an endpoint that declares it", async () => {
+    queries.length = 0;
+    const allowing = Middleware.layerWith({ allowedQueryParameters: ["sort"] });
+    expect((await serve("/posts?sort=title", allowing)).status).toBe(200);
+    expect(queries).toEqual([{ sort: [{ field: "title", direction: "asc" }] }]);
+    const field = await serve("/posts?sort=nope", allowing);
+    expect(field.status).toBe(400);
+    expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
   });
 });

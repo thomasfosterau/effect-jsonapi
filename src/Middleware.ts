@@ -26,7 +26,9 @@
  *     a-z and that neither the specification defines nor the endpoint
  *     declares (JSON:API 1.1 §Query Parameters), and an `include` or `sort`
  *     parameter on an endpoint that does not declare it (§Inclusion of
- *     Related Resources, §Sorting; see {@link checkQueryParameters}).
+ *     Related Resources; §Sorting on a collection endpoint, the general
+ *     §Implementation-Specific Query Parameters rule on any other; see
+ *     {@link checkQueryParameters}).
  *
  * Both middlewares are attached automatically by the `Endpoint` constructors,
  * so any `HttpApi` containing JSON:API endpoints will fail to build (at the
@@ -473,8 +475,11 @@ export const schemaErrorDocument = (
 const SPEC_FAMILIES: ReadonlyArray<string> = ["fields", "page", "filter"];
 
 // The families JSON:API 1.1 requires an endpoint that does not support them to
-// answer with a 400 (§Inclusion of Related Resources, §Sorting), each with the
-// detail its rejection carries. An endpoint supports one by declaring it.
+// answer with a 400, each with the detail its rejection carries: `include`
+// under §Inclusion of Related Resources; `sort` under §Sorting on an endpoint
+// that responds with a resource collection, and under the general
+// §Implementation-Specific Query Parameters rule on any other. An endpoint
+// supports one by declaring it.
 const SUPPORT_FAMILIES: Readonly<Record<string, string>> = {
   include:
     'This endpoint does not support the "include" parameter. JSON:API requires an ' +
@@ -637,7 +642,10 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * made only of the letters a-z is reserved for the specification, so a server
  * that does not know how to process one MUST answer 400 Bad Request. And
  * §Inclusion of Related Resources and §Sorting require the same 400 for an
- * `include` or `sort` parameter on an endpoint that does not support it.
+ * `include` or `sort` parameter on an endpoint that does not support it —
+ * §Sorting on an endpoint that responds with a resource collection; on any
+ * other, the general §Implementation-Specific Query Parameters rule applies
+ * to `sort`, since the endpoint does not know how to process it.
  * Returns that 400 document — one error object per offending parameter, each
  * naming it in `source.parameter` — or `undefined` when every parameter is
  * acceptable.
@@ -878,8 +886,10 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * declared nor allowed, is answered with the JSON:API 400 naming it in
  * `source.parameter` (JSON:API 1.1 §Query Parameters), and so is an
  * `include` or `sort` parameter the endpoint neither declares nor allows
- * (§Inclusion of Related Resources, §Sorting). Then every request
- * validation failure is answered as {@link SchemaErrorsLive} describes.
+ * (§Inclusion of Related Resources; §Sorting on a collection endpoint, the
+ * general §Implementation-Specific Query Parameters rule on any other). Then
+ * every request validation failure is answered as {@link SchemaErrorsLive}
+ * describes.
  *
  * The `Endpoint` constructors attach {@link SchemaErrors} after
  * {@link ContentNegotiation}, which makes it the outer of the two, so this
@@ -962,8 +972,12 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * schema does not declare it — `?include=author` on `Endpoint.get(R)`
  * without `include`, `?sort=title` on `Endpoint.get(R)`, which never
  * declares `sort` — is a 400 naming it, whatever its value (an empty
- * `?include=` too): JSON:API 1.1 requires an endpoint that does not support
- * inclusion or the requested sorting to reject it. An undeclared
+ * `?include=` too). JSON:API 1.1 requires it: §Inclusion of Related
+ * Resources for `include`; for `sort`, §Sorting on an endpoint that responds
+ * with a resource collection, and on a single-resource endpoint (`GET
+ * /articles/1?sort=title`) the general §Implementation-Specific Query
+ * Parameters rule, since that endpoint does not know how to process `sort`
+ * as a query parameter from the specification. An undeclared
  * `fields[TYPE]`, `page[…]` or `filter[…]` is still ignored.
  *
  * A handler whose response fails to encode against its endpoint's own schema
