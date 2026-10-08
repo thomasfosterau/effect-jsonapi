@@ -152,6 +152,26 @@ The summary line reports skips alongside passes for the same reason:
 SUMMARY  7 rules failed (19 findings) · 19 passed · 10 not checked · 7 areas out of scope · 111 requests made
 ```
 
+### 4.1 The four outcomes
+
+Every rule in a run ends in exactly one `Conformance.Outcome`, and the four mean different things:
+
+| Outcome | Means | Is it a verdict on the server? |
+| --- | --- | --- |
+| `Passed` | The rule ran, made its probes (`probes` counts them) and found nothing. | Yes: it held. |
+| `Failed` | The rule ran and found the server breaking it; `findings` says how, with the request. | Yes: it is broken. |
+| `Skipped` | The rule could not be decided against this target — no endpoint of that shape, a withheld `ids` sample or `writes` key, a condition never met (§4 above), a write payload the server rejected or a `writes` `create` / `update` that threw — and `reason` says which. | No: a statement about coverage. |
+| `Errored` | The rule **died** before it reached a verdict: a transport that throws, or a bug in the kit. `message` renders the defect and `defect` is the value as thrown. | No: the run could not decide it. |
+
+A rule that skips was _never going to_ be decided against this target; a rule that dies _should have been_ and was not. A throwing fixture is neither: a `create` or `update` that throws skips the rules it was for, naming the member, and a `cleanup` that fails or throws is recorded in `Report.writes` as `cleanup-failed` (§1.4). Since [#246](https://github.com/thomasfosterau/effect-jsonapi/issues/246), a rule's defect is that rule's `Errored` outcome rather than the end of the run: every other rule still runs and is reported, and so is `Report.writes`, so the cleanup ledger survives one bad rule. (Before, the defect failed the whole `verify` / `verifyWith` and took the rest of the report with it.) Interruption is not turned into an outcome — it is a request to stop the whole run, not something one rule did, so it still stops it.
+
+How each reading of a report treats it:
+
+- **`format`** prints each tier's dead rules first, marked `DIED`, with the defect's message in place of findings. The tier and summary lines gain a `· N died` count — only when a rule did, so a clean run's summary reads as above.
+- **`summarise`** counts them in `errored`, separately from `failed`, `passed` and `skipped`.
+- **`assert`** dies on the first `Errored` outcome, before it looks at failures, with a defect that names the rule and carries the original defect as its `cause`. It does not fail with a `ContractViolation`, because a dead rule is not a finding about the server, and it cannot pass, because the rule was not decided — so a gate built on `assert` is exactly as strict as when a defect killed the run.
+- **A gate that does not use `assert`** must check for dead rules itself. A test that filters `outcomes` for `Failed` — for instance to pin a known set of failures, as this repo's examples do (§8) — lets an `Errored` rule through silently. Gate on `Conformance.summarise(report).errored === 0` as well, and print `Conformance.format(report)` when it is not.
+
 ## 5. What v1 does **not** cover
 
 Declared in `Conformance.gaps` and printed in every report.
@@ -228,6 +248,8 @@ The same four in all three examples, which is itself evidence: nothing here is o
 Three of the four are now _example_ gaps rather than library ones: #112 landed `onResource` / `Handlers.project` and #103 landed the `jsonapi` builder option, but the worked examples have not adopted either, so the kit still sees unprojected fieldsets and documents that do not advertise their version. Adopting both in `examples/*/handlers.ts` would clear those three — worth doing, and deliberately left to a change that is about the examples rather than about the kit.
 
 A new failure means a regression; a disappearing one means a fixed bug whose entry should come off the list. The test says so when either happens.
+
+Pinning failures is not `assert`, so each example also asserts that **no rule died** — in the full run and in the spec-tier-only run — listing every dead rule as `id: message`, with the whole report in the failure message (§4.1). Without it, a rule that dies would drop out of the `Failed` filter and the suite would stay green over a rule it never decided.
 
 ## 9. Proving the kit detects
 
