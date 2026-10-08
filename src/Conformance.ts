@@ -228,7 +228,9 @@ export interface Finding extends Core.Finding {}
  * made, `Failed` with its findings, `Skipped` with the reason it could not
  * be decided against this target, or `Errored` when the rule died — a
  * transport that throws, or a bug in the kit, not a finding about the server —
- * with the defect's `message` and the `defect` itself.
+ * with the defect's `message` (capped at 500 characters, a longer one ending
+ * in `…`; `[unrenderable defect]` for a value that throws when inspected) and
+ * the `defect` itself.
  *
  * `Skipped` is load-bearing. A rule that needs a write endpoint against an api
  * that has none, or a sample id the caller did not supply, must not be counted
