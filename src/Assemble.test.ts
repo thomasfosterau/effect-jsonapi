@@ -392,6 +392,25 @@ describe("Assemble.collection", () => {
     ).toBeUndefined();
   });
 
+  it("does not repeat a page member in `included` (#147)", async () => {
+    // A heterogeneous page: `place-1` is a hit in its own right and the
+    // birthplace of the person beside it. The include walk already skips
+    // resources the document holds, so it never loads `place-1`; the repeat
+    // comes only from the caller's own pre-resolved `included`, which is what
+    // the dedupe against primary data has to drop.
+    const { calls, targets } = registry([place]);
+    const document = await run(
+      Assemble.collection(
+        [person("a"), place],
+        { totalCount: 2, offset: 0, limit: 10, baseUrl },
+        { included: [place], include: ["birthPlace"], includable: ["birthPlace"], targets },
+      ),
+    );
+    expect(calls).toEqual([]);
+    expect(ids(document.data)).toEqual(["people:a", "places:place-1"]);
+    expect(document.included).toBeUndefined();
+  });
+
   it("resolves the page's include walk in one batch per target type, deduplicated", async () => {
     const { calls, targets } = registry([place]);
     const document = await run(

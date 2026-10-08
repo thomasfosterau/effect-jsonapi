@@ -18,10 +18,6 @@ import { GitHubLive } from "../handlers.js";
  * Remove an entry when its issue is fixed; the test will tell you to.
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
-  // #147 — `Handlers.buildIncluded` dedupes `included` against itself but not
-  // against the primary data, so a resource that is both primary data and an
-  // include target is emitted twice in one document. A library defect.
-  ["spec/document/no-duplicate-resources", "#147"],
   // #112 landed the mechanism — `onResource: Handlers.project(query.fields)` —
   // but this example's handlers have not adopted it, so `?fields[TYPE]=` still
   // returns every attribute. An example gap now, not a library one.

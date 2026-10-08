@@ -5,7 +5,9 @@
  * helpers assemble those values while enforcing the spec's compound-document
  * rules at runtime:
  *
- *   - `included` resources are deduplicated by `(type, id)`
+ *   - `included` resources are deduplicated by `(type, id)`, against each
+ *     other and against the primary data — a compound document carries one
+ *     resource object per `(type, id)` pair
  *   - full linkage: every included resource must be referenced by a resource
  *     identifier somewhere in the document (data's relationships or another
  *     included resource's relationships)
@@ -35,7 +37,7 @@
  *
  * @since 0.1.0
  */
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import type { Pair } from "./Query.js";
@@ -568,8 +570,8 @@ const referencedIdentifiers = (resources: ReadonlyArray<ResourceValue>): Set<str
 
 // Wraps a transform so it runs at most once per `(type, id)`, handing back
 // the same value everywhere that resource appears in the document. A resource
-// that is both primary data and an `included` member is therefore shaped
-// once, not twice — it cannot come out two ways.
+// offered as both primary data and an `included` member is shaped once, for
+// the primary slot, and `buildIncluded` then drops it from `included`.
 const memoise = <F extends TransformLambda>(
   onResource: ResourceTransform<F>,
 ): ResourceTransform<F> => {
@@ -597,6 +599,12 @@ const mapResources = <F extends TransformLambda>(
  * Deduplicates included resources by `(type, id)`, applies the per-resource
  * transform, and verifies the spec's full-linkage rule: every included
  * resource must be referenced by a resource identifier in the document.
+ *
+ * Dedup is document-wide: a resource already present in `primary` is dropped
+ * from `included` rather than repeated, since a compound document MUST NOT
+ * include more than one resource object for each `(type, id)` pair. That is
+ * the case a heterogeneous collection hits whenever an include target is also
+ * one of the hits.
  *
  * The three steps run in that order deliberately. Dedup first, so `onResource`
  * runs once per distinct resource rather than once per occurrence; the
@@ -630,8 +638,9 @@ export const buildIncluded = <
     readonly onResource?: ResourceTransform<F> | undefined;
   },
 ): ReadonlyArray<Transformed<F, Included>> => {
-  // Dedupe by (type, id)
-  const seen = new Set<string>();
+  // Dedupe by (type, id), against the primary data as well as within
+  // `included`: the one-resource-object-per-pair rule is document-wide.
+  const seen = new Set<string>(primary.map(key));
   const deduped: Array<Included> = [];
   for (const resource of included) {
     const k = key(resource);
@@ -1149,10 +1158,16 @@ const build = (
   onResource: ResourceTransform<TransformLambda> | undefined,
 ) => {
   const links = options === undefined ? undefined : buildLinks(options);
-  const included =
-    options?.included !== undefined && options.included.length > 0
-      ? buildIncluded(primary, options.included, { checkLinkage: options.checkLinkage, onResource })
-      : undefined;
+  // Omitted, not `[]`, when nothing survives dedup against the primary data —
+  // the same shape as a document that was handed no `included` at all.
+  const members =
+    options?.included === undefined
+      ? []
+      : buildIncluded(primary, options.included, {
+          checkLinkage: options.checkLinkage,
+          onResource,
+        });
+  const included = Arr.isReadonlyArrayNonEmpty(members) ? members : undefined;
   return {
     data,
     ...(included !== undefined ? { included } : {}),
@@ -1165,7 +1180,8 @@ const build = (
 /**
  * Builds a single-resource document value: `{ data, included?, links?, meta?, jsonapi? }`.
  *
- * Included resources are deduplicated and checked for full linkage.
+ * Included resources are deduplicated — against each other and against the
+ * primary data — and checked for full linkage.
  *
  * Pass `jsonapi` to stamp the top-level `jsonapi` object — `Document.v1_1` to
  * advertise JSON:API 1.1, or `Atomic.jsonapi` for the atomic-operations
@@ -1309,7 +1325,8 @@ export const data = <
 /**
  * Builds a collection document value: `{ data: [...], included?, links?, meta?, jsonapi? }`.
  *
- * Included resources are deduplicated and checked for full linkage.
+ * Included resources are deduplicated — against each other and against the
+ * primary data — and checked for full linkage.
  *
  * JSON:API 1.1 requires a collection's `self` link to carry the query
  * parameters the client provided. Pass `query` — the request's canonical

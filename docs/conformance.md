@@ -175,15 +175,14 @@ Two packaging questions are deliberately **not** pre-empted:
 
 | Rule | Tracking | Whose |
 | --- | --- | --- |
-| `spec/document/no-duplicate-resources` | [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147) | the library's |
 | `spec/query/sparse-fieldsets-primary` | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) | the examples' |
 | `spec/query/sparse-fieldsets-included` | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) | the examples' |
 | `spec/query/unknown-query-parameter` | [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) | the library's |
 | `profile/document/jsonapi-member` | [#103](https://github.com/thomasfosterau/effect-jsonapi/issues/103) | the examples' |
 
-The same five in all three examples, which is itself evidence: nothing here is one example's mistake. Two were previously unfiled and were found by the kit — [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147) (`Handlers.buildIncluded` does not dedupe `included` against the primary data) and [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) (unknown query parameters are ignored rather than rejected). A seventh, [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101), was on this list until its fix landed; the kit now guards it instead. An eighth, [#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102) (the repeated-key spelling was honoured for `include` only), landed the same way.
+The same four in all three examples, which is itself evidence: nothing here is one example's mistake. [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) (unknown query parameters are ignored rather than rejected) was previously unfiled and was found by the kit. Three more were on this list until their fixes landed, and the kit now guards them instead: [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101); [#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102) (the repeated-key spelling was honoured for `include` only); and [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147), also found by the kit (`Handlers.buildIncluded` did not dedupe `included` against the primary data, so a heterogeneous collection's `/search?include=…` repeated a hit in `included`).
 
-Three of the five are now _example_ gaps rather than library ones: #112 landed `onResource` / `Handlers.project` and #103 landed the `jsonapi` builder option, but the worked examples have not adopted either, so the kit still sees unprojected fieldsets and documents that do not advertise their version. Adopting both in `examples/*/handlers.ts` would clear those three — worth doing, and deliberately left to a change that is about the examples rather than about the kit.
+Three of the four are now _example_ gaps rather than library ones: #112 landed `onResource` / `Handlers.project` and #103 landed the `jsonapi` builder option, but the worked examples have not adopted either, so the kit still sees unprojected fieldsets and documents that do not advertise their version. Adopting both in `examples/*/handlers.ts` would clear those three — worth doing, and deliberately left to a change that is about the examples rather than about the kit.
 
 A new failure means a regression; a disappearing one means a fixed bug whose entry should come off the list. The test says so when either happens.
 
