@@ -669,11 +669,6 @@ describe("Query.Filter: rejections name the offending key", () => {
     );
   });
 
-  // `Resource.filterable` is a plain object, so a field name that is an
-  // `Object.prototype` member must read as undeclared, not as the inherited
-  // value (#260).
-  const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"];
-
   it.each(inherited)(
     "rejects a field named %s, an Object.prototype member, in every spelling",
     (name) => {
