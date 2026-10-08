@@ -1378,6 +1378,17 @@ describe("Conformance: the write fixture", () => {
       new TransportRefused({ message: "connection refused" }),
       "TransportRefused: connection refused",
     ],
+    // `name` is the error's own to set; a number still renders, through the template.
+    [
+      "an error named by a number",
+      Object.assign(new TransportRefused({ message: "" }), { name: 42 }),
+      "42",
+    ],
+    [
+      "an error named by a number, with a message",
+      Object.assign(new TransportRefused({ message: "refused" }), { name: 42 }),
+      "42: refused",
+    ],
   ])("renders %s a rule dies with as itself", async (_, defect, message) => {
     const { report } = await run(
       (canned, request) => {
@@ -1388,6 +1399,22 @@ describe("Conformance: the write fixture", () => {
     );
     expect(report.outcomes).toEqual([
       expect.objectContaining({ _tag: "Errored", message, defect }),
+    ]);
+  });
+
+  it("marks an error whose name cannot become a string as unrenderable", async () => {
+    const defect = Object.assign(new TransportRefused({ message: "refused" }), {
+      name: Symbol("odd"),
+    });
+    const { report } = await run(
+      (canned, request) => {
+        if (request.method === "PATCH") throw defect;
+        return canned;
+      },
+      () => ({ only: ["spec/status/update-response"] }),
+    );
+    expect(report.outcomes).toEqual([
+      expect.objectContaining({ _tag: "Errored", message: "[unrenderable defect]", defect }),
     ]);
   });
 
@@ -1565,7 +1592,8 @@ describe("Conformance: the write fixture", () => {
     message: Schema.String,
   }) {}
 
-  // A fixture that throws is not a defect: no rule dies of it.
+  // A fixture that throws a value the kit can render is not a defect: no rule
+  // dies of it. One it can't render still does, until #271.
   it.each([
     {
       member: "create",

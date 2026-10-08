@@ -83,9 +83,9 @@ export interface Skipped {
 
 /**
  * A rule that died — a defect, not a finding — before it reached a verdict.
- * `message` renders the defect, capped at 500 characters (a longer one ends in
- * `…`; one that cannot be rendered is `[unrenderable defect]`); `defect` is
- * the value as it was thrown.
+ * `message` renders the defect, capped at 500 UTF-16 code units (a longer one
+ * ends in `…`; one that cannot be rendered is `[unrenderable defect]`);
+ * `defect` is the value as it was thrown.
  *
  * @internal
  */
@@ -544,8 +544,10 @@ export const skip = (rule: Rule, reason: string): Skipped => ({ _tag: "Skipped",
 
 /**
  * An `Error` as `Name: message`, or the name alone when it carries no message.
- * Both go through a template, so a `name` that is not a string still renders
- * as one.
+ * Both go through a template, so a `name` that is not a string but coerces to
+ * one (a number, say) still renders; one that cannot coerce (a Symbol, or an
+ * object whose `toString` throws) throws here, and the defect's message falls
+ * back to {@link UNRENDERABLE}.
  */
 const errorMessage = (error: Error): string =>
   error.message === "" ? `${error.name}` : `${error.name}: ${error.message}`;
