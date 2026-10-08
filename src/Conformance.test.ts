@@ -1405,7 +1405,7 @@ describe("Conformance: the write fixture", () => {
     expect(writes[0]).toEqual(expect.objectContaining({ id: "7", detail: undefined }));
   });
 
-  it("reads everything it reads, the profile tier's included, before it creates anything", async () => {
+  it("runs every rule that creates nothing, the profile tier's included, before it creates anything", async () => {
     // A create is vetted against what the run's reads have shown so far, so a
     // read after the first create could not inform it. A read-back of what the
     // kit itself created is exempt: it shows nothing the kit did not make.
@@ -1429,6 +1429,15 @@ describe("Conformance: the write fixture", () => {
     expect(firstCreate).toBeGreaterThan(0);
     expect(lastRead).toBeGreaterThan(0);
     expect(lastRead).toBeLessThan(firstCreate);
+    // A selection that interleaves rules that create with rules that do not
+    // is reported in the suite's order too.
+    const only = ["spec/status/", "spec/atomic/", "profile/"];
+    const { report: selection } = await run(undefined, () => ({ only }));
+    expect(selection.outcomes.map((outcome) => outcome.rule.id)).toEqual(
+      Conformance.rules
+        .filter((rule) => only.some((prefix) => rule.id.startsWith(prefix)))
+        .map((rule) => rule.id),
+    );
   });
 
   it("does not act on an id it already holds a live record for", async () => {
