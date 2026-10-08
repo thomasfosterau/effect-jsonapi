@@ -1323,6 +1323,53 @@ describe("Conformance: the write fixture", () => {
   untouched("does not act on a created resource of another type", "people", "9");
   untouched("does not act on the `ids` sample a create answer names", "articles", "1");
 
+  // `encodeURIComponent` leaves `.` alone and a URL's dot segments are
+  // resolved before it is sent, so these ids would put the kit's PATCH and
+  // DELETE on `/` or on the collection rather than on anything it created.
+  it.each(["..", ".", ""])(
+    "does not act on the id %j, which is no path segment of its own",
+    async (id) => {
+      const { report, seen, cleaned, writes } = await run(naming("articles", id));
+      expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
+      expect(cleaned).toEqual([]);
+      expect(writes).toEqual(
+        WRITE_RULES.map(() =>
+          expect.objectContaining({
+            id: undefined,
+            disposal: "left",
+            detail: expect.stringContaining(
+              `\`articles:${id}\`, which is not a URL path segment of its own`,
+            ),
+          }),
+        ),
+      );
+      expect(outcomeFor(report, "spec/status/update-response")).toEqual(skippedFor("not touched"));
+      expect(outcomeFor(report, "spec/status/delete-response")).toEqual(skippedFor("not touched"));
+    },
+  );
+
+  it("does not act on an id a read earlier in the run returned", async () => {
+    // The read probes are shown articles:7, and every create answer then names it.
+    const { seen, cleaned, writes } = await run((canned, request) =>
+      request.method === "GET" &&
+      request.path.startsWith("/articles/1") &&
+      canned.status === undefined
+        ? { body: { data: { type: "articles", id: "7", attributes: {} } } }
+        : naming("articles", "7")(canned, request),
+    );
+    expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
+    expect(cleaned).toEqual([]);
+    expect(writes).toEqual(
+      WRITE_RULES.map(() =>
+        expect.objectContaining({
+          id: undefined,
+          disposal: "left",
+          detail: expect.stringContaining("`articles:7`, which the kit did not create (a read"),
+        }),
+      ),
+    );
+  });
+
   it("does not act on an id it already holds a live record for", async () => {
     // Every create answer names articles:500, and cleanup fails — so after the
     // first create, articles:500 is on the record as still in place.
@@ -1381,6 +1428,41 @@ describe("Conformance: the write fixture", () => {
       { method: "POST", path: "/articles", body: {} },
     ]);
     expect(MutableHashMap.size(store)).toBe(0);
+  });
+
+  /** The parameterised Content-Type probes a run of `target` sends, as `METHOD /path`. */
+  const contentTypeProbes = async <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+    target: HttpApi.HttpApi<ApiId, Groups>,
+  ) => {
+    const serve = writeServer(MutableHashMap.empty());
+    const probes: Array<string> = [];
+    await verifyOver(target)(
+      (request) => {
+        if (parameterised(request)) probes.push(`${request.method} ${request.path}`);
+        return serve(request);
+      },
+      { only: ["spec/content-negotiation/request-content-type-parameters"] },
+    );
+    return probes;
+  };
+
+  it("sends the parameterised Content-Type probe to the create endpoint even when it is discovered last", async () => {
+    const createLast = HttpApi.make("createLast").add(
+      Group.make(
+        Article,
+        Endpoint.updateRelationship(Article, "author"),
+        Endpoint.update(Article),
+        Endpoint.create(Article),
+      ),
+    );
+    expect(await contentTypeProbes(createLast)).toEqual(["POST /articles"]);
+  });
+
+  it("without a create endpoint, sends the parameterised Content-Type probe to an update before a relationship write", async () => {
+    const noCreate = HttpApi.make("noCreate").add(
+      Group.make(Article, Endpoint.updateRelationship(Article, "author"), Endpoint.update(Article)),
+    );
+    expect(await contentTypeProbes(noCreate)).toEqual(["PATCH /articles/1"]);
   });
 
   // -------------------------------------------------------------------------
@@ -1468,6 +1550,27 @@ describe("Conformance: the write fixture", () => {
     "an update answered 200 with no document at all",
     "spec/status/update-response",
     (canned, request) => (request.method === "PATCH" ? { status: 200 } : canned),
+  );
+
+  brokenWrite(
+    "an update answered 200 with an empty document",
+    "spec/status/update-response",
+    (canned, request) => (request.method === "PATCH" ? { body: {} } : canned),
+  );
+
+  brokenWrite(
+    "an update answered 200 with an error document",
+    "spec/status/update-response",
+    (canned, request) =>
+      request.method === "PATCH"
+        ? { body: { errors: [{ status: "200", title: "Updated" }] } }
+        : canned,
+  );
+
+  brokenWrite(
+    "an update answered 200 with null primary data",
+    "spec/status/update-response",
+    (canned, request) => (request.method === "PATCH" ? { body: { data: null } } : canned),
   );
 
   brokenWrite(

@@ -168,11 +168,18 @@ const contentTypeParameters: RuleImpl = {
   ),
   run: (ctx) =>
     Effect.gen(function* () {
-      const { resolved, unresolved } = probeable(ctx, ["create", "update", "relationshipWrite"]);
+      const roles = ["create", "update", "relationshipWrite"] as const;
+      const { resolved, unresolved } = probeable(ctx, roles);
       // The create endpoint first: of the three it is the one whose URL names
       // no existing resource, so even a server that ignores the media type has
-      // nothing of the caller's to change.
-      const target = resolved.find(({ endpoint }) => endpoint.role === "create") ?? resolved[0];
+      // nothing of the caller's to change. Then an update, whose `{}` body
+      // names no member to change, before a relationship write, whose URL is
+      // a relationship of the caller's `ids` sample.
+      const target = Arr.head(
+        Arr.flatMap(roles, (role) =>
+          Arr.filter(resolved, ({ endpoint }) => endpoint.role === role),
+        ),
+      ).pipe(Option.getOrUndefined);
       if (target === undefined) {
         return skip(contentTypeParameters.rule, noProbeReason("write endpoint", unresolved));
       }
@@ -1482,8 +1489,20 @@ const updateFindings = (
           "a JSON:API document",
         );
       // JSON:API 1.1: a 200 MAY carry no primary data when the server changed
-      // nothing beyond the request; when it carries `data`, that is the resource.
-      if (!Predicate.hasProperty(observation.body, "data")) return [];
+      // nothing beyond the request — a document that is then still a document,
+      // so it carries `meta` (one of `data` / `errors` / `meta` is required, and
+      // `errors` is no answer to a success); when it carries `data`, that is
+      // the resource.
+      if (!Predicate.hasProperty(observation.body, "data"))
+        return Predicate.hasProperty(observation.body, "meta") &&
+          !Predicate.hasProperty(observation.body, "errors")
+          ? []
+          : broken(
+              `the 200 updating ${type}:${id} carries neither primary data nor a top-level \`meta\`${
+                Predicate.hasProperty(observation.body, "errors") ? " (it carries `errors`)" : ""
+              }`,
+              "`data` that is the updated resource, or no primary data and a top-level `meta`",
+            );
       return Option.exists(
         primaryIdentity(observation),
         (named) => named.type === type && named.id === id,

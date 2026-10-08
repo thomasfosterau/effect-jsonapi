@@ -32,10 +32,13 @@
  *
  * **Writes are opt-in and disposable.** The rules that change state run only
  * with `mutating: true` and a {@link WriteFixture} per type in `writes`. They
- * act only on the id the server's create response named, after checking it
- * names a resource of the type the kit sent and is neither an `ids` sample nor
- * an id the run already holds; they dispose of each resource however the rule
- * ended, and list every one in {@link Report.writes}.
+ * act on the id the server's create response named only after checking it
+ * names a resource of the type the kit sent, under an id that is a URL path
+ * segment of its own and is neither an `ids` sample, nor one a read in the run
+ * returned, nor one the run already holds; they dispose of each resource
+ * however the rule ended, and list every one in {@link Report.writes}. The
+ * check refuses only ids evidently not the kit's own — any other id is
+ * trusted — so run writes only against data you can afford to have modified.
  *
  * @example
  * ```ts
@@ -84,7 +87,7 @@
  *
  * @since 0.15.0
  */
-import { Data, Effect, Layer } from "effect";
+import { Data, Effect, Layer, MutableHashSet } from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
@@ -320,12 +323,17 @@ export interface WritePayload extends Core.Payload {}
  * created in place and says so in {@link Report.writes}, so never omit it
  * against a server whose state outlives the run.
  *
- * The write rules run only when {@link Options.mutating} is `true`, and act
- * only on the id the server's create response named, after checking it: the
+ * The write rules run only when {@link Options.mutating} is `true`, and act on
+ * the id the server's create response named only after checking it: the
  * response must name a resource of the type `create` returned, under an id
- * that is not an `ids` sample and not one the run already holds a resource for
- * that has not been removed. Any other id is recorded as named and never
- * updated, deleted or passed to `cleanup`. A create answered with anything but
+ * that is a URL path segment of its own (not `""`, `.` or `..`), is not an
+ * `ids` sample, was not returned by a successful `GET` earlier in the run, and
+ * is not one the run already holds a resource for that has not been removed.
+ * A refused id is recorded as named and never updated, deleted or passed to
+ * `cleanup`. The check refuses only ids that are evidently not the kit's own:
+ * any other id is trusted, because a server that names some other existing
+ * resource cannot be told from an honest one — so supply `writes` only for a
+ * server and data you can afford to have modified. A create answered with anything but
  * a 2xx is taken to have created nothing, so nothing is recorded or cleaned up
  * for it.
  *
@@ -756,11 +764,13 @@ const execute = (
 ): Effect.Effect<Report> =>
   Effect.gen(function* () {
     const resolved = resolveOptions(baseUrl, options);
+    const observed = MutableHashSet.empty<string>();
     const ctx: Core.Context = {
       endpoints: Core.discover(api),
       options: resolved,
-      request: Core.runner(client, resolved.baseUrl),
+      request: Core.observing(Core.runner(client, resolved.baseUrl), observed),
       writes: [],
+      observed,
     };
     const outcomes: Array<Outcome> = [];
     for (const implementation of selected(options)) {

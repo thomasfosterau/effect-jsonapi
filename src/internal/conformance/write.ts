@@ -7,11 +7,14 @@
  * created, so both come from `Options.writes`. Everything here keeps three
  * promises the rules depend on:
  *
- *   - **The kit acts only on what it created.** A create response's id is
- *     taken only when the response names a resource of the type the kit sent,
- *     under an id that is neither an `ids` sample nor one the run already holds
- *     a live record for. Any other id is recorded as named and never updated,
- *     deleted or handed to `cleanup`.
+ *   - **The kit refuses an id it evidently did not create.** A create
+ *     response's id is taken only when the response names a resource of the
+ *     type the kit sent, under an id that is a URL path segment of its own and
+ *     is neither an `ids` sample, nor one a read earlier in the run returned,
+ *     nor one the run already holds a live record for. A refused id is
+ *     recorded as named and never updated, deleted or handed to `cleanup`.
+ *     Any other id is trusted: the kit cannot tell a server that names an
+ *     existing resource it has not seen from an honest one.
  *   - **Disposal is unconditional.** A created resource is handed to the rule
  *     inside `Effect.acquireUseRelease`, so the fixture's `cleanup` runs when
  *     the rule passes, when it fails and when it dies.
@@ -22,13 +25,25 @@
  * @since 0.17.0
  * @internal
  */
-import { Array as Arr, Cause, Data, Effect, Exit, Option, Predicate, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Data,
+  Effect,
+  Exit,
+  MutableHashSet,
+  Option,
+  Predicate,
+  Result,
+  Schema,
+} from "effect";
 import { MEDIA_TYPE } from "../media.js";
 import {
   type Context,
   type Discovered,
   type Finding,
   type Fixture,
+  idKey,
   type Observation,
   type Outcome,
   type Payload,
@@ -320,13 +335,35 @@ const live = (entry: Entry): boolean =>
   entry.disposal === "left" || entry.disposal === "cleanup-failed";
 
 /**
+ * Whether `id`, percent-encoded as one URL path segment, is still exactly that
+ * segment once the URL is normalised. `encodeURIComponent` escapes `/`, `?`,
+ * `#` and `%` but leaves `.` alone, and a URL's dot segments are resolved
+ * before it is sent: `/articles/..` is `/`, `/articles/.` is `/articles/`. An
+ * empty id leaves `/articles/` too. A request built from any of them reaches a
+ * URL other than the resource's own — the collection, or the root.
+ */
+const isOwnSegment = (id: string): boolean => {
+  const path = `/type/${encodeURIComponent(id)}`;
+  return id !== "" && new URL(path, "http://conformance.invalid").pathname === path;
+};
+
+/**
  * The id a create response named, if the kit may act on it — or why not. The
  * kit acts only on a resource it made, so the response must name a resource of
- * the type the kit sent, under an id that is not an `ids` sample (which the kit
- * did not create) and not one the run already holds a live record for (two
- * live resources cannot share an id, so one of the two answers is wrong). An
- * id whose earlier holder the kit has since removed is accepted: servers that
- * hand out the next free id reuse it.
+ * the type the kit sent, under an id that:
+ *
+ *   - is a URL path segment of its own (see `isOwnSegment`), since the update
+ *     and delete rules put it in a URL and `cleanup` may too;
+ *   - is not an `ids` sample, which the kit did not create;
+ *   - no successful `GET` earlier in the run has shown (`Context.observed`):
+ *     the server held that resource before the kit created anything;
+ *   - the run does not already hold a live record for (two live resources
+ *     cannot share an id, so one of the two answers is wrong).
+ *
+ * An id whose earlier holder the kit has since removed is accepted: servers
+ * that hand out the next free id reuse it. Any other id is trusted — a server
+ * that names an existing resource the run has not seen cannot be told from an
+ * honest one.
  */
 const vet = (
   ctx: Context,
@@ -338,9 +375,15 @@ const vet = (
     Result.fail(`the create response named \`${named.type}:${named.id}\`, ${why} — not touched`);
   if (named.type !== payload.type)
     return refuse(`which the kit did not create (it sent a "${payload.type}" resource)`);
+  if (!isOwnSegment(named.id))
+    return refuse(
+      "which is not a URL path segment of its own (a request to it would reach another URL)",
+    );
   const samples = [ctx.options.ids[target.key], ctx.options.ids[named.type]];
   if (Arr.contains(samples, named.id))
     return refuse("which the kit did not create (it is the `ids` sample)");
+  if (MutableHashSet.has(ctx.observed, idKey(named.type, named.id)))
+    return refuse("which the kit did not create (a read earlier in this run returned it)");
   const held = Arr.some(
     ctx.writes,
     (entry) => entry.type === target.key && entry.id === named.id && live(entry),

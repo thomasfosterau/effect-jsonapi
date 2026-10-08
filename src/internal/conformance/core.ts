@@ -7,7 +7,7 @@
  * @since 0.15.0
  * @internal
  */
-import { Effect, SchemaAST } from "effect";
+import { Array as Arr, Effect, MutableHashSet, Option, SchemaAST } from "effect";
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
@@ -393,6 +393,13 @@ export interface Context {
    * of it — the run's audit trail. Appended to by `./write.ts` only.
    */
   readonly writes: Array<{ -readonly [K in keyof WriteRecord]: WriteRecord[K] }>;
+  /**
+   * The `idKey` of every resource a successful `GET` has shown the run —
+   * primary, included, or named by a relationship. The server held each of
+   * them before the kit asked, so a create response naming one did not make
+   * it. Filled by `observing`.
+   */
+  readonly observed: MutableHashSet.MutableHashSet<string>;
   readonly request: (probe: {
     readonly method?: string;
     readonly url: string;
@@ -590,6 +597,13 @@ export const resourcesOf = (
 };
 
 /**
+ * The comparable string `identity` gives a resource with this `type` and `id`.
+ *
+ * @internal
+ */
+export const idKey = (type: string, id: string): string => JSON.stringify(["id", type, id]);
+
+/**
  * A resource object's `(type, id)` identity as a comparable string, or
  * `undefined` when it carries no usable identity.
  *
@@ -599,7 +613,7 @@ export const identity = (resource: Readonly<Record<string, unknown>>): string | 
   const type = resource["type"];
   if (typeof type !== "string") return undefined;
   const id = resource["id"];
-  if (typeof id === "string") return JSON.stringify(["id", type, id]);
+  if (typeof id === "string") return idKey(type, id);
   const lid = resource["lid"];
   if (typeof lid === "string") return JSON.stringify(["lid", type, lid]);
   return undefined;
@@ -629,6 +643,35 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
   }
   return out;
 };
+
+/** Every identity a response's document shows: its resource objects' own, and those their relationships name. */
+const shownBy = (observation: Observation): ReadonlyArray<string> =>
+  Arr.flatMap(resourcesOf(observation.body), ({ resource }) => [
+    ...Option.toArray(Option.fromUndefinedOr(identity(resource))),
+    ...linkageOf(resource),
+  ]);
+
+/**
+ * Wraps a probe runner so that every resource a 2xx `GET` shows is added to
+ * `observed` — see `Context.observed`.
+ *
+ * @internal
+ */
+export const observing =
+  (
+    request: Context["request"],
+    observed: MutableHashSet.MutableHashSet<string>,
+  ): Context["request"] =>
+  (probe) =>
+    request(probe).pipe(
+      Effect.tap((observation) =>
+        Effect.sync(() => {
+          const read = (probe.method ?? "GET") === "GET";
+          if (!read || observation.status < 200 || observation.status >= 300) return;
+          Arr.forEach(shownBy(observation), (key) => MutableHashSet.add(observed, key));
+        }),
+      ),
+    );
 
 /** @internal */
 export const errorObjectsOf = (body: unknown): ReadonlyArray<Readonly<Record<string, unknown>>> => {
