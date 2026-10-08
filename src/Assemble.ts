@@ -446,8 +446,16 @@ export interface UnpaginatedCollectionOptions<
    * The document's top-level `meta` — document-level metadata that isn't
    * page math: a generation timestamp, a cache hint, an application-specific
    * summary — emitted as given. Omit it (or pass `undefined`) and the
-   * document has no `meta` member. `totalCount` is not special-cased: a
-   * caller that wants a total wants {@link collection} and its page math.
+   * document has no `meta` member. `totalCount` is not special-cased: one
+   * passed here is emitted verbatim and, with a `self`, makes the document
+   * structurally assignable to {@link CollectionDocument} — a caller that
+   * wants a paginated total wants {@link collection} and its page math.
+   *
+   * `M` is inferred `const`, as on `Handlers.collection`: the document emits
+   * this very value, so an object literal keeps its literal type. Its
+   * constraint is `Handlers.MetaValue`, which a value typed by an `interface`
+   * without an index signature doesn't satisfy (as on `Handlers.collection`):
+   * spread it (`{ ...stamp }`) or declare its type with a `type` alias.
    *
    * An explicit `undefined` is accepted only when `M` already admits it, as
    * for `self`, so a caller's own bare-optional `o.meta` forwards as is while
@@ -881,9 +889,12 @@ export const collection = <
  *
  * Pass `meta` — document-level metadata that isn't page math, such as a
  * generation timestamp or a cache hint — and the document carries it as the
- * top-level `meta`, as given. Without it the document has no `meta` member.
- * `meta.totalCount` is not special-cased: a collection whose total matters
- * is a page of something, and goes through {@link collection}.
+ * top-level `meta`, as given, typed as passed (an object literal keeps its
+ * literal type). Without it the document has no `meta` member.
+ * `meta.totalCount` is not special-cased: it is emitted verbatim, and with a
+ * `self` the document is then structurally a {@link CollectionDocument}; a
+ * collection whose total matters is a page of something, and goes through
+ * {@link collection}.
  *
  * The return type ({@link UnpaginatedCollectionDocument}) follows the
  * `self` and `meta` passed: no `links` / `meta` member without one, the
@@ -939,12 +950,13 @@ export const unpaginatedCollection = <
   // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `self` option as passed
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `meta` option as passed
-  M extends Handlers.MetaValue | undefined = undefined,
+  const M extends Handlers.MetaValue | undefined = undefined,
 >(
   resources: ReadonlyArray<R>,
   options: UnpaginatedCollectionOptions<V, Targets, Self, M> = {},
 ): Effect.Effect<
-  // `Self` is widened to `string`, so a literal `self` doesn't leak into the type.
+  // `Self` is widened to `string`, so a literal `self` doesn't leak into the
+  // type; `M` is not, since the document emits that very value.
   UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>

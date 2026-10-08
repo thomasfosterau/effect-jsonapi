@@ -1542,14 +1542,14 @@ const document = Assemble.unpaginatedCollection(colours, {
 // succeeds with { data: [...], links: { self: "https://example.test/colours?sort=name" }, jsonapi: … }
 ```
 
-Document-level metadata that isn't page math (a generation timestamp, a cache hint, an application-specific summary) goes in `meta`, which the document carries as given. The return type follows it the way it follows `self`: `meta` of the type you pass, optional when that type admits `undefined` (your own optional `meta` forwarded as is), and no `meta` member at all without it. `meta.totalCount` gets no special treatment; a collection whose total matters is a page, and goes through `Assemble.collection`:
+Document-level metadata that isn't page math (a generation timestamp, a cache hint, an application-specific summary) goes in `meta`, which the document carries as given. The return type follows it the way it follows `self`: `meta` of the type you pass, optional when that type admits `undefined` (your own optional `meta` forwarded as is), and no `meta` member at all without it. An object literal keeps its literal type (`meta` is inferred `const`, as on `Handlers.collection`, since the document emits that very value), and a value typed by an `interface` with no index signature is rejected, as `Handlers.collection` rejects it: spread it (`{ ...stamp }`) or use a `type` alias. `meta.totalCount` gets no special treatment: it is emitted verbatim, and with `self` makes the document structurally assignable to `CollectionDocument`. A collection whose total matters is a page, and goes through `Assemble.collection`:
 
 ```ts
 const document = Assemble.unpaginatedCollection(colours, {
   self: "https://example.test/colours",
   meta: { generatedAt: snapshot.takenAt },
 });
-// Effect<UnpaginatedCollectionDocument<Colour, string, { generatedAt: string }>, …>
+// Effect<UnpaginatedCollectionDocument<Colour, string, { readonly generatedAt: string }>, …>
 // succeeds with { data: [...], links: { self: … }, meta: { generatedAt: "…" }, jsonapi: … }
 ```
 

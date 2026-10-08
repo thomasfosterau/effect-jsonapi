@@ -124,6 +124,10 @@ declare const optionallyLinkedDocument: Assemble.UnpaginatedCollectionDocument<P
 assertType<MaybeSelf>(optionallyLinkedDocument.links?.self);
 // @ts-expect-error — `links` may be absent
 assertType<string>(optionallyLinkedDocument.links.self);
+// …and is genuinely optional, not required-but-maybe-`undefined`: a linkless
+// document is one of the optionally-linked ones.
+declare const linkless: Assemble.UnpaginatedCollectionDocument<Person>;
+assertType<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>>(linkless);
 
 // The same `self` forwarded from the caller's own bare-optional option: under
 // `exactOptionalPropertyTypes`, `o.self` reads as `string | undefined` and has
@@ -208,18 +212,29 @@ assertType<unknown>(stampedDocument.links);
 // @ts-expect-error — nor is it a paginated document
 assertType<Assemble.CollectionDocument<Person>>(stampedDocument);
 
-// An object literal infers its widened type, as an annotation would spell it.
+// An object literal keeps its literal type (`M` is `const`, as on
+// `Handlers.collection`): the document emits that very value, so the type is
+// truthful — unlike `self`, which is a switch and always types as `string`.
 const literal = Assemble.unpaginatedCollection(people, { meta: { generatedAt: "now" } });
 assertType<
   Equals<
     typeof literal,
     Effect.Effect<
-      Assemble.UnpaginatedCollectionDocument<Person, undefined, { generatedAt: string }>,
+      Assemble.UnpaginatedCollectionDocument<Person, undefined, { readonly generatedAt: "now" }>,
       Assemble.IncludeError,
       never
     >
   >
 >(true);
+
+// …so a document assembled from a literal `meta` still fits a document type
+// declared with a union member, which a widened `{ cache: string }` would not.
+declare const generatedAt: string;
+const fresh = Assemble.unpaginatedCollection(people, { meta: { generatedAt, cache: "fresh" } });
+export const cached: Effect.Effect<
+  Assemble.UnpaginatedCollectionDocument<Person, undefined, Generated>,
+  Assemble.IncludeError
+> = fresh;
 
 // Alongside a `self` link: both members, each typed as passed.
 const both = Assemble.unpaginatedCollection(people, {
@@ -269,6 +284,10 @@ declare const forwardedMetaDocument: Assemble.UnpaginatedCollectionDocument<
 assertType<MaybeGenerated>(forwardedMetaDocument.meta);
 // @ts-expect-error — `meta` may be absent
 assertType<string>(forwardedMetaDocument.meta.generatedAt);
+// …and is genuinely optional, not required-but-maybe-`undefined`: a document
+// with no `meta` is one of the optionally-stamped ones.
+declare const metaless: Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf>;
+assertType<Assemble.UnpaginatedCollectionDocument<Person, MaybeSelf, MaybeGenerated>>(metaless);
 
 // An explicit `undefined` is no `meta` at all.
 const unstamped = Assemble.unpaginatedCollection(people, { meta: undefined });
