@@ -264,6 +264,21 @@ describe("onExplicitRefusal", () => {
     );
   });
 
+  // #234's reproduction: a `q` outside the RFC 9110 qvalue grammar is
+  // malformed (the default weight), never the explicit `q=0` refusal this
+  // option answers with a 406.
+  it.each(["", "0x0", "-1"])("dispatches a lone JSON:API range weighted `q=%s`", (q) => {
+    const verdict = refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`));
+    expect(verdict.error).toBeUndefined();
+    expect(verdict).toEqual({ representation: MEDIA_TYPE, dispatch: true });
+  });
+
+  it.each(["0", "0.000"])("still 406s a lone JSON:API range weighted `q=%s`", (q) => {
+    expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`)).error).toBe(
+      Negotiation.NOT_ACCEPTABLE_REFUSED,
+    );
+  });
+
   it("406s a lone `q=0` refusal of a clean `ext` instance", () => {
     expect(
       refusing.negotiate(get("/contests", `${MEDIA_TYPE};ext="https://jsonapi.org/ext/atomic";q=0`))

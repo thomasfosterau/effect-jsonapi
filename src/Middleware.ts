@@ -9,9 +9,10 @@
  *         type parameters other than `ext` / `profile` (or unsupported
  *         extension URIs) → 415 Unsupported Media Type
  *       - an `Accept` header in which every instance of the JSON:API media
- *         type carries such parameters, or is weighted `q=0`, → 406 Not
- *         Acceptable (the `q` weight itself is not a media type parameter,
- *         per RFC 9110 §12.4.2, so it never counts against the whitelist)
+ *         type carries such parameters, is weighted `q=0`, or carries a
+ *         malformed `q` → 406 Not Acceptable (the `q` weight itself is not a
+ *         media type parameter, per RFC 9110 §12.4.2, so it never counts
+ *         against the whitelist)
  *   - {@link SchemaErrors} — converts request validation failures (malformed
  *     query parameters, payloads, path parameters) into spec-compliant
  *     JSON:API 400 error documents instead of the default HttpApi error shape:
