@@ -1070,6 +1070,7 @@ Every endpoint automatically:
 - serves and accepts **`application/vnd.api+json`**
 - declares its errors as **JSON:API error documents** at the right status
 - carries the **content-negotiation middleware** (415 on parameterised request media types, 406 on unacceptable `Accept` headers) and the **schema-error middleware** (malformed params/query/payloads become JSON:API 400 documents; a handler response that fails its own endpoint's schema stays a server defect — reported, and answered with the opaque JSON:API 500 `ServerErrors.SERVER_ERROR`) — and because they're real `HttpApiMiddleware` services, **the api won't build until you provide them**: forgetting is a compile error, not a runtime surprise
+- rejects a **reserved query parameter** it does not process: JSON:API 1.1 reserves parameter names made only of the letters a-z for the specification, so `?unknown=1` (or `?foo[bar]=1` — the family's base name is what counts) is a 400 naming it in `source.parameter`, while an implementation-specific name carrying any other character (`?fooBar=1`, `?x-trace=1`) is ignored as before. The specification's own families (`include`, `fields`, `sort`, `page`, `filter`) and any all-lowercase name the endpoint's `query` schema declares are left to that schema; see [Reserved query parameters](#reserved-query-parameters) for the escape hatch
 - documents itself in **OpenAPI** (`OpenApi.fromApi(Api)`) with the JSON:API media type, status codes and bracket query parameters
 
 ### Idempotent writes (`Idempotency-Key`)
@@ -1250,6 +1251,24 @@ HttpApiBuilder.layer(Api).pipe(
 ```
 
 Use it only when something upstream genuinely enforces §5 — for an api that owns its own URLs, `Middleware.layer` remains the correct choice. (`Middleware.ContentNegotiationPassthrough` is the negotiation half alone, for composing your own set.)
+
+#### Reserved query parameters
+
+The `SchemaErrors` middleware rejects, with a 400 per offending parameter, every query parameter whose family base name is made only of a-z and that neither the specification defines nor the endpoint's `query` schema declares — the spec's MUST, which reserves those names so it can standardise more later. A host whose URL space carries its own lowercase parameters through to the api (`?lang=`, `?ref=`) can either rename them (`langCode`, `x-ref` — the spec's recommendation) or list them, by family base name:
+
+```ts
+Layer.provide(Middleware.layerWith({ allowedQueryParameters: ["lang"] }));
+
+// or, when the host negotiates content itself:
+Layer.provide(
+  Layer.mergeAll(
+    Middleware.ContentNegotiationPassthrough,
+    Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] }),
+  ),
+);
+```
+
+An allowed name never reaches the endpoint's decoded `query`; it is only no longer rejected. `Middleware.checkQueryParameters(names, { declared, allowedQueryParameters })` is the same check standalone, for a hook that decodes requests itself: it returns the 400 document, or `undefined`.
 
 And to call it — the same definitions drive a fully typed client:
 

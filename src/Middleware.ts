@@ -21,7 +21,11 @@
  *     `pointer` (`/data/attributes/title`) or `header`. HttpApi decodes each
  *     request part with the default parse options (`errors: "first"`), so a
  *     part yields one error object — except the `filter` family, whose codec
- *     reports every offending key together.
+ *     reports every offending key together. It also rejects, with a 400
+ *     naming it, a query parameter whose family base name is made only of
+ *     a-z and that neither the specification defines nor the endpoint
+ *     declares (JSON:API 1.1 §Query Parameters; see
+ *     {@link checkQueryParameters}).
  *
  * Both middlewares are attached automatically by the `Endpoint` constructors,
  * so any `HttpApi` containing JSON:API endpoints will fail to build (at the
@@ -35,7 +39,8 @@
  * failure itself), both rendered with `ApiError.toDocument`. And for an api
  * built from the constructors whose host has already negotiated,
  * {@link layerHostNegotiated} satisfies the endpoints' negotiation
- * requirement without running §5 twice.
+ * requirement without running §5 twice. {@link checkQueryParameters} is the
+ * reserved-query-parameter rule standalone.
  *
  * ## Tracing
  *
@@ -57,12 +62,23 @@
  *
  * @since 0.1.0
  */
-import { Effect, ErrorReporter, Layer, Schema, SchemaIssue } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  ErrorReporter,
+  Layer,
+  Option,
+  Predicate,
+  Record,
+  Schema,
+  SchemaAST,
+  SchemaIssue,
+} from "effect";
 import { HttpServerRespondable } from "effect/http";
-import { HttpServerRequest } from "effect/http/HttpServerRequest";
+import { HttpServerRequest, ParsedSearchParams } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
-import type { HttpApiError } from "effect/http-api";
-import { HttpApiMiddleware } from "effect/http-api";
+import type { HttpApiEndpoint } from "effect/http-api";
+import { HttpApiError, HttpApiMiddleware } from "effect/http-api";
 import {
   BadRequest,
   NotAcceptable,
@@ -99,7 +115,8 @@ import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
  * - `Span.schemaError` — one span per request-validation failure, wrapping
  *   the translation of that failure into a JSON:API 400 document. Attribute:
  *   `jsonapi.request_part` — the request part that failed (`"Params"`,
- *   `"Headers"`, `"Query"` or `"Payload"`). A failure to encode the
+ *   `"Headers"`, `"Query"` or `"Payload"`; a rejected reserved query
+ *   parameter is tagged `"Query"`). A failure to encode the
  *   *response* is a server error, not a request-validation failure, and
  *   emits no such span.
  *
@@ -445,6 +462,179 @@ export const schemaErrorDocument = (
 };
 
 // ---------------------------------------------------------------------------
+// Reserved query parameter names (JSON:API 1.1 §Query Parameters)
+// ---------------------------------------------------------------------------
+
+// The query parameter families JSON:API 1.1 itself defines. Whether a given
+// endpoint supports one is its query schema's business, not this check's.
+const SPEC_FAMILIES: ReadonlyArray<string> = ["include", "fields", "sort", "page", "filter"];
+
+// A family base name made only of a-z is reserved for the specification.
+const RESERVED_BASE_NAME = /^[a-z]+$/;
+
+// A parameter's family base name: everything before its first `[` — `page`
+// for `page[limit]`, `foo` for `foo[bar]`, the whole name when unbracketed.
+const baseName = (name: string): string => {
+  const bracket = name.indexOf("[");
+  return bracket === -1 ? name : name.slice(0, bracket);
+};
+
+/**
+ * Options for the reserved-query-parameter check {@link SchemaErrors} runs on
+ * every request (see {@link checkQueryParameters}).
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface QueryParameterOptions {
+  /**
+   * Family base names made only of a-z that the api accepts on every
+   * endpoint although no endpoint declares them — for a host whose URL space
+   * carries its own lowercase parameters (`lang`, `ref`, …) through to the
+   * api. Each name admits the bare parameter and its bracketed members
+   * (`lang` admits `lang` and `lang[x]`); the endpoint never sees them in its
+   * decoded query.
+   *
+   * JSON:API 1.1 reserves these names for the specification, so accepting one
+   * is a deliberate deviation: prefer renaming the parameter (`langCode`,
+   * `x-lang`) when the host controls it. Defaults to none.
+   */
+  readonly allowedQueryParameters?: ReadonlyArray<string> | undefined;
+}
+
+/**
+ * The input to {@link checkQueryParameters}: the
+ * {@link QueryParameterOptions} plus the parameters the endpoint declares.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface QueryParameterCheck extends QueryParameterOptions {
+  /**
+   * The query parameter names the endpoint's own query schema declares
+   * (`q`, `page[limit]`, …); each admits its whole family. Defaults to none.
+   */
+  readonly declared?: ReadonlyArray<string> | undefined;
+}
+
+/**
+ * JSON:API 1.1 §Query Parameters: a query parameter whose family base name is
+ * made only of the letters a-z is reserved for the specification, so a server
+ * that does not know how to process one MUST answer 400 Bad Request. Returns
+ * that 400 document — one error object per offending parameter, each naming
+ * it in `source.parameter` — or `undefined` when every parameter is
+ * acceptable.
+ *
+ * A parameter is acceptable when its family base name (everything before the
+ * first `[`):
+ *
+ * - contains any character outside a-z (`fooBar`, `x-trace`, `foo_bar`,
+ *   `ext:name`) — an implementation-specific or extension parameter, ignored
+ *   here as before;
+ * - is one of the specification's own families (`include`, `fields`, `sort`,
+ *   `page`, `filter`), which the endpoint's query schema decodes or ignores;
+ * - is the base of a name in `declared`; or
+ * - is listed in `allowedQueryParameters`.
+ *
+ * {@link SchemaErrorsLive} runs this on every request before the endpoint
+ * decodes anything, with the names the endpoint's query schema declares.
+ * Call it directly from a plain framework hook that decodes requests itself.
+ *
+ * @example
+ * ```ts
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // the names of the request's query parameters, e.g. from `URLSearchParams`
+ * const names = new URLSearchParams("q=hello&unknown=1&fooBar=2").keys()
+ *
+ * const document = Middleware.checkQueryParameters(names, { declared: ["q"] })
+ * document?.errors[0]?.source // { parameter: "unknown" }
+ * ```
+ *
+ * @since 0.17.0
+ * @category utils
+ */
+export const checkQueryParameters = (
+  names: Iterable<string>,
+  options?: QueryParameterCheck,
+): typeof WireDocument.Type | undefined => {
+  const known = [
+    ...SPEC_FAMILIES,
+    ...(options?.declared ?? []).map(baseName),
+    ...(options?.allowedQueryParameters ?? []),
+  ];
+  const rejected = Arr.dedupe(
+    Arr.filter(Arr.fromIterable(names), (name) => {
+      const base = baseName(name);
+      return RESERVED_BASE_NAME.test(base) && !known.includes(base);
+    }),
+  );
+  if (!Arr.isReadonlyArrayNonEmpty(rejected)) return undefined;
+  return {
+    errors: rejected.map((parameter) => ({
+      status: String(BadRequest.status),
+      code: BadRequest.code,
+      ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
+      detail:
+        `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
+        "names made only of the letters a-z for the specification; an implementation-" +
+        "specific parameter's name must contain at least one other character, such as " +
+        "a capital letter.",
+      source: { parameter },
+    })),
+  };
+};
+
+// What an endpoint's query schema declares, for `checkQueryParameters`:
+// the wire names of its encoded (flat) side, or none when that side could
+// accept a name this walk cannot enumerate — a record keyed by any string,
+// say — in which case the check stands aside rather than reject a parameter
+// the endpoint might process. `filter: true`'s `filter[…]` rest is the
+// spec's own family and enumerable as such.
+const declaredNames = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<string>> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isObjects(encoded)) {
+    return Option.map(
+      Option.all(encoded.indexSignatures.map(({ parameter }) => familyPrefix(parameter))),
+      (prefixes) => [
+        ...encoded.propertySignatures.map((signature) => String(signature.name)),
+        ...prefixes,
+      ],
+    );
+  }
+  if (SchemaAST.isUnion(encoded)) {
+    return Option.map(Option.all(encoded.types.map(declaredNames)), Arr.flatten);
+  }
+  if (SchemaAST.isSuspend(encoded)) return declaredNames(encoded.thunk());
+  return Option.none();
+};
+
+// The family an index signature's key admits, when it names one: a template
+// literal whose literal head closes the base name (`filter[`). Any other key
+// could match a base name of any spelling.
+const familyPrefix = (parameter: SchemaAST.AST): Option.Option<string> => {
+  if (!SchemaAST.isTemplateLiteral(parameter)) return Option.none();
+  const [head] = parameter.parts;
+  return head !== undefined &&
+    SchemaAST.isLiteral(head) &&
+    Predicate.isString(head.literal) &&
+    head.literal.includes("[")
+    ? Option.some(head.literal)
+    : Option.none();
+};
+
+// Endpoints are built once and served many times; walk each query schema once.
+const declaredByEndpoint = new WeakMap<HttpApiEndpoint.Top, Option.Option<ReadonlyArray<string>>>();
+
+const declaredFor = (endpoint: HttpApiEndpoint.Top): Option.Option<ReadonlyArray<string>> => {
+  const cached = declaredByEndpoint.get(endpoint);
+  if (cached !== undefined) return cached;
+  const names = endpoint.query === undefined ? Option.some([]) : declaredNames(endpoint.query.ast);
+  declaredByEndpoint.set(endpoint, names);
+  return names;
+};
+
+// ---------------------------------------------------------------------------
 // Middleware services
 // ---------------------------------------------------------------------------
 
@@ -463,9 +653,10 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
 
 /**
  * Converts request validation failures (`HttpApiSchemaError`: malformed
- * params, query, payload or headers) into JSON:API 400 error documents.
- * A failure to encode the handler's response is left a server error (see
- * {@link SchemaErrorsLive}).
+ * params, query, payload or headers) into JSON:API 400 error documents, and
+ * rejects reserved all-lowercase query parameters the endpoint does not
+ * process (see {@link checkQueryParameters}). A failure to encode the
+ * handler's response is left a server error (see {@link SchemaErrorsLive}).
  *
  * @since 0.1.0
  * @category services
@@ -555,6 +746,91 @@ class ResponseEncodeError extends Schema.TaggedError<ResponseEncodeError>()(
   }
 }
 
+// The 400 a request-validation failure answers with, under the request-part
+// span every such failure emits.
+const badRequestResponse = (part: RequestPart, document: typeof WireDocument.Type) =>
+  Effect.succeed(
+    HttpServerResponse.jsonUnsafe(document, { status: BadRequest.status, contentType: MEDIA_TYPE }),
+  ).pipe(
+    Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": part })),
+    Effect.withSpan(Span.schemaError),
+  );
+
+const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
+  isResponsePart(error.kind)
+    ? Effect.die(
+        new ResponseEncodeError({
+          message: `The handler's response failed to encode against its endpoint's schema (${error.kind})`,
+          cause: error,
+        }),
+      )
+    : badRequestResponse(error.kind, schemaErrorDocument(error.kind, error.cause));
+
+/**
+ * Creates the live {@link SchemaErrors} implementation, optionally accepting
+ * extra all-lowercase query parameters (see
+ * {@link QueryParameterOptions.allowedQueryParameters}).
+ *
+ * Before the endpoint decodes anything, every request's query parameter
+ * names are checked with {@link checkQueryParameters} against the names the
+ * endpoint's query schema declares: a parameter whose family base name is made
+ * only of a-z, that is neither one of the specification's families nor
+ * declared nor allowed, is answered with the JSON:API 400 naming it in
+ * `source.parameter` (JSON:API 1.1 §Query Parameters). Then every request
+ * validation failure is answered as {@link SchemaErrorsLive} describes.
+ *
+ * The `Endpoint` constructors attach {@link SchemaErrors} after
+ * {@link ContentNegotiation}, which makes it the outer of the two, so this
+ * check runs first: a request that both carries a reserved parameter and
+ * fails §5 negotiation is answered with the 400, not the 406 or 415.
+ *
+ * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
+ * the same option. A host that negotiates content itself composes this with
+ * {@link ContentNegotiationPassthrough}, as the example does.
+ *
+ * @example
+ * ```ts
+ * import { Layer } from "effect"
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const HandlersLive: Layer.Layer<never> = Layer.empty
+ *
+ * // The host's URL space carries its own `?lang=` through to the api.
+ * const ApiLive = Layer.mergeAll(HandlersLive).pipe(
+ *   Layer.provideMerge(
+ *     Layer.mergeAll(
+ *       Middleware.ContentNegotiationPassthrough,
+ *       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] })
+ *     )
+ *   )
+ * )
+ * ```
+ *
+ * @since 0.17.0
+ * @category constructors
+ */
+export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<SchemaErrors> =>
+  Layer.succeed(
+    SchemaErrors,
+    // Untraced: the middleware's span surface is `Span.schemaError` alone.
+    Effect.fnUntraced(function* (httpEffect, { endpoint }) {
+      const declared = declaredFor(endpoint);
+      if (Option.isSome(declared)) {
+        const params = yield* ParsedSearchParams;
+        const rejected = checkQueryParameters(Record.keys(params), {
+          declared: declared.value,
+          allowedQueryParameters: options?.allowedQueryParameters,
+        });
+        if (rejected !== undefined) return yield* badRequestResponse("Query", rejected);
+      }
+      return yield* Effect.catch(httpEffect, (error) =>
+        HttpApiError.HttpApiSchemaError.is(error)
+          ? transformSchemaError(error)
+          : Effect.fail(error),
+      );
+    }),
+  );
+
 /**
  * The live {@link SchemaErrors} implementation: answers every request
  * validation failure with the JSON:API 400 error document of
@@ -562,6 +838,15 @@ class ResponseEncodeError extends Schema.TaggedError<ResponseEncodeError>()(
  * request part under HttpApi's `errors: "first"`, every offending key for the
  * `filter` family), each with a `detail` and a `source` naming the offending
  * parameter, header or body member.
+ *
+ * It also answers a query parameter whose family base name is made only of
+ * a-z, and which the endpoint neither declares nor the specification defines
+ * (`?unknown=1`, `?foo[bar]=1`), with a 400 naming it in `source.parameter`:
+ * JSON:API 1.1 reserves those names for the specification, so a server that
+ * does not know how to process one MUST reject it. Implementation-specific
+ * names, carrying any other character (`?fooBar=1`, `?x-trace=1`), are
+ * ignored as before. {@link schemaErrorsLayer} accepts extra lowercase names
+ * a host needs.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
@@ -572,25 +857,7 @@ class ResponseEncodeError extends Schema.TaggedError<ResponseEncodeError>()(
  * @since 0.1.0
  * @category layers
  */
-export const SchemaErrorsLive: Layer.Layer<SchemaErrors> =
-  HttpApiMiddleware.layerSchemaErrorTransform(SchemaErrors, (error) =>
-    isResponsePart(error.kind)
-      ? Effect.die(
-          new ResponseEncodeError({
-            message: `The handler's response failed to encode against its endpoint's schema (${error.kind})`,
-            cause: error,
-          }),
-        )
-      : Effect.succeed(
-          HttpServerResponse.jsonUnsafe(schemaErrorDocument(error.kind, error.cause), {
-            status: BadRequest.status,
-            contentType: MEDIA_TYPE,
-          }),
-        ).pipe(
-          Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
-          Effect.withSpan(Span.schemaError),
-        ),
-  );
+export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = schemaErrorsLayer();
 
 /**
  * A {@link ContentNegotiation} implementation that performs **no** §5 checks —
@@ -681,8 +948,10 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
 );
 
 /**
- * Like {@link layer}, with content-negotiation options — required when the api
- * uses JSON:API extensions.
+ * Like {@link layer}, with options — content-negotiation options, required
+ * when the api uses JSON:API extensions, and the query-parameter options of
+ * {@link schemaErrorsLayer} (`allowedQueryParameters`, for a host that must
+ * accept its own all-lowercase parameters; since 0.17.0).
  *
  * @example
  * ```ts
@@ -703,6 +972,6 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
  * @category layers
  */
 export const layerWith = (
-  options: NegotiationOptions,
+  options: NegotiationOptions & QueryParameterOptions,
 ): Layer.Layer<ContentNegotiation | SchemaErrors> =>
-  Layer.mergeAll(contentNegotiationLayer(options), SchemaErrorsLive);
+  Layer.mergeAll(contentNegotiationLayer(options), schemaErrorsLayer(options));

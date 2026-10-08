@@ -23,9 +23,6 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   // returns every attribute. An example gap now, not a library one.
   ["spec/query/sparse-fieldsets-primary", "#112"],
   ["spec/query/sparse-fieldsets-included", "#112"],
-  // #148 — a query parameter named only with a-z that the server does not
-  // recognise must be a 400; `Query.schema` ignores unknown keys instead.
-  ["spec/query/unknown-query-parameter", "#148"],
   // #103 landed the `jsonapi` option on the document builders, but this
   // example's handlers do not pass it, so no document advertises the version
   // it implements. An example gap now, not a library one.
