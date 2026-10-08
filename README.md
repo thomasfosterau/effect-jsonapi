@@ -1519,7 +1519,7 @@ The refusal applies only when no range of any media type carries `q > 0`; anothe
 
 `Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set.
 
-`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no pagination `links` (and no `links` member at all unless `self` is given) and no `meta` — and its `UnpaginatedCollectionDocument` type has no `meta` and no pagination links, so no `next` / `last` link the endpoint doesn't honour is advertised:
+`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no pagination `links` (and no `links` member at all unless `self` is given) and no `meta` (unless `meta` is given) — and its `UnpaginatedCollectionDocument` type has no page math and no pagination links, so no `meta.totalCount` and no `next` / `last` link the endpoint doesn't honour is advertised:
 
 ```ts
 const document = Assemble.unpaginatedCollection(colours, {
@@ -1540,6 +1540,17 @@ const document = Assemble.unpaginatedCollection(colours, {
 });
 // Effect<UnpaginatedCollectionDocument<Colour, string>, …>
 // succeeds with { data: [...], links: { self: "https://example.test/colours?sort=name" }, jsonapi: … }
+```
+
+Document-level metadata that isn't page math (a generation timestamp, a cache hint, an application-specific summary) goes in `meta`, which the document carries as given. The return type follows it the way it follows `self`: `meta` of the type you pass, optional when that type admits `undefined` (your own optional `meta` forwarded as is), and no `meta` member at all without it. `meta.totalCount` gets no special treatment; a collection whose total matters is a page, and goes through `Assemble.collection`:
+
+```ts
+const document = Assemble.unpaginatedCollection(colours, {
+  self: "https://example.test/colours",
+  meta: { generatedAt: snapshot.takenAt },
+});
+// Effect<UnpaginatedCollectionDocument<Colour, string, { generatedAt: string }>, …>
+// succeeds with { data: [...], links: { self: … }, meta: { generatedAt: "…" }, jsonapi: … }
 ```
 
 `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:

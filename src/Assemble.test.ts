@@ -628,6 +628,60 @@ describe("Assemble.unpaginatedCollection", () => {
       expect(rest).toStrictEqual(linkless);
     });
   });
+
+  describe("with a top-level `meta` (#253)", () => {
+    const self = "https://example.test/people";
+    const meta = { generatedAt: "2026-10-08T00:00:00Z", cache: { maxAge: 60 } };
+    const options = {
+      viewer: NON_ADMIN,
+      capabilities: familyCapabilities,
+      include: ["birthPlace"],
+      includable: ["birthPlace"],
+      targets: registry([place]).targets,
+    };
+
+    it("emits `meta` as given, beside the per-resource meta it doesn't touch", async () => {
+      const document = await run(Assemble.unpaginatedCollection(whole, { ...options, meta }));
+      expect(document.meta).toStrictEqual(meta);
+      expect(document).not.toHaveProperty("links");
+      expect(document.data.map((resource) => resource.meta)).toEqual(
+        whole.map(() => ({ canEdit: false, canDelete: false })),
+      );
+      // No page math is added to it: a total is `Assemble.collection`'s.
+      expect(document.meta).not.toHaveProperty("totalCount");
+    });
+
+    it("is the meta-less document plus `meta`, with or without `self`", async () => {
+      const bare = await run(Assemble.unpaginatedCollection(whole, options));
+      const { meta: emitted, ...rest } = await run(
+        Assemble.unpaginatedCollection(whole, { ...options, meta }),
+      );
+      expect(emitted).toStrictEqual(meta);
+      expect(rest).toStrictEqual(bare);
+
+      const query: ReadonlyArray<Query.Pair> = [["sort", "-name"]];
+      const linked = await run(Assemble.unpaginatedCollection(whole, { ...options, self, query }));
+      const { meta: linkedMeta, ...linkedRest } = await run(
+        Assemble.unpaginatedCollection(whole, { ...options, self, query, meta }),
+      );
+      expect(linkedMeta).toStrictEqual(meta);
+      expect(linkedRest).toStrictEqual(linked);
+      expect(linkedRest.links.self).toBe(`${self}?sort=-name`);
+    });
+
+    it("emits exactly the meta-less document when `meta` is absent", async () => {
+      const bare = await run(Assemble.unpaginatedCollection(whole, options));
+      expect(bare).not.toHaveProperty("meta");
+      // A `meta` the handler turns out not to have (typed `… | undefined`,
+      // as an optional threaded through would be) adds no member.
+      const absentMeta = [meta].find((value) => value.generatedAt === "");
+      const dropped = await run(
+        Assemble.unpaginatedCollection(whole, { ...options, meta: absentMeta }),
+      );
+      expect(dropped).not.toHaveProperty("meta");
+      expect(dropped).toStrictEqual(bare);
+    });
+  });
 });
 
 describe("Assemble.relationship", () => {
