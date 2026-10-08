@@ -119,9 +119,10 @@ overrides:
   # @effect/docgen > @effect/markdown-toc > gray-matter and effect-solutions >
   # gray-matter (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh —
   # patched in 3.15.2); `shell-quote` via @changesets/cli > launch-editor
-  # (GHSA-pqg4-j6r4-53mv — patched in 1.11.0; launch-editor's `^1.10.0`
-  # admits the fix, but the floor is what moves the locked 1.10.0 and keeps
-  # it from coming back). Scoped to the affected major so a consumer of another
+  # (GHSA-pqg4-j6r4-53mv — patched in 1.11.0; the locked launch-editor
+  # 2.14.1 declares `^1.8.4` (2.14.2 raises it to `^1.10.0`), which admits the
+  # fix, but the floor is what moves the locked 1.10.0 and keeps it from
+  # coming back). Scoped to the affected major so a consumer of another
   # major elsewhere in the tree keeps its own range. Drop each once its
   # dependent's own range floor excludes the vulnerable versions.
   "brace-expansion@2": ">=2.1.4"
