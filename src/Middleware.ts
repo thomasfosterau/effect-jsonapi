@@ -56,10 +56,11 @@
  *
  * @since 0.1.0
  */
-import type { Schema } from "effect";
-import { Effect, Layer, SchemaIssue } from "effect";
+import { Effect, ErrorReporter, Layer, Schema, SchemaIssue } from "effect";
+import { HttpServerRespondable } from "effect/http";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import type { HttpApiError } from "effect/http-api";
 import { HttpApiMiddleware } from "effect/http-api";
 import {
   BadRequest,
@@ -72,6 +73,7 @@ import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
+import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -95,8 +97,10 @@ import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
  *   (`"content_type"` or `"accept"`, naming which header failed).
  * - `Span.schemaError` — one span per request-validation failure, wrapping
  *   the translation of that failure into a JSON:API 400 document. Attribute:
- *   `jsonapi.request_part` — the {@link RequestPart} that failed
- *   (`"Params"`, `"Headers"`, `"Query"`, `"Body"` or `"Payload"`).
+ *   `jsonapi.request_part` — the request part that failed (`"Params"`,
+ *   `"Headers"`, `"Query"` or `"Payload"`). A failure to encode the
+ *   *response* is a server error, not a request-validation failure, and
+ *   emits no such span.
  *
  * Every attribute value is one of a small fixed set of strings; none of them
  * is derived from a header value, a filter literal, a query string, or
@@ -261,8 +265,15 @@ export const negotiate = (
 };
 
 /**
- * The part of a request whose decoding failed — the vocabulary
- * `HttpApiSchemaError` uses, and the input to {@link schemaError}.
+ * The part of a request whose decoding failed — the input to
+ * {@link schemaError} and {@link schemaErrorDocument}.
+ *
+ * `"Params"`, `"Headers"`, `"Query"` and `"Payload"` are the request-side
+ * kinds `HttpApiSchemaError` uses; HttpApi calls the request body
+ * `"Payload"`. `"Body"` is accepted for a host that decodes a request body
+ * itself and names it so, but inside HttpApi an `HttpApiSchemaError` of kind
+ * `"Body"` is a failure to encode the handler's *response* — a server error
+ * that {@link SchemaErrorsLive} never answers as a 400.
  *
  * @since 0.7.0
  * @category models
@@ -316,7 +327,8 @@ const jsonPointer = (path: ReadonlyArray<string | number>): string =>
 // grammar key like `filter[age][gt]` is already one segment) up to the first
 // list index — everything after an index is inside a decoded value (the sort
 // codec's `["sort", 0, "field"]`), not part of the wire key; path params and
-// headers take the first segment; bodies take the JSON Pointer.
+// headers take the first segment; a request body (HttpApi's `Payload`, or a
+// host's own `Body`) takes the JSON Pointer.
 const sourceOf = (
   part: RequestPart,
   path: ReadonlyArray<string | number>,
@@ -449,6 +461,8 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
 /**
  * Converts request validation failures (`HttpApiSchemaError`: malformed
  * params, query, payload or headers) into JSON:API 400 error documents.
+ * A failure to encode the handler's response is left a server error (see
+ * {@link SchemaErrorsLive}).
  *
  * @since 0.1.0
  * @category services
@@ -512,6 +526,32 @@ export const contentNegotiationLayer = (
  */
 export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNegotiationLayer();
 
+// The `HttpApiSchemaError` kinds HttpApi raises while encoding the handler's
+// *response* rather than decoding the request: `Body` for the success value,
+// `ResponseHeaders` for its declared headers. Either means the handler produced
+// something its own endpoint's schema rejects — a server bug, not a bad request.
+type ResponsePart = Extract<HttpApiError.HttpApiSchemaError["kind"], "Body" | "ResponseHeaders">;
+
+const isResponsePart = (kind: HttpApiError.HttpApiSchemaError["kind"]): kind is ResponsePart =>
+  kind === "Body" || kind === "ResponseHeaders";
+
+// The defect a response-encoding failure dies with. It cannot stay the
+// `HttpApiSchemaError` itself: that error is `Respondable` as an empty 400, and
+// HttpApi turns a failure of it into a defect the router answers with exactly
+// that 400. This one answers with the opaque JSON:API 500 `ServerErrors.respond`
+// uses for every other server defect, and asks error reporters for `Error`
+// severity; the original `HttpApiSchemaError` rides along as `cause`.
+class ResponseEncodeError extends Schema.TaggedError<ResponseEncodeError>()(
+  "effect-jsonapi/ResponseEncodeError",
+  { message: Schema.String, cause: Schema.Defect() },
+) {
+  override readonly [ErrorReporter.severity] = "Error" as const;
+
+  [HttpServerRespondable.symbol]() {
+    return errorResponse(SERVER_ERROR);
+  }
+}
+
 /**
  * The live {@link SchemaErrors} implementation: answers every request
  * validation failure with the JSON:API 400 error document of
@@ -520,27 +560,33 @@ export const ContentNegotiationLive: Layer.Layer<ContentNegotiation> = contentNe
  * `filter` family), each with a `detail` and a `source` naming the offending
  * parameter, header or body member.
  *
+ * A handler whose response fails to encode against its endpoint's own schema
+ * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
+ * bug, not a bad request: it stays a defect, which the request's error
+ * reporting sees at `Error` severity and the client receives as the opaque
+ * JSON:API 500 of `ServerErrors.SERVER_ERROR`.
+ *
  * @since 0.1.0
  * @category layers
  */
 export const SchemaErrorsLive: Layer.Layer<SchemaErrors> =
-  HttpApiMiddleware.layerSchemaErrorTransform(
-    SchemaErrors,
-    // `ResponseHeaders` failures are a server-side bug (the handler's own response
-    // doesn't satisfy its declared schema), not a client request-validation error —
-    // re-fail with the original error instead of mislabeling it a 400.
-    (error) =>
-      error.kind === "ResponseHeaders"
-        ? Effect.fail(error)
-        : Effect.succeed(
-            HttpServerResponse.jsonUnsafe(schemaErrorDocument(error.kind, error.cause), {
-              status: BadRequest.status,
-              contentType: MEDIA_TYPE,
-            }),
-          ).pipe(
-            Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
-            Effect.withSpan(Span.schemaError),
-          ),
+  HttpApiMiddleware.layerSchemaErrorTransform(SchemaErrors, (error) =>
+    isResponsePart(error.kind)
+      ? Effect.die(
+          new ResponseEncodeError({
+            message: `The handler's response failed to encode against its endpoint's schema (${error.kind})`,
+            cause: error,
+          }),
+        )
+      : Effect.succeed(
+          HttpServerResponse.jsonUnsafe(schemaErrorDocument(error.kind, error.cause), {
+            status: BadRequest.status,
+            contentType: MEDIA_TYPE,
+          }),
+        ).pipe(
+          Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": error.kind })),
+          Effect.withSpan(Span.schemaError),
+        ),
   );
 
 /**

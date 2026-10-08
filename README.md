@@ -1069,7 +1069,7 @@ Every endpoint automatically:
 
 - serves and accepts **`application/vnd.api+json`**
 - declares its errors as **JSON:API error documents** at the right status
-- carries the **content-negotiation middleware** (415 on parameterised request media types, 406 on unacceptable `Accept` headers) and the **schema-error middleware** (malformed params/query/payloads become JSON:API 400 documents) — and because they're real `HttpApiMiddleware` services, **the api won't build until you provide them**: forgetting is a compile error, not a runtime surprise
+- carries the **content-negotiation middleware** (415 on parameterised request media types, 406 on unacceptable `Accept` headers) and the **schema-error middleware** (malformed params/query/payloads become JSON:API 400 documents; a handler response that fails its own endpoint's schema stays a server defect — reported, and answered with the opaque JSON:API 500 `ServerErrors.SERVER_ERROR`) — and because they're real `HttpApiMiddleware` services, **the api won't build until you provide them**: forgetting is a compile error, not a runtime surprise
 - documents itself in **OpenAPI** (`OpenApi.fromApi(Api)`) with the JSON:API media type, status codes and bracket query parameters
 
 ### Idempotent writes (`Idempotency-Key`)
