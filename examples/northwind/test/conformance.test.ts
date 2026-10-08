@@ -179,7 +179,10 @@ describe("northwind: JSON:API conformance", () => {
       ) as Effect.Effect<Conformance.Report, never, never>,
     );
     expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
-    expect(died(specOnly)).toEqual([]);
+    expect(
+      died(specOnly),
+      `a rule died — a defect, not a finding\n${Conformance.format(specOnly)}`,
+    ).toEqual([]);
     const failing = specOnly.outcomes
       .filter((outcome) => outcome._tag === "Failed")
       .map((outcome) => outcome.rule.id);
