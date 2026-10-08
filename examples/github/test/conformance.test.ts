@@ -8,7 +8,7 @@
  * entry should come off this list.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect } from "effect";
+import { Effect, Predicate } from "effect";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
@@ -83,6 +83,17 @@ const WRITES: Conformance.Options["writes"] = {
   },
 };
 
+/**
+ * The rules that died in a run, each as `id: message`. A rule that dies — a
+ * defect in the kit or its transport, not a finding about this example — is an
+ * `Errored` outcome rather than a failed run (#246), so nothing that filters
+ * for `Failed` sees it; every run here is checked with this.
+ */
+const died = (run: Conformance.Report): ReadonlyArray<string> =>
+  run.outcomes.flatMap((outcome) =>
+    Predicate.isTagged(outcome, "Errored") ? [`${outcome.rule.id}: ${outcome.message}`] : [],
+  );
+
 const report = await Effect.runPromise(
   Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }).pipe(
     Effect.provide(GitHubLive),
@@ -91,6 +102,15 @@ const report = await Effect.runPromise(
 );
 
 describe("github: JSON:API conformance", () => {
+  it("decided every rule it ran: none died", () => {
+    // The message carries the whole report, so a dead rule explains itself
+    // alongside its neighbours; the diff names each dead rule and its defect.
+    expect(
+      died(report),
+      `a rule died — a defect, not a finding\n${Conformance.format(report)}`,
+    ).toEqual([]);
+  });
+
   it("breaks exactly the rules that are already filed", () => {
     const failing = report.outcomes
       .filter((outcome) => outcome._tag === "Failed")
@@ -156,6 +176,7 @@ describe("github: JSON:API conformance", () => {
       ) as Effect.Effect<Conformance.Report, never, never>,
     );
     expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
+    expect(died(specOnly)).toEqual([]);
     const failing = specOnly.outcomes
       .filter((outcome) => outcome._tag === "Failed")
       .map((outcome) => outcome.rule.id);
