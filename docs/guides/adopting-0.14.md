@@ -122,7 +122,7 @@ return Handlers.collection(bibliographies, { included, links, meta: { totalCount
 **The 400 for a rejected path.** Two cases, both carrying the whole legal set as `meta.includablePaths` — the contract `UnsupportedIncludeError.allowed` existed for (#1623):
 
 - A path outside the declared surface never reaches a handler. `Endpoint.get(Bibliography, { include: BIBLIOGRAPHY_INCLUDE })` rejects `?include=entries.nope` at decode time, and `Middleware.schemaErrorDocument` renders it as `{ status: "400", source: { parameter: "include" }, meta: { includablePaths: ["entries", "entries.bibliography"] } }`. As of this guide the literal schema publishes the set, so the 400 carries it — previously it carried the `source` alone. `?sort=` does the same with `meta.sortableFields`.
-- A handler that validates paths at runtime (a `related` endpoint resolving one level, a family whose allow-list is data) calls `Query.validateIncludePaths(paths, { includable: surface.paths, maxDepth: 3 })` and fails with `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`; both encode to the same document (`meta.includablePaths`, `meta.maxDepth`).
+- A handler that validates paths at runtime (a `related` endpoint resolving one level, a family whose allow-list is data) calls `Query.validateIncludePaths(paths, { includable: surface.paths, maxDepth: 3 })` and fails with `ApiError.UnsupportedIncludePath` / `UnsupportedIncludeDepth`; both encode to the same document (`source: { parameter: "include" }`, `meta.includablePaths`, `meta.maxDepth`).
 
 ```ts
 const rejected =
