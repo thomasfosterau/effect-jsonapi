@@ -85,6 +85,11 @@ export default defineConfig({
       // 269 `avoid-native-object-helpers`, 245 `avoid-non-null-assertion`.
       "effect/require-safety-comment-for-type-assertion": "warn",
       "effect/no-chained-type-assertions": "warn",
+      // This rule and `no-known-value-widening` only check the built-in
+      // `Record<K, V>` while no local binding is named `Record`, so importing
+      // effect's `Record` module under that name hides every such site in
+      // the file (#275). Never bind it as `Record`: alias it (`Record as R`,
+      // or `Rec` where `R` is already the file's resource type parameter).
       "effect/no-unsafe-dictionary-type": "warn",
       "effect/no-runtime-typeof": "warn",
       "effect/use-clock-service": "warn",
