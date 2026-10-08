@@ -3,15 +3,16 @@
  *
  * **Moves to `@thomasfosterau/effect-schema-ext`** (effect-schema-ext#1) once
  * that package publishes; this module is the interim home so nothing here
- * depends on an unpublished package. Everything is re-exported from a public
- * module (`ServerErrors.pathToJsonPointer`, `FlatQuery.suppliedValue`) so the
- * move is an import change, not an API change.
+ * depends on an unpublished package. Everything public is re-exported from a
+ * public module (`ServerErrors.pathToJsonPointer`, `FlatQuery.suppliedValue`)
+ * so the move is an import change, not an API change; `closedStruct` is used
+ * only inside the library's own request-body schemas.
  *
  * @internal
  */
 // The bare `effect` barrel: the schema-only entry point reaches this module,
 // and `test/entry-points.test.ts` pins `effect` as its only external.
-import { JsonPointer, Option, Predicate, SchemaIssue } from "effect";
+import { JsonPointer, Option, Predicate, Record as Rec, Schema, SchemaIssue } from "effect";
 
 /**
  * The value an update actually **supplies** for a clearable, tri-state field
@@ -117,3 +118,53 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
   walk(issue, [], Option.none());
   return leaves;
 };
+
+// A struct that declares no fields parses any non-nullish input (in the
+// pinned effect it is a bare not-nullish check), so this filter first answers
+// a non-object the way a struct with fields does: "Expected object" at the
+// member itself. `Predicate.isObject` is the test that struct applies
+// (`typeof "object"`, not `null`, not an array). Otherwise each enumerable own
+// key of the input is an `UnexpectedKey` at its own path, the issue
+// `onExcessProperty: "error"` reports for a struct with fields;
+// `Reflect.ownKeys` rather than `Object.keys` so a symbol key counts too.
+// No `identifier` / `title` / `description`: an identifier makes each site a
+// named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
+// document and renders a `null` member as "Expected <identifier>", and a title
+// or description would be copied into that document too.
+// oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
+const noMembers = Schema.makeFilter<unknown>(
+  (input, ast) =>
+    !Predicate.isObject(input)
+      ? "Expected object"
+      : Reflect.ownKeys(input)
+          .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
+          .map((key) => ({
+            path: [key],
+            issue: new SchemaIssue.UnexpectedKey(
+              ast,
+              Object.getOwnPropertyDescriptor(input, key)?.value,
+            ),
+          })),
+  { toJsonSchema: () => ({ type: "object", additionalProperties: false }) },
+);
+
+/**
+ * `Schema.Struct(fields)`, closed when `fields` is empty: a struct that
+ * declares no fields rejects every member of its input, each as an
+ * `UnexpectedKey` issue at that member's path ("Expected no excess property"),
+ * and rejects a non-object or an array at its own path ("Expected object"),
+ * as a struct with fields does.
+ *
+ * In the pinned `effect`, a struct **with** fields drops input keys it doesn't
+ * declare, but a struct with **no** fields is a bare not-nullish check that
+ * returns its input unchanged, so every key reaches the decoded value although
+ * its type is `{}`. Parse options can't close it (`onExcessProperty` is never
+ * consulted on that path); this check does. A struct with fields is returned
+ * as `Schema.Struct` builds it.
+ */
+export const closedStruct = <const Fields extends Schema.Struct.Fields>(
+  fields: Fields,
+): Schema.Struct<Fields> =>
+  Rec.isEmptyReadonlyRecord(fields)
+    ? Schema.Struct<Fields>(fields).check(noMembers)
+    : Schema.Struct(fields);

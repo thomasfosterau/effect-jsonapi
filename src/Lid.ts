@@ -217,15 +217,22 @@ export const make = (): LidMap => {
       const resolved: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(relationships)) {
         const linkage = value.data;
-        resolved[key] = {
-          ...value,
-          data:
-            linkage === null || linkage === undefined
-              ? null
-              : Array.isArray(linkage)
-                ? linkage.map(resolveRef)
-                : resolveRef(linkage as RefValue),
-        };
+        // An own data property, so a member named `__proto__` stays a key
+        // instead of re-parenting `resolved` (plain assignment would).
+        Object.defineProperty(resolved, key, {
+          value: {
+            ...value,
+            data:
+              linkage === null || linkage === undefined
+                ? null
+                : Array.isArray(linkage)
+                  ? linkage.map(resolveRef)
+                  : resolveRef(linkage as RefValue),
+          },
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        });
       }
       return resolved as ResolvedLinkage<R>;
     },
