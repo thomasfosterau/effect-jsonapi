@@ -545,6 +545,8 @@ describe("SchemaErrorsLive and response encoding", () => {
   const MisencodingApp = HttpApiBuilder.layer(MisencodingApi).pipe(Layer.provide(MisencodingLive));
   const HeaderApp = HttpApiBuilder.layer(HeaderApi).pipe(Layer.provide(HeaderLive));
 
+  const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
   // Serves one request with the live middleware, a recording error reporter
   // and a recording tracer, returning what each of them saw.
   const serve = async (
@@ -572,10 +574,14 @@ describe("SchemaErrorsLive and response encoding", () => {
     );
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     const response = await handler(input).finally(dispose);
+    // Read the body as text and parse it only when there is one, so a wrong
+    // status (an empty 400, say) surfaces as a status mismatch rather than as
+    // a JSON parse error.
+    const text = await response.text();
     return {
       status: response.status,
       contentType: response.headers.get("content-type"),
-      body: await response.json(),
+      body: text === "" ? undefined : decodeJson(text),
       reports,
       spans,
     };
@@ -594,6 +600,13 @@ describe("SchemaErrorsLive and response encoding", () => {
     const { reports } = await serve(new Request("http://localhost/articles/1"));
     expect(reports.map(({ severity }) => severity)).toEqual(["Error"]);
     expect(reports.map(({ error }) => error.message)).toEqual([expect.stringContaining("(Body)")]);
+    // the original `HttpApiSchemaError` is kept as the reported error's cause
+    expect(reports.map(({ error }) => error)).toEqual([
+      expect.objectContaining({
+        _tag: "effect-jsonapi/ResponseEncodeError",
+        cause: expect.objectContaining({ _tag: "HttpApiSchemaError", kind: "Body" }),
+      }),
+    ]);
   });
 
   it("treats a response header its own schema rejects the same way", async () => {
@@ -601,6 +614,12 @@ describe("SchemaErrorsLive and response encoding", () => {
     expect(response.status).toBe(500);
     expect(response.body).toEqual(SERVER_ERROR.toDocument());
     expect(response.reports.map((report) => report.severity)).toEqual(["Error"]);
+    expect(response.reports.map((report) => report.error)).toEqual([
+      expect.objectContaining({
+        _tag: "effect-jsonapi/ResponseEncodeError",
+        cause: expect.objectContaining({ _tag: "HttpApiSchemaError", kind: "ResponseHeaders" }),
+      }),
+    ]);
   });
 
   it("still answers a malformed request body with the JSON:API 400", async () => {
