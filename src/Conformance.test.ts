@@ -1592,21 +1592,71 @@ describe("Conformance: the write fixture", () => {
     message: Schema.String,
   }) {}
 
-  // A fixture that throws a value the kit can render is not a defect: no rule
-  // dies of it. One it can't render still does, until #271.
-  it.each([
+  /** An error whose `message` getter throws: reading it, as `String` does, throws. */
+  const messageThrows = Object.defineProperty(new FixtureBroke({ message: "" }), "message", {
+    get: (): string => {
+      throw new FixtureBroke({ message: "no message" });
+    },
+  });
+
+  /** What each value a fixture member throws or fails with renders as in the report. */
+  const fixtureValues = [
+    {
+      value: "a tagged error",
+      thrown: new FixtureBroke({ message: "fixture broke" }),
+      rendered: "FixtureBroke: fixture broke",
+    },
+    // `__proto__` in a literal sets the prototype: `String` finds no `toString` on it.
+    { value: "a null-prototype object", thrown: { __proto__: null }, rendered: "{}" },
+    { value: "a revoked Proxy", thrown: revoked, rendered: "[unrenderable defect]" },
+    {
+      value: "an error whose message getter throws",
+      thrown: messageThrows,
+      rendered: "[unrenderable defect]",
+    },
+    {
+      value: "an error named by a Symbol",
+      thrown: Object.assign(new FixtureBroke({ message: "broke" }), { name: Symbol("odd") }),
+      rendered: "[unrenderable defect]",
+    },
+  ];
+
+  type Thrown = (typeof fixtureValues)[number]["thrown"];
+
+  const throwing = (thrown: Thrown) => (): never => {
+    throw thrown;
+  };
+
+  /** The fixture member that misbehaves, how, and what the run must make of it. */
+  const fixtureMembers = [
     {
       member: "create",
-      expected: (report: Conformance.Report, writes: ReadonlyArray<Conformance.Write>) => {
-        everyWriteRule(report, `writes["articles"].create threw: FixtureBroke: create broke`);
+      how: "throws",
+      override: (thrown: Thrown): Partial<Conformance.WriteFixture> => ({
+        create: throwing(thrown),
+      }),
+      expected: (
+        report: Conformance.Report,
+        writes: ReadonlyArray<Conformance.Write>,
+        rendered: string,
+      ) => {
+        everyWriteRule(report, `writes["articles"].create threw: ${rendered}`);
         expect(writes).toEqual([]);
       },
     },
     {
       member: "update",
-      expected: (report: Conformance.Report, writes: ReadonlyArray<Conformance.Write>) => {
+      how: "throws",
+      override: (thrown: Thrown): Partial<Conformance.WriteFixture> => ({
+        update: throwing(thrown),
+      }),
+      expected: (
+        report: Conformance.Report,
+        writes: ReadonlyArray<Conformance.Write>,
+        rendered: string,
+      ) => {
         expect(outcomeFor(report, "spec/status/update-response")).toEqual(
-          skippedFor(`writes["articles"].update threw: FixtureBroke: update broke`),
+          skippedFor(`writes["articles"].update threw: ${rendered}`),
         );
         const others = WRITE_RULES.filter((id) => id !== "spec/status/update-response");
         expect(others.map((id) => outcomeFor(report, id)._tag)).toEqual(others.map(() => "Passed"));
@@ -1615,32 +1665,58 @@ describe("Conformance: the write fixture", () => {
     },
     {
       member: "cleanup",
-      expected: (report: Conformance.Report, writes: ReadonlyArray<Conformance.Write>) => {
-        everyWriteRule(report);
-        const stuck = writes.filter((write) => write.disposal === "cleanup-failed");
-        // Every creation but the one the kit's own DELETE removed.
-        expect(stuck.length).toBe(WRITE_RULES.length - 1);
-        expect(stuck[0]?.detail).toContain("cleanup broke");
-      },
+      how: "throws",
+      override: (thrown: Thrown): Partial<Conformance.WriteFixture> => ({
+        cleanup: throwing(thrown),
+      }),
+      expected: (
+        report: Conformance.Report,
+        writes: ReadonlyArray<Conformance.Write>,
+        rendered: string,
+      ) => cleanupFailed(report, writes, rendered),
     },
-  ] as const)(
-    "skips or records — never dies — when the fixture's $member throws",
-    async ({ member, expected }) => {
+    {
+      member: "cleanup",
+      how: "fails with",
+      override: (thrown: Thrown): Partial<Conformance.WriteFixture> => ({
+        cleanup: () => Effect.fail(thrown),
+      }),
+      expected: (
+        report: Conformance.Report,
+        writes: ReadonlyArray<Conformance.Write>,
+        rendered: string,
+      ) => cleanupFailed(report, writes, rendered),
+    },
+  ];
+
+  /** Every write rule passed, and every creation but the one the kit's own DELETE removed is `cleanup-failed`, saying why. */
+  const cleanupFailed = (
+    report: Conformance.Report,
+    writes: ReadonlyArray<Conformance.Write>,
+    rendered: string,
+  ) => {
+    everyWriteRule(report);
+    const stuck = writes.filter((write) => write.disposal === "cleanup-failed");
+    expect(stuck.length).toBe(WRITE_RULES.length - 1);
+    expect(stuck.map((write) => write.detail)).toEqual(stuck.map(() => rendered));
+  };
+
+  // A write fixture member that throws, or a `cleanup` that fails, is not a
+  // defect — whatever the value, even one no rendering can read: no rule dies
+  // of it.
+  it.each(
+    fixtureMembers.flatMap((member) => fixtureValues.map((value) => ({ ...member, ...value }))),
+  )(
+    "skips or records — never dies — when the fixture's $member $how $value",
+    async ({ override, thrown, rendered, expected }) => {
       const { report, writes } = await run(undefined, (store, cleaned) => ({
-        writes: {
-          articles: {
-            ...fixture(store, cleaned),
-            [member]: () => {
-              throw new FixtureBroke({ message: `${member} broke` });
-            },
-          },
-        },
+        writes: { articles: { ...fixture(store, cleaned), ...override(thrown) } },
       }));
       expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual(
         [],
       );
       expect(failed(report)).toEqual([]);
-      expected(report, writes);
+      expected(report, writes, rendered);
     },
   );
 
