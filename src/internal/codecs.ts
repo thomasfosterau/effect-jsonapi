@@ -5,6 +5,7 @@
  */
 import { Option, Record, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
+import { define } from "./define.js";
 import { errorMeta } from "./errorMeta.js";
 
 /**
@@ -146,19 +147,6 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
       }),
     ),
   );
-};
-
-// Assigns an own, enumerable data property. Plain assignment would run the
-// `__proto__` accessor for a key spelled `__proto__` (a client controls every
-// key), re-parenting the record — or, for a group read back through it,
-// writing into `Object.prototype`.
-const define = <V>(record: Record<string, V>, key: string, value: V): void => {
-  Object.defineProperty(record, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
 };
 
 const bracketKey = /^([^[\]]+)\[([^[\]]+)\]$/;

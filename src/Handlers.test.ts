@@ -327,6 +327,25 @@ describe("Handlers.project", () => {
     });
   });
 
+  // Attributes parsed from JSON can carry `__proto__` as an own key; a
+  // projection that assigned it would drop the member and re-parent the copy
+  // onto its value (#269).
+  it("keeps a requested attribute keyed __proto__ as an own data member", () => {
+    const Json = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown));
+    const resource = {
+      type: "articles",
+      id: "3",
+      attributes: Schema.decodeUnknownSync(Json)(
+        '{"__proto__":{"inner":2},"title":"T","body":"B"}',
+      ),
+    };
+    const { attributes } = Handlers.project(resource, { articles: ["__proto__", "title"] });
+    expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyNames(attributes)).toEqual(["__proto__", "title"]);
+    expect(Schema.encodeSync(Json)(attributes)).toBe('{"__proto__":{"inner":2},"title":"T"}');
+    expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
+  });
+
   it("data-last builds the transform the builders take", () => {
     const onResource = Handlers.project({ articles: ["title"] });
     expect(onResource(relatedArticle)).toEqual({
