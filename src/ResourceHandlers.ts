@@ -770,7 +770,9 @@ const loadRefs = <Targets extends Handlers.IncludeTargets>(
  * paginated collection (offset / limit over the linkage; only the page's
  * refs are loaded, one call per distinct target type), a **to-one** the
  * single related resource honouring `?include=`, or `{ data: null }` for
- * empty linkage. A ref that doesn't resolve is dropped, never a failure.
+ * empty linkage — with `included: []` when the request carried `include`,
+ * whose paths are validated either way. A ref that doesn't resolve is
+ * dropped, never a failure.
  *
  * @since 0.16.0
  * @category constructors
@@ -786,12 +788,14 @@ export const related = <
   Targets extends Handlers.IncludeTargets = never,
 >(
   config: RelatedConfig<TParent, TId, V, E, R, RV, RL, Targets>,
-): ((
-  request: RelatedRequest<TId>,
-) => Effect.Effect<
+): ((request: RelatedRequest<TId>) => Effect.Effect<
   | Assemble.CollectionDocument<Assemble.ResourceLike>
   | Assemble.ResourceDocument<Assemble.ResourceLike>
-  | { readonly data: null; readonly jsonapi: typeof Assemble.JSONAPI_MEMBER },
+  | {
+      readonly data: null;
+      readonly included?: readonly [];
+      readonly jsonapi: typeof Assemble.JSONAPI_MEMBER;
+    },
   E | Assemble.IncludeError | Handlers.IncludeTargetError<Targets>,
   R | RV | RL | Handlers.IncludeTargetServices<Targets>
 >) => {
@@ -830,8 +834,18 @@ export const related = <
     const refs = Assemble.relationshipRefs(yield* config.loadParent(params.id), config.key);
     const [resource] = yield* loadRefs(refs.slice(0, 1), config.targets, concurrency);
     // An empty linkage and a ref that doesn't resolve are the same answer on
-    // the wire: `data: null`.
-    if (resource === undefined) return { data: null, jsonapi: Assemble.JSONAPI_MEMBER } as const;
+    // the wire: `data: null`. There is nothing to walk from, but the request's
+    // paths are still validated as a resolved resource's are, and a request
+    // carrying `include` still gets the key, empty (§Fetching Includes, #232).
+    if (resource === undefined) {
+      const include = query?.include;
+      if (include === undefined) return { data: null, jsonapi: Assemble.JSONAPI_MEMBER } as const;
+      yield* Query.validateIncludePaths(include, {
+        includable: config.includable ?? [],
+        maxDepth: Assemble.MAX_INCLUDE_DEPTH,
+      });
+      return { data: null, included: [], jsonapi: Assemble.JSONAPI_MEMBER } as const;
+    }
     return yield* Assemble.resource(resource, {
       ...capabilities,
       viewer: yield* viewer,
@@ -846,7 +860,11 @@ export const related = <
   ) => Effect.Effect<
     | Assemble.CollectionDocument<Assemble.ResourceLike>
     | Assemble.ResourceDocument<Assemble.ResourceLike>
-    | { readonly data: null; readonly jsonapi: typeof Assemble.JSONAPI_MEMBER },
+    | {
+        readonly data: null;
+        readonly included?: readonly [];
+        readonly jsonapi: typeof Assemble.JSONAPI_MEMBER;
+      },
     E | Assemble.IncludeError | Handlers.IncludeTargetError<Targets>,
     R | RV | RL | Handlers.IncludeTargetServices<Targets>
   >;

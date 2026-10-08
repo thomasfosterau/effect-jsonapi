@@ -242,9 +242,15 @@ describe("Assemble.resource", () => {
     expect(
       await run(Assemble.resource(person("p1"), { includable: ["birthPlace"] })),
     ).not.toHaveProperty("included");
+  });
+
+  it("emits `included: []` for `?include=` with no paths: the request carried `include` (#232)", async () => {
+    // Presence is the signal: `?include=` decodes to `[]`, and a client that
+    // supplied `include`, even empty, gets the compound document's key.
     expect(
-      await run(Assemble.resource(person("p1"), { include: [], includable: ["birthPlace"] })),
-    ).not.toHaveProperty("included");
+      (await run(Assemble.resource(person("p1"), { include: [], includable: ["birthPlace"] })))
+        .included,
+    ).toEqual([]);
   });
 
   it("emits `included: []` when include was requested and nothing resolved (#232)", async () => {
@@ -469,6 +475,24 @@ describe("Assemble.collection", () => {
     ).toEqual([]);
   });
 
+  it("emits `included: []` in validate-only mode: include, no registry (#232)", async () => {
+    const pagination = { totalCount: 3, offset: 0, limit: 10, baseUrl };
+    expect(
+      (
+        await run(
+          Assemble.collection(page, pagination, {
+            include: ["birthPlace"],
+            includable: ["birthPlace"],
+          }),
+        )
+      ).included,
+    ).toEqual([]);
+    // `?include=` with no paths is still a request that carried `include`.
+    expect(
+      (await run(Assemble.collection(page, pagination, { include: [], includable: [] }))).included,
+    ).toEqual([]);
+  });
+
   it("resolves the page's include walk in one batch per target type, deduplicated", async () => {
     const { calls, targets } = registry([place]);
     const document = await run(
@@ -617,6 +641,22 @@ describe("Assemble.unpaginatedCollection", () => {
     );
     expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
     expect(deduped.included).toEqual([]);
+  });
+
+  it("emits `included: []` in validate-only mode: include, no registry (#232)", async () => {
+    expect(
+      (
+        await run(
+          Assemble.unpaginatedCollection(whole, {
+            include: ["birthPlace"],
+            includable: ["birthPlace"],
+          }),
+        )
+      ).included,
+    ).toEqual([]);
+    expect(
+      (await run(Assemble.unpaginatedCollection(whole, { include: [], includable: [] }))).included,
+    ).toEqual([]);
   });
 
   it("assembles what `collection` does, less its links and meta", async () => {

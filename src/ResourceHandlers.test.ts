@@ -539,4 +539,53 @@ describe("related", () => {
       jsonapi: { version: "1.1" },
     });
   });
+
+  it("answers an empty to-one with `included: []` when the request carried `include` (#232)", async () => {
+    // §Fetching Includes: a request carrying `include` gets the `included` key,
+    // even when there is no related resource to walk from.
+    const empty = ResourceHandlers.related({
+      ...config,
+      key: "polity",
+      cardinality: "one",
+      includable: ["country", "country.capital.mayor"],
+    });
+    const [withPath, threeHops, bareInclude, withoutInclude] = await Effect.runPromise(
+      Effect.all(
+        [
+          empty({ params: { id: "c1" }, query: { include: ["country"] } }),
+          // A path at the default depth limit (3 hops) is accepted.
+          empty({ params: { id: "c1" }, query: { include: ["country.capital.mayor"] } }),
+          // `?include=` (no paths) is still a request that carried `include`.
+          empty({ params: { id: "c1" }, query: { include: [] } }),
+          empty({ params: { id: "c1" }, query: {} }),
+        ],
+        { concurrency: 1 },
+      ),
+    );
+    expect(withPath).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+    expect(threeHops).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+    expect(bareInclude).toEqual({ data: null, included: [], jsonapi: { version: "1.1" } });
+    // Without `include` the key stays absent.
+    expect(withoutInclude).not.toHaveProperty("included");
+  });
+
+  it("validates an empty to-one's include paths, as it does a resolved one's", async () => {
+    const empty = ResourceHandlers.related({
+      ...config,
+      key: "polity",
+      cardinality: "one",
+      includable: ["country"],
+    });
+    expect(
+      await failure(empty({ params: { id: "c1" }, query: { include: ["nope"] } })),
+    ).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+    expect(
+      await failure(empty({ params: { id: "c1" }, query: { include: ["a.b.c.d"] } })),
+    ).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+    // With no `includable` configured, no path is includable.
+    const closed = ResourceHandlers.related({ ...config, key: "polity", cardinality: "one" });
+    expect(
+      await failure(closed({ params: { id: "c1" }, query: { include: ["country"] } })),
+    ).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+  });
 });
