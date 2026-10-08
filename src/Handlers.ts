@@ -608,9 +608,17 @@ const mapResources = <F extends TransformLambda>(
  *
  * The three steps run in that order deliberately. Dedup first, so `onResource`
  * runs once per distinct resource rather than once per occurrence; the
- * transform before the check, so the check sees the resources the document
- * actually emits — a transform that drops `relationships` breaks full linkage,
- * and saying so is the point of the check.
+ * transform before the check, so the check sees the `included` members the
+ * document actually emits — a transform that drops `relationships` can break
+ * full linkage, and saying so is the point of the check.
+ *
+ * `onResource` shapes only `included` here: the check reads `primary` as
+ * passed. {@link data} and {@link collection} pass their already-transformed
+ * primary data; called directly, pass `primary` as the document will emit it.
+ *
+ * The check is per reference: a member passes when any resource in the
+ * document — primary or another included member — references it, not only
+ * when it is reachable from the primary data.
  *
  * The transform is keyed off the resource as given, so it must not change a
  * resource's `type` or `id`.
@@ -630,8 +638,9 @@ export const buildIncluded = <
   options?: {
     /**
      * `false` skips the full-linkage check, which is on by default. The check
-     * runs on the resources the document emits, after dedup and `onResource`,
-     * so `included` from {@link resolveIncluded} is not on its own a reason to
+     * runs on the `included` members after dedup and `onResource`, against
+     * `primary` as passed — so pass `primary` as the document will emit it.
+     * `included` from {@link resolveIncluded} is not on its own a reason to
      * skip it: a transform that touches `relationships` can orphan members the
      * resolver linked. Skip it only when you know every emitted `included`
      * member is referenced by the emitted document.
@@ -987,8 +996,10 @@ const resolve = (
  *
  * - an `onResource` transform removes or rewrites `relationships`. The check
  *   runs on the transformed resources the document emits, so stripping the
- *   primary data's `relationships` orphans the first level of `included`, and
- *   stripping a member's orphans everything reached only through it.
+ *   primary data's `relationships` orphans every member that only the primary
+ *   data referenced, and stripping a member's orphans every member that only
+ *   it referenced. The check is per reference, not reachability from the
+ *   primary data: a member another member still references passes.
  *   {@link project} and {@link withMeta} leave `relationships` alone;
  *   {@link transform} is unconstrained;
  * - the array is edited: a member taken out can orphan what was reached

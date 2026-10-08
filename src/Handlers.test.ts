@@ -460,6 +460,41 @@ describe("the per-resource transform pass", () => {
     ).toEqual([{ type: "articles", id: "2", attributes: relatedArticle.attributes }]);
   });
 
+  it("checks linkage per reference, not reachability from the primary data", () => {
+    // Pins the current, non-transitive check: a member referenced by another
+    // member passes even when the primary data no longer reaches either of
+    // them. #239 tracks making it transitive, which turns this into a throw.
+    const stripRelationships = Handlers.transform<Handlers.IdentityLambda>((resource) => {
+      if (resource.type !== "articles" || resource.id !== "1") return resource;
+      const { relationships: _relationships, ...rest } = resource;
+      return rest;
+    });
+    const primary = {
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hi" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+    const person = {
+      type: "people",
+      id: "9",
+      attributes: { name: "Ann" },
+      relationships: { articles: { data: [{ type: "articles", id: "2" }] } },
+    };
+    const other = {
+      type: "articles",
+      id: "2",
+      attributes: { title: "Yo" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+    const document = Handlers.data(primary, {
+      included: [person, other],
+      onResource: stripRelationships,
+    });
+    expect(document.data).toEqual({ type: "articles", id: "1", attributes: { title: "Hi" } });
+    expect(document.included).toEqual([person, other]);
+  });
+
   it("buildIncluded drops members already present as primary data (#147)", () => {
     expect(Handlers.buildIncluded([article, author], [author, comment, author])).toEqual([comment]);
   });
