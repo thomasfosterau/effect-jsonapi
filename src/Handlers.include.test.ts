@@ -711,6 +711,19 @@ describe("Handlers.resolveIncluded — composing a document", () => {
     expect(document).toEqual({ data: article1 });
     expect("included" in document).toBe(false);
   });
+
+  it("keeps an empty `included` when the walk resolved to nothing (#232)", async () => {
+    // §Fetching Includes: a request carrying `include` gets a compound
+    // document with an `included` key, even an empty one. `[]` from the walk
+    // reaches the wire as `included: []`, not as an omitted member.
+    const db = store(graph);
+    const document = await run(
+      Handlers.resolveIncluded(article1, ["editor"], db.targets("people")).pipe(
+        Effect.map((included) => Handlers.data(article1, { included })),
+      ),
+    );
+    expect(document).toEqual({ data: article1, included: [] });
+  });
 });
 
 describe("Handlers.resolveIncluded — types", () => {

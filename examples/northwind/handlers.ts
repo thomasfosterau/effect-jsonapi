@@ -674,7 +674,10 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       loadProduct(params.id).pipe(
         Effect.map((product) =>
           Handlers.data(product, {
-            included: resolveProductIncluded(product, query.include),
+            included:
+              query.include === undefined
+                ? undefined
+                : resolveProductIncluded(product, query.include),
             self: `/products/${product.id}`,
           }),
         ),
@@ -719,7 +722,10 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((product) => resolveProductIncluded(product, query.include)),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((product) => resolveProductIncluded(product, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total),
         }),
@@ -829,7 +835,10 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       loadEmployee(params.id).pipe(
         Effect.map((employee) =>
           Handlers.data(employee, {
-            included: resolveEmployeeIncluded(employee, query.include),
+            included:
+              query.include === undefined
+                ? undefined
+                : resolveEmployeeIncluded(employee, query.include),
             self: `/employees/${employee.id}`,
           }),
         ),
@@ -846,7 +855,10 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       const { limit, offset, page, total } = paginate(employees, query.page);
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((employee) => resolveEmployeeIncluded(employee, query.include)),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((employee) => resolveEmployeeIncluded(employee, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total),
         }),
@@ -940,7 +952,8 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
       loadOrder(params.id).pipe(
         Effect.map((order) =>
           Handlers.data(order, {
-            included: resolveOrderIncluded(order, query.include),
+            included:
+              query.include === undefined ? undefined : resolveOrderIncluded(order, query.include),
             self: `/orders/${order.id}`,
           }),
         ),
@@ -977,7 +990,10 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((order) => resolveOrderIncluded(order, query.include)),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((order) => resolveOrderIncluded(order, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total),
         }),
@@ -1034,7 +1050,10 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
           const { limit, offset, page, total } = paginate(all, query.page);
           const path = Handlers.relatedLink("orders", order.id, "lineItems");
           return Handlers.collection(page, {
-            included: page.flatMap((item) => resolveOrderItemIncluded(item, query.include)),
+            included:
+              query.include === undefined
+                ? undefined
+                : page.flatMap((item) => resolveOrderItemIncluded(item, query.include)),
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
           });
@@ -1099,9 +1118,12 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     return Effect.succeed(
       Handlers.collection(page, {
-        included: page.flatMap((result) =>
-          result.type === "products" ? resolveProductIncluded(result, query.include) : [],
-        ),
+        included:
+          query.include === undefined
+            ? undefined
+            : page.flatMap((result) =>
+                result.type === "products" ? resolveProductIncluded(result, query.include) : [],
+              ),
         meta: { total },
         links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
       }),

@@ -90,8 +90,26 @@ describe("Handlers.data", () => {
     expect(Handlers.data(selfLinked, { included: [selfLinked, author] }).included).toEqual([
       author,
     ]);
-    // …and when it was the only candidate, there is no `included` member at all.
-    expect(Handlers.data(selfLinked, { included: [selfLinked] })).toEqual({ data: selfLinked });
+    // …and when it was the only candidate, `included` is still there, empty:
+    // the caller asked for a compound document (#232).
+    expect(Handlers.data(selfLinked, { included: [selfLinked] })).toEqual({
+      data: selfLinked,
+      included: [],
+    });
+  });
+
+  it("emits `included: []` when the caller passed an empty array (#232)", () => {
+    // JSON:API 1.1 §Fetching Includes: a response to a request carrying
+    // `include` MUST be a compound document with an `included` key, even if it
+    // holds an empty array. An array — however empty — is the caller saying so.
+    expect(Handlers.data(article, { included: [] })).toEqual({ data: article, included: [] });
+    expect(Handlers.data(null, { included: [] })).toEqual({ data: null, included: [] });
+  });
+
+  it("omits `included` when the caller passed `undefined` (#232)", () => {
+    // `undefined` is "no include was requested": the document stays bare.
+    expect(Handlers.data(article, { included: undefined })).toEqual({ data: article });
+    expect("included" in Handlers.data(article, { included: undefined })).toBe(false);
   });
 });
 
@@ -123,10 +141,23 @@ describe("Handlers.collection", () => {
     expect(doc.included).toEqual([comment]);
   });
 
-  it("omits `included` when every candidate is already primary data (#147)", () => {
+  it("keeps an empty `included` when every candidate is already primary data (#147, #232)", () => {
+    // `/search?include=author` where every author is also a hit: the dedupe
+    // against primary data leaves nothing, and the request still carried
+    // `include`, so the compound document keeps its (empty) `included` key.
     expect(Handlers.collection([article, author], { included: [author, author] })).toEqual({
       data: [article, author],
+      included: [],
     });
+  });
+
+  it("emits `included: []` for an empty array and omits it for `undefined` (#232)", () => {
+    expect(Handlers.collection([article], { included: [] })).toEqual({
+      data: [article],
+      included: [],
+    });
+    expect(Handlers.collection([], { included: [] })).toEqual({ data: [], included: [] });
+    expect(Handlers.collection([article], { included: undefined })).toEqual({ data: [article] });
   });
 
   it("appends the request's canonical query to the self link", () => {
@@ -441,7 +472,7 @@ describe("the per-resource transform pass", () => {
       },
     });
     expect(runs).toBe(1);
-    expect(document.included).toBeUndefined();
+    expect(document.included).toEqual([]);
   });
 
   it("runs before the full-linkage check — a transform that breaks linkage is caught", () => {

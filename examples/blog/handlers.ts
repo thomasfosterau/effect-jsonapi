@@ -154,7 +154,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.map((article) =>
           Handlers.data(article, {
-            included: resolveIncluded(article, query.include),
+            included:
+              query.include === undefined ? undefined : resolveIncluded(article, query.include),
             self: `/articles/${article.id}`,
           }),
         ),
@@ -187,7 +188,10 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((article) => resolveIncluded(article, query.include)),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((article) => resolveIncluded(article, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total),
         }),
@@ -264,12 +268,15 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           const page = all.slice(offset, offset + limit);
           const path = Handlers.relatedLink("articles", article.id, "comments");
           return Handlers.collection(page, {
-            included: query.include?.includes("author")
-              ? page.flatMap((comment) => {
-                  const author = store.people.get(comment.relationships!.author.data.id);
-                  return author === undefined ? [] : [author];
-                })
-              : [],
+            included:
+              query.include === undefined
+                ? undefined
+                : query.include.includes("author")
+                  ? page.flatMap((comment) => {
+                      const author = store.people.get(comment.relationships!.author.data.id);
+                      return author === undefined ? [] : [author];
+                    })
+                  : [],
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
           });
@@ -368,7 +375,7 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
       Handlers.collection(page, {
         included:
           query.include === undefined
-            ? []
+            ? undefined
             : page.flatMap((result) =>
                 result.type === "articles" ? resolveIncluded(result, query.include) : [],
               ),

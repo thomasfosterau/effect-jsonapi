@@ -24,6 +24,12 @@
  * disagree about what a ref resolves to and a page's walk is never N round
  * trips.
  *
+ * A request carrying `include` always answers a compound document: the
+ * `included` key is present, `[]` when nothing resolved or every candidate was
+ * already primary data (JSON:API 1.1 §Fetching Includes). Without `include`
+ * the key is absent unless members the caller resolved itself survive the
+ * dedupe against the primary data.
+ *
  * ## Capabilities
  *
  * `meta.canEdit` / `meta.canDelete` advertise what the viewer may do to a
@@ -363,7 +369,9 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
   /**
    * The registry the walk loads through, keyed by target type
    * (`Handlers.IncludeTargets`). Omit it and no walk runs — `include` is
-   * validated but `included` stays absent.
+   * validated, and `included` holds only what the caller resolved itself
+   * (`[]` for {@link resource}): a request carrying `include` always gets the
+   * key, empty when nothing remains (JSON:API 1.1 §Fetching Includes).
    */
   readonly targets?: Targets | undefined;
   /** The maximum number of hops. Defaults to {@link MAX_INCLUDE_DEPTH}. */
@@ -675,7 +683,12 @@ const onResourceFor = <V>(options: Options<V, any>) =>
 const asValue = (resource: ResourceLike): Handlers.ResourceValue =>
   resource as unknown as Handlers.ResourceValue;
 
-/** Validates the requested paths, then walks them — or answers nothing when no walk was asked for. */
+/**
+ * Validates the requested paths, then walks them. `undefined` means the
+ * request carried no `include`, and only that: a request that did gets an
+ * array, `[]` when there is no registry to walk through, so the document
+ * keeps its `included` key (§Fetching Includes, #232).
+ */
 const walk = <Targets extends Handlers.IncludeTargets>(
   primary: ReadonlyArray<ResourceLike>,
   options: Options<any, Targets>,
@@ -695,7 +708,7 @@ const walk = <Targets extends Handlers.IncludeTargets>(
   }).pipe(
     Effect.flatMap(() =>
       options.targets === undefined
-        ? Effect.succeed(undefined)
+        ? Effect.succeed([])
         : Handlers.resolveIncluded(primary.map(asValue), include, options.targets, {
             depth,
             concurrency: options.concurrency,
@@ -768,7 +781,8 @@ export const resource = <
     Effect.map((included) => {
       const built = Handlers.data(asValue(wired), {
         ...(wired.links?.self === undefined ? {} : { self: wired.links.self }),
-        ...(included === undefined || included.length === 0
+        // An empty walk keeps the key: the request carried `include` (#232).
+        ...(included === undefined
           ? {}
           : { included: included.map((r) => asValue(stringifyLinks(r))) }),
         onResource: onResourceFor(options),
@@ -776,6 +790,18 @@ export const resource = <
       return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<R>;
     }),
   );
+};
+
+// A document answering a request that carried no `include` keeps `included`
+// only when something is in it: the caller may have resolved no members of
+// its own, or only members that are primary data, which the builders' dedupe
+// then drops, leaving their empty array.
+const withoutEmptyIncluded = <T extends { readonly included?: ReadonlyArray<unknown> }>(
+  document: T,
+): T => {
+  if (document.included === undefined || document.included.length > 0) return document;
+  const { included: _included, ...rest } = document;
+  return rest as T;
 };
 
 /**
@@ -803,19 +829,24 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
   const wired = resources.map(stringifyLinks);
   return walk(wired, options).pipe(
     Effect.map((resolved) => {
+      // `resolved` is an array exactly when the request carried `include`.
+      const requested = resolved !== undefined;
       const included = [...(options.included ?? []), ...(resolved ?? [])];
       const built = Handlers.collection(wired.map(asValue), {
         ...top,
-        ...(included.length === 0
-          ? {}
-          : { included: included.map((r) => asValue(stringifyLinks(r))) }),
+        included: included.map((r) => asValue(stringifyLinks(r))),
         onResource: onResourceFor(options),
       });
       // SAFETY: `Handlers.collection` types its value over the builders' loose
       // `ResourceValue`; the value is `D` by construction — the wired, stamped
-      // resources, `included` only when non-empty, exactly the `top` members
-      // the caller's `D` declares, and the `jsonapi` member.
-      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as D;
+      // resources, `included` when the request carried `include` (empty if
+      // nothing remains, #232) or when members survive the dedupe against
+      // the primary data, exactly the `top` members the caller's `D`
+      // declares, and the `jsonapi` member.
+      return {
+        ...(requested ? built : withoutEmptyIncluded(built)),
+        jsonapi: JSONAPI_MEMBER,
+      } as unknown as D;
     }),
   );
 };

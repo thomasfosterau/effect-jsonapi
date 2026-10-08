@@ -1145,7 +1145,7 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 )
 ```
 
-The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` — against itself and against the primary `data`, so a resource that is both a hit and an include target is emitted once, as primary data — and checked for **full linkage** (every included resource must be reachable from the primary data through resource linkage). Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
+The document builders (`Handlers.data` / `Handlers.collection`) enforce the compound-document rules at runtime: `included` is **deduplicated** by `(type, id)` — against itself and against the primary `data`, so a resource that is both a hit and an include target is emitted once, as primary data — and checked for **full linkage** (every included resource must be reachable from the primary data through resource linkage). Any `included` array is emitted, even an empty one or one the dedupe empties — a response to a request carrying `include` MUST have an `included` key, "even if that `included` key holds an empty array" ([§Fetching Includes](https://jsonapi.org/format/1.1/#fetching-includes)) — so pass an array whenever the request carried `include`, and `undefined` when it did not, which omits the member. Their `onResource` option applies per-resource processing — sparse fieldsets, computed `meta` — uniformly across the whole document ([below](#the-per-resource-transform-pass-onresource)).
 
 ### Resolving `included` — one batch per level
 
@@ -1174,7 +1174,7 @@ What it guarantees, and why each one matters:
 | **Cycles terminate** | A graph that loops (`articles → comments → articles`) revisits resources the document already holds, which are never re-loaded |
 | **Depth-capped** | `depth` (default `3`, the deepest path `Query.Include` legalises) bounds the number of hops. §7.1 leaves the bound implementation-defined and each hop is another round of loader calls, so this is a denial-of-service boundary, not just an ergonomic one |
 | **Unresolvable refs dropped** | A type with no target, an id the batch didn't return, a row this viewer may not see: all normal outcomes, simply absent from `included`. A loader's own failure propagates and fails the document |
-| **`undefined` when unasked** | So the caller omits the member. `[]` is the different statement "your walk resolved to nothing" |
+| **`undefined` when unasked** | So the builders omit the member. `[]` is the different statement "your walk resolved to nothing", which they emit as `included: []` |
 
 Because every resource is reached _through_ a document resource's linkage, full linkage holds by construction **for the array the resolver returns**: handed unchanged to `Handlers.data` / `Handlers.collection` with the same primary data, the builders' check is a guard over the resolver's own output rather than a live constraint. It is live again when anything between the walk and the document changes linkage, because the check runs on the resources the document actually emits:
 
@@ -1517,7 +1517,7 @@ The refusal applies only when no range of any media type carries `q > 0`; anothe
 
 ### The assembler, the handlers and the registry
 
-`Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set.
+`Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set. A request carrying `include` always gets the `included` key — `[]` when nothing resolved or every candidate was already primary data; without `include` the key is absent unless members the caller resolved itself survive the dedupe.
 
 `Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no pagination `links` (and no `links` member at all unless `self` is given) and no `meta` (unless `meta` is given) — and its `UnpaginatedCollectionDocument` type has no page math and no pagination links, so no `meta.totalCount` and no `next` / `last` link the endpoint doesn't honour is advertised:
 

@@ -238,14 +238,33 @@ describe("Assemble.resource", () => {
     ]);
   });
 
-  it("emits no `included` when no include is requested, or no registry is wired", async () => {
+  it("emits no `included` when no include is requested", async () => {
     expect(
-      (await run(Assemble.resource(person("p1"), { includable: ["birthPlace"] }))).included,
-    ).toBeUndefined();
+      await run(Assemble.resource(person("p1"), { includable: ["birthPlace"] })),
+    ).not.toHaveProperty("included");
+    expect(
+      await run(Assemble.resource(person("p1"), { include: [], includable: ["birthPlace"] })),
+    ).not.toHaveProperty("included");
+  });
+
+  it("emits `included: []` when include was requested and nothing resolved (#232)", async () => {
+    // §Fetching Includes: a response to a request carrying `include` MUST be a
+    // compound document with an `included` key, even an empty one.
     const validatedOnly = await run(
       Assemble.resource(person("p1"), { include: ["birthPlace"], includable: ["birthPlace"] }),
     );
-    expect(validatedOnly.included).toBeUndefined();
+    expect(validatedOnly.included).toEqual([]);
+    // A registry that cannot resolve the ref: the walk answers `[]`.
+    const { calls, targets } = registry([party("party-1")]);
+    const unresolved = await run(
+      Assemble.resource(person("p1"), {
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      }),
+    );
+    expect(calls).toEqual([]);
+    expect(unresolved.included).toEqual([]);
   });
 
   it("rejects an include path outside the whitelist, naming the allowed paths", async () => {
@@ -367,7 +386,7 @@ describe("Assemble.collection", () => {
     }
   });
 
-  it("emits pre-resolved included members, link-coerced, and omits the member when empty", async () => {
+  it("emits pre-resolved included members, link-coerced, and omits the member when empty and unrequested", async () => {
     const withIncluded = await run(
       Assemble.collection(
         page,
@@ -391,6 +410,17 @@ describe("Assemble.collection", () => {
         )
       ).included,
     ).toBeUndefined();
+    // Members that are all primary data, with no `include` on the request:
+    // the dedupe leaves nothing, and there is no request to answer with `[]`.
+    expect(
+      await run(
+        Assemble.collection(
+          [person("a"), place],
+          { totalCount: 2, offset: 0, limit: 10, baseUrl },
+          { included: [place] },
+        ),
+      ),
+    ).not.toHaveProperty("included");
   });
 
   it("does not repeat a page member in `included` (#147)", async () => {
@@ -409,7 +439,34 @@ describe("Assemble.collection", () => {
     );
     expect(calls).toEqual([]);
     expect(ids(document.data)).toEqual(["people:a", "places:place-1"]);
-    expect(document.included).toBeUndefined();
+    // Every candidate was a hit, but the request carried `include`, so the
+    // compound document keeps its `included` key, empty (#232).
+    expect(document.included).toEqual([]);
+  });
+
+  it("emits `included: []` when include was requested and nothing resolved (#232)", async () => {
+    const { calls, targets } = registry([]);
+    const document = await run(
+      Assemble.collection(
+        page,
+        { totalCount: 3, offset: 0, limit: 10, baseUrl },
+        { include: ["birthPlace"], includable: ["birthPlace"], targets },
+      ),
+    );
+    expect(calls).toEqual([]);
+    expect(document.included).toEqual([]);
+    // An empty page answers the same way.
+    expect(
+      (
+        await run(
+          Assemble.collection(
+            [],
+            { totalCount: 0, offset: 0, limit: 10, baseUrl },
+            { include: ["birthPlace"], includable: ["birthPlace"], targets },
+          ),
+        )
+      ).included,
+    ).toEqual([]);
   });
 
   it("resolves the page's include walk in one batch per target type, deduplicated", async () => {
@@ -532,9 +589,34 @@ describe("Assemble.unpaginatedCollection", () => {
     expect(calls).toEqual([]);
     expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
     expect(ids(deduped.included)).toEqual(["candidates:c-1"]);
-    expect(
-      (await run(Assemble.unpaginatedCollection(whole, { included: [] }))).included,
-    ).toBeUndefined();
+    expect(await run(Assemble.unpaginatedCollection(whole, { included: [] }))).not.toHaveProperty(
+      "included",
+    );
+  });
+
+  it("emits `included: []` when include was requested and nothing remains (#232)", async () => {
+    const { calls, targets } = registry([]);
+    const unresolved = await run(
+      Assemble.unpaginatedCollection(whole, {
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      }),
+    );
+    expect(calls).toEqual([]);
+    expect(unresolved.included).toEqual([]);
+    // Every candidate is already primary data: the dedupe leaves nothing, and
+    // the key stays.
+    const deduped = await run(
+      Assemble.unpaginatedCollection([contest("x"), election], {
+        included: [election],
+        include: ["election"],
+        includable: ["election"],
+        targets,
+      }),
+    );
+    expect(ids(deduped.data)).toEqual(["contests:x", "elections:election-1"]);
+    expect(deduped.included).toEqual([]);
   });
 
   it("assembles what `collection` does, less its links and meta", async () => {

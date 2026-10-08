@@ -65,6 +65,8 @@ describe("blog example: fetching", () => {
     expect(document.links?.self).toBe("/articles/1");
     // dates decode through the wire format
     expect(document.data?.attributes.createdAt).toBeInstanceOf(Date);
+    // no `?include=`, no compound document: the member is absent, not `[]`
+    expect(document).not.toHaveProperty("included");
   });
 
   it("serves compound documents for ?include=author,tags", async () => {
@@ -508,6 +510,34 @@ describe("blog example: heterogeneous search", () => {
 
     // the matched article's author is included
     expect(document.included?.map((resource) => resource.type)).toEqual(["people"]);
+  });
+
+  it("keeps an empty `included` when every included author is already a hit (#232)", async () => {
+    // "d" hits the article and its author, Dan: the author is primary data, so
+    // the dedupe leaves nothing to include — but the request carried
+    // `include`, and §Fetching Includes requires the key, even empty.
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.search.search({
+          query: { filter: { q: "d" }, include: ["author"] },
+        });
+      }),
+    );
+
+    // the article and its author are both hits
+    expect(document.data.map((result) => `${result.type}:${result.id}`)).toEqual(
+      expect.arrayContaining(["articles:1", `people:${sampleAuthor.id}`]),
+    );
+    expect(document.included).toEqual([]);
+    // …and without `include` the member is absent
+    const plain = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.search.search({ query: { filter: { q: "d" } } });
+      }),
+    );
+    expect(plain).not.toHaveProperty("included");
   });
 
   it("documents the search endpoint in OpenAPI", () => {
