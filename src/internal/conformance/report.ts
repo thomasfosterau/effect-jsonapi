@@ -10,7 +10,7 @@
  * @since 0.15.0
  * @internal
  */
-import type { Gap, Outcome, Rule, Tier } from "./core.js";
+import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
 
 /** @internal */
 export interface Summary {
@@ -127,6 +127,37 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
   return lines.join("\n");
 };
 
+const DISPOSAL: Readonly<Record<Disposal, string>> = {
+  deleted: "deleted by the kit's DELETE probe",
+  "cleaned-up": "removed by cleanup",
+  "cleanup-failed": "CLEANUP FAILED",
+  left: "LEFT IN PLACE",
+};
+
+/**
+ * The audit trail of a run that wrote: every resource the kit created and what
+ * became of it, with what is still there called out first. Nothing at all when
+ * no write rule ran, so a read-only run's report is unchanged.
+ */
+const renderWrites = (writes: ReadonlyArray<WriteRecord>): ReadonlyArray<string> => {
+  if (writes.length === 0) return [];
+  const remaining = writes.filter(
+    (write) => write.disposal === "left" || write.disposal === "cleanup-failed",
+  ).length;
+  const out: Array<string> = [
+    "WRITES",
+    `  ${writes.length} resource${writes.length === 1 ? "" : "s"} created · ${remaining} still in place`,
+    "",
+  ];
+  for (const write of writes) {
+    const detail = write.detail === undefined ? "" : ` — ${write.detail}`;
+    out.push(`  ${write.type}:${write.id ?? "(no id)"}  ${DISPOSAL[write.disposal]}${detail}`);
+    out.push(`      created by ${write.rule}`);
+  }
+  out.push("");
+  return out;
+};
+
 /**
  * Renders the whole report. Failures first within each tier, because that is
  * what a reader came for; then passes, then the rules that did not run.
@@ -140,6 +171,7 @@ export const format = (
     readonly version: string;
     readonly outcomes: ReadonlyArray<Outcome>;
     readonly gaps: ReadonlyArray<Gap>;
+    readonly writes?: ReadonlyArray<WriteRecord> | undefined;
   },
   options?: { readonly width?: number | undefined },
 ): string => {
@@ -169,6 +201,8 @@ export const format = (
       out.push("");
     }
   }
+
+  out.push(...renderWrites(report.writes ?? []));
 
   out.push("NOT COVERED BY THIS KIT");
   if (report.gaps.length === 0) {

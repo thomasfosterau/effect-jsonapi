@@ -270,6 +270,25 @@ const loadUser = (id: string): Effect.Effect<User, UserNotFound> => {
   return user === undefined ? Effect.fail(new UserNotFound({ id })) : Effect.succeed(user);
 };
 
+/**
+ * Removes a repository outright, bypassing the API — the cleanup a conformance
+ * run's write fixture hands back (`test/conformance.test.ts`).
+ */
+export const discardRepository = (id: string): Effect.Effect<void> =>
+  Effect.sync(() => {
+    store.repositories.delete(id);
+  });
+
+/**
+ * Removes an issue outright, bypassing the API — issues have no DELETE
+ * endpoint, so this is the only way a conformance run's created issues go.
+ */
+export const discardIssue = (id: string): Effect.Effect<void> =>
+  Effect.sync(() => {
+    store.issues.delete(id);
+    store.commentsByIssue.delete(id);
+  });
+
 const loadRepository = (id: string): Effect.Effect<Repository, RepositoryNotFound> => {
   const repository = store.repositories.get(id);
   return repository === undefined

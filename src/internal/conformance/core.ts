@@ -261,8 +261,62 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
 };
 
 // ---------------------------------------------------------------------------
-// URL resolution
+// Options and the write fixture
 // ---------------------------------------------------------------------------
+
+/**
+ * A resource object, without an `id`, that a create endpoint will accept — in
+ * its wire (encoded) form, because the kit sends it as raw JSON.
+ *
+ * @internal
+ */
+export interface Payload {
+  readonly type: string;
+  readonly attributes?: Readonly<Record<string, unknown>> | undefined;
+  readonly relationships?: Readonly<Record<string, unknown>> | undefined;
+  readonly meta?: Readonly<Record<string, unknown>> | undefined;
+}
+
+/** @internal */
+export interface Fixture {
+  /**
+   * A resource object the server will accept on `POST /<type>`, without an
+   * `id`. Called once per create the kit makes, so a fixture under a
+   * uniqueness constraint can return a fresh value each time.
+   */
+  readonly create?: (() => Payload) | undefined;
+  /**
+   * The `attributes` / `relationships` of a PATCH that must succeed against a
+   * resource `create` made. The kit adds `type` and `id`.
+   */
+  readonly update?: (() => Omit<Payload, "type">) | undefined;
+  /**
+   * Removes a resource the kit created, by the id the server assigned it. Run
+   * for every resource the kit created and did not itself delete — after the
+   * rule that made it, whether that rule passed, failed or died.
+   */
+  readonly cleanup?: ((id: string) => Effect.Effect<unknown, unknown>) | undefined;
+}
+
+/**
+ * What became of a resource the kit created: removed by the kit's own DELETE
+ * probe, removed by the fixture's `cleanup`, `cleanup` failed, or left behind
+ * because the fixture supplied no `cleanup` (or the response named no id).
+ *
+ * @internal
+ */
+export type Disposal = "deleted" | "cleaned-up" | "cleanup-failed" | "left";
+
+/** @internal */
+export interface WriteRecord {
+  readonly type: string;
+  /** The id the server answered with, or `undefined` when the response named none. */
+  readonly id: string | undefined;
+  /** The id of the rule whose probe created it. */
+  readonly rule: string;
+  readonly disposal: Disposal;
+  readonly detail: string | undefined;
+}
 
 /** @internal */
 export interface ResolvedOptions {
@@ -272,7 +326,12 @@ export interface ResolvedOptions {
   readonly absentId: string;
   readonly extensions: ReadonlyArray<string>;
   readonly mutating: boolean;
+  readonly writes: Readonly<Record<string, Fixture>>;
 }
+
+// ---------------------------------------------------------------------------
+// URL resolution
+// ---------------------------------------------------------------------------
 
 /** @internal */
 export type Resolution =
@@ -325,6 +384,11 @@ export const resolvePath = (endpoint: Discovered, options: ResolvedOptions): Res
 export interface Context {
   readonly endpoints: ReadonlyArray<Discovered>;
   readonly options: ResolvedOptions;
+  /**
+   * Every resource a write probe created, in creation order, with what became
+   * of it — the run's audit trail. Appended to by `./write.ts` only.
+   */
+  readonly writes: Array<{ -readonly [K in keyof WriteRecord]: WriteRecord[K] }>;
   readonly request: (probe: {
     readonly method?: string;
     readonly url: string;
@@ -345,6 +409,28 @@ const headerRecord = (
 };
 
 /**
+ * The client request for a probe. A body is sent under the probe's own
+ * `Content-Type` — the JSON:API media type unless the probe says otherwise —
+ * never `application/json`, which a JSON:API server is entitled to refuse
+ * before reading the body.
+ */
+const clientRequest = (
+  method: string,
+  url: string,
+  headers: Readonly<Record<string, string>>,
+  body: unknown,
+): HttpClientRequest.HttpClientRequest => {
+  const request = HttpClientRequest.make(method as "GET")(url, { headers });
+  return body === undefined
+    ? request
+    : HttpClientRequest.bodyText(
+        request,
+        JSON.stringify(body),
+        headers["content-type"] ?? MEDIA_TYPE,
+      );
+};
+
+/**
  * Builds the probe runner over an `HttpClient`. A transport failure becomes an
  * `Observation` with `status: 0` rather than an error, so one unreachable
  * endpoint is reported as a finding instead of aborting the whole run.
@@ -361,8 +447,7 @@ export const runner =
         ? probe.url
         : `${baseUrl.replace(/\/$/, "")}${probe.url}`;
       const record: Probe = { method, url: probe.url, headers, body: probe.body };
-      let request = HttpClientRequest.make(method as "GET")(url, { headers });
-      if (probe.body !== undefined) request = HttpClientRequest.bodyJsonUnsafe(request, probe.body);
+      const request = clientRequest(method, url, headers, probe.body);
       const result = yield* Effect.result(client.execute(request));
       if (result._tag === "Failure") {
         return {

@@ -11,7 +11,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { Effect } from "effect";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
-import { NorthwindLive } from "../handlers.js";
+import { discardOrder, discardProduct, NorthwindLive } from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
@@ -30,6 +30,9 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   // example's handlers do not pass it, so no document advertises the version
   // it implements. An example gap now, not a library one.
   ["profile/document/jsonapi-member", "#103"],
+  // #236 — a 201 create SHOULD carry `Location`, and nothing in the library
+  // emits one; the write fixture below is what lets the kit see it at all.
+  ["spec/status/create-location", "#236"],
 ];
 
 const IDS = {
@@ -43,8 +46,51 @@ const IDS = {
   orders: "1",
 };
 
+/**
+ * The write fixture: payloads the example accepts, updates it must apply, and
+ * the cleanup for whatever the write rules create. Product names are unique per
+ * run because the example rejects a duplicate product name.
+ */
+let sequence = 0;
+const WRITES: Conformance.Options["writes"] = {
+  products: {
+    create: () => ({
+      type: "products",
+      attributes: {
+        name: `Conformance Probe ${++sequence}`,
+        unitPrice: 1,
+        unitsInStock: 0,
+        discontinued: false,
+      },
+      relationships: {
+        category: { data: { type: "categories", id: "1" } },
+        supplier: { data: { type: "suppliers", id: "1" } },
+      },
+    }),
+    update: () => ({ attributes: { unitsInStock: 10 } }),
+    cleanup: discardProduct,
+  },
+  orders: {
+    create: () => ({
+      type: "orders",
+      attributes: {
+        orderDate: "2024-01-01T00:00:00.000Z",
+        requiredDate: "2024-01-15T00:00:00.000Z",
+        freight: 1,
+        shipCountry: "Australia",
+      },
+      relationships: {
+        customer: { data: { type: "customers", id: "1" } },
+        employee: { data: { type: "employees", id: "1" } },
+      },
+    }),
+    update: () => ({ attributes: { shipCity: "Melbourne" } }),
+    cleanup: discardOrder,
+  },
+};
+
 const report = await Effect.runPromise(
-  Conformance.verify(Api, { ids: IDS }).pipe(
+  Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }).pipe(
     Effect.provide(NorthwindLive),
     Effect.scoped,
   ) as Effect.Effect<Conformance.Report, never, never>,
@@ -82,6 +128,19 @@ describe("northwind: JSON:API conformance", () => {
     const summary = Conformance.summarise(report);
     expect(summary.probes).toBeGreaterThan(50);
     expect(summary.passed).toBeGreaterThan(15);
+  });
+
+  it("ran the write rules against targets it created, and left nothing behind", () => {
+    for (const id of [
+      "spec/status/create-response-document",
+      "spec/status/update-response",
+      "spec/status/delete-response",
+    ]) {
+      expect(report.outcomes.find((outcome) => outcome.rule.id === id)?._tag).toBe("Passed");
+    }
+    const writes = report.writes ?? [];
+    expect(writes.length).toBeGreaterThan(0);
+    for (const write of writes) expect(["deleted", "cleaned-up"]).toContain(write.disposal);
   });
 
   it("renders a report that states what it did not check", () => {

@@ -2,7 +2,7 @@
 
 Design note for `Conformance` — the executable specification a server is driven through to prove it implements JSON:API v1.1, and this package's profile. Tracks [#120](https://github.com/thomasfosterau/effect-jsonapi/issues/120) (epic [#115](https://github.com/thomasfosterau/effect-jsonapi/issues/115)).
 
-**Status:** v1 implemented. 36 rules (31 `spec`, 5 `profile`), eight declared coverage gaps; `Conformance.rules` and `Conformance.gaps` are the live lists.
+**Status:** v1 implemented, plus the write fixture ([#162](https://github.com/thomasfosterau/effect-jsonapi/issues/162)). 39 rules (34 `spec`, 5 `profile`), eight declared coverage gaps; `Conformance.rules` and `Conformance.gaps` are the live lists.
 
 ## 0. Why it exists
 
@@ -65,6 +65,41 @@ SKIP  spec/document/top-level-members
 
 A rule that probed _some_ endpoints but not others passes with a note saying how many it never reached, so partial coverage never reads as full coverage.
 
+### 1.4 The write fixture
+
+`ids` cannot drive a write: the kit cannot synthesise a payload a server will accept (attributes carry domain constraints, required to-one relationships point at resources that must already exist, and a payload rejected with a 422 proves nothing about the 201 rules), and it cannot undo what it created. So the write rules take a second, opt-in contract, keyed by resource type like `ids`:
+
+```ts
+Conformance.verify(api, {
+  ids: { articles: "1" },
+  mutating: true, // the master switch: nothing writes without it
+  writes: {
+    articles: {
+      // a payload the server will accept, in wire form — called once per create
+      create: () => ({
+        type: "articles",
+        attributes: { title: `conformance probe ${++n}`, body: "…" },
+        relationships: { author: { data: { type: "people", id: "9" } } },
+      }),
+      // a PATCH that must succeed against a resource `create` made; the kit adds type and id
+      update: () => ({ attributes: { title: `conformance probe ${++n} (updated)` } }),
+      // removes a resource the kit created, by the id the server assigned
+      cleanup: (id) => Effect.sync(() => store.delete(id)),
+    },
+  },
+});
+```
+
+What the kit promises in return:
+
+- **It writes only to what it made.** Every write rule creates its own disposable target from `create` — the update rule PATCHes it, the delete rule DELETEs it — and never touches an `ids` sample. (Before the fixture, `mutating: true` made the delete rule delete the `ids` sample.)
+- **Cleanup runs however the rule ends.** Each target is created inside `Effect.acquireUseRelease`, so `cleanup` runs after the rule that made it whether that rule passed, failed or died. A cleanup that fails is recorded, not propagated, so one bad cleanup cannot cost the run its report.
+- **The run is auditable.** `Report.writes` lists every resource the kit created, the rule that created it and what became of it — `deleted` by the kit's own DELETE, `cleaned-up`, `cleanup-failed` with the cause, or `left`. `format` prints them under `WRITES`, with the count still in place.
+- **Each sub-key gates only its own rules.** A type with no `create` skips every write rule naming `writes["<type>"].create`, exactly as a missing `ids` entry does; a create-only type omits `update` and skips only the update rule. Never a vacuous pass.
+- **A rejected payload is not a verdict.** If the server does not accept `create` (a 4xx, say), the rules it was for report `Skipped` with the status and body — the fixture is wrong or the server is, and the kit cannot tell which.
+
+**`cleanup` is optional.** Against a target known to be disposable — an in-process store the test throws away — it can be omitted; the kit then leaves what it created in place and says so (`left`, naming `writes["<type>"].cleanup`). Against a server whose state outlives the run, always supply it. This is the less demanding of the two contracts, chosen pending the owner's decision ([§10](#10-open-questions)); the alternative is to require `cleanup` whenever `create` is given.
+
 ## 2. Two tiers, separately runnable
 
 | Tier | What it is | Authority |
@@ -76,7 +111,7 @@ A rule that probed _some_ endpoints but not others passes with a note saying how
 
 ## 3. What v1 covers
 
-31 rules. Every one carries a stable id, an RFC 2119 level, a section and a URL.
+34 rules. Every one carries a stable id, an RFC 2119 level, a section and a URL.
 
 **Content negotiation (§Content Negotiation, §Extensions, §Profiles)** — the response media type and its permitted parameters; 415 on a parameterised request `Content-Type`; 406 when every `Accept` instance is parameterised; an unsupported `ext` URI; an unrecognised `profile` ignored rather than rejected; and the two RFC 9110 §12.4.2 weight rules — a non-zero `q` is not a media type parameter, `q=0` is a refusal. The kit reported the first of those against the shipped middleware before [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101) was fixed; it now guards the fix against regressing.
 
@@ -88,9 +123,9 @@ The document rules probe **compound** documents, not just bare ones: for each en
 
 **Query parameters (§Sparse Fieldsets, §Inclusion, §Sorting, §Query Parameters)** — sparse fieldsets applying to primary data _and_ to `included` (two rules, because they fail independently — [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112)); an unidentifiable `include` path is a 400; an unsupported `sort` field is a 400; and an all-lowercase unrecognised query parameter is a 400.
 
-**Status codes** — 404 for an absent resource. The rest (`Location` on a 201, the 204-vs-200 delete rules) are declared and reported as skipped; see §5.
+**Status codes** — 404 for an absent resource. With the write fixture (§1.4): a creation without a client-generated id answers 201 with the created resource as primary data (`create-response-document`); the 201 carries `Location` (`create-location`, a SHOULD — the spec's level, corrected from the MUST the never-run v1 rule claimed) and, when the resource also carries `links.self`, the two match (`create-location-matches-self`); an update answers 200 with the updated resource, 204 with no body, or 202 (`update-response`); and a delete answers 204 empty, 200 with only `meta`, or 202 (`delete-response`).
 
-**Atomic operations** — a malformed `atomic:operations` document is rejected. The rest are declared and skipped; see §5.
+**Atomic operations** — a malformed `atomic:operations` document is rejected; with the write fixture, an `add` of the fixture's payload is answered under the extension's media type (`response-ext-parameter`). `lid` resolution and all-or-nothing are declared and skipped; see §5.
 
 **The profile tier** — the filter grammar's advertisement (§5), its rejections with `source.parameter` (§2, §4, §7: an operator outside the closed core, an undeclared field, a key deeper than the grammar admits, a repeated `filter[…]` key), and spelling equivalence (§2.2, §3: bare shorthand, explicit `[eq]`, group form and a key-permuted group form must all answer the same document, because the canonical string is a function of the AST alone). Plus two library conventions: advertising `jsonapi: { version: "1.1" }` ([#103](https://github.com/thomasfosterau/effect-jsonapi/issues/103)) and accepting the repeated-key spelling of every comma-separated family ([#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102)).
 
@@ -119,12 +154,13 @@ Declared in `Conformance.gaps` and printed in every report.
 | **The filter profile's evaluation semantics** | Whether `not(eq(status, x))` matches a NULL row, whether `nin` is SQL's `NOT IN` or the negation of `in`, where an absent attribute lands. Needs an oracle over known data, which a black-box transport cannot supply. See §6. |
 | **Pagination link correctness** | That the links are present and well-formed is checkable; that following them enumerates the collection exactly once needs the full set. |
 | **Sort ordering correctness** | That an unsupported field is a 400 is checked; that `?sort=-createdAt` actually orders, and where NULLs land, needs known data and the profile's collation decision. |
-| **Write semantics** | Create / update / delete / relationship mutation. The status-code and `Location` rules are declared and skipped: the kit cannot synthesise a valid payload for an arbitrary resource, nor reset the target afterwards. Needs a fixture contract supplying a payload and a disposable target. |
-| **Atomic operations processing** | `lid` resolution, all-or-nothing, `atomic:results` ordering — same write-fixture need. |
+| **Write semantics beyond the success responses** | The write fixture (§1.4) covers what a successful create, update and delete answer. Still unwritten: the 409 Conflict rules, creation with a client-generated id, relationship mutation through `/relationships/…`, and reading a write back to confirm it was stored ([#237](https://github.com/thomasfosterau/effect-jsonapi/issues/237)). |
+| **Atomic operations processing** | `lid` resolution, all-or-nothing, `atomic:results` ordering — these need operations applied and then observed, and all-or-nothing a deliberately-invalid operation the fixture does not supply ([#164](https://github.com/thomasfosterau/effect-jsonapi/issues/164)). |
+| **The Idempotency-Key profile** | Beyond the write fixture, its replay rules need the kit to resend a request byte for byte ([#165](https://github.com/thomasfosterau/effect-jsonapi/issues/165)). |
 | **Link dereferenceability** | Well-formedness is checkable; crawling every `self` / `related` is a second pass the kit does not make. |
 | **Concerns outside JSON:API** | Auth, caching, conditional requests, rate limiting, CORS. The spec takes no position, so neither does the kit. |
 
-Mutating probes are **off by default** (`mutating: true` opts in), because a conformance run should be safe to point at a live server.
+Mutating probes are **off by default** (`mutating: true` opts in, and the write rules also need a `writes` fixture), because a conformance run should be safe to point at a live server.
 
 ## 6. Relationship to #116
 
@@ -171,7 +207,7 @@ Two packaging questions are deliberately **not** pre-empted:
 
 ## 8. Running it against this repo
 
-`examples/{blog,github,northwind}/test/conformance.test.ts` run the kit against all three worked examples. They deliberately **do not assert a clean run** — they pin the exact set of rules each example is known to break, with the issue tracking each:
+`examples/{blog,github,northwind}/test/conformance.test.ts` run the kit against all three worked examples, with `mutating: true` and a write fixture for every type with a create endpoint (`articles`; `repositories` and `issues`; `products` and `orders`) whose `cleanup` removes the resource from the example's in-memory store. Each asserts the write rules ran and nothing was left behind. They deliberately **do not assert a clean run** — they pin the exact set of rules each example is known to break, with the issue tracking each:
 
 | Rule | Tracking | Whose |
 | --- | --- | --- |
@@ -179,8 +215,9 @@ Two packaging questions are deliberately **not** pre-empted:
 | `spec/query/sparse-fieldsets-included` | [#112](https://github.com/thomasfosterau/effect-jsonapi/issues/112) | the examples' |
 | `spec/query/unknown-query-parameter` | [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) | the library's |
 | `profile/document/jsonapi-member` | [#103](https://github.com/thomasfosterau/effect-jsonapi/issues/103) | the examples' |
+| `spec/status/create-location` | [#236](https://github.com/thomasfosterau/effect-jsonapi/issues/236) | the library's |
 
-The same four in all three examples, which is itself evidence: nothing here is one example's mistake. [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) (unknown query parameters are ignored rather than rejected) was previously unfiled and was found by the kit. Three more were on this list until their fixes landed, and the kit now guards them instead: [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101); [#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102) (the repeated-key spelling was honoured for `include` only); and [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147), also found by the kit (`Handlers.buildIncluded` did not dedupe `included` against the primary data, so a heterogeneous collection's `/search?include=…` repeated a hit in `included`).
+The same five in all three examples, which is itself evidence: nothing here is one example's mistake. [#236](https://github.com/thomasfosterau/effect-jsonapi/issues/236) (no 201 carries `Location`, because nothing in the library emits one) was found by the write fixture the first time `create-location` ran. [#148](https://github.com/thomasfosterau/effect-jsonapi/issues/148) (unknown query parameters are ignored rather than rejected) was previously unfiled and was found by the kit. Three more were on this list until their fixes landed, and the kit now guards them instead: [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101); [#102](https://github.com/thomasfosterau/effect-jsonapi/issues/102) (the repeated-key spelling was honoured for `include` only); and [#147](https://github.com/thomasfosterau/effect-jsonapi/issues/147), also found by the kit (`Handlers.buildIncluded` did not dedupe `included` against the primary data, so a heterogeneous collection's `/search?include=…` repeated a hit in `included`).
 
 Three of the four are now _example_ gaps rather than library ones: #112 landed `onResource` / `Handlers.project` and #103 landed the `jsonapi` builder option, but the worked examples have not adopted either, so the kit still sees unprojected fieldsets and documents that do not advertise their version. Adopting both in `examples/*/handlers.ts` would clear those three — worth doing, and deliberately left to a change that is about the examples rather than about the kit.
 
@@ -201,10 +238,12 @@ it("does not flag anything else when one rule is broken", async () => {
 
 A kit that fails everything catches every bug and is worthless. The control — the conformant server, against which the kit reports no failures — is the other half of the same argument.
 
+**The write rules get their own fixture too**: an api with create, update, delete and atomic operations endpoints and a canned server whose writes land in a `Map`. Against it every write rule must pass and actually run, and the `Map` must end empty; then each rule is broken in turn (a 200 for a creation, a 201 without the created resource or without `Location`, a `Location` that disagrees with `links.self`, an update answering a different resource, a 200 DELETE carrying `data`, an atomic response without the `ext` parameter), each asserting **exactly** that rule fails. Further cases pin the contract itself: nothing is written without `mutating: true`; a missing fixture or sub-key skips naming the key; a rejected payload skips rather than passes; cleanup runs after a rule that fails and after one that dies; a failing cleanup is recorded without aborting the run; and with no `cleanup` the report lists what it left.
+
 **The filter-grammar rules get their own fixture**, because nothing else would run them: no api in this repo declares `filter: true`, so against every example they legitimately report `Skipped`. A rule that skips everywhere would ship never having executed, which is indistinguishable from a rule that does not work. So `Conformance.test.ts` carries a grammar-enabled api and a canned server implementing §2/§4/§5/§7 correctly, asserts the three rules **pass and actually ran** (not skipped), and then breaks each in turn: the profile parameter dropped from the media type, an operator outside the closed core accepted, a rejection that omits `source.parameter`, and the group form answering a different document from the shorthand it desugars from.
 
 ## 10. Open questions
 
-- **A write-fixture contract.** The largest gap by far. Something like a per-resource `{ create: () => payload, cleanup: (id) => Effect<void> }`, which would unlock the create/update/ delete status rules, `Location`, relationship replacement semantics and the whole atomic suite.
+- **Is `cleanup` required?** The write fixture ([#162](https://github.com/thomasfosterau/effect-jsonapi/issues/162)) ships it **optional** — the less demanding contract — so an in-process target known to be disposable can omit it, and the kit reports what it left (§1.4). The alternative is to require `cleanup` whenever `create` is given, which makes a live-server run safe by construction at the cost of a no-op cleanup in every in-process test. An owner decision.
 - **Machine-readable output.** `format` renders text. A JSON rendering of `Report` is trivially derivable (it is plain data) but no stable serialisation is committed to yet.
 - **Rule versioning.** Rule ids are the stable surface a consumer pins against; a policy for renaming or retiring one is not yet written.

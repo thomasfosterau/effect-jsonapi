@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Layer, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
+import type { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
@@ -18,7 +19,7 @@ import * as Handlers from "./Handlers.js";
 import * as Middleware from "./Middleware.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
-import { MEDIA_TYPE } from "./internal/media.js";
+import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "./internal/media.js";
 
 // ---------------------------------------------------------------------------
 // A tiny api, used for endpoint discovery by both the real and canned targets
@@ -61,15 +62,22 @@ interface Canned {
   readonly status?: number;
   readonly contentType?: string;
   readonly body?: unknown;
+  /** Response headers beyond `Content-Type` — a `Location`, say. */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
-const cannedClient = (
-  serve: (request: {
-    readonly method: string;
-    readonly path: string;
-    readonly headers: Headers;
-  }) => Canned,
-): HttpClient.HttpClient =>
+interface CannedRequest {
+  readonly method: string;
+  readonly path: string;
+  readonly headers: Headers;
+  /** The parsed JSON request body, when there is one. */
+  readonly body?: unknown;
+}
+
+const requestBody = (body: HttpClientRequest.HttpClientRequest["body"]): unknown =>
+  body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(body.body)) : undefined;
+
+const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.HttpClient =>
   HttpClient.make((request, url) =>
     Effect.sync(() => {
       const headers = new Headers();
@@ -80,6 +88,7 @@ const cannedClient = (
         method: request.method,
         path: `${url.pathname}${url.search}`,
         headers,
+        body: requestBody(request.body),
       });
       const status = canned.status ?? 200;
       const contentType = canned.contentType ?? MEDIA_TYPE;
@@ -88,7 +97,7 @@ const cannedClient = (
         request,
         new Response(hasBody ? JSON.stringify(canned.body) : null, {
           status,
-          headers: hasBody ? { "content-type": contentType } : {},
+          headers: { ...canned.headers, ...(hasBody ? { "content-type": contentType } : {}) },
         }),
       );
     }),
@@ -913,6 +922,346 @@ describe("Conformance: the filter grammar profile", () => {
     const outcome = outcomeFor(report, "profile/filter/spelling-equivalence");
     expect(outcome._tag).toBe("Failed");
   });
+});
+
+// ---------------------------------------------------------------------------
+// The write fixture
+// ---------------------------------------------------------------------------
+
+/**
+ * The write rules skip against every api above — none has a write endpoint —
+ * and against any target without a `writes` fixture. This is the api and the
+ * canned server that make them run: create, update and delete endpoints, an
+ * atomic operations endpoint, and a server whose writes land in a `Map` the
+ * fixture's `cleanup` removes from, so a test can see exactly what was left.
+ */
+describe("Conformance: the write fixture", () => {
+  const writeApi = HttpApi.make("writes")
+    .add(
+      Group.make(
+        Article,
+        Endpoint.get(Article),
+        Endpoint.create(Article),
+        Endpoint.update(Article),
+        Endpoint.delete(Article),
+      ),
+    )
+    .add(Group.make("operations", Endpoint.operations([Article])));
+
+  const WRITE_RULES = [
+    "spec/status/create-response-document",
+    "spec/status/create-location",
+    "spec/status/create-location-matches-self",
+    "spec/status/update-response",
+    "spec/status/delete-response",
+    "spec/atomic/response-ext-parameter",
+  ];
+
+  const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
+
+  type Stored = Readonly<Record<string, unknown>>;
+
+  const unsupported: Canned = {
+    status: 415,
+    body: { errors: [{ status: "415", title: "Unsupported Media Type" }] },
+  };
+
+  const parameterised = (request: CannedRequest): boolean =>
+    /;\s*(?!ext=|profile=)[a-z]+=/i.test(request.headers.get("content-type") ?? "");
+
+  /** A server that implements create / update / delete / `add` correctly, over `store`. */
+  const writeServer = (store: Map<string, Stored>) => {
+    let next = 100;
+    const resource = (id: string, attributes: unknown) => ({
+      type: "articles",
+      id,
+      attributes,
+      links: { self: `/articles/${id}` },
+    });
+    const create = (data: Stored) => {
+      const id = `${next++}`;
+      store.set(id, data);
+      return resource(id, data["attributes"]);
+    };
+    const created = (data: Stored): Canned => {
+      const made = create(data);
+      return { status: 201, headers: { location: made.links.self }, body: { data: made } };
+    };
+    const operations = (body: Stored): Canned => {
+      const list = body["atomic:operations"];
+      if (!Array.isArray(list))
+        return { status: 400, body: { errors: [{ status: "400", title: "Bad Request" }] } };
+      const results = list.map((operation: Stored) => ({
+        data: create(operation["data"] as Stored),
+      }));
+      return { contentType: atomicType, body: { "atomic:results": results } };
+    };
+    /** PATCH and DELETE on a stored article; `undefined` for anything else. */
+    const onStored = (request: CannedRequest, data: Stored): Canned | undefined => {
+      const id = /^\/articles\/([^/?]+)$/.exec(request.path)?.[1];
+      if (id === undefined || !store.has(id)) return undefined;
+      if (request.method === "PATCH")
+        return { body: { data: resource(id, { ...(data["attributes"] as object) }) } };
+      if (request.method !== "DELETE") return undefined;
+      store.delete(id);
+      return { status: 204 };
+    };
+    return (request: CannedRequest): Canned => {
+      // §Content Negotiation first: a parameterised JSON:API Content-Type is a
+      // 415 before anything is written.
+      if (parameterised(request)) return unsupported;
+      const body = (request.body ?? {}) as Stored;
+      const data = (body["data"] ?? {}) as Stored;
+      const route = `${request.method} ${request.path}`;
+      if (route === "POST /articles") return created(data);
+      if (route === "POST /operations") return operations(body);
+      return onStored(request, data) ?? conformantServe(request);
+    };
+  };
+
+  let sequence = 0;
+  const fixture = (store: Map<string, Stored>): Conformance.WriteFixture => ({
+    create: () => ({
+      type: "articles",
+      attributes: { title: `probe ${++sequence}`, body: "" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    }),
+    update: () => ({ attributes: { title: `probe ${++sequence} (updated)` } }),
+    cleanup: (id) => Effect.sync(() => store.delete(id)),
+  });
+
+  const verifyWrites = (serve: (request: CannedRequest) => Canned, options?: Conformance.Options) =>
+    Effect.runPromise(
+      Conformance.verifyWith(writeApi, {
+        client: cannedClient(serve),
+        baseUrl: "http://fixture.test",
+        ids: { articles: "1" },
+        ...options,
+      }),
+    );
+
+  /** A conformant run over a fresh store, with `change` applied to every answer. */
+  const run = async (
+    change: (canned: Canned, request: CannedRequest) => Canned = (canned) => canned,
+    options?: (store: Map<string, Stored>) => Conformance.Options,
+  ) => {
+    const store = new Map<string, Stored>();
+    const serve = writeServer(store);
+    const report = await verifyWrites((request) => change(serve(request), request), {
+      mutating: true,
+      writes: { articles: fixture(store) },
+      ...options?.(store),
+    });
+    return { report, store };
+  };
+
+  it("runs every write rule against a conformant server, on targets it created", async () => {
+    const { report, store } = await run();
+    expect(failed(report)).toEqual([]);
+    for (const id of WRITE_RULES) expect(outcomeFor(report, id)._tag).toBe("Passed");
+    // Every creation is on the record, and nothing outlived the run.
+    const writes = report.writes ?? [];
+    expect(writes.length).toBe(WRITE_RULES.length);
+    expect(writes.map((write) => write.rule)).toEqual(WRITE_RULES);
+    for (const write of writes) expect(["deleted", "cleaned-up"]).toContain(write.disposal);
+    expect(writes.find((write) => write.rule === "spec/status/delete-response")?.disposal).toBe(
+      "deleted",
+    );
+    expect(store.size).toBe(0);
+  });
+
+  it("never writes without `mutating: true`, even with a fixture", async () => {
+    const { report, store } = await run(undefined, () => ({ mutating: false }));
+    for (const id of WRITE_RULES) {
+      const outcome = outcomeFor(report, id);
+      expect(outcome._tag).toBe("Skipped");
+      if (outcome._tag === "Skipped") expect(outcome.reason).toContain("mutating: true");
+    }
+    expect(report.writes).toEqual([]);
+    expect(store.size).toBe(0);
+  });
+
+  it("skips — never passes — a type with no fixture, naming the key it wanted", async () => {
+    const { report } = await run(undefined, () => ({ writes: {} }));
+    for (const id of WRITE_RULES) {
+      const outcome = outcomeFor(report, id);
+      expect(outcome._tag).toBe("Skipped");
+      if (outcome._tag === "Skipped") expect(outcome.reason).toContain(`writes["articles"].create`);
+    }
+  });
+
+  it("skips only the rules of an absent sub-key — a create-only fixture still creates", async () => {
+    const { report, store } = await run(undefined, (store) => {
+      const { update: _update, ...createOnly } = fixture(store);
+      return { writes: { articles: createOnly } };
+    });
+    const update = outcomeFor(report, "spec/status/update-response");
+    expect(update._tag).toBe("Skipped");
+    if (update._tag === "Skipped") expect(update.reason).toContain(`writes["articles"].update`);
+    expect(outcomeFor(report, "spec/status/create-response-document")._tag).toBe("Passed");
+    expect(outcomeFor(report, "spec/status/delete-response")._tag).toBe("Passed");
+    expect(store.size).toBe(0);
+  });
+
+  it("reports a payload the server rejects as not checked, never as a pass", async () => {
+    const { report } = await run((canned, request) =>
+      request.method === "POST" && request.path === "/articles"
+        ? { status: 422, body: { errors: [{ status: "422", title: "Unprocessable" }] } }
+        : canned,
+    );
+    const outcome = outcomeFor(report, "spec/status/create-response-document");
+    expect(outcome._tag).toBe("Skipped");
+    if (outcome._tag === "Skipped") expect(outcome.reason).toContain("did not accept");
+  });
+
+  it("cleans up after a rule that fails", async () => {
+    const { report, store } = await run((canned) => {
+      const { location: _location, ...headers } = canned.headers ?? {};
+      return { ...canned, headers };
+    });
+    expect(failed(report)).toEqual(["spec/status/create-location"]);
+    expect(store.size).toBe(0);
+    for (const write of report.writes ?? [])
+      expect(["deleted", "cleaned-up"]).toContain(write.disposal);
+  });
+
+  it("cleans up after a rule that dies", async () => {
+    const store = new Map<string, Stored>();
+    const serve = writeServer(store);
+    const exit = await Effect.runPromiseExit(
+      Conformance.verifyWith(writeApi, {
+        client: cannedClient((request) => {
+          if (request.method === "PATCH") throw new Error("the transport fell over");
+          return serve(request);
+        }),
+        baseUrl: "http://fixture.test",
+        ids: { articles: "1" },
+        mutating: true,
+        writes: { articles: fixture(store) },
+        only: ["spec/status/update-response"],
+      }),
+    );
+    expect(exit._tag).toBe("Failure");
+    // The resource the update rule created was still removed.
+    expect(store.size).toBe(0);
+  });
+
+  it("records a cleanup that fails, rather than aborting the run", async () => {
+    const { report, store } = await run(undefined, (store) => ({
+      writes: { articles: { ...fixture(store), cleanup: () => Effect.fail("store offline") } },
+    }));
+    expect(failed(report)).toEqual([]);
+    const stuck = (report.writes ?? []).filter((write) => write.disposal === "cleanup-failed");
+    // Every creation but the one the kit's own DELETE removed.
+    expect(stuck.length).toBe(WRITE_RULES.length - 1);
+    expect(stuck[0]?.detail).toContain("store offline");
+    expect(store.size).toBe(WRITE_RULES.length - 1);
+    expect(Conformance.format(report)).toContain("CLEANUP FAILED");
+  });
+
+  it("leaves what it created in place without a cleanup, and says so", async () => {
+    const { report, store } = await run(undefined, (store) => {
+      const { cleanup: _cleanup, ...noCleanup } = fixture(store);
+      return { writes: { articles: noCleanup } };
+    });
+    expect(failed(report)).toEqual([]);
+    const left = (report.writes ?? []).filter((write) => write.disposal === "left");
+    expect(left.length).toBe(WRITE_RULES.length - 1);
+    expect(left[0]?.detail).toContain(`writes["articles"].cleanup`);
+    expect(store.size).toBe(WRITE_RULES.length - 1);
+    const text = Conformance.format(report);
+    expect(text).toContain("WRITES");
+    expect(text).toContain(`${WRITE_RULES.length - 1} still in place`);
+    expect(text).toContain("LEFT IN PLACE");
+  });
+
+  /** One deliberate defect, and the kit must report exactly that rule. */
+  const brokenWrite = (
+    name: string,
+    id: string,
+    change: (canned: Canned, request: CannedRequest) => Canned,
+    leaves = 0,
+  ) =>
+    it(name, async () => {
+      const { report, store } = await run(change);
+      expect(failed(report)).toEqual([id]);
+      const outcome = outcomeFor(report, id);
+      if (outcome._tag === "Failed") {
+        for (const found of outcome.findings) {
+          expect(found.expected).not.toBe("");
+          expect(found.observed).not.toBe("");
+          expect(found.probe?.method).toMatch(/POST|PATCH|DELETE/);
+        }
+      }
+      expect(store.size).toBe(leaves);
+      // …and whatever is left is on the record as left.
+      expect((report.writes ?? []).filter((write) => write.disposal === "left").length).toBe(
+        leaves,
+      );
+    });
+
+  /** A successful `POST /articles` — not the 415 the negotiation rule provokes. */
+  const creates = (request: CannedRequest, canned: Canned) =>
+    request.method === "POST" && request.path === "/articles" && canned.status === 201;
+
+  brokenWrite(
+    "a creation answered 200 instead of 201",
+    "spec/status/create-response-document",
+    (canned, request) => (creates(request, canned) ? { ...canned, status: 200 } : canned),
+  );
+
+  // A 201 that does not say what it created cannot be cleaned up after: each
+  // of the five create-endpoint rules leaves its resource behind, and the
+  // report says so rather than pretending otherwise.
+  brokenWrite(
+    "a 201 whose primary data is not the created resource",
+    "spec/status/create-response-document",
+    (canned, request) =>
+      creates(request, canned) ? { ...canned, body: { meta: { ok: true } } } : canned,
+    5,
+  );
+
+  brokenWrite(
+    "a 201 without a Location header",
+    "spec/status/create-location",
+    (canned, request) => (creates(request, canned) ? { ...canned, headers: {} } : canned),
+  );
+
+  brokenWrite(
+    "a Location that disagrees with the created resource's self link",
+    "spec/status/create-location-matches-self",
+    (canned, request) =>
+      creates(request, canned)
+        ? { ...canned, headers: { location: "/articles/elsewhere" } }
+        : canned,
+  );
+
+  brokenWrite(
+    "an update answered with a different resource",
+    "spec/status/update-response",
+    (canned, request) =>
+      request.method === "PATCH"
+        ? { body: { data: { type: "articles", id: "someone-else", attributes: {} } } }
+        : canned,
+  );
+
+  brokenWrite(
+    "a 200 DELETE carrying primary data",
+    "spec/status/delete-response",
+    (canned, request) =>
+      request.method === "DELETE" && canned.status === 204
+        ? { status: 200, body: { data: null } }
+        : canned,
+  );
+
+  brokenWrite(
+    "an atomic response without the extension's media type",
+    "spec/atomic/response-ext-parameter",
+    (canned, request) =>
+      request.path === "/operations" && (canned.status ?? 200) === 200
+        ? { ...canned, contentType: MEDIA_TYPE }
+        : canned,
+  );
 });
 
 // ---------------------------------------------------------------------------

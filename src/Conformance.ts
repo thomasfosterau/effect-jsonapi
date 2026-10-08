@@ -30,6 +30,11 @@
  * all. A kit that answers "OK" without saying what it checked is worse than
  * nothing, so {@link format} always prints all three sections.
  *
+ * **Writes are opt-in and disposable.** The rules that change state run only
+ * with `mutating: true` and a {@link WriteFixture} per type in `writes`. They
+ * act only on resources they created from it, dispose of each however the rule
+ * ended, and list every one in {@link Report.writes}.
+ *
  * @example
  * ```ts
  * import { Effect, Layer, Schema } from "effect"
@@ -90,6 +95,7 @@ import * as Core from "./internal/conformance/core.js";
 import * as ProfileRules from "./internal/conformance/profile.js";
 import * as ReportFormat from "./internal/conformance/report.js";
 import * as SpecRules from "./internal/conformance/spec.js";
+import * as WriteFixtures from "./internal/conformance/write.js";
 
 // ---------------------------------------------------------------------------
 // The rule model
@@ -258,6 +264,124 @@ export type Outcome = Core.Outcome;
 export interface Gap extends Core.Gap {}
 
 /**
+ * A resource object a create endpoint will accept, without an `id` — the value
+ * a {@link WriteFixture}'s `create` returns.
+ *
+ * It is the **wire** form: the kit sends it as raw JSON, exactly as a client
+ * would, so a `Schema.DateFromString` attribute is an ISO string here, not a
+ * `Date`. The kit wraps it as `{ data: … }` for `POST /<type>` and as an `add`
+ * operation for the atomic operations endpoint.
+ *
+ * @example
+ * ```ts
+ * import { Conformance } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const payload: Conformance.WritePayload = {
+ *   type: "articles",
+ *   attributes: { title: "conformance probe", body: "…", createdAt: "2024-01-01T00:00:00.000Z" },
+ *   relationships: { author: { data: { type: "people", id: "9" } } }
+ * }
+ *
+ * payload.type // "articles"
+ * ```
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface WritePayload extends Core.Payload {}
+
+/**
+ * The write-fixture contract for one resource type: what the kit cannot derive
+ * for itself, so the write rules can run.
+ *
+ * - **`create`** — a payload the server will accept. The kit cannot synthesise
+ *   one: attributes carry domain constraints and required relationships point
+ *   at resources that must already exist, and a payload the server rejects
+ *   proves nothing about what it answers on success. Called once per create, so
+ *   a fixture under a uniqueness constraint can return a fresh value each time.
+ * - **`update`** — the `attributes` / `relationships` of a PATCH that must
+ *   succeed against a resource `create` made. The kit adds `type` and `id`.
+ * - **`cleanup`** — removes a resource the kit created, by the id the server
+ *   assigned. It runs for every resource the kit created and did not itself
+ *   delete, after the rule that made it — whether that rule passed, failed or
+ *   died — and a cleanup that fails is recorded in {@link Report.writes} rather
+ *   than aborting the run.
+ *
+ * Every member is optional, and each one gates only its own rules: a type with
+ * no `create` skips every write rule naming `writes["<type>"].create`, and a
+ * create-only type supplies no `update` and skips only the update rule.
+ * **`cleanup` is optional too**, for a target known to be disposable — an
+ * in-process store a test throws away. Without it the kit leaves what it
+ * created in place and says so in {@link Report.writes}, so never omit it
+ * against a server whose state outlives the run.
+ *
+ * The write rules act only on resources they created themselves — never on a
+ * `ids` sample — and run only when {@link Options.mutating} is `true`.
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Conformance } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // the in-memory store a test server would read from
+ * const store = new Map<string, unknown>()
+ *
+ * let sequence = 0
+ * const articles: Conformance.WriteFixture = {
+ *   // a fresh title per create, because the server rejects a duplicate
+ *   create: () => ({
+ *     type: "articles",
+ *     attributes: { title: `conformance probe ${++sequence}`, body: "…" },
+ *     relationships: { author: { data: { type: "people", id: "9" } } }
+ *   }),
+ *   update: () => ({ attributes: { title: `conformance probe ${++sequence} (updated)` } }),
+ *   cleanup: (id) => Effect.sync(() => store.delete(id))
+ * }
+ *
+ * articles.create?.().type // "articles"
+ * ```
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface WriteFixture extends Core.Fixture {}
+
+/**
+ * One resource the kit created during a run, and what became of it — the audit
+ * trail {@link Report.writes} carries, so a run against a real server can be
+ * checked for what it left behind.
+ *
+ * `disposal` is `"deleted"` when the kit's own DELETE probe removed it,
+ * `"cleaned-up"` when the fixture's `cleanup` did, `"cleanup-failed"` when
+ * `cleanup` failed (with the cause in `detail`), and `"left"` when nothing
+ * removed it — no `cleanup` was supplied, or the response named no id.
+ *
+ * @example
+ * ```ts
+ * import { Conformance } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const leftBehind = (report: Conformance.Report): ReadonlyArray<Conformance.Write> =>
+ *   (report.writes ?? []).filter((write) => write.disposal === "left" || write.disposal === "cleanup-failed")
+ *
+ * leftBehind({
+ *   target: "blog",
+ *   version: "1.1",
+ *   transport: "in-process",
+ *   outcomes: [],
+ *   gaps: [],
+ *   writes: [
+ *     { type: "articles", id: "2", rule: "spec/status/delete-response", disposal: "deleted", detail: undefined },
+ *     { type: "articles", id: "3", rule: "spec/status/create-location", disposal: "left", detail: "no cleanup" }
+ *   ]
+ * }).length // 1
+ * ```
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface Write extends Core.WriteRecord {}
+
+/**
  * The result of a run: every rule's outcome, the declared coverage gaps, and
  * what was driven.
  *
@@ -287,6 +411,14 @@ export interface Report {
   readonly transport: "in-process" | "http";
   readonly outcomes: ReadonlyArray<Outcome>;
   readonly gaps: ReadonlyArray<Gap>;
+  /**
+   * Every resource the write rules created, in creation order, with what
+   * became of it. Empty when no write rule ran; absent from a report built by
+   * hand.
+   *
+   * @since 0.17.0
+   */
+  readonly writes?: ReadonlyArray<Write> | undefined;
 }
 
 /**
@@ -449,22 +581,22 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: [],
   },
   {
-    area: "Write semantics",
+    area: "Write semantics beyond the success responses",
     reason:
-      "Create, update, delete and relationship mutation. The status-code and `Location` rules are declared and reported as skipped: deciding them means applying writes, and the kit cannot synthesise a valid payload for an arbitrary resource or reset the target afterwards. Needs a fixture contract that supplies a payload and a disposable target.",
-    tracking: [],
+      "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — on resources it creates and disposes of itself. Still unchecked: the 409 Conflict rules (a `type` the endpoint does not serve, a duplicate client-generated id), creation with a client-generated id (201 or 204), relationship mutation through `/relationships/…` (replacement, append, removal), and whether a write was actually stored, which needs the resource read back. The fixture makes each of these probe-able; they are not yet written.",
+    tracking: ["#162", "#237"],
   },
   {
     area: "Atomic operations processing",
     reason:
-      "The request document's shape is checked. `lid` resolution across operations, all-or-nothing application and `atomic:results` ordering all require applying operations and then observing what was stored, so they share the write-fixture gap above.",
-    tracking: [],
+      "The request document's shape is checked, and — given a `writes` fixture — that an `add` is answered under the extension's media type. `lid` resolution across operations, all-or-nothing application and `atomic:results` ordering need operations applied and what was stored then observed, and all-or-nothing also needs a deliberately-invalid operation the fixture does not supply.",
+    tracking: ["#164"],
   },
   {
     area: "The Idempotency-Key profile",
     reason:
-      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`), and the profile tier does not check it at all — it covers the filter grammar and two library conventions only. Its rules are almost entirely about what a *retried write* does (replay of the recorded response, the fingerprint mismatch conflict, the in-flight case), so they need the write fixture the gap below describes, plus a way to replay a request the kit has already sent. Its one non-mutating rule — that a write endpoint declaring the header advertises the profile on its response media type — is checkable today and simply not yet written.",
-    tracking: ["#123"],
+      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`), and the profile tier does not check it at all — it covers the filter grammar and two library conventions only. Its rules are almost entirely about what a *retried write* does (replay of the recorded response, the fingerprint mismatch conflict, the in-flight case), so beyond the `writes` fixture they need a way to replay a request the kit has already sent. Its one non-mutating rule — that a write endpoint declaring the header advertises the profile on its response media type — is checkable today and simply not yet written.",
+    tracking: ["#123", "#165"],
   },
   {
     area: "Link dereferenceability",
@@ -487,14 +619,20 @@ export const gaps: ReadonlyArray<Gap> = [
 /**
  * How a run is configured.
  *
- * `ids` is the fixture contract, and it is deliberately the smallest one that
- * works: one id per resource type that is known to exist, so a rule can turn
- * `/articles/:id` into a URL. A rule with no id to use reports `Skipped` naming
- * the key it wanted rather than quietly passing.
+ * `ids` is the read fixture contract, and it is deliberately the smallest one
+ * that works: one id per resource type that is known to exist, so a rule can
+ * turn `/articles/:id` into a URL. `writes` is the write fixture contract
+ * ({@link WriteFixture}): a payload per type the server will accept, so the
+ * write rules can create a disposable target, and how to remove it afterwards.
+ * A rule with no id or fixture to use reports `Skipped` naming the key it
+ * wanted rather than quietly passing.
  *
  * @example
  * ```ts
+ * import { Effect } from "effect"
  * import { Conformance } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const created = new Set<string>()
  *
  * const options: Conformance.Options = {
  *   // one known-existing id per resource type
@@ -502,10 +640,19 @@ export const gaps: ReadonlyArray<Gap> = [
  *   // an explicit URL for an endpoint whose path the conventions don't cover
  *   paths: { "search.search": "/search?filter[q]=bikeshed" },
  *   // the spec tier only — don't hold the target to this package's profile
- *   tiers: ["spec"]
+ *   tiers: ["spec"],
+ *   // opt in to the rules that write, against targets made from this fixture
+ *   mutating: true,
+ *   writes: {
+ *     articles: {
+ *       create: () => ({ type: "articles", attributes: { title: "conformance probe", body: "…" } }),
+ *       cleanup: (id) => Effect.sync(() => created.delete(id))
+ *     }
+ *   }
  * }
  *
  * options.tiers?.includes("spec") // true
+ * options.writes?.["articles"]?.update === undefined // true — the update rule skips
  * ```
  *
  * @since 0.15.0
@@ -535,9 +682,18 @@ export interface Options {
   readonly extensions?: ReadonlyArray<string> | undefined;
   /**
    * Run the rules whose probes change the target's state. Off by default: a
-   * conformance run should be safe to point at a live server.
+   * conformance run should be safe to point at a live server. The write rules
+   * also need a {@link WriteFixture} per type in `writes`.
    */
   readonly mutating?: boolean | undefined;
+  /**
+   * The write fixture per resource type, keyed like `ids`: a payload to create
+   * a disposable target with, an update to apply to it, and how to remove it.
+   * A type with no entry skips its write rules, naming the key it wanted.
+   *
+   * @since 0.17.0
+   */
+  readonly writes?: Readonly<Record<string, WriteFixture>> | undefined;
   /** Which tiers to run. Defaults to both. */
   readonly tiers?: ReadonlyArray<Tier> | undefined;
   /**
@@ -558,6 +714,7 @@ const resolveOptions = (baseUrl: string, options: Options | undefined): Core.Res
   absentId: options?.absentId ?? DEFAULT_ABSENT_ID,
   extensions: options?.extensions ?? [],
   mutating: options?.mutating ?? false,
+  writes: options?.writes ?? {},
 });
 
 const selected = (options: Options | undefined): ReadonlyArray<Core.RuleImpl> => {
@@ -590,6 +747,7 @@ const execute = (
       endpoints: Core.discover(api),
       options: resolved,
       request: Core.runner(client, resolved.baseUrl),
+      writes: [],
     };
     const outcomes: Array<Outcome> = [];
     for (const implementation of selected(options)) {
@@ -601,6 +759,7 @@ const execute = (
       transport,
       outcomes,
       gaps,
+      writes: WriteFixtures.snapshot(ctx),
     };
   });
 
