@@ -9,8 +9,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   Cause,
+  Deferred,
   Effect,
   Exit,
+  Fiber,
   Layer,
   Match,
   MutableHashMap,
@@ -439,13 +441,14 @@ describe("Conformance: the report", () => {
   });
 
   it("prints and counts a rule that died apart from failures, and assert dies on it", async () => {
+    const defect = { reason: "fell over" };
     const report: Conformance.Report = {
       target: "t",
       version: "1.1",
       transport: "in-process",
       outcomes: [
         { _tag: "Passed", rule, probes: 2, note: undefined },
-        { _tag: "Errored", rule, message: "the transport fell over", defect: "fell over" },
+        { _tag: "Errored", rule, message: "the transport fell over", defect },
       ],
       gaps: [],
     };
@@ -469,6 +472,11 @@ describe("Conformance: the report", () => {
       expect(Exit.isFailure(exit) && Cause.pretty(exit.cause)).toContain(
         `${rule.id} died: the transport fell over`,
       );
+      // A tagged defect carrying the rule's id and, as its `cause`, the very
+      // value the rule died with.
+      const died = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
+      expect(died).toMatchObject({ _tag: "RuleDied", rule: rule.id });
+      expect(Predicate.hasProperty(died, "cause") && died.cause).toBe(defect);
     };
     await diesNaming(report);
     await diesNaming({
@@ -1310,6 +1318,103 @@ describe("Conformance: the write fixture", () => {
     const text = Conformance.format(report);
     expect(text).toContain("DIED  spec/status/update-response");
     expect(text).toContain("not decided — the rule died: TransportFellOver");
+  });
+
+  class FixturesUnreadable extends Schema.TaggedError<FixturesUnreadable>()(
+    "FixturesUnreadable",
+    {},
+  ) {}
+
+  it("reports a rule that throws before its Effect starts as Errored, keeping the report", async () => {
+    // Reading `writes["articles"]` throws. The write rules read it while
+    // building their targets — before, not inside, the Effect their `run`
+    // returns — standing in for any kit code that throws synchronously.
+    const { report, store, writes } = await run(undefined, () => ({
+      writes: {
+        get articles(): Conformance.WriteFixture {
+          throw new FixturesUnreadable();
+        },
+      },
+    }));
+    expect(report.outcomes.map((outcome) => outcome.rule.id)).toEqual(
+      Conformance.rules.map((rule) => rule.id),
+    );
+    const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
+    expect(errored.map((outcome) => outcome.rule.id)).toEqual(WRITE_RULES);
+    expect(errored.map((outcome) => outcome.message)).toEqual(
+      WRITE_RULES.map(() => "FixturesUnreadable"),
+    );
+    // Every other rule still ran.
+    expect(failed(report)).toEqual([]);
+    expect(Conformance.summarise(report).passed).toBeGreaterThan(0);
+    expect(writes).toEqual([]);
+    expect(MutableHashMap.size(store)).toBe(0);
+  });
+
+  class TransportRefused extends Schema.TaggedError<TransportRefused>()("TransportRefused", {
+    message: Schema.String,
+  }) {}
+
+  it.each([
+    ["a string", "boom", "boom"],
+    ["null", null, "null"],
+    ["a number", 42, "42"],
+    ["a plain object", { code: 7 }, `{"code":7}`],
+    [
+      "an error",
+      new TransportRefused({ message: "connection refused" }),
+      "TransportRefused: connection refused",
+    ],
+  ])("renders %s a rule dies with as itself", async (_, defect, message) => {
+    const { report } = await run(
+      (canned, request) => {
+        if (request.method === "PATCH") throw defect;
+        return canned;
+      },
+      () => ({ only: ["spec/status/update-response"] }),
+    );
+    expect(report.outcomes).toEqual([
+      expect.objectContaining({ _tag: "Errored", message, defect }),
+    ]);
+  });
+
+  it("stops at an external interrupt, cleaning up what the interrupted rule created", async () => {
+    const store: Store = MutableHashMap.empty();
+    const cleaned: Array<string> = [];
+    const seen: Array<string> = [];
+    const serve = cannedClient(writeServer(store));
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const patching = yield* Deferred.make<void>();
+        const fiber = yield* Effect.forkChild(
+          Conformance.verifyWith(writeApi, {
+            client: HttpClient.make((request, url) =>
+              Effect.andThen(
+                Effect.sync(() => seen.push(`${request.method} ${url.pathname}`)),
+                // The update rule's PATCH never answers; the run is
+                // interrupted from outside while it waits.
+                request.method === "PATCH"
+                  ? Effect.andThen(Deferred.succeed(patching, undefined), Effect.never)
+                  : serve.execute(request),
+              ),
+            ),
+            baseUrl: "http://fixture.test",
+            ids: { articles: "1" },
+            mutating: true,
+            writes: { articles: fixture(store, cleaned) },
+          }),
+        );
+        yield* Deferred.await(patching);
+        yield* Fiber.interrupt(fiber);
+        return yield* Fiber.join(fiber);
+      }),
+    );
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+    // No rule started after the interrupted one: its PATCH was the last
+    // request, so the delete and atomic write rules never ran. And the
+    // resource it was patching — the one it created — was still removed.
+    expect(seen.at(-1)).toBe(`PATCH /articles/${cleaned.at(-1)}`);
+    expect(MutableHashMap.size(store)).toBe(0);
   });
 
   it("still propagates interruption, cleaning up what the interrupted rule created", async () => {

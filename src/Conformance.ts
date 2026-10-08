@@ -226,8 +226,8 @@ export interface Finding extends Core.Finding {}
 /**
  * What became of one rule in a run: `Passed` with the number of requests it
  * made, `Failed` with its findings, `Skipped` with the reason it could not
- * be decided against this target, or `Errored` when the rule died — a defect
- * in the kit, a fixture or the transport, not a finding about the server —
+ * be decided against this target, or `Errored` when the rule died — a
+ * transport that throws, or a bug in the kit, not a finding about the server —
  * with the defect's `message` and the `defect` itself.
  *
  * `Skipped` is load-bearing. A rule that needs a write endpoint against an api
@@ -238,7 +238,9 @@ export interface Finding extends Core.Finding {}
  * rest of its report: every other rule still runs and is reported, and so is
  * {@link Report.writes}. It is neither a pass nor a finding — {@link assert}
  * dies on it. Interruption is not turned into an outcome: it still stops the
- * run.
+ * run. A write fixture that throws is not a defect: a `create` or `update`
+ * that throws skips the rules it would have driven, naming the member, and a
+ * `cleanup` that fails or throws is recorded in {@link Report.writes}.
  *
  * @example
  * ```ts
@@ -553,7 +555,8 @@ export class ContractViolation extends Data.TaggedError("ContractViolation")<{
 
 /**
  * The defect {@link assert} dies with on a rule that died: the rule's id, a
- * message naming it and the defect, and the defect itself as `cause`.
+ * message naming it and the defect, and the defect itself as `cause`. Private
+ * on purpose — callers match it by its tag (`_tag: "RuleDied"`), not by class.
  */
 class RuleDied extends Schema.TaggedError<RuleDied>()("RuleDied", {
   rule: Schema.String,
@@ -1102,9 +1105,11 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
  * A rule that died (`Errored`) is neither: the run could not decide it, so the
  * gate cannot pass, and it is not a finding about the server, so it is not a
  * `ContractViolation`. `assert` dies on the first one instead — before looking
- * at failures — with a `RuleDied` defect whose message names the rule and the
- * defect's, and whose `cause` is the original defect. That keeps the gate as strict as when a
- * rule's defect killed the whole run, while the report itself stays readable.
+ * at failures — with a tagged defect, `_tag: "RuleDied"` (match it with
+ * `Predicate.isTagged(defect, "RuleDied")`), whose `rule` is the rule's id,
+ * whose message names the rule and the defect's, and whose `cause` is the
+ * original defect. That keeps the gate as strict as when a rule's defect
+ * killed the whole run, while the report itself stays readable.
  *
  * @example
  * ```ts

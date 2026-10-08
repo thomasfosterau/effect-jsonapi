@@ -7,7 +7,15 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Cause, Effect, MutableHashSet, Option, SchemaAST } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Formatter,
+  MutableHashSet,
+  Option,
+  Predicate,
+  SchemaAST,
+} from "effect";
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
@@ -531,31 +539,35 @@ export const pass = (rule: Rule, probes: number, note?: string): Passed => ({
 /** @internal */
 export const skip = (rule: Rule, reason: string): Skipped => ({ _tag: "Skipped", rule, reason });
 
-/**
- * Renders the errors a defect pretty-prints as, `Name: message` each (or the
- * name alone when it carries no message), so a thrown tagged error with no
- * message still says what it was.
- */
-const defectMessage = (errors: ReadonlyArray<Error>): string =>
-  errors
-    .map((error) => (error.message === "" ? error.name : `${error.name}: ${error.message}`))
-    .join("; ");
+/** An `Error` as `Name: message`, or the name alone when it carries no message. */
+const errorMessage = (error: Error): string =>
+  error.message === "" ? error.name : `${error.name}: ${error.message}`;
 
 /**
  * Runs one rule, turning a defect into its `Errored` outcome so that one rule
  * that dies cannot cost the run every other rule's outcome and its writes
- * ledger. Interruption is not caught: it is a request to stop the whole run,
- * not something one rule did, so it still propagates.
+ * ledger. `run` is suspended, so a throw before it returns its Effect — kit
+ * code that works out a rule's targets up front — is caught the same way.
+ * Interruption is not caught: it is a request to stop the whole run, not
+ * something one rule did, so it still propagates.
  *
  * @internal
  */
 export const runRule = (implementation: RuleImpl, ctx: Context): Effect.Effect<Outcome> =>
-  implementation.run(ctx).pipe(
+  Effect.suspend(() => implementation.run(ctx)).pipe(
+    // The defect's message for a report line: an `Error` by its name and
+    // message, so a thrown tagged error with no message still says what it
+    // was; anything else thrown — a string, `null`, a plain object — as
+    // itself, not dressed up as an `Error`.
     Effect.catchDefect((defect) =>
       Effect.succeed<Outcome>({
         _tag: "Errored",
         rule: implementation.rule,
-        message: defectMessage(Cause.prettyErrors(Cause.die(defect))),
+        message: Predicate.isError(defect)
+          ? errorMessage(defect)
+          : Predicate.isString(defect)
+            ? defect
+            : Formatter.format(defect),
         defect,
       }),
     ),
