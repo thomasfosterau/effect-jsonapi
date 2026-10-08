@@ -228,7 +228,9 @@ export interface Finding extends Core.Finding {}
  * made, `Failed` with its findings, `Skipped` with the reason it could not
  * be decided against this target, or `Errored` when the rule died — a
  * transport that throws, or a bug in the kit, not a finding about the server —
- * with the defect's `message` and the `defect` itself.
+ * with the defect's `message` (capped at 500 UTF-16 code units, a longer one
+ * ending in `…`; `[unrenderable defect]` for a value that throws when
+ * inspected) and the `defect` itself.
  *
  * `Skipped` is load-bearing. A rule that needs a write endpoint against an api
  * that has none, or a sample id the caller did not supply, must not be counted
@@ -238,9 +240,12 @@ export interface Finding extends Core.Finding {}
  * rest of its report: every other rule still runs and is reported, and so is
  * {@link Report.writes}. It is neither a pass nor a finding — {@link assert}
  * dies on it. Interruption is not turned into an outcome: it still stops the
- * run. A write fixture that throws is not a defect: a `create` or `update`
- * that throws skips the rules it would have driven, naming the member, and a
- * `cleanup` that fails or throws is recorded in {@link Report.writes}.
+ * run. A write fixture that throws a value the kit can render is not a
+ * defect: a `create` or `update` that throws one skips the rules it would have
+ * driven, naming the member, and a `cleanup` that fails with or throws one is
+ * recorded in {@link Report.writes}. One that throws a value the kit can't
+ * render (a revoked `Proxy`, say) is still reported as `Errored` until
+ * {@link https://github.com/thomasfosterau/effect-jsonapi/issues/271 #271}.
  *
  * @example
  * ```ts
@@ -1109,7 +1114,10 @@ export const findings = (report: Report): ReadonlyArray<Finding> =>
  * `Predicate.isTagged(defect, "RuleDied")`), whose `rule` is the rule's id,
  * whose message names the rule and the defect's, and whose `cause` is the
  * original defect. That keeps the gate as strict as when a rule's defect
- * killed the whole run, while the report itself stays readable.
+ * killed the whole run, while the report itself stays readable. Its `message`
+ * is always rendered, but its `cause` holds the defect as it was thrown, so a
+ * reporter that pretty-prints the cause can itself throw on a defect that
+ * cannot be inspected (a revoked `Proxy`, say).
  *
  * @example
  * ```ts

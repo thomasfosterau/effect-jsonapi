@@ -14,6 +14,7 @@ import {
   MutableHashSet,
   Option,
   Predicate,
+  Result,
   SchemaAST,
 } from "effect";
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
@@ -82,7 +83,9 @@ export interface Skipped {
 
 /**
  * A rule that died — a defect, not a finding — before it reached a verdict.
- * `message` renders the defect; `defect` is the value as it was thrown.
+ * `message` renders the defect, capped at 500 UTF-16 code units (a longer one
+ * ends in `…`; one that cannot be rendered is `[unrenderable defect]`);
+ * `defect` is the value as it was thrown.
  *
  * @internal
  */
@@ -539,9 +542,33 @@ export const pass = (rule: Rule, probes: number, note?: string): Passed => ({
 /** @internal */
 export const skip = (rule: Rule, reason: string): Skipped => ({ _tag: "Skipped", rule, reason });
 
-/** An `Error` as `Name: message`, or the name alone when it carries no message. */
+/**
+ * An `Error` as `Name: message`, or the name alone when it carries no message.
+ * Both go through a template, so a `name` that is not a string but coerces to
+ * one (a number, say) still renders; one that cannot coerce (a Symbol, or an
+ * object whose `toString` throws) throws here, and the defect's message falls
+ * back to {@link UNRENDERABLE}.
+ */
 const errorMessage = (error: Error): string =>
-  error.message === "" ? error.name : `${error.name}: ${error.message}`;
+  error.message === "" ? `${error.name}` : `${error.name}: ${error.message}`;
+
+/** The longest `Errored.message`, in UTF-16 code units, the marker included. */
+const MESSAGE_LIMIT = 500;
+
+/**
+ * `message` cut to {@link MESSAGE_LIMIT}, ending in `…` when it was cut. The
+ * cut never splits a surrogate pair: a high surrogate it would leave last is
+ * dropped too.
+ */
+const capped = (message: string): string => {
+  if (message.length <= MESSAGE_LIMIT) return message;
+  const end = MESSAGE_LIMIT - 1;
+  const last = message.charCodeAt(end - 1);
+  return `${message.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end)}…`;
+};
+
+/** `Errored.message` for a defect that throws when it is inspected. */
+const UNRENDERABLE = "[unrenderable defect]";
 
 /**
  * Runs one rule, turning a defect into its `Errored` outcome so that one rule
@@ -555,19 +582,30 @@ const errorMessage = (error: Error): string =>
  */
 export const runRule = (implementation: RuleImpl, ctx: Context): Effect.Effect<Outcome> =>
   Effect.suspend(() => implementation.run(ctx)).pipe(
-    // The defect's message for a report line: an `Error` by its name and
-    // message, so a thrown tagged error with no message still says what it
-    // was; anything else thrown — a string, `null`, a plain object — as
-    // itself, not dressed up as an `Error`.
     Effect.catchDefect((defect) =>
       Effect.succeed<Outcome>({
         _tag: "Errored",
         rule: implementation.rule,
-        message: Predicate.isError(defect)
-          ? errorMessage(defect)
-          : Predicate.isString(defect)
-            ? defect
-            : Formatter.format(defect),
+        // The defect's message for a report line: an `Error` by its name and
+        // message, so a thrown tagged error with no message still says what
+        // it was; anything else thrown — a string, `null`, a plain object —
+        // as itself, not dressed up as an `Error`. Rendering is total: a
+        // defect that throws when inspected (a revoked `Proxy`, a getter that
+        // throws) gets a fixed marker rather than killing the run the
+        // `Errored` outcome exists to keep.
+        message: Result.merge(
+          Result.try({
+            try: () =>
+              capped(
+                Predicate.isError(defect)
+                  ? errorMessage(defect)
+                  : Predicate.isString(defect)
+                    ? defect
+                    : Formatter.format(defect),
+              ),
+            catch: () => UNRENDERABLE,
+          }),
+        ),
         defect,
       }),
     ),

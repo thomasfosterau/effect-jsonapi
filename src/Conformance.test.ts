@@ -126,15 +126,22 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
     }),
   );
 
-/** A run of `target` against the canned server `serve`. */
+/**
+ * A run of `target` against the canned server `serve`, through `client` — the
+ * canned client as it is, unless a test wraps it.
+ */
 const verifyOver =
   <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
     target: HttpApi.HttpApi<ApiId, Groups>,
   ) =>
-  (serve: (request: CannedRequest) => Canned, options?: Conformance.Options) =>
+  (
+    serve: (request: CannedRequest) => Canned,
+    options?: Conformance.Options,
+    client: (canned: HttpClient.HttpClient) => HttpClient.HttpClient = (canned) => canned,
+  ) =>
     Effect.runPromise(
       Conformance.verifyWith(target, {
-        client: cannedClient(serve),
+        client: client(cannedClient(serve)),
         baseUrl: "http://fixture.test",
         ids: { articles: "1" },
         ...options,
@@ -1180,17 +1187,22 @@ describe("Conformance: the write fixture", () => {
   /**
    * A conformant run over a fresh store, with `change` applied to every
    * answer. `seen` is every request as `METHOD /path`, `cleaned` every id the
-   * fixture's `cleanup` was called with.
+   * fixture's `cleanup` was called with. `server.client`, when given, wraps the
+   * client the run sends through.
    */
   const run = async (
     change: (canned: Canned, request: CannedRequest) => Canned = (canned) => canned,
     options?: (store: Store, cleaned: Array<string>) => Conformance.Options,
-    server: { readonly reuseIds?: boolean } = {},
+    server: {
+      readonly reuseIds?: boolean;
+      readonly client?: (canned: HttpClient.HttpClient) => HttpClient.HttpClient;
+    } = {},
   ) => {
     const store: Store = MutableHashMap.empty();
     const cleaned: Array<string> = [];
     const seen: Array<string> = [];
-    const serve = writeServer(store, server);
+    const { client, ...served } = server;
+    const serve = writeServer(store, served);
     const report = await verifyWrites(
       (request) => {
         seen.push(`${request.method} ${request.path}`);
@@ -1201,6 +1213,7 @@ describe("Conformance: the write fixture", () => {
         writes: { articles: fixture(store, cleaned) },
         ...options?.(store, cleaned),
       },
+      client,
     );
     return { report, store, seen, cleaned, writes: report.writes ?? [] };
   };
@@ -1365,6 +1378,17 @@ describe("Conformance: the write fixture", () => {
       new TransportRefused({ message: "connection refused" }),
       "TransportRefused: connection refused",
     ],
+    // `name` is the error's own to set; a number still renders, through the template.
+    [
+      "an error named by a number",
+      Object.assign(new TransportRefused({ message: "" }), { name: 42 }),
+      "42",
+    ],
+    [
+      "an error named by a number, with a message",
+      Object.assign(new TransportRefused({ message: "refused" }), { name: 42 }),
+      "42: refused",
+    ],
   ])("renders %s a rule dies with as itself", async (_, defect, message) => {
     const { report } = await run(
       (canned, request) => {
@@ -1376,6 +1400,117 @@ describe("Conformance: the write fixture", () => {
     expect(report.outcomes).toEqual([
       expect.objectContaining({ _tag: "Errored", message, defect }),
     ]);
+  });
+
+  it("marks an error whose name cannot become a string as unrenderable", async () => {
+    const defect = Object.assign(new TransportRefused({ message: "refused" }), {
+      name: Symbol("odd"),
+    });
+    const { report } = await run(
+      (canned, request) => {
+        if (request.method === "PATCH") throw defect;
+        return canned;
+      },
+      () => ({ only: ["spec/status/update-response"] }),
+    );
+    expect(report.outcomes).toEqual([
+      expect.objectContaining({ _tag: "Errored", message: "[unrenderable defect]", defect }),
+    ]);
+  });
+
+  /** A value every inspection of throws: `instanceof`, `String`, a property read. */
+  const revoked = ((): object => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    return proxy;
+  })();
+
+  const onlyUpdate = { only: ["spec/status/update-response"] };
+
+  it.each([
+    [
+      "thrown by the transport",
+      () =>
+        run(
+          (canned, request) => {
+            if (request.method === "PATCH") throw revoked;
+            return canned;
+          },
+          () => onlyUpdate,
+        ),
+    ],
+    [
+      "died with by the transport",
+      () =>
+        run(undefined, () => onlyUpdate, {
+          client: (client) =>
+            HttpClient.make((request) =>
+              request.method === "PATCH" ? Effect.die(revoked) : client.execute(request),
+            ),
+        }),
+    ],
+    [
+      "thrown before the rule's Effect",
+      () =>
+        run(undefined, () => ({
+          ...onlyUpdate,
+          writes: {
+            get articles(): Conformance.WriteFixture {
+              throw revoked;
+            },
+          },
+        })),
+    ],
+  ])("reports a defect no rendering can read, %s, as Errored", async (_, go) => {
+    const { report, store } = await go();
+    const [outcome] = report.outcomes;
+    expect(report.outcomes.length).toBe(1);
+    expect(outcome?._tag).toBe("Errored");
+    expect(Predicate.isTagged(outcome, "Errored") && outcome.message).toBe("[unrenderable defect]");
+    expect(Predicate.isTagged(outcome, "Errored") && Object.is(outcome.defect, revoked)).toBe(true);
+    expect(Conformance.format(report)).toContain("the rule died: [unrenderable defect]");
+    // What the dead rule created, if anything, was still removed.
+    expect(MutableHashMap.size(store)).toBe(0);
+  });
+
+  it("caps the message of a defect too long for a report line", async () => {
+    const { report } = await run(
+      (canned, request) => {
+        if (request.method === "PATCH") throw "x".repeat(10_000);
+        return canned;
+      },
+      () => ({ only: ["spec/status/update-response"] }),
+    );
+    const [outcome] = report.outcomes;
+    const message = Predicate.isTagged(outcome, "Errored") ? outcome.message : "";
+    expect(message.length).toBe(500);
+    expect(message).toBe(`${"x".repeat(499)}…`);
+    // The defect itself is kept whole.
+    expect(Predicate.isTagged(outcome, "Errored") && outcome.defect).toBe("x".repeat(10_000));
+  });
+
+  it("does not split a surrogate pair when it caps a message", async () => {
+    const { report } = await run(
+      (canned, request) => {
+        if (request.method === "PATCH") throw `${"x".repeat(498)}😀${"x".repeat(100)}`;
+        return canned;
+      },
+      () => ({ only: ["spec/status/update-response"] }),
+    );
+    const [outcome] = report.outcomes;
+    expect(Predicate.isTagged(outcome, "Errored") && outcome.message).toBe(`${"x".repeat(498)}…`);
+  });
+
+  it("leaves a message at the cap as it is", async () => {
+    const { report } = await run(
+      (canned, request) => {
+        if (request.method === "PATCH") throw "x".repeat(500);
+        return canned;
+      },
+      () => ({ only: ["spec/status/update-response"] }),
+    );
+    const [outcome] = report.outcomes;
+    expect(Predicate.isTagged(outcome, "Errored") && outcome.message).toBe("x".repeat(500));
   });
 
   it("stops at an external interrupt, cleaning up what the interrupted rule created", async () => {
@@ -1452,6 +1587,62 @@ describe("Conformance: the write fixture", () => {
     expect(MutableHashMap.size(store)).toBe(WRITE_RULES.length - 1);
     expect(Conformance.format(report)).toContain("CLEANUP FAILED");
   });
+
+  class FixtureBroke extends Schema.TaggedError<FixtureBroke>()("FixtureBroke", {
+    message: Schema.String,
+  }) {}
+
+  // A fixture that throws a value the kit can render is not a defect: no rule
+  // dies of it. One it can't render still does, until #271.
+  it.each([
+    {
+      member: "create",
+      expected: (report: Conformance.Report, writes: ReadonlyArray<Conformance.Write>) => {
+        everyWriteRule(report, `writes["articles"].create threw: FixtureBroke: create broke`);
+        expect(writes).toEqual([]);
+      },
+    },
+    {
+      member: "update",
+      expected: (report: Conformance.Report, writes: ReadonlyArray<Conformance.Write>) => {
+        expect(outcomeFor(report, "spec/status/update-response")).toEqual(
+          skippedFor(`writes["articles"].update threw: FixtureBroke: update broke`),
+        );
+        const others = WRITE_RULES.filter((id) => id !== "spec/status/update-response");
+        expect(others.map((id) => outcomeFor(report, id)._tag)).toEqual(others.map(() => "Passed"));
+        expect(disposals(writes)).not.toContain("left");
+      },
+    },
+    {
+      member: "cleanup",
+      expected: (report: Conformance.Report, writes: ReadonlyArray<Conformance.Write>) => {
+        everyWriteRule(report);
+        const stuck = writes.filter((write) => write.disposal === "cleanup-failed");
+        // Every creation but the one the kit's own DELETE removed.
+        expect(stuck.length).toBe(WRITE_RULES.length - 1);
+        expect(stuck[0]?.detail).toContain("cleanup broke");
+      },
+    },
+  ] as const)(
+    "skips or records — never dies — when the fixture's $member throws",
+    async ({ member, expected }) => {
+      const { report, writes } = await run(undefined, (store, cleaned) => ({
+        writes: {
+          articles: {
+            ...fixture(store, cleaned),
+            [member]: () => {
+              throw new FixtureBroke({ message: `${member} broke` });
+            },
+          },
+        },
+      }));
+      expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual(
+        [],
+      );
+      expect(failed(report)).toEqual([]);
+      expected(report, writes);
+    },
+  );
 
   it("leaves what it created in place without a cleanup, and says so", async () => {
     const { report, store, writes } = await run(undefined, (store, cleaned) => {
