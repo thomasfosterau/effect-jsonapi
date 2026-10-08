@@ -13,7 +13,18 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Effect, Match, Option, Predicate, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  HashMap,
+  HashSet,
+  Match,
+  Option,
+  Predicate,
+  Result,
+  Schema,
+} from "effect";
+import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
 import {
   atomicMediaType,
@@ -557,6 +568,47 @@ const includedRequiresData: RuleImpl = {
     })(ctx),
 };
 
+/**
+ * The `included` members of a document that cannot be reached from its
+ * primary data through resource linkage, in document order — the violations
+ * `spec/document/full-linkage` reports.
+ *
+ * The walk is the builders' (`Linkage.reachable`, shared so the two cannot drift
+ * apart); identity and linkage are the kit's own, over arbitrary JSON:
+ * `identity` keys a member by `type` and `id`, or by `lid` when it has no
+ * `id`, and `linkageOf` reads the identifiers a member's relationships name
+ * (a `null`, empty, meta-only or links-only relationship names none). A member
+ * with no identity at all can never be reached, so it is always reported; a
+ * key the document does not include ends its branch. Of two members with the
+ * same identity, the later one's linkage is the one followed.
+ *
+ * @internal
+ */
+export const unlinkedIncluded = (document: Readonly<Record<string, unknown>>) => {
+  const included = document["included"];
+  if (!Array.isArray(included)) return [];
+  const data = document["data"];
+  const primaries = Array.isArray(data) ? Arr.filter(data, isRecord) : isRecord(data) ? [data] : [];
+  const members = Arr.filter(included, isRecord);
+  const byIdentity = HashMap.fromIterable(
+    Arr.flatMap(members, (resource) =>
+      Arr.map(
+        Arr.fromOption(Option.fromUndefinedOr(identity(resource))),
+        (key) => [key, resource] as const,
+      ),
+    ),
+  );
+  const linked = Linkage.reachable(Arr.flatMap(primaries, linkageOf), (key) =>
+    Option.match(HashMap.get(byIdentity, key), { onNone: () => [], onSome: linkageOf }),
+  );
+  return Arr.filter(members, (resource) =>
+    Option.match(Option.fromUndefinedOr(identity(resource)), {
+      onNone: () => true,
+      onSome: (key) => !HashSet.has(linked, key),
+    }),
+  );
+};
+
 const fullLinkage: RuleImpl = {
   rule: rule(
     "spec/document/full-linkage",
@@ -572,40 +624,7 @@ const fullLinkage: RuleImpl = {
       inapplicable:
         "no endpoint returned a compound document — either none declares `include`, or no resource it returned carries inline relationship linkage to include",
       check: (body, observation, where) => {
-        if (!isRecord(body)) return [];
-        const included = body["included"];
-        if (!Array.isArray(included) || included.length === 0) return [];
-        const primary = body["data"];
-        const primaries = Array.isArray(primary)
-          ? primary.filter(isRecord)
-          : isRecord(primary)
-            ? [primary]
-            : [];
-        const includedRecords = included.filter(isRecord);
-        const byIdentity = new Map<string, Readonly<Record<string, unknown>>>();
-        for (const resource of includedRecords) {
-          const key = identity(resource);
-          if (key !== undefined) byIdentity.set(key, resource);
-        }
-        const reachable = new Set<string>();
-        const frontier: Array<string> = [];
-        const seed = (keys: ReadonlyArray<string>) => {
-          for (const key of keys) {
-            if (reachable.has(key)) continue;
-            reachable.add(key);
-            frontier.push(key);
-          }
-        };
-        for (const resource of primaries) seed(linkageOf(resource));
-        while (frontier.length > 0) {
-          const key = frontier.pop()!;
-          const resource = byIdentity.get(key);
-          if (resource !== undefined) seed(linkageOf(resource));
-        }
-        const orphans = includedRecords.filter((resource) => {
-          const key = identity(resource);
-          return key === undefined || !reachable.has(key);
-        });
+        const orphans = isRecord(body) ? unlinkedIncluded(body) : [];
         return orphans.length === 0
           ? []
           : [
