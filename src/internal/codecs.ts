@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Schema, SchemaTransformation } from "effect";
+import { Option, Record, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
 import { errorMeta } from "./errorMeta.js";
 
@@ -177,27 +177,24 @@ const bracketKey = /^([^[\]]+)\[([^[\]]+)\]$/;
  */
 export const nest = (flat: { readonly [key: string]: unknown }): Record<string, unknown> => {
   const nested: Record<string, unknown> = {};
-  const bracketed: Array<readonly [key: string, group: string, member: string, value: unknown]> =
-    [];
-  for (const [key, value] of Object.entries(flat)) {
+  // Whether a bare key holds `name`, wherever it sits in `flat`.
+  const holdsBare = (name: string): boolean =>
+    Option.getOrUndefined(Record.get(flat, name)) !== undefined;
+  for (const [key, value] of Record.toEntries(flat)) {
     if (value === undefined) continue;
-    const match = bracketKey.exec(key);
-    if (match === null) define(nested, key, value);
-    else bracketed.push([key, match[1]!, match[2]!, value]);
-  }
-  const groups = new Map<string, Record<string, unknown>>();
-  for (const [key, name, member, value] of bracketed) {
-    let group = groups.get(name);
-    if (group === undefined) {
-      if (Object.hasOwn(nested, name)) {
-        define(nested, key, value);
-        continue;
-      }
-      group = {};
-      groups.set(name, group);
-      define(nested, name, group);
+    const [, name, member] = bracketKey.exec(key) ?? [];
+    if (name === undefined || member === undefined || holdsBare(name)) {
+      define(nested, key, value);
+    } else {
+      // No bare key holds the name, so an own entry under it is a group this
+      // loop made.
+      const group = Option.getOrElse(Record.get(nested, name), () => {
+        const made: Record<string, unknown> = {};
+        define(nested, name, made);
+        return made;
+      }) as Record<string, unknown>;
+      define(group, member, value);
     }
-    define(group, member, value);
   }
   return nested;
 };

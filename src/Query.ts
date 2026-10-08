@@ -48,7 +48,7 @@
  * @since 0.1.0
  */
 import type { SchemaAST, Types } from "effect";
-import { Effect, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import { Effect, Record, Schema, SchemaIssue, SchemaTransformation } from "effect";
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
@@ -1677,9 +1677,8 @@ export const schema = <R extends Any, const O extends Options<R>>(
   // parameter through to the handler (typed `{}`) and into `nest`. Keeping
   // only the declared keys makes the empty case drop them too (#260); with
   // fields it is a no-op, the struct having dropped the rest already.
-  const declared = new Set(Object.keys(flatFields));
   const declaredOnly = (values: Values): Values =>
-    Object.fromEntries(Object.entries(values).filter(([key]) => declared.has(key)));
+    Record.filter(values, (_, key) => Record.has(flatFields, key));
   return flat.pipe(
     Schema.decodeTo(
       nested,

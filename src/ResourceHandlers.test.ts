@@ -504,8 +504,9 @@ describe("related", () => {
     );
   });
 
-  it("drops a ref whose type names an Object.prototype member, as it does any type with no target", async () => {
-    for (const type of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"])(
+    "drops a ref typed %s, an Object.prototype member, as it does any type with no target",
+    async (type) => {
       const one = ResourceHandlers.related({
         ...config,
         loadParent: (_id: string) =>
@@ -518,12 +519,13 @@ describe("related", () => {
         key: "election",
         cardinality: "one",
       });
+      // oxlint-disable-next-line effect/effect-run-in-body -- the test is the runtime boundary, as for every handler test in this file
       expect(await Effect.runPromise(one({ params: { id: "c1" } }))).toEqual({
         data: null,
         jsonapi: { version: "1.1" },
       });
-    }
-  });
+    },
+  );
 
   it("answers a to-one as the related resource, or `data: null` for empty linkage", async () => {
     const one = ResourceHandlers.related({ ...config, key: "election", cardinality: "one" });

@@ -8,6 +8,7 @@ import * as Group from "./Group.js";
 import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
+import { platformLayer } from "./Registry.js";
 import { attribute, make as Resource } from "./Resource.js";
 
 const Person = Resource("people", {
@@ -1187,13 +1188,10 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
       const appLayer = HttpApiBuilder.layer(Api).pipe(
         Layer.provide(PeopleLive),
         Layer.provide(Middleware.layer),
-      ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+        Layer.provide(platformLayer),
+      );
       const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-      try {
-        return (await handler(new Request(url))).status;
-      } finally {
-        await dispose();
-      }
+      return (await handler(new Request(url)).finally(dispose)).status;
     };
 
     it.each(titled(implementationSpecific))(

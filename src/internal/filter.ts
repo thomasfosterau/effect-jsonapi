@@ -41,7 +41,7 @@ class InvalidFilter extends Schema.TaggedError<InvalidFilter>()("InvalidFilter",
 // own entry counts: the declaration is a plain object (`Resource.filterable`)
 // and the field name comes from the request, so `constructor`, `__proto__`,
 // `toString`, … must read as undeclared, not as an `Object.prototype` member.
-const declaration = <V>(fields: { readonly [field: string]: V }, field: string): V | undefined =>
+const declaration = <V>(fields: { readonly [field: string]: V }, field: string) =>
   Option.getOrUndefined(Record.get(fields, field));
 
 /**

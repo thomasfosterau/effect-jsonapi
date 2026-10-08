@@ -40,6 +40,10 @@ const Article = Resource("articles", {
   },
 });
 
+// Field names a plain-object lookup would find on `Object.prototype`: each
+// must read as undeclared (#260), as `Resource.filterable` is a plain object.
+const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"] as const;
+
 const fields = filterable(Article);
 const codec = Query.Filter(Article);
 type Ast = typeof codec.Type;
@@ -670,9 +674,10 @@ describe("Query.Filter: rejections name the offending key", () => {
   // value (#260).
   const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"];
 
-  it("rejects a field named after an Object.prototype member in every spelling", () => {
-    for (const name of inherited) {
-      const message = `Unknown filter field ${JSON.stringify(name)}`;
+  it.each(inherited)(
+    "rejects a field named %s, an Object.prototype member, in every spelling",
+    (name) => {
+      const message = `Unknown filter field "${name}"`;
       expect(failures({ [`filter[${name}]`]: "x" })).toEqual([{ key: `filter[${name}]`, message }]);
       expect(failures({ [`filter[${name}][eq]`]: "x" })).toEqual([
         { key: `filter[${name}][eq]`, message },
@@ -684,25 +689,23 @@ describe("Query.Filter: rejections name the offending key", () => {
           "filter[c][condition][value]": "x",
         }),
       ).toEqual([{ key: "filter[c][condition][path]", message }]);
-    }
-  });
+    },
+  );
 
-  it("refuses on encode a field named after an Object.prototype member", () => {
-    for (const name of inherited) {
-      const message = `Unknown filter field ${JSON.stringify(name)}`;
-      for (const tree of [eq(name, "x"), Filter.isIn(name, ["x"]), Filter.isNull(name)]) {
-        const result = Schema.encodeUnknownResult(codec)(tree);
-        expect(result._tag).toBe("Failure");
-        if (result._tag === "Failure") expect(result.failure.message).toBe(message);
-        expect(() => Filter.normalise(tree, fields)).toThrow(
-          expect.objectContaining({ _tag: "InvalidFilter", message }),
-        );
-      }
-      // each guard on its own, since `prepare` runs the operator check first
-      const invalid = expect.objectContaining({ _tag: "InvalidFilter", message });
-      expect(() => literalEncoder(fields)(name, "x")).toThrow(invalid);
-      expect(() => operatorCheck(fields)(name, "eq")).toThrow(invalid);
-    }
+  it.each(inherited)("refuses on encode a field named %s, an Object.prototype member", (name) => {
+    const message = `Unknown filter field "${name}"`;
+    const invalid = expect.objectContaining({ _tag: "InvalidFilter", message });
+    const refused = expect.objectContaining({ message });
+    const encode = Schema.encodeUnknownSync(codec);
+    expect(() => encode(eq(name, "x"))).toThrow(refused);
+    expect(() => encode(Filter.isIn(name, ["x"]))).toThrow(refused);
+    expect(() => encode(Filter.isNull(name))).toThrow(refused);
+    expect(() => Filter.normalise(eq(name, "x"), fields)).toThrow(invalid);
+    expect(() => Filter.normalise(Filter.isIn(name, ["x"]), fields)).toThrow(invalid);
+    expect(() => Filter.normalise(Filter.isNull(name), fields)).toThrow(invalid);
+    // each guard on its own, since `prepare` runs the operator check first
+    expect(() => literalEncoder(fields)(name, "x")).toThrow(invalid);
+    expect(() => operatorCheck(fields)(name, "eq")).toThrow(invalid);
   });
 
   it("rejects an empty record: an absent filter is Query.schema's concern", () => {
@@ -1483,24 +1486,26 @@ describe("Endpoint.list with filter: true, end to end", () => {
     expect(decoded.detail).toBe('Unknown filter field "body"');
   });
 
-  it("answers 400, not 500, for a field named after an Object.prototype member", async () => {
-    for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
-      for (const [query, parameter] of [
-        [`filter[${name}]=x`, `filter[${name}]`],
-        [`filter[${name}][gt]=1`, `filter[${name}][gt]`],
-        [
-          `filter[c][condition][path]=${name}&filter[c][condition][operator]=eq&filter[c][condition][value]=x`,
-          "filter[c][condition][path]",
-        ],
-      ] as const) {
-        const response = await request(`http://localhost/articles?${query}`);
-        expect(response.status).toBe(400);
-        expect(response.body).toEqual({
-          errors: [error(`Unknown filter field ${JSON.stringify(name)}`, parameter)],
-        });
-      }
-    }
-  });
+  it.each(
+    inherited.flatMap((name) => [
+      [name, `filter[${name}]=x`, `filter[${name}]`],
+      [name, `filter[${name}][gt]=1`, `filter[${name}][gt]`],
+      [
+        name,
+        `filter[c][condition][path]=${name}&filter[c][condition][operator]=eq&filter[c][condition][value]=x`,
+        "filter[c][condition][path]",
+      ],
+    ]),
+  )(
+    "answers 400, not 500, for the Object.prototype member %s (?%s)",
+    async (name, query, parameter) => {
+      const response = await request(`http://localhost/articles?${query}`);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({
+        errors: [error(`Unknown filter field "${name}"`, parameter)],
+      });
+    },
+  );
 
   it("answers one error object per offending key", async () => {
     const response = await request("http://localhost/articles?filter[body]=x&filter[age][gt]=abc");

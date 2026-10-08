@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vite-plus/test";
+import * as Record from "effect/Record";
 import { flatten, nest } from "./codecs.js";
 
 // A reshaper that wrote through `__proto__` would pollute every object in the
@@ -8,9 +9,9 @@ afterEach(() => {
   Reflect.deleteProperty(Object.prototype, "polluted");
 });
 
-// `Object.fromEntries` makes `__proto__` an own key, as `UrlParams.toRecord`
+// `Record.fromEntries` makes `__proto__` an own key, as `UrlParams.toRecord`
 // does; an object literal would set the prototype instead.
-const record = (key: string, value: unknown) => Object.fromEntries([[key, value]]);
+const record = <V>(key: string, value: V) => Record.fromEntries([[key, value]]);
 
 describe("nest", () => {
   it("reshapes one bracket level into groups", () => {
