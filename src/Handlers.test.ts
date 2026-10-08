@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import { Schema } from "effect";
 import * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -490,6 +491,10 @@ describe("the per-resource transform pass", () => {
     expect(() =>
       Handlers.data(primary, { included: [person, other], onResource: stripRelationships }),
     ).toThrow(/full linkage violation: included resource "people:9"/);
+    // A collection walks from its transformed primary data too.
+    expect(() =>
+      Handlers.collection([primary], { included: [person, other], onResource: stripRelationships }),
+    ).toThrow(/full linkage violation: included resource "people:9"/);
     // Untransformed, the primary data reaches both: `people:9` directly,
     // `articles:2` through it.
     expect(Handlers.data(primary, { included: [person, other] }).included).toEqual([person, other]);
@@ -537,6 +542,26 @@ describe("the per-resource transform pass", () => {
     expect(
       Handlers.collection([stripped, sibling], { included: [company, person] }).included,
     ).toEqual([company, person]);
+  });
+
+  it("walks a long chain of included members without overflowing the stack (#239)", () => {
+    // articles:1 → people:0 → people:1 → … → people:9999: one walk level per
+    // member, so a walk that recursed per level would exhaust the stack.
+    const length = 10_000;
+    const primary = {
+      type: "articles",
+      id: "1",
+      relationships: { author: { data: { type: "people", id: "0" } } },
+    };
+    const chain = Arr.makeBy(length, (i) => ({
+      type: "people",
+      id: String(i),
+      relationships: {
+        manager: { data: i + 1 < length ? { type: "people", id: String(i + 1) } : null },
+      },
+    }));
+    expect(Handlers.buildIncluded([primary], chain)).toHaveLength(length);
+    expect(Handlers.data(primary, { included: chain }).included).toHaveLength(length);
   });
 
   it("buildIncluded drops members already present as primary data (#147)", () => {

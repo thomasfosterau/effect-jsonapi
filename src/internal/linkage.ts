@@ -24,17 +24,13 @@ export const reachable = (
   seeds: Iterable<string>,
   linkageOf: (key: string) => Iterable<string>,
 ): HashSet.HashSet<string> => {
-  const walk = (
-    reached: HashSet.HashSet<string>,
-    level: ReadonlyArray<string>,
-  ): HashSet.HashSet<string> => {
+  let reached = HashSet.empty<string>();
+  let level = Arr.fromIterable(seeds);
+  // oxlint-disable-next-line effect/imperative-loops -- one pass per level: recursing per level overflows the stack on a long chain of included members
+  while (Arr.isReadonlyArrayNonEmpty(level)) {
     const fresh = Arr.dedupe(Arr.filter(level, (key) => !HashSet.has(reached, key)));
-    return Arr.isReadonlyArrayNonEmpty(fresh)
-      ? walk(
-          HashSet.union(reached, HashSet.fromIterable(fresh)),
-          Arr.flatMap(fresh, (key) => Arr.fromIterable(linkageOf(key))),
-        )
-      : reached;
-  };
-  return walk(HashSet.empty(), Arr.fromIterable(seeds));
+    reached = HashSet.union(reached, HashSet.fromIterable(fresh));
+    level = Arr.flatMap(fresh, (key) => Arr.fromIterable(linkageOf(key)));
+  }
+  return reached;
 };
