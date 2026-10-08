@@ -49,6 +49,7 @@ import { Effect, Schema, SchemaAST, SchemaIssue, SchemaTransformation, Struct } 
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js";
 import * as Filter from "./Filter.js";
 import { resolveOperators } from "./internal/operators.js";
+import { closedStruct } from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships, RelationshipSchemas } from "./Relationship.js";
 import * as Sort from "./Sort.js";
@@ -2699,8 +2700,11 @@ export const make = <
   // `attribute` / `readOnlyAttribute`) controlling how it appears in the write
   // projections. A plain schema attribute projects with the read-write defaults.
   // They derive from the *declared* map, so input-only attributes project too.
-  const createAttributes = Schema.Struct(createAttributeFields(options.attributes));
-  const updateAttributes = Schema.Struct(updateAttributeFields(options.attributes));
+  // Every member struct of a write body is closed (`closedStruct`): one that
+  // declares nothing rejects each member a client sends with a 400 at that
+  // member, where a bare empty struct would hand them all to the handler.
+  const createAttributes = closedStruct(createAttributeFields(options.attributes));
+  const updateAttributes = closedStruct(updateAttributeFields(options.attributes));
 
   // Filter declarations are checked now, not on first use: an attribute declared
   // filterable whose encoded form has no literal codec, or a relationship
@@ -2742,7 +2746,7 @@ export const make = <
       createRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!);
     }
   }
-  const createRelationshipsStruct = Schema.Struct(createRelationshipFields);
+  const createRelationshipsStruct = closedStruct(createRelationshipFields);
 
   const createPayload = Schema.Struct({
     data: Schema.Struct({
@@ -2770,7 +2774,7 @@ export const make = <
       type: Schema.tag(type),
       id,
       attributes: Schema.optionalKey(updateAttributes),
-      relationships: Schema.optionalKey(Schema.Struct(updateRelationshipFields)),
+      relationships: Schema.optionalKey(closedStruct(updateRelationshipFields)),
     }),
   }) as unknown as UpdatePayload<Type, Attributes, Rels, IdSchema>;
 

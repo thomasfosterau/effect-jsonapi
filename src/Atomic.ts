@@ -59,6 +59,7 @@ import { Schema } from "effect";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js";
+import { closedStruct } from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
 import type {
@@ -348,7 +349,7 @@ const addRelationshipMembers = (
       fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
     }
   }
-  return { struct: Schema.Struct(fields), required };
+  return { struct: closedStruct(fields), required };
 };
 
 const updateRelationshipFields = (relationships: Relationships): Schema.Top => {
@@ -357,7 +358,7 @@ const updateRelationshipFields = (relationships: Relationships): Schema.Top => {
     if (descriptor.kind === "paginated") continue;
     fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
   }
-  return Schema.Struct(fields);
+  return closedStruct(fields);
 };
 
 // ---------------------------------------------------------------------------
@@ -401,7 +402,7 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
       lid: Schema.optionalKey(Schema.String),
       // From the *declared* map, so input-only attributes (`resource: false`)
       // are accepted here exactly as in `createPayload`.
-      attributes: Schema.Struct(createAttributeFields(declaredAttributes(resource))),
+      attributes: closedStruct(createAttributeFields(declaredAttributes(resource))),
       relationships: required ? struct : Schema.optionalKey(struct),
     }),
     meta: Schema.optionalKey(AnyMeta),
@@ -450,7 +451,7 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
       attributes: Schema.optionalKey(
-        Schema.Struct(updateAttributeFields(declaredAttributes(resource))),
+        closedStruct(updateAttributeFields(declaredAttributes(resource))),
       ),
       relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships)),
     }),

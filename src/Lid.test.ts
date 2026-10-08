@@ -110,6 +110,24 @@ describe("lidMap", () => {
     expect(lids.resolveLinkage(Article, undefined)).toEqual({});
   });
 
+  // A decoded body only carries declared relationships (#270), but the linkage
+  // a caller hands in is a plain record: an own `__proto__` member stays a key
+  // of the result rather than re-parenting it.
+  it("keeps an own __proto__ member as a key, never as the result's prototype", () => {
+    const linkage = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Record(
+          Schema.String,
+          Schema.Struct({ data: Schema.Struct({ type: Schema.String, id: Schema.String }) }),
+        ),
+      ),
+    )('{"__proto__":{"data":{"type":"people","id":"1"}}}');
+    const resolved = lidMap().resolveLinkage(Article, linkage);
+    expect(Object.getPrototypeOf(resolved)).toBe(Object.prototype);
+    expect(Reflect.ownKeys(resolved)).toEqual(["__proto__"]);
+    expect(resolved).toEqual(linkage);
+  });
+
   it("throws UnknownLidError for unassigned lids in linkage", () => {
     const lids = lidMap();
     expect(() =>
