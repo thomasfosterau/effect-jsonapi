@@ -1613,7 +1613,7 @@ Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and �
 
 Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](./docs/filter-grammar.md) §2). Encoding always emits the single comma form.
 
-A parameter the endpoint's query does not declare never reaches the handler: decoding drops it, on an endpoint whose query declares no family at all (its decoded `query` is then `{}`) as on any other, and no spelling of one — `?x=1&x[y]=2`, `?a[]=1`, `?x[y][z]=1` — can make the query fail to decode ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)).
+A parameter the endpoint's query does not declare never reaches the handler: decoding drops it, on an endpoint whose query declares no family at all (its decoded `query` is then `{}`) as on any other, and no spelling of one — a bare name next to its bracketed members, empty brackets, deeper nesting — can make the query fail to decode ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)).
 
 ### Declaring filterable and sortable attributes
 
