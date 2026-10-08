@@ -348,6 +348,12 @@ describe("query-parameter errors", () => {
         },
       ],
     });
+    // The parameter names the rejected type, not a fixed `fields[articles]`.
+    expect(
+      ApiError.toDocument(
+        new ApiError.UnsupportedFieldsetMember({ type: "people", field: "x", attributes: [] }),
+      ).errors[0]?.source,
+    ).toEqual({ parameter: "fields[people]" });
   });
 
   it("UnsupportedFieldsetMember meta round-trips through the wire schema", () => {

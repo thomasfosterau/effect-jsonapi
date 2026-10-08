@@ -310,13 +310,14 @@ describe("fromTaggedError", () => {
       title: "Conflict",
       detail: "URL id differs",
     });
-    // …and the package's include error, meta.includablePaths included.
+    // …and the package's include error, source.parameter and meta.includablePaths included.
     const include = mapped(
       new ApiError.UnsupportedIncludePath({ path: "nope", includablePaths: ["author"] }),
     );
     expect(include.status).toBe(400);
     expect(include.errors[0]).toMatchObject({
       code: "unsupported.include-path",
+      source: { parameter: "include" },
       meta: { includablePaths: ["author"] },
     });
   });
