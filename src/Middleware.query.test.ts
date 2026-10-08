@@ -678,4 +678,16 @@ describe("spec families an endpoint does not support (#261)", () => {
     expect(queries).toEqual([{}]);
     expect((await serve("/posts?include=author", allowing)).status).toBe(400);
   });
+
+  // Allowing a family only switches off the 400 where it is undeclared: an
+  // endpoint that declares it still decodes it, value and codec errors alike.
+  it("still decodes a family listed in allowedQueryParameters on an endpoint that declares it", async () => {
+    queries.length = 0;
+    const allowing = Middleware.layerWith({ allowedQueryParameters: ["sort"] });
+    expect((await serve("/posts?sort=title", allowing)).status).toBe(200);
+    expect(queries).toEqual([{ sort: [{ field: "title", direction: "asc" }] }]);
+    const field = await serve("/posts?sort=nope", allowing);
+    expect(field.status).toBe(400);
+    expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
+  });
 });
