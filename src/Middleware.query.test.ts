@@ -271,6 +271,18 @@ describe("allowedQueryParameters entries", () => {
     ).toThrow('List its base name "lang"');
   });
 
+  it("says a name with any other character needs no entry", () => {
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: ["Lang"] });
+    expect(build).toThrow("needs no entry");
+    expect(build).not.toThrow("List its base name");
+  });
+
+  it("says an empty entry names no parameter", () => {
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [""] });
+    expect(build).toThrow("An empty entry names no parameter; remove it.");
+    expect(build).not.toThrow("needs no entry");
+  });
+
   it("accepts base names made only of a-z, the specification's families included", () => {
     expect(() =>
       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang", "ref", "page"] }),

@@ -505,8 +505,9 @@ export interface QueryParameterOptions {
    * with {@link InvalidAllowedQueryParameter} rather than admitting nothing:
    * {@link schemaErrorsLayer} and {@link layerWith} throw it when the layer is
    * built, {@link checkQueryParameters} when it is called. List a bracketed
-   * member by its base name (`lang`); a name with any other character is
-   * implementation-specific and never rejected, so it needs no entry.
+   * member by its base name (`lang`) and drop an empty entry; a name with any
+   * other character is implementation-specific and never rejected, so it
+   * needs no entry.
    */
   readonly allowedQueryParameters?: ReadonlyArray<string> | undefined;
 }
@@ -551,11 +552,44 @@ const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string
     message:
       `allowedQueryParameters entry "${parameter}" is not a family base name ` +
       "made only of the letters a-z. " +
-      (base !== parameter && RESERVED_BASE_NAME.test(base)
-        ? `List its base name "${base}", which admits the bare parameter and ` +
-          "every bracketed member of its family."
-        : "A name with any other character is implementation-specific and never rejected, " +
-          "so it needs no entry."),
+      (parameter === ""
+        ? "An empty entry names no parameter; remove it."
+        : base !== parameter && RESERVED_BASE_NAME.test(base)
+          ? `List its base name "${base}", which admits the bare parameter and ` +
+            "every bracketed member of its family."
+          : "A name with any other character is implementation-specific and never rejected, " +
+            "so it needs no entry."),
+  });
+};
+
+// The check behind `checkQueryParameters`, over an allow-list
+// `allowedBaseNames` has already validated: `schemaErrorsLayer` validates
+// once, when it is built, rather than on every request.
+const rejectQueryParameters = (
+  names: Iterable<string>,
+  declared: ReadonlyArray<string>,
+  allowed: ReadonlyArray<string>,
+): Option.Option<typeof WireDocument.Type> => {
+  const known = [...SPEC_FAMILIES, ...declared.map(baseName), ...allowed];
+  const rejected = Arr.dedupe(
+    Arr.filter(Arr.fromIterable(names), (name) => {
+      const base = baseName(name);
+      return RESERVED_BASE_NAME.test(base) && !known.includes(base);
+    }),
+  );
+  if (!Arr.isReadonlyArrayNonEmpty(rejected)) return Option.none();
+  return Option.some({
+    errors: rejected.map((parameter) => ({
+      status: String(BadRequest.status),
+      code: BadRequest.code,
+      ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
+      detail:
+        `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
+        "names made only of the letters a-z for the specification; an implementation-" +
+        "specific parameter's name must contain at least one other character, such as " +
+        "a capital letter.",
+      source: { parameter },
+    })),
   });
 };
 
@@ -617,33 +651,10 @@ export interface QueryParameterCheck extends QueryParameterOptions {
 export const checkQueryParameters = (
   names: Iterable<string>,
   options?: QueryParameterCheck,
-): typeof WireDocument.Type | undefined => {
-  const known = [
-    ...SPEC_FAMILIES,
-    ...(options?.declared ?? []).map(baseName),
-    ...allowedBaseNames(options),
-  ];
-  const rejected = Arr.dedupe(
-    Arr.filter(Arr.fromIterable(names), (name) => {
-      const base = baseName(name);
-      return RESERVED_BASE_NAME.test(base) && !known.includes(base);
-    }),
+): typeof WireDocument.Type | undefined =>
+  Option.getOrUndefined(
+    rejectQueryParameters(names, options?.declared ?? [], allowedBaseNames(options)),
   );
-  if (!Arr.isReadonlyArrayNonEmpty(rejected)) return undefined;
-  return {
-    errors: rejected.map((parameter) => ({
-      status: String(BadRequest.status),
-      code: BadRequest.code,
-      ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
-      detail:
-        `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
-        "names made only of the letters a-z for the specification; an implementation-" +
-        "specific parameter's name must contain at least one other character, such as " +
-        "a capital letter.",
-      source: { parameter },
-    })),
-  };
-};
 
 // What an endpoint's query schema declares, for `checkQueryParameters`:
 // the wire names of its encoded (flat) side, or none when that side could
@@ -883,11 +894,12 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
       const declared = declaredFor(endpoint);
       if (Option.isSome(declared)) {
         const params = yield* ParsedSearchParams;
-        const rejected = checkQueryParameters(Record.keys(params), {
-          declared: declared.value,
+        const rejected = rejectQueryParameters(
+          Record.keys(params),
+          declared.value,
           allowedQueryParameters,
-        });
-        if (rejected !== undefined) return yield* badRequestResponse("Query", rejected);
+        );
+        if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
       }
       return yield* Effect.catch(httpEffect, (error) =>
         HttpApiError.HttpApiSchemaError.is(error)
@@ -1019,6 +1031,10 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
  * when the api uses JSON:API extensions, and the query-parameter options of
  * {@link schemaErrorsLayer} (`allowedQueryParameters`, for a host that must
  * accept its own all-lowercase parameters; since 0.17.0).
+ *
+ * Throws {@link InvalidAllowedQueryParameter}, when called, for an
+ * `allowedQueryParameters` entry that is not a family base name made only of
+ * a-z.
  *
  * @example
  * ```ts
