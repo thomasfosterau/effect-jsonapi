@@ -10,6 +10,7 @@ import { Effect, Exit } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
+import * as Query from "./Query.js";
 
 interface User {
   readonly id: string;
@@ -554,6 +555,78 @@ describe("Assemble.unpaginatedCollection", () => {
     expect(links.self).toBeDefined();
     expect(meta.totalCount).toBe(3);
     expect(await run(Assemble.unpaginatedCollection(whole, options))).toEqual(paged);
+  });
+
+  describe("with a `self` link (#242)", () => {
+    const self = "https://example.test/people";
+    const query: ReadonlyArray<Query.Pair> = [
+      ["include", "birthPlace"],
+      ["filter[q]", "Ada Lovelace, & co"],
+      ["sort", "-name"],
+    ];
+
+    it("emits `links.self` and nothing else at the top level", async () => {
+      const document = await run(Assemble.unpaginatedCollection(whole, { self }));
+      expect(document.links).toEqual({ self });
+      expect(document).not.toHaveProperty("meta");
+      expect(ids(document.data)).toEqual(["people:a", "people:b", "people:c"]);
+      expect(document.jsonapi).toEqual({ version: "1.1" });
+    });
+
+    it("carries the query on `self`, canonicalised as `collection`'s links are", async () => {
+      const document = await run(Assemble.unpaginatedCollection(whole, { self, query }));
+      expect(document.links.self).toBe(
+        `${self}?include=birthPlace&filter[q]=Ada%20Lovelace%2C%20%26%20co&sort=-name`,
+      );
+      expect(document.links.self).toBe(`${self}?${Query.serialise(query)}`);
+      // The paginated form serialises the same pairs the same way, its page
+      // cursor appended after them.
+      const paged = await run(
+        Assemble.collection(whole, { totalCount: 3, offset: 0, limit: 10, baseUrl: self, query }),
+      );
+      expect(paged.links.first).toBe(`${document.links.self}&page[offset]=0&page[limit]=10`);
+      // An empty query leaves `self` as given; a `self` that has a query
+      // string of its own is extended rather than given a second `?`.
+      expect((await run(Assemble.unpaginatedCollection(whole, { self, query: [] }))).links).toEqual(
+        { self },
+      );
+      expect(
+        (
+          await run(
+            Assemble.unpaginatedCollection(whole, {
+              self: `${self}?locale=en`,
+              query: [["sort", "name"]],
+            }),
+          )
+        ).links.self,
+      ).toBe(`${self}?locale=en&sort=name`);
+    });
+
+    it("emits exactly the linkless document when `self` is absent", async () => {
+      const options = {
+        viewer: NON_ADMIN,
+        capabilities: familyCapabilities,
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets: registry([place]).targets,
+      };
+      const linkless = await run(Assemble.unpaginatedCollection(whole, options));
+      // A `self` the handler turns out not to have (typed `string | undefined`,
+      // as an optional threaded through would be) drops the query with the link.
+      const absentSelf = [self].find((url) => url.startsWith("ftp:"));
+      const dropped = await run(
+        Assemble.unpaginatedCollection(whole, { ...options, self: absentSelf, query }),
+      );
+      expect(dropped).not.toHaveProperty("links");
+      expect(dropped).toStrictEqual(linkless);
+      // With `self`, the document is the linkless one plus `links` — the
+      // rest is untouched.
+      const { links, ...rest } = await run(
+        Assemble.unpaginatedCollection(whole, { ...options, self, query }),
+      );
+      expect(links.self).toBe(`${self}?${Query.serialise(query)}`);
+      expect(rest).toStrictEqual(linkless);
+    });
   });
 });
 

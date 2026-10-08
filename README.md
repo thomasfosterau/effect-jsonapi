@@ -1531,6 +1531,17 @@ const document = Assemble.unpaginatedCollection(colours, {
 // succeeds with { data: [...], included: [...], jsonapi: { version: "1.1" } }
 ```
 
+To give the collection its own `self` link, pass `self` (its absolute URL) and, optionally, `query` — the request's canonical pairs (`Query.canonicalPairs(listQuery)(query)`), serialised onto `self` the way `Assemble.collection` serialises them onto its pagination links. The document then carries `links: { self }` and still no `meta`; the return type follows the `self` you pass (`links` required for a `string`, optional for a `string | undefined`), and `query` is a type error without `self`. With no `self` the output is exactly as above:
+
+```ts
+const document = Assemble.unpaginatedCollection(colours, {
+  self: "https://example.test/colours",
+  query: Query.canonicalPairs(listQuery)(query),
+});
+// Effect<UnpaginatedCollectionDocument<Colour, string>, …>
+// succeeds with { data: [...], links: { self: "https://example.test/colours?sort=name" }, jsonapi: … }
+```
+
 `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
 
 ```ts
