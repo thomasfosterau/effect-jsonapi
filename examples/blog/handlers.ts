@@ -102,6 +102,17 @@ const store = {
   ]),
 };
 
+/**
+ * Removes an article outright, bypassing the API — the cleanup a conformance
+ * run's write fixture hands back (`test/conformance.test.ts`), so the articles
+ * the kit creates do not outlive the rules that created them.
+ */
+export const discardArticle = (id: string): Effect.Effect<void> =>
+  Effect.sync(() => {
+    store.articles.delete(id);
+    store.articleComments.delete(id);
+  });
+
 const loadArticle = (id: string): Effect.Effect<Article, ArticleNotFound> => {
   const article = store.articles.get(id);
   return article === undefined ? Effect.fail(new ArticleNotFound({ id })) : Effect.succeed(article);

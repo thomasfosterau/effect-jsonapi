@@ -409,6 +409,25 @@ const loadEmployee = (id: string): Effect.Effect<Employee, EmployeeNotFound> => 
     : Effect.succeed(employee);
 };
 
+/**
+ * Removes a product outright, bypassing the API — the cleanup a conformance
+ * run's write fixture hands back (`test/conformance.test.ts`).
+ */
+export const discardProduct = (id: string): Effect.Effect<void> =>
+  Effect.sync(() => {
+    store.products.delete(id);
+  });
+
+/**
+ * Removes an order outright, bypassing the API — orders have no DELETE
+ * endpoint, so this is the only way a conformance run's created orders go.
+ */
+export const discardOrder = (id: string): Effect.Effect<void> =>
+  Effect.sync(() => {
+    store.orders.delete(id);
+    store.itemsByOrder.delete(id);
+  });
+
 const loadProduct = (id: string): Effect.Effect<Product, ProductNotFound> => {
   const product = store.products.get(id);
   return product === undefined ? Effect.fail(new ProductNotFound({ id })) : Effect.succeed(product);

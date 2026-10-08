@@ -1856,9 +1856,32 @@ FAIL  spec/content-negotiation/accept-weight-is-not-a-parameter
         observed: 406 application/vnd.api+json — {"errors":[{"status":"406", …
 ```
 
+**Writes need a fixture, and are opt-in.** The kit cannot invent a payload your server will accept, so the create / update / delete rules (201 with the created resource, `Location`, the update and delete responses, the atomic extension's response media type) run only with `mutating: true` and a write fixture per type:
+
+```ts
+let n = 0;
+Conformance.verify(Api, {
+  ids: { articles: "1" },
+  mutating: true,
+  writes: {
+    articles: {
+      create: () => ({
+        type: "articles",
+        attributes: { title: `conformance probe ${++n}`, body: "…" },
+        relationships: { author: { data: { type: "people", id: "9" } } },
+      }),
+      update: () => ({ attributes: { title: `conformance probe ${++n} (updated)` } }),
+      cleanup: (id) => deleteArticleFromYourStore(id), // an Effect
+    },
+  },
+});
+```
+
+Each write rule creates its own target from `create` and never touches an `ids` sample; `cleanup` runs after the rule that made it whether that rule passed, failed or died; and `report.writes` (printed under `WRITES`) lists everything the run created and what became of it. A type with no fixture skips its write rules naming the missing key. `cleanup` may be omitted for a target you throw away (an in-process store) — the report then lists what was left — but supply it against anything that outlives the run.
+
 Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this package's filter grammar profile and the conventions it adds where the spec declines to have one. Pass `tiers: ["spec"]` to hold a server to the specification without adopting any of this library's opinions.
 
-**It says what it did not check.** Every rule that could not run reports why — no endpoint of that shape, no sample id, a mutating probe not opted into — and `Conformance.gaps` declares the areas the kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics, atomic processing), each with its reason and tracking issue. Both are printed in every report, and skips are counted separately from passes, so a run that proved little cannot read as a clean bill of health.
+**It says what it did not check.** Every rule that could not run reports why — no endpoint of that shape, no sample id, no write fixture, a mutating probe not opted into — and `Conformance.gaps` declares the areas the kit does not cover at all (filter _evaluation_ semantics, pagination-link and sort-ordering correctness, the write rules beyond the success responses, atomic processing), each with its reason and tracking issue. Both are printed in every report, and skips are counted separately from passes, so a run that proved little cannot read as a clean bill of health.
 
 Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule, its requirement, its citation and the request that decided it.
 
@@ -1896,7 +1919,7 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 
 ## Limitations
 
-- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling and the filter grammar profile. Filter _evaluation_ semantics, pagination-link and sort-ordering correctness, write semantics and atomic processing are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](./docs/conformance.md).
+- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling and the filter grammar profile. Filter _evaluation_ semantics, pagination-link and sort-ordering correctness, the write rules beyond the success responses (conflicts, client-generated ids, relationship mutation) and atomic processing are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](./docs/conformance.md).
 - **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed to your handler, and the builders project it when you ask them to — `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })` ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is projected behind your back; the builders don't post-process responses against request state on their own. Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is built from the resource's attributes, so a relationship name cannot be requested.
 - **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works, `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }` raises it one hop, and the runtime validation matches the same set. Declaring the surface explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because the derivation then recurses over the declaration rather than the graph.
 - **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided via `Client.narrowIncluded`.

@@ -4,9 +4,10 @@
  *
  * Each rule is one normative sentence with its section and a probe that decides
  * it. Rules that would change the target's state are gated behind
- * `mutating: true` and report `Skipped` otherwise; rules whose shape this api
- * has no endpoint for report `Skipped` naming what was missing. Nothing here
- * silently passes.
+ * `mutating: true` and report `Skipped` otherwise, and act only on resources
+ * they created themselves from the caller's `writes` fixture (`./write.ts`),
+ * never on a sample id; rules whose shape this api has no endpoint for report
+ * `Skipped` naming what was missing. Nothing here silently passes.
  *
  * @since 0.15.0
  * @internal
@@ -35,7 +36,26 @@ import {
   settle,
   skip,
   withQuery,
+  type Outcome,
+  type Payload,
 } from "./core.js";
+import {
+  type Accepted,
+  atomicTargets,
+  buildUpdate,
+  decided,
+  onAccepted,
+  overTargets,
+  pathFor,
+  primaryId,
+  type Target,
+  targets,
+  undecided,
+  type Verdict,
+  viaCreateEndpoint,
+  withCreated,
+  writeHeaders,
+} from "./write.js";
 
 const SPEC = "https://jsonapi.org/format/1.1";
 const ATOMIC = "https://jsonapi.org/ext/atomic";
@@ -72,9 +92,6 @@ const atomicRule = (
 /** Every endpoint whose successful response is a JSON:API document. */
 const readable = (ctx: Context) =>
   probeable(ctx, ["collection", "resource", "related", "relationship"]);
-
-const MUTATING_SKIP =
-  "mutating probe — pass `mutating: true` to run it against a disposable target";
 
 // ---------------------------------------------------------------------------
 // Content negotiation
@@ -1193,23 +1210,241 @@ const resourceNotFound: RuleImpl = {
     }),
 };
 
+// ---------------------------------------------------------------------------
+// Writes
+//
+// Every write probe acts on a disposable target it created itself from the
+// caller's `writes` fixture — never on a sample id — and `./write.ts` disposes
+// of that target however the probe ends.
+// ---------------------------------------------------------------------------
+
+/** One create probe per type with a fixture, decided by `decide` on success. */
+const overCreates = (
+  ctx: Context,
+  rule: Rule,
+  decide: (target: Target, created: Accepted) => Verdict,
+): Effect.Effect<Outcome> =>
+  overTargets(ctx, rule, targets(ctx, "create"), "create endpoint", (target) =>
+    withCreated(
+      ctx,
+      rule,
+      target,
+      viaCreateEndpoint(ctx, target),
+      onAccepted(target, (created) => Effect.succeed(decide(target, created))),
+    ),
+  );
+
+/** A create probe that answered something other than 201 decides no 201 rule. */
+const not201 = (target: Target, observation: Observation): Verdict =>
+  undecided(
+    `creating a "${target.key}" resource answered ${observation.status}, not 201 — see spec/status/create-response-document`,
+  );
+
+const createResponseDocument: RuleImpl = {
+  rule: rule(
+    "spec/status/create-response-document",
+    "Creating Resources",
+    "crud-creating-responses-201",
+    "MUST",
+    "If a POST request did not include a client-generated id and the requested resource has been created, the server MUST respond with 201 Created and a document that contains the created resource as primary data.",
+  ),
+  run: (ctx) =>
+    overCreates(ctx, createResponseDocument.rule, (target, { observation, payload }) => {
+      if (observation.status === 202)
+        return undecided(
+          `creating a "${target.key}" resource answered 202 Accepted — the creation is deferred, so there is no created resource to check`,
+        );
+      if (observation.status !== 201)
+        return decided(1, [
+          finding(createResponseDocument.rule, {
+            detail: `creating a "${target.key}" resource without a client-generated id did not answer 201`,
+            expected: "201 Created",
+            observed: describe(observation),
+            probe: observation.probe,
+          }),
+        ]);
+      const data = isRecord(observation.body) ? observation.body["data"] : undefined;
+      const ok = isRecord(data) && data["type"] === payload.type && typeof data["id"] === "string";
+      return decided(
+        1,
+        ok
+          ? []
+          : [
+              finding(createResponseDocument.rule, {
+                detail: `the 201 creating a "${target.key}" resource does not carry it as primary data`,
+                expected: `a document whose \`data\` is a "${payload.type}" resource object with a string \`id\``,
+                observed: describe(observation),
+                probe: observation.probe,
+              }),
+            ],
+      );
+    }),
+};
+
 const createLocation: RuleImpl = {
   rule: rule(
     "spec/status/create-location",
     "Creating Resources",
     "crud-creating-responses-201",
-    "MUST",
-    "If a POST request did not include a client-generated id and the requested resource has been created, the server MUST respond with 201 Created and a `Location` header identifying the new resource.",
+    "SHOULD",
+    "The 201 Created response to a POST that did not include a client-generated id SHOULD include a `Location` header identifying the location of the newly created resource.",
   ),
   run: (ctx) =>
-    Effect.succeed(
-      ctx.options.mutating
-        ? skip(
-            createLocation.rule,
-            "`mutating: true` was set but the kit cannot synthesise a valid create payload for an arbitrary resource — supply it through a fixture (not yet implemented; see the coverage gaps)",
-          )
-        : skip(createLocation.rule, MUTATING_SKIP),
+    overCreates(ctx, createLocation.rule, (target, { observation }) => {
+      if (observation.status !== 201) return not201(target, observation);
+      const location = observation.headers["location"];
+      return decided(
+        1,
+        location !== undefined && location !== ""
+          ? []
+          : [
+              finding(createLocation.rule, {
+                detail: `the 201 creating a "${target.key}" resource carried no \`Location\` header`,
+                expected: "a `Location` header identifying the created resource",
+                observed: `${describe(observation)} — headers: ${Object.keys(observation.headers).join(", ") || "(none)"}`,
+                probe: observation.probe,
+              }),
+            ],
+      );
+    }),
+};
+
+/** A link member's URL, whether spelled as a string or as a link object. */
+const href = (link: unknown): string | undefined =>
+  typeof link === "string"
+    ? link
+    : isRecord(link) && typeof link["href"] === "string"
+      ? link["href"]
+      : undefined;
+
+/** A URL resolved against the target's origin, so a relative and an absolute spelling compare equal. */
+const absolute = (url: string, base: string): string => {
+  try {
+    return new URL(url, base).href;
+  } catch {
+    return url;
+  }
+};
+
+const createLocationMatchesSelf: RuleImpl = {
+  rule: rule(
+    "spec/status/create-location-matches-self",
+    "Creating Resources",
+    "crud-creating-responses-201",
+    "MUST",
+    "If the resource object returned by a 201 Created response contains a `self` key in its `links` member and a `Location` header is provided, the value of the `self` member MUST match the value of the `Location` header.",
+  ),
+  run: (ctx) =>
+    overCreates(ctx, createLocationMatchesSelf.rule, (target, { observation }) => {
+      if (observation.status !== 201) return not201(target, observation);
+      const location = observation.headers["location"];
+      const data = isRecord(observation.body) ? observation.body["data"] : undefined;
+      const self =
+        isRecord(data) && isRecord(data["links"]) ? href(data["links"]["self"]) : undefined;
+      if (location === undefined || self === undefined)
+        return undecided(
+          `the 201 creating a "${target.key}" resource carried ${location === undefined ? "no `Location` header" : "no `data.links.self`"}, so there was nothing to compare`,
+        );
+      const base = ctx.options.baseUrl;
+      return decided(
+        1,
+        absolute(location, base) === absolute(self, base)
+          ? []
+          : [
+              finding(createLocationMatchesSelf.rule, {
+                detail: `the 201 creating a "${target.key}" resource names two different locations for it`,
+                expected: `\`Location\` and \`data.links.self\` the same URL`,
+                observed: `Location: ${location} · data.links.self: ${self}`,
+                probe: observation.probe,
+              }),
+            ],
+      );
+    }),
+};
+
+const updateResponse: RuleImpl = {
+  rule: rule(
+    "spec/status/update-response",
+    "Updating Resources",
+    "crud-updating-responses",
+    "MUST",
+    "A server MUST respond to a successful update with 200 OK and a document whose primary data is the updated resource, 204 No Content with no response document, or 202 Accepted.",
+  ),
+  run: (ctx) =>
+    overTargets(ctx, updateResponse.rule, targets(ctx, "update"), "update endpoint", (target) =>
+      withCreated(
+        ctx,
+        updateResponse.rule,
+        target,
+        viaCreateEndpoint(ctx, target),
+        onAccepted(target, (created) =>
+          Effect.gen(function* () {
+            const id = created.entry.id;
+            if (id === undefined) return undecided(`the create response named no id to update`);
+            const patch = buildUpdate(target);
+            if (typeof patch === "string") return undecided(patch);
+            const observation = yield* ctx.request({
+              method: target.endpoint.method,
+              url: pathFor(target.endpoint, id),
+              headers: writeHeaders,
+              body: { data: { ...patch, type: created.payload.type, id } },
+            });
+            return judgeUpdate(target, created.payload.type, id, observation);
+          }),
+        ),
+      ),
     ),
+};
+
+const judgeUpdate = (
+  target: Target,
+  type: string,
+  id: string,
+  observation: Observation,
+): Verdict =>
+  observation.status < 200 || observation.status >= 300
+    ? undecided(
+        `the server did not accept writes["${target.key}"].update on the resource the kit had just created (${describe(observation)})`,
+      )
+    : decided(2, updateFindings(target, type, id, observation));
+
+/** What is wrong with a 2xx answer to an update, if anything. */
+const updateFindings = (
+  target: Target,
+  type: string,
+  id: string,
+  observation: Observation,
+): ReadonlyArray<Finding> => {
+  const broken = (detail: string, expected: string) => [
+    finding(updateResponse.rule, {
+      detail,
+      expected,
+      observed: describe(observation),
+      probe: observation.probe,
+    }),
+  ];
+  switch (observation.status) {
+    case 202:
+      return [];
+    case 204:
+      return observation.text === ""
+        ? []
+        : broken("a 204 update response carried a body", "an empty body");
+    case 200: {
+      const data = isRecord(observation.body) ? observation.body["data"] : undefined;
+      return isRecord(data) && data["type"] === type && data["id"] === id
+        ? []
+        : broken(
+            `the 200 updating ${type}:${id} does not carry the updated resource as primary data`,
+            `a document whose \`data\` is the "${type}" resource "${id}"`,
+          );
+    }
+    default:
+      return broken(
+        `updating a "${target.key}" resource answered neither 200, 204 nor 202`,
+        "200 with the updated resource, 204, or 202",
+      );
+  }
 };
 
 const deleteResponse: RuleImpl = {
@@ -1221,58 +1456,74 @@ const deleteResponse: RuleImpl = {
     "A server MUST respond to a successful DELETE with 204 No Content and an empty body, 200 OK with only top-level `meta`, or 202 Accepted.",
   ),
   run: (ctx) =>
-    Effect.gen(function* () {
-      if (!ctx.options.mutating) return skip(deleteResponse.rule, MUTATING_SKIP);
-      const target = probeable(ctx, ["delete"]).resolved[0];
-      if (target === undefined)
-        return skip(deleteResponse.rule, noProbeReason("DELETE resource endpoint", []));
-      const observation = yield* ctx.request({
-        method: "DELETE",
-        url: target.path,
-        headers: jsonApiAccept,
-      });
-      const findings: Array<Finding> = [];
-      if (observation.status === 204) {
-        if (observation.text !== "") {
-          findings.push(
-            finding(deleteResponse.rule, {
-              detail: "a 204 DELETE response carried a body",
-              expected: "an empty body",
-              observed: describe(observation),
-              probe: observation.probe,
+    overTargets(
+      ctx,
+      deleteResponse.rule,
+      targets(ctx, "delete"),
+      "DELETE resource endpoint",
+      (target) =>
+        withCreated(
+          ctx,
+          deleteResponse.rule,
+          target,
+          viaCreateEndpoint(ctx, target),
+          onAccepted(target, (created) =>
+            Effect.gen(function* () {
+              const id = created.entry.id;
+              if (id === undefined) return undecided(`the create response named no id to delete`);
+              const observation = yield* ctx.request({
+                method: target.endpoint.method,
+                url: pathFor(target.endpoint, id),
+                headers: jsonApiAccept,
+              });
+              // A completed deletion is the disposal; anything else still owes a cleanup.
+              if (observation.status === 200 || observation.status === 204)
+                created.entry.disposal = "deleted";
+              return decided(2, judgeDelete(observation));
             }),
-          );
-        }
-      } else if (observation.status === 200) {
-        const body = observation.body;
-        const members = isRecord(body) ? Object.keys(body) : [];
-        if (
-          !isRecord(body) ||
-          !members.every(
-            (member) => member === "meta" || member === "jsonapi" || member === "links",
-          )
-        ) {
-          findings.push(
-            finding(deleteResponse.rule, {
-              detail: "a 200 DELETE response carried members other than `meta`",
-              expected: "only top-level `meta`",
-              observed: `top-level members: ${members.join(", ") || "(none)"}`,
-              probe: observation.probe,
-            }),
-          );
-        }
-      } else if (observation.status !== 202) {
-        findings.push(
+          ),
+        ),
+    ),
+};
+
+const judgeDelete = (observation: Observation): ReadonlyArray<Finding> => {
+  if (observation.status === 202) return [];
+  if (observation.status === 204)
+    return observation.text === ""
+      ? []
+      : [
           finding(deleteResponse.rule, {
-            detail: "a DELETE produced neither 204, 200 nor 202",
-            expected: "204, 200 with only `meta`, or 202",
+            detail: "a 204 DELETE response carried a body",
+            expected: "an empty body",
             observed: describe(observation),
             probe: observation.probe,
           }),
-        );
-      }
-      return settle(deleteResponse.rule, 1, findings);
+        ];
+  if (observation.status === 200) {
+    const body = observation.body;
+    const members = isRecord(body) ? Object.keys(body) : [];
+    const onlyMeta =
+      isRecord(body) &&
+      members.every((member) => member === "meta" || member === "jsonapi" || member === "links");
+    return onlyMeta
+      ? []
+      : [
+          finding(deleteResponse.rule, {
+            detail: "a 200 DELETE response carried members other than `meta`",
+            expected: "only top-level `meta`",
+            observed: `top-level members: ${members.join(", ") || "(none)"}`,
+            probe: observation.probe,
+          }),
+        ];
+  }
+  return [
+    finding(deleteResponse.rule, {
+      detail: "deleting the resource the kit had just created produced neither 204, 200 nor 202",
+      expected: "204, 200 with only `meta`, or 202",
+      observed: describe(observation),
+      probe: observation.probe,
     }),
+  ];
 };
 
 // ---------------------------------------------------------------------------
@@ -1315,6 +1566,13 @@ const atomicMalformedRejected: RuleImpl = {
     }),
 };
 
+/** The id the first `atomic:results` entry's resource carries. */
+const atomicResultId = (body: unknown): string | undefined => {
+  if (!isRecord(body)) return undefined;
+  const results = body["atomic:results"];
+  return Array.isArray(results) ? primaryId(results[0]) : undefined;
+};
+
 const atomicResponseExt: RuleImpl = {
   rule: atomicRule(
     "spec/atomic/response-ext-parameter",
@@ -1322,17 +1580,57 @@ const atomicResponseExt: RuleImpl = {
     "MUST",
     "A server that processes an atomic operations request MUST respond with the `ext` parameter naming the extension URI on the response's `Content-Type`.",
   ),
-  run: (ctx) =>
-    Effect.succeed(
-      operationsEndpoint(ctx) === undefined
-        ? skip(atomicResponseExt.rule, "no atomic operations endpoint")
-        : !ctx.options.mutating
-          ? skip(atomicResponseExt.rule, MUTATING_SKIP)
-          : skip(
-              atomicResponseExt.rule,
-              "`mutating: true` was set but the kit cannot synthesise a valid operation for an arbitrary resource — supply it through a fixture (not yet implemented; see the coverage gaps)",
-            ),
-    ),
+  run: (ctx) => {
+    const endpoint = operationsEndpoint(ctx);
+    if (endpoint === undefined)
+      return Effect.succeed(skip(atomicResponseExt.rule, "no atomic operations endpoint"));
+    const send = (payload: Payload) =>
+      ctx.request({
+        method: endpoint.method,
+        url: endpoint.path,
+        headers: { accept: atomicMediaType, "content-type": atomicMediaType },
+        body: { "atomic:operations": [{ op: "add", data: payload }] },
+      });
+    return overTargets(
+      ctx,
+      atomicResponseExt.rule,
+      atomicTargets(ctx, endpoint),
+      "atomic operations endpoint",
+      (target) =>
+        withCreated(
+          ctx,
+          atomicResponseExt.rule,
+          target,
+          { send, idOf: atomicResultId },
+          onAccepted(target, ({ observation }) =>
+            Effect.succeed(judgeAtomicMediaType(target, observation)),
+          ),
+        ),
+    );
+  },
+};
+
+const judgeAtomicMediaType = (target: Target, observation: Observation): Verdict => {
+  const header = observation.contentType;
+  if (observation.text === "" || header === undefined)
+    return undecided(
+      `an \`add\` of a "${target.key}" resource answered ${observation.status} with no document, so there was no media type to check`,
+    );
+  const { base, parameters } = parseMediaType(header);
+  const ext = parameters.find(([name]) => name === "ext")?.[1] ?? "";
+  return decided(
+    1,
+    base === MEDIA_TYPE && ext.split(/\s+/).includes(ATOMIC)
+      ? []
+      : [
+          finding(atomicResponseExt.rule, {
+            detail: `the response to an atomic \`add\` of a "${target.key}" resource does not name the extension`,
+            expected: atomicMediaType,
+            observed: describe(observation),
+            probe: observation.probe,
+          }),
+        ],
+  );
 };
 
 const atomicAllOrNothing: RuleImpl = {
@@ -1348,7 +1646,7 @@ const atomicAllOrNothing: RuleImpl = {
         ? skip(atomicAllOrNothing.rule, "no atomic operations endpoint")
         : skip(
             atomicAllOrNothing.rule,
-            "requires applying then observing operations against known data — supply it through a fixture (not yet implemented; see the coverage gaps)",
+            "requires applying operations, then observing what was stored — not yet written (see the coverage gaps, #164)",
           ),
     ),
 };
@@ -1366,7 +1664,7 @@ const atomicLidResolution: RuleImpl = {
         ? skip(atomicLidResolution.rule, "no atomic operations endpoint")
         : skip(
             atomicLidResolution.rule,
-            "requires applying operations against known data — supply it through a fixture (not yet implemented; see the coverage gaps)",
+            "requires applying operations, then reading back what they stored — not yet written (see the coverage gaps, #164)",
           ),
     ),
 };
@@ -1437,7 +1735,10 @@ export const rules: ReadonlyArray<RuleImpl> = [
   unsupportedInclude,
   unsupportedSort,
   resourceNotFound,
+  createResponseDocument,
   createLocation,
+  createLocationMatchesSelf,
+  updateResponse,
   deleteResponse,
   atomicMalformedRejected,
   atomicResponseExt,
