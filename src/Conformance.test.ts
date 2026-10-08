@@ -160,6 +160,24 @@ const outcomeFor = (report: Conformance.Report, id: string): Conformance.Outcome
   return found;
 };
 
+/** A 400 error document whose one error object carries `members` too. */
+const badRequest = (
+  members: { readonly source?: { readonly parameter: string } } = {},
+): Canned => ({
+  status: 400,
+  body: { errors: [{ status: "400", title: "Bad Request", ...members }] },
+});
+
+/** The query a canned request carries. */
+const queryOf = (request: { readonly path: string }): URLSearchParams =>
+  new URLSearchParams(request.path.split("?")[1] ?? "");
+
+/** A canned request's path without its query. */
+const withoutQuery = <R extends { readonly path: string }>(request: R): R => ({
+  ...request,
+  path: request.path.replace(/\?.*$/, ""),
+});
+
 /**
  * A correct-enough server: negotiates per §5, answers well-formed documents,
  * projects sparse fieldsets, rejects unknown query parameters and absent ids.
@@ -949,6 +967,15 @@ describe("Conformance: detects a deliberately broken server", () => {
     },
   );
 
+  // `/articles` declares no `sort`: a server that drops it instead of refusing
+  // it answers the collection as if it had never been sent (#278).
+  broken(
+    "a sort on a collection endpoint that does not declare it, ignored",
+    "spec/query/sort-unsupported-endpoint",
+    (canned, request) =>
+      queryOf(request).has("sort") ? conformantServe(withoutQuery(request)) : canned,
+  );
+
   it("does not flag anything else when one rule is broken", async () => {
     const report = await verifyCanned((request) => {
       const canned = conformantServe(request);
@@ -958,6 +985,208 @@ describe("Conformance: detects a deliberately broken server", () => {
     });
     // Exactly the media-type rule, and nothing riding along with it.
     expect(failed(report)).toEqual(["spec/content-negotiation/response-media-type"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `include` / `sort` on an endpoint that does not declare them (#278)
+// ---------------------------------------------------------------------------
+
+/**
+ * The main fixture declares `include` on every read endpoint, so the include
+ * rule has nothing to probe there. This api drops it from `get` and keeps it on
+ * `list`, which declares no `sort`: one endpoint for each rule to probe.
+ */
+describe("Conformance: include / sort on an endpoint that does not declare them", () => {
+  const INCLUDE = "spec/query/include-unsupported-endpoint";
+  const SORT = "spec/query/sort-unsupported-endpoint";
+
+  const undeclaredApi = HttpApi.make("undeclared").add(
+    Group.make(
+      Article,
+      Endpoint.get(Article, { fields: true }),
+      Endpoint.list(Article, { include: true, fields: true }),
+    ),
+  );
+  const verifyUndeclared = verifyOver(undeclaredApi);
+
+  /** The baseline server, refusing `include` on `/articles/1`, which does not declare it. */
+  const undeclaredServe = (request: CannedRequest): Canned =>
+    request.path.startsWith("/articles/1") && queryOf(request).has("include")
+      ? badRequest({ source: { parameter: "include" } })
+      : conformantServe(request);
+
+  it("passes against a server that refuses both, each having probed its endpoint", async () => {
+    const report = await verifyUndeclared(undeclaredServe);
+    expect(failed(report)).toEqual([]);
+    const include = outcomeFor(report, INCLUDE);
+    const sort = outcomeFor(report, SORT);
+    expect(include).toMatchObject({ _tag: "Passed", probes: 2, note: undefined });
+    expect(sort).toMatchObject({ _tag: "Passed", probes: 2, note: undefined });
+  });
+
+  it("probes with a relationship name and an attribute name the baseline response shows", async () => {
+    const seen: Array<string> = [];
+    await verifyUndeclared(
+      (request) => {
+        seen.push(request.path);
+        return undeclaredServe(request);
+      },
+      { only: [INCLUDE, SORT] },
+    );
+    expect(seen).toEqual([
+      "/articles/1",
+      "/articles/1?include=author",
+      "/articles",
+      "/articles?sort=title",
+    ]);
+  });
+
+  it("fails the include rule alone when the endpoint ignores `include`", async () => {
+    // `conformantServe` serves `?include=author` on `/articles/1` as a compound
+    // document — exactly what an endpoint without `include` must not do.
+    const report = await verifyUndeclared(conformantServe);
+    expect(failed(report)).toEqual([INCLUDE]);
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail:
+            "`?include=author` on /articles/1, which does not declare `include`, was not rejected",
+          expected: "400 Bad Request",
+          observed: expect.stringMatching(/^200 /),
+          probe: { url: "/articles/1?include=author" },
+        },
+      ],
+    });
+  });
+
+  it("fails the sort rule alone when the collection endpoint ignores `sort`", async () => {
+    const report = await verifyUndeclared((request) =>
+      undeclaredServe(queryOf(request).has("sort") ? withoutQuery(request) : request),
+    );
+    expect(failed(report)).toEqual([SORT]);
+    expect(outcomeFor(report, SORT)).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: "`?sort=title` on /articles, which does not declare `sort`, was not rejected",
+          observed: expect.stringMatching(/^200 /),
+          probe: { url: "/articles?sort=title" },
+        },
+      ],
+    });
+  });
+
+  it("does not take a 4xx other than 400 for the refusal", async () => {
+    const report = await verifyUndeclared((request) =>
+      queryOf(request).has("include") || queryOf(request).has("sort")
+        ? { status: 422, body: { errors: [{ status: "422", source: { parameter: "include" } }] } }
+        : undeclaredServe(request),
+    );
+    const unprocessable = {
+      _tag: "Failed",
+      findings: [{ observed: expect.stringMatching(/^422 /) }],
+    };
+    expect(outcomeFor(report, INCLUDE)).toMatchObject(unprocessable);
+    expect(outcomeFor(report, SORT)).toMatchObject(unprocessable);
+  });
+
+  it("fails a 400 whose `source.parameter` blames another parameter", async () => {
+    const report = await verifyUndeclared((request) =>
+      queryOf(request).has("include") && request.path.startsWith("/articles/1")
+        ? badRequest({ source: { parameter: "fields[articles]" } })
+        : undeclaredServe(request),
+    );
+    expect(failed(report)).toEqual([INCLUDE]);
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          expected: `source: { parameter: "include" }`,
+          observed: "source.parameter: `fields[articles]`",
+        },
+      ],
+    });
+  });
+
+  it("passes a 400 that names no `source.parameter` — JSON:API makes `source` optional — and says so", async () => {
+    const report = await verifyUndeclared((request) => {
+      const canned = undeclaredServe(request);
+      return canned.status === 400 ? badRequest() : canned;
+    });
+    expect(failed(report)).toEqual([]);
+    const noted = { _tag: "Passed", note: expect.stringContaining("named no `source.parameter`") };
+    expect(outcomeFor(report, INCLUDE)).toMatchObject(noted);
+    expect(outcomeFor(report, SORT)).toMatchObject(noted);
+  });
+
+  it("probes with a placeholder when the baseline shows no name to use", async () => {
+    const seen: Array<string> = [];
+    await verifyUndeclared(
+      (request) => {
+        seen.push(request.path);
+        // Every baseline resource bare: no attributes or relationships to learn from.
+        const bare = { type: "articles", id: "1" };
+        if (request.path === "/articles/1") return { body: { data: bare } };
+        if (request.path === "/articles") return { body: { data: [bare] } };
+        return undeclaredServe(request);
+      },
+      { only: [INCLUDE, SORT] },
+    );
+    expect(seen).toContain("/articles/1?include=notARelationshipPath");
+    expect(seen).toContain("/articles?sort=notASortableField");
+  });
+
+  it("skips — never passes — when every read endpoint declares `include`", async () => {
+    const report = await verifyCanned(conformantServe, { only: [INCLUDE] });
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({
+      _tag: "Skipped",
+      reason: "every read endpoint declares `include`",
+    });
+  });
+
+  it("skips, naming the missing option, when no endpoint without `include` resolves", async () => {
+    const report = await verifyUndeclared(undeclaredServe, { ids: {}, only: [INCLUDE] });
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining(`ids["articles"]`),
+    });
+  });
+
+  it("skips when every collection endpoint declares `sort`", async () => {
+    const sorted = HttpApi.make("sorted").add(
+      Group.make(Article, Endpoint.list(Article, { sort: true })),
+    );
+    const report = await verifyOver(sorted)(conformantServe, { only: [SORT] });
+    expect(outcomeFor(report, SORT)).toMatchObject({
+      _tag: "Skipped",
+      reason: "every list and related endpoint declares `sort`",
+    });
+  });
+
+  it("does not probe `sort` on an endpoint that answers a single resource", async () => {
+    // §Sorting's MUST covers collection endpoints only: a to-one related
+    // endpoint answering one resource is not one, whatever its role.
+    const toOne = HttpApi.make("toOne").add(
+      Group.make(Article, Endpoint.get(Article), Endpoint.related(Article, "author")),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(toOne)(
+      (request) => {
+        seen.push(request.path);
+        return request.path.startsWith("/articles/1/author")
+          ? { body: { data: { type: "people", id: "9", attributes: { firstName: "Dan" } } } }
+          : conformantServe(request);
+      },
+      { only: [SORT] },
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no list or related endpoint without `sort` answered with a resource collection as primary data",
+    });
+    expect(seen.some((path) => path.includes("sort="))).toBe(false);
   });
 });
 
@@ -1274,6 +1503,9 @@ describe("Conformance: the write fixture", () => {
       const route = `${request.method} ${request.path}`;
       if (route === "POST /articles") return onCreate(request);
       if (route === "POST /operations") return onOperations(request);
+      // `writeApi` declares `include` on no endpoint, so it refuses one on every
+      // endpoint, as JSON:API requires (#278).
+      if (queryOf(request).has("include")) return badRequest({ source: { parameter: "include" } });
       return Option.getOrElse(onStored(request), () => conformantServe(request));
     };
   };
@@ -2355,13 +2587,21 @@ describe("Conformance: in-process", () => {
 
   const Live = ArticlesLive.pipe(Layer.provideMerge(Middleware.layer));
 
-  const run = (options?: Conformance.Options) =>
-    Effect.runPromise(
-      Conformance.verify(api, { ids: { articles: "1" }, ...options }).pipe(
-        Effect.provide(Live),
-        Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
-    );
+  /** A run of `target` in process, its handlers and middleware from `live`. */
+  const runOver =
+    <ApiId extends string, Groups extends HttpApiGroup.Constraint, ROut>(
+      target: HttpApi.HttpApi<ApiId, Groups>,
+      live: Layer.Layer<ROut>,
+    ) =>
+    (options?: Conformance.Options) =>
+      Effect.runPromise(
+        Conformance.verify(target, { ids: { articles: "1" }, ...options }).pipe(
+          Effect.provide(live),
+          Effect.scoped,
+        ) as Effect.Effect<Conformance.Report, never, never>,
+      );
+
+  const run = runOver(api, Live);
 
   it("drives the real router, middleware and handlers", async () => {
     const report = await run();
@@ -2375,6 +2615,34 @@ describe("Conformance: in-process", () => {
   it("observes the wire, not the typed client: it sees the raw media type", async () => {
     const report = await run({ only: ["spec/content-negotiation/response-media-type"] });
     expect(outcomeFor(report, "spec/content-negotiation/response-media-type")._tag).toBe("Passed");
+  });
+
+  it("holds the middleware to the 400 for `sort` on a collection endpoint without it (#261)", async () => {
+    // `list` declares `include` and `fields` but no `sort`.
+    const report = await run({ only: ["spec/query/sort-unsupported-endpoint"] });
+    expect(outcomeFor(report, "spec/query/sort-unsupported-endpoint")).toMatchObject({
+      _tag: "Passed",
+      probes: 2,
+      note: undefined,
+    });
+  });
+
+  it("holds the middleware to the 400 for `include` on an endpoint without it (#261)", async () => {
+    const undeclared = HttpApi.make("undeclared").add(
+      Group.make(Article, Endpoint.get(Article, { fields: true })),
+    );
+    const UndeclaredLive = HttpApiBuilder.group(undeclared, "articles", (handlers) =>
+      handlers.handle("get", () => Effect.succeed(Handlers.data(article, { self: "/articles/1" }))),
+    ).pipe(Layer.provideMerge(Middleware.layer));
+    const report = await runOver(
+      undeclared,
+      UndeclaredLive,
+    )({ only: ["spec/query/include-unsupported-endpoint"] });
+    expect(outcomeFor(report, "spec/query/include-unsupported-endpoint")).toMatchObject({
+      _tag: "Passed",
+      probes: 2,
+      note: undefined,
+    });
   });
 
   it("holds the middleware to the Accept-weight rule #101 fixed", async () => {

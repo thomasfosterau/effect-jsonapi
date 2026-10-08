@@ -27,7 +27,6 @@ import {
   coverageNote,
   describe,
   type Discovered,
-  errorObjectsOf,
   finding,
   type Finding,
   isRecord,
@@ -39,6 +38,7 @@ import {
   type RuleImpl,
   settle,
   skip,
+  sourceParametersOf,
   withQuery,
 } from "./core.js";
 
@@ -219,11 +219,7 @@ const rejections: RuleImpl = {
           );
           continue;
         }
-        const parameters = errorObjectsOf(observation.body)
-          .map((error) => error["source"])
-          .filter(isRecord)
-          .map((source) => source["parameter"])
-          .filter((parameter): parameter is string => typeof parameter === "string");
+        const parameters = sourceParametersOf(observation);
         if (!parameters.includes(probe.key)) {
           findings.push(
             finding(rejections.rule, {

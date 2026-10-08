@@ -22,6 +22,7 @@ import {
   Match,
   Option,
   Predicate,
+  Record as Rec,
   Result,
   Schema,
 } from "effect";
@@ -44,10 +45,12 @@ import {
   parseMediaType,
   probeable,
   resourcesOf,
+  type Role,
   type Rule,
   type RuleImpl,
   settle,
   skip,
+  sourceParametersOf,
   withQuery,
   type Outcome,
   type Payload,
@@ -104,9 +107,17 @@ const atomicRule = (
   requirement,
 });
 
+/** The roles of every endpoint whose successful response is a JSON:API document. */
+const READ_ROLES: ReadonlyArray<Role> = ["collection", "resource", "related", "relationship"];
+
+/**
+ * The roles of an endpoint that may respond with a resource collection — a
+ * list, or a related endpoint, which does when its relationship is to-many.
+ */
+const COLLECTION_ROLES: ReadonlyArray<Role> = ["collection", "related"];
+
 /** Every endpoint whose successful response is a JSON:API document. */
-const readable = (ctx: Context) =>
-  probeable(ctx, ["collection", "resource", "related", "relationship"]);
+const readable = (ctx: Context) => probeable(ctx, READ_ROLES);
 
 // ---------------------------------------------------------------------------
 // Content negotiation
@@ -1214,6 +1225,171 @@ const unsupportedSort: RuleImpl = {
     }),
 };
 
+/**
+ * The endpoints of `roles` whose discovered query does not declare `family` —
+ * the ones that must refuse it — split as `probeable` splits them.
+ */
+const lacking = (ctx: Context, roles: ReadonlyArray<Role>, family: string) =>
+  probeable(
+    { ...ctx, endpoints: ctx.endpoints.filter(({ queryKeys }) => !queryKeys.includes(family)) },
+    roles,
+  );
+
+/** `true` when `probeable` found no endpoint at all, resolvable or not. */
+const noEndpoint = (found: ReturnType<typeof probeable>): boolean =>
+  Arr.isReadonlyArrayEmpty(found.resolved) && Arr.isReadonlyArrayEmpty(found.unresolved);
+
+/** The attribute names the first resource object of a collection carries. */
+const attributeNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> => {
+  const attributes = data.find(isRecord)?.["attributes"];
+  return isRecord(attributes) ? Rec.keys(attributes) : [];
+};
+
+/**
+ * Settles a rule on the answer to `?<parameter>=…` sent to an endpoint that
+ * does not declare `parameter`. Only a 400 is the refusal; a 400 whose
+ * `source.parameter` names other parameters but not this one refused something
+ * else. JSON:API makes `source` a SHOULD, so a 400 naming no parameter at all
+ * still passes — with a note saying the status alone decided it.
+ */
+const settleRefusal = (
+  impl: Rule,
+  probes: number,
+  refusal: {
+    readonly parameter: string;
+    readonly where: string;
+    readonly observation: Observation;
+  },
+): Outcome => {
+  const { parameter, where, observation } = refusal;
+  const sent = `\`${observation.probe.url.slice(observation.probe.url.indexOf("?"))}\``;
+  if (observation.status !== 400) {
+    return settle(impl, probes, [
+      finding(impl, {
+        detail: `${sent} on ${where}, which does not declare \`${parameter}\`, was not rejected`,
+        expected: "400 Bad Request",
+        observed: describe(observation),
+        probe: observation.probe,
+      }),
+    ]);
+  }
+  return Arr.match(sourceParametersOf(observation), {
+    onEmpty: () =>
+      settle(
+        impl,
+        probes,
+        [],
+        `the 400 for ${sent} named no \`source.parameter\` (optional in JSON:API), so its status alone decided this rule`,
+      ),
+    onNonEmpty: (parameters) =>
+      settle(
+        impl,
+        probes,
+        parameters.includes(parameter)
+          ? []
+          : [
+              finding(impl, {
+                detail: `the 400 for ${sent} on ${where} does not name \`${parameter}\` in \`source.parameter\`, so it refused something else`,
+                expected: `source: { parameter: "${parameter}" }`,
+                observed: `source.parameter: ${parameters.map((name) => `\`${name}\``).join(", ")}`,
+                probe: observation.probe,
+              }),
+            ],
+      ),
+  });
+};
+
+const includeUnsupportedEndpoint: RuleImpl = {
+  rule: rule(
+    "spec/query/include-unsupported-endpoint",
+    "Inclusion of Related Resources",
+    "fetching-includes",
+    "MUST",
+    "If an endpoint does not support the `include` parameter, it MUST respond with 400 Bad Request to any requests that include it.",
+  ),
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const impl = includeUnsupportedEndpoint.rule;
+      if (noEndpoint(readable(ctx))) return skip(impl, noProbeReason("JSON:API read endpoint", []));
+      const candidates = lacking(ctx, READ_ROLES, "include");
+      if (noEndpoint(candidates)) return skip(impl, "every read endpoint declares `include`");
+      const target = Arr.head(candidates.resolved);
+      if (Option.isNone(target))
+        return skip(impl, noProbeReason("read endpoint without `include`", candidates.unresolved));
+      const { path } = target.value;
+      // A relationship the resource carries inline linkage for is the one an
+      // endpoint that did process `include` would visibly honour, so a server
+      // that ignores the parameter is caught answering 200 with `included`.
+      const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+      const name = Option.getOrElse(
+        Arr.head(includableOf(baseline.body)),
+        () => "notARelationshipPath",
+      );
+      const observation = yield* ctx.request({
+        url: withQuery(path, [["include", name]]),
+        headers: jsonApiAccept,
+      });
+      return settleRefusal(impl, 2, { parameter: "include", where: path, observation });
+    }),
+};
+
+/**
+ * Probes `sort` on the first of `targets` whose baseline response has a
+ * resource collection as primary data — the only endpoints §Sorting covers; a
+ * to-one related endpoint answers a single resource, and is passed over.
+ */
+const sortFirstCollection = (
+  ctx: Context,
+  impl: Rule,
+  targets: ReadonlyArray<{ readonly path: string }>,
+  probes: number,
+): Effect.Effect<Outcome> =>
+  Arr.matchLeft(targets, {
+    onEmpty: () =>
+      Effect.succeed(
+        skip(
+          impl,
+          "no list or related endpoint without `sort` answered with a resource collection as primary data",
+        ),
+      ),
+    onNonEmpty: ({ path }, rest) =>
+      Effect.gen(function* () {
+        const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+        const data = isRecord(baseline.body) ? baseline.body["data"] : undefined;
+        if (!Array.isArray(data)) return yield* sortFirstCollection(ctx, impl, rest, probes + 1);
+        const name = Option.getOrElse(Arr.head(attributeNamesOf(data)), () => "notASortableField");
+        const observation = yield* ctx.request({
+          url: withQuery(path, [["sort", name]]),
+          headers: jsonApiAccept,
+        });
+        return settleRefusal(impl, probes + 2, { parameter: "sort", where: path, observation });
+      }),
+  });
+
+const sortUnsupportedEndpoint: RuleImpl = {
+  rule: rule(
+    "spec/query/sort-unsupported-endpoint",
+    "Sorting",
+    "fetching-sorting",
+    "MUST",
+    "If the server does not support sorting as specified in the query parameter `sort`, it MUST return 400 Bad Request; this applies to any endpoint that responds with a resource collection as primary data.",
+  ),
+  run: (ctx) => {
+    const impl = sortUnsupportedEndpoint.rule;
+    if (noEndpoint(probeable(ctx, COLLECTION_ROLES)))
+      return Effect.succeed(skip(impl, noProbeReason("list or related endpoint", [])));
+    const candidates = lacking(ctx, COLLECTION_ROLES, "sort");
+    if (noEndpoint(candidates))
+      return Effect.succeed(skip(impl, "every list and related endpoint declares `sort`"));
+    if (Arr.isReadonlyArrayEmpty(candidates.resolved)) {
+      return Effect.succeed(
+        skip(impl, noProbeReason("list or related endpoint without `sort`", candidates.unresolved)),
+      );
+    }
+    return sortFirstCollection(ctx, impl, candidates.resolved, 0);
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Status codes
 // ---------------------------------------------------------------------------
@@ -1867,6 +2043,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   unknownQueryParameter,
   unsupportedInclude,
   unsupportedSort,
+  includeUnsupportedEndpoint,
+  sortUnsupportedEndpoint,
   resourceNotFound,
   createResponseDocument,
   createLocation,
