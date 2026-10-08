@@ -247,6 +247,16 @@ describe("onExplicitRefusal", () => {
     expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0.0, text/html;q=0`)).error).toBe(
       Negotiation.NOT_ACCEPTABLE_REFUSED,
     );
+    expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0, */*;q=0`)).error).toBe(
+      Negotiation.NOT_ACCEPTABLE_REFUSED,
+    );
+  });
+
+  it("406s a lone `q=0` refusal of a clean `ext` instance", () => {
+    expect(
+      refusing.negotiate(get("/contests", `${MEDIA_TYPE};ext="https://jsonapi.org/ext/atomic";q=0`))
+        .error,
+    ).toBe(Negotiation.NOT_ACCEPTABLE_REFUSED);
   });
 
   it("serves the host's representation, or an alternate, when another range has `q > 0`", () => {
@@ -269,6 +279,20 @@ describe("onExplicitRefusal", () => {
     expect(
       refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=0, ${MEDIA_TYPE};ext=atomic`)),
     ).toEqual({ representation: MEDIA_TYPE, dispatch: true });
+  });
+
+  // Pending an owner decision recorded on #198
+  // (https://github.com/thomasfosterau/effect-jsonapi/issues/198#issuecomment-6050059821):
+  // this pins today's behaviour, not a settled one. A parameterised JSON:API
+  // range with `q > 0` counts as "another acceptable range", so adding the
+  // refusal turns the §6.3.2 406 that range earns on its own into a page.
+  it("falls through when a parameterised JSON:API range with `q > 0` accompanies the refusal", () => {
+    expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};version=1`)).error).toBe(
+      Negotiation.NOT_ACCEPTABLE,
+    );
+    expectHtmlFallthrough(
+      refusing.negotiate(get("/contests", `${MEDIA_TYPE};version=1, ${MEDIA_TYPE};q=0`)),
+    );
   });
 
   it("leaves the §6.3.2 406, page-only paths, writes and a missing Accept as they were", () => {

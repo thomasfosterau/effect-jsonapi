@@ -1486,7 +1486,7 @@ const { isApiPath, negotiate } = Negotiation.make({ api: Api });
 
 // in the framework hook:
 const verdict = negotiate(request);
-if (verdict.error) return Negotiation.errorResponse(verdict.error); // §5: 406 / 415
+if (verdict.error) return Negotiation.errorResponse(verdict.error); // JSON:API §5 406 / 415, or the opt-in RFC 9110 refusal 406
 if (verdict.dispatch) return apiHandler(Negotiation.requestForRouter(request), context);
 // otherwise render the page; `verdict.representation` is the cache-key token
 ```

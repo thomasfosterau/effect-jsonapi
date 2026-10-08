@@ -71,7 +71,10 @@ export interface Verdict {
   readonly representation: string;
   /** `true` → serve this request from the Effect `HttpApi`. */
   readonly dispatch: boolean;
-  /** A JSON:API §5 negotiation error to emit instead of dispatching. */
+  /**
+   * A negotiation error to emit instead of dispatching: JSON:API §5's 406 or
+   * 415, or the opt-in RFC 9110 refusal ({@link NOT_ACCEPTABLE_REFUSED}).
+   */
   readonly error?: NegotiationError;
 }
 
