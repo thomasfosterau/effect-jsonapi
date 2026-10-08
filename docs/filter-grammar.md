@@ -441,7 +441,7 @@ Below, `V` is `value(resource, field)` ([§6.4](#64-null) for what makes it NULL
 | string                | `eq` against the string `"null"`           |
 | number, boolean       | **400**, `source.parameter` naming the key |
 
-A tree built in memory can hold a `null` where a literal belongs; it is not a valid tree, and encoding it fails rather than producing a URL. Servers that accept a filter tree from anywhere but this codec must reject a `null` literal themselves.
+A tree built in memory can hold a `null` where a literal belongs; it is not a valid tree, and encoding it fails rather than producing a URL, with a message that names the field and points at `isnull`. Servers that accept a filter tree from anywhere but this codec must reject a `null` literal themselves.
 
 **F-NULL-3.** A `NULL` value is never _produced_ by evaluation either: the three-valued result of a comparison against NULL is UNKNOWN ([F-CMP-1](#631-comparison-eq-ne-lt-lte-gt-gte)), which is a truth value, not a value of the field.
 

@@ -435,10 +435,16 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
   it("F-NULL-1: a null literal has no wire spelling and does not encode", () => {
     // there is no list item that decodes to NULL either — "null" stays a string
     expect(decode({ "filter[title][in]": "a,null" })).toEqual(Filter.isIn("title", ["a", "null"]));
-    // and a hand-built tree holding one is not encodable
-    expect(() => encode(eq("title", null as never))).toThrow();
-    expect(() => encode(eq("deletedAt", null as never))).toThrow();
-    expect(() => encode(Filter.isIn("title", ["a", null as never]))).toThrow();
+    // and a hand-built tree holding one is not encodable, with a pointer at isnull
+    const hint = (field: string) =>
+      `NULL is not a filter literal for field "${field}" (use the isnull operator)`;
+    // SAFETY: a deliberately ill-typed literal — the case under test is a tree
+    // built around the types, which the runtime must still refuse.
+    const NULL = null as never;
+    expect(() => encode(eq("title", NULL))).toThrow(hint("title"));
+    // (`gte`: `eq` is not declared on deletedAt, which would fail for that instead)
+    expect(() => encode(Filter.gte("deletedAt", NULL))).toThrow(hint("deletedAt"));
+    expect(() => encode(Filter.isIn("title", ["a", NULL]))).toThrow(hint("title"));
   });
 
   it("F-ORD-1: every field's literals are a JSON scalar of the domain §6.2 compares in", () => {

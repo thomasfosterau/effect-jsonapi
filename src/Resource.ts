@@ -2199,6 +2199,11 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
         },
         // `NaN` / `Infinity` are numbers `Schema.Number` admits but the decoder
         // above rejects; refusing them here keeps `decode ∘ encode` total.
+        // `target` has already checked the type, so for a number kind they are
+        // the only values that fail, and they are rendered with `String`:
+        // `JSON.stringify` writes all three as `null`, which reads as a NULL
+        // literal. (`null` itself never reaches here — `target` rejects it
+        // first; the tree encoder in `internal/filter.ts` names it.)
         encode: (value, options) =>
           typeof value === kind && (kind !== "number" || Number.isFinite(value))
             ? Effect.succeed(String(value))
@@ -2206,8 +2211,8 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
                 new SchemaIssue.InvalidValue(
                   {
                     message:
-                      value === null
-                        ? "NULL is not a filter literal (use the isnull operator)"
+                      kind === "number"
+                        ? `Expected a finite number to encode as a filter literal, got ${String(value)}`
                         : `Expected a ${kind} to encode as a filter literal, got ${JSON.stringify(value)}`,
                   },
                   value,

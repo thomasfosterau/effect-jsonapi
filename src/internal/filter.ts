@@ -34,12 +34,18 @@ export interface FieldCodecs {
  */
 export type LiteralEncoder = (field: string, value: unknown) => string;
 
-/** A `LiteralEncoder` over a declaration's literal codecs. */
+/**
+ * A `LiteralEncoder` over a declaration's literal codecs. A `null` literal is
+ * refused here, ahead of the codec, with a pointer at `isnull`: NULL is never a
+ * literal (`docs/filter-grammar.md` F-NULL-1), and the codec's own type check
+ * would only say what it expected.
+ */
 export const literalEncoder =
   (fields: FieldCodecs): LiteralEncoder =>
   (field, value) => {
     const codec = fields[field];
     if (codec === undefined) throw new Error(unknownField(field));
+    if (value === null) throw new Error(nullLiteral(field));
     return Schema.encodeUnknownSync(codec.literal as Schema.Codec<unknown, string>)(value);
   };
 
@@ -64,6 +70,8 @@ export const operatorCheck =
   };
 
 const unknownField = (field: string): string => `Unknown filter field ${JSON.stringify(field)}`;
+const nullLiteral = (field: string): string =>
+  `NULL is not a filter literal for field "${field}" (use the isnull operator)`;
 const undeclaredOperator = (
   field: string,
   operator: string,
