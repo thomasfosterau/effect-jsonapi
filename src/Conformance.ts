@@ -229,8 +229,13 @@ export interface Finding extends Core.Finding {}
  * be decided against this target, or `Errored` when the rule died — a
  * transport that throws, or a bug in the kit, not a finding about the server —
  * with the defect's `message` (capped at 500 UTF-16 code units, a longer one
- * ending in `…`; `[unrenderable defect]` for a value that throws when
- * inspected) and the `defect` itself.
+ * ending in `…`; `[unrenderable defect]` for a value the kit cannot read at
+ * all — a revoked `Proxy`, or one whose `getPrototypeOf` trap throws, or an
+ * `Error` whose `name` or `message` throws when read or cannot become a string
+ * (a Symbol, or an object whose `toString` throws)) and the `defect` itself.
+ * Any other value that throws when part of it is read — an object whose
+ * `toString` throws, say — renders with `Formatter.format`'s own marker for
+ * that part, such as `[toString threw]`.
  *
  * `Skipped` is load-bearing. A rule that needs a write endpoint against an api
  * that has none, or a sample id the caller did not supply, must not be counted
@@ -243,8 +248,8 @@ export interface Finding extends Core.Finding {}
  * run. A write fixture member that throws is not a defect, whatever it
  * throws: a `create` or `update` that throws skips the rules it would have
  * driven, naming the member, and a `cleanup` that fails or throws is recorded
- * in {@link Report.writes}. The value is rendered as `message` is, so one that
- * throws when inspected reads `[unrenderable defect]` there too.
+ * in {@link Report.writes}. The value is rendered as `message` is, so one the
+ * kit cannot read at all reads `[unrenderable defect]` there too.
  *
  * @example
  * ```ts
