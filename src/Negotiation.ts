@@ -20,7 +20,10 @@
  *
  * JSON:API §5's two negotiation errors are emitted at the seam: a read whose
  * every JSON:API instance is parameterised is `406`, a write whose
- * `Content-Type` carries a disallowed parameter is `415`. The rules are
+ * `Content-Type` carries a disallowed parameter is `415`. A read that
+ * explicitly refuses JSON:API (`q=0`) and names nothing else acceptable falls
+ * through by default; `onExplicitRefusal: "notAcceptable"` answers it `406`
+ * instead ({@link NOT_ACCEPTABLE_REFUSED}). The rules are
  * `Middleware`'s (the same parser); what this module adds is the *winning*
  * comparison against the other media types and the path test, which a
  * §5-only check has no need of.
@@ -68,7 +71,10 @@ export interface Verdict {
   readonly representation: string;
   /** `true` → serve this request from the Effect `HttpApi`. */
   readonly dispatch: boolean;
-  /** A JSON:API §5 negotiation error to emit instead of dispatching. */
+  /**
+   * A negotiation error to emit instead of dispatching: JSON:API §5's 406 or
+   * 415, or the opt-in RFC 9110 refusal ({@link NOT_ACCEPTABLE_REFUSED}).
+   */
   readonly error?: NegotiationError;
 }
 
@@ -119,6 +125,26 @@ export interface Options {
   readonly fallback?: string | undefined;
   /** Representations negotiated ahead of JSON:API on their own paths. */
   readonly alternates?: ReadonlyArray<Alternate> | undefined;
+  /**
+   * What a read on an api path answers when its `Accept` refuses JSON:API
+   * explicitly — a clean JSON:API instance at `q=0` — and no range of any
+   * media type carries `q > 0`.
+   *
+   * - `"fallthrough"` (the default): the host's own representation, as for
+   *   any request that does not dispatch. RFC 9110 §12.4.2 reads `q=0` as
+   *   "not acceptable", so the JSON:API instance simply does not win.
+   * - `"notAcceptable"`: a `406` carrying {@link NOT_ACCEPTABLE_REFUSED}, for
+   *   a host that answers a client refusing JSON:API on a JSON:API endpoint
+   *   rather than serving it a page.
+   *
+   * Either way, a request that also names another range with `q > 0` —
+   * `text/html;q=0.5`, `application/json`, `*\/*`, an alternate — is
+   * negotiated as before: the refusal only applies when nothing is left.
+   *
+   * @since 0.17.0
+   */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- a plain options record: `| undefined` lets a caller forward its own optional under exactOptionalPropertyTypes, as the sibling options do
+  readonly onExplicitRefusal?: "fallthrough" | "notAcceptable" | undefined;
 }
 
 /**
@@ -150,6 +176,24 @@ export const NOT_ACCEPTABLE: NegotiationError = {
   title: "Not Acceptable",
   detail:
     "The Accept header carried the JSON:API media type, but every instance was modified with media-type parameters other than `ext` or `profile` (JSON:API §6.3.2).",
+};
+
+/**
+ * The 406 a read answers, under `onExplicitRefusal: "notAcceptable"`, when
+ * its `Accept` refuses the JSON:API media type with `q=0` and names no other
+ * acceptable media type (RFC 9110 §12.4.2). Same status and `code` as
+ * {@link NOT_ACCEPTABLE}; the `detail` names the rule, so the two 406s can be
+ * told apart.
+ *
+ * @since 0.17.0
+ * @category constants
+ */
+export const NOT_ACCEPTABLE_REFUSED: NegotiationError = {
+  status: 406,
+  code: "not-acceptable",
+  title: "Not Acceptable",
+  detail:
+    "The Accept header refused the JSON:API media type with `q=0` and named no other acceptable media type (RFC 9110 §12.4.2).",
 };
 
 /**
@@ -308,6 +352,26 @@ const wins = (entries: ReadonlyArray<AcceptEntry>, predicate: (entry: AcceptEntr
   return maxWeight(selected) >= maxWeight(entries.filter((entry) => !predicate(entry)));
 };
 
+/**
+ * The negotiation error a read on an api path answers, given its `Accept`
+ * entries and the JSON:API ones among them (at least one).
+ */
+const readError = (
+  entries: ReadonlyArray<AcceptEntry>,
+  jsonapi: ReadonlyArray<AcceptEntry>,
+  refuseExplicitly: boolean,
+): Option.Option<NegotiationError> => {
+  // `allParameterised` keys off whether any clean instance *exists*: a
+  // clean `q=0` instance is an explicit refusal, not a §5 parameterisation.
+  if (!jsonapi.some((entry) => entry.clean)) return Option.some(NOT_ACCEPTABLE);
+  // Past that check a clean instance exists, so when no entry carries
+  // `q > 0` it is a clean `q=0`: the client refused JSON:API and named
+  // nothing else it would take.
+  return refuseExplicitly && entries.every((entry) => entry.weight <= 0)
+    ? Option.some(NOT_ACCEPTABLE_REFUSED)
+    : Option.none();
+};
+
 // ---------------------------------------------------------------------------
 // make
 // ---------------------------------------------------------------------------
@@ -343,12 +407,37 @@ const wins = (entries: ReadonlyArray<AcceptEntry>, predicate: (entry: AcceptEntr
  * // → 406
  * ```
  *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { HttpApi } from "effect/http-api"
+ * import { Endpoint, Group, MEDIA_TYPE, Negotiation, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
+ * const Api = HttpApi.make("blog").add(
+ *   Group.make(Article, Endpoint.get(Article), Endpoint.list(Article))
+ * )
+ * // A client that refuses JSON:API on a JSON:API endpoint gets a 406, not a page.
+ * const { negotiate } = Negotiation.make({ api: Api, onExplicitRefusal: "notAcceptable" })
+ *
+ * const read = (accept: string) =>
+ *   negotiate(new Request("https://example.test/articles", { headers: { accept } }))
+ *
+ * console.log(read(`${MEDIA_TYPE};q=0`).error === Negotiation.NOT_ACCEPTABLE_REFUSED)
+ * // → true
+ * console.log(read(`${MEDIA_TYPE};q=0, text/html;q=0.5`))
+ * // → { representation: "text/html", dispatch: false }
+ * console.log(read(`${MEDIA_TYPE};q=0, application/json`).error)
+ * // → undefined
+ * ```
+ *
  * @since 0.16.0
  * @category constructors
  */
 export const make = (options: Options): Negotiator => {
   const fallback = options.fallback ?? "text/html";
   const alternates = options.alternates ?? [];
+  const refuseExplicitly = options.onExplicitRefusal === "notAcceptable";
   const patterns = groupsOf(options.api).flatMap((group) =>
     Object.values(group.endpoints).flatMap((endpoint) =>
       Arr.fromOption(routePattern(endpoint.path)),
@@ -372,10 +461,10 @@ export const make = (options: Options): Negotiator => {
     }
     const jsonapi = entries.filter((entry) => entry.base === MEDIA_TYPE);
     if (jsonapi.length === 0 || !isApiPath(pathname)) return html;
-    // `allParameterised` keys off whether any clean instance *exists*: a
-    // clean `q=0` instance is an explicit refusal, not a §5 parameterisation.
-    if (!jsonapi.some((entry) => entry.clean)) return { ...html, error: NOT_ACCEPTABLE };
-    return wins(entries, (entry) => entry.base === MEDIA_TYPE) ? dispatch : html;
+    return Option.match(readError(entries, jsonapi, refuseExplicitly), {
+      onSome: (error) => ({ ...html, error }),
+      onNone: () => (wins(entries, (entry) => entry.base === MEDIA_TYPE) ? dispatch : html),
+    });
   };
 
   const negotiateWrite = (request: Request): Verdict => {
