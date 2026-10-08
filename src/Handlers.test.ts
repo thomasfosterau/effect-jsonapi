@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as R from "effect/Record";
 import { Schema } from "effect";
 import * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -345,6 +346,37 @@ describe("Handlers.project", () => {
     expect(Schema.encodeSync(Json)(attributes)).toBe('{"__proto__":{"inner":2},"title":"T"}');
     expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
   });
+
+  // The projection defines `__proto__` and assigns every other name; one
+  // that `Object.prototype` carries (or that a function does) is still an
+  // own member of the copy, not a write to anything inherited.
+  it.each(["constructor", "prototype", "toString", "__proto__"])(
+    "keeps a requested attribute keyed %s as an own data member",
+    (key) => {
+      const resource = {
+        type: "articles",
+        id: "3",
+        attributes: R.fromEntries([
+          [key, { inner: 2 }],
+          ["title", "T"],
+          ["body", "B"],
+        ]),
+      };
+      const { attributes } = Handlers.project(resource, { articles: [key, "title"] });
+      expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
+      expect(Object.getOwnPropertyNames(attributes)).toEqual([key, "title"]);
+      expect(Object.getOwnPropertyDescriptor(attributes, key)).toEqual({
+        value: { inner: 2 },
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      expect(Schema.encodeSync(Schema.fromJsonString(Schema.Unknown))(attributes)).toBe(
+        `{"${key}":{"inner":2},"title":"T"}`,
+      );
+      expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
+    },
+  );
 
   it("data-last builds the transform the builders take", () => {
     const onResource = Handlers.project({ articles: ["title"] });

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Record from "effect/Record";
 import { flatten, nest } from "./codecs.js";
 
@@ -69,5 +69,38 @@ describe("flatten", () => {
     const bare = flatten(record("__proto__", ["yes"]));
     expect(Object.getPrototypeOf(bare)).toBe(Object.prototype);
     expect(Object.hasOwn(bare, "__proto__")).toBe(true);
+  });
+});
+
+// A frozen `Object.prototype` (SES `lockdown()`, `--frozen-intrinsics`) makes
+// every inherited member read-only, so plainly assigning `toString` throws in
+// strict mode: the "override mistake". Freezing the prototype the vitest
+// worker shares would break every other test, so one read-only member stands
+// in for it. The codecs define every key, so they still write it as their own.
+describe("under a read-only inherited member, as a frozen prototype gives (#269)", () => {
+  beforeEach(() => {
+    Object.defineProperty(Object.prototype, "readOnlyProbe", {
+      value: "inherited",
+      writable: false,
+      configurable: true,
+    });
+  });
+  afterEach(() => {
+    Reflect.deleteProperty(Object.prototype, "readOnlyProbe");
+  });
+
+  it("nest writes a group member under that name as its own", () => {
+    const { page } = nest({ "page[readOnlyProbe]": "1" });
+    expect(Object.getOwnPropertyDescriptor(page, "readOnlyProbe")?.value).toBe("1");
+  });
+
+  it("nest writes a bare key under that name as its own", () => {
+    const nested = nest({ readOnlyProbe: "1" });
+    expect(Object.getOwnPropertyDescriptor(nested, "readOnlyProbe")?.value).toBe("1");
+  });
+
+  it("flatten writes a key under that name as its own", () => {
+    const flat = flatten({ readOnlyProbe: "1" });
+    expect(Object.getOwnPropertyDescriptor(flat, "readOnlyProbe")?.value).toBe("1");
   });
 });

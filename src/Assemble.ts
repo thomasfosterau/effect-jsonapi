@@ -48,7 +48,7 @@ import { Effect } from "effect";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
-import { define } from "./internal/define.js";
+import { assign } from "./internal/define.js";
 import * as Query from "./Query.js";
 
 // ---------------------------------------------------------------------------
@@ -630,7 +630,7 @@ const toWireValue = (value: unknown): unknown => {
     const out: { [key: string]: unknown } = {};
     for (const [key, entry] of Object.entries(value)) {
       // An own `__proto__` member (as `JSON.parse` gives) stays a member.
-      if (entry !== undefined) define(out, key, toWireValue(entry));
+      if (entry !== undefined) assign(out, key, toWireValue(entry));
     }
     return out;
   }

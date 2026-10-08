@@ -48,7 +48,7 @@
 import { Array as Arr, Effect, HashMap, HashSet, Option, Record } from "effect";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
-import { define } from "./internal/define.js";
+import { assign } from "./internal/define.js";
 import { reachable } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
 
@@ -323,7 +323,7 @@ const selectAttributes = (
   const projected: Record<string, unknown> = {};
   for (const name of Object.keys(attributes)) {
     // An own `__proto__` attribute (as `JSON.parse` gives) stays a member.
-    if (selected.has(name)) define(projected, name, attributes[name]);
+    if (selected.has(name)) assign(projected, name, attributes[name]);
   }
   return projected;
 };

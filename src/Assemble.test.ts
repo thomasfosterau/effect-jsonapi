@@ -956,6 +956,41 @@ describe("helpers", () => {
     expect(Object.hasOwn(Object.prototype, "inner")).toBe(false);
   });
 
+  // The copy defines `__proto__` and assigns every other key; a name that
+  // `Object.prototype` carries (or that a function does) is still an own
+  // member of the copy, not a write to anything inherited.
+  it.each(["constructor", "prototype", "toString", "__proto__"])(
+    "keeps a member keyed %s as an own data member",
+    (key) => {
+      const coerced = Assemble.toWireSafeResource({
+        type: "things",
+        id: "1",
+        attributes: R.fromEntries([
+          [key, { at: new URL("https://example.test/a") }],
+          ["title", "T"],
+        ]),
+        meta: R.fromEntries([[key, 1]]),
+      });
+      const { attributes, meta } = coerced;
+      expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
+      expect(Object.getOwnPropertyNames(attributes)).toEqual([key, "title"]);
+      expect(Object.getOwnPropertyDescriptor(attributes, key)).toEqual({
+        value: { at: "https://example.test/a" },
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+      expect(Object.getPrototypeOf(meta)).toBe(Object.prototype);
+      expect(Object.getOwnPropertyNames(meta)).toEqual([key]);
+      expect(toJson(coerced)).toBe(
+        `{"type":"things","id":"1","attributes":{"${key}":{"at":"https://example.test/a"},` +
+          `"title":"T"},"meta":{"${key}":1}}`,
+      );
+      expect(Object.hasOwn(Object.prototype, "at")).toBe(false);
+      expect(Object.prototype.toString.call(attributes)).toBe("[object Object]");
+    },
+  );
+
   it("stringifies a link object's href too", () => {
     const wired = Assemble.stringifyLinks({
       type: "t",
