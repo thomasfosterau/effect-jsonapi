@@ -499,9 +499,65 @@ export interface QueryParameterOptions {
    * JSON:API 1.1 reserves these names for the specification, so accepting one
    * is a deliberate deviation: prefer renaming the parameter (`langCode`,
    * `x-lang`) when the host controls it. Defaults to none.
+   *
+   * An entry that is not such a base name — a bracketed member (`lang[x]`),
+   * a name with any other character (`Lang`, ` lang`), or `""` — is refused
+   * with {@link InvalidAllowedQueryParameter} rather than admitting nothing:
+   * {@link schemaErrorsLayer} and {@link layerWith} throw it when the layer is
+   * built, {@link checkQueryParameters} when it is called. List a bracketed
+   * member by its base name (`lang`); a name with any other character is
+   * implementation-specific and never rejected, so it needs no entry.
    */
   readonly allowedQueryParameters?: ReadonlyArray<string> | undefined;
 }
+
+/**
+ * An `allowedQueryParameters` entry that is not a family base name made only
+ * of the letters a-z (see {@link QueryParameterOptions.allowedQueryParameters}).
+ * Thrown when {@link schemaErrorsLayer} or {@link layerWith} builds its layer,
+ * and by {@link checkQueryParameters}, so a misspelt entry fails at startup
+ * instead of leaving the parameter it meant to admit rejected.
+ *
+ * @example
+ * ```ts
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * try {
+ *   Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang[region]"] })
+ * } catch (error) {
+ *   console.log((error as Middleware.InvalidAllowedQueryParameter).parameter)
+ * }
+ * // → lang[region]
+ * ```
+ *
+ * @since 0.17.0
+ * @category errors
+ */
+export class InvalidAllowedQueryParameter extends Schema.TaggedError<InvalidAllowedQueryParameter>()(
+  "InvalidAllowedQueryParameter",
+  { parameter: Schema.String, message: Schema.String },
+) {}
+
+// The allow-list, every entry checked to be a reserved family base name: any
+// other entry could never match a parameter the check rejects.
+const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string> => {
+  const allowed = options?.allowedQueryParameters ?? [];
+  const invalid = Arr.findFirst(allowed, (entry) => !RESERVED_BASE_NAME.test(entry));
+  if (Option.isNone(invalid)) return allowed;
+  const parameter = invalid.value;
+  const base = baseName(parameter);
+  throw new InvalidAllowedQueryParameter({
+    parameter,
+    message:
+      `allowedQueryParameters entry "${parameter}" is not a family base name ` +
+      "made only of the letters a-z. " +
+      (base !== parameter && RESERVED_BASE_NAME.test(base)
+        ? `List its base name "${base}", which admits the bare parameter and ` +
+          "every bracketed member of its family."
+        : "A name with any other character is implementation-specific and never rejected, " +
+          "so it needs no entry."),
+  });
+};
 
 /**
  * The input to {@link checkQueryParameters}: the
@@ -537,6 +593,9 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * - is the base of a name in `declared`; or
  * - is listed in `allowedQueryParameters`.
  *
+ * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
+ * entry that is not a family base name made only of a-z.
+ *
  * {@link SchemaErrorsLive} runs this on every request before the endpoint
  * decodes anything, with the names the endpoint's query schema declares.
  * Call it directly from a plain framework hook that decodes requests itself.
@@ -562,7 +621,7 @@ export const checkQueryParameters = (
   const known = [
     ...SPEC_FAMILIES,
     ...(options?.declared ?? []).map(baseName),
-    ...(options?.allowedQueryParameters ?? []),
+    ...allowedBaseNames(options),
   ];
   const rejected = Arr.dedupe(
     Arr.filter(Arr.fromIterable(names), (name) => {
@@ -785,6 +844,10 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * check runs first: a request that both carries a reserved parameter and
  * fails §5 negotiation is answered with the 400, not the 406 or 415.
  *
+ * Throws {@link InvalidAllowedQueryParameter}, when called, for an
+ * `allowedQueryParameters` entry that is not a family base name made only of
+ * a-z.
+ *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
  * the same option. A host that negotiates content itself composes this with
  * {@link ContentNegotiationPassthrough}, as the example does.
@@ -810,8 +873,10 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * @since 0.17.0
  * @category constructors
  */
-export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<SchemaErrors> =>
-  Layer.succeed(
+export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<SchemaErrors> => {
+  // Checked here, so a misspelt entry fails when the layer is built.
+  const allowedQueryParameters = allowedBaseNames(options);
+  return Layer.succeed(
     SchemaErrors,
     // Untraced: the middleware's span surface is `Span.schemaError` alone.
     Effect.fnUntraced(function* (httpEffect, { endpoint }) {
@@ -820,7 +885,7 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
         const params = yield* ParsedSearchParams;
         const rejected = checkQueryParameters(Record.keys(params), {
           declared: declared.value,
-          allowedQueryParameters: options?.allowedQueryParameters,
+          allowedQueryParameters,
         });
         if (rejected !== undefined) return yield* badRequestResponse("Query", rejected);
       }
@@ -831,6 +896,7 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
       );
     }),
   );
+};
 
 /**
  * The live {@link SchemaErrors} implementation: answers every request
