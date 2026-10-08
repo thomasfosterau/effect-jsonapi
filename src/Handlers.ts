@@ -12,6 +12,13 @@
  *     primary data by following resource linkage — the primary data's
  *     relationships, then other included resources' relationships
  *
+ * `included` keeps the request's shape: an array — even one that is empty, or
+ * that dedup against the primary data empties — emits the member, because a
+ * response to a request carrying `include` MUST be a compound document with
+ * an `included` key, "even if that `included` key holds an empty array"
+ * (JSON:API 1.1 §Fetching Includes). Pass `undefined` when the request carried
+ * no `include`, and the member is omitted.
+ *
  * They also take an `onResource` hook — a per-resource transform run **once
  * per resource, in every slot**: the primary `data`, every deduplicated
  * `included` member, and the identifiers of a linkage document. That is what
@@ -23,7 +30,8 @@
  * handlers.handle("fetch", ({ params, query }) =>
  *   loadArticle(params.id).pipe(Effect.map((article) =>
  *     data(article, {
- *       included: query.include?.includes("author") ? [author] : [],
+ *       // `undefined` without `?include=`; `[]` when it names nothing to load
+ *       included: query.include === undefined ? undefined : query.include.includes("author") ? [author] : [],
  *       self: `/articles/${article.id}`
  *     })
  *   ))
@@ -987,8 +995,11 @@ const resolve = (
  *   target, an id the batch didn't return, a row the viewer may not see: all
  *   are normal outcomes, and simply absent from `included`. A loader's own
  *   failure propagates and fails the document.
- * - **`undefined` when nothing was requested**, so the caller omits the member.
- *   An empty array is the different statement "your walk resolved to nothing".
+ * - **`undefined` when nothing was requested**, so the builders omit the
+ *   member. An empty array is the different statement "your walk resolved to
+ *   nothing", and {@link data} / {@link collection} emit it as `included: []`
+ *   — §Fetching Includes requires the key in every response to a request
+ *   carrying `include`.
  *
  * **Full linkage holds by construction — for the array this returns.** Every
  * member is reached *through* the linkage of the primary data the walk started
@@ -1202,16 +1213,18 @@ const build = (
   onResource: ResourceTransform<TransformLambda> | undefined,
 ) => {
   const links = options === undefined ? undefined : buildLinks(options);
-  // Omitted, not `[]`, when nothing survives dedup against the primary data —
-  // the same shape as a document that was handed no `included` at all.
-  const members =
+  // An array — however empty, and however empty dedup against the primary
+  // data leaves it — is a compound document, and keeps its `included` key:
+  // §Fetching Includes requires one in every response to a request carrying
+  // `include`, "even if that `included` key holds an empty array" (#232).
+  // Only `undefined` (nothing was requested) omits the member.
+  const included =
     options?.included === undefined
-      ? []
+      ? undefined
       : buildIncluded(primary, options.included, {
           checkLinkage: options.checkLinkage,
           onResource,
         });
-  const included = Arr.isReadonlyArrayNonEmpty(members) ? members : undefined;
   return {
     data,
     ...(included !== undefined ? { included } : {}),
@@ -1225,7 +1238,10 @@ const build = (
  * Builds a single-resource document value: `{ data, included?, links?, meta?, jsonapi? }`.
  *
  * Included resources are deduplicated — against each other and against the
- * primary data — and checked for full linkage.
+ * primary data — and checked for full linkage. Any `included` array, empty
+ * or emptied by that dedup, is emitted (`included: []`): pass one whenever the
+ * request carried `include`, and `undefined` when it did not, so the member
+ * is omitted (JSON:API 1.1 §Fetching Includes).
  *
  * Pass `jsonapi` to stamp the top-level `jsonapi` object — `Document.v1_1` to
  * advertise JSON:API 1.1, or `Atomic.jsonapi` for the atomic-operations
@@ -1280,7 +1296,10 @@ const build = (
  *     loadArticle(params.id).pipe(
  *       Effect.map((article) =>
  *         Handlers.data(article, {
- *           included: query.include?.includes("author") ? [author] : [],
+ *           // `undefined` without `?include=` (no `included` member); `[]`
+ *           // when it named nothing that resolved (`included: []`)
+ *           included:
+ *             query.include === undefined ? undefined : query.include.includes("author") ? [author] : [],
  *           jsonapi: Document.v1_1,
  *           self: `/articles/${article.id}`
  *         })
@@ -1333,6 +1352,11 @@ export const data = <
 >(
   resource: R,
   options?: {
+    /**
+     * The compound document's members. An array — even `[]` — emits
+     * `included`; `undefined` omits it. Pass an array whenever the request
+     * carried `include` (JSON:API 1.1 §Fetching Includes).
+     */
     readonly included?: ReadonlyArray<Included> | undefined;
     readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
@@ -1377,7 +1401,10 @@ export const data = <
  * Builds a collection document value: `{ data: [...], included?, links?, meta?, jsonapi? }`.
  *
  * Included resources are deduplicated — against each other and against the
- * primary data — and checked for full linkage.
+ * primary data — and checked for full linkage. As with {@link data}, any
+ * `included` array is emitted, even empty — a heterogeneous collection whose
+ * every include candidate is already a hit answers `included: []` — and
+ * `undefined` omits the member.
  *
  * JSON:API 1.1 requires a collection's `self` link to carry the query
  * parameters the client provided. Pass `query` — the request's canonical
@@ -1449,6 +1476,11 @@ export const collection = <
 >(
   resources: ReadonlyArray<R>,
   options?: {
+    /**
+     * The compound document's members. An array — even `[]` — emits
+     * `included`; `undefined` omits it. Pass an array whenever the request
+     * carried `include` (JSON:API 1.1 §Fetching Includes).
+     */
     readonly included?: ReadonlyArray<Included> | undefined;
     readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */

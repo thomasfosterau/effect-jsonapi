@@ -458,7 +458,10 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       loadRepository(params.id).pipe(
         Effect.map((repository) =>
           Handlers.data(repository, {
-            included: resolveRepositoryIncluded(repository, query.include),
+            included:
+              query.include === undefined
+                ? undefined
+                : resolveRepositoryIncluded(repository, query.include),
             self: `/repositories/${repository.id}`,
           }),
         ),
@@ -494,9 +497,10 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((repository) =>
-            resolveRepositoryIncluded(repository, query.include),
-          ),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((repository) => resolveRepositoryIncluded(repository, query.include)),
           meta: { total },
           links: Handlers.numberPaginationLinks("/repositories", { number, size }, total),
         }),
@@ -571,7 +575,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       loadIssue(params.id).pipe(
         Effect.map((issue) =>
           Handlers.data(issue, {
-            included: resolveIssueIncluded(issue, query.include),
+            included:
+              query.include === undefined ? undefined : resolveIssueIncluded(issue, query.include),
             self: `/issues/${issue.id}`,
           }),
         ),
@@ -601,7 +606,10 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((issue) => resolveIssueIncluded(issue, query.include)),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((issue) => resolveIssueIncluded(issue, query.include)),
           meta: { total },
           links: Handlers.numberPaginationLinks("/issues", { number, size }, total),
         }),
@@ -660,12 +668,15 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           const { number, page, size, total } = paginate(all, query.page);
           const path = Handlers.relatedLink("issues", issue.id, "comments");
           return Handlers.collection(page, {
-            included: query.include?.includes("author")
-              ? page.flatMap((comment) => {
-                  const author = store.users.get(comment.relationships!.author.data.id);
-                  return author === undefined ? [] : [author];
-                })
-              : [],
+            included:
+              query.include === undefined
+                ? undefined
+                : query.include.includes("author")
+                  ? page.flatMap((comment) => {
+                      const author = store.users.get(comment.relationships!.author.data.id);
+                      return author === undefined ? [] : [author];
+                    })
+                  : [],
             meta: { total },
             links: Handlers.numberPaginationLinks(path, { number, size }, total),
           });
@@ -768,7 +779,8 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
       loadPull(params.id).pipe(
         Effect.map((pull) =>
           Handlers.data(pull, {
-            included: resolvePullIncluded(pull, query.include),
+            included:
+              query.include === undefined ? undefined : resolvePullIncluded(pull, query.include),
             self: `/pulls/${pull.id}`,
           }),
         ),
@@ -791,7 +803,10 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
 
       return Effect.succeed(
         Handlers.collection(page, {
-          included: page.flatMap((pull) => resolvePullIncluded(pull, query.include)),
+          included:
+            query.include === undefined
+              ? undefined
+              : page.flatMap((pull) => resolvePullIncluded(pull, query.include)),
           meta: { total },
           links: Handlers.numberPaginationLinks("/pulls", { number, size }, total),
         }),
@@ -831,13 +846,16 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     return Effect.succeed(
       Handlers.collection(page, {
-        included: page.flatMap((result) =>
-          result.type === "repositories"
-            ? resolveRepositoryIncluded(result, query.include)
-            : result.type === "issues"
-              ? resolveIssueIncluded(result, query.include)
-              : [],
-        ),
+        included:
+          query.include === undefined
+            ? undefined
+            : page.flatMap((result) =>
+                result.type === "repositories"
+                  ? resolveRepositoryIncluded(result, query.include)
+                  : result.type === "issues"
+                    ? resolveIssueIncluded(result, query.include)
+                    : [],
+              ),
         meta: { total },
         links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
       }),
