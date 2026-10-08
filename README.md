@@ -1268,7 +1268,7 @@ Layer.provide(
 );
 ```
 
-An allowed name never reaches the endpoint's decoded `query`; it is only no longer rejected. `Middleware.checkQueryParameters(names, { declared, allowedQueryParameters })` is the same check standalone, for a hook that decodes requests itself: it returns the 400 document, or `undefined`.
+An allowed name never reaches the endpoint's decoded `query`, which keeps only what its `query` schema declares — also when that schema declares nothing ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)); it is only no longer rejected. `Middleware.checkQueryParameters(names, { declared, allowedQueryParameters })` is the same check standalone, for a hook that decodes requests itself: it returns the 400 document, or `undefined`.
 
 And to call it — the same definitions drive a fully typed client:
 

@@ -493,7 +493,8 @@ export interface QueryParameterOptions {
    * carries its own lowercase parameters (`lang`, `ref`, …) through to the
    * api. Each name admits the bare parameter and its bracketed members
    * (`lang` admits `lang` and `lang[x]`); the endpoint never sees them in its
-   * decoded query.
+   * decoded query, which keeps only what its `query` schema declares — also
+   * when that schema declares nothing (#260).
    *
    * JSON:API 1.1 reserves these names for the specification, so accepting one
    * is a deliberate deviation: prefer renaming the parameter (`langCode`,

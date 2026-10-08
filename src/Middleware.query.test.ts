@@ -41,11 +41,17 @@ const Api = HttpApi.make("blog")
     ),
   );
 
+// The decoded `query` each `get` handler call received.
+const getQueries: Array<unknown> = [];
+
 const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
   handlers
-    .handle("get", ({ params }) =>
-      Effect.succeed({ data: Article.make({ id: params.id, attributes: { title: "Hello" } }) }),
-    )
+    .handle("get", ({ params, query }) => {
+      getQueries.push(query);
+      return Effect.succeed({
+        data: Article.make({ id: params.id, attributes: { title: "Hello" } }),
+      });
+    })
     .handle("list", () => Effect.succeed({ data: [] }))
     .handle("delete", () => Effect.void),
 );
@@ -186,6 +192,19 @@ describe("allowedQueryParameters", () => {
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({ type: "articles", id: "1" });
   });
+
+  // #260: `Endpoint.get(Article)` declares no query family, and its empty
+  // query struct used to hand every parameter to the handler and to the
+  // bracket reshaper, which threw (a 500) on a bare/bracketed collision.
+  it.each(["lang=en", "lang[region]=au", "lang=en&lang[region]=au", "lang[region]=au&lang=en"])(
+    "never hands `?%s` to the handler's decoded query",
+    async (query) => {
+      getQueries.length = 0;
+      const response = await request(`/articles/1?${query}`, allowing);
+      expect(response.status).toBe(200);
+      expect(getQueries).toEqual([{}]);
+    },
+  );
 
   it("rejects every other all-lowercase family", async () => {
     const other = await request("/articles/1?lang=en&unknown=1", allowing);

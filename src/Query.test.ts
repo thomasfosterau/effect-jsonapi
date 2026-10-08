@@ -1083,6 +1083,25 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
     "__proto__[polluted]=yes",
     "constructor[prototype][polluted]=yes",
   ];
+  // The same shapes under implementation-specific names (a character outside
+  // a-z), which the `SchemaErrors` middleware lets through to decoding; an
+  // all-lowercase one it rejects first (#148).
+  const implementationSpecific = [
+    "fooBar=1",
+    "fooBar=1&fooBar[x]=2",
+    "fooBar[x]=1&fooBar=2",
+    "fooBar=1&fooBar=2&fooBar[x]=3",
+    "fooBar[x]=1&fooBar[x][y]=2",
+    "fooBar[]=1&fooBar[]=2&fooBar=3",
+    "[x]=1&x-y[]=2&[]=3",
+    `aB${"[b]".repeat(2000)}=1&aB=2&aB[b]=3`,
+    "__proto__=1",
+    "__proto__[polluted]=yes",
+    "__proto__[polluted]=yes&__proto__=1",
+  ];
+  // A readable test title for a query string (the deep one is 6 kB).
+  const titled = (searches: ReadonlyArray<string>) =>
+    searches.map((search) => [search.length > 60 ? `${search.slice(0, 60)}…` : search, search]);
 
   // A reshaper that wrote through `__proto__` would pollute every object in
   // the process; undo it so one failure doesn't cascade into the rest.
@@ -1117,7 +1136,7 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
   ];
 
   describe.each(schemas)("%s", (_, schema) => {
-    it.each(undeclared)("?%s decodes to {}", (search) => {
+    it.each(titled(undeclared))("?%s decodes to {}", (_, search) => {
       expect(Schema.decodeUnknownSync(schema)(wire(search))).toEqual({});
       expect(polluted()).toBe(false);
     });
@@ -1177,11 +1196,14 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
       }
     };
 
-    it.each(undeclared)("answers 200 to ?%s and hands the handler {}", async (search) => {
-      received.length = 0;
-      expect(await request(`http://localhost/people/1?${search}`)).toBe(200);
-      expect(received).toEqual([{}]);
-      expect(polluted()).toBe(false);
-    });
+    it.each(titled(implementationSpecific))(
+      "answers 200 to ?%s and hands the handler {}",
+      async (_, search) => {
+        received.length = 0;
+        expect(await request(`http://localhost/people/1?${search}`)).toBe(200);
+        expect(received).toEqual([{}]);
+        expect(polluted()).toBe(false);
+      },
+    );
   });
 });
