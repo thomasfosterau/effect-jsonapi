@@ -5,10 +5,14 @@ import { unlinkedIncluded } from "./spec.js";
 /** A resource identifier object, which a resource object extends. */
 const ref = (type: string, id: string) => ({ type, id });
 
-const one = (identifier: unknown) => ({ data: identifier });
+/** A resource identifier object: a `type` and either an `id` or a `lid`. */
+type Identifier = { readonly type: string } & ({ readonly id: string } | { readonly lid: string });
+
+/** A to-one or to-many relationship whose resource linkage is `linkage`. */
+const one = (linkage: Identifier | ReadonlyArray<Identifier>) => ({ data: linkage });
 
 /** The `type:id` (or `type:lid`) of each member the kit reports, in order. */
-const orphans = (document: Readonly<Record<string, unknown>>) =>
+const orphans = (document: Parameters<typeof unlinkedIncluded>[0]) =>
   Arr.map(
     unlinkedIncluded(document),
     (resource) => `${String(resource["type"])}:${String(resource["id"] ?? resource["lid"])}`,
@@ -35,6 +39,22 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
   it("reports a member whose only reference is its own relationship", () => {
     const manager = { ...ref("people", "9"), relationships: { manager: one(ref("people", "9")) } };
     expect(orphans({ data: [ref("articles", "1")], included: [manager] })).toEqual(["people:9"]);
+  });
+
+  it("walks from every element of array primary data", () => {
+    // Only the second primary links `people:9`.
+    const data = [
+      ref("articles", "1"),
+      { ...ref("articles", "2"), relationships: { author: one(ref("people", "9")) } },
+    ];
+    expect(orphans({ data, included: [ref("people", "9")] })).toEqual([]);
+  });
+
+  it("does not count the primary data's own identity as linked", () => {
+    // An included copy of the primary resource is reachable only if something links to it.
+    expect(orphans({ data: ref("articles", "1"), included: [ref("articles", "1")] })).toEqual([
+      "articles:1",
+    ]);
   });
 
   it("keys members by `lid` when they have no `id`, apart from an `id` of the same value", () => {
@@ -65,7 +85,7 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
         ...ref("articles", "1"),
         relationships: {
           author: one(ref("people", "9")),
-          editor: one(null),
+          editor: { data: null },
           tags: one([]),
           stats: { meta: { count: 2 } },
           comments: { links: { related: "/articles/1/comments" } },
@@ -93,7 +113,9 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
     const length = 30_000;
     const included = Arr.makeBy(length, (i) => ({
       ...ref("people", String(i)),
-      relationships: { manager: one(i + 1 < length ? ref("people", String(i + 1)) : null) },
+      relationships: {
+        manager: i + 1 < length ? one(ref("people", String(i + 1))) : { data: null },
+      },
     }));
     const document = {
       data: { ...ref("articles", "1"), relationships: { author: one(ref("people", "0")) } },
