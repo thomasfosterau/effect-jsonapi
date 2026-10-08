@@ -199,7 +199,9 @@ export const contentTypeIsAcceptable = (
  * media type parameter, so it never counts against the ext/profile rule. An
  * entry weighted `q=0` is an explicit refusal of that representation and is
  * skipped rather than treated as acceptable; any non-zero weight is treated
- * the same as an entry with no weight at all.
+ * the same as an entry with no weight at all. A `q` outside the RFC 9110
+ * `qvalue` grammar (`0` to `1`, at most three decimals — e.g. `q=`, `q=2`,
+ * `q=abc`) is malformed, and the entry is skipped like a refusal.
  *
  * @since 0.1.0
  * @category utils

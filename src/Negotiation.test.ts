@@ -154,6 +154,18 @@ describe("negotiate — reads (Accept)", () => {
   it("treats an unparseable q= as the default 1 (still wins on a tie)", () => {
     expect(negotiate(get("/contests", `${MEDIA_TYPE};q=abc`)).dispatch).toBe(true);
   });
+
+  it.each(["", "0x0", "-1", "1e-9"])(
+    "treats q=%s, outside the RFC 9110 qvalue grammar, as unparseable — never as a q=0 refusal",
+    (q) => {
+      expect(negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`)).dispatch).toBe(true);
+    },
+  );
+
+  it("does not read an out-of-range q as a weight above 1 that beats every competitor", () => {
+    expect(negotiate(get("/contests", `${MEDIA_TYPE};q=2, text/html;q=1`)).dispatch).toBe(true);
+    expect(negotiate(get("/contests", `text/html;q=2, ${MEDIA_TYPE}`)).dispatch).toBe(true);
+  });
 });
 
 describe("negotiate — writes (Content-Type)", () => {
