@@ -1517,7 +1517,21 @@ The refusal applies only when no range of any media type carries `q > 0`; anothe
 
 ### The assembler, the handlers and the registry
 
-`Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set. `ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
+`Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set.
+
+`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no `links` and no `meta` — and its `UnpaginatedCollectionDocument` type has neither member, so no `next` / `last` link the endpoint doesn't honour is advertised:
+
+```ts
+const document = Assemble.unpaginatedCollection(colours, {
+  include: ["family"],
+  includable: ["family"],
+  targets: { families },
+});
+// Effect<UnpaginatedCollectionDocument<Colour>, …>
+// succeeds with { data: [...], included: [...], jsonapi: { version: "1.1" } }
+```
+
+`ResourceHandlers.make` / `readOnly` build the handler set the presets' endpoints expect, with everything an application owns passed in; `Registry` collects the families, checks each against its group at module init, and builds the router:
 
 ```ts
 import { Assemble, Registry, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
@@ -1542,18 +1556,6 @@ const { handler } = Registry.webHandler(Api, [peopleFamily, contestsFamily], {
   respond: boundary,
 })
 // (request: Request, context: Context<User | Database | …>) => Promise<Response>
-```
-
-`Assemble.collection(resources, pagination, options?)` surfaces the page math — `meta.totalCount` and the five offset pagination links, carrying the request's other query pairs. A collection served whole (a small fixed list, or a to-many related collection that is never paged) uses `Assemble.unpaginatedCollection(resources, options?)` instead: the same stamping, projection, `include` walk, `included` handling and `jsonapi` member, with no `links` and no `meta` — and its `UnpaginatedCollectionDocument` type has neither member, so no `next` / `last` link the endpoint doesn't honour is advertised:
-
-```ts
-const document = Assemble.unpaginatedCollection(colours, {
-  include: ["family"],
-  includable: ["family"],
-  targets: { families },
-});
-// Effect<UnpaginatedCollectionDocument<Colour>, …>
-// succeeds with { data: [...], included: [...], jsonapi: { version: "1.1" } }
 ```
 
 ## Query parameters
