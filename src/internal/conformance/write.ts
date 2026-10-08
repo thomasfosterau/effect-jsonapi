@@ -10,11 +10,12 @@
  *   - **The kit refuses an id it evidently did not create.** A create
  *     response's id is taken only when the response names a resource of the
  *     type the kit sent, under an id that is a URL path segment of its own and
- *     is neither an `ids` sample, nor one a read earlier in the run returned,
- *     nor one the run already holds a live record for. A refused id is
- *     recorded as named and never updated, deleted or handed to `cleanup`.
- *     Any other id is trusted: the kit cannot tell a server that names an
- *     existing resource it has not seen from an honest one.
+ *     is neither an `ids` sample, nor one a read earlier in the run returned
+ *     (unless the kit took it from a create of its own), nor one the run
+ *     already holds a live record for. A refused id is recorded as named and
+ *     never updated, deleted or handed to `cleanup`. Any other id is trusted:
+ *     the kit cannot tell a server that names an existing resource it has not
+ *     seen from an honest one.
  *   - **Disposal is unconditional.** A created resource is handed to the rule
  *     inside `Effect.acquireUseRelease`, so the fixture's `cleanup` runs when
  *     the rule passes, when it fails and when it dies.
@@ -170,7 +171,7 @@ const usable = (
  * The endpoints of `role` a write rule can drive. For `"create"` that is every
  * create endpoint whose type has a `create` fixture; for `"update"` and
  * `"delete"` it is every such endpoint whose type also has a create endpoint
- * and fixture — the kit acts only on resources it created itself, never on a
+ * and fixture — the kit acts on resources it created itself, never on a
  * caller's sample — and, for `"update"`, an `update` fixture.
  *
  * @internal
@@ -341,29 +342,38 @@ const live = (entry: Entry): boolean =>
  * before it is sent: `/articles/..` is `/`, `/articles/.` is `/articles/`. An
  * empty id leaves `/articles/` too. A request built from any of them reaches a
  * URL other than the resource's own — the collection, or the root.
+ *
+ * An id no URL can carry — a lone surrogate, which `encodeURIComponent`
+ * throws on — is no segment either. It comes straight from the server's
+ * response, so this must answer rather than throw: a throw here would die in
+ * the step that records the create, before the record exists.
  */
-const isOwnSegment = (id: string): boolean => {
-  const path = `/type/${encodeURIComponent(id)}`;
-  return id !== "" && new URL(path, "http://conformance.invalid").pathname === path;
-};
+const isOwnSegment = (id: string): boolean =>
+  id !== "" &&
+  Result.try(() => {
+    const path = `/type/${encodeURIComponent(id)}`;
+    return new URL(path, "http://conformance.invalid").pathname === path;
+  }).pipe(Result.getOrElse(() => false));
 
 /**
  * The id a create response named, if the kit may act on it — or why not. The
- * kit acts only on a resource it made, so the response must name a resource of
- * the type the kit sent, under an id that:
+ * kit refuses an id it evidently did not create, so the response must name a
+ * resource of the type the kit sent, under an id that:
  *
  *   - is a URL path segment of its own (see `isOwnSegment`), since the update
  *     and delete rules put it in a URL and `cleanup` may too;
  *   - is not an `ids` sample, which the kit did not create;
- *   - no successful `GET` earlier in the run has shown (`Context.observed`):
- *     the server held that resource before the kit created anything;
+ *   - no successful `GET` earlier in the run has shown (`Context.observed`),
+ *     unless the kit took that id from an earlier create of its own: the
+ *     server held a resource it showed before the kit made one under its id;
  *   - the run does not already hold a live record for (two live resources
  *     cannot share an id, so one of the two answers is wrong).
  *
  * An id whose earlier holder the kit has since removed is accepted: servers
  * that hand out the next free id reuse it. Any other id is trusted — a server
  * that names an existing resource the run has not seen cannot be told from an
- * honest one.
+ * honest one. The observed check is only as complete as the reads before it,
+ * which is why the read rules run first (`rules` in `./spec.ts`).
  */
 const vet = (
   ctx: Context,
@@ -382,13 +392,19 @@ const vet = (
   const samples = [ctx.options.ids[target.key], ctx.options.ids[named.type]];
   if (Arr.contains(samples, named.id))
     return refuse("which the kit did not create (it is the `ids` sample)");
-  if (MutableHashSet.has(ctx.observed, idKey(named.type, named.id)))
-    return refuse("which the kit did not create (a read earlier in this run returned it)");
-  const held = Arr.some(
+  const mine = Arr.filter(
     ctx.writes,
-    (entry) => entry.type === target.key && entry.id === named.id && live(entry),
+    (entry) => entry.type === target.key && entry.id === named.id,
   );
-  if (held)
+  // A read of what the kit itself created earlier — a read-back — shows that
+  // id too; it says nothing about who made it, so only an id the kit never
+  // took is refused for having been read.
+  if (
+    Arr.isReadonlyArrayEmpty(mine) &&
+    MutableHashSet.has(ctx.observed, idKey(named.type, named.id))
+  )
+    return refuse("which the kit did not create (a read earlier in this run returned it)");
+  if (Arr.some(mine, live))
     return refuse(
       "which this create did not make (an earlier create in this run holds that id and has not been removed)",
     );

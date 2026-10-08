@@ -4,11 +4,11 @@
  *
  * Each rule is one normative sentence with its section and a probe that decides
  * it. Rules that would change the target's state are gated behind
- * `mutating: true` and report `Skipped` otherwise, and act only on resources
- * they created themselves from the caller's `writes` fixture (`./write.ts`) —
- * never on a sample id, nor on an id a create response names for anything but
- * what the kit sent; rules whose shape this api has no endpoint for report
- * `Skipped` naming what was missing. Nothing here silently passes.
+ * `mutating: true` and report `Skipped` otherwise, and act on resources they
+ * create themselves from the caller's `writes` fixture (`./write.ts`) — never
+ * on a sample id, and never on an id the create response names that the kit
+ * evidently did not create; rules whose shape this api has no endpoint for
+ * report `Skipped` naming what was missing. Nothing here silently passes.
  *
  * @since 0.15.0
  * @internal
@@ -1258,6 +1258,7 @@ const not201 = (target: Target, observation: Observation): Verdict =>
   );
 
 const createResponseDocument: RuleImpl = {
+  creates: true,
   rule: rule(
     "spec/status/create-response-document",
     "Creating Resources",
@@ -1308,6 +1309,7 @@ const headerNames = (observation: Observation): string =>
   });
 
 const createLocation: RuleImpl = {
+  creates: true,
   rule: rule(
     "spec/status/create-location",
     "Creating Resources",
@@ -1358,6 +1360,7 @@ const absolute = (url: string, base: string): string =>
   Result.try({ try: () => new URL(url, base).href, catch: () => url }).pipe(Result.merge);
 
 const createLocationMatchesSelf: RuleImpl = {
+  creates: true,
   rule: rule(
     "spec/status/create-location-matches-self",
     "Creating Resources",
@@ -1392,6 +1395,7 @@ const createLocationMatchesSelf: RuleImpl = {
 };
 
 const updateResponse: RuleImpl = {
+  creates: true,
   rule: rule(
     "spec/status/update-response",
     "Updating Resources",
@@ -1470,6 +1474,25 @@ const judgeWriteSuccess = (
     Match.orElse(otherwise),
   );
 
+/** The members a 200 update document without primary data is judged by. */
+interface DocumentWithoutData {
+  readonly meta?: unknown;
+  readonly errors?: unknown;
+}
+
+/**
+ * What is wrong with a 200 update document that carries no primary data, if
+ * anything: it must carry a top-level `meta` object, and no `errors`.
+ */
+const withoutData = (body: DocumentWithoutData): Option.Option<string> => {
+  if ("errors" in body)
+    return Option.some("carries `errors` — an error document is no answer to a successful update");
+  if (!("meta" in body)) return Option.some("carries neither primary data nor a top-level `meta`");
+  if (!isRecord(body.meta))
+    return Option.some("carries no primary data and a top-level `meta` that is not an object");
+  return Option.none();
+};
+
 /** What is wrong with a 2xx answer to an update, if anything. */
 const updateFindings = (
   target: Target,
@@ -1494,15 +1517,14 @@ const updateFindings = (
       // `errors` is no answer to a success); when it carries `data`, that is
       // the resource.
       if (!Predicate.hasProperty(observation.body, "data"))
-        return Predicate.hasProperty(observation.body, "meta") &&
-          !Predicate.hasProperty(observation.body, "errors")
-          ? []
-          : broken(
-              `the 200 updating ${type}:${id} carries neither primary data nor a top-level \`meta\`${
-                Predicate.hasProperty(observation.body, "errors") ? " (it carries `errors`)" : ""
-              }`,
-              "`data` that is the updated resource, or no primary data and a top-level `meta`",
-            );
+        return Option.match(withoutData(observation.body), {
+          onNone: () => [],
+          onSome: (problem) =>
+            broken(
+              `the 200 updating ${type}:${id} ${problem}`,
+              "`data` that is the updated resource, or no primary data and a top-level `meta` object",
+            ),
+        });
       return Option.exists(
         primaryIdentity(observation),
         (named) => named.type === type && named.id === id,
@@ -1522,6 +1544,7 @@ const updateFindings = (
 };
 
 const deleteResponse: RuleImpl = {
+  creates: true,
   rule: rule(
     "spec/status/delete-response",
     "Deleting Resources",
@@ -1641,6 +1664,7 @@ const atomicMalformedRejected: RuleImpl = {
 };
 
 const atomicResponseExt: RuleImpl = {
+  creates: true,
   rule: rule(
     "spec/atomic/response-ext-parameter",
     "Content Negotiation — Universal Responsibilities (with the Atomic Operations extension)",
@@ -1774,6 +1798,13 @@ const reachable: RuleImpl = {
 
 /**
  * The JSON:API v1.1 suite, in report order.
+ *
+ * A run does not send the rules' requests in this order: every rule marked
+ * `creates` runs after every rule that is not, the profile tier's included.
+ * That is load-bearing — a create response naming an id a read has shown is
+ * refused (`vet` in `./write.ts`), and that check knows only what the reads
+ * before it have shown (`Context.observed`). A rule that creates must carry
+ * `creates: true`, or the reads after it cannot inform its vetting.
  *
  * @internal
  */

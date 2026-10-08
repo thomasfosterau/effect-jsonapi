@@ -87,7 +87,7 @@
  *
  * @since 0.15.0
  */
-import { Data, Effect, Layer, MutableHashSet } from "effect";
+import { Array as Arr, Data, Effect, Layer, MutableHashSet, Order } from "effect";
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
@@ -323,19 +323,20 @@ export interface WritePayload extends Core.Payload {}
  * created in place and says so in {@link Report.writes}, so never omit it
  * against a server whose state outlives the run.
  *
- * The write rules run only when {@link Options.mutating} is `true`, and act on
- * the id the server's create response named only after checking it: the
- * response must name a resource of the type `create` returned, under an id
- * that is a URL path segment of its own (not `""`, `.` or `..`), is not an
- * `ids` sample, was not returned by a successful `GET` earlier in the run, and
- * is not one the run already holds a resource for that has not been removed.
- * A refused id is recorded as named and never updated, deleted or passed to
- * `cleanup`. The check refuses only ids that are evidently not the kit's own:
- * any other id is trusted, because a server that names some other existing
- * resource cannot be told from an honest one — so supply `writes` only for a
- * server and data you can afford to have modified. A create answered with anything but
- * a 2xx is taken to have created nothing, so nothing is recorded or cleaned up
- * for it.
+ * The write rules run only when {@link Options.mutating} is `true`, after
+ * every rule that creates nothing, and act on the id the server's create response
+ * named only after checking it: the response must name a resource of the type
+ * `create` returned, under an id that is a URL path segment of its own (not
+ * `""`, `.`, `..` or one no URL can carry), is not an `ids` sample, was not
+ * returned by a successful `GET` earlier in the run (unless the kit had
+ * already taken that id from a create of its own), and is not one the run
+ * already holds a resource for that has not been removed. A refused id is
+ * recorded as named and never updated, deleted or passed to `cleanup`. The
+ * check refuses only ids that are evidently not the kit's own: any other id is
+ * trusted, because a server that names some other existing resource cannot be
+ * told from an honest one — so supply `writes` only for a server and data you
+ * can afford to have modified. A create answered with anything but a 2xx is
+ * taken to have created nothing, so nothing is recorded or cleaned up for it.
  *
  * @example
  * ```ts
@@ -772,10 +773,28 @@ const execute = (
       writes: [],
       observed,
     };
-    const outcomes: Array<Outcome> = [];
-    for (const implementation of selected(options)) {
-      outcomes.push(yield* implementation.run(ctx));
-    }
+    // Every rule that creates nothing (the profile tier's included) runs
+    // before the first rule that creates, so a create is vetted against
+    // everything the run reads (`Context.observed` in
+    // `./internal/conformance/core.ts`). Each outcome carries its rule's
+    // position in the suite, so the report keeps the suite's order.
+    const chosen = Arr.map(selected(options), (implementation, index) => ({
+      implementation,
+      index,
+    }));
+    const ran = yield* Effect.forEach(
+      [
+        ...Arr.filter(chosen, ({ implementation }) => implementation.creates !== true),
+        ...Arr.filter(chosen, ({ implementation }) => implementation.creates === true),
+      ],
+      ({ implementation, index }) =>
+        Effect.map(implementation.run(ctx), (outcome) => ({ outcome, index })),
+      { concurrency: 1 },
+    );
+    const outcomes = Arr.map(
+      Arr.sortWith(ran, ({ index }) => index, Order.Number),
+      ({ outcome }) => outcome,
+    );
     return {
       target: options?.target ?? api.identifier,
       version: "1.1",

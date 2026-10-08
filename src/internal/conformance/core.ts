@@ -499,6 +499,12 @@ export const runner =
 export interface RuleImpl {
   readonly rule: Rule;
   readonly run: (ctx: Context) => Effect.Effect<Outcome>;
+  /**
+   * Set on a rule that creates resources (through `./write.ts`). A run sends
+   * every other rule's requests first, so that what the reads show is known
+   * before any create is vetted against it — see `Context.observed`.
+   */
+  readonly creates?: true;
 }
 
 /** @internal */

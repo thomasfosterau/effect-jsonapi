@@ -1277,7 +1277,7 @@ describe("Conformance: the write fixture", () => {
   });
 
   // -------------------------------------------------------------------------
-  // The kit acts only on what it created
+  // The kit refuses an id it evidently did not create
   // -------------------------------------------------------------------------
 
   /**
@@ -1325,8 +1325,10 @@ describe("Conformance: the write fixture", () => {
 
   // `encodeURIComponent` leaves `.` alone and a URL's dot segments are
   // resolved before it is sent, so these ids would put the kit's PATCH and
-  // DELETE on `/` or on the collection rather than on anything it created.
-  it.each(["..", ".", ""])(
+  // DELETE on `/` or on the collection rather than on anything it created. A
+  // lone surrogate (`"\ud800"` in the JSON) cannot be percent-encoded at all:
+  // `encodeURIComponent` throws on it.
+  it.each(["..", ".", "", "\uD800"])(
     "does not act on the id %j, which is no path segment of its own",
     async (id) => {
       const { report, seen, cleaned, writes } = await run(naming("articles", id));
@@ -1348,15 +1350,41 @@ describe("Conformance: the write fixture", () => {
     },
   );
 
-  it("does not act on an id a read earlier in the run returned", async () => {
-    // The read probes are shown articles:7, and every create answer then names it.
-    const { seen, cleaned, writes } = await run((canned, request) =>
+  /** A read's document: its primary data, and what it includes. */
+  interface Shown {
+    readonly data: object;
+    readonly included?: ReadonlyArray<object>;
+  }
+
+  /** Every successful read of the `ids` sample answers `body`, and every create answer names articles:7. */
+  const showing =
+    (body: Shown, status = 200) =>
+    (canned: Canned, request: CannedRequest) =>
       request.method === "GET" &&
       request.path.startsWith("/articles/1") &&
       canned.status === undefined
-        ? { body: { data: { type: "articles", id: "7", attributes: {} } } }
-        : naming("articles", "7")(canned, request),
-    );
+        ? { status, body }
+        : naming("articles", "7")(canned, request);
+
+  const sample = { type: "articles", id: "1", attributes: {} };
+  const seven = { type: "articles", id: "7" };
+
+  // A read shows a resource as primary data, as an included resource, or as a
+  // relationship's linkage — to-one or to-many — and any of them is a resource
+  // the server held before the kit created anything.
+  it.each([
+    ["as primary data", { data: { ...seven, attributes: {} } }],
+    ["only as an included resource", { data: sample, included: [{ ...seven, attributes: {} }] }],
+    [
+      "only as to-one linkage",
+      { data: { ...sample, relationships: { related: { data: seven } } } },
+    ],
+    [
+      "only as to-many linkage",
+      { data: { ...sample, relationships: { related: { data: [seven] } } } },
+    ],
+  ])("does not act on an id a read earlier in the run returned %s", async (_, body) => {
+    const { seen, cleaned, writes } = await run(showing(body));
     expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
     expect(cleaned).toEqual([]);
     expect(writes).toEqual(
@@ -1367,6 +1395,48 @@ describe("Conformance: the write fixture", () => {
           detail: expect.stringContaining("`articles:7`, which the kit did not create (a read"),
         }),
       ),
+    );
+  });
+
+  it("does not count what an unsuccessful read carries as shown", async () => {
+    // A 404 is no evidence the server holds articles:7, so the first create
+    // naming it is taken at its word.
+    const { writes } = await run(showing({ data: { ...seven, attributes: {} } }, 404));
+    expect(writes[0]).toEqual(expect.objectContaining({ id: "7", detail: undefined }));
+  });
+
+  it("runs every rule that creates nothing, the profile tier's included, before it creates anything", async () => {
+    // A create is vetted against what the run's reads have shown so far, so a
+    // read after the first create could not inform it. A read-back of what the
+    // kit itself created is exempt: it shows nothing the kit did not make.
+    const log: Array<{ readonly request: string; readonly status: number }> = [];
+    const { report, writes } = await run((canned, request) => {
+      log.push({ request: `${request.method} ${request.path}`, status: canned.status ?? 200 });
+      return canned;
+    });
+    // …whatever order the requests went in, the report keeps the suite's.
+    expect(report.outcomes.map((outcome) => outcome.rule.id)).toEqual(
+      Conformance.rules.map((rule) => rule.id),
+    );
+    const created = writes.map((write) => `GET /articles/${write.id}`);
+    const firstCreate = log.findIndex(
+      ({ request, status }) =>
+        /^POST \/(articles|operations)$/.test(request) && status >= 200 && status < 300,
+    );
+    const lastRead = log.findLastIndex(
+      ({ request }) => request.startsWith("GET ") && !created.includes(request.split("?")[0] ?? ""),
+    );
+    expect(firstCreate).toBeGreaterThan(0);
+    expect(lastRead).toBeGreaterThan(0);
+    expect(lastRead).toBeLessThan(firstCreate);
+    // A selection that interleaves rules that create with rules that do not
+    // is reported in the suite's order too.
+    const only = ["spec/status/", "spec/atomic/", "profile/"];
+    const { report: selection } = await run(undefined, () => ({ only }));
+    expect(selection.outcomes.map((outcome) => outcome.rule.id)).toEqual(
+      Conformance.rules
+        .filter((rule) => only.some((prefix) => rule.id.startsWith(prefix)))
+        .map((rule) => rule.id),
     );
   });
 
@@ -1566,6 +1636,36 @@ describe("Conformance: the write fixture", () => {
         ? { body: { errors: [{ status: "200", title: "Updated" }] } }
         : canned,
   );
+
+  brokenWrite(
+    "an update answered 200 with `meta` and an error document",
+    "spec/status/update-response",
+    (canned, request) =>
+      request.method === "PATCH"
+        ? { body: { meta: { updated: true }, errors: [{ status: "200", title: "Updated" }] } }
+        : canned,
+  );
+
+  brokenWrite(
+    "an update answered 200 with a null `meta` and no primary data",
+    "spec/status/update-response",
+    (canned, request) => (request.method === "PATCH" ? { body: { meta: null } } : canned),
+  );
+
+  it.each([
+    [{}, "carries neither primary data nor a top-level `meta`"],
+    [{ errors: [{ title: "Updated" }] }, "carries `errors`"],
+    [{ meta: { updated: true }, errors: [{ title: "Updated" }] }, "carries `errors`"],
+    [{ meta: null }, "a top-level `meta` that is not an object"],
+    [{ meta: [] }, "a top-level `meta` that is not an object"],
+  ])("says what is wrong with the 200 update document %j", async (body, detail) => {
+    const { report } = await run((canned, request) =>
+      request.method === "PATCH" ? { body } : canned,
+    );
+    const outcome = outcomeFor(report, "spec/status/update-response");
+    const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    expect(findings.map((found) => found.detail)).toEqual([expect.stringContaining(detail)]);
+  });
 
   brokenWrite(
     "an update answered 200 with null primary data",
