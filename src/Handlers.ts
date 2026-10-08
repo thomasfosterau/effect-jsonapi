@@ -1130,8 +1130,9 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
  *
  * The `jsonapi` member is *conditional* on `J`, the same way `meta` is
  * conditional on `M`: it is present (and required, not optional — a builder
- * that infers `J` from an argument has one to put there) only when a caller actually passed the `jsonapi` option, so the
- * return type of `Handlers.data(article, { jsonapi: Document.v1_1 })` carries
+ * that infers `J` from an argument has one to put there) only when a caller
+ * actually passed the `jsonapi` option, so the return type of
+ * `Handlers.data(article, { jsonapi: Document.v1_1 })` carries
  * `jsonapi: Document.JsonApiObjectValue` and the return type of
  * `Handlers.data(article)` has no `jsonapi` member at all — no cast needed
  * either way. `included` is always declared, optional: a builder emits any

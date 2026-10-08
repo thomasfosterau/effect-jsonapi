@@ -9,8 +9,15 @@
  *
  * This file is type-checked by the `typecheck` task and never executed.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
+
+/** Pins a value to an expected type without using it (`noUnusedLocals`). */
+const assertType = <Expected>(_value: Expected): void => {};
+
+// Whether two types are identical, not merely mutually assignable.
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 const Person = Resource.make("people", { attributes: { name: Schema.String } });
 const person = Person.make({ id: Person.Id.make("9"), attributes: { name: "Dan" } });
@@ -24,22 +31,36 @@ const article = Article.make({
   relationships: { author: { data: { type: "people", id: person.id } } },
 });
 
-// A literal `[]` infers `Included = never`; the member still reads back.
-export const dataEmpty = Handlers.data(article, { included: [] });
-export const dataEmptyIncluded: ReadonlyArray<unknown> | undefined = dataEmpty.included;
+// Each assertion pins the `included` member exactly: `Pick` fails to compile
+// when the key is absent, and `Equals` tells an optional member from a required
+// one and rejects `any`.
 
-export const collectionEmpty = Handlers.collection([article], { included: [] });
-export const collectionEmptyIncluded: ReadonlyArray<unknown> | undefined = collectionEmpty.included;
+// A literal `[]` infers `Included = never`; the member is still declared.
+const dataEmpty = Handlers.data(article, { included: [] });
+assertType<
+  Equals<Pick<typeof dataEmpty, "included">, { readonly included?: ReadonlyArray<never> }>
+>(true);
+// Negative control: the member is optional, never required.
+assertType<Equals<Pick<typeof dataEmpty, "included">, { readonly included: ReadonlyArray<never> }>>(
+  false,
+);
+
+const collectionEmpty = Handlers.collection([article], { included: [] });
+assertType<
+  Equals<Pick<typeof collectionEmpty, "included">, { readonly included?: ReadonlyArray<never> }>
+>(true);
 
 // No option at all: the member is optional and holds nothing.
-export const dataBare = Handlers.data(article);
-export const dataBareIncluded: ReadonlyArray<never> | undefined = dataBare.included;
-
-// Negative control: the member is optional, never required.
-// @ts-expect-error -- `included` may be absent, so it is not a plain array
-export const dataEmptyRequired: ReadonlyArray<unknown> = dataEmpty.included;
+const dataBare = Handlers.data(article);
+assertType<Equals<Pick<typeof dataBare, "included">, { readonly included?: ReadonlyArray<never> }>>(
+  true,
+);
 
 // A non-empty `included` keeps its element type.
-export const dataWithAuthor = Handlers.data(article, { included: [person] });
-export const dataWithAuthorIncluded: ReadonlyArray<typeof person> | undefined =
-  dataWithAuthor.included;
+const dataWithAuthor = Handlers.data(article, { included: [person] });
+assertType<
+  Equals<
+    Pick<typeof dataWithAuthor, "included">,
+    { readonly included?: ReadonlyArray<typeof person> }
+  >
+>(true);
