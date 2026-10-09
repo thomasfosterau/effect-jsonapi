@@ -5,16 +5,18 @@
  * relationship is excluded from that write) answers 400 with a
  * `source.pointer` at the undeclared member, through the real middleware
  * stack, instead of handing the member to the handler. A non-object member
- * answers 400 `Expected object` at the member, as a struct with fields does.
+ * answers 400 `Expected object` at the member, as a struct with fields does,
+ * a `null` included (#286).
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpRouter } from "effect/http";
-import { HttpApi, HttpApiBuilder } from "effect/http-api";
+import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
@@ -252,8 +254,10 @@ describe("a non-object member answers 400 at the member, whether or not it decla
   // A struct that declares no fields parses any non-nullish input in the
   // pinned effect, so a non-object reaches its member check; that check
   // answers it exactly as a struct with fields does: "Expected object" at the
-  // member itself. An array is not an object to either.
-  const values = ['"x"', "5", "true", "[]", '["a"]'] as const;
+  // member itself. An array is not an object to either. A `null` fails the
+  // empty struct's own not-nullish check before that member check runs, and
+  // renders "Expected object" too, not "Expected object | array" (#286).
+  const values = ['"x"', "5", "true", "[]", '["a"]', "null"] as const;
 
   const sites: ReadonlyArray<
     readonly [
@@ -443,5 +447,54 @@ describe("a member struct left empty by write projections (#270)", () => {
       onSuccess: () => [],
     });
     expect(issues).toEqual([{ path, message: "Expected no excess property" }]);
+  });
+});
+
+describe("a null member that declares no fields (#286)", () => {
+  // The issue's own reproduction, at the schema: the empty member's `null`
+  // renders as the fielded member's does.
+  it.each([
+    ["declares none", Flag.createPayload, { data: { type: "flags", attributes: null } }],
+    ["declares fields", Note.createPayload, { data: { type: "notes", attributes: null } }],
+  ] as const)("%s: Expected object at the member", (_, schema, input) => {
+    const issues = Result.match(Schema.decodeUnknownResult(schema)(input), {
+      onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+      onSuccess: () => [],
+    });
+    expect(issues).toEqual([{ path: ["data", "attributes"], message: "Expected object" }]);
+  });
+
+  // The message names no OpenAPI component: the empty member stays the inline
+  // closed object #270 made it, with no `noMembers` component.
+  it("leaves the member an inline closed object in the OpenAPI document", () => {
+    const RequestBody = Schema.Struct({
+      content: Schema.Record(
+        Schema.String,
+        Schema.Struct({
+          schema: Schema.Struct({
+            properties: Schema.Struct({
+              data: Schema.Struct({ properties: Schema.Record(Schema.String, Schema.Unknown) }),
+            }),
+          }),
+        }),
+      ),
+    });
+    const spec = OpenApi.fromApi(Api);
+    const members = (path: string, method: "post" | "patch") =>
+      Schema.decodeUnknownSync(RequestBody)(spec.paths[path]?.[method]?.requestBody).content[
+        MEDIA_TYPE
+      ]?.schema.properties.data.properties;
+    const closed = {
+      not: { type: "null" },
+      allOf: [{ type: "object", additionalProperties: false }],
+    };
+    expect(members("/flags", "post")?.attributes).toEqual(closed);
+    expect(members("/flags/{id}", "patch")?.attributes).toEqual(closed);
+    expect(members("/notes", "post")?.relationships).toEqual(closed);
+    expect(Rec.keys(spec.components.schemas)).toEqual([
+      "BadRequestEncoded",
+      "UnsupportedMediaTypeEncoded",
+      "NotAcceptableEncoded",
+    ]);
   });
 });

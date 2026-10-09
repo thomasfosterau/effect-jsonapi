@@ -12,7 +12,15 @@
  */
 // The bare `effect` barrel: the schema-only entry point reaches this module,
 // and `test/entry-points.test.ts` pins `effect` as its only external.
-import { JsonPointer, Option, Predicate, Record as Rec, Schema, SchemaIssue } from "effect";
+import {
+  Array as Arr,
+  JsonPointer,
+  Option,
+  Predicate,
+  Record as Rec,
+  Schema,
+  SchemaIssue,
+} from "effect";
 
 /**
  * The value an update actually **supplies** for a clearable, tri-state field
@@ -127,33 +135,51 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
 // key of the input is an `UnexpectedKey` at its own path, the issue
 // `onExcessProperty: "error"` reports for a struct with fields;
 // `Reflect.ownKeys` rather than `Object.keys` so a symbol key counts too.
+// The keys are grouped under a `Composite` on `Schema.Unknown`'s AST, not on
+// this struct's: a formatter reads a `message` annotation on a check's issue
+// as the whole check's message, so grouping them on the struct (which
+// carries `nullAsObject`, below) would collapse every key into one "Expected
+// object" at the member.
 // No `identifier` / `title` / `description`: an identifier makes each site a
 // named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
 // document and renders a `null` member as "Expected <identifier>", and a title
 // or description would be copied into that document too.
 // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
 const noMembers = Schema.makeFilter<unknown>(
-  (input, ast) =>
-    !Predicate.isObject(input)
-      ? "Expected object"
-      : Reflect.ownKeys(input)
-          .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
-          .map((key) => ({
-            path: [key],
-            issue: new SchemaIssue.UnexpectedKey(
-              ast,
-              Object.getOwnPropertyDescriptor(input, key)?.value,
-            ),
-          })),
+  (input, ast, options) => {
+    if (!Predicate.isObject(input)) return "Expected object";
+    const members = Reflect.ownKeys(input)
+      .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
+      .map(
+        (key) =>
+          new SchemaIssue.Pointer(
+            [key],
+            new SchemaIssue.UnexpectedKey(ast, Object.getOwnPropertyDescriptor(input, key)?.value),
+          ),
+      );
+    return Arr.isReadonlyArrayNonEmpty(members)
+      ? new SchemaIssue.Composite(Schema.Unknown.ast, members, input, options)
+      : true;
+  },
   { toJsonSchema: () => ({ type: "object", additionalProperties: false }) },
 );
+
+// A `null` never reaches `noMembers`: the empty struct's own not-nullish
+// check rejects it first, as an `InvalidType` whose text comes from
+// `SchemaAST.Objects#getExpected`, which is "object | array" for a struct with
+// no fields ("object" for one with fields). The default formatters read a
+// `message` annotation on that issue's AST before the expected text, so this
+// one renders the `null` the way a struct with fields does (#286). Unlike an
+// `identifier`, a `message` names no OpenAPI component and is not copied into
+// the JSON Schema, and it changes no parse: only the text of that issue.
+const nullAsObject = { message: "Expected object" } as const;
 
 /**
  * `Schema.Struct(fields)`, closed when `fields` is empty: a struct that
  * declares no fields rejects every member of its input, each as an
  * `UnexpectedKey` issue at that member's path ("Expected no excess property"),
- * and rejects a non-object or an array at its own path ("Expected object"),
- * as a struct with fields does.
+ * and rejects a non-object, an array or a `null` at its own path ("Expected
+ * object"), as a struct with fields does.
  *
  * In the pinned `effect`, a struct **with** fields drops input keys it doesn't
  * declare, but a struct with **no** fields is a bare not-nullish check that
@@ -166,5 +192,5 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
 ): Schema.Struct<Fields> =>
   Rec.isEmptyReadonlyRecord(fields)
-    ? Schema.Struct<Fields>(fields).check(noMembers)
+    ? Schema.Struct<Fields>(fields).annotate(nullAsObject).check(noMembers)
     : Schema.Struct(fields);
