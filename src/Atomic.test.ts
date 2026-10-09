@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Match, Schema } from "effect";
+import { Match, Result, Schema, SchemaIssue } from "effect";
 import * as Atomic from "./Atomic.js";
 import * as Middleware from "./Middleware.js";
 import * as Relationship from "./Relationship.js";
@@ -44,6 +44,12 @@ const Request = Atomic.RequestDocument([Article, Comment]);
 const Results = Atomic.ResultDocument([Article, Comment]);
 
 const decodeOperation = Schema.decodeUnknownSync(Operations as Schema.Codec<unknown, unknown>);
+// The issues a failed decode reports, each with its path, or `[]` on success.
+const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
+  Result.match(result, {
+    onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+    onSuccess: () => [],
+  });
 const decodeRequest = Schema.decodeUnknownSync(Request as Schema.Codec<unknown, unknown>);
 const encodeRequest = Schema.encodeUnknownSync(Request as Schema.Codec<unknown, unknown>);
 const decodeResults = Schema.decodeUnknownSync(Results as Schema.Codec<unknown, unknown>);
@@ -168,21 +174,31 @@ describe("operation schemas", () => {
 
   it("excludes `paginated` relationships from add operations", () => {
     // Article's subscribers relationship is paginated — it is not part of the
-    // operation's relationships schema, so inline linkage for it is stripped
-    // (the same semantics as create payloads)
-    const operation = decodeOperation({
-      op: "add",
-      data: {
-        type: "articles",
-        attributes: { title: "Hello", body: "" },
-        relationships: {
-          author: { data: null },
-          subscribers: { data: [{ type: "people", id: "9" }] },
-        },
-      },
-    }) as any;
-    expect(operation.data.relationships.subscribers).toBeUndefined();
-    expect(operation.data.relationships.author).toEqual({ data: null });
+    // operation's relationships schema, so inline linkage for it is rejected
+    // at its path (the same semantics as create payloads, #292)
+    const data = {
+      type: "articles",
+      attributes: { title: "Hello", body: "" },
+      relationships: { author: { data: null } },
+    };
+    const operation = decodeOperation({ op: "add", data }) as any;
+    expect(operation.data.relationships).toEqual({ author: { data: null } });
+    expect(
+      issuesOf(
+        Schema.decodeUnknownResult(Atomic.AddOperation(Article))({
+          op: "add",
+          data: {
+            ...data,
+            relationships: {
+              ...data.relationships,
+              subscribers: { data: [{ type: "people", id: "9" }] },
+            },
+          },
+        }),
+      ),
+    ).toEqual([
+      { path: ["data", "relationships", "subscribers"], message: "Expected no excess property" },
+    ]);
   });
 
   it("decodes an update operation targeted by data id", () => {
@@ -840,10 +856,18 @@ describe("input-only attributes in operations", () => {
     expectTypeOf<UpdateAttrs>().not.toHaveProperty("file");
     const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Upload))({
       op: "update",
-      data: { type: "uploads", id: "1", attributes: { secret: "t", file: bytes } },
+      data: { type: "uploads", id: "1", attributes: { secret: "t" } },
     });
-    // `secret` is accepted; `file` (update: false) is dropped, not an error
     expect(decoded.data.attributes).toEqual({ secret: "t" });
+    // `file` (update: false) is not an update attribute: rejected at its path (#292)
+    expect(
+      issuesOf(
+        Schema.decodeUnknownResult(Atomic.UpdateOperation(Upload))({
+          op: "update",
+          data: { type: "uploads", id: "1", attributes: { secret: "t", file: bytes } },
+        }),
+      ),
+    ).toEqual([{ path: ["data", "attributes", "file"], message: "Expected no excess property" }]);
   });
 });
 

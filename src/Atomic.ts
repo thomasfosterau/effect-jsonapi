@@ -388,7 +388,9 @@ export interface AddOperation<R extends Any> extends Schema.Struct<{
 }> {}
 
 /**
- * Creates the `add` operation schema for a resource.
+ * Creates the `add` operation schema for a resource. Its `data.attributes` and
+ * `data.relationships` members reject, when decoding and when encoding, every
+ * member they don't declare, as `createPayload`'s do.
  *
  * @since 0.1.0
  * @category schemas
@@ -437,7 +439,9 @@ export interface UpdateOperation<R extends Any> extends Schema.Struct<{
 }> {}
 
 /**
- * Creates the `update` operation schema for a resource.
+ * Creates the `update` operation schema for a resource. Its `data.attributes`
+ * and `data.relationships` members reject, when decoding and when encoding,
+ * every member they don't declare, as `updatePayload`'s do.
  *
  * @since 0.1.0
  * @category schemas
