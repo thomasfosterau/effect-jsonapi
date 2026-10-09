@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Result, Schema, SchemaTransformation, Tracer } from "effect";
+import { Effect, Layer, Match, Result, Schema, SchemaTransformation, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -1093,11 +1093,9 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       paths: Schema.optionalKey(Schema.Record(Schema.String, Query.Include(Tag))),
       other: Schema.optionalKey(Query.Include(Post)),
     }).pipe(Schema.encodeKeys({ paths: "include", other: "inc" })),
-    // A rename to an array-index name reorders the wire struct, so only
-    // identity pairs it: `include` → `0` does; `paths` → `include` does not,
-    // since the `include` and `sort` codecs encode to one AST. The wire `include`
-    // is then read off the properties left unpaired, never the decoded
-    // `include`, which is paired with `0`.
+    // A rename to an array-index name reorders the wire struct: the wire
+    // `include` is still the decoded `paths`, never the decoded `include`,
+    // which is sent as `0`.
     "index-rename": Schema.Struct({
       include: Schema.optionalKey(Query.Include(Post)),
       paths: Query.Include(Tag),
@@ -1146,6 +1144,68 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       }),
       { filters: ["status"] },
     ),
+    // A passthrough between two structs that list the same names in another
+    // order, every wire property carrying the AST a decoded one encodes to:
+    // nothing is renamed, so each wire name is its own decoded name.
+    "passthrough-reordered": Schema.Struct({
+      sort: Schema.toEncoded(Query.Include(Post)),
+      include: Schema.toEncoded(Query.Include(Post)),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ include: Query.Include(Post), sort: Query.Sort(["title"]) }),
+        SchemaTransformation.passthrough(),
+      ),
+    ),
+    "passthrough-reordered-empty": Schema.Struct({
+      sort: Schema.toEncoded(Query.Include(Tag)),
+      include: Schema.toEncoded(Query.Include(Tag)),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ include: Query.Include(Tag), sort: Query.Sort(["title"]) }),
+        SchemaTransformation.passthrough(),
+      ),
+    ),
+    // A check on the renamed struct that reports a property by its decoded
+    // name: the issue tree is the struct's composite, the check, then a
+    // pointer, or a composite of pointers when the check reports several.
+    "checked-rename": Schema.Struct({ count: Schema.optionalKey(Schema.FiniteFromString) })
+      .pipe(Schema.encodeKeys({ count: "page[size]" }))
+      .check(
+        Schema.makeFilter(
+          ({ count }) =>
+            Match.value(count).pipe(
+              Match.when(undefined, () => undefined),
+              Match.when(7, () => false),
+              Match.when(
+                (n) => n > 100,
+                () => [
+                  { path: ["count"], issue: "too big" },
+                  { path: ["count"], issue: "far too big" },
+                ],
+              ),
+              Match.when(
+                (n) => n > 10,
+                () => ({ path: ["count"], issue: "too big" }),
+              ),
+              Match.orElse(() => undefined),
+            ),
+          {
+            identifier: "pageSizeCap",
+            title: "page size cap",
+            description: "rejects a page size above 10, and the size 7 whole",
+          },
+        ),
+        // A check with a message of its own is reported whole, under it.
+        Schema.makeFilter(
+          ({ count }) => (count === 9 ? { path: ["count"], issue: "nine" } : undefined),
+          {
+            identifier: "notNine",
+            title: "not nine",
+            description: "rejects a page size of 9",
+            message: "not nine",
+          },
+        ),
+      ),
     // Both members decode a `paths`; only the first renames it on the wire.
     "union-of-branches": Schema.Union([
       Schema.Struct({ paths: Query.Include(Post) }).pipe(Schema.encodeKeys({ paths: "include" })),
@@ -1179,6 +1239,9 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       endpoint("bracketed-page"),
       endpoint("flat-list"),
       endpoint("union-of-branches"),
+      endpoint("passthrough-reordered"),
+      endpoint("passthrough-reordered-empty"),
+      endpoint("checked-rename"),
     ),
   );
   const echo = ({ query }: { readonly query: unknown }) => Effect.succeed(query);
@@ -1203,6 +1266,9 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       "bracketed-page": echo,
       "flat-list": echo,
       "union-of-branches": echo,
+      "passthrough-reordered": echo,
+      "passthrough-reordered-empty": echo,
+      "checked-rename": echo,
     }),
   );
 
@@ -1276,7 +1342,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       ["a renamed `sort` in a suspended query", "/suspended-renames?sort=", "sort"],
       ["a renamed record of empty `include` codecs", "/renamed-record?include=", "include"],
       [
-        "an `include` the encoding leaves unpaired",
+        "an `include` beside a decoded `include` renamed to an array index",
         "/index-rename?include=&order=title",
         "include",
       ],
@@ -1284,6 +1350,12 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
         "the empty one of two renamed fieldsets",
         "/renamed-fieldsets?fields[tags]=",
         "fields[tags]",
+      ],
+      // Read by place, the wire `include` was the decoded `sort`.
+      [
+        "an `include` a passthrough lists in another order",
+        "/passthrough-reordered-empty?include=&sort=title",
+        "include",
       ],
     ] as const)("rejects an empty vocabulary as unsupported: %s", async (_, url, parameter) => {
       const response = await serve(url);
@@ -1300,6 +1372,14 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       detail,
       source: { parameter },
     });
+    // A rejection the renderer cannot place on a parameter.
+    const whole = {
+      status: "400",
+      code: "bad_request",
+      title: "Bad Request",
+      detail: "Request query failed validation",
+      meta: { detail: "Request query failed validation" },
+    };
     // A rejected `include` path, with the vocabulary it renders as `meta`.
     const includable = (parameter: string) => ({
       ...rejected(parameter, 'Expected "author"'),
@@ -1367,6 +1447,34 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
         "/flat-list?page[limit]=abc&filter[status]=open",
         [rejected("page[limit]", "Expected a finite number")],
       ],
+      // Read by place, the wire `include` was named `sort`, and the other way
+      // round.
+      [
+        "an `include` a passthrough lists in another order",
+        "/passthrough-reordered?include=nope&sort=title",
+        [includable("include")],
+      ],
+      [
+        "a `sort` a passthrough lists in another order",
+        "/passthrough-reordered?include=author&sort=nope",
+        [{ ...rejected("sort", 'Expected "title"'), meta: { sortableFields: ["title"] } }],
+      ],
+      // A check on the struct that points at a renamed property.
+      [
+        "a renamed property a struct check rejects",
+        "/checked-rename?page[size]=50",
+        [rejected("page[size]", "too big")],
+      ],
+      [
+        "a renamed property a struct check rejects twice",
+        "/checked-rename?page[size]=500",
+        [rejected("page[size]", "too big"), rejected("page[size]", "far too big")],
+      ],
+      // Neither names a property, so each is the generic rejection, as
+      // before: the formatter reports a check with a message of its own
+      // whole, at the struct, never at the property it points to.
+      ["a struct check that rejects the whole query", "/checked-rename?page[size]=7", [whole]],
+      ["a struct check with a message of its own", "/checked-rename?page[size]=9", [whole]],
     ] as const)("%s", async (_, url, errors) => {
       const response = await serve(url);
       expect(response.status).toBe(400);

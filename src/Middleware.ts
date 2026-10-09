@@ -449,22 +449,13 @@ const sourceOf = (
 export const schemaErrorDocument = (
   part: RequestPart,
   error: Schema.SchemaError | SchemaIssue.Issue,
-): typeof WireDocument.Type => errorDocument(part, error, Option.none());
-
-// `schemaErrorDocument`, given the query schema the request was decoded with
-// when there is one, so a renamed query property is named by its wire name
-// even where the decoder rebuilt the schema's encoded side.
-const errorDocument = (
-  part: RequestPart,
-  error: Schema.SchemaError | SchemaIssue.Issue,
-  query: Option.Option<SchemaAST.AST>,
 ): typeof WireDocument.Type => {
   const issue = SchemaIssue.isIssue(error) ? error : error.issue;
   // Each leaf's path in decoded names, and as the request spelled it: a
   // query property renamed on the wire (#305) is named by its wire name.
   const leaves =
     part === "Query"
-      ? queryLeaves(issue, query)
+      ? queryLeaves(issue)
       : SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues.map((leaf) => {
           const path = (leaf.path ?? []).map((segment) =>
             typeof segment === "object" ? segment.key : segment,
@@ -938,10 +929,7 @@ const badRequestResponse = (part: RequestPart, document: typeof WireDocument.Typ
     Effect.withSpan(Span.schemaError),
   );
 
-const transformSchemaError = (
-  error: HttpApiError.HttpApiSchemaError,
-  endpoint: HttpApiEndpoint.Top,
-) =>
+const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
   isResponsePart(error.kind)
     ? Effect.die(
         new ResponseEncodeError({
@@ -949,14 +937,7 @@ const transformSchemaError = (
           cause: error,
         }),
       )
-    : badRequestResponse(
-        error.kind,
-        errorDocument(
-          error.kind,
-          error.cause,
-          Option.map(Option.fromNullishOr(endpoint.query), ({ ast }) => ast),
-        ),
-      );
+    : badRequestResponse(error.kind, schemaErrorDocument(error.kind, error.cause));
 
 /**
  * Creates the live {@link SchemaErrors} implementation, optionally accepting
@@ -1032,7 +1013,7 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
       }
       return yield* Effect.catch(httpEffect, (error) =>
         HttpApiError.HttpApiSchemaError.is(error)
-          ? transformSchemaError(error, endpoint)
+          ? transformSchemaError(error)
           : Effect.fail(error),
       );
     }),
@@ -1076,9 +1057,11 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * schema's encoding sends under the parameter's name, whatever its decoded
  * name: with `Schema.encodeKeys({ paths: "include", order: "sort" })`, the
  * `include` parameter is decided by `paths` and `sort` by `order`, and a
- * decoded `include` sent as `inc` decides nothing about `include`. Where the
- * schema's structure does not settle which property that is (a rename to an
- * array-index name between properties whose codecs encode alike, say), the
+ * decoded `include` sent as `inc` decides nothing about `include`; a
+ * transformation between two structs that renames nothing pairs each name
+ * with itself, whatever order either struct lists them in. Where the
+ * encoding cannot show which property that is (a chain of more than one
+ * transformation, one that fails on a probe value, a `Middleware`), the
  * property of that name decides, or failing one, every property whose name
  * the wire does not declare.
  *

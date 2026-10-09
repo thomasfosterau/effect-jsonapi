@@ -9,19 +9,25 @@
  *
  * A query renamed on the wire (`Schema.encodeKeys`, and `Query.bracketKeys`
  * built on it) hides which decoded property each wire parameter feeds inside
- * an opaque transformation. `wireProperties` recovers it from the schema's
- * structure, so the support check reads the property a parameter actually
- * decodes into and a rejected value's `source.parameter` names the
- * parameter the request sent (`queryLeaves`).
+ * an opaque transformation. `wireProperties` recovers it by running that
+ * transformation on a probe, so the support check reads the property a
+ * parameter actually decodes into and a rejected value's `source.parameter`
+ * names the parameter the request sent (`queryLeaves`).
  *
  * @internal
  */
 import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
 import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaGetter from "effect/SchemaGetter";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 /**
  * The wire names a query schema's encoded side declares, or none when that
@@ -80,11 +86,51 @@ export interface WireProperty {
   readonly wire: string;
 }
 
-// A name whose place in an object's key order is not where it was written:
-// an array index sorts first and a symbol last, so a rename to or from one
-// can reorder the encoded struct against the decoded one.
-const keepsItsPlace = (signature: SchemaAST.PropertySignature): boolean =>
-  Predicate.isString(signature.name) && !/^\d+$/.test(signature.name);
+// A probe value per wire name: unique, and a string, as a query value is,
+// so a transformation that reads its input as one still runs.
+const sentinel = (index: number): string => `\u0000effect-jsonapi:probe:${index}`;
+
+// Where a struct transformation's decode moves each wire property: run on a
+// probe whose every wire name holds its own sentinel, a wire name goes to
+// the one output key its sentinel lands on. A sentinel that lands nowhere
+// (the value was rebuilt, nested or dropped) or on more than one key leaves
+// its wire name out, and a decode that fails, dies, goes asynchronous or is
+// no `Transformation` (a `Middleware`) leaves every one out. The decode is
+// `effect`'s own getter: for `Schema.encodeKeys` it is
+// `Struct.renameKeys`, which settles every rename, swaps and array-index
+// names included.
+const probe = (
+  transformation: SchemaAST.Link["transformation"],
+  wire: ReadonlyArray<string>,
+): ReadonlyArray<readonly [wire: string, decoded: PropertyKey]> => {
+  if (!SchemaTransformation.isTransformation(transformation)) return [];
+  const input = Rec.fromEntries(Arr.map(wire, (name, index) => [name, sentinel(index)] as const));
+  // Suspended, so a getter that throws while it runs dies inside the run
+  // rather than out of this function.
+  // SAFETY: the run provides no service; a getter that asks for one dies
+  // looking it up, inside the run, and a failed run pairs nothing.
+  const decode = Effect.suspend(() =>
+    SchemaGetter.run(transformation.decode, Option.some(input), {}),
+  ) as Effect.Effect<Option.Option<unknown>, SchemaIssue.Issue>;
+  const output = Exit.match(Effect.runSyncExit(decode), {
+    onFailure: () => Option.none<unknown>(),
+    onSuccess: (decoded) => decoded,
+  });
+  return Option.match(Option.filter(output, Predicate.isObject), {
+    onNone: () => [],
+    onSome: (decoded) => {
+      const landed = Arr.flatMap(Reflect.ownKeys(decoded), (key) =>
+        Arr.filterMap(wire, (name, index) =>
+          decoded[key] === sentinel(index) ? Result.succeed([name, key] as const) : Result.failVoid,
+        ),
+      );
+      return Arr.filter(
+        landed,
+        ([name]) => Arr.filter(landed, ([other]) => other === name).length === 1,
+      );
+    },
+  });
+};
 
 /**
  * The wire name of every property of a struct's decoded side that its
@@ -93,83 +139,60 @@ const keepsItsPlace = (signature: SchemaAST.PropertySignature): boolean =>
  * actually sends, never by a decoded name that may stand for another wire
  * parameter (a decoded `sort` sent as `include`).
  *
- * `Schema.encodeKeys` builds the encoded struct from `Schema.toEncoded` of
- * each field, in the decoded struct's own field order, and
- * `SchemaAST.toEncoded` is memoised by identity: the encoded property at a
- * given place carries the very AST `toEncoded` gives the decoded property at
- * that place. So when every place pairs up that way, the struct is read
- * place by place, which settles even two properties whose codecs encode to
- * one shared AST (`Schema.String`). Otherwise a wire property is paired with
- * the one decoded property whose encoded AST it carries, when exactly one
- * does and no other wire property carries it too. A property neither rule
- * pairs is left out: the AST does not say where it goes. A struct no
- * encoding renames pairs each property with its own name.
+ * A struct with no encoding of its own pairs each property with its own
+ * name. A struct decoded from another struct (`Schema.encodeKeys`, or any
+ * `Schema.decodeTo` between two structs) is read by running that one
+ * transformation's decode on a probe (`probe`): each wire property is paired
+ * with the decoded property its value lands in, so a rename is read as the
+ * rename it is and a passthrough between two structs that list the same
+ * names in another order pairs each name with itself. Anything else (a
+ * chain of more than one transformation, a source that is no plain struct,
+ * a `Middleware`, a decode that fails on the probe, a value the
+ * transformation rebuilds) pairs nothing it cannot show, and callers fall
+ * back to reading the property by its name (#306's rule).
+ *
+ * The probe runs the schema's own decode, synchronously, outside any
+ * request and with no service: a transformation with a side effect (a log,
+ * say) has it run on sentinel values each time this is called, and one that
+ * needs a service fails on the probe and so pairs nothing.
  *
  * @internal
  */
 export const wireProperties = (ast: SchemaAST.Objects): ReadonlyArray<WireProperty> => {
-  const encoded = SchemaAST.toEncoded(ast);
-  if (!SchemaAST.isObjects(encoded)) return [];
-  const decoded = Arr.map(ast.propertySignatures, (property) => ({
-    property,
-    encoded: SchemaAST.toEncoded(property.type),
-  }));
-  const wire = encoded.propertySignatures;
-  const pair = (property: SchemaAST.PropertySignature, signature: SchemaAST.PropertySignature) => ({
-    property,
-    wire: String(signature.name),
+  const names = (struct: SchemaAST.Objects) =>
+    Arr.map(struct.propertySignatures, ({ name }) => String(name));
+  const routes = Option.match(Option.fromNullishOr(ast.encoding), {
+    onNone: () => Arr.map(ast.propertySignatures, ({ name }) => [String(name), name] as const),
+    onSome: ([link, ...rest]) =>
+      Arr.isReadonlyArrayEmpty(rest) &&
+      SchemaAST.isObjects(link.to) &&
+      link.to.encoding === undefined
+        ? probe(link.transformation, names(link.to))
+        : [],
   });
-  const inPlace =
-    decoded.length === wire.length &&
-    Arr.every(ast.propertySignatures, keepsItsPlace) &&
-    Arr.every(wire, keepsItsPlace) &&
-    Arr.every(wire, (signature, index) => decoded[index]?.encoded === signature.type);
-  if (inPlace)
-    return Arr.zipWith(decoded, wire, ({ property }, signature) => pair(property, signature));
-  return Arr.flatMap(wire, (signature) => {
-    const carriers = Arr.filter(decoded, ({ encoded }) => encoded === signature.type);
-    const sharers = Arr.filter(wire, (other) => other.type === signature.type);
-    return carriers.length === 1 && sharers.length === 1
-      ? Arr.map(carriers, ({ property }) => pair(property, signature))
-      : [];
-  });
-};
-
-// The structs a query schema decodes its parameters with: the query itself,
-// every member of a union, and the target of a suspended schema, once.
-const structsOf = (
-  ast: SchemaAST.AST,
-  visiting: ReadonlyArray<SchemaAST.AST>,
-): ReadonlyArray<SchemaAST.Objects> => {
-  if (SchemaAST.isObjects(ast)) return [ast];
-  if (SchemaAST.isUnion(ast))
-    return Arr.flatMap(ast.types, (member) => structsOf(member, visiting));
-  if (SchemaAST.isSuspend(ast) && !visiting.includes(ast)) {
-    return structsOf(ast.thunk(), [...visiting, ast]);
-  }
-  return [];
+  return Arr.flatMap(routes, ([wire, name]) =>
+    Arr.fromOption(
+      Option.map(
+        Arr.findFirst(ast.propertySignatures, (property) => property.name === name),
+        (property) => ({ property, wire }),
+      ),
+    ),
+  );
 };
 
 // The wire name a struct issue's property `key` was sent under, when the
-// struct's encoding settles it. `known` pairs each property of the query the
-// request was decoded with: a decoder may rebuild a struct's encoded side
-// (HttpApi lets an array decode from a single value), which loses the
-// identities `wireProperties` reads, but it keeps the decoded side's
-// property signatures. Otherwise the issue's own schema is read.
-const wireNameOf =
-  (ast: SchemaAST.AST, known: ReadonlyArray<WireProperty>) =>
-  (key: PropertyKey): Option.Option<string> => {
-    if (!SchemaAST.isObjects(ast)) return Option.none();
-    const pairedWith = (properties: ReadonlyArray<WireProperty>) =>
-      Option.map(
-        Arr.findFirst(properties, ({ property }) => property.name === key),
-        ({ wire }) => wire,
-      );
-    return Option.orElse(
-      pairedWith(Arr.filter(known, ({ property }) => ast.propertySignatures.includes(property))),
-      () => pairedWith(wireProperties(ast)),
+// struct's encoding settles it: read off the issue's own schema, which is
+// the side that rejected the value. A decoder that rebuilds the struct's
+// encoded side (HttpApi lets an array decode from a single value) keeps its
+// one transformation, which `wireProperties` runs.
+const wireNameOf = (ast: SchemaAST.AST): ((key: PropertyKey) => Option.Option<string>) => {
+  const settled = SchemaAST.isObjects(ast) ? wireProperties(ast) : [];
+  return (key) =>
+    Option.map(
+      Arr.findFirst(settled, ({ property }) => property.name === key),
+      ({ wire }) => wire,
     );
-  };
+};
 
 /**
  * One formatted leaf of a query issue: its message, the path it sits at in
@@ -202,48 +225,57 @@ const formatted = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<QueryLeaf> =
     return { message: leaf.message, path: [...at.path, ...below], wire: [...at.wire, ...below] };
   });
 
+// Whether the formatter walks through a failed check to the issue it
+// carries, as it does when the check names no message of its own and its
+// issue is no bare value (a struct check's `{ path, issue }` is a pointer).
+const walksThrough = (filter: SchemaIssue.Filter): boolean =>
+  SchemaIssue.defaultCheckHook(filter) === undefined && filter.issue._tag !== "InvalidValue";
+
 // `SchemaIssue.makeFormatterStandardSchemaV1`'s own walk, which extends the
-// path only through a pointer, an encoding, a composite and a non-empty
-// union: every other node is `formatted` alone. A struct's issue reports its
-// decoded side's AST when the decoded side rejected the value, under decoded
-// names, and its encoded side's AST when the wire value was rejected before
-// any rename, under wire names: either way `wireNameOf` that AST names the
-// wire.
-const leavesOf = (
-  issue: SchemaIssue.Issue,
-  at: At,
-  known: ReadonlyArray<WireProperty>,
-): ReadonlyArray<QueryLeaf> =>
+// path only through a pointer, an encoding, a composite, a non-empty union
+// and a check it `walksThrough`: every other node is `formatted` alone. A
+// struct's property issue is a pointer under the struct's composite, either
+// directly or under a check on the struct that points at the property (a
+// `Schema.makeFilter` returning `{ path, issue }`, or several of them, which
+// the check carries as a composite of pointers on the same struct). Either
+// way the pointer's first key is the struct's property, named on the wire by
+// `wireNameOf` the composite's AST: a struct's issue reports its decoded
+// side's AST when the decoded side rejected the value, under decoded names,
+// and its encoded side's AST when the wire value was rejected before any
+// rename, under wire names. A check met anywhere else is `formatted` alone,
+// as the formatter would render it, in the names the issue reports.
+const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<QueryLeaf> =>
   Match.value(issue).pipe(
     Match.tag("Pointer", (pointer) =>
-      leavesOf(
-        pointer.issue,
-        { path: [...at.path, ...pointer.path], wire: [...at.wire, ...pointer.path] },
-        known,
-      ),
+      leavesOf(pointer.issue, {
+        path: [...at.path, ...pointer.path],
+        wire: [...at.wire, ...pointer.path],
+      }),
     ),
-    Match.tag("Encoding", (encoding) => leavesOf(encoding.issue, at, known)),
+    Match.tag("Encoding", (encoding) => leavesOf(encoding.issue, at)),
     Match.tag("Composite", (composite) => {
-      const wireName = wireNameOf(composite.ast, known);
-      return Arr.flatMap(composite.issues, (child) =>
+      const wireName = wireNameOf(composite.ast);
+      const enter = (child: SchemaIssue.Issue): ReadonlyArray<QueryLeaf> =>
         Match.value(child).pipe(
           Match.tag("Pointer", (pointer) => {
             const [key, ...rest] = pointer.path;
             const sent = key === undefined ? [] : [Option.getOrElse(wireName(key), () => key)];
-            return leavesOf(
-              pointer.issue,
-              { path: [...at.path, ...pointer.path], wire: [...at.wire, ...sent, ...rest] },
-              known,
-            );
+            return leavesOf(pointer.issue, {
+              path: [...at.path, ...pointer.path],
+              wire: [...at.wire, ...sent, ...rest],
+            });
           }),
-          Match.orElse((other) => leavesOf(other, at, known)),
-        ),
-      );
+          Match.tag("Filter", (filter) =>
+            walksThrough(filter) ? enter(filter.issue) : formatted(filter, at),
+          ),
+          Match.orElse((other) => leavesOf(other, at)),
+        );
+      return Arr.flatMap(composite.issues, enter);
     }),
     Match.tag("AnyOf", (anyOf) =>
       Arr.match(anyOf.issues, {
         onEmpty: () => formatted(anyOf, at),
-        onNonEmpty: (issues) => Arr.flatMap(issues, (child) => leavesOf(child, at, known)),
+        onNonEmpty: (issues) => Arr.flatMap(issues, (child) => leavesOf(child, at)),
       }),
     ),
     Match.orElse((other) => formatted(other, at)),
@@ -256,21 +288,10 @@ const leavesOf = (
  * (`Schema.encodeKeys`, `Query.bracketKeys`) is reported under its decoded
  * name when its decoded side rejected it, which names no parameter the
  * request carries. Each place a leaf's path enters a struct's property takes
- * the wire name `wireProperties` settles for it, read off `query` (the
- * schema the request was decoded with) when there is one, else off the
- * issue's own schema; one it does not settle keeps its reported name.
+ * the wire name `wireProperties` settles for it, read off the issue's own
+ * schema; one it does not settle keeps its reported name.
  *
  * @internal
  */
-export const queryLeaves = (
-  issue: SchemaIssue.Issue,
-  query: Option.Option<SchemaAST.AST>,
-): ReadonlyArray<QueryLeaf> =>
-  leavesOf(
-    issue,
-    { path: [], wire: [] },
-    Arr.flatMap(
-      Option.match(query, { onNone: () => [], onSome: (ast) => structsOf(ast, []) }),
-      wireProperties,
-    ),
-  );
+export const queryLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<QueryLeaf> =>
+  leavesOf(issue, { path: [], wire: [] });

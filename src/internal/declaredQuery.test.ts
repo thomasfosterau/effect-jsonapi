@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
+import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Query from "../Query.js";
 import * as Relationship from "../Relationship.js";
@@ -15,6 +17,9 @@ const Post = Resource.make("posts", {
 });
 const Tag = Resource.make("tags", { attributes: {} });
 
+// A struct with no property, whose encoded type a string satisfies.
+const Empty = Schema.Struct({});
+
 // The struct a schema's AST is; a struct with no property otherwise, which
 // every assertion below then fails on.
 const objects = (schema: Schema.Top): SchemaAST.Objects =>
@@ -27,36 +32,18 @@ const objects = (schema: Schema.Top): SchemaAST.Objects =>
 const settled = (schema: Schema.Top) =>
   wireProperties(objects(schema)).map(({ property, wire }) => [String(property.name), wire]);
 
-// `wireProperties` relies on two facts about the pinned `effect`: an
-// upgrade that breaks either fails here first, not as a misread query.
+// `wireProperties` reads a rename by running the encoding's decode on a
+// probe: an `effect` upgrade that moves the rename elsewhere fails here
+// first, not as a misread query.
 describe("what `wireProperties` relies on in effect", () => {
-  it("`SchemaAST.toEncoded` is memoised by identity", () => {
-    const include = Query.Include(Post);
-    expect(SchemaAST.toEncoded(include.ast)).toBe(SchemaAST.toEncoded(include.ast));
-    const optional = Schema.optionalKey(include);
-    expect(SchemaAST.toEncoded(optional.ast)).toBe(SchemaAST.toEncoded(optional.ast));
-  });
-
-  it("`Schema.encodeKeys` builds the encoded struct from `toEncoded` of each field, in field order", () => {
-    const fields = {
-      paths: Schema.optionalKey(Query.Include(Post)),
-      count: Schema.FiniteFromString,
-      order: Schema.optionalKey(Query.Sort(["title"])),
-    };
-    const encoded = objects(
-      Schema.toEncoded(
-        Schema.Struct(fields).pipe(Schema.encodeKeys({ paths: "include", order: "sort" })),
-      ),
+  it("`Schema.encodeKeys` renames in its one encoding link, a `Transformation` from a plain struct", () => {
+    const schema = Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) }).pipe(
+      Schema.encodeKeys({ paths: "include" }),
     );
-    expect(encoded.propertySignatures.map(({ name }) => name)).toEqual([
-      "include",
-      "count",
-      "sort",
-    ]);
-    const types = encoded.propertySignatures.map(({ type }) => type);
-    expect(types[0]).toBe(SchemaAST.toEncoded(fields.paths.ast));
-    expect(types[1]).toBe(SchemaAST.toEncoded(fields.count.ast));
-    expect(types[2]).toBe(SchemaAST.toEncoded(fields.order.ast));
+    const [link, ...rest] = schema.ast.encoding ?? [];
+    expect(rest).toEqual([]);
+    expect(SchemaTransformation.isTransformation(link?.transformation)).toBe(true);
+    expect(link !== undefined && SchemaAST.isObjects(link.to) && link.to.encoding).toBeUndefined();
   });
 });
 
@@ -115,8 +102,8 @@ describe("wireProperties", () => {
   });
 
   // An array-index name sorts first in an object, so the encoded struct's
-  // order is not the decoded one's: only identity can pair it.
-  it("pairs by identity alone when a rename can reorder the struct", () => {
+  // order is not the decoded one's; the rename is read all the same.
+  it("pairs a rename that reorders the struct", () => {
     const distinct = Schema.Struct({ a: Schema.Number, b: Schema.FiniteFromString }).pipe(
       Schema.encodeKeys({ b: "0" }),
     );
@@ -127,11 +114,152 @@ describe("wireProperties", () => {
     const shared = Schema.Struct({ a: Schema.String, b: Schema.String }).pipe(
       Schema.encodeKeys({ b: "0" }),
     );
-    expect(settled(shared)).toEqual([]);
+    expect(settled(shared)).toEqual([
+      ["b", "0"],
+      ["a", "a"],
+    ]);
   });
 
-  // A struct-to-struct transformation that is not a rename: both wire
-  // strings carry the AST of the one decoded string, so neither is paired.
+  // The review's case: a passthrough between two structs that list the
+  // same names in another order, every wire property carrying the AST a
+  // decoded one encodes to. Read by place, `sort` was paired with `include`.
+  it("pairs each name with itself across a passthrough that reorders the struct", () => {
+    const schema = Schema.Struct({
+      sort: Schema.toEncoded(Query.Include(Post)),
+      include: Schema.toEncoded(Query.Include(Post)),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ include: Query.Include(Post), sort: Query.Sort(["title"]) }),
+        SchemaTransformation.passthrough(),
+      ),
+    );
+    expect(settled(schema)).toEqual([
+      ["sort", "sort"],
+      ["include", "include"],
+    ]);
+  });
+
+  // The wire struct has fewer properties than the decoded one, and its one
+  // property encodes alike with the decoded property at the same place: it
+  // is still paired with the property its value lands in.
+  it("pairs a wire property with the property its value lands in when the sides differ in size", () => {
+    const schema = Schema.Struct({ x: Schema.String }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ y: Schema.String, x: Schema.String }),
+        SchemaTransformation.transform({
+          decode: ({ x }) => ({ y: "", x }),
+          encode: ({ x }) => ({ x }),
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([["x", "x"]]);
+  });
+
+  it("pairs nothing a wire value lands in twice", () => {
+    const schema = Schema.Struct({ a: Schema.String }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ x: Schema.String, y: Schema.String }),
+        SchemaTransformation.transform({
+          decode: ({ a }) => ({ x: a, y: a }),
+          encode: ({ x }) => ({ a: x }),
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([]);
+  });
+
+  // Each falls back to the caller's reading by name.
+  it.each([
+    [
+      "a decode that throws",
+      Schema.Struct({ a: Schema.String }).pipe(
+        Schema.decodeTo(
+          Schema.Struct({ a: Schema.String }),
+          // `BigInt` throws a `SyntaxError` on the probe's non-numeric value.
+          SchemaTransformation.transform({
+            decode: ({ a }) => ({ a: String(BigInt(a)) }),
+            encode: ({ a }) => ({ a }),
+          }),
+        ),
+      ),
+    ],
+    [
+      "a decode that fails",
+      Schema.Struct({ a: Schema.String }).pipe(
+        Schema.decodeTo(
+          Schema.Struct({ a: Schema.String }),
+          SchemaTransformation.transformEffect<{ readonly a: string }, { readonly a: string }>({
+            decode: (input) =>
+              Effect.fail(new SchemaIssue.InvalidValue({ message: "not on a probe" }, input)),
+            encode: Effect.succeed,
+          }),
+        ),
+      ),
+    ],
+    [
+      "a decode that runs asynchronously",
+      Schema.Struct({ a: Schema.String }).pipe(
+        Schema.decodeTo(
+          Schema.Struct({ a: Schema.String }),
+          SchemaTransformation.transformEffect<{ readonly a: string }, { readonly a: string }>({
+            decode: () => Effect.never,
+            encode: Effect.succeed,
+          }),
+        ),
+      ),
+    ],
+    [
+      "a middleware",
+      Schema.Struct({ a: Schema.String }).pipe(Schema.middlewareDecoding((effect) => effect)),
+    ],
+    [
+      "a chain of two transformations",
+      Schema.Struct({ x: Schema.String }).pipe(
+        Schema.decodeTo(
+          Schema.Struct({ a: Schema.String }).pipe(Schema.encodeKeys({ a: "y" })),
+          SchemaTransformation.transform({
+            decode: ({ x }) => ({ y: x }),
+            encode: ({ y }) => ({ x: y }),
+          }),
+        ),
+      ),
+    ],
+    // The wire is `x`: read as a plain struct, `a` would be paired with `a`.
+    [
+      "a transformation from a struct with an encoding of its own",
+      Schema.Struct({ a: Schema.String })
+        .pipe(Schema.encodeKeys({ a: "x" }))
+        .pipe(
+          Schema.decodeTo(Schema.Struct({ a: Schema.String }), SchemaTransformation.passthrough()),
+        ),
+    ],
+    [
+      "a transformation from a value that is no struct",
+      Schema.String.pipe(
+        Schema.decodeTo(
+          Schema.Struct({ a: Schema.String }),
+          SchemaTransformation.transform({ decode: (a) => ({ a }), encode: ({ a }) => a }),
+        ),
+      ),
+    ],
+    [
+      "a decode to a value that is no object",
+      Schema.Struct({ a: Schema.String }).pipe(
+        Schema.decodeTo(
+          Empty,
+          SchemaTransformation.transform<typeof Empty.Encoded, { readonly a: string }>({
+            decode: () => "",
+            encode: () => ({ a: "" }),
+          }),
+        ),
+      ),
+    ],
+  ] as const)("pairs nothing through %s", (_, schema) => {
+    expect(settled(schema)).toEqual([]);
+  });
+
+  // A struct-to-struct transformation that is not a rename: neither wire
+  // value lands in a decoded property as it was sent, so neither is paired.
   it("pairs nothing two wire properties could both be", () => {
     const schema = Schema.Struct({ a: Schema.String, b: Schema.String }).pipe(
       Schema.decodeTo(
