@@ -1213,7 +1213,10 @@ export const collection = <
     readonly errors?: Errors;
     /** Enable the `?include=` query parameter (paths span all resources' graphs). */
     readonly include?: Include;
-    /** Enable `?fields[TYPE]=` sparse fieldsets for all resources and their targets. */
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets for all resources, their targets
+     * and every type an `include` path reaches.
+     */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for every attribute of every resource, or an explicit list. */
     readonly sort?: Sort;
@@ -1304,7 +1307,10 @@ export const polymorphic = <
   options?: CommonOptions<Name, Path, Errors> & {
     /** Enable the `?include=` query parameter (paths span all members' graphs). */
     readonly include?: Include;
-    /** Enable `?fields[TYPE]=` sparse fieldsets for all members and their targets. */
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets for all members, their targets
+     * and every type an `include` path reaches.
+     */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta;
@@ -1531,7 +1537,10 @@ export const related = <
      * endpoint's `included` union.
      */
     readonly include?: Include;
-    /** Enable `?fields[TYPE]=` sparse fieldsets for the target and its targets. */
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets for the target, its targets and
+     * every type an `include` path reaches.
+     */
     readonly fields?: Fields;
     /** Enable `?sort=` over the target's attributes (to-many relationships). */
     readonly sort?: Sort;
