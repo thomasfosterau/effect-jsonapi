@@ -11,7 +11,19 @@ import { describe, expect, it } from "vite-plus/test";
 import { Effect, Predicate } from "effect";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
-import { discardOrder, discardProduct, NorthwindLive } from "../handlers.js";
+import {
+  alfreds,
+  beverages,
+  chai,
+  discardOrder,
+  discardProduct,
+  exotic,
+  nancy,
+  NorthwindLive,
+  order10248,
+  speedy,
+  westboro,
+} from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
@@ -29,15 +41,22 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   ["profile/document/jsonapi-member", "#103"],
 ];
 
+/**
+ * One id per resource type, each taken from a record the example's store is
+ * seeded with, so every rule that resolves `/:type/:id` probes a resource the
+ * example holds rather than a 404. Northwind's ids are not uniform — orders
+ * start at 10248 and territories are zip codes — so a hard-coded `"1"` for
+ * every type silently probed absent resources (#301).
+ */
 const IDS = {
-  categories: "1",
-  suppliers: "1",
-  shippers: "1",
-  customers: "1",
-  territories: "1",
-  employees: "1",
-  products: "1",
-  orders: "1",
+  categories: beverages.id,
+  suppliers: exotic.id,
+  shippers: speedy.id,
+  customers: alfreds.id,
+  territories: westboro.id,
+  employees: nancy.id,
+  products: chai.id,
+  orders: order10248.id,
 };
 
 /**
@@ -57,8 +76,8 @@ const WRITES: Conformance.Options["writes"] = {
         discontinued: false,
       },
       relationships: {
-        category: { data: { type: "categories", id: "1" } },
-        supplier: { data: { type: "suppliers", id: "1" } },
+        category: { data: { type: "categories", id: IDS.categories } },
+        supplier: { data: { type: "suppliers", id: IDS.suppliers } },
       },
     }),
     update: () => ({ attributes: { unitsInStock: 10 } }),
@@ -74,8 +93,8 @@ const WRITES: Conformance.Options["writes"] = {
         shipCountry: "Australia",
       },
       relationships: {
-        customer: { data: { type: "customers", id: "1" } },
-        employee: { data: { type: "employees", id: "1" } },
+        customer: { data: { type: "customers", id: IDS.customers } },
+        employee: { data: { type: "employees", id: IDS.employees } },
       },
     }),
     update: () => ({ attributes: { shipCity: "Melbourne" } }),
@@ -109,6 +128,22 @@ describe("northwind: JSON:API conformance", () => {
       died(report),
       `a rule died — a defect, not a finding\n${Conformance.format(report)}`,
     ).toEqual([]);
+  });
+
+  it("sampled only resources the example holds: nothing it read answered 404", () => {
+    // An `ids` entry the example does not hold fails no rule: the read endpoints
+    // answer 404, and the rules that resolve `/:type/:id` see less of the api.
+    // It surfaces only in the notes of rules that passed and the reasons of
+    // rules that skipped, each naming the 404 (#301).
+    const remarks = report.outcomes.flatMap((outcome) => {
+      if (Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined) {
+        return [`${outcome.rule.id}: ${outcome.note}`];
+      }
+      return Predicate.isTagged(outcome, "Skipped")
+        ? [`${outcome.rule.id}: ${outcome.reason}`]
+        : [];
+    });
+    expect(remarks.filter((remark) => /\b404\b/.test(remark))).toEqual([]);
   });
 
   it("breaks exactly the rules that are already filed", () => {
