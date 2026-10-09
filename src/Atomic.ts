@@ -59,7 +59,7 @@ import { Schema } from "effect";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js";
-import { closedStruct } from "./internal/schemaExt.js";
+import { closedStruct, defaultUndeclaredMemberCap } from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
 import type {
@@ -331,9 +331,16 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
   ]: Schema.optionalKey<RefSchemaFor<Rels[K]>>;
 };
 
+// How many undeclared members each operation member reports at its own path
+// (#308): the resource's own cap, which every definition `Resource.make` builds
+// carries, or the default for a hand-rolled `Any` that carries none.
+const undeclaredMemberCapOf = (resource: Any): number =>
+  resource.undeclaredMemberCap ?? defaultUndeclaredMemberCap;
+
 // Runtime construction of the add / update operation relationship members.
 const addRelationshipMembers = (
   relationships: Relationships,
+  cap: number,
 ): {
   readonly struct: Schema.Top;
   readonly required: boolean;
@@ -349,16 +356,16 @@ const addRelationshipMembers = (
       fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
     }
   }
-  return { struct: closedStruct(fields), required };
+  return { struct: closedStruct(fields, cap), required };
 };
 
-const updateRelationshipFields = (relationships: Relationships): Schema.Top => {
+const updateRelationshipFields = (relationships: Relationships, cap: number): Schema.Top => {
   const fields: Record<string, Schema.Top> = {};
   for (const [key, descriptor] of Object.entries(relationships)) {
     if (descriptor.kind === "paginated") continue;
     fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
   }
-  return closedStruct(fields);
+  return closedStruct(fields, cap);
 };
 
 // ---------------------------------------------------------------------------
@@ -396,7 +403,8 @@ export interface AddOperation<R extends Any> extends Schema.Struct<{
  * @category schemas
  */
 export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
-  const { required, struct } = addRelationshipMembers(resource.relationships);
+  const cap = undeclaredMemberCapOf(resource);
+  const { required, struct } = addRelationshipMembers(resource.relationships, cap);
   return Schema.Struct({
     op: Schema.tag("add"),
     data: Schema.Struct({
@@ -404,7 +412,7 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
       lid: Schema.optionalKey(Schema.String),
       // From the *declared* map, so input-only attributes (`resource: false`)
       // are accepted here exactly as in `createPayload`.
-      attributes: closedStruct(createAttributeFields(declaredAttributes(resource))),
+      attributes: closedStruct(createAttributeFields(declaredAttributes(resource)), cap),
       relationships: required ? struct : Schema.optionalKey(struct),
     }),
     meta: Schema.optionalKey(AnyMeta),
@@ -446,8 +454,9 @@ export interface UpdateOperation<R extends Any> extends Schema.Struct<{
  * @since 0.1.0
  * @category schemas
  */
-export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> =>
-  Schema.Struct({
+export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> => {
+  const cap = undeclaredMemberCapOf(resource);
+  return Schema.Struct({
     op: Schema.tag("update"),
     ref: Schema.optionalKey(ResourceRef(resource)),
     data: Schema.Struct({
@@ -455,12 +464,13 @@ export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> 
       id: Schema.optionalKey(resource.Id),
       lid: Schema.optionalKey(Schema.String),
       attributes: Schema.optionalKey(
-        closedStruct(updateAttributeFields(declaredAttributes(resource))),
+        closedStruct(updateAttributeFields(declaredAttributes(resource)), cap),
       ),
-      relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships)),
+      relationships: Schema.optionalKey(updateRelationshipFields(resource.relationships, cap)),
     }),
     meta: Schema.optionalKey(AnyMeta),
   }) as unknown as UpdateOperation<R>;
+};
 
 /**
  * A `remove` operation: deletes the resource targeted by `ref`.

@@ -128,18 +128,34 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
   return leaves;
 };
 
-// Rejects every enumerable own key of an object outside `declared`, each as an
-// `UnexpectedKey` at its own path: the issue `onExcessProperty: "error"`
-// reports, so the `SchemaErrors` middleware renders it unchanged ("Expected no
-// excess property"). It reads the enumerable own string keys (`Record.keys`),
-// then the enumerable own symbol keys, which is the order `Reflect.ownKeys`
-// gives, at a fraction of its cost. So a symbol key counts too, and an own
-// `__proto__` / `constructor` (`JSON.parse` makes both) is rejected like any
-// other name. A non-enumerable key is let through, as effect's own
-// `onExcessProperty: "error"` lets it through ("only enumerable own properties
-// can be excess"); `JSON.parse` never makes one. `declared` is a native `Set`,
-// read once per key: the check runs twice per parse (see `closedStruct`), on
-// every write body.
+/**
+ * How many undeclared members a closed struct reports at their own paths
+ * before it summarises the rest in one issue at the struct (#308).
+ */
+export const defaultUndeclaredMemberCap = 12;
+
+// The summary issue's message: "…and 9,988 more undeclared members". The count
+// is grouped with commas whatever the host's locale, so a response body never
+// depends on where the server runs.
+const moreUndeclared = (count: number): string =>
+  `…and ${count.toLocaleString("en-US")} more undeclared member${count === 1 ? "" : "s"}`;
+
+// Rejects every enumerable own key of an object outside `declared`. The first
+// `cap` of them are reported each as an `UnexpectedKey` at its own path: the
+// issue `onExcessProperty: "error"` reports, so the `SchemaErrors` middleware
+// renders it unchanged ("Expected no excess property"). Any beyond the cap are
+// counted, not reported: one `InvalidValue` at the struct itself says how many
+// more there are (#308), so the issues, and the 400 a server renders from
+// them, stay bounded however many keys a request sends. The keys are still
+// all read, so the count is exact; only the issues are capped.
+// It reads the enumerable own string keys (`Record.keys`), then the enumerable
+// own symbol keys, which is the order `Reflect.ownKeys` gives, at a fraction of
+// its cost. So a symbol key counts too, and an own `__proto__` / `constructor`
+// (`JSON.parse` makes both) is rejected like any other name. A non-enumerable
+// key is let through, as effect's own `onExcessProperty: "error"` lets it
+// through ("only enumerable own properties can be excess"); `JSON.parse` never
+// makes one. `declared` is a native `Set`, read once per key: the check runs
+// twice per parse (see `closedStruct`), on every write body.
 // A non-object is answered first, the way a struct with fields answers it:
 // "Expected object" at the member itself. Only a struct that declares no
 // fields lets one through to here (in the pinned effect it is a bare
@@ -159,7 +175,7 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
 // named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
 // document and renders a `null` member as "Expected <identifier>", and a title
 // or description would be copied into that document too.
-const noMembers = (declared: ReadonlySet<PropertyKey>) =>
+const noMembers = (declared: ReadonlySet<PropertyKey>, cap: number) =>
   // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
   Schema.makeFilter<unknown>(
     (input, ast, options) => {
@@ -171,24 +187,27 @@ const noMembers = (declared: ReadonlySet<PropertyKey>) =>
           (key) => !declared.has(key) && Object.prototype.propertyIsEnumerable.call(input, key),
         ),
       ];
-      return Arr.isReadonlyArrayNonEmpty(undeclared)
-        ? new SchemaIssue.Composite(
-            Schema.Unknown.ast,
-            Arr.map(
-              undeclared,
-              (key) =>
-                new SchemaIssue.Pointer(
-                  [key],
-                  new SchemaIssue.UnexpectedKey(
-                    ast,
-                    Object.getOwnPropertyDescriptor(input, key)?.value,
-                  ),
-                ),
+      if (!Arr.isReadonlyArrayNonEmpty(undeclared)) return true;
+      const reported: Array<SchemaIssue.Issue> = Arr.map(
+        Arr.take(undeclared, cap),
+        (key) =>
+          new SchemaIssue.Pointer(
+            [key],
+            new SchemaIssue.UnexpectedKey(ast, Object.getOwnPropertyDescriptor(input, key)?.value),
+          ),
+      );
+      const more = undeclared.length - reported.length;
+      return new SchemaIssue.Composite(
+        Schema.Unknown.ast,
+        Arr.isReadonlyArrayNonEmpty(reported) && more === 0
+          ? reported
+          : Arr.append(
+              reported,
+              new SchemaIssue.InvalidValue({ message: moreUndeclared(more) }, input, options),
             ),
-            input,
-            options,
-          )
-        : true;
+        input,
+        options,
+      );
     },
     {
       toJsonSchema: () =>
@@ -208,9 +227,12 @@ const nullAsObject = { message: "Expected object" } as const;
 
 /**
  * `Schema.Struct(fields)`, closed: a member of its input that `fields` doesn't
- * declare is rejected, each as an `UnexpectedKey` issue at that member's path
- * ("Expected no excess property"), and a non-object, an array or a `null` is
- * rejected at its own path ("Expected object"). The result is still a
+ * declare is rejected, each of the first `cap` (default
+ * {@link defaultUndeclaredMemberCap}) as an `UnexpectedKey` issue at that
+ * member's path ("Expected no excess property"), and any beyond them by one
+ * `InvalidValue` at the struct ("…and 9,988 more undeclared members"). A
+ * non-object, an array or a `null` is rejected at its own path ("Expected
+ * object"). The result is still a
  * `Schema.Struct`: its `fields`, its `Type` / `Encoded`, the JSON Schema /
  * OpenAPI it renders and how it decodes a declared member are unchanged.
  *
@@ -227,8 +249,11 @@ const nullAsObject = { message: "Expected object" } as const;
  * decoding a request body, and a client encoding one.
  *
  * What that ordering means for the issues reported:
- * - Every undeclared member of one struct is reported, each as its own issue,
- *   whatever the `errors` parse option says (a cap is #308).
+ * - The first `cap` undeclared members of one struct are reported, each as
+ *   its own issue, and the rest by one summary issue at the struct, whatever
+ *   the `errors` parse option says (#308). `cap` is a positive integer or
+ *   `Infinity` (every member reported, the summary never); the caller
+ *   validates it (`Resource.make`'s `undeclaredMemberCap`).
  * - The encoding check runs only once the node has parsed. So when a declared
  *   field fails (a wrong type, a missing required key), only that field is
  *   reported, and the undeclared members beside it are not, even with
@@ -244,6 +269,7 @@ const nullAsObject = { message: "Expected object" } as const;
  */
 export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
+  cap: number = defaultUndeclaredMemberCap,
 ): Schema.Struct<Fields> => {
   const struct = Rec.isEmptyReadonlyRecord(fields)
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
@@ -252,7 +278,7 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   // A native `Set`, not a `HashSet`: the lookup runs per key, twice per parse
   // of every write body, and `HashSet.has` made a 10-field decode ~45% slower.
   // oxlint-disable-next-line effect/avoid-native-object-helpers -- hot-path lookup, see above
-  const checks = [noMembers(new Set(Reflect.ownKeys(fields)))] as const;
+  const checks = [noMembers(new Set(Reflect.ownKeys(fields)), cap)] as const;
   return struct.rebuild(
     new SchemaAST.Objects(
       ast.propertySignatures,
