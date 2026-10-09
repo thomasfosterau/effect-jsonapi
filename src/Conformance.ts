@@ -634,12 +634,6 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: ["#116", "#120"],
   },
   {
-    area: "Pagination link correctness",
-    reason:
-      "That `first` / `prev` / `next` / `last` are present and well-formed is checkable; that following them enumerates the collection exactly once, with no gap or repeat, requires knowing the full set the server is paging over.",
-    tracking: [],
-  },
-  {
     area: "Sort ordering correctness",
     reason:
       "A `sort` field the server does not support must be a 400, and that is checked. Whether `?sort=-createdAt` actually orders the collection, and where NULLs land, requires known data. Note the filter profile's §6.2 ordering rules govern `filter` comparison only — `sort` ordering is still unspecified, so there is no normative text to check against yet.",

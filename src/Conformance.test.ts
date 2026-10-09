@@ -30,6 +30,7 @@ import * as Filter from "./Filter.js";
 import * as Group from "./Group.js";
 import * as Handlers from "./Handlers.js";
 import * as Middleware from "./Middleware.js";
+import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "./internal/media.js";
@@ -2755,6 +2756,495 @@ describe("Conformance: the write fixture", () => {
         ? { ...canned, contentType: MEDIA_TYPE }
         : canned,
   );
+});
+// ---------------------------------------------------------------------------
+// Pagination links enumerate the collection (#166)
+// ---------------------------------------------------------------------------
+
+/**
+ * A canned pager over a fixed collection, as a server would page it: the
+ * conformant default, and one seam per way a pager breaks — which resources a
+ * page holds, and which links it carries.
+ */
+describe("Conformance: pagination links enumerate the collection", () => {
+  const RULE = "spec/pagination/links-enumerate-collection";
+
+  const Tag = Resource.make("tags", { attributes: { name: Schema.String } });
+  const offsetApi = HttpApi.make("paged").add(
+    Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Offset })),
+  );
+  const numberApi = HttpApi.make("paged").add(
+    Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Number })),
+  );
+  const cursorApi = HttpApi.make("paged").add(
+    Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Cursor })),
+  );
+
+  const ROWS = ["1", "2", "3", "4", "5", "6", "7"];
+  const tag = (id: string) => ({ type: "tags", id, attributes: { name: `tag ${id}` } });
+  const notFound: Canned = {
+    status: 404,
+    body: { errors: [{ status: "404", title: "Not Found" }] },
+  };
+
+  interface Window {
+    readonly offset: number;
+    readonly limit: number;
+    readonly total: number;
+  }
+
+  /** What a canned page puts under a pagination key: a link, or something that is not one. */
+  type LinkValue = string | null | { readonly href: string } | { readonly toString: number };
+
+  interface Links {
+    readonly first?: LinkValue;
+    readonly prev?: LinkValue;
+    readonly next?: LinkValue;
+    readonly last?: LinkValue;
+  }
+
+  /** The offset pager's links, as `Handlers.offsetPaginationLinks` spells them. */
+  const offsetLinks = ({ offset, limit, total }: Window): Links => {
+    const at = (start: number) => `/tags?page[offset]=${start}&page[limit]=${limit}`;
+    return {
+      first: at(0),
+      prev: offset > 0 ? at(Math.max(offset - limit, 0)) : null,
+      next: offset + limit < total ? at(offset + limit) : null,
+      last: at(Math.floor(Math.max(total - 1, 0) / limit) * limit),
+    };
+  };
+
+  interface Pager {
+    readonly rows?: ReadonlyArray<string>;
+    /** The page size when the request names none: the whole collection unless given. */
+    readonly defaultLimit?: number;
+    /** The ids a window holds. */
+    readonly slice?: (rows: ReadonlyArray<string>, window: Window) => ReadonlyArray<string>;
+    readonly links?: (window: Window) => Links;
+  }
+
+  const offsetPager =
+    (pager: Pager = {}) =>
+    (request: CannedRequest): Canned => {
+      if (withoutQuery(request).path !== "/tags") return notFound;
+      const query = queryOf(request);
+      const rows = pager.rows ?? ROWS;
+      const window = {
+        offset: Number(query.get("page[offset]") ?? "0"),
+        limit: Number(query.get("page[limit]") ?? `${pager.defaultLimit ?? rows.length}`),
+        total: rows.length,
+      };
+      const ids = (pager.slice ?? ((all, w) => all.slice(w.offset, w.offset + w.limit)))(
+        rows,
+        window,
+      );
+      return { body: { data: ids.map(tag), links: (pager.links ?? offsetLinks)(window) } };
+    };
+
+  /** Every path a canned server was asked for, in order. */
+  const recording = (serve: (request: CannedRequest) => Canned) => {
+    const paths: Array<string> = [];
+    return {
+      paths,
+      serve: (request: CannedRequest): Canned => {
+        paths.push(decodeURIComponent(request.path));
+        return serve(request);
+      },
+    };
+  };
+
+  /** A run of the pagination rule alone against `serve`, discovering `target`. */
+  const verifyPaged = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+    serve: (request: CannedRequest) => Canned,
+    target: HttpApi.HttpApi<ApiId, Groups>,
+  ) => verifyOver(target)(serve, { only: [RULE] });
+
+  /** The rule's outcome, which must be `Failed`, and its findings' details and observations. */
+  const failure = async (serve: (request: CannedRequest) => Canned) => {
+    const outcome = outcomeFor(await verifyPaged(serve, offsetApi), RULE);
+    expect(outcome._tag).toBe("Failed");
+    const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    Arr.forEach(findings, (found) => {
+      expect(found.expected).not.toBe("");
+      expect(found.observed).not.toBe("");
+    });
+    return findings.map(({ detail, observed }) => `${detail} | ${observed}`);
+  };
+
+  const skipReasonOver = async <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+    serve: (request: CannedRequest) => Canned,
+    target: HttpApi.HttpApi<ApiId, Groups>,
+  ) => {
+    const outcome = outcomeFor(await verifyPaged(serve, target), RULE);
+    expect(outcome._tag).toBe("Skipped");
+    return Predicate.isTagged(outcome, "Skipped") ? outcome.reason : "";
+  };
+  const skipReason = (serve: (request: CannedRequest) => Canned) =>
+    skipReasonOver(serve, offsetApi);
+
+  it("walks `next` from the first page of a conformant offset pager and passes", async () => {
+    const server = recording(offsetPager());
+    const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
+    expect(outcome).toMatchObject({ _tag: "Passed", note: undefined });
+    // The whole collection first, then three pages of three, the third reached
+    // through the second's `next`, and the `first` link once.
+    expect(server.paths).toEqual([
+      "/tags",
+      "/tags?page[offset]=0&page[limit]=7",
+      "/tags?page[limit]=3",
+      "/tags?page[offset]=3&page[limit]=3",
+      "/tags?page[offset]=6&page[limit]=3",
+      "/tags?page[offset]=0&page[limit]=3",
+    ]);
+    expect(Predicate.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(server.paths.length);
+  });
+
+  it("works off the links, not the strategy: page number and size", async () => {
+    const numberPager = (request: CannedRequest): Canned => {
+      if (withoutQuery(request).path !== "/tags") return notFound;
+      const query = queryOf(request);
+      const size = Number(query.get("page[size]") ?? `${ROWS.length}`);
+      const number = Number(query.get("page[number]") ?? "1");
+      const pages = Math.ceil(ROWS.length / size);
+      const at = (n: number) => `/tags?page[number]=${n}&page[size]=${size}`;
+      return {
+        body: {
+          data: ROWS.slice((number - 1) * size, number * size).map(tag),
+          links: {
+            first: at(1),
+            prev: number > 1 ? at(number - 1) : null,
+            next: number < pages ? at(number + 1) : null,
+            last: at(pages),
+          },
+        },
+      };
+    };
+    const server = recording(numberPager);
+    const outcome = outcomeFor(await verifyPaged(server.serve, numberApi), RULE);
+    expect(outcome._tag).toBe("Passed");
+    expect(server.paths).toContain("/tags?page[size]=3");
+    expect(server.paths).toContain("/tags?page[number]=3&page[size]=3");
+  });
+
+  it("works off the links, not the strategy: an opaque cursor and absolute URLs", async () => {
+    const cursorPager = (request: CannedRequest): Canned => {
+      if (withoutQuery(request).path !== "/tags") return notFound;
+      const query = queryOf(request);
+      const size = Number(query.get("page[size]") ?? `${ROWS.length}`);
+      const cursor = query.get("page[cursor]");
+      const start = cursor === null ? 0 : ROWS.indexOf(atob(cursor)) + 1;
+      const ids = ROWS.slice(start, start + size);
+      const last = ids.at(-1);
+      return {
+        body: {
+          data: ids.map(tag),
+          links: {
+            next:
+              last === undefined || last === ROWS.at(-1)
+                ? null
+                : {
+                    href: `http://fixture.test/tags?page[cursor]=${btoa(last)}&page[size]=${size}`,
+                  },
+          },
+        },
+      };
+    };
+    const server = recording(cursorPager);
+    const outcome = outcomeFor(await verifyPaged(server.serve, cursorApi), RULE);
+    expect(outcome._tag).toBe("Passed");
+    expect(server.paths).toContain(`/tags?page[cursor]=${btoa("6")}&page[size]=3`);
+  });
+
+  it("walks a collection the server pages by default, cross-checking a second page size", async () => {
+    const server = recording(offsetPager({ defaultLimit: 3 }));
+    const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
+    expect(outcome._tag).toBe("Passed");
+    // The default pages of three are the reference; the walk uses pages of two.
+    expect(server.paths).toContain("/tags?page[offset]=6&page[limit]=3");
+    expect(server.paths).toContain("/tags?page[limit]=2");
+    expect(server.paths).toContain("/tags?page[offset]=6&page[limit]=2");
+  });
+
+  it("detects pages that repeat a resource", async () => {
+    // Each page after the first starts one row early, so its first row is the
+    // previous page's last.
+    const repeats = await failure(
+      offsetPager({
+        slice: (rows, { offset, limit }) => rows.slice(Math.max(offset - 1, 0), offset + limit),
+      }),
+    );
+    expect(repeats).toEqual([
+      "following `next` from /tags?page[limit]=3 listed 2 resources a second time | tags:3 (pages 1 and 2), tags:6 (pages 2 and 3)",
+    ]);
+  });
+
+  it("detects a skipped page against the collection fetched whole", async () => {
+    const gaps = await failure(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          next:
+            window.offset + 2 * window.limit < window.total
+              ? `/tags?page[offset]=${window.offset + 2 * window.limit}&page[limit]=${window.limit}`
+              : null,
+        }),
+      }),
+    );
+    expect(gaps).toEqual([
+      "following `next` from /tags?page[limit]=3 never reached 3 resources /tags lists | never reached: tags:4, tags:5, tags:6",
+    ]);
+  });
+
+  it("detects a cyclic `next`, and stops", async () => {
+    const server = recording(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          next:
+            window.offset + window.limit < window.total
+              ? `/tags?page[offset]=${window.offset + window.limit}&page[limit]=${window.limit}`
+              : `/tags?page[offset]=${window.limit}&page[limit]=${window.limit}`,
+        }),
+      }),
+    );
+    const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
+    expect(outcome._tag).toBe("Failed");
+    const details = Predicate.isTagged(outcome, "Failed")
+      ? outcome.findings.map((found) => found.detail).join("\n")
+      : "";
+    expect(details).toContain(
+      "`next` on page 3 (/tags?page[offset]=6&page[limit]=3) leads back to page 2 (/tags?page[offset]=3&page[limit]=3), so following it never ends",
+    );
+    expect(server.paths.length).toBeLessThan(20);
+  });
+
+  it("detects a `next` that never ends, leading past the last page", async () => {
+    const server = recording(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          next: `/tags?page[offset]=${window.offset + window.limit}&page[limit]=${window.limit}`,
+        }),
+      }),
+    );
+    const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
+    expect(outcome._tag).toBe("Failed");
+    const details = Predicate.isTagged(outcome, "Failed")
+      ? outcome.findings.map((found) => found.detail).join("\n")
+      : "";
+    expect(details).toContain(
+      "`next` on page 3 (/tags?page[offset]=6&page[limit]=3) leads to a page that lists no resources, so the last page carries `next`",
+    );
+    expect(server.paths.length).toBeLessThan(20);
+  });
+
+  it("detects a `next` that never ends, serving the same page again and again", async () => {
+    const server = recording(
+      offsetPager({
+        slice: (rows, { limit }) => rows.slice(0, limit),
+        links: (window) => ({
+          ...offsetLinks(window),
+          next: `/tags?page[offset]=${window.offset + window.limit}&page[limit]=${window.limit}`,
+        }),
+      }),
+    );
+    const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
+    expect(outcome._tag).toBe("Failed");
+    const details = Predicate.isTagged(outcome, "Failed")
+      ? outcome.findings.map((found) => found.detail).join("\n")
+      : "";
+    expect(details).toContain(
+      "following `next` from /tags listed 7 resources a second time — page 2 listed nothing earlier pages had not, so the walk stopped there",
+    );
+    expect(server.paths.length).toBeLessThan(20);
+  });
+
+  it("detects `prev` on the first page", async () => {
+    const found = await failure(
+      offsetPager({
+        links: (window) => ({ ...offsetLinks(window), prev: "/tags?page[offset]=0&page[limit]=1" }),
+      }),
+    );
+    expect(found).toEqual([
+      "the first page (/tags) carries `prev`, but no page comes before it | prev: /tags?page[offset]=0&page[limit]=1",
+      "the first page (/tags?page[limit]=3) carries `prev`, but no page comes before it | prev: /tags?page[offset]=0&page[limit]=1",
+    ]);
+  });
+
+  it("detects `last` pointing past the end", async () => {
+    const found = await failure(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          last: `/tags?page[offset]=${window.total}&page[limit]=${window.limit}`,
+        }),
+      }),
+    );
+    expect(found).toEqual([
+      "`last` on /tags answers different resources from the last page `next` reaches | no resources (/tags?page[offset]=7&page[limit]=7)",
+      "`last` on /tags?page[limit]=3 answers different resources from the last page `next` reaches | no resources (/tags?page[offset]=7&page[limit]=3)",
+    ]);
+  });
+
+  it("detects `first` disagreeing with the first page", async () => {
+    const found = await failure(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          first: `/tags?page[offset]=1&page[limit]=${window.limit}`,
+        }),
+      }),
+    );
+    expect(found).toEqual([
+      "`first` on /tags answers different resources from the first page | tags:2, tags:3, tags:4, tags:5, tags:6, tags:7 (/tags?page[offset]=1&page[limit]=7)",
+      "`first` on /tags?page[limit]=3 answers different resources from the first page | tags:2, tags:3, tags:4 (/tags?page[offset]=1&page[limit]=3)",
+    ]);
+  });
+
+  it("detects a `next` that leads to an error", async () => {
+    const found = await failure((request) =>
+      queryOf(request).get("page[offset]") === "3" ? notFound : offsetPager()(request),
+    );
+    expect(found).toEqual([
+      `\`next\` on page 1 (/tags?page[limit]=3) leads to a response that is not a page of the collection | 404 ${MEDIA_TYPE} — {"errors":[{"status":"404","title":"Not Found"}]}`,
+    ]);
+  });
+
+  // `{"toString":1}` is valid JSON that `String` cannot convert: a link that
+  // is not a link is a finding, not a rule that dies rendering it.
+  it("detects a `next` that is not a link, rendering it safely", async () => {
+    const found = await failure(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          next: window.offset + window.limit < window.total ? { toString: 1 } : null,
+        }),
+      }),
+    );
+    expect(found).toEqual([
+      `\`next\` on page 1 (/tags?page[limit]=3) is not a link the kit can follow | next: {"toString":1}`,
+    ]);
+  });
+
+  it("does not follow a `next` to another origin", async () => {
+    const server = recording(
+      offsetPager({
+        links: (window) => ({
+          ...offsetLinks(window),
+          next:
+            window.offset + window.limit < window.total
+              ? `https://elsewhere.test/tags?page[offset]=${window.offset + window.limit}&page[limit]=${window.limit}`
+              : null,
+        }),
+      }),
+    );
+    const reason = await skipReason(server.serve);
+    expect(reason).toBe(
+      "no paginated collection could be walked to a verdict (/tags: `next` on page 1 (/tags?page[limit]=3) leads to another origin, https://elsewhere.test, which the kit does not follow)",
+    );
+    expect(server.paths.some((path) => path.includes("page[offset]=3"))).toBe(false);
+  });
+
+  it("skips, naming the budget, a walk that does not end within it — never a partial pass", async () => {
+    const server = recording(
+      offsetPager({ rows: Arr.makeBy(500, (n) => `${n}`), defaultLimit: 1 }),
+    );
+    const reason = await skipReason(server.serve);
+    expect(reason).toContain("did not end within its budget of 20 pages");
+    expect(server.paths.length).toBeLessThanOrEqual(25);
+  });
+
+  it("skips, naming the budget, a `next` that ends never with fresh resources", async () => {
+    // Every page holds resources no earlier page held, forever.
+    const endless = (request: CannedRequest): Canned => {
+      const offset = Number(queryOf(request).get("page[offset]") ?? "0");
+      return {
+        body: {
+          data: [tag(`${offset}`)],
+          links: { next: `/tags?page[offset]=${offset + 1}` },
+        },
+      };
+    };
+    const server = recording(endless);
+    expect(await skipReason(server.serve)).toMatch(/budget/);
+    expect(server.paths.length).toBeLessThanOrEqual(25);
+  });
+
+  it("does not hold an unstably-ordered collection's repeats against its links", async () => {
+    // Every request sees the collection rotated one further: offsets are
+    // honoured, but over a different order each time. JSON:API requires no
+    // stable order without `sort`, so this is not a violation of the links.
+    let requests = 0;
+    const reason = await skipReason(
+      offsetPager({
+        slice: (rows, { offset, limit }) => {
+          const turn = requests++ % rows.length;
+          return [...rows.slice(turn), ...rows.slice(0, turn)].slice(offset, offset + limit);
+        },
+      }),
+    );
+    expect(reason).toContain("the collection's order is not stable");
+    expect(reason).toContain(
+      '"The server MAY apply default sorting rules to top-level `data` if request parameter `sort` is not specified"',
+    );
+  });
+
+  it("skips when no collection endpoint declares a page size", async () => {
+    expect(await skipReasonOver(conformantServe, api)).toContain("`page[limit]` or `page[size]`");
+  });
+
+  it("skips a collection too small to fill two pages", async () => {
+    expect(await skipReason(offsetPager({ rows: ["1"] }))).toContain(
+      "/tags: the collection holds one resource — fewer than two",
+    );
+  });
+
+  it("skips a collection whose server ignores the page size", async () => {
+    const reason = await skipReason(
+      offsetPager({ slice: (rows) => rows, links: () => ({ next: null }) }),
+    );
+    expect(reason).toContain(
+      "/tags: `page[limit]=3` answered all 7 resources on one page, with no `next` to follow",
+    );
+  });
+
+  it("holds `Handlers.offsetPaginationLinks` and the real router to the rule", async () => {
+    const TagsLive = HttpApiBuilder.group(offsetApi, "tags", (handlers) =>
+      handlers.handle("list", ({ query }) => {
+        const total = ROWS.length;
+        const offset = query.page?.offset ?? 0;
+        const limit = query.page?.limit ?? total;
+        return Effect.succeed(
+          Handlers.collection(
+            ROWS.slice(offset, offset + limit).map((id) =>
+              Tag.make({ id: Tag.Id.make(id), attributes: { name: `tag ${id}` } }),
+            ),
+            { links: Handlers.offsetPaginationLinks("/tags", { offset, limit }, total) },
+          ),
+        );
+      }),
+    );
+    const report = await Effect.runPromise(
+      // SAFETY: the handlers and `Middleware.layer` provide every service the
+      // router needs; the platform services `verify` names are never used.
+      Conformance.verify(offsetApi, { only: [RULE] }).pipe(
+        Effect.provide(TagsLive.pipe(Layer.provideMerge(Middleware.layer))),
+        Effect.scoped,
+      ) as Effect.Effect<Conformance.Report, never, never>,
+    );
+    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", note: undefined });
+  });
+
+  it("is in the spec tier, at the specification's MUST, and closes its coverage gap", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === RULE);
+    expect(rule).toMatchObject({
+      tier: "spec",
+      level: "MUST",
+      reference: "https://jsonapi.org/format/1.1/#fetching-pagination",
+    });
+    // The coverage gap it closes is no longer declared.
+    expect(Conformance.gaps.map(({ area }) => area)).not.toContain("Pagination link correctness");
+  });
 });
 // ---------------------------------------------------------------------------
 // In-process: the same rules over the real router

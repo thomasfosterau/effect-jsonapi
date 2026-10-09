@@ -82,6 +82,7 @@ const HTTP_TIER = [
   "internal/canonical.ts",
   "internal/codecs.ts",
   "internal/conformance/core.ts",
+  "internal/conformance/pagination.ts",
   "internal/conformance/profile.ts",
   "internal/conformance/report.ts",
   "internal/conformance/spec.ts",
