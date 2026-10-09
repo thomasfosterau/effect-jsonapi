@@ -14,11 +14,13 @@
 // and `test/entry-points.test.ts` pins `effect` as its only external.
 import {
   Array as Arr,
+  HashSet,
   JsonPointer,
   Option,
   Predicate,
   Record as Rec,
   Schema,
+  SchemaAST,
   SchemaIssue,
 } from "effect";
 
@@ -127,45 +129,63 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
   return leaves;
 };
 
-// A struct that declares no fields parses any non-nullish input (in the
-// pinned effect it is a bare not-nullish check), so this filter first answers
-// a non-object the way a struct with fields does: "Expected object" at the
-// member itself. `Predicate.isObject` is the test that struct applies
-// (`typeof "object"`, not `null`, not an array). Otherwise each enumerable own
-// key of the input is an `UnexpectedKey` at its own path, the issue
-// `onExcessProperty: "error"` reports for a struct with fields;
-// `Reflect.ownKeys` rather than `Object.keys` so a symbol key counts too.
+// Rejects every enumerable own key of an object outside `declared`, each as an
+// `UnexpectedKey` at its own path: the issue `onExcessProperty: "error"`
+// reports, so the `SchemaErrors` middleware renders it unchanged ("Expected no
+// excess property"). `Reflect.ownKeys` rather than `Object.keys` so a symbol
+// key counts too, and an own `__proto__` / `constructor` (`JSON.parse` makes
+// both) is rejected like any other name.
+// A non-object is answered first, the way a struct with fields answers it:
+// "Expected object" at the member itself. Only a struct that declares no
+// fields lets one through to here (in the pinned effect it is a bare
+// not-nullish check); `Predicate.isObject` is the test a struct with fields
+// applies (`typeof "object"`, not `null`, not an array).
 // The keys are grouped under a `Composite` on `Schema.Unknown`'s AST, not on
-// this struct's: a formatter reads a `message` annotation on a check's issue
-// as the whole check's message, so grouping them on the struct (which
+// the struct's: a formatter reads a `message` annotation on a check's issue as
+// the whole check's message, so grouping them on the empty struct (which
 // carries `nullAsObject`, below) would collapse every key into one "Expected
 // object" at the member.
+// JSON Schema: a struct with fields already renders `additionalProperties:
+// false` in an OpenAPI document (effect generates it with `onExcessProperty:
+// "error"`), so this check adds nothing there and the member's properties are
+// rendered exactly as before. A struct with no fields renders only `{ not:
+// { type: "null" } }`, so for it the check describes the closed object.
 // No `identifier` / `title` / `description`: an identifier makes each site a
 // named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
 // document and renders a `null` member as "Expected <identifier>", and a title
 // or description would be copied into that document too.
-// oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
-const noMembers = Schema.makeFilter<unknown>(
-  (input, ast, options) => {
-    if (!Predicate.isObject(input)) return "Expected object";
-    const members = Reflect.ownKeys(input)
-      .filter((key) => Object.prototype.propertyIsEnumerable.call(input, key))
-      .map(
-        (key) =>
-          new SchemaIssue.Pointer(
-            [key],
-            new SchemaIssue.UnexpectedKey(ast, Object.getOwnPropertyDescriptor(input, key)?.value),
-          ),
-      );
-    return Arr.isReadonlyArrayNonEmpty(members)
-      ? new SchemaIssue.Composite(Schema.Unknown.ast, members, input, options)
-      : true;
-  },
-  { toJsonSchema: () => ({ type: "object", additionalProperties: false }) },
-);
+const noMembers = (declared: HashSet.HashSet<PropertyKey>) =>
+  // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
+  Schema.makeFilter<unknown>(
+    (input, ast, options) => {
+      if (!Predicate.isObject(input)) return "Expected object";
+      const members = Reflect.ownKeys(input)
+        .filter(
+          (key) =>
+            !HashSet.has(declared, key) && Object.prototype.propertyIsEnumerable.call(input, key),
+        )
+        .map(
+          (key) =>
+            new SchemaIssue.Pointer(
+              [key],
+              new SchemaIssue.UnexpectedKey(
+                ast,
+                Object.getOwnPropertyDescriptor(input, key)?.value,
+              ),
+            ),
+        );
+      return Arr.isReadonlyArrayNonEmpty(members)
+        ? new SchemaIssue.Composite(Schema.Unknown.ast, members, input, options)
+        : true;
+    },
+    {
+      toJsonSchema: () =>
+        HashSet.isEmpty(declared) ? { type: "object", additionalProperties: false } : {},
+    },
+  );
 
-// A `null` never reaches `noMembers`: the empty struct's own not-nullish
-// check rejects it first, as an `InvalidType` whose text comes from
+// A `null` never reaches `noMembers` on a struct with no fields: its own
+// not-nullish check rejects it first, as an `InvalidType` whose text comes from
 // `SchemaAST.Objects#getExpected`, which is "object | array" for a struct with
 // no fields ("object" for one with fields). The default formatters read a
 // `message` annotation on that issue's AST before the expected text, so this
@@ -175,22 +195,45 @@ const noMembers = Schema.makeFilter<unknown>(
 const nullAsObject = { message: "Expected object" } as const;
 
 /**
- * `Schema.Struct(fields)`, closed when `fields` is empty: a struct that
- * declares no fields rejects every member of its input, each as an
- * `UnexpectedKey` issue at that member's path ("Expected no excess property"),
- * and rejects a non-object, an array or a `null` at its own path ("Expected
- * object"), as a struct with fields does.
+ * `Schema.Struct(fields)`, closed: a member of its input that `fields` doesn't
+ * declare is rejected, each as an `UnexpectedKey` issue at that member's path
+ * ("Expected no excess property"), and a non-object, an array or a `null` is
+ * rejected at its own path ("Expected object"). The result is still a
+ * `Schema.Struct`: its `fields`, its `Type` / `Encoded`, the JSON Schema /
+ * OpenAPI it renders and how it decodes a declared member are unchanged.
  *
- * In the pinned `effect`, a struct **with** fields drops input keys it doesn't
- * declare, but a struct with **no** fields is a bare not-nullish check that
- * returns its input unchanged, so every key reaches the decoded value although
- * its type is `{}`. Parse options can't close it (`onExcessProperty` is never
- * consulted on that path); this check does. A struct with fields is returned
- * as `Schema.Struct` builds it.
+ * In the pinned `effect`, a struct **with** fields drops the input keys it
+ * doesn't declare while it parses, so a check (which runs on the parsed
+ * output) never sees them; a struct with **no** fields is a bare not-nullish
+ * check that returns its input unchanged, so every key would reach the
+ * decoded value although its type is `{}`. Parse options can't close a single
+ * struct (`onExcessProperty` applies to every struct in the payload). So the
+ * key check is attached twice: as a check, and as an **encoding check**, which
+ * the parser runs on a node's raw input once that node has parsed. Decoding
+ * runs the encoding check, encoding (`SchemaAST.flip` swaps the two lists)
+ * runs the check, so both directions reject an undeclared member: a server
+ * decoding a request body, and a client encoding one.
+ *
+ * Deriving a new struct (`mapFields`, `Struct.pick`, …) builds a plain one
+ * from the fields, without the check.
  */
 export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
-): Schema.Struct<Fields> =>
-  Rec.isEmptyReadonlyRecord(fields)
-    ? Schema.Struct<Fields>(fields).annotate(nullAsObject).check(noMembers)
+): Schema.Struct<Fields> => {
+  const struct = Rec.isEmptyReadonlyRecord(fields)
+    ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
     : Schema.Struct(fields);
+  const { ast } = struct;
+  const checks = [noMembers(HashSet.fromIterable(Reflect.ownKeys(fields)))] as const;
+  return struct.rebuild(
+    new SchemaAST.Objects(
+      ast.propertySignatures,
+      ast.indexSignatures,
+      ast.annotations,
+      checks,
+      ast.encoding,
+      ast.context,
+      checks,
+    ),
+  );
+};

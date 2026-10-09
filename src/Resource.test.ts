@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Brand, Option, Schema } from "effect";
+import { Brand, Option, Result, Schema, SchemaIssue } from "effect";
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js";
 import * as Filter from "./Filter.js";
 import * as Query from "./Query.js";
@@ -28,6 +28,13 @@ import * as Sort from "./Sort.js";
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
 // ---------------------------------------------------------------------------
+
+// The issues a failed decode reports, each with its path, or `[]` on success.
+const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
+  Result.match(result, {
+    onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+    onSuccess: () => [],
+  });
 
 const Person = Resource("people", {
   attributes: {
@@ -1368,15 +1375,17 @@ describe("Resource.readOnlyAttribute", () => {
       },
     });
     expect(decoded.data.attributes).toEqual({ title: "Hello" });
-    // a stray read-only attribute on the wire is dropped, not surfaced
-    const stray = Schema.decodeUnknownSync(Post.createPayload)({
+    // a stray read-only attribute on the wire is rejected at its path (#292)
+    const stray = Schema.decodeUnknownResult(Post.createPayload)({
       data: {
         type: "posts",
         attributes: { title: "Hello", createdAt: new Date("2024-01-01") },
         relationships: { author: { data: { type: "people", id: "9" } } },
       },
     });
-    expect(stray.data.attributes).toEqual({ title: "Hello" });
+    expect(issuesOf(stray)).toEqual([
+      { path: ["data", "attributes", "createdAt"], message: "Expected no excess property" },
+    ]);
   });
 
   it("excludes read-only attributes from the update payload", () => {
@@ -1700,9 +1709,10 @@ describe("Resource.attribute with resource: false (input-only)", () => {
 
     const input = Schema.decodeUnknownSync(Upload.updateInput)({ id: "1", secret: "t" });
     expect(input).toEqual({ id: "1", secret: "t" });
-    // `file` on the wire is dropped, not accepted
-    const dropped = Schema.decodeUnknownSync(Upload.updateInput)({ id: "1", file: bytes });
-    expect("file" in dropped).toBe(false);
+    // `file` on the wire is rejected at its path (#292)
+    expect(
+      issuesOf(Schema.decodeUnknownResult(Upload.updateInput)({ id: "1", file: bytes })),
+    ).toEqual([{ path: ["file"], message: "Expected no excess property" }]);
     const payload = Schema.decodeUnknownSync(Upload.updatePayload)({
       data: { type: "uploads", id: "1", attributes: { secret: "t" } },
     });

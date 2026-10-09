@@ -1,12 +1,14 @@
 /**
  * Request bodies that send `attributes` / `relationships` members a resource
- * doesn't declare (#270). A member struct that declares nothing (a resource
- * with no attributes or no relationships, or one whose every attribute or
- * relationship is excluded from that write) answers 400 with a
- * `source.pointer` at the undeclared member, through the real middleware
- * stack, instead of handing the member to the handler. A non-object member
- * answers 400 `Expected object` at the member, as a struct with fields does,
- * a `null` included (#286).
+ * doesn't declare (#270, #292). Every write body member struct, whether it
+ * declares fields or none, answers 400 with a `source.pointer` at each
+ * undeclared member, through the real middleware stack, instead of dropping
+ * the member (a struct with fields, before #292) or handing it to the handler
+ * (a struct with none, before #270). A non-object member answers 400
+ * `Expected object` at the member, a `null` included (#286). The members
+ * JSON:API allows around them (`meta`, `jsonapi`, `links`) are still accepted,
+ * the OpenAPI document still describes each member's properties, and encoding
+ * (what a client does) rejects an undeclared member as decoding does.
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
@@ -34,10 +36,19 @@ const Flag = Resource("flags", {
 });
 // Declares no relationships.
 const Note = Resource("notes", { attributes: { body: Schema.String } });
+// Served through the flat `createInput` / `updateInput` payloads.
+const Memo = Resource("memos", { attributes: { body: Schema.String } });
 
 const Api = HttpApi.make("undeclared")
   .add(Group.make(Flag, Endpoint.create(Flag), Endpoint.update(Flag)))
   .add(Group.make(Note, Endpoint.create(Note), Endpoint.update(Note)))
+  .add(
+    Group.make(
+      Memo,
+      Endpoint.create(Memo, { payload: Memo.createInput }),
+      Endpoint.update(Memo, { payload: Memo.updateInput }),
+    ),
+  )
   .add(Group.make("operations", Endpoint.operations([Flag, Note])));
 
 // Every resource `data` a handler is handed, so a test can assert what reached it.
@@ -46,6 +57,8 @@ interface Received {
   readonly attributes?: object;
   readonly relationships?: object;
 }
+// Every flat payload a `memos` handler is handed.
+const receivedFlat: Array<object> = [];
 const received: Array<Received> = [];
 
 const FlagsLive = HttpApiBuilder.group(Api, "flags", (handlers) =>
@@ -74,6 +87,20 @@ const NotesLive = HttpApiBuilder.group(Api, "notes", (handlers) =>
     }),
 );
 
+const MemosLive = HttpApiBuilder.group(Api, "memos", (handlers) =>
+  handlers
+    .handle("create", ({ payload }) => {
+      receivedFlat.push(payload);
+      return Effect.succeed({
+        data: Memo.make({ id: Memo.Id.make("1"), attributes: { body: payload.body } }),
+      });
+    })
+    .handle("update", ({ params, payload }) => {
+      receivedFlat.push(payload);
+      return Effect.succeed({ data: Memo.make({ id: params.id, attributes: { body: "b" } }) });
+    }),
+);
+
 const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
   handlers.handle("operations", ({ payload }) => {
     // These tests send only resource `add` / `update` operations.
@@ -89,7 +116,7 @@ const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
 );
 
 const AppLive = HttpApiBuilder.layer(Api).pipe(
-  Layer.provide([FlagsLive, NotesLive, OperationsLive]),
+  Layer.provide([FlagsLive, NotesLive, MemosLive, OperationsLive]),
   Layer.provide(layerWith({ extensions: [Atomic.EXTENSION_URI] })),
   Layer.provide(platformLayer),
 );
@@ -205,14 +232,100 @@ const cases: ReadonlyArray<Case> = [
       ),
     (m) => `/atomic:operations/0/data/relationships/${m}`,
   ],
+  // Members that declare fields (#292): the declared member is sent too.
+  [
+    "createPayload attributes (attributes declared)",
+    "POST",
+    "/notes",
+    (m) => `{"data":{"type":"notes","attributes":{"body":"b","${m}":${memberValue}}}}`,
+    (m) => `/data/attributes/${m}`,
+  ],
+  [
+    "updatePayload attributes (attributes declared)",
+    "PATCH",
+    "/notes/1",
+    (m) => `{"data":{"type":"notes","id":"1","attributes":{"body":"b","${m}":${memberValue}}}}`,
+    (m) => `/data/attributes/${m}`,
+  ],
+  [
+    "createPayload relationships (relationships declared)",
+    "POST",
+    "/flags",
+    (m) =>
+      `{"data":{"type":"flags","attributes":{},"relationships":{"owner":${ownerLinkage},"${m}":${ownerLinkage}}}}`,
+    (m) => `/data/relationships/${m}`,
+  ],
+  [
+    "updatePayload relationships (relationships declared)",
+    "PATCH",
+    "/flags/1",
+    (m) =>
+      `{"data":{"type":"flags","id":"1","relationships":{"owner":${ownerLinkage},"${m}":${ownerLinkage}}}}`,
+    (m) => `/data/relationships/${m}`,
+  ],
+  [
+    "atomic add attributes (attributes declared)",
+    "POST",
+    "/operations",
+    (m) =>
+      op(`{"op":"add","data":{"type":"notes","attributes":{"body":"b","${m}":${memberValue}}}}`),
+    (m) => `/atomic:operations/0/data/attributes/${m}`,
+  ],
+  [
+    "atomic update attributes (attributes declared)",
+    "POST",
+    "/operations",
+    (m) =>
+      op(
+        `{"op":"update","data":{"type":"notes","id":"1","attributes":{"body":"b","${m}":${memberValue}}}}`,
+      ),
+    (m) => `/atomic:operations/0/data/attributes/${m}`,
+  ],
+  [
+    "atomic add relationships (relationships declared)",
+    "POST",
+    "/operations",
+    (m) =>
+      op(
+        `{"op":"add","data":{"type":"flags","attributes":{},"relationships":{"owner":${ownerLinkage},"${m}":${ownerLinkage}}}}`,
+      ),
+    (m) => `/atomic:operations/0/data/relationships/${m}`,
+  ],
+  [
+    "atomic update relationships (relationships declared)",
+    "POST",
+    "/operations",
+    (m) =>
+      op(
+        `{"op":"update","data":{"type":"flags","id":"1","relationships":{"owner":${ownerLinkage},"${m}":${ownerLinkage}}}}`,
+      ),
+    (m) => `/atomic:operations/0/data/relationships/${m}`,
+  ],
+  // The flat payloads: `createInput` is the create attributes struct itself,
+  // `updateInput` the update attributes plus `id`.
+  [
+    "createInput (flat create payload)",
+    "POST",
+    "/memos",
+    (m) => `{"body":"b","${m}":${memberValue}}`,
+    (m) => `/${m}`,
+  ],
+  [
+    "updateInput (flat update payload)",
+    "PATCH",
+    "/memos/1",
+    (m) => `{"id":"1","body":"b","${m}":${memberValue}}`,
+    (m) => `/${m}`,
+  ],
 ];
 
 const members = ["isAdmin", "__proto__", "constructor"] as const;
 
-describe("a request body member the resource doesn't declare (#270)", () => {
+describe("a request body member the resource doesn't declare (#270, #292)", () => {
   describe.each(cases)("%s", (_, method, path, body, pointer) => {
     it.each(members)("answers 400 at the member %s and never calls the handler", async (m) => {
       received.length = 0;
+      receivedFlat.length = 0;
       const response = await send(method, path, body(m));
       expect(response.status).toBe(400);
       const errors = errorsOf(response.text);
@@ -231,6 +344,7 @@ describe("a request body member the resource doesn't declare (#270)", () => {
         },
       ]);
       expect(received).toEqual([]);
+      expect(receivedFlat).toEqual([]);
       expect(polluted()).toBe(false);
     });
   });
@@ -248,9 +362,25 @@ describe("a request body member the resource doesn't declare (#270)", () => {
       { pointer: "/data/attributes/a~0b~1c" },
     ]);
   });
+
+  it("reports every undeclared member beside a declared one, each at its own pointer (#292)", async () => {
+    received.length = 0;
+    const response = await send(
+      "POST",
+      "/notes",
+      '{"data":{"type":"notes","attributes":{"body":"b","a":1,"b/c":2,"a~b/c":3}}}',
+    );
+    expect(response.status).toBe(400);
+    expect(errorsOf(response.text).map(({ detail, source }) => [detail, source.pointer])).toEqual([
+      ["Expected no excess property", "/data/attributes/a"],
+      ["Expected no excess property", "/data/attributes/b~1c"],
+      ["Expected no excess property", "/data/attributes/a~0b~1c"],
+    ]);
+    expect(received).toEqual([]);
+  });
 });
 
-describe("a non-object member answers 400 at the member, whether or not it declares fields (#270)", () => {
+describe("a non-object member answers 400 at the member, whether or not it declares fields (#270, #292)", () => {
   // A struct that declares no fields parses any non-nullish input in the
   // pinned effect, so a non-object reaches its member check; that check
   // answers it exactly as a struct with fields does: "Expected object" at the
@@ -303,7 +433,29 @@ describe("a non-object member answers 400 at the member, whether or not it decla
       (v) => op(`{"op":"add","data":{"type":"flags","attributes":${v}}}`),
       "/atomic:operations/0/data/attributes",
     ],
-    // The reference: members that declare fields.
+    [
+      "atomic update attributes (none declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"update","data":{"type":"flags","id":"1","attributes":${v}}}`),
+      "/atomic:operations/0/data/attributes",
+    ],
+    [
+      "atomic add relationships (none declared)",
+      "POST",
+      "/operations",
+      (v) =>
+        op(`{"op":"add","data":{"type":"notes","attributes":{"body":"b"},"relationships":${v}}}`),
+      "/atomic:operations/0/data/relationships",
+    ],
+    [
+      "atomic update relationships (none declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"update","data":{"type":"notes","id":"1","relationships":${v}}}`),
+      "/atomic:operations/0/data/relationships",
+    ],
+    // Members that declare fields.
     [
       "createPayload attributes (declared)",
       "POST",
@@ -312,11 +464,53 @@ describe("a non-object member answers 400 at the member, whether or not it decla
       "/data/attributes",
     ],
     [
+      "updatePayload attributes (declared)",
+      "PATCH",
+      "/notes/1",
+      (v) => `{"data":{"type":"notes","id":"1","attributes":${v}}}`,
+      "/data/attributes",
+    ],
+    [
+      "createPayload relationships (declared)",
+      "POST",
+      "/flags",
+      (v) => `{"data":{"type":"flags","attributes":{},"relationships":${v}}}`,
+      "/data/relationships",
+    ],
+    [
       "updatePayload relationships (declared)",
       "PATCH",
       "/flags/1",
       (v) => `{"data":{"type":"flags","id":"1","relationships":${v}}}`,
       "/data/relationships",
+    ],
+    [
+      "atomic add attributes (declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"add","data":{"type":"notes","attributes":${v}}}`),
+      "/atomic:operations/0/data/attributes",
+    ],
+    [
+      "atomic update attributes (declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"update","data":{"type":"notes","id":"1","attributes":${v}}}`),
+      "/atomic:operations/0/data/attributes",
+    ],
+    [
+      "atomic add relationships (declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"add","data":{"type":"flags","attributes":{},"relationships":${v}}}`),
+      "/atomic:operations/0/data/relationships",
+    ],
+    [
+      "atomic update relationships (declared)",
+      "POST",
+      "/operations",
+      (v) => op(`{"op":"update","data":{"type":"flags","id":"1","relationships":${v}}}`),
+      "/atomic:operations/0/data/relationships",
     ],
   ];
 
@@ -496,5 +690,185 @@ describe("a null member that declares no fields (#286)", () => {
       "UnsupportedMediaTypeEncoded",
       "NotAcceptableEncoded",
     ]);
+  });
+});
+
+describe("the members JSON:API allows around a closed member are still accepted (#292)", () => {
+  // Only `attributes` / `relationships` (and the flat payloads) are closed:
+  // the document's `meta` / `jsonapi` / `links`, the resource object's `meta`
+  // / `links`, a relationship object's `meta` / `links`, a resource
+  // identifier's `meta` and an operation's `meta` are not members of them.
+  const meta = '"meta":{"m":1}';
+  const links = '"links":{"self":"http://x"}';
+  const top = `${meta},"jsonapi":{"version":"1.1"},${links}`;
+  const linkage = `{"data":{"type":"owners","id":"1",${meta}},${meta},${links}}`;
+
+  it.each([
+    [
+      "createPayload",
+      "POST",
+      "/flags",
+      `{"data":{"type":"flags","attributes":{},"relationships":{"owner":${linkage}},${meta},${links}},${top}}`,
+      [["flags", [], ["owner"]]],
+    ],
+    [
+      "updatePayload",
+      "PATCH",
+      "/flags/1",
+      `{"data":{"type":"flags","id":"1","relationships":{"owner":${linkage}},${meta},${links}},${top}}`,
+      [["flags", [], ["owner"]]],
+    ],
+    [
+      "atomic add and update",
+      "POST",
+      "/operations",
+      `{"atomic:operations":[${[
+        `{"op":"add","data":{"type":"notes","attributes":{"body":"b"},${meta}},${meta}}`,
+        `{"op":"update","data":{"type":"flags","id":"1","relationships":{"owner":${linkage}},${meta}},${meta}}`,
+      ].join(",")}],${meta},"jsonapi":{"version":"1.1"}}`,
+      [
+        ["notes", ["body"], []],
+        ["flags", [], ["owner"]],
+      ],
+    ],
+  ] as const)(
+    "%s: 2xx, and the handler gets the declared members",
+    async (_, method, path, body, members) => {
+      received.length = 0;
+      const response = await send(method, path, body);
+      expect(response.status).toBeLessThan(300);
+      // each `data` the handler got: its type, attribute keys and relationship keys
+      expect(
+        received.map(({ attributes = {}, relationships = {}, type }) => [
+          type,
+          Rec.keys(attributes),
+          Rec.keys(relationships),
+        ]),
+      ).toEqual(members);
+    },
+  );
+
+  it("a declared-only body reaches the handler with exactly the declared members", async () => {
+    received.length = 0;
+    receivedFlat.length = 0;
+    const create = await send(
+      "POST",
+      "/notes",
+      '{"data":{"type":"notes","attributes":{"body":"b"}}}',
+    );
+    const flat = await send("PATCH", "/memos/1", '{"id":"1","body":"b"}');
+    expect([create.status, flat.status]).toEqual([201, 200]);
+    expect(received).toEqual([{ type: "notes", attributes: { body: "b" } }]);
+    expect(receivedFlat).toEqual([{ id: "1", body: "b" }]);
+  });
+});
+
+describe("encoding a closed member, as a client does, rejects an undeclared member (#292)", () => {
+  // `Client` and `HttpBody` encode a payload through `Schema.toCodecJson`.
+  const formatted = (result: Result.Result<unknown, Schema.SchemaError>) =>
+    Result.match(result, {
+      onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+      onSuccess: () => [],
+    });
+
+  const sites: ReadonlyArray<
+    readonly [string, Schema.Codec<unknown, unknown>, object, ReadonlyArray<string>]
+  > = [
+    [
+      "createPayload attributes (declared)",
+      Note.createPayload,
+      { data: { type: "notes", attributes: { body: "b", extra: 1 } } },
+      ["data", "attributes", "extra"],
+    ],
+    [
+      "createPayload attributes (none declared)",
+      Flag.createPayload,
+      { data: { type: "flags", attributes: { extra: 1 } } },
+      ["data", "attributes", "extra"],
+    ],
+    [
+      "updatePayload relationships (declared)",
+      Flag.updatePayload,
+      { data: { type: "flags", id: "1", relationships: { extra: { data: null } } } },
+      ["data", "relationships", "extra"],
+    ],
+    ["createInput", Memo.createInput, { body: "b", extra: 1 }, ["extra"]],
+    ["updateInput", Memo.updateInput, { id: "1", extra: 1 }, ["extra"]],
+    [
+      "atomic add attributes (declared)",
+      Atomic.AddOperation(Note),
+      { op: "add", data: { type: "notes", attributes: { body: "b", extra: 1 } } },
+      ["data", "attributes", "extra"],
+    ],
+    [
+      "atomic update relationships (declared)",
+      Atomic.UpdateOperation(Flag),
+      { op: "update", data: { type: "flags", id: "1", relationships: { extra: { data: null } } } },
+      ["data", "relationships", "extra"],
+    ],
+  ];
+
+  it.each(sites)("%s: encode and decode report the same issue", (_, schema, value, path) => {
+    const codec = Schema.toCodecJson(schema);
+    const expected = [{ path, message: "Expected no excess property" }];
+    expect(formatted(Schema.encodeUnknownResult(codec)(value))).toEqual(expected);
+    expect(formatted(Schema.decodeUnknownResult(codec)(value))).toEqual(expected);
+  });
+
+  it("encodes a value with only declared members as before", () => {
+    expect(
+      Schema.encodeUnknownSync(Schema.toCodecJson(Note.createPayload))({
+        data: { type: "notes", attributes: { body: "b" } },
+      }),
+    ).toEqual({ data: { type: "notes", attributes: { body: "b" } } });
+  });
+});
+
+describe("a closed member keeps its fields and its OpenAPI properties (#292)", () => {
+  it("keeps `.fields` on createInput and on each payload member", () => {
+    expect(Rec.keys(Memo.createInput.fields)).toEqual(["body"]);
+    expect(Rec.keys(Memo.updateInput.fields)).toEqual(["body", "id"]);
+    expect(Rec.keys(Note.createPayload.fields.data.fields.attributes.fields)).toEqual(["body"]);
+  });
+
+  it("describes a member that declares fields by its properties, closed", () => {
+    const spec = OpenApi.fromApi(Api);
+    const RequestBody = Schema.Struct({
+      content: Schema.Record(Schema.String, Schema.Struct({ schema: Schema.Unknown })),
+    });
+    const Envelope = Schema.Struct({
+      properties: Schema.Struct({
+        data: Schema.Struct({ properties: Schema.Record(Schema.String, Schema.Unknown) }),
+      }),
+    });
+    const body = (path: string, method: "post" | "patch") =>
+      Schema.decodeUnknownSync(RequestBody)(spec.paths[path]?.[method]?.requestBody).content[
+        MEDIA_TYPE
+      ]?.schema;
+    const members = (path: string, method: "post" | "patch") =>
+      Schema.decodeUnknownSync(Envelope)(body(path, method)).properties.data.properties;
+    expect(members("/notes", "post").attributes).toEqual({
+      type: "object",
+      properties: { body: { type: "string" } },
+      required: ["body"],
+      additionalProperties: false,
+    });
+    // An update attribute is clearable, so `null` is allowed too.
+    expect(members("/notes/{id}", "patch").attributes).toEqual({
+      type: "object",
+      properties: { body: { anyOf: [{ type: "string" }, { type: "null" }] } },
+      additionalProperties: false,
+    });
+    expect(body("/memos", "post")).toEqual({
+      type: "object",
+      properties: { body: { type: "string" } },
+      required: ["body"],
+      additionalProperties: false,
+    });
+    expect(members("/flags", "post").relationships).toMatchObject({
+      type: "object",
+      properties: { owner: { type: "object" } },
+      additionalProperties: false,
+    });
   });
 });

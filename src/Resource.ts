@@ -1198,19 +1198,31 @@ export interface Resource<
    * {@link extend} inherits.
    */
   readonly declaredAttributes: Attributes;
-  /** Request body schema for creating this resource (no `id`, optional `lid`, required `one` relationships). */
+  /**
+   * Request body schema for creating this resource (no `id`, optional `lid`,
+   * required `one` relationships). Its `attributes` and `relationships`
+   * members reject, when decoding and when encoding, every member they don't
+   * declare, each as an "Expected no excess property" issue at that member.
+   */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>;
-  /** Request body schema for updating this resource (`id` required, attributes partial). */
+  /**
+   * Request body schema for updating this resource (`id` required, attributes
+   * partial). Its `attributes` and `relationships` members reject, when
+   * decoding and when encoding, every member they don't declare.
+   */
   readonly updatePayload: UpdatePayload<Type, Attributes, Rels, IdSchema>;
   /**
    * Flat ("command-style") create request schema: the attributes struct alone,
    * without the JSON:API `{ data: { type, attributes } }` envelope — for
    * transports that carry a flat attribute payload (RPC, remote functions).
+   * It is the same closed struct as `createPayload`'s `attributes`, so it
+   * rejects every key it doesn't declare; `.fields` lists the keys it does.
    */
   readonly createInput: CreateInput<Attributes>;
   /**
    * Flat ("command-style") update request schema: the resource id plus the
-   * tri-state partial attributes, without the JSON:API envelope.
+   * tri-state partial attributes, without the JSON:API envelope. It rejects
+   * every key besides `id` and the update attributes.
    */
   readonly updateInput: UpdateInput<Attributes, IdSchema>;
   /**
@@ -2700,9 +2712,10 @@ export const make = <
   // `attribute` / `readOnlyAttribute`) controlling how it appears in the write
   // projections. A plain schema attribute projects with the read-write defaults.
   // They derive from the *declared* map, so input-only attributes project too.
-  // Every member struct of a write body is closed (`closedStruct`): one that
-  // declares nothing rejects each member a client sends with a 400 at that
-  // member, where a bare empty struct would hand them all to the handler.
+  // Every member struct of a write body is closed (`closedStruct`): a member a
+  // client sends that it doesn't declare is a 400 at that member, where a
+  // struct with fields would silently drop it (#292) and a bare empty struct
+  // would hand it to the handler (#270).
   const createAttributes = closedStruct(createAttributeFields(options.attributes));
   const updateAttributes = closedStruct(updateAttributeFields(options.attributes));
 
@@ -2782,7 +2795,8 @@ export const make = <
   // JSON:API `{ data: { type, ... } }` envelope. They mirror the enveloped
   // payloads' attribute projections.
   const createInput = createAttributes as unknown as CreateInput<Attributes>;
-  const updateInput = Schema.Struct({
+  // Closed like the enveloped payload's attributes.
+  const updateInput = closedStruct({
     ...(updateAttributeFields(options.attributes) as Record<string, Schema.Top>),
     // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
     id,
