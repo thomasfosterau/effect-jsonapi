@@ -181,6 +181,18 @@ describe("an empty vocabulary says so when it rejects a value (#282)", () => {
       { sort: "title" },
       "sortable fields",
     ],
+    [
+      "Query.Fieldset over no attributes (#261)",
+      Query.Fieldset(Tag),
+      "name",
+      'sparse fieldset for type "tags"',
+    ],
+    [
+      "Query.schema's fieldset for a type with no attributes (#261)",
+      Query.schema(Tag, { fields: true }),
+      { "fields[tags]": "name" },
+      'sparse fieldset for type "tags"',
+    ],
   ];
 
   it.each(cases)("%s", (_, schema, input, what) => {
@@ -193,6 +205,7 @@ describe("an empty vocabulary says so when it rejects a value (#282)", () => {
     expect(() => Schema.decodeUnknownSync(Query.Sort(["title"]))("body")).toThrow(
       'Expected "title"',
     );
+    expect(() => Schema.decodeUnknownSync(Query.Fieldset(Article))("nope")).toThrow(/^Expected "/);
   });
 });
 

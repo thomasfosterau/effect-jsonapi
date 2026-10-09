@@ -63,7 +63,7 @@ import {
   repeatable,
   Sort as SortCodec,
 } from "./internal/codecs.js";
-import type { FieldCodecs } from "./internal/filter.js";
+import type { FieldCodec, FieldCodecs } from "./internal/filter.js";
 import {
   decodeFilter,
   encodeFilter,
@@ -72,7 +72,7 @@ import {
   operatorCheck,
   prepare,
 } from "./internal/filter.js";
-import { vocabularyAnnotations } from "./internal/vocabulary.js";
+import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
 import type {
   Any,
   AttributeKeys,
@@ -1093,10 +1093,24 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @since 0.1.0
  * @category constructors
  */
-export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
-  repeatable(
-    CommaSeparated(Schema.Literals(attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>)),
+export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> => {
+  const fields = attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>;
+  return repeatable(
+    CommaSeparated(
+      // The fieldset's fields ride on the literal schema as the `fields`
+      // vocabulary of this resource type, so `Middleware`'s support check
+      // treats a `fields[TYPE]` whose type has no field to select as
+      // unsupported (#261), that type alone. Its rejection says so rather
+      // than "Expected never".
+      Schema.Literals(fields).annotate(
+        vocabularyAnnotations(
+          { family: "fields", type: resource.type, values: fields },
+          `This endpoint supports no sparse fieldset for type "${resource.type}".`,
+        ),
+      ),
+    ),
   ) as Fieldset<AttributeKeys<R>>;
+};
 
 /**
  * The decoded `sort` schema: a list of `{ field, direction }` terms. Accepts
@@ -1413,6 +1427,10 @@ export interface Options<R extends Any> {
    *
    * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
    * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
+   *
+   * Under the `SchemaErrors` middleware, a `fields[TYPE]` for any other type,
+   * or for a type whose resource has no attribute, is a 400 naming it, as is
+   * every `fields[TYPE]` on an endpoint without this option (#261).
    */
   readonly fields?: boolean | undefined;
   /**
@@ -1425,7 +1443,9 @@ export interface Options<R extends Any> {
   readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>> | undefined;
   /**
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
-   * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`).
+   * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`). Under the
+   * `SchemaErrors` middleware, `?page[…]=` on an endpoint without it, or
+   * with no key (`{}`), is a 400 naming it (#261).
    */
   readonly page?: Schema.Struct.Fields | undefined;
   /**
@@ -1440,6 +1460,10 @@ export interface Options<R extends Any> {
    * A `Schema.Struct.Fields` map is the open per-key escape hatch for flags
    * JSON:API has no family for: each key becomes `filter[<key>]` and its
    * schema must decode from a string.
+   *
+   * Under the `SchemaErrors` middleware, `?filter[…]=` on an endpoint
+   * without it — or with `true` over a resource with no filterable field, or
+   * an empty map — is a 400 naming it (#261).
    */
   readonly filter?: FilterOption | undefined;
 }
@@ -1661,7 +1685,18 @@ export const schema = <R extends Any, const O extends Options<R>>(
       );
     }
     filterFields = filterable(resources[0]!) as FieldCodecs;
-    nestedFields.filter = Schema.optionalKey(AstSchema);
+    // The grammar's filterable fields ride on the decoded tree's schema as
+    // the `filter` vocabulary, so `Middleware`'s support check treats
+    // `filter: true` over a resource with no filterable field as unsupported
+    // (#261). The grammar's own rejections already name the field.
+    nestedFields.filter = Schema.optionalKey(
+      AstSchema.annotate(
+        vocabularyAnnotation({
+          family: "filter",
+          values: Rec.keys<string, FieldCodec>(filterFields),
+        }),
+      ),
+    );
     // The bare `filter` key is malformed under the grammar; declared here so
     // it reaches the grammar's rejection rather than being dropped.
     flatFields.filter = Schema.optionalKey(FilterWireValue);
