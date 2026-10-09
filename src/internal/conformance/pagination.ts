@@ -9,22 +9,21 @@
  * disagrees with the reference rather than with itself. The walk is bounded
  * (a page budget per walk, a request budget per run of the rule, a `next` that
  * leads back to a page already visited ends it), and a walk that runs out of
- * budget is reported as not checked, never as a partial pass.
+ * budget — or meets a server error, a rate limit or a lost response — is
+ * reported as not checked, never as a partial pass.
  *
  * @since 0.17.0
  * @internal
  */
-import {
-  Array as Arr,
-  Data,
-  Effect,
-  Formatter,
-  HashSet,
-  MutableHashMap,
-  Option,
-  Predicate,
-  Result,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Formatter from "effect/Formatter";
+import * as HashSet from "effect/HashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
 import {
   type Context,
   coverageNote,
@@ -94,10 +93,15 @@ interface Member {
   readonly label: string;
 }
 
-/** A page of the collection: where it was fetched, what came back, what it lists. */
+/**
+ * A page of the collection: where it was fetched, what came back, the
+ * resources it lists, and how many items its `data` held — more than
+ * `members` when some carry no identity the kit can compare on.
+ */
 interface Page extends Target {
   readonly observation: Observation;
   readonly members: ReadonlyArray<Member>;
+  readonly items: number;
 }
 
 /** A pagination link as a document carries it. */
@@ -137,6 +141,28 @@ const listed = (labels: ReadonlyArray<string>): string =>
 
 /** `n resource(s)`. */
 const resources = (count: number): string => `${count} resource${count === 1 ? "" : "s"}`;
+
+/** `n item(s)`. */
+const itemsOf = (count: number): string => `${count} item${count === 1 ? "" : "s"}`;
+
+/** What a page of items none of which the kit can identify is said to list. */
+const unidentified = (count: number): string =>
+  `${itemsOf(count)}, none of them a resource the kit can identify (a string \`type\` and \`id\` or \`lid\`)`;
+
+/** `true` when a page's `data` holds items but not one the kit can identify. */
+const opaque = (page: Page): boolean => Arr.isReadonlyArrayEmpty(page.members) && page.items > 0;
+
+/**
+ * `true` when a response says nothing of the links: no response at all, a
+ * rate limit or a server error. The kit does not decide on one.
+ */
+const unanswered = (observation: Observation): boolean =>
+  observation.transportError !== undefined ||
+  observation.status === 429 ||
+  observation.status >= 500;
+
+/** Why an {@link unanswered} response decides nothing. */
+const SAYS_NOTHING = "a server error, a rate limit or a lost response says nothing of the links";
 
 /** The `links` member `name` of a page's document. */
 const linkOf = (page: Page, name: string): Link => {
@@ -188,6 +214,7 @@ const pageOf = (target: Target, observation: Observation): Option.Option<Page> =
     ? Option.some({
         ...target,
         observation,
+        items: data.length,
         members: Arr.filterMap(data, (item) =>
           isRecord(item)
             ? Result.fromOption(
@@ -253,7 +280,7 @@ const budgeted = (ctx: Context): Io => {
   };
 };
 
-const REQUESTS_SPENT = `the rule's budget of ${REQUEST_BUDGET} requests ran out before the walk ended`;
+const REQUESTS_SPENT = `the rule's budget of ${REQUEST_BUDGET} requests ran out before the collection could be checked`;
 
 // ---------------------------------------------------------------------------
 // The walk
@@ -265,6 +292,8 @@ type End =
   | { readonly _tag: "Cycle"; readonly from: number; readonly to: number }
   | { readonly _tag: "Empty"; readonly from: number; readonly observation: Observation }
   | { readonly _tag: "NotAPage"; readonly from: number; readonly observation: Observation }
+  | { readonly _tag: "Unanswered"; readonly from: number; readonly observation: Observation }
+  | { readonly _tag: "Opaque"; readonly from: number; readonly items: number }
   | { readonly _tag: "NotALink"; readonly from: number; readonly value: unknown }
   | { readonly _tag: "Offsite"; readonly from: number; readonly origin: string }
   | { readonly _tag: "Stalled"; readonly at: number }
@@ -281,9 +310,11 @@ interface Walk {
  * Follows `next` from `first` until a page omits it or sets it `null` — or
  * until the walk can go no further: a `next` that is no link, leads off the
  * origin or back to a page already visited, answers something that is not a
- * page, or a page that lists no resources; a page that lists nothing earlier pages did
- * not (a `next` that would never end); more resources than `holds`, when the
- * collection's size is known; or the budget.
+ * page — or nothing the kit decides on: a server error, a rate limit, no
+ * response — or a page that lists no resources, or none the kit can identify;
+ * a page that lists nothing earlier pages did not (a `next` that would never
+ * end); more resources than `holds`, when the collection's size is known; or
+ * the budget.
  */
 const walk = (
   io: Io,
@@ -352,8 +383,12 @@ const arrive = (
   observation: Observation,
 ): Result.Result<readonly [Arr.NonEmptyReadonlyArray<Page>, HashSet.HashSet<string>], Walk> => {
   const from = pages.length;
+  if (unanswered(observation))
+    return Result.fail({ pages, end: End.Unanswered({ from, observation }) });
   const page = pageOf(target, observation);
   if (Option.isNone(page)) return Result.fail({ pages, end: End.NotAPage({ from, observation }) });
+  if (opaque(page.value))
+    return Result.fail({ pages, end: End.Opaque({ from, items: page.value.items }) });
   if (Arr.isReadonlyArrayEmpty(page.value.members))
     return Result.fail({ pages, end: End.Empty({ from, observation }) });
   const walked = Arr.append(pages, page.value);
@@ -447,6 +482,8 @@ const judgeEnd = (run: Walk, start: string): ReadonlyArray<Judged> => {
     Overflow: () => undefined,
     Offsite: () => undefined,
     Spent: () => undefined,
+    Unanswered: () => undefined,
+    Opaque: () => undefined,
     Cycle: ({ from, to }) => {
       out.push({
         ordered: false,
@@ -497,11 +534,18 @@ const judgeEnd = (run: Walk, start: string): ReadonlyArray<Judged> => {
 };
 
 /** Why a walk could not be finished, when it could not. */
-const unfinishedOf = (end: End, pages: ReadonlyArray<Page>): Option.Option<string> =>
-  End.$match(end, {
+const unfinishedOf = (end: End, pages: ReadonlyArray<Page>): Option.Option<string> => {
+  const on = (from: number): string => `\`next\` on page ${from} (${pages[from - 1]?.url ?? ""})`;
+  return End.$match(end, {
     Offsite: ({ from, origin }) =>
+      Option.some(`${on(from)} leads to another origin, ${origin}, which the kit does not follow`),
+    Unanswered: ({ from, observation }) =>
       Option.some(
-        `\`next\` on page ${from} (${pages[from - 1]?.url ?? ""}) leads to another origin, ${origin}, which the kit does not follow`,
+        `${on(from)} got ${statusOf(observation)}, so the walk could not be finished — ${SAYS_NOTHING}`,
+      ),
+    Opaque: ({ from, items }) =>
+      Option.some(
+        `${on(from)} leads to a page of ${unidentified(items)}, so the walk could not be finished`,
       ),
     Spent: ({ reason }) => Option.some(reason),
     Last: () => Option.none(),
@@ -512,6 +556,7 @@ const unfinishedOf = (end: End, pages: ReadonlyArray<Page>): Option.Option<strin
     Stalled: () => Option.none(),
     Overflow: () => Option.none(),
   });
+};
 
 /**
  * The page a `first` or `last` link names, when the kit should fetch it — none
@@ -551,50 +596,78 @@ const named = (page: Page): string =>
     ? "no resources"
     : listed(page.members.map(({ label }) => label));
 
-/** What a `first` or `last` link answered, held against the page the walk found there. */
+/** A judgement of findings alone, with nothing left unfinished. */
+const judgedOnly = (judged: ReadonlyArray<Judged>): Judgement => ({
+  judged,
+  unfinished: Option.none(),
+});
+
+/** A judgement that could not be made, and why. */
+const unjudged = (why: string): Judgement => ({ judged: [], unfinished: Option.some(why) });
+
+/**
+ * What a `first` or `last` link answered, held against the page the walk
+ * found there — or why it could not be: a response that says nothing of the
+ * links, or a page of items none of which the kit can identify.
+ */
 const compareEndPage = (
   name: "first" | "last",
   carrier: Page,
   expected: Page,
   target: Target,
   observation: Observation,
-): ReadonlyArray<Judged> => {
+): Judgement => {
   const which = name === "first" ? "first page" : "last page `next` reaches";
+  const link = `\`${name}\` on ${carrier.url}`;
+  if (unanswered(observation)) {
+    return unjudged(
+      `${link} got ${statusOf(observation)}, so it could not be checked — ${SAYS_NOTHING}`,
+    );
+  }
   return Option.match(pageOf(target, observation), {
-    onNone: () => [
-      {
-        ordered: false,
-        finding: finding(rule, {
-          detail: `\`${name}\` on ${carrier.url} leads to a response that is not a page of the collection`,
-          expected: `the ${which}, ${expected.url}`,
-          observed: describe(observation),
-          probe: observation.probe,
-        }),
-      },
-    ],
+    onNone: () =>
+      judgedOnly([
+        {
+          ordered: false,
+          finding: finding(rule, {
+            detail: `${link} leads to a response that is not a page of the collection`,
+            expected: `the ${which}, ${expected.url}`,
+            observed: describe(observation),
+            probe: observation.probe,
+          }),
+        },
+      ]),
     onSome: (page) => {
+      if (opaque(page)) {
+        return unjudged(
+          `${link} leads to a page of ${unidentified(page.items)}, so it could not be checked`,
+        );
+      }
       const answered = keysOf([page]);
       const wanted = keysOf([expected]);
-      return HashSet.isSubset(answered, wanted) && HashSet.isSubset(wanted, answered)
-        ? []
-        : [
-            {
-              ordered: true,
-              finding: finding(rule, {
-                detail: `\`${name}\` on ${carrier.url} answers different resources from the ${which}`,
-                expected: `${named(expected)} (${expected.url})`,
-                observed: `${named(page)} (${page.url})`,
-                probe: observation.probe,
-              }),
-            },
-          ];
+      return judgedOnly(
+        HashSet.isSubset(answered, wanted) && HashSet.isSubset(wanted, answered)
+          ? []
+          : [
+              {
+                ordered: true,
+                finding: finding(rule, {
+                  detail: `${link} answers different resources from the ${which}`,
+                  expected: `${named(expected)} (${expected.url})`,
+                  observed: `${named(page)} (${page.url})`,
+                  probe: observation.probe,
+                }),
+              },
+            ],
+      );
     },
   });
 };
 
 /**
  * Checks the `first` or `last` link a walk's first page carries against the
- * page the walk found there: both must list the same resources.
+ * page the walk found there: both must list the same resources. A link the
+ * request budget leaves no request to follow is unfinished, not passed.
  */
 const checkEndLink = (
   io: Io,
@@ -602,16 +675,16 @@ const checkEndLink = (
   name: "first" | "last",
   carrier: Page,
   expected: Page,
-): Effect.Effect<ReadonlyArray<Judged>> =>
+): Effect.Effect<Judgement> =>
   Result.match(endLinkTarget(baseUrl, name, carrier, expected), {
-    onFailure: (judged) => Effect.succeed([judged]),
+    onFailure: (judged) => Effect.succeed(judgedOnly([judged])),
     onSuccess: (target) =>
       Option.match(target, {
-        onNone: () => Effect.succeed([]),
+        onNone: () => Effect.succeed(judgedOnly([])),
         onSome: (resolved) =>
           Effect.map(io.fetch(resolved), (answer) =>
             Option.match(answer, {
-              onNone: () => [],
+              onNone: () => unjudged(REQUESTS_SPENT),
               onSome: (observation) =>
                 compareEndPage(name, carrier, expected, resolved, observation),
             }),
@@ -626,10 +699,14 @@ const judge = (io: Io, baseUrl: string, run: Walk): Effect.Effect<Judgement> =>
     const firsts = yield* checkEndLink(io, baseUrl, "first", first, first);
     const lasts = End.$is("Last")(run.end)
       ? yield* checkEndLink(io, baseUrl, "last", first, Arr.lastNonEmpty(run.pages))
-      : [];
+      : judgedOnly([]);
     return {
-      judged: [...judgeEnd(run, first.url), ...firsts, ...lasts],
-      unfinished: unfinishedOf(run.end, run.pages),
+      judged: [...judgeEnd(run, first.url), ...firsts.judged, ...lasts.judged],
+      unfinished: Option.firstSomeOf([
+        unfinishedOf(run.end, run.pages),
+        firsts.unfinished,
+        lasts.unfinished,
+      ]),
     };
   });
 
@@ -657,25 +734,49 @@ const sizeFor = (reference: Walk, holds: number): number => {
 };
 
 /**
- * Re-asks for each page a walk started from, and says how the order changed
- * if a second answer lists its resources in a different order from the
- * first — the case JSON:API leaves to the server when no `sort` is given.
+ * Re-asks for a page a walk started from: none when the second answer lists
+ * the same resources in the same order, or why the order is not shown stable —
+ * the server listed them in another order (the case JSON:API leaves to the
+ * server when no `sort` is given), or the second ask got no page to compare.
+ */
+const recheck = (io: Io, start: Page): Effect.Effect<Option.Option<string>> =>
+  Effect.map(io.refetch(start), (answer) =>
+    Option.match(answer, {
+      onNone: () =>
+        Option.some(
+          `the rule's budget of ${REQUEST_BUDGET} requests ran out before the collection's order could be confirmed stable`,
+        ),
+      onSome: (observation) =>
+        Option.match(pageOf(start, observation), {
+          onNone: () =>
+            Option.some(
+              `asked for ${start.url} a second time to confirm the collection's order is stable, the kit got ${statusOf(observation)}`,
+            ),
+          onSome: (page) =>
+            sequenceOf(page) === sequenceOf(start)
+              ? Option.none()
+              : Option.some(
+                  `the collection's order is not stable — asked for ${start.url} a second time, the server listed its resources in a different order — and JSON:API requires no stable order without \`sort\` (§Sorting: "The server MAY apply default sorting rules to top-level \`data\` if request parameter \`sort\` is not specified")`,
+                ),
+        }),
+    }),
+  );
+
+/**
+ * Re-asks for each page a walk started from, one at a time, stopping at the
+ * first that does not show the order stable: none when every one does, or why
+ * one did not. A second ask that cannot be made or answered confirms nothing.
  */
 const reordered = (io: Io, starts: ReadonlyArray<Page>): Effect.Effect<Option.Option<string>> =>
-  Effect.gen(function* () {
-    const again = yield* Effect.forEach(starts, (start) => io.refetch(start), {
-      concurrency: 1,
-    });
-    return Arr.findFirst(Arr.zip(starts, again), ([start, answer]) =>
-      Option.exists(
-        Option.flatMap(answer, (observation) => pageOf(start, observation)),
-        (page) => sequenceOf(page) !== sequenceOf(start),
-      ),
-    ).pipe(Option.map(([start]) => start.url));
-  });
+  Effect.reduce(
+    starts,
+    (): Option.Option<string> => Option.none(),
+    (why, start) => (Option.isSome(why) ? Effect.succeed(why) : recheck(io, start)),
+  );
 
-const unstable = (url: string, withheld: number): string =>
-  `the collection's order is not stable — asked for ${url} a second time, the server listed its resources in a different order — and JSON:API requires no stable order without \`sort\` (§Sorting: "The server MAY apply default sorting rules to top-level \`data\` if request parameter \`sort\` is not specified"), so the walk's ${withheld} order-dependent finding${withheld === 1 ? "" : "s"} (resources repeated or missed across pages, or a \`first\` / \`last\` page that disagrees) cannot be held against the links`;
+/** Why `withheld` order-dependent findings are not held against the links. */
+const withholding = (why: string, withheld: number): string =>
+  `${why}, so the walk's ${withheld} order-dependent finding${withheld === 1 ? "" : "s"} (resources repeated or missed across pages, or a \`first\` / \`last\` page that disagrees) cannot be held against the links`;
 
 /** An assessment of `where` from what its walks showed. */
 const settled = (
@@ -687,6 +788,44 @@ const settled = (
   findings: judged.map(({ finding: found }) => found),
   unsettled,
 });
+
+/**
+ * An assessment of `where` whose order-dependent findings stand only once
+ * asking again for each page a walk started from (`starts`) shows the order
+ * stable; otherwise they are withheld, and `where` is not decided, saying why.
+ * Every way out of {@link assess} that carries findings comes through here.
+ */
+const confirmed = (
+  io: Io,
+  where: string,
+  judged: ReadonlyArray<Judged>,
+  unsettled: Option.Option<string>,
+  starts: ReadonlyArray<Page>,
+): Effect.Effect<Assessment> => {
+  const ordered = judged.filter(({ ordered: dependsOnOrder }) => dependsOnOrder);
+  if (Arr.isReadonlyArrayEmpty(ordered)) return Effect.succeed(settled(where, judged, unsettled));
+  return Effect.map(reordered(io, starts), (why) =>
+    Option.match(why, {
+      onNone: () => settled(where, judged, unsettled),
+      onSome: (cause) =>
+        settled(
+          where,
+          judged.filter(({ ordered: dependsOnOrder }) => !dependsOnOrder),
+          Option.some(
+            [...Option.toArray(unsettled), withholding(cause, ordered.length)].join("; "),
+          ),
+        ),
+    }),
+  );
+};
+
+/** Why a reference too small to page is not walked again. */
+const tooFew = (reference: Walk, holds: number): string => {
+  const items = Arr.reduce(reference.pages, 0, (total, page) => total + page.items);
+  return holds === 0 && items > 0
+    ? `the collection lists ${unidentified(items)} — fewer than two resources, so no page size forces a second page`
+    : `the collection holds ${holds === 0 ? "no resources" : "one resource"} — fewer than two, so no page size forces a second page`;
+};
 
 /**
  * Walks one collection endpoint: the collection as the server serves it by
@@ -707,13 +846,10 @@ const assess = (
     const judged = yield* judge(io, baseUrl, reference);
     const holds = HashSet.size(keysOf(reference.pages));
     const blocked = Option.orElse(judged.unfinished, () =>
-      holds < 2
-        ? Option.some(
-            `the collection holds ${holds === 0 ? "no resources" : "one resource"} — fewer than two, so no page size forces a second page`,
-          )
-        : Option.none(),
+      holds < 2 ? Option.some(tooFew(reference, holds)) : Option.none(),
     );
-    if (Option.isSome(blocked)) return settled(path, judged.judged, blocked);
+    if (Option.isSome(blocked))
+      return yield* confirmed(io, path, judged.judged, blocked, [reached.success]);
     const key =
       SIZE_KEYS.find((candidate) => endpoint.queryKeys.includes(candidate)) ?? "page[limit]";
     return yield* assessPaged(io, baseUrl, path, reference, judged.judged, [
@@ -737,13 +873,19 @@ const assessPaged = (
   Effect.gen(function* () {
     const holds = HashSet.size(keysOf(reference.pages));
     const sized = withQuery(path, [[key, `${size}`]]);
+    const referenceStart = Arr.headNonEmpty(reference.pages);
     const started = yield* fetchPage(io, own(sized, baseUrl), sized);
-    if (Result.isFailure(started))
-      return settled(path, referenceJudged, Option.some(started.failure));
+    if (Result.isFailure(started)) {
+      return yield* confirmed(io, path, referenceJudged, Option.some(started.failure), [
+        referenceStart,
+      ]);
+    }
+    const starts = [referenceStart, started.success];
     const paged = yield* walk(io, baseUrl, started.success, Option.some(holds));
     const pagedJudged = yield* judge(io, baseUrl, paged);
     const judged = [...referenceJudged, ...pagedJudged.judged];
-    if (Option.isSome(pagedJudged.unfinished)) return settled(path, judged, pagedJudged.unfinished);
+    if (Option.isSome(pagedJudged.unfinished))
+      return yield* confirmed(io, path, judged, pagedJudged.unfinished, starts);
     const all = [...judged, ...crossCheck(reference, paged, path)];
     if (paged.pages.length === 1 && End.$is("Last")(paged.end) && Arr.isReadonlyArrayEmpty(all)) {
       return settled(
@@ -754,18 +896,7 @@ const assessPaged = (
         ),
       );
     }
-    const ordered = all.filter(({ ordered: dependsOnOrder }) => dependsOnOrder);
-    if (Arr.isReadonlyArrayEmpty(ordered)) return settled(path, all, Option.none());
-    const moved = yield* reordered(io, [Arr.headNonEmpty(reference.pages), started.success]);
-    return Option.match(moved, {
-      onNone: () => settled(path, all, Option.none()),
-      onSome: (url) =>
-        settled(
-          path,
-          all.filter(({ ordered: dependsOnOrder }) => !dependsOnOrder),
-          Option.some(unstable(url, ordered.length)),
-        ),
-    });
+    return yield* confirmed(io, path, all, Option.none(), starts);
   });
 
 /** The page at a URL the rule built, or why there is none. */

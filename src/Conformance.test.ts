@@ -149,6 +149,22 @@ const verifyOver =
       }),
     );
 
+/** A run of `target` in process, its handlers and middleware from `live`. */
+const runOver =
+  <ApiId extends string, Groups extends HttpApiGroup.Constraint, ROut>(
+    target: HttpApi.HttpApi<ApiId, Groups>,
+    live: Layer.Layer<ROut>,
+  ) =>
+  (options?: Conformance.Options) =>
+    Effect.runPromise(
+      // SAFETY: `live` and `Middleware.layer` provide every service the router
+      // needs; the platform services `verify` names are never used.
+      Conformance.verify(target, { ids: { articles: "1" }, ...options }).pipe(
+        Effect.provide(live),
+        Effect.scoped,
+      ) as Effect.Effect<Conformance.Report, never, never>,
+    );
+
 const verifyCanned = verifyOver(api);
 
 const failed = (report: Conformance.Report): ReadonlyArray<string> =>
@@ -2793,8 +2809,11 @@ describe("Conformance: pagination links enumerate the collection", () => {
     readonly total: number;
   }
 
-  /** What a canned page puts under a pagination key: a link, or something that is not one. */
-  type LinkValue = string | null | { readonly href: string } | { readonly toString: number };
+  /**
+   * What a canned page puts under a pagination key: any JSON — a link, `null`,
+   * or something that is not a link at all.
+   */
+  type LinkValue = Schema.Json;
 
   interface Links {
     readonly first?: LinkValue;
@@ -3110,6 +3129,252 @@ describe("Conformance: pagination links enumerate the collection", () => {
     ]);
   });
 
+  it("detects a `next` that leads to a 2xx that is not a page", async () => {
+    const found = await failure((request) =>
+      queryOf(request).get("page[offset]") === "3"
+        ? { body: { data: tag("4") } }
+        : offsetPager()(request),
+    );
+    expect(found).toEqual([
+      `\`next\` on page 1 (/tags?page[limit]=3) leads to a response that is not a page of the collection | 200 ${MEDIA_TYPE} — {"data":{"type":"tags","id":"4","attributes":{"name":"tag 4"}}}`,
+    ]);
+  });
+
+  // A server error, a rate limit or a lost response says nothing of the
+  // links: the reference fetch is not decided on one, and neither is the walk.
+  const unavailable: Canned = {
+    status: 503,
+    body: { errors: [{ status: "503", title: "Service Unavailable" }] },
+  };
+  const limited: Canned = {
+    status: 429,
+    body: { errors: [{ status: "429", title: "Too Many Requests" }] },
+  };
+
+  it.each([
+    ["503", unavailable],
+    ["429", limited],
+  ] as const)("does not hold a %s mid-walk against `next`", async (status, answer) => {
+    const reason = await skipReason((request) =>
+      queryOf(request).get("page[offset]") === "3" ? answer : offsetPager()(request),
+    );
+    expect(reason).toBe(
+      `no paginated collection could be walked to a verdict (/tags: \`next\` on page 1 (/tags?page[limit]=3) got ${status}, so the walk could not be finished — a server error, a rate limit or a lost response says nothing of the links)`,
+    );
+  });
+
+  it("does not hold a lost response mid-walk against `next`", async () => {
+    const report = await verifyOver(offsetApi)(offsetPager(), { only: [RULE] }, (client) =>
+      HttpClient.make((request) =>
+        /page(\[|%5B)offset(\]|%5D)=3/.test(request.url)
+          ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, description: "reset" }),
+              }),
+            )
+          : client.execute(request),
+      ),
+    );
+    expect(outcomeFor(report, RULE)).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining(
+        "/tags: `next` on page 1 (/tags?page[limit]=3) got no response (",
+      ),
+    });
+  });
+
+  it("does not hold a 503 from `first` against the links", async () => {
+    const reason = await skipReason((request) =>
+      queryOf(request).get("page[offset]") === "0" ? unavailable : offsetPager()(request),
+    );
+    expect(reason).toContain(
+      "/tags: `first` on /tags got 503, so it could not be checked — a server error, a rate limit or a lost response says nothing of the links",
+    );
+  });
+
+  /** Pages that each start one row early, so each repeats the previous page's last. */
+  const repeating = offsetPager({
+    slice: (rows, { offset, limit }) => rows.slice(Math.max(offset - 1, 0), offset + limit),
+  });
+
+  it("does not take a recheck of the order that failed for a stable order", async () => {
+    let asked = 0;
+    const reason = await skipReason((request) =>
+      decodeURIComponent(request.path) === "/tags?page[limit]=3" && ++asked === 2
+        ? unavailable
+        : repeating(request),
+    );
+    expect(reason).toContain(
+      "/tags: asked for /tags?page[limit]=3 a second time to confirm the collection's order is stable, the kit got 503, so the walk's 1 order-dependent finding",
+    );
+  });
+
+  it("does not hold a walk cut short to a repeat without rechecking the order", async () => {
+    // The second walk repeats a resource, then leads off the origin; asked
+    // again, its first page comes back in another order.
+    let asked = 0;
+    const reason = await skipReason((request) => {
+      const query = queryOf(request);
+      const answer = repeating(request);
+      if (decodeURIComponent(request.path) === "/tags?page[limit]=3" && ++asked === 2) {
+        return { body: { data: ["3", "2", "1"].map(tag), links: {} } };
+      }
+      return query.get("page[offset]") === "3"
+        ? {
+            body: {
+              data: ["3", "4", "5", "6"].map(tag),
+              links: { next: "https://elsewhere.test/tags" },
+            },
+          }
+        : answer;
+    });
+    expect(reason).toContain(
+      "/tags: `next` on page 2 (/tags?page[offset]=3&page[limit]=3) leads to another origin, https://elsewhere.test, which the kit does not follow; the collection's order is not stable",
+    );
+    expect(reason).toContain("so the walk's 1 order-dependent finding");
+  });
+
+  it("does not take a `first` page of items it cannot identify for a different page", async () => {
+    const reason = await skipReason((request) =>
+      queryOf(request).get("page[offset]") === "0"
+        ? { body: { data: [{ name: "a" }], links: {} } }
+        : offsetPager()(request),
+    );
+    expect(reason).toContain(
+      "/tags: `first` on /tags leads to a page of 1 item, none of them a resource the kit can identify (a string `type` and `id` or `lid`), so it could not be checked",
+    );
+  });
+
+  it("does not take a collection of items it cannot identify for an empty one", async () => {
+    const reason = await skipReason(() => ({
+      body: { data: [{ name: "a" }, { name: "b" }], links: {} },
+    }));
+    expect(reason).toContain(
+      "/tags: the collection lists 2 items, none of them a resource the kit can identify (a string `type` and `id` or `lid`) — fewer than two resources",
+    );
+  });
+
+  it("does not take a page of items it cannot identify for an empty page", async () => {
+    const reason = await skipReason((request) =>
+      queryOf(request).get("page[offset]") === "3"
+        ? { body: { data: [{ name: "a" }, { name: "b" }], links: {} } }
+        : offsetPager()(request),
+    );
+    expect(reason).toContain(
+      "/tags: `next` on page 1 (/tags?page[limit]=3) leads to a page of 2 items, none of them a resource the kit can identify (a string `type` and `id` or `lid`), so the walk could not be finished",
+    );
+  });
+
+  it("quotes a server value cut to 200 code units, never splitting a surrogate pair", async () => {
+    const carrying = (prev: string) =>
+      failure(offsetPager({ links: (window) => ({ ...offsetLinks(window), prev }) }));
+    const long = `/tags?${"x".repeat(300)}`;
+    expect((await carrying(long))[0]).toBe(
+      `the first page (/tags) carries \`prev\`, but no page comes before it | prev: ${long.slice(0, 199)}…`,
+    );
+    // Code unit 199 is the high half of an emoji: the cut drops it rather than
+    // leave half a character.
+    expect((await carrying(`${"a".repeat(198)}😀😀`))[0]).toBe(
+      `the first page (/tags) carries \`prev\`, but no page comes before it | prev: ${"a".repeat(198)}…`,
+    );
+  });
+
+  it("detects a walk that reaches a resource the collection does not list", async () => {
+    const found = await failure((request) =>
+      offsetPager({
+        rows:
+          queryOf(request).get("page[limit]") === "3" ? ["1", "2", "3", "4", "5", "6", "8"] : ROWS,
+      })(request),
+    );
+    expect(found).toEqual([
+      "following `next` from /tags?page[limit]=3 never reached 1 resource /tags lists | never reached: tags:7",
+      "following `next` from /tags?page[limit]=3 reached 1 resource /tags does not list | not in /tags: tags:8",
+    ]);
+  });
+
+  it("stops a walk that lists more resources than the collection holds", async () => {
+    // Pages of three go on past the seventh resource with fresh ones, forever.
+    const server = recording(
+      offsetPager({
+        slice: (_, { offset, limit }) => Arr.makeBy(limit, (n) => `${offset + n + 1}`),
+        links: (window) => ({
+          ...offsetLinks(window),
+          next:
+            window.limit < window.total
+              ? `/tags?page[offset]=${window.offset + window.limit}&page[limit]=${window.limit}`
+              : null,
+        }),
+      }),
+    );
+    expect(await failure(server.serve)).toEqual([
+      "following `next` from /tags?page[limit]=3 reached 2 resources /tags does not list | not in /tags: tags:8, tags:9",
+    ]);
+    expect(server.paths).toContain("/tags?page[offset]=6&page[limit]=3");
+    expect(server.paths).not.toContain("/tags?page[offset]=9&page[limit]=3");
+  });
+
+  // The request budget, pinned: ten collections ahead of `tags`, each a pager
+  // that spends exactly the requests it is given and then leads off the
+  // origin, leave `tags` exactly as many as a test chooses.
+  const BURNERS = Arr.makeBy(10, (n) => `burner${n}`);
+  const crowdedApi = HttpApi.make("paged").add(
+    ...Arr.map(BURNERS, (type) => {
+      const Burner = Resource.make(type, { attributes: { name: Schema.String } });
+      return Group.make(Burner, Endpoint.list(Burner, { page: Query.Page.Offset }));
+    }),
+    Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Offset })),
+  );
+
+  /** `tags` from `serve`, behind burners that spend all of the budget of 200 but `leave`. */
+  const crowded = (leave: number, serve: (request: CannedRequest) => Canned) => {
+    const spend = 200 - leave;
+    return (request: CannedRequest): Canned => {
+      const type = withoutQuery(request).path.slice(1);
+      const index = BURNERS.indexOf(type);
+      if (index === -1) return serve(request);
+      const cost = Math.min(Math.max(spend - 20 * index, 1), 20);
+      const offset = Number(queryOf(request).get("page[offset]") ?? "0");
+      return {
+        body: {
+          data: [{ type, id: `${offset}`, attributes: { name: `${type} ${offset}` } }],
+          links: {
+            next:
+              offset + 1 < cost
+                ? `/${type}?page[offset]=${offset + 1}`
+                : `https://elsewhere.test/${type}`,
+          },
+        },
+      };
+    };
+  };
+
+  it("stops at the rule's budget of 200 requests, and says so", async () => {
+    const server = recording(crowded(0, offsetPager()));
+    const reason = await skipReasonOver(server.serve, crowdedApi);
+    expect(server.paths).toHaveLength(200);
+    expect(server.paths.some((path) => path.startsWith("/tags"))).toBe(false);
+    expect(reason).toContain("/tags: the rule's budget of 200 requests ran out");
+  });
+
+  it("does not pass a collection whose `first` link the budget did not reach", async () => {
+    // Five requests walk both partitions of `tags`; the sixth would check the
+    // second walk's `first`.
+    const server = recording(crowded(5, offsetPager()));
+    const reason = await skipReasonOver(server.serve, crowdedApi);
+    expect(server.paths).toHaveLength(200);
+    expect(reason).toContain("/tags: the rule's budget of 200 requests ran out");
+  });
+
+  it("does not report order-dependent findings the budget left no request to recheck", async () => {
+    // Seven requests walk `tags` and recheck the first page of one walk, not the other.
+    const server = recording(crowded(7, repeating));
+    const reason = await skipReasonOver(server.serve, crowdedApi);
+    expect(server.paths).toHaveLength(200);
+    expect(reason).toContain(
+      "/tags: the rule's budget of 200 requests ran out before the collection's order could be confirmed stable, so the walk's 1 order-dependent finding",
+    );
+  });
+
   // `{"toString":1}` is valid JSON that `String` cannot convert: a link that
   // is not a link is a finding, not a rule that dies rendering it.
   it("detects a `next` that is not a link, rendering it safely", async () => {
@@ -3224,14 +3489,10 @@ describe("Conformance: pagination links enumerate the collection", () => {
         );
       }),
     );
-    const report = await Effect.runPromise(
-      // SAFETY: the handlers and `Middleware.layer` provide every service the
-      // router needs; the platform services `verify` names are never used.
-      Conformance.verify(offsetApi, { only: [RULE] }).pipe(
-        Effect.provide(TagsLive.pipe(Layer.provideMerge(Middleware.layer))),
-        Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
-    );
+    const report = await runOver(
+      offsetApi,
+      TagsLive.pipe(Layer.provideMerge(Middleware.layer)),
+    )({ only: [RULE] });
     expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", note: undefined });
   });
 
@@ -3271,20 +3532,6 @@ describe("Conformance: in-process", () => {
   );
 
   const Live = ArticlesLive.pipe(Layer.provideMerge(Middleware.layer));
-
-  /** A run of `target` in process, its handlers and middleware from `live`. */
-  const runOver =
-    <ApiId extends string, Groups extends HttpApiGroup.Constraint, ROut>(
-      target: HttpApi.HttpApi<ApiId, Groups>,
-      live: Layer.Layer<ROut>,
-    ) =>
-    (options?: Conformance.Options) =>
-      Effect.runPromise(
-        Conformance.verify(target, { ids: { articles: "1" }, ...options }).pipe(
-          Effect.provide(live),
-          Effect.scoped,
-        ) as Effect.Effect<Conformance.Report, never, never>,
-      );
 
   const run = runOver(api, Live);
 
