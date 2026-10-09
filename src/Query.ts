@@ -745,13 +745,18 @@ export const Include = <
   ) as ReadonlyArray<IncludePathsOf<R, O>>;
   return repeatable(
     CommaSeparated(
-      // The whitelist rides on the literal schema as error `meta`, so the 400
-      // `Middleware.schemaErrorDocument` renders for a rejected path carries
-      // `meta.includablePaths` — the same set `ApiError.UnsupportedIncludePath`
-      // publishes — and a caller learns the legal paths without a second call.
-      // An empty set says so rather than "Expected never" (#282).
+      // The whitelist rides on the literal schema as the `include`
+      // vocabulary, so the 400 `Middleware.schemaErrorDocument` renders for a
+      // rejected path carries `meta.includablePaths` — the same set
+      // `ApiError.UnsupportedIncludePath` publishes — and a caller learns the
+      // legal paths without a second call. An empty set makes `include`
+      // unsupported (#282), and its rejection says so rather than "Expected
+      // never".
       Schema.Literals(paths).annotate(
-        vocabularyAnnotations("includablePaths", paths, "This endpoint supports no include paths."),
+        vocabularyAnnotations(
+          { family: "include", values: paths },
+          "This endpoint supports no include paths.",
+        ),
       ),
     ),
   ) as Include<R, IncludePathsOf<R, O>>;

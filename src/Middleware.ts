@@ -75,7 +75,6 @@ import {
   ErrorReporter,
   Layer,
   Option,
-  Predicate,
   Record as Rec,
   Schema,
   SchemaAST,
@@ -95,10 +94,11 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
-import type { ErrorMeta } from "./internal/errorMeta.js";
-import { errorMetaOf, indexErrorMeta } from "./internal/errorMeta.js";
+import { declaredNames } from "./internal/declaredQuery.js";
+import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
+import { admitsNoValue } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
 // ---------------------------------------------------------------------------
@@ -486,7 +486,7 @@ const SPEC_FAMILIES: ReadonlyArray<string> = ["fields", "page", "filter"];
 // that responds with a resource collection, and under the general
 // §Implementation-Specific Query Parameters rule on any other. An endpoint
 // supports one by declaring it with at least one legal value (#282).
-const SUPPORT_FAMILIES: Readonly<Record<string, string>> = {
+const SUPPORT_FAMILIES: Readonly<Record<"include" | "sort", string>> = {
   include:
     'This endpoint does not support the "include" parameter. JSON:API requires an ' +
     "endpoint that does not support inclusion of related resources to reject any " +
@@ -495,6 +495,8 @@ const SUPPORT_FAMILIES: Readonly<Record<string, string>> = {
     'This endpoint does not support the "sort" parameter. JSON:API requires a server ' +
     "that does not support the requested sorting to reject it.",
 };
+
+const SUPPORT_FAMILY_NAMES = Rec.keys(SUPPORT_FAMILIES);
 
 // A family base name made only of a-z is reserved for the specification.
 const RESERVED_BASE_NAME = /^[a-z]+$/;
@@ -526,9 +528,11 @@ export interface QueryParameterOptions {
    * JSON:API 1.1 reserves these names for the specification, so accepting one
    * is a deliberate deviation: prefer renaming the parameter (`langCode`,
    * `x-lang`) when the host controls it. Listing `include` or `sort` admits
-   * it on an endpoint that does not support it, which then ignores it
-   * instead of answering the 400 the specification requires. Defaults to
-   * none.
+   * it on an endpoint that does not support it instead of answering the 400
+   * the specification requires: an endpoint that does not declare it then
+   * ignores it, and one that declares it with an empty vocabulary decodes it,
+   * so its codec rejects any value that names a path or field ("This
+   * endpoint supports no include paths."). Defaults to none.
    *
    * An entry that is not such a base name — a bracketed member (`lang[x]`),
    * a name with any other character (`Lang`, ` lang`), or `""` — is refused
@@ -614,7 +618,7 @@ const rejectQueryParameters = (
       code: BadRequest.code,
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
       detail: Option.getOrElse(
-        Rec.get(SUPPORT_FAMILIES, baseName(parameter)),
+        Rec.get<string, string>(SUPPORT_FAMILIES, baseName(parameter)),
         () =>
           `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
           "names made only of the letters a-z for the specification; an implementation-" +
@@ -703,88 +707,19 @@ export const checkQueryParameters = (
     rejectQueryParameters(names, options?.declared ?? [], allowedBaseNames(options)),
   );
 
-// What an endpoint's query schema declares, for `checkQueryParameters`:
-// the wire names of its encoded (flat) side, or none when that side could
-// accept a name this walk cannot enumerate — a record keyed by any string,
-// say — in which case the check stands aside rather than reject a parameter
-// the endpoint might process. `filter: true`'s `filter[…]` rest is the
-// spec's own family and enumerable as such.
-const declaredNames = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<string>> => {
-  const encoded = SchemaAST.toEncoded(ast);
-  if (SchemaAST.isObjects(encoded)) {
-    return Option.map(
-      Option.all(encoded.indexSignatures.map(({ parameter }) => familyPrefix(parameter))),
-      (prefixes) => [
-        ...encoded.propertySignatures.map((signature) => String(signature.name)),
-        ...prefixes,
-      ],
-    );
-  }
-  if (SchemaAST.isUnion(encoded)) {
-    return Option.map(Option.all(encoded.types.map(declaredNames)), Arr.flatten);
-  }
-  if (SchemaAST.isSuspend(encoded)) return declaredNames(encoded.thunk());
-  return Option.none();
-};
-
-// The family an index signature's key admits, when it names one: a template
-// literal whose literal head closes the base name (`filter[`). Any other key
-// could match a base name of any spelling.
-const familyPrefix = (parameter: SchemaAST.AST): Option.Option<string> => {
-  if (!SchemaAST.isTemplateLiteral(parameter)) return Option.none();
-  const [head] = parameter.parts;
-  return head !== undefined &&
-    SchemaAST.isLiteral(head) &&
-    Predicate.isString(head.literal) &&
-    head.literal.includes("[")
-    ? Option.some(head.literal)
-    : Option.none();
-};
-
-// The `meta` member under which each support family's codec publishes its
-// vocabulary: `Query.Include`'s include paths, `Query.Sort`'s sortable fields.
-const VOCABULARY_META = { include: "includablePaths", sort: "sortableFields" } as const;
-
-const isEmptyVocabulary = Schema.is(Schema.Tuple([]));
-
-// The schemas directly under a node that can carry error `meta`. A `Suspend`
-// is not followed, so a recursive schema cannot loop the walk.
-const childrenOf = (ast: SchemaAST.AST): ReadonlyArray<SchemaAST.AST> => {
-  if (SchemaAST.isObjects(ast)) {
-    return [
-      ...ast.propertySignatures.map((signature) => signature.type),
-      ...ast.indexSignatures.map((signature) => signature.type),
-    ];
-  }
-  if (SchemaAST.isArrays(ast)) return [...ast.elements, ...ast.rest];
-  return SchemaAST.isUnion(ast) ? ast.types : [];
-};
-
-// Every error `meta` a schema publishes, from its own node and every node
-// under it (struct members, array elements, union members).
-const errorMetaWithin = (ast: SchemaAST.AST): ReadonlyArray<ErrorMeta> => {
-  const own = errorMetaOf(ast.annotations);
-  return [...(own === undefined ? [] : [own]), ...childrenOf(ast).flatMap(errorMetaWithin)];
-};
-
 // The support families an endpoint's query schema declares with an empty
 // vocabulary: `include: { paths: [] }`, `include: true` over no
 // relationships, `sort: true` over no attributes. Such a family supports no
 // value, so it counts as undeclared (owner decision on #282): every request
 // that carries it gets the same 400 as on an endpoint that never declared it.
-// A family counts as empty only when every vocabulary the schema publishes
-// for it is empty.
-const emptyVocabularies = (ast: SchemaAST.AST): ReadonlyArray<string> => {
-  const published = errorMetaWithin(SchemaAST.toType(ast));
-  return Arr.filter(Rec.keys(VOCABULARY_META), (family) => {
-    const key = VOCABULARY_META[family];
-    const vocabularies = Arr.flatMap(published, (meta) => (Rec.has(meta, key) ? [meta[key]] : []));
-    return Arr.isReadonlyArrayNonEmpty(vocabularies) && Arr.every(vocabularies, isEmptyVocabulary);
-  });
-};
+// Each family is read off its own decoded property only (`admitsNoValue`).
+const emptyVocabularies = (ast: SchemaAST.AST): ReadonlyArray<string> =>
+  Arr.filter(SUPPORT_FAMILY_NAMES, (family) => admitsNoValue(ast, family));
 
-// What an endpoint supports, for `checkQueryParameters`: the names its query
-// schema declares, less a support family it declares with no legal value.
+// What an endpoint supports, for `checkQueryParameters`: the wire names its
+// query schema declares (`declaredNames`; none when it could accept a name
+// the walk cannot enumerate, and the check then stands aside), less a support
+// family it declares with no legal value.
 const supportedNames = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<string>> =>
   Option.map(declaredNames(ast), (names) => {
     const empty = emptyVocabularies(ast);
@@ -1043,8 +978,12 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * collection, and on a single-resource endpoint (`GET /articles/1?sort=title`)
  * the general §Implementation-Specific Query Parameters rule, since that
  * endpoint does not know how to process `sort` as a query parameter from the
- * specification. An undeclared `fields[TYPE]`, `page[…]` or `filter[…]` is
- * still ignored.
+ * specification. Only the schema's own decoded `include` / `sort` property
+ * decides whether its vocabulary is empty, read through a union or
+ * `Schema.suspend`: one whose codec publishes no vocabulary
+ * (`Query.IncludeList`, a custom codec), or a non-empty one in any member of
+ * a union, supports the family. An undeclared `fields[TYPE]`, `page[…]` or
+ * `filter[…]` is still ignored.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server

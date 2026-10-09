@@ -92,6 +92,7 @@ const HTTP_TIER = [
   "internal/httpMedia.ts",
   "internal/linkage.ts",
   "internal/responseBody.ts",
+  "internal/vocabulary.ts",
 ];
 
 /**

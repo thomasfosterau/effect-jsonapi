@@ -6,7 +6,8 @@
 import { Array as Arr, Option, Record as Rec, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
 import { define } from "./define.js";
-import { errorMeta } from "./errorMeta.js";
+import type { Vocabulary } from "./vocabulary.js";
+import { vocabularyAnnotation } from "./vocabulary.js";
 
 /**
  * A comma-separated list codec: `"a,b,c"` ↔ `["a", "b", "c"]`.
@@ -92,18 +93,18 @@ export const repeatable = <S extends Schema.Top>(
 
 /**
  * The annotations of a closed vocabulary's literal schema: its whole set as
- * error `meta` under `key`, and, when the set is empty, a `message` saying so —
- * `Schema.Literals([])` is `never`, whose rejection would otherwise read
- * "Expected never" (#282).
+ * the family's vocabulary (`internal/vocabulary.ts`), which the 400 for a
+ * rejected value renders as error `meta` and the support check reads, and,
+ * when the set is empty, a `message` saying so — `Schema.Literals([])` is
+ * `never`, whose rejection would otherwise read "Expected never" (#282).
  */
 export const vocabularyAnnotations = (
-  key: string,
-  vocabulary: ReadonlyArray<string>,
+  vocabulary: Vocabulary,
   emptyMessage: string,
 ): Schema.Annotations.Annotations =>
-  Arr.match(vocabulary, {
-    onEmpty: () => ({ ...errorMeta({ [key]: vocabulary }), message: emptyMessage }),
-    onNonEmpty: () => errorMeta({ [key]: vocabulary }),
+  Arr.match(vocabulary.values, {
+    onEmpty: () => ({ ...vocabularyAnnotation(vocabulary), message: emptyMessage }),
+    onNonEmpty: () => vocabularyAnnotation(vocabulary),
   });
 
 /**
@@ -135,11 +136,15 @@ export interface Sort<Field extends string> extends Schema.decodeTo<
  */
 export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): Sort<Field> => {
   const item = Schema.Struct({
-    // The sortable set rides on the literal schema as error `meta`, so the 400
-    // for an unknown field carries `meta.sortableFields` (see `errorMeta`).
-    // An empty set says so rather than "Expected never" (#282).
+    // The sortable set rides on the literal schema as the `sort` vocabulary,
+    // so the 400 for an unknown field carries `meta.sortableFields` (see
+    // `errorMeta`), and an empty set makes `sort` unsupported (#282). An
+    // empty set's rejection says so rather than "Expected never".
     field: Schema.Literals(fields as ReadonlyArray<Field>).annotate(
-      vocabularyAnnotations("sortableFields", fields, "This endpoint supports no sortable fields."),
+      vocabularyAnnotations(
+        { family: "sort", values: fields },
+        "This endpoint supports no sortable fields.",
+      ),
     ),
     direction: Schema.Literals(["asc", "desc"] as ["asc", "desc"]),
   });
