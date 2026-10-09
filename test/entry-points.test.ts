@@ -91,6 +91,7 @@ const HTTP_TIER = [
   "internal/errorMeta.ts",
   "internal/httpMedia.ts",
   "internal/linkage.ts",
+  "internal/responseBody.ts",
 ];
 
 /**

@@ -61,6 +61,7 @@ import { HttpApiMiddleware } from "effect/http-api";
 import { make as makeApiError } from "./ApiError.js";
 import type { JsonApiObject } from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { bodyText } from "./internal/responseBody.js";
 
 // ---------------------------------------------------------------------------
 // Profile constants
@@ -736,23 +737,10 @@ export class Middleware extends HttpApiMiddleware.Service<Middleware>()(
 const isSafe = (method: string): boolean =>
   method === "GET" || method === "HEAD" || method === "OPTIONS";
 
-// The response text of a body whose bytes are already settled — everything the
-// package's own endpoints emit. `undefined` means "this response cannot be
+// `bodyText` (./internal/responseBody.js) reads the response text of a body
+// whose bytes are already settled. `undefined` means "this response cannot be
 // reproduced byte for byte" (a stream, a form, a raw value the platform will
 // serialise later): the key is released rather than replayed from a guess.
-const bodyText = (response: HttpServerResponse.HttpServerResponse): string | undefined => {
-  const body = response.body;
-  switch (body._tag) {
-    case "Empty":
-      return "";
-    case "Uint8Array":
-      return new TextDecoder().decode(body.body);
-    case "Raw":
-      return typeof body.body === "string" ? body.body : undefined;
-    default:
-      return undefined;
-  }
-};
 
 const replay = (recorded: Recorded): HttpServerResponse.HttpServerResponse => {
   const base =

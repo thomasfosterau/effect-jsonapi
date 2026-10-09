@@ -521,7 +521,10 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
         relationships: payload.data.relationships,
       });
       store.repositories.set(repository.id, repository);
-      return Effect.succeed(Handlers.data(repository, { self: `/repositories/${repository.id}` }));
+      // The created resource carries its own `self` link: the 201's `Location`
+      // header is copied from it, so the two match.
+      const self = `/repositories/${repository.id}`;
+      return Effect.succeed(Handlers.data({ ...repository, links: { self } }, { self }));
     })
     .handle("update", ({ params, payload }) =>
       loadRepository(params.id).pipe(
@@ -637,7 +640,10 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       });
       store.issues.set(issue.id, issue);
       store.commentsByIssue.set(issue.id, []);
-      return Effect.succeed(Handlers.data(issue, { self: `/issues/${issue.id}` }));
+      // The created resource carries its own `self` link: the 201's `Location`
+      // header is copied from it, so the two match.
+      const self = `/issues/${issue.id}`;
+      return Effect.succeed(Handlers.data({ ...issue, links: { self } }, { self }));
     })
     .handle("update", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(

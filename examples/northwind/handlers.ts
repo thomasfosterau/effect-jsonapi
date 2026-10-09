@@ -748,7 +748,10 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
           relationships: payload.data.relationships,
         });
         store.products.set(product.id, product);
-        return Handlers.data(product, { self: `/products/${product.id}` });
+        // The created resource carries its own `self` link: the 201's `Location`
+        // header is copied from it, so the two match.
+        const self = `/products/${product.id}`;
+        return Handlers.data({ ...product, links: { self } }, { self });
       }),
     )
     .handle("update", ({ params, payload }) =>
@@ -1020,7 +1023,10 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         });
         store.orders.set(order.id, order);
         store.itemsByOrder.set(order.id, []);
-        return Handlers.data(order, { self: `/orders/${order.id}` });
+        // The created resource carries its own `self` link: the 201's `Location`
+        // header is copied from it, so the two match.
+        const self = `/orders/${order.id}`;
+        return Handlers.data({ ...order, links: { self } }, { self });
       }),
     )
     .handle("update", ({ params, payload }) =>

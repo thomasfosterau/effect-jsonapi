@@ -86,7 +86,7 @@ import * as Idempotency from "./Idempotency.js";
 import { isSurface } from "./Include.js";
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
 import { MEDIA_TYPE } from "./internal/media.js";
-import { ContentNegotiation, SchemaErrors } from "./Middleware.js";
+import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
@@ -697,10 +697,19 @@ export const list = <
  * `Idempotency.Middleware`, so the api needs an `Idempotency.layer(store)` —
  * see `docs/idempotency.md`.
  *
+ * A 201 answers with a `Location` header (§Creating Resources → 201 Created),
+ * copied verbatim from the created resource's `data.links.self` — or, when it
+ * has none, the document's top-level `links.self` — by the attached
+ * `Middleware.CreatedLocation`, so the two match by construction. Give the
+ * created resource a `links.self` (as the example's document does) and both
+ * the header and the match follow; with neither link the header is omitted,
+ * and a create answering another `status` is left untouched. The middleware
+ * sits inside `Idempotency.Middleware`, so a replay keeps the header.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { ApiError, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { ApiError, Endpoint, Group, Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
@@ -715,6 +724,17 @@ export const list = <
  *   Article,
  *   // POST /articles → 201, body { data: { type, attributes } }
  *   Endpoint.create(Article, { errors: [TitleTaken] })
+ * )
+ *
+ * // The handler answers with the created resource carrying its own `self`
+ * // link; the 201's `Location` header is copied from it: `/articles/1`.
+ * const createdDocument = Handlers.data(
+ *   Article.make({
+ *     id: Article.Id.make("1"),
+ *     attributes: { title: "Hello", body: "World" },
+ *     links: { self: "/articles/1" }
+ *   }),
+ *   { self: "/articles/1" }
  * )
  *
  * // …or with a flat command-input body: { title, body }
@@ -825,7 +845,10 @@ export const create = <
       },
     )
       .middleware(ContentNegotiation)
-      .middleware(SchemaErrors),
+      .middleware(SchemaErrors)
+      // Before `Idempotency.applied`, so inside its middleware: the recorded
+      // 201 carries `Location`, and a replay returns it.
+      .middleware(CreatedLocation),
     options?.idempotency,
   );
 

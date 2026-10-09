@@ -117,7 +117,7 @@ Every module is a namespace export of the package root (`import { Resource } fro
 | `ServerErrors` | The server's error seam: the domain error catalogue and `ServerErrors.respond`. |
 | `Registry` | The handler registry and router (`Registry.webHandler`). |
 | `Negotiation` | The representation verdict for a host serving JSON:API on its page URLs. |
-| `Middleware` | Protocol middleware (`Middleware.layer`): content negotiation and schema errors. |
+| `Middleware` | Protocol middleware (`Middleware.layer`): content negotiation, schema errors and the create's `Location` header. |
 | `MediaType` | Media type annotation combinators for hand-rolled endpoints. |
 | `Atomic` | The [atomic operations extension](https://jsonapi.org/ext/atomic/). |
 | `Lid` | Local id (`lid`) resolution (`Lid.make`). |
@@ -635,6 +635,19 @@ const articles = Group.make(
 const Api = HttpApi.make("blog").add(articles);
 ```
 
+### The create's `Location` header
+
+A `201` from `Endpoint.create` carries a `Location` header naming the created resource (JSON:API v1.1 §Creating Resources → 201 Created, a SHOULD). Nothing in the handler sets it: the `Middleware.CreatedLocation` middleware the constructor attaches copies it, verbatim, from the document the endpoint encoded — the created resource's `data.links.self`, or, when the resource has none, the document's top-level `links.self` (a link object contributes its `href`). Give the created resource its own `self` link and the spec's MUST — when the resource carries `links.self`, it and `Location` match — holds by construction:
+
+```ts
+// In the `create` handler, once the new `article` is stored:
+const self = `/articles/${article.id}`;
+// 201, `Location: /articles/42`, and `data.links.self` the same URL
+return Effect.succeed(Handlers.data({ ...article, links: { self } }, { self }));
+```
+
+With neither link the header is omitted, and so is a link that isn't a URI-reference (a space, a control character or a non-ASCII character in it), rather than sent malformed. Only a `201` is touched: a create answering another [`status`](#overriding-the-write-status) is left alone, as is a response that already carries `Location`, and a body that isn't a JSON document (or isn't settled bytes) passes through unchanged rather than failing the request. The middleware sits inside `Idempotency.Middleware`, so a [replayed](#idempotent-writes-idempotency-key) `201` keeps its `Location`. `Middleware.layer`, `Middleware.layerWith` and `Middleware.layerHostNegotiated` all provide it, and `Registry.layer` / `Registry.webHandler` provide it beneath whatever `middleware` they are given; any other api that composes its own middleware set adds `Middleware.CreatedLocationLive`. The header is not declared on the endpoint, so the typed client does not surface it.
+
 ### Overriding the write payload
 
 `Endpoint.create` and `Endpoint.update` bind their request body to the resource's `createPayload` / `updatePayload` — the nested JSON:API envelope — which is what a spec-compliant client sends. Some apis deliberately keep a **flat** write contract instead: a command input carrying foreign-key ids or nested arrays that JSON:API's relationship-linkage model can't express, while still _answering_ with JSON:API documents.
@@ -1091,7 +1104,7 @@ const articles = Group.make(
 const people = Group.resource(Person, { idempotency: true });
 ```
 
-A retry carrying the same key gets the original response back **verbatim** — the same status, headers and body, plus `Idempotency-Replayed: true` — instead of running again. The same key carrying a _different_ request is a `422`, never a silent replay; a retry arriving while the original is still in flight is a `409`. Both are JSON:API error documents sourced at the header.
+A retry carrying the same key gets the original response back **verbatim** — the same status, headers (a create's `Location` among them) and body, plus `Idempotency-Replayed: true` — instead of running again. The same key carrying a _different_ request is a `422`, never a silent replay; a retry arriving while the original is still in flight is a `409`. Both are JSON:API error documents sourced at the header.
 
 This package stores nothing, so the application supplies the store — the same division `Lid.make()` draws:
 
@@ -1205,7 +1218,7 @@ import { HttpApiBuilder } from "effect/http-api"
 
 const ApiLive = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),
-  Layer.provide(Middleware.layer) // content negotiation + JSON:API 400s
+  Layer.provide(Middleware.layer) // content negotiation, JSON:API 400s, a 201's `Location`
 )
 
 // rc.118 builds a fresh router per entrypoint: serve the API layer through
@@ -1243,7 +1256,7 @@ if (parsed._tag === "Failure") {
 
 If you _do_ adopt the endpoint constructors but your host negotiates content upstream — a framework hook serving JSON:API and HTML on one URL space — the constructors' `ContentNegotiation` middleware would run §5 a second time. That's redundant at best, and contradictory when the host deliberately admits something the spec's rules reject (an api that accepts `Accept: application/json` would see those requests 406'd after the hook let them through).
 
-`Middleware.layerHostNegotiated` is the drop-in replacement for `Middleware.layer` in that case: it satisfies the endpoints' `ContentNegotiation` requirement without performing any checks, leaving the host the single negotiating authority, and keeps `SchemaErrors` live so request validation still answers with JSON:API 400s. Nothing else about the endpoints changes.
+`Middleware.layerHostNegotiated` is the drop-in replacement for `Middleware.layer` in that case: it satisfies the endpoints' `ContentNegotiation` requirement without performing any checks, leaving the host the single negotiating authority, and keeps `SchemaErrors` live so request validation still answers with JSON:API 400s (and `CreatedLocation`, so a create's `201` still carries `Location`). Nothing else about the endpoints changes.
 
 ```ts
 HttpApiBuilder.layer(Api).pipe(
@@ -1266,6 +1279,7 @@ Layer.provide(
   Layer.mergeAll(
     Middleware.ContentNegotiationPassthrough,
     Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] }),
+    Middleware.CreatedLocationLive, // the create's `Location` header
   ),
 );
 ```
@@ -1864,6 +1878,7 @@ const query2 = ListArticles2.pipe(
 | Compound documents never inline unbounded relationships | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction |
 | `errors` array is never empty | non-empty check on the error document schema |
 | 200 / 201 / 204 status codes per operation | set by the endpoint constructors |
+| A 201 create carries `Location`, matching the created resource's `links.self` | `Endpoint.create` attaches `Middleware.CreatedLocation`, which copies the resource's (or the document's) `self` link into the header |
 | Pagination / sorting / sparse fieldsets / inclusion / filtering query families | typed query schemas derived from the resource definition |
 | Atomic operations extension: `atomic:operations` / `atomic:results` documents, lid refs, relationship operations | `Endpoint.operations` + `Atomic` schemas derived from resource definitions |
 | Profiles are negotiated, advertised in `jsonapi.profile`, and unknown ones ignored | the filter grammar and idempotency profiles publish URIs; negotiation ignores profiles it doesn't know |

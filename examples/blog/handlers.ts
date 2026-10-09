@@ -219,7 +219,10 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       });
       store.articles.set(article.id, article);
       store.articleComments.set(article.id, []);
-      return Effect.succeed(Handlers.data(article, { self: `/articles/${article.id}` }));
+      // The created resource carries its own `self` link: the 201's `Location`
+      // header is copied from it, so the two match.
+      const self = `/articles/${article.id}`;
+      return Effect.succeed(Handlers.data({ ...article, links: { self } }, { self }));
     })
     .handle("update", ({ params, payload }) =>
       loadArticle(params.id).pipe(

@@ -5,8 +5,9 @@
  * refused, and the web handler answers documents, negotiated 400s, and the
  * error seam's 404 / 409 through the flat presets end to end.
  */
-import { describe, expect, it } from "vite-plus/test";
-import { Context, Effect, Option, Schema } from "effect";
+import { describe, expect, it, onTestFinished } from "vite-plus/test";
+import { Context, Effect, Layer, Option, Schema } from "effect";
+import { HttpServerResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -275,6 +276,43 @@ describe("the router, over HTTP", () => {
     } finally {
       await dispose();
     }
+  });
+
+  // #236: `Endpoint.create` attaches `Middleware.CreatedLocation`, which
+  // `Options.middleware`'s type does not name — so a custom set built from the
+  // pre-#236 pieces type-checks, and the router supplies the live one.
+  const createPerson = (
+    middleware: Layer.Layer<Middleware.ContentNegotiation | Middleware.SchemaErrors>,
+  ) => {
+    const { handler, dispose } = Registry.webHandler(Api, families, { middleware });
+    onTestFinished(() => dispose());
+    const request = new Request("https://example.test/people", {
+      method: "POST",
+      headers: { "content-type": MEDIA_TYPE, accept: MEDIA_TYPE },
+      body: '{"name":"Bob"}',
+    });
+    return handler(Negotiation.requestForRouter(request), Context.make(Store, new Map()));
+  };
+
+  it("serves a create under a custom middleware set that does not provide CreatedLocation", async () => {
+    const response = await createPerson(
+      Layer.mergeAll(Middleware.ContentNegotiationPassthrough, Middleware.schemaErrorsLayer()),
+    );
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ data: { id: "2" } });
+  });
+
+  it("lets a CreatedLocation in the custom middleware set win over the router's", async () => {
+    const custom = Layer.succeed(Middleware.CreatedLocation, (httpEffect) =>
+      Effect.map(httpEffect, (response) =>
+        HttpServerResponse.setHeader(response, "location", "/custom/2"),
+      ),
+    );
+    const response = await createPerson(
+      Layer.mergeAll(Middleware.ContentNegotiationPassthrough, Middleware.SchemaErrorsLive, custom),
+    );
+    expect(response.status).toBe(201);
+    expect(response.headers.get("location")).toBe("/custom/2");
   });
 
   it("does not report an ApiError of its own once the boundary answered it", () => {
