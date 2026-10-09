@@ -1841,7 +1841,7 @@ Endpoint.list(Article, { page: Query.Page.offset({ maxLimit: 100, defaultLimit: 
 
 `Query.schema`'s `page` option composes the whole query and **nests** the decoded cursor under a `page` key. Some applications instead merge pagination **flat** into their own list-input struct — `{ limit, offset, …filters }` — because the rest of the application consumes that flat type directly and shouldn't learn a transport-shaped nesting.
 
-`Query.bracketPageKeys` is the standalone rename for exactly that case: given any struct carrying `offset` and `limit`, it re-keys **only those two encoded keys** to `page[offset]` / `page[limit]`, leaving the decoded type and every other field's wire key alone. The bracket family it produces is the same one `Handlers.offsetPaginationLinks` emits, so following a `next` link decodes straight back into the flat `{ offset, limit }` the list operation reads.
+`Query.bracketPageKeys` is the standalone rename for exactly that case: given any struct carrying `offset` and `limit`, it re-keys **only those two encoded keys** to `page[offset]` / `page[limit]`, leaving the decoded type and every other field's wire key alone. The bracket family it produces is the same one `Handlers.offsetPaginationLinks` emits, so following a `next` link decodes straight back into the flat `{ offset, limit }` the list operation reads. A rejected value is reported under the name the request sent: `?page[limit]=abc` is a 400 with `source.parameter: "page[limit]"`, not the decoded `limit`, and the same holds for any property `Schema.encodeKeys` renames.
 
 ```ts
 const ListArticles = Schema.Struct({

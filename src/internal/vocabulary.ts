@@ -24,7 +24,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
-import { declaredNames } from "./declaredQuery.js";
+import { declaredNames, wireProperties } from "./declaredQuery.js";
 
 /** The annotation key. Namespaced so it can never collide with a consumer's. */
 const VOCABULARY_ANNOTATION = "~@thomasfosterau/effect-jsonapi/vocabulary";
@@ -188,13 +188,15 @@ const drawsOnlyFromEmpty = (
   });
 
 // The schemas a query decodes its wire parameter `name` with, each read on
-// its decoded side. On a struct that is its property of that name, or of the
-// family's name (`Query.schema` nests every `fields[TYPE]` under `fields`),
-// or, when it has neither but its encoded side declares `name`, every
-// property whose name that side does not declare: one of them is the
-// property the struct's encoding renamed to `name` (`Schema.encodeKeys`),
-// and the AST does not say which. Read on every member of a union and
-// through a suspended schema.
+// its decoded side. On a struct that is the property its encoding sends
+// under `name` (`wireProperties`), whatever its decoded name. Where the
+// encoding does not settle that, it is among the properties the encoding
+// does not settle: the one of that name, or of the family's name
+// (`Query.schema` nests every `fields[TYPE]` under `fields`), or, when it has
+// neither but its encoded side declares `name`, every such property whose
+// name that side does not declare, one of which the struct's encoding
+// renamed to `name`. Read on every member of a union and through a
+// suspended schema.
 const propertiesFor = (
   ast: SchemaAST.AST,
   name: string,
@@ -204,16 +206,23 @@ const propertiesFor = (
   if (SchemaAST.isObjects(ast)) {
     const decoded = (signatures: ReadonlyArray<SchemaAST.PropertySignature>) =>
       Arr.map(signatures, (signature) => SchemaAST.toType(signature.type));
-    const named = Arr.filter(
+    const settled = wireProperties(ast);
+    const sent = Arr.filter(settled, (property) => property.wire === name);
+    if (Arr.isReadonlyArrayNonEmpty(sent)) {
+      return decoded(Arr.map(sent, ({ property }) => property));
+    }
+    const unsettled = Arr.filter(
       ast.propertySignatures,
+      (signature) => !Arr.some(settled, ({ property }) => property === signature),
+    );
+    const named = Arr.filter(
+      unsettled,
       (signature) => signature.name === name || signature.name === family,
     );
     if (Arr.isReadonlyArrayNonEmpty(named)) return decoded(named);
     const wire = Option.getOrElse(declaredNames(ast), (): ReadonlyArray<string> => []);
     return wire.includes(name)
-      ? decoded(
-          Arr.filter(ast.propertySignatures, (signature) => !wire.includes(String(signature.name))),
-        )
+      ? decoded(Arr.filter(unsettled, (signature) => !wire.includes(String(signature.name))))
       : [];
   }
   if (SchemaAST.isUnion(ast)) {
@@ -239,14 +248,16 @@ const propertiesFor = (
  * other family is read whole.
  *
  * Reads the property the wire parameter decodes into and nothing else, so a
- * vocabulary under another parameter never counts: the property named after
- * the wire parameter or its family, or, where the query's encoding renames
- * another property to the wire name (to the family's name for any family but
- * `fields`), every property the wire does not name. True only when every
- * such property, in every member of a union query, draws its values from
- * empty vocabularies alone; a property that publishes no vocabulary
- * (`Query.IncludeList`, a custom codec) or a non-empty one anywhere admits a
- * value, and so does an endpoint whose decoded query has no such property.
+ * vocabulary under another parameter never counts: the property the query's
+ * encoding sends under the wire name (`wireProperties`), whatever its
+ * decoded name. Where the encoding does not settle that, it reads, among the
+ * properties it does not settle, the one named after the wire parameter or
+ * its family, or, where the encoded side declares the wire name, every one
+ * the wire does not name. True only when every such property, in every
+ * member of a union query, draws its values from empty vocabularies alone;
+ * a property that publishes no vocabulary (`Query.IncludeList`, a custom
+ * codec) or a non-empty one anywhere admits a value, and so does an endpoint
+ * whose decoded query has no such property.
  *
  * @internal
  */

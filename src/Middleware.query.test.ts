@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Schema, SchemaTransformation, Tracer } from "effect";
+import { Effect, Layer, Match, Result, Schema, SchemaTransformation, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -1035,6 +1035,582 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
     const response = await serve(url);
     expect(response.status).toBe(400);
     expect(response.body).toEqual(unsupported(family));
+  });
+});
+
+describe("which property a renamed wire parameter decodes into (#305, #306 follow-up)", () => {
+  // `Schema.encodeKeys` renames a struct's properties on the wire inside an
+  // opaque transformation, so the support check and the 400's
+  // `source.parameter` both need to know which decoded property each wire
+  // parameter feeds. The answer must come from the encoding, never from the
+  // decoded names: a decoded `sort` may be sent as `include`, and a decoded
+  // `include` as `inc`.
+  const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
+  const Post = Resource.make("posts", {
+    attributes: { title: Schema.NonEmptyString },
+    relationships: { author: Relationship.one(() => Person) },
+  });
+  // No relationship and no attribute: every vocabulary derived from it is empty.
+  const Tag = Resource.make("tags", { attributes: {} });
+
+  const twoRenames = Schema.Struct({
+    paths: Schema.optionalKey(Query.Include(Tag)),
+    order: Schema.optionalKey(Query.Sort([])),
+  }).pipe(Schema.encodeKeys({ paths: "include", order: "sort" }));
+
+  const endpoints = {
+    // The wire `include` decodes into the decoded `sort`, a non-empty
+    // vocabulary; the wire `sort` into `x`, an `include` codec.
+    "include-into-sort": Schema.Struct({
+      sort: Schema.optionalKey(Query.Include(Post)),
+      x: Schema.optionalKey(Query.Include(Tag)),
+    }).pipe(Schema.encodeKeys({ sort: "include", x: "sort" })),
+    "two-renames": twoRenames,
+    // As above, with both properties required, as the review spelled it.
+    "two-renames-required": Schema.Struct({
+      paths: Query.Include(Tag),
+      order: Query.Sort([]),
+    }).pipe(Schema.encodeKeys({ paths: "include", order: "sort" })),
+    // A decoded `include` sent as `inc`, and another property sent as `include`.
+    "include-sent-elsewhere": Schema.Struct({
+      include: Schema.optionalKey(Query.Include(Post)),
+      paths: Schema.optionalKey(Query.Include(Tag)),
+    }).pipe(Schema.encodeKeys({ include: "inc", paths: "include" })),
+    swap: Schema.Struct({
+      include: Schema.optionalKey(Query.Include(Post)),
+      inc: Schema.optionalKey(Query.Include(Tag)),
+    }).pipe(Schema.encodeKeys({ include: "inc", inc: "include" })),
+    // The second member declares no `include`, so it reads no property.
+    "union-of-renamed": Schema.Union([
+      Schema.Struct({
+        paths: Schema.optionalKey(Query.Include(Tag)),
+        other: Schema.optionalKey(Query.Include(Post)),
+      }).pipe(Schema.encodeKeys({ paths: "include", other: "inc" })),
+      Schema.Struct({ q: Schema.optionalKey(Schema.String) }),
+    ]),
+    "suspended-renames": Schema.suspend(() => twoRenames),
+    "renamed-record": Schema.Struct({
+      paths: Schema.optionalKey(Schema.Record(Schema.String, Query.Include(Tag))),
+      other: Schema.optionalKey(Query.Include(Post)),
+    }).pipe(Schema.encodeKeys({ paths: "include", other: "inc" })),
+    // A rename to an array-index name reorders the wire struct: the wire
+    // `include` is still the decoded `paths`, never the decoded `include`,
+    // which is sent as `0`.
+    "index-rename": Schema.Struct({
+      include: Schema.optionalKey(Query.Include(Post)),
+      paths: Query.Include(Tag),
+      order: Query.Sort(["title"]),
+    }).pipe(Schema.encodeKeys({ include: "0", paths: "include" })),
+    // Two renamed fieldsets, one of them empty (#313's type-aware path).
+    "renamed-fieldsets": Schema.Struct({
+      tagFields: Schema.optionalKey(Query.Fieldset(Tag)),
+      personFields: Schema.optionalKey(Query.Fieldset(Person)),
+    }).pipe(Schema.encodeKeys({ tagFields: "fields[tags]", personFields: "fields[people]" })),
+    // #305's reproduction, with a non-empty vocabulary.
+    "renamed-include": Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) }).pipe(
+      Schema.encodeKeys({ paths: "include" }),
+    ),
+    "required-renamed-include": Schema.Struct({ paths: Query.Include(Post) }).pipe(
+      Schema.encodeKeys({ paths: "include" }),
+    ),
+    "two-nonempty-renames": Schema.Struct({
+      paths: Schema.optionalKey(Query.Include(Post)),
+      order: Schema.optionalKey(Query.Sort(["title"])),
+    }).pipe(Schema.encodeKeys({ paths: "include", order: "sort" })),
+    // `NonEmptyString` keeps its check on the encoded side, so an empty value
+    // fails on the wire, under the wire name; `FiniteFromString` fails after
+    // the rename, under the decoded one.
+    "swapped-scalars": Schema.Struct({
+      a: Schema.NonEmptyString,
+      b: Schema.FiniteFromString,
+    }).pipe(Schema.encodeKeys({ a: "b", b: "a" })),
+    "suspended-renamed-include": Schema.suspend(() =>
+      Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) }).pipe(
+        Schema.encodeKeys({ paths: "include" }),
+      ),
+    ),
+    "renamed-fieldset": Schema.Struct({
+      personFields: Schema.optionalKey(Query.Fieldset(Person)),
+    }).pipe(Schema.encodeKeys({ personFields: "fields[people]" })),
+    "bracketed-page": Query.bracketPageKeys(
+      Schema.Struct({ ...Query.Page.offset({ maxLimit: 100 }) }),
+    ),
+    // `Query.flatList` brackets `page[…]` and the listed `filter[…]` keys in
+    // one rename.
+    "flat-list": Query.flatList(
+      Schema.Struct({
+        ...Query.Page.offset({ maxLimit: 100 }),
+        status: Schema.optionalKey(Schema.Literals(["open", "closed"])),
+      }),
+      { filters: ["status"] },
+    ),
+    // A passthrough between two structs that list the same names in another
+    // order, every wire property carrying the AST a decoded one encodes to:
+    // nothing is renamed, so each wire name is its own decoded name.
+    "passthrough-reordered": Schema.Struct({
+      sort: Schema.toEncoded(Query.Include(Post)),
+      include: Schema.toEncoded(Query.Include(Post)),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ include: Query.Include(Post), sort: Query.Sort(["title"]) }),
+        SchemaTransformation.passthrough(),
+      ),
+    ),
+    "passthrough-reordered-empty": Schema.Struct({
+      sort: Schema.toEncoded(Query.Include(Tag)),
+      include: Schema.toEncoded(Query.Include(Tag)),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ include: Query.Include(Tag), sort: Query.Sort(["title"]) }),
+        SchemaTransformation.passthrough(),
+      ),
+    ),
+    // A check on the renamed struct that reports a property by its decoded
+    // name: the issue tree is the struct's composite, the check, then a
+    // pointer, or a composite of pointers when the check reports several.
+    "checked-rename": Schema.Struct({ count: Schema.optionalKey(Schema.FiniteFromString) })
+      .pipe(Schema.encodeKeys({ count: "page[size]" }))
+      .check(
+        Schema.makeFilter(
+          ({ count }) =>
+            Match.value(count).pipe(
+              Match.when(undefined, () => undefined),
+              Match.when(7, () => false),
+              Match.when(
+                (n) => n > 100,
+                () => [
+                  { path: ["count"], issue: "too big" },
+                  { path: ["count"], issue: "far too big" },
+                ],
+              ),
+              Match.when(
+                (n) => n > 10,
+                () => ({ path: ["count"], issue: "too big" }),
+              ),
+              Match.orElse(() => undefined),
+            ),
+          {
+            identifier: "pageSizeCap",
+            title: "page size cap",
+            description: "rejects a page size above 10, and the size 7 whole",
+          },
+        ),
+        // A check with a message of its own is reported whole, under it.
+        Schema.makeFilter(
+          ({ count }) => (count === 9 ? { path: ["count"], issue: "nine" } : undefined),
+          {
+            identifier: "notNine",
+            title: "not nine",
+            description: "rejects a page size of 9",
+            message: "not nine",
+          },
+        ),
+      ),
+    // `include` and `inc` each fill `paths` when sent alone, so a value
+    // rejected there may have come from either: neither is its wire name.
+    "include-or-inc": Schema.Struct({
+      include: Schema.optionalKey(Schema.toEncoded(Query.Include(Post))),
+      inc: Schema.optionalKey(Schema.toEncoded(Query.Include(Post))),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) }),
+        SchemaTransformation.transform({
+          decode: ({ include, inc }) => {
+            const paths = include ?? inc;
+            return paths === undefined ? {} : { paths };
+          },
+          encode: ({ paths }) => (paths === undefined ? {} : { include: paths }),
+        }),
+      ),
+    ),
+    // Both members decode a `paths`; only the first renames it on the wire.
+    "union-of-branches": Schema.Union([
+      Schema.Struct({ paths: Query.Include(Post) }).pipe(Schema.encodeKeys({ paths: "include" })),
+      Schema.Struct({ paths: Query.Include(Post) }),
+    ]),
+  } as const;
+  type Name = keyof typeof endpoints;
+  const endpoint = <const N extends Name>(name: N) =>
+    HttpApiEndpoint.get(name, `/${name}`, {
+      query: endpoints[name],
+      success: Schema.Unknown,
+    }).middleware(Middleware.SchemaErrors);
+  const RenamedApi = HttpApi.make("renamed").add(
+    HttpApiGroup.make("renamed").add(
+      endpoint("include-into-sort"),
+      endpoint("two-renames"),
+      endpoint("two-renames-required"),
+      endpoint("include-sent-elsewhere"),
+      endpoint("swap"),
+      endpoint("union-of-renamed"),
+      endpoint("suspended-renames"),
+      endpoint("renamed-record"),
+      endpoint("index-rename"),
+      endpoint("renamed-fieldsets"),
+      endpoint("renamed-include"),
+      endpoint("required-renamed-include"),
+      endpoint("two-nonempty-renames"),
+      endpoint("swapped-scalars"),
+      endpoint("suspended-renamed-include"),
+      endpoint("renamed-fieldset"),
+      endpoint("bracketed-page"),
+      endpoint("flat-list"),
+      endpoint("union-of-branches"),
+      endpoint("passthrough-reordered"),
+      endpoint("passthrough-reordered-empty"),
+      endpoint("checked-rename"),
+      endpoint("include-or-inc"),
+    ),
+  );
+  const echo = ({ query }: { readonly query: unknown }) => Effect.succeed(query);
+  const RenamedLive = HttpApiBuilder.group(RenamedApi, "renamed", (handlers) =>
+    handlers.handleAll({
+      "include-into-sort": echo,
+      "two-renames": echo,
+      "two-renames-required": echo,
+      "include-sent-elsewhere": echo,
+      swap: echo,
+      "union-of-renamed": echo,
+      "suspended-renames": echo,
+      "renamed-record": echo,
+      "index-rename": echo,
+      "renamed-fieldsets": echo,
+      "renamed-include": echo,
+      "required-renamed-include": echo,
+      "two-nonempty-renames": echo,
+      "swapped-scalars": echo,
+      "suspended-renamed-include": echo,
+      "renamed-fieldset": echo,
+      "bracketed-page": echo,
+      "flat-list": echo,
+      "union-of-branches": echo,
+      "passthrough-reordered": echo,
+      "passthrough-reordered-empty": echo,
+      "checked-rename": echo,
+      "include-or-inc": echo,
+    }),
+  );
+
+  const serve = async (url: string) => {
+    const appLayer = HttpApiBuilder.layer(RenamedApi).pipe(
+      Layer.provide(RenamedLive),
+      Layer.provide(Middleware.SchemaErrorsLive),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(new Request(`http://localhost${url}`)).finally(dispose);
+    return { status: response.status, body: decodeJson(await response.text()) };
+  };
+
+  const unsupported = (parameter: string) => ({
+    errors: [
+      {
+        status: "400",
+        code: "bad_request",
+        title: "Bad Request",
+        detail: expect.stringContaining(`does not support the "${parameter}" parameter`),
+        source: { parameter },
+      },
+    ],
+  });
+
+  describe("the support check reads the property the wire parameter decodes into", () => {
+    it.each([
+      // The review's should-fix: #306 dropped every property whose decoded
+      // name is on the wire, so the decoded `sort` was never read.
+      [
+        "a wire `include` decoded into `sort`",
+        "/include-into-sort?include=author",
+        { sort: ["author"] },
+      ],
+      [
+        "a wire `include` decoded into `sort`, an empty value",
+        "/include-into-sort?include=",
+        { sort: [] },
+      ],
+      ["the non-empty side of a swap", "/swap?inc=author", { include: ["author"] }],
+      [
+        "a decoded `include` sent under another name",
+        "/include-sent-elsewhere?inc=author",
+        { include: ["author"] },
+      ],
+      [
+        "the non-empty one of two renamed fieldsets",
+        "/renamed-fieldsets?fields[people]=name",
+        { personFields: ["name"] },
+      ],
+    ] as const)("supports %s", async (_, url, query) => {
+      const response = await serve(url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(query);
+    });
+
+    it.each([
+      ["`include`, one of two renames", "/two-renames?include=", "include"],
+      ["`sort`, one of two renames", "/two-renames?sort=", "sort"],
+      ["`include`, one of two required renames", "/two-renames-required?include=", "include"],
+      ["`sort`, one of two required renames", "/two-renames-required?sort=title", "sort"],
+      // #306's known limit: the decoded `include` is not the wire `include`.
+      [
+        "an `include` beside a decoded `include` sent elsewhere",
+        "/include-sent-elsewhere?include=author",
+        "include",
+      ],
+      ["the empty side of a swap", "/swap?include=author", "include"],
+      ["a renamed `include` in a union", "/union-of-renamed?include=author", "include"],
+      ["a renamed `sort` in a suspended query", "/suspended-renames?sort=", "sort"],
+      ["a renamed record of empty `include` codecs", "/renamed-record?include=", "include"],
+      [
+        "an `include` beside a decoded `include` renamed to an array index",
+        "/index-rename?include=&order=title",
+        "include",
+      ],
+      [
+        "the empty one of two renamed fieldsets",
+        "/renamed-fieldsets?fields[tags]=",
+        "fields[tags]",
+      ],
+      // Read by place, the wire `include` was the decoded `sort`.
+      [
+        "an `include` a passthrough lists in another order",
+        "/passthrough-reordered-empty?include=&sort=title",
+        "include",
+      ],
+    ] as const)("rejects an empty vocabulary as unsupported: %s", async (_, url, parameter) => {
+      const response = await serve(url);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual(unsupported(parameter));
+    });
+  });
+
+  describe("`source.parameter` names the wire parameter (#305)", () => {
+    const rejected = (parameter: string, detail: string) => ({
+      status: "400",
+      code: "bad_request",
+      title: "Bad Request",
+      detail,
+      source: { parameter },
+    });
+    // A rejection the renderer cannot place on a parameter.
+    const whole = {
+      status: "400",
+      code: "bad_request",
+      title: "Bad Request",
+      detail: "Request query failed validation",
+      meta: { detail: "Request query failed validation" },
+    };
+    // A rejected `include` path, with the vocabulary it renders as `meta`.
+    const includable = (parameter: string) => ({
+      ...rejected(parameter, 'Expected "author"'),
+      meta: { includablePaths: ["author"] },
+    });
+
+    it.each([
+      [
+        "an `include` renamed from `paths`",
+        "/renamed-include?include=nope",
+        [includable("include")],
+      ],
+      [
+        "a renamed `include` in a suspended query",
+        "/suspended-renamed-include?include=nope",
+        [includable("include")],
+      ],
+      [
+        "a required renamed `include`, missing",
+        "/required-renamed-include",
+        [rejected("include", "Missing key")],
+      ],
+      [
+        "`include`, one of two renames",
+        "/two-nonempty-renames?include=nope",
+        [includable("include")],
+      ],
+      [
+        "`sort`, one of two renames",
+        "/two-nonempty-renames?sort=nope",
+        [{ ...rejected("sort", 'Expected "title"'), meta: { sortableFields: ["title"] } }],
+      ],
+      // The decoded `include` is sent as `inc`: the name the client used wins.
+      ["a swap", "/swap?inc=nope", [includable("inc")]],
+      // Decoded `b` is the wire `a`.
+      [
+        "a value rejected after the rename",
+        "/swapped-scalars?a=x&b=y",
+        [rejected("a", "Expected a finite number")],
+      ],
+      // Rejected on the wire, before the rename: already the wire name.
+      [
+        "a value rejected before the rename",
+        "/swapped-scalars?a=1&b=",
+        [rejected("b", "Expected a value with a length of at least 1")],
+      ],
+      [
+        "a renamed fieldset",
+        "/renamed-fieldset?fields[people]=nope",
+        [rejected("fields[people]", 'Expected "name"')],
+      ],
+      // Each member's failure is named by that member's own wire name.
+      [
+        "a union whose members send the same property under different names",
+        "/union-of-branches?include=nope&paths=nope",
+        [includable("include"), includable("paths")],
+      ],
+      [
+        "a page member bracketed by `Query.bracketPageKeys`",
+        "/bracketed-page?page[limit]=abc",
+        [rejected("page[limit]", "Expected a finite number")],
+      ],
+      [
+        "a page member bracketed by `Query.flatList`",
+        "/flat-list?page[limit]=abc&filter[status]=open",
+        [rejected("page[limit]", "Expected a finite number")],
+      ],
+      // Read by place, the wire `include` was named `sort`, and the other way
+      // round.
+      [
+        "an `include` a passthrough lists in another order",
+        "/passthrough-reordered?include=nope&sort=title",
+        [includable("include")],
+      ],
+      [
+        "a `sort` a passthrough lists in another order",
+        "/passthrough-reordered?include=author&sort=nope",
+        [{ ...rejected("sort", 'Expected "title"'), meta: { sortableFields: ["title"] } }],
+      ],
+      // A check on the struct that points at a renamed property.
+      [
+        "a renamed property a struct check rejects",
+        "/checked-rename?page[size]=50",
+        [rejected("page[size]", "too big")],
+      ],
+      [
+        "a renamed property a struct check rejects twice",
+        "/checked-rename?page[size]=500",
+        [rejected("page[size]", "too big"), rejected("page[size]", "far too big")],
+      ],
+      // Read off one probe of both names, `paths` was paired with `include`,
+      // a parameter this request never sent. Neither name is shown to be
+      // `paths`'s, so it keeps its decoded name, as on trunk.
+      [
+        "a property either of two wire parameters fills",
+        "/include-or-inc?inc=nope",
+        [includable("paths")],
+      ],
+      // Neither names a property, so each is the generic rejection, as
+      // before: the formatter reports a check with a message of its own
+      // whole, at the struct, never at the property it points to.
+      ["a struct check that rejects the whole query", "/checked-rename?page[size]=7", [whole]],
+      ["a struct check with a message of its own", "/checked-rename?page[size]=9", [whole]],
+    ] as const)("%s", async (_, url, errors) => {
+      const response = await serve(url);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ errors });
+    });
+
+    // A host that decodes the query itself renders the same document.
+    it("on a direct decode, through `schemaErrorDocument`", () => {
+      const result = Schema.decodeUnknownResult(endpoints.swap)({ inc: "nope" });
+      expect(
+        Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
+      ).toEqual({ errors: [includable("inc")] });
+    });
+
+    // A struct check's pointer below a renamed property: only its first key
+    // is the property, renamed; the rest is inside the property's value.
+    it("a struct check that points below a renamed property", () => {
+      const fieldsets = Schema.Struct({
+        fieldsets: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+      })
+        .pipe(Schema.encodeKeys({ fieldsets: "fields" }))
+        .check(
+          Schema.makeFilter(
+            ({ fieldsets: sets }) =>
+              sets?.["people"] === "secret"
+                ? { path: ["fieldsets", "people"], issue: "not public" }
+                : undefined,
+            {
+              identifier: "publicFieldsets",
+              title: "public fieldsets",
+              description: "rejects the secret fieldset of people",
+            },
+          ),
+        );
+      const result = Schema.decodeUnknownResult(fieldsets)({ fields: { people: "secret" } });
+      expect(
+        Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
+      ).toEqual({ errors: [rejected("fields[people]", "not public")] });
+    });
+
+    // The renamed struct is the source of another transformation: its
+    // decoded side's issue sits under the outer schema's `Encoding`.
+    it("a renamed struct's issue under another schema's encoding", () => {
+      const renamed = Schema.Struct({ paths: Query.Include(Post) }).pipe(
+        Schema.encodeKeys({ paths: "include" }),
+      );
+      const outer = renamed.pipe(
+        Schema.decodeTo(Schema.toType(renamed), SchemaTransformation.passthrough()),
+      );
+      const result = Schema.decodeUnknownResult(outer)({ include: "nope" });
+      expect(
+        Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
+      ).toEqual({ errors: [includable("include")] });
+    });
+
+    // HttpApi builds an endpoint's codecs once, so the renamed struct's AST
+    // is the same on every request it rejects: the query's own decode runs
+    // on one set of probes, not on a set per rejected request.
+    it("probes a renamed query once, however many requests it rejects", async () => {
+      const decoded: Array<{ readonly include?: string }> = [];
+      const Wire = Schema.Struct({ include: Schema.optionalKey(Schema.String) });
+      const Paths = Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) });
+      const counted = Wire.pipe(
+        Schema.decodeTo(
+          Paths,
+          SchemaTransformation.transform<typeof Paths.Encoded, typeof Wire.Type>({
+            decode: (wire) => {
+              decoded.push(wire);
+              return wire.include === undefined ? {} : { paths: wire.include };
+            },
+            // `Query.Include` encodes a list as one comma-separated value.
+            encode: ({ paths }) => (paths === undefined ? {} : { include: String(paths) }),
+          }),
+        ),
+      );
+      const CountedApi = HttpApi.make("counted").add(
+        HttpApiGroup.make("counted").add(
+          HttpApiEndpoint.get("counted", "/counted", {
+            query: counted,
+            success: Schema.Unknown,
+          }).middleware(Middleware.SchemaErrors),
+        ),
+      );
+      const CountedLive = HttpApiBuilder.group(CountedApi, "counted", (handlers) =>
+        handlers.handle("counted", echo),
+      );
+      const { dispose, handler } = HttpRouter.toWebHandler(
+        HttpApiBuilder.layer(CountedApi).pipe(
+          Layer.provide(CountedLive),
+          Layer.provide(Middleware.SchemaErrorsLive),
+          Layer.provide(platformLayer),
+        ),
+      );
+      const reject = async () => {
+        const response = await handler(new Request("http://localhost/counted?include=nope"));
+        return { status: response.status, body: decodeJson(await response.text()) };
+      };
+      // Every decode but of the requests' own `nope` is a probe.
+      const probes = () => decoded.filter(({ include }) => include !== "nope").length;
+      const rejectFive = async () => {
+        expect(await reject()).toEqual({ status: 400, body: { errors: [includable("include")] } });
+        // One set: the full probe, and the one wire name's own.
+        expect(probes()).toBe(2);
+        const more = await Promise.all([reject(), reject(), reject(), reject()]);
+        expect(more.map(({ status }) => status)).toEqual([400, 400, 400, 400]);
+        expect(probes()).toBe(2);
+      };
+      await rejectFive().finally(dispose);
+    });
   });
 });
 
