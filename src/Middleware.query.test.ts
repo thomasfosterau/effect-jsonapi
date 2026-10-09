@@ -272,6 +272,57 @@ describe("allowedQueryParameters entries", () => {
     ).toThrow('List its base name "lang"');
   });
 
+  // A bracketed member of a family the specification defines: listing its
+  // base name would be refused in turn, so the advice is the family's own.
+  it.each(["page[size]", "filter[status]", "fields[articles]", "include[]", "sort[x][y]"])(
+    "refuses %j as a member of a specification family, not by its base name",
+    (entry) => {
+      const family = entry.slice(0, entry.indexOf("["));
+      const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] });
+      expect(build).toThrow(
+        expect.objectContaining({
+          _tag: "InvalidAllowedQueryParameter",
+          parameter: entry,
+          message: expect.stringContaining(
+            `"${entry}" is a member of the "${family}" query parameter family JSON:API defines`,
+          ),
+        }),
+      );
+      expect(build).toThrow("declaring it in its query schema");
+      expect(build).toThrow("remove the entry");
+      expect(build).not.toThrow("List its base name");
+      expect(() => Middleware.layerWith({ allowedQueryParameters: [entry] })).toThrow(
+        `"${entry}" is a member of the "${family}" query parameter family`,
+      );
+      expect(() =>
+        Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] }),
+      ).toThrow(`"${entry}" is a member of the "${family}" query parameter family`);
+    },
+  );
+
+  // The allow-list is matched against the decoded parameter names, so a
+  // percent-encoded spelling of a bracket names nothing the check ever sees:
+  // its `%` makes it an implementation-specific name.
+  it("refuses a percent-encoded `page%5Bsize%5D` as a name with any other character", () => {
+    const build = () =>
+      Middleware.schemaErrorsLayer({ allowedQueryParameters: ["page%5Bsize%5D"] });
+    expect(build).toThrow(
+      expect.objectContaining({
+        _tag: "InvalidAllowedQueryParameter",
+        parameter: "page%5Bsize%5D",
+      }),
+    );
+    expect(build).toThrow("needs no entry");
+  });
+
+  // Family names are case-sensitive: `Page` is not the specification's
+  // `page`, but an implementation-specific name the check never rejects.
+  it.each(["Page", "Page[size]"])("refuses the mixed-case %j as needing no entry", (entry) => {
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] });
+    expect(build).toThrow("needs no entry");
+    expect(build).not.toThrow("query parameter family JSON:API defines");
+  });
+
   it("says a name with any other character needs no entry", () => {
     const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: ["Lang"] });
     expect(build).toThrow("needs no entry");
@@ -379,6 +430,9 @@ describe("Middleware.checkQueryParameters", () => {
       ),
     );
     expect(check(["fields[people]"], { declared: ["fields["] })).toBeUndefined();
+    expect(check(["fields"], { declared: ["fields["] })?.errors).toEqual([
+      expect.objectContaining({ source: { parameter: "fields" } }),
+    ]);
   });
 
   it("rejects `include` and `sort` unless declared (#261)", () => {
@@ -1881,6 +1935,22 @@ describe("`fields`, `page` and `filter` an endpoint does not support (#261)", ()
     expect(queries).toEqual([{}]);
   });
 
+  // The check reads the decoded parameter names, so a percent-encoded
+  // bracket is the same parameter as a literal one.
+  it("rejects a percent-encoded `page%5Bsize%5D` under its decoded name", async () => {
+    const response = await serve("/posts/1?page%5Bsize%5D=10");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ errors: [unsupported("page[size]")] });
+  });
+
+  // Family names are case-sensitive: `Page[size]` is an implementation-
+  // specific parameter, which the endpoint ignores.
+  it("ignores a mixed-case `Page[size]`, an implementation-specific name", async () => {
+    queries.length = 0;
+    expect((await serve("/posts/1?Page[size]=10&FILTER[title]=x")).status).toBe(200);
+    expect(queries).toEqual([{}]);
+  });
+
   // The same precedence as `include` / `sort`: `SchemaErrors` is the outer
   // middleware, so the 400 wins over a 406 or 415.
   describe("is decided before content negotiation", () => {
@@ -2066,6 +2136,7 @@ describe("`fields`, `page` and `filter` an endpoint does not support (#261)", ()
         ["fields[tags]"],
       ],
       ["`page` beside an open `fields[` record", "/open-fieldsets?page[limit]=1", ["page[limit]"]],
+      ["a bare `fields` beside an open `fields[` record", "/open-fieldsets?fields=x", ["fields"]],
     ] as const)("rejects %s", async (_, url, parameters) => {
       const response = await serveHandBuilt(url);
       expect(response.status).toBe(400);
