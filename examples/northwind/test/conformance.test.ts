@@ -9,9 +9,22 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Predicate } from "effect";
+import { HttpApiTest } from "effect/http-api";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
-import { discardOrder, discardProduct, NorthwindLive } from "../handlers.js";
+import {
+  alfreds,
+  beverages,
+  chai,
+  discardOrder,
+  discardProduct,
+  exotic,
+  nancy,
+  NorthwindLive,
+  order10248,
+  speedy,
+  westboro,
+} from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
@@ -29,15 +42,22 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   ["profile/document/jsonapi-member", "#103"],
 ];
 
+/**
+ * One id per resource type, each taken from a record the example's store is
+ * seeded with, so every rule that resolves `/:type/:id` probes a resource the
+ * example holds rather than a 404. Northwind's ids are not uniform — orders
+ * start at 10248 and territories are zip codes — so a hard-coded `"1"` for
+ * every type silently probed absent resources (#301).
+ */
 const IDS = {
-  categories: "1",
-  suppliers: "1",
-  shippers: "1",
-  customers: "1",
-  territories: "1",
-  employees: "1",
-  products: "1",
-  orders: "1",
+  categories: beverages.id,
+  suppliers: exotic.id,
+  shippers: speedy.id,
+  customers: alfreds.id,
+  territories: westboro.id,
+  employees: nancy.id,
+  products: chai.id,
+  orders: order10248.id,
 };
 
 /**
@@ -57,8 +77,8 @@ const WRITES: Conformance.Options["writes"] = {
         discontinued: false,
       },
       relationships: {
-        category: { data: { type: "categories", id: "1" } },
-        supplier: { data: { type: "suppliers", id: "1" } },
+        category: { data: { type: "categories", id: IDS.categories } },
+        supplier: { data: { type: "suppliers", id: IDS.suppliers } },
       },
     }),
     update: () => ({ attributes: { unitsInStock: 10 } }),
@@ -74,8 +94,8 @@ const WRITES: Conformance.Options["writes"] = {
         shipCountry: "Australia",
       },
       relationships: {
-        customer: { data: { type: "customers", id: "1" } },
-        employee: { data: { type: "employees", id: "1" } },
+        customer: { data: { type: "customers", id: IDS.customers } },
+        employee: { data: { type: "employees", id: IDS.employees } },
       },
     }),
     update: () => ({ attributes: { shipCity: "Melbourne" } }),
@@ -94,11 +114,59 @@ const died = (run: Conformance.Report): ReadonlyArray<string> =>
     Predicate.isTagged(outcome, "Errored") ? [`${outcome.rule.id}: ${outcome.message}`] : [],
   );
 
-const report = await Effect.runPromise(
-  Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }).pipe(
-    Effect.provide(NorthwindLive),
-    Effect.scoped,
-  ) as Effect.Effect<Conformance.Report, never, never>,
+/**
+ * Each `IDS` entry fetched through its type's `get` endpoint, as the returned
+ * `data.id`, or `did not resolve: …` with the error when the fetch fails.
+ */
+const resolveSamples = Effect.fn("resolveSamples")(function* () {
+  const client = yield* HttpApiTest.groups(Api, [
+    "categories",
+    "suppliers",
+    "shippers",
+    "customers",
+    "territories",
+    "employees",
+    "products",
+    "orders",
+  ]);
+  const id = <A extends { readonly data: { readonly id: string } }, E, R>(
+    get: Effect.Effect<A, E, R>,
+  ) =>
+    get.pipe(
+      Effect.match({
+        onFailure: (error) => `did not resolve: ${String(error)}`,
+        onSuccess: (document): string => document.data.id,
+      }),
+    );
+  return yield* Effect.all(
+    {
+      categories: id(client.categories.get({ params: { id: IDS.categories }, query: {} })),
+      suppliers: id(client.suppliers.get({ params: { id: IDS.suppliers }, query: {} })),
+      shippers: id(client.shippers.get({ params: { id: IDS.shippers }, query: {} })),
+      customers: id(client.customers.get({ params: { id: IDS.customers }, query: {} })),
+      territories: id(client.territories.get({ params: { id: IDS.territories }, query: {} })),
+      employees: id(client.employees.get({ params: { id: IDS.employees }, query: {} })),
+      products: id(client.products.get({ params: { id: IDS.products }, query: {} })),
+      orders: id(client.orders.get({ params: { id: IDS.orders }, query: {} })),
+    },
+    { concurrency: 1 },
+  );
+});
+
+// The samples are resolved first, against the store as seeded, then the suite
+// runs against the same layer.
+const { report, resolved } = await Effect.runPromise(
+  Effect.all(
+    {
+      resolved: resolveSamples(),
+      report: Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }),
+    },
+    { concurrency: 1 },
+  ).pipe(Effect.provide(NorthwindLive), Effect.scoped) as Effect.Effect<
+    { readonly report: Conformance.Report; readonly resolved: Record<keyof typeof IDS, string> },
+    never,
+    never
+  >,
 );
 
 describe("northwind: JSON:API conformance", () => {
@@ -109,6 +177,37 @@ describe("northwind: JSON:API conformance", () => {
       died(report),
       `a rule died — a defect, not a finding\n${Conformance.format(report)}`,
     ).toEqual([]);
+  });
+
+  it("samples an id the example holds for every resource type", () => {
+    // An `ids` entry the example does not hold fails no rule: the read endpoints
+    // answer 404, and the rules that resolve `/:type/:id` see less of the api
+    // (#301). This is the direct guard: each sample fetched through its own
+    // `get` endpoint, independent of how the kit words anything in its report.
+    // Keyed by type, so the returned `data.id`s are compared with `IDS` entry by
+    // entry and a sample that does not resolve shows up under its type.
+    expect(resolved).toEqual(IDS);
+  });
+
+  it("sampled only resources the example holds: nothing it read answered 404", () => {
+    // A second line of defence behind the direct guard above, over what the kit
+    // itself read. An absent sample surfaces only in the notes of rules that
+    // passed and the reasons of rules that skipped, so this matches `404` in
+    // the kit's wording and checks nothing once that wording changes. It also
+    // leans on one rule for every type but orders: today only the skip reason
+    // of `spec/links/resource-self-dereferences` (no read endpoint carries a
+    // resource `links.self`) lists a 404 per sampled `/:type/:id`. Once a read
+    // endpoint carries `links.self`, that rule stops skipping, and an absent
+    // territory, say, would pass here unnoticed.
+    const remarks = report.outcomes.flatMap((outcome) => {
+      if (Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined) {
+        return [`${outcome.rule.id}: ${outcome.note}`];
+      }
+      return Predicate.isTagged(outcome, "Skipped")
+        ? [`${outcome.rule.id}: ${outcome.reason}`]
+        : [];
+    });
+    expect(remarks.filter((remark) => /\b404\b/.test(remark))).toEqual([]);
   });
 
   it("breaks exactly the rules that are already filed", () => {
