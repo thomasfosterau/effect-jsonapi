@@ -670,6 +670,24 @@ export const finding = (
 });
 
 /**
+ * A response's status, or why there was none, for a skip reason.
+ *
+ * @internal
+ */
+export const statusOf = (observation: Observation): string =>
+  observation.transportError === undefined
+    ? `${observation.status}`
+    : `no response (${observation.transportError})`;
+
+/**
+ * `true` when a response came back 2xx.
+ *
+ * @internal
+ */
+export const succeeded = (observation: Observation): boolean =>
+  observation.status >= 200 && observation.status < 300;
+
+/**
  * The observed status, content type and body excerpt, rendered for a finding's
  * `observed` line — the body is usually what explains the failure.
  *
@@ -742,6 +760,30 @@ export const identity = (resource: Readonly<Record<string, unknown>>): string | 
   const lid = resource["lid"];
   if (typeof lid === "string") return JSON.stringify(["lid", type, lid]);
   return undefined;
+};
+
+/**
+ * A resource as `type:id` for a finding's `observed`, naming the member
+ * `identity` keys it on: its `id` when that is a string, else its `lid` when
+ * that is — so a duplicate keyed on `lid` is not named by an `id` the
+ * comparison ignored. With neither a string, there is no key, and the label
+ * falls back to whichever of the two is present. A string member reads as
+ * itself; anything else through `Formatter.format`, because the server's JSON
+ * can put an object there and `String({"toString":1})` throws: naming a
+ * malformed resource must not kill the rule that reports it.
+ *
+ * @internal
+ */
+export const resourceLabel = (resource: {
+  readonly type?: unknown;
+  readonly id?: unknown;
+  readonly lid?: unknown;
+}): string => {
+  const { id, lid } = resource;
+  const member = Predicate.isString(id) ? id : Predicate.isString(lid) ? lid : (id ?? lid);
+  return Arr.map([resource.type, member], (value) =>
+    Predicate.isString(value) ? value : Formatter.format(value),
+  ).join(":");
 };
 
 /**

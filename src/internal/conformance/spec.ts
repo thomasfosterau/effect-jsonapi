@@ -16,7 +16,6 @@
 import {
   Array as Arr,
   Effect,
-  Formatter,
   HashMap,
   HashSet,
   Match,
@@ -28,6 +27,7 @@ import {
 } from "effect";
 import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
+import { linksEnumerateCollection } from "./pagination.js";
 import {
   atomicMediaType,
   type Context,
@@ -44,6 +44,7 @@ import {
   type Observation,
   parseMediaType,
   probeable,
+  resourceLabel,
   resourcesOf,
   type Role,
   type Rule,
@@ -51,6 +52,8 @@ import {
   settle,
   skip,
   sourceParametersOf,
+  statusOf,
+  succeeded,
   withQuery,
   type Outcome,
   type Payload,
@@ -578,28 +581,6 @@ const includedRequiresData: RuleImpl = {
           : [];
       },
     })(ctx),
-};
-
-/**
- * A resource as `type:id` for a finding's `observed`, naming the member
- * `identity` keys it on: its `id` when that is a string, else its `lid` when
- * that is — so a duplicate keyed on `lid` is not named by an `id` the
- * comparison ignored. With neither a string, there is no key, and the label
- * falls back to whichever of the two is present. A string member reads as
- * itself; anything else through `Formatter.format`, because the server's JSON
- * can put an object there and `String({"toString":1})` throws: naming a
- * malformed resource must not kill the rule that reports it.
- */
-const resourceLabel = (resource: {
-  readonly type?: unknown;
-  readonly id?: unknown;
-  readonly lid?: unknown;
-}): string => {
-  const { id, lid } = resource;
-  const member = Predicate.isString(id) ? id : Predicate.isString(lid) ? lid : (id ?? lid);
-  return Arr.map([resource.type, member], (value) =>
-    Predicate.isString(value) ? value : Formatter.format(value),
-  ).join(":");
 };
 
 /**
@@ -1262,16 +1243,6 @@ const attributeNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> =
   const attributes = data.find(isRecord)?.["attributes"];
   return isRecord(attributes) ? Rec.keys(attributes) : [];
 };
-
-/** A response's status, or why there was none, for a skip reason. */
-const statusOf = (observation: Observation): string =>
-  observation.transportError === undefined
-    ? `${observation.status}`
-    : `no response (${observation.transportError})`;
-
-/** `true` when a response came back 2xx. */
-const succeeded = (observation: Observation): boolean =>
-  observation.status >= 200 && observation.status < 300;
 
 /**
  * Settles a rule on the answer to `?<parameter>=…` sent to an endpoint that
@@ -2116,6 +2087,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   unsupportedSort,
   includeUnsupportedEndpoint,
   sortUnsupportedEndpoint,
+  linksEnumerateCollection,
   resourceNotFound,
   createResponseDocument,
   createLocation,
