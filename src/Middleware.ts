@@ -973,16 +973,17 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * `?include=` too). So is one the schema declares with an empty vocabulary,
  * which supports no value: `include: { paths: [] }`, `include: true` on a
  * resource with no relationships, `sort: true` on one with no attributes.
- * Only the schema's own decoded `include` / `sort` property counts, read
- * through a union or `Schema.suspend`; one whose codec publishes no
- * vocabulary (`Query.IncludeList`, a custom codec), or a non-empty one in
- * any member of a union, supports the family. JSON:API 1.1 requires it: §Inclusion of Related Resources for `include`;
+ * JSON:API 1.1 requires it: §Inclusion of Related Resources for `include`;
  * for `sort`, §Sorting on an endpoint that responds with a resource
  * collection, and on a single-resource endpoint (`GET /articles/1?sort=title`)
  * the general §Implementation-Specific Query Parameters rule, since that
  * endpoint does not know how to process `sort` as a query parameter from the
- * specification. An undeclared `fields[TYPE]`, `page[…]` or `filter[…]` is
- * still ignored.
+ * specification. Only the schema's own decoded `include` / `sort` property
+ * decides whether its vocabulary is empty, read through a union or
+ * `Schema.suspend`: one whose codec publishes no vocabulary
+ * (`Query.IncludeList`, a custom codec), or a non-empty one in any member of
+ * a union, supports the family. An undeclared `fields[TYPE]`, `page[…]` or
+ * `filter[…]` is still ignored.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
