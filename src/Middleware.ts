@@ -1,7 +1,7 @@
 /**
  * JSON:API protocol middleware.
  *
- * Two `HttpApiMiddleware` services enforce the parts of the spec that live
+ * Three `HttpApiMiddleware` services enforce the parts of the spec that live
  * outside schemas:
  *
  *   - {@link ContentNegotiation} — JSON:API §5 content negotiation:
@@ -29,13 +29,16 @@
  *     Related Resources; §Sorting on a collection endpoint, the general
  *     §Implementation-Specific Query Parameters rule on any other; see
  *     {@link checkQueryParameters}).
+ *   - {@link CreatedLocation} — JSON:API §Creating Resources: a 201 create
+ *     answers with a `Location` header copied from the created resource's
+ *     `self` link.
  *
- * Both middlewares are attached automatically by the `Endpoint` constructors,
- * so any `HttpApi` containing JSON:API endpoints will fail to build (at the
- * type level) until {@link layer} is provided — compliance cannot be
- * forgotten.
+ * The first two are attached automatically by every `Endpoint` constructor
+ * and the third by `Endpoint.create`, so any `HttpApi` containing JSON:API
+ * endpoints will fail to build (at the type level) until {@link layer} is
+ * provided — compliance cannot be forgotten.
  *
- * Both are also usable **outside** those constructors, for hosts that own the
+ * The first two are also usable **outside** those constructors, for hosts that own the
  * URL themselves: {@link negotiate} runs the §5 rules over plain headers and
  * {@link schemaError} builds the request-validation 400 (and
  * {@link schemaErrorDocument} the source-bearing document from the decoding
@@ -93,6 +96,7 @@ import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
+import { withCreatedLocation } from "./internal/responseBody.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
 // ---------------------------------------------------------------------------
@@ -902,7 +906,8 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
  * the same option. A host that negotiates content itself composes this with
- * {@link ContentNegotiationPassthrough}, as the example does.
+ * {@link ContentNegotiationPassthrough} and {@link CreatedLocationLive}, as the
+ * example does.
  *
  * @example
  * ```ts
@@ -916,7 +921,8 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  *   Layer.provideMerge(
  *     Layer.mergeAll(
  *       Middleware.ContentNegotiationPassthrough,
- *       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] })
+ *       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] }),
+ *       Middleware.CreatedLocationLive
  *     )
  *   )
  * )
@@ -992,6 +998,64 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
 export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = schemaErrorsLayer();
 
 /**
+ * Answers a 201 create with a `Location` header (JSON:API v1.1 §Creating
+ * Resources → 201 Created), derived from the document the endpoint encoded:
+ * the created resource's `data.links.self`, else the document's top-level
+ * `links.self`, copied verbatim (a link object contributes its `href`). So
+ * when the resource carries `links.self`, the two match by construction, as
+ * the spec requires.
+ *
+ * Only a 201 is touched: a create answering another `status`, a response that
+ * already carries `Location`, a body that is not JSON (or not settled bytes,
+ * such as a stream), and a document naming no usable `self` link all pass
+ * through unchanged. It never fails a request.
+ *
+ * `Endpoint.create` — and so `Endpoint.resource` / `Group.resource` — attaches
+ * it inside `Idempotency.Middleware`, so a recorded 201 keeps its `Location`
+ * and a replay returns it. {@link layer}, {@link layerWith} and
+ * {@link layerHostNegotiated} provide {@link CreatedLocationLive}; an api that
+ * composes its own middleware set adds it beside the others.
+ *
+ * @since 0.17.0
+ * @category services
+ */
+export class CreatedLocation extends HttpApiMiddleware.Service<CreatedLocation>()(
+  "effect-jsonapi/CreatedLocation",
+) {}
+
+/**
+ * The live {@link CreatedLocation} implementation. Part of {@link layer},
+ * {@link layerWith} and {@link layerHostNegotiated}; provide it yourself only
+ * beside a middleware set of your own.
+ *
+ * @example
+ * ```ts
+ * import { Layer } from "effect"
+ * import { Middleware } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const HandlersLive: Layer.Layer<never> = Layer.empty
+ *
+ * // `Middleware.layer`, spelled out piece by piece.
+ * const ApiLive = Layer.mergeAll(HandlersLive).pipe(
+ *   Layer.provideMerge(
+ *     Layer.mergeAll(
+ *       Middleware.ContentNegotiationLive,
+ *       Middleware.SchemaErrorsLive,
+ *       Middleware.CreatedLocationLive
+ *     )
+ *   )
+ * )
+ * ```
+ *
+ * @since 0.17.0
+ * @category layers
+ */
+export const CreatedLocationLive: Layer.Layer<CreatedLocation> = Layer.succeed(
+  CreatedLocation,
+  (httpEffect) => Effect.map(httpEffect, withCreatedLocation),
+);
+
+/**
  * A {@link ContentNegotiation} implementation that performs **no** §5 checks —
  * for apis whose host already negotiated content upstream.
  *
@@ -1023,7 +1087,8 @@ export const ContentNegotiationPassthrough: Layer.Layer<ContentNegotiation> = La
 
 /**
  * Everything a JSON:API api needs to run **when its host negotiates content**:
- * {@link ContentNegotiationPassthrough} plus the live {@link SchemaErrors}.
+ * {@link ContentNegotiationPassthrough} plus the live {@link SchemaErrors} and
+ * {@link CreatedLocation}.
  *
  * The drop-in replacement for {@link layer} in an application whose framework
  * hook has already applied §5 — typically with {@link negotiate}, so the rules
@@ -1047,14 +1112,13 @@ export const ContentNegotiationPassthrough: Layer.Layer<ContentNegotiation> = La
  * @since 0.7.0
  * @category layers
  */
-export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.mergeAll(
-  ContentNegotiationPassthrough,
-  SchemaErrorsLive,
-);
+export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocation> =
+  Layer.mergeAll(ContentNegotiationPassthrough, SchemaErrorsLive, CreatedLocationLive);
 
 /**
- * Everything a JSON:API api needs to run: provide this layer alongside your
- * `HttpApiBuilder` group implementations.
+ * Everything a JSON:API api needs to run — the live {@link ContentNegotiation},
+ * {@link SchemaErrors} and {@link CreatedLocation}: provide this layer
+ * alongside your `HttpApiBuilder` group implementations.
  *
  * @example
  * ```ts
@@ -1074,10 +1138,8 @@ export const layerHostNegotiated: Layer.Layer<ContentNegotiation | SchemaErrors>
  * @since 0.1.0
  * @category layers
  */
-export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.mergeAll(
-  ContentNegotiationLive,
-  SchemaErrorsLive,
-);
+export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocation> =
+  Layer.mergeAll(ContentNegotiationLive, SchemaErrorsLive, CreatedLocationLive);
 
 /**
  * Like {@link layer}, with options — content-negotiation options, required
@@ -1109,5 +1171,5 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors> = Layer.merge
  */
 export const layerWith = (
   options: NegotiationOptions & QueryParameterOptions,
-): Layer.Layer<ContentNegotiation | SchemaErrors> =>
-  Layer.mergeAll(contentNegotiationLayer(options), schemaErrorsLayer(options));
+): Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocation> =>
+  Layer.mergeAll(contentNegotiationLayer(options), schemaErrorsLayer(options), CreatedLocationLive);

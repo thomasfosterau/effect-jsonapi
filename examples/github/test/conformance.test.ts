@@ -27,9 +27,6 @@ const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   // example's handlers do not pass it, so no document advertises the version
   // it implements. An example gap now, not a library one.
   ["profile/document/jsonapi-member", "#103"],
-  // #236 — a 201 create SHOULD carry `Location`, and nothing in the library
-  // emits one; the write fixture below is what lets the kit see it at all.
-  ["spec/status/create-location", "#236"],
 ];
 
 const IDS = {
@@ -147,6 +144,10 @@ describe("github: JSON:API conformance", () => {
   it("ran the write rules against targets it created, and left nothing behind", () => {
     const writeRules = [
       "spec/status/create-response-document",
+      // #236: the 201 carries `Location`, copied from the created resource's
+      // own `links.self`, so the two match.
+      "spec/status/create-location",
+      "spec/status/create-location-matches-self",
       "spec/status/update-response",
       "spec/status/delete-response",
     ];
