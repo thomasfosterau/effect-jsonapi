@@ -3,11 +3,10 @@
  *
  * @internal
  */
-import { Array as Arr, Option, Record as Rec, Schema, SchemaTransformation } from "effect";
+import { Option, Record as Rec, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
 import { define } from "./define.js";
-import type { Vocabulary } from "./vocabulary.js";
-import { vocabularyAnnotation } from "./vocabulary.js";
+import { vocabularyAnnotations } from "./vocabulary.js";
 
 /**
  * A comma-separated list codec: `"a,b,c"` ↔ `["a", "b", "c"]`.
@@ -90,22 +89,6 @@ export const repeatable = <S extends Schema.Top>(
   item: S,
 ): Schema.decodeTo<S, Repeatable, never, never> =>
   Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>;
-
-/**
- * The annotations of a closed vocabulary's literal schema: its whole set as
- * the family's vocabulary (`internal/vocabulary.ts`), which the 400 for a
- * rejected value renders as error `meta` and the support check reads, and,
- * when the set is empty, a `message` saying so — `Schema.Literals([])` is
- * `never`, whose rejection would otherwise read "Expected never" (#282).
- */
-export const vocabularyAnnotations = (
-  vocabulary: Vocabulary,
-  emptyMessage: string,
-): Schema.Annotations.Annotations =>
-  Arr.match(vocabulary.values, {
-    onEmpty: () => ({ ...vocabularyAnnotation(vocabulary), message: emptyMessage }),
-    onNonEmpty: () => vocabularyAnnotation(vocabulary),
-  });
 
 /**
  * A sort term: an attribute name and a direction — the public `Sort.Term`.

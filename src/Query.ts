@@ -62,7 +62,6 @@ import {
   Repeatable,
   repeatable,
   Sort as SortCodec,
-  vocabularyAnnotations,
 } from "./internal/codecs.js";
 import type { FieldCodecs } from "./internal/filter.js";
 import {
@@ -73,6 +72,7 @@ import {
   operatorCheck,
   prepare,
 } from "./internal/filter.js";
+import { vocabularyAnnotations } from "./internal/vocabulary.js";
 import type {
   Any,
   AttributeKeys,

@@ -712,7 +712,8 @@ export const checkQueryParameters = (
 // relationships, `sort: true` over no attributes. Such a family supports no
 // value, so it counts as undeclared (owner decision on #282): every request
 // that carries it gets the same 400 as on an endpoint that never declared it.
-// Each family is read off its own decoded property only (`admitsNoValue`).
+// Each family is read off the property its wire parameter decodes into, and
+// no other (`admitsNoValue`).
 const emptyVocabularies = (ast: SchemaAST.AST): ReadonlyArray<string> =>
   Arr.filter(SUPPORT_FAMILY_NAMES, (family) => admitsNoValue(ast, family));
 
@@ -978,12 +979,13 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * collection, and on a single-resource endpoint (`GET /articles/1?sort=title`)
  * the general §Implementation-Specific Query Parameters rule, since that
  * endpoint does not know how to process `sort` as a query parameter from the
- * specification. Only the schema's own decoded `include` / `sort` property
- * decides whether its vocabulary is empty, read through a union or
- * `Schema.suspend`: one whose codec publishes no vocabulary
- * (`Query.IncludeList`, a custom codec), or a non-empty one in any member of
- * a union, supports the family. An undeclared `fields[TYPE]`, `page[…]` or
- * `filter[…]` is still ignored.
+ * specification. Only the property the schema decodes the `include` /
+ * `sort` parameter into decides whether its vocabulary is empty — the one of
+ * that name, or the one its encoding renames to it (`Schema.encodeKeys`) —
+ * read through a union or `Schema.suspend`: one whose codec publishes no
+ * vocabulary (`Query.IncludeList`, a custom codec), or a non-empty one in
+ * any member of a union, supports the family. An undeclared `fields[TYPE]`,
+ * `page[…]` or `filter[…]` is still ignored.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server

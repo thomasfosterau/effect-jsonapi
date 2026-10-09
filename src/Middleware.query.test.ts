@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Schema, Tracer } from "effect";
+import { Effect, Layer, Schema, SchemaTransformation, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -767,10 +767,12 @@ describe("spec families an endpoint does not support (#261)", () => {
 
 describe("which declared `include` / `sort` an endpoint supports (#282)", () => {
   // The support check reads the vocabulary the `include` / `sort` codecs
-  // publish, on the decoded property of that name only. A family counts as
-  // unsupported when every value its property could decode is drawn from an
-  // empty vocabulary; one that publishes no vocabulary (`Query.IncludeList`,
-  // a custom codec) or a non-empty one somewhere is supported.
+  // publish, only on the property the family's wire parameter decodes into
+  // (the one of that name, or one the encoding renames to it). A family
+  // counts as unsupported when every value its property could decode is
+  // drawn from an empty vocabulary; one that publishes no vocabulary
+  // (`Query.IncludeList`, a custom codec) or a non-empty one somewhere is
+  // supported.
   const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
   const Post = Resource.make("posts", {
     attributes: { title: Schema.NonEmptyString },
@@ -796,6 +798,11 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
     "union-of-queries": Schema.Union([
       Query.schema(Tag, { include: { paths: [] } }),
       Query.schema(Post, { include: true }),
+    ]),
+    // The second member's wire has no `include`, so it reads no property.
+    "union-with-query-without-include": Schema.Union([
+      Query.schema(Tag, { include: { paths: [] } }),
+      Query.schema(Post, { fields: true }),
     ]),
     "union-of-sorts": Schema.Struct({
       sort: Schema.optionalKey(Schema.Union([Query.Sort([]), Query.Sort(["title"])])),
@@ -823,6 +830,32 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
     "optional-include": Schema.Struct({ include: Schema.optional(Query.Include(Tag)) }),
     // Only the family's own vocabulary counts.
     "sort-codec-as-include": Schema.Struct({ include: Schema.optionalKey(Query.Sort([])) }),
+    // A record of empty vocabularies: every value it decodes draws on one.
+    "include-record": Schema.Struct({
+      include: Schema.optionalKey(Schema.Record(Schema.String, Query.Include(Tag))),
+    }),
+    // The wire's `include` decodes into a property of another name.
+    "renamed-include": Schema.Struct({ paths: Schema.optionalKey(Query.Include(Tag)) }).pipe(
+      Schema.encodeKeys({ paths: "include" }),
+    ),
+    "renamed-include-beside-other": Schema.Struct({
+      paths: Schema.optionalKey(Query.Include(Tag)),
+      other: Schema.optionalKey(Query.Include(Post)),
+    }).pipe(Schema.encodeKeys({ paths: "include" })),
+    "renamed-open-include": Schema.Struct({
+      paths: Schema.optionalKey(Query.IncludeList),
+      other: Schema.optionalKey(Query.Include(Tag)),
+    }).pipe(Schema.encodeKeys({ paths: "include" })),
+    // A query decoded whole by a custom codec has no property to read.
+    "query-as-string": Schema.Struct({ include: Schema.optionalKey(Schema.String) }).pipe(
+      Schema.decodeTo(
+        Schema.String,
+        SchemaTransformation.transform<string, { readonly include?: string }>({
+          decode: (query) => query.include ?? "",
+          encode: (include) => ({ include }),
+        }),
+      ),
+    ),
   } as const;
   type Name = keyof typeof endpoints;
   const endpoint = <const N extends Name>(name: N) =>
@@ -836,6 +869,7 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
       endpoint("custom-sort"),
       endpoint("recursive-include"),
       endpoint("union-of-queries"),
+      endpoint("union-with-query-without-include"),
       endpoint("union-of-sorts"),
       endpoint("union-with-open-include"),
       endpoint("open-include-beside-empty"),
@@ -845,6 +879,11 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
       endpoint("suspended-include"),
       endpoint("optional-include"),
       endpoint("sort-codec-as-include"),
+      endpoint("include-record"),
+      endpoint("renamed-include"),
+      endpoint("renamed-include-beside-other"),
+      endpoint("renamed-open-include"),
+      endpoint("query-as-string"),
     ),
   );
   // Each handler answers the decoded `query` it received.
@@ -855,6 +894,7 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
       "custom-sort": echo,
       "recursive-include": echo,
       "union-of-queries": echo,
+      "union-with-query-without-include": echo,
       "union-of-sorts": echo,
       "union-with-open-include": echo,
       "open-include-beside-empty": echo,
@@ -864,6 +904,11 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
       "suspended-include": echo,
       "optional-include": echo,
       "sort-codec-as-include": echo,
+      "include-record": echo,
+      "renamed-include": echo,
+      "renamed-include-beside-other": echo,
+      "renamed-open-include": echo,
+      "query-as-string": echo,
     }),
   );
 
@@ -936,6 +981,14 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
       },
     ],
     ["another family's empty vocabulary", "/sort-codec-as-include?include=", { include: [] }],
+    // The wire's `include` feeds the renamed `paths`, an open list; the
+    // empty vocabulary under `other` is another parameter's.
+    [
+      "a renamed `Query.IncludeList` beside an empty vocabulary under another name",
+      "/renamed-open-include?include=author",
+      { paths: ["author"] },
+    ],
+    ["a query its own codec decodes whole", "/query-as-string?include=author", "author"],
   ] as const)("supports %s", async (_, url, query) => {
     const response = await serve(url);
     expect(response.status).toBe(200);
@@ -957,6 +1010,20 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
     ["a suspended query, an empty value", "/suspended-query?include=", "include"],
     ["a suspended `include` codec", "/suspended-include?include=author", "include"],
     ["an optional `include`", "/optional-include?include=", "include"],
+    ["a record of empty `include` codecs", "/include-record?include=", "include"],
+    // Owner decision on #282: the wire name decides, not the decoded one.
+    ["an `include` renamed on the wire", "/renamed-include?include=author", "include"],
+    ["an `include` renamed on the wire, an empty value", "/renamed-include?include=", "include"],
+    [
+      "an `include` renamed on the wire beside a non-empty one under another name",
+      "/renamed-include-beside-other?include=author",
+      "include",
+    ],
+    [
+      "a union with a query that declares no `include`",
+      "/union-with-query-without-include?include=author",
+      "include",
+    ],
   ] as const)("rejects an empty vocabulary as unsupported: %s", async (_, url, family) => {
     const response = await serve(url);
     expect(response.status).toBe(400);
