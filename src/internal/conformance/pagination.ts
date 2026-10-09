@@ -9,8 +9,9 @@
  * disagrees with the reference rather than with itself. The walk is bounded
  * (a page budget per walk, a request budget per run of the rule, a `next` that
  * leads back to a page already visited ends it), and a walk that runs out of
- * budget — or meets a server error, a rate limit or a lost response — is
- * reported as not checked, never as a partial pass.
+ * budget — or meets a server error, a rate limit, a request timeout or a lost
+ * response, or starts on a page of items it cannot identify — is reported as
+ * not checked, never as a partial pass.
  *
  * @since 0.17.0
  * @internal
@@ -183,11 +184,11 @@ interface Walk {
  * Follows `next` from `first` until a page omits it or sets it `null` — or
  * until the walk can go no further: a `next` that is no link, leads off the
  * origin or back to a page already visited, answers something that is not a
- * page — or nothing the kit decides on: a server error, a rate limit, no
- * response — or a page that lists no resources, or none the kit can identify;
- * a page that lists nothing earlier pages did not (a `next` that would never
- * end); more resources than `holds`, when the collection's size is known; or
- * the budget.
+ * page — or nothing the kit decides on: a server error, a rate limit, a
+ * request timeout, no response — or a page that lists no resources, or none
+ * the kit can identify; a page that lists nothing earlier pages did not (a
+ * `next` that would never end); more resources than `holds`, when the
+ * collection's size is known; or the budget.
  */
 const walk = (
   io: Io,
@@ -693,12 +694,8 @@ const confirmed = (
 };
 
 /** Why a reference too small to page is not walked again. */
-const tooFew = (reference: Walk, holds: number): string => {
-  const items = Arr.reduce(reference.pages, 0, (total, page) => total + page.items);
-  return holds === 0 && items > 0
-    ? `the collection lists ${unidentified(items)} — fewer than two resources, so no page size forces a second page`
-    : `the collection holds ${holds === 0 ? "no resources" : "one resource"} — fewer than two, so no page size forces a second page`;
-};
+const tooFew = (holds: number): string =>
+  `the collection holds ${holds === 0 ? "no resources" : "one resource"} — fewer than two, so no page size forces a second page`;
 
 /**
  * Walks one collection endpoint: the collection as the server serves it by
@@ -719,7 +716,7 @@ const assess = (
     const judged = yield* judge(io, baseUrl, reference);
     const holds = HashSet.size(keysOf(reference.pages));
     const blocked = Option.orElse(judged.unfinished, () =>
-      holds < 2 ? Option.some(tooFew(reference, holds)) : Option.none(),
+      holds < 2 ? Option.some(tooFew(holds)) : Option.none(),
     );
     if (Option.isSome(blocked))
       return yield* confirmed(io, path, judged.judged, blocked, [reached.success]);
@@ -772,7 +769,12 @@ const assessPaged = (
     return yield* confirmed(io, path, all, Option.none(), starts);
   });
 
-/** The page at a URL the rule built, or why there is none. */
+/**
+ * The page at a URL the rule built, where a walk starts, or why there is none.
+ * A page of items none of which the kit can identify is no start: what it
+ * lists cannot be compared with anything, so a walk from it would hold the
+ * links to resources the kit never saw.
+ */
 const fetchPage = (
   io: Io,
   target: Option.Option<Target>,
@@ -785,10 +787,18 @@ const fetchPage = (
         Option.match(answer, {
           onNone: () => Result.fail(REQUESTS_SPENT),
           onSome: (observation) =>
-            Result.fromOption(pageOf(resolved, observation), () =>
-              succeeded(observation)
-                ? `${url} answered ${observation.status} without a resource collection as primary data`
-                : `${url} answered ${statusOf(observation)}`,
+            Result.flatMap(
+              Result.fromOption(pageOf(resolved, observation), () =>
+                succeeded(observation)
+                  ? `${url} answered ${observation.status} without a resource collection as primary data`
+                  : `${url} answered ${statusOf(observation)}`,
+              ),
+              (page) =>
+                opaque(page)
+                  ? Result.fail(
+                      `${url} answered a page of ${unidentified(page.items)}, so no walk can start from it`,
+                    )
+                  : Result.succeed(page),
             ),
         }),
       ),

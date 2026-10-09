@@ -11,8 +11,8 @@
  * The crawl is the pagination walk's (`./crawl.ts`): a link resolves against
  * the document that carries it, one that leads to another origin is never
  * requested, every request is a `GET` under a per-run budget, and a server
- * error, a rate limit or a lost response leaves the link not decided rather
- * than failed. A crawl the budget cannot finish is not passed.
+ * error, a rate limit, a request timeout or a lost response leaves the link
+ * not decided rather than failed. A crawl the budget cannot finish is not passed.
  *
  * @since 0.17.0
  * @internal

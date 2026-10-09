@@ -159,12 +159,15 @@ export const stepTo = (href: string, from: Target, baseUrl: string): Step => {
 
 /**
  * `true` when a response says nothing of the links: no response at all, a
- * rate limit or a server error. The kit does not decide on one.
+ * rate limit (`429`), a request timeout (`408`, RFC 9110 §15.5.9: the server
+ * "did not receive a complete request message within the time that it was
+ * prepared to wait") or a server error. The kit does not decide on one.
  *
  * @internal
  */
 export const unanswered = (observation: Observation): boolean =>
   observation.transportError !== undefined ||
+  observation.status === 408 ||
   observation.status === 429 ||
   observation.status >= 500;
 
@@ -174,7 +177,7 @@ export const unanswered = (observation: Observation): boolean =>
  * @internal
  */
 export const SAYS_NOTHING =
-  "a server error, a rate limit or a lost response says nothing of the links";
+  "a server error, a rate limit, a request timeout or a lost response says nothing of the links";
 
 // ---------------------------------------------------------------------------
 // The budgeted transport

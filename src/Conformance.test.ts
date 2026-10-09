@@ -3150,16 +3150,20 @@ describe("Conformance: pagination links enumerate the collection", () => {
     status: 429,
     body: { errors: [{ status: "429", title: "Too Many Requests" }] },
   };
-
-  it.each([
+  /** Every status that says nothing of the links, at the edges of the ranges it covers. */
+  const silent = [
     ["503", unavailable],
+    ["500", { status: 500, body: { errors: [{ status: "500", title: "Internal Server Error" }] } }],
     ["429", limited],
-  ] as const)("does not hold a %s mid-walk against `next`", async (status, answer) => {
+    ["408", { status: 408, body: { errors: [{ status: "408", title: "Request Timeout" }] } }],
+  ] as const satisfies ReadonlyArray<readonly [string, Canned]>;
+
+  it.each(silent)("does not hold a %s mid-walk against `next`", async (status, answer) => {
     const reason = await skipReason((request) =>
       queryOf(request).get("page[offset]") === "3" ? answer : offsetPager()(request),
     );
     expect(reason).toBe(
-      `no paginated collection could be walked to a verdict (/tags: \`next\` on page 1 (/tags?page[limit]=3) got ${status}, so the walk could not be finished — a server error, a rate limit or a lost response says nothing of the links)`,
+      `no paginated collection could be walked to a verdict (/tags: \`next\` on page 1 (/tags?page[limit]=3) got ${status}, so the walk could not be finished — a server error, a rate limit, a request timeout or a lost response says nothing of the links)`,
     );
   });
 
@@ -3183,13 +3187,52 @@ describe("Conformance: pagination links enumerate the collection", () => {
     });
   });
 
-  it("does not hold a 503 from `first` against the links", async () => {
+  it.each(silent)("does not hold a %s from `first` against the links", async (status, answer) => {
     const reason = await skipReason((request) =>
-      queryOf(request).get("page[offset]") === "0" ? unavailable : offsetPager()(request),
+      queryOf(request).get("page[offset]") === "0" ? answer : offsetPager()(request),
     );
     expect(reason).toContain(
-      "/tags: `first` on /tags got 503, so it could not be checked — a server error, a rate limit or a lost response says nothing of the links",
+      `/tags: \`first\` on /tags got ${status}, so it could not be checked — a server error, a rate limit, a request timeout or a lost response says nothing of the links`,
     );
+  });
+
+  it.each(silent)("does not hold a %s from `last` against the links", async (status, answer) => {
+    // `last` names the page `next` reaches by another URL, so the kit asks for it.
+    const reason = await skipReason((request) =>
+      queryOf(request).get("page[last]") === "1"
+        ? answer
+        : offsetPager({
+            links: (window) => ({
+              ...offsetLinks(window),
+              last: `/tags?page[last]=1&page[limit]=${window.limit}`,
+            }),
+          })(request),
+    );
+    expect(reason).toContain(
+      `/tags: \`last\` on /tags got ${status}, so it could not be checked — a server error, a rate limit, a request timeout or a lost response says nothing of the links`,
+    );
+  });
+
+  it("does not hold a reference walk cut short to a repeat without rechecking the order", async () => {
+    // The server pages by default: its second page repeats the first's last
+    // resource, and its third answers 503. Asked again, the first page comes
+    // back in another order, so the repeat is not held against the links.
+    let asked = 0;
+    const pager = offsetPager({
+      defaultLimit: 3,
+      slice: (rows, { offset, limit }) => rows.slice(Math.max(offset - 1, 0), offset + limit),
+    });
+    const reason = await skipReason((request) => {
+      const path = decodeURIComponent(request.path);
+      if (path === "/tags" && ++asked === 2) {
+        return { body: { data: ["3", "2", "1"].map(tag), links: {} } };
+      }
+      return queryOf(request).get("page[offset]") === "6" ? unavailable : pager(request);
+    });
+    expect(reason).toContain(
+      "/tags: `next` on page 2 (/tags?page[offset]=3&page[limit]=3) got 503, so the walk could not be finished — a server error, a rate limit, a request timeout or a lost response says nothing of the links; the collection's order is not stable",
+    );
+    expect(reason).toContain("so the walk's 1 order-dependent finding");
   });
 
   /** Pages that each start one row early, so each repeats the previous page's last. */
@@ -3234,6 +3277,28 @@ describe("Conformance: pagination links enumerate the collection", () => {
     expect(reason).toContain("so the walk's 1 order-dependent finding");
   });
 
+  it("stops rechecking the order at the first page that shows it unstable", async () => {
+    // Asked again, the reference comes back in another order; the second
+    // walk's first page is not asked for a third time.
+    let asked = 0;
+    const server = recording((request) =>
+      decodeURIComponent(request.path) === "/tags" && ++asked === 2
+        ? { body: { data: [...ROWS].reverse().map(tag), links: {} } }
+        : repeating(request),
+    );
+    const reason = await skipReason(server.serve);
+    expect(reason).toContain("the collection's order is not stable");
+    expect(server.paths).toEqual([
+      "/tags",
+      "/tags?page[offset]=0&page[limit]=7",
+      "/tags?page[limit]=3",
+      "/tags?page[offset]=3&page[limit]=3",
+      "/tags?page[offset]=6&page[limit]=3",
+      "/tags?page[offset]=0&page[limit]=3",
+      "/tags",
+    ]);
+  });
+
   it("does not take a `first` page of items it cannot identify for a different page", async () => {
     const reason = await skipReason((request) =>
       queryOf(request).get("page[offset]") === "0"
@@ -3250,7 +3315,44 @@ describe("Conformance: pagination links enumerate the collection", () => {
       body: { data: [{ name: "a" }, { name: "b" }], links: {} },
     }));
     expect(reason).toContain(
-      "/tags: the collection lists 2 items, none of them a resource the kit can identify (a string `type` and `id` or `lid`) — fewer than two resources",
+      "/tags: /tags answered a page of 2 items, none of them a resource the kit can identify (a string `type` and `id` or `lid`), so no walk can start from it",
+    );
+  });
+
+  // A walk's own starting page is held to what later pages are: one of items
+  // the kit cannot identify leaves the collection not decided, not failed.
+  it("does not hold a second walk that starts on items it cannot identify against the links", async () => {
+    const reason = await skipReason((request) =>
+      decodeURIComponent(request.path) === "/tags?page[limit]=3"
+        ? {
+            body: {
+              data: [{ name: "a" }, { name: "b" }, { name: "c" }],
+              links: offsetLinks({ offset: 0, limit: 3, total: ROWS.length }),
+            },
+          }
+        : offsetPager()(request),
+    );
+    expect(reason).toBe(
+      "no paginated collection could be walked to a verdict (/tags: /tags?page[limit]=3 answered a page of 3 items, none of them a resource the kit can identify (a string `type` and `id` or `lid`), so no walk can start from it)",
+    );
+  });
+
+  it("does not hold a reference that starts on items it cannot identify against the links", async () => {
+    // The server pages by default, and its first page lists items without an
+    // identity; the pages `next` leads to list resources.
+    const pager = offsetPager({ defaultLimit: 3 });
+    const reason = await skipReason((request) =>
+      decodeURIComponent(request.path) === "/tags"
+        ? {
+            body: {
+              data: [{ name: "a" }, { name: "b" }, { name: "c" }],
+              links: offsetLinks({ offset: 0, limit: 3, total: ROWS.length }),
+            },
+          }
+        : pager(request),
+    );
+    expect(reason).toBe(
+      "no paginated collection could be walked to a verdict (/tags: /tags answered a page of 3 items, none of them a resource the kit can identify (a string `type` and `id` or `lid`), so no walk can start from it)",
     );
   });
 
@@ -3363,6 +3465,26 @@ describe("Conformance: pagination links enumerate the collection", () => {
     const reason = await skipReasonOver(server.serve, crowdedApi);
     expect(server.paths).toHaveLength(200);
     expect(reason).toContain("/tags: the rule's budget of 200 requests ran out");
+  });
+
+  it("does not take a walk the budget cuts short for one that reached the last page", async () => {
+    // The 200th request answers one resource and a `next` the budget leaves no
+    // request to follow: the collection is not decided for want of requests,
+    // not taken for a collection of one.
+    const server = recording(
+      crowded(1, (request) =>
+        decodeURIComponent(request.path) === "/tags"
+          ? { body: { data: [tag("1")], links: { next: "/tags?page[offset]=1" } } }
+          : notFound,
+      ),
+    );
+    const reason = await skipReasonOver(server.serve, crowdedApi);
+    expect(server.paths).toHaveLength(200);
+    expect(server.paths.at(-1)).toBe("/tags");
+    expect(reason).toContain(
+      "/tags: the rule's budget of 200 requests ran out before the collection could be checked",
+    );
+    expect(reason).not.toContain("fewer than two");
   });
 
   it("does not report order-dependent findings the budget left no request to recheck", async () => {
@@ -3892,15 +4014,20 @@ describe("Conformance: `self` and `related` links dereference", () => {
 
   it.each([
     ["503", unavailable],
+    ["500", { status: 500, body: { errors: [{ status: "500", title: "Internal Server Error" }] } }],
     ["429", limited],
-  ] as const)("does not hold a %s against the link", async (status, answer) => {
-    expect(await noteOf(SELF, at("/articles/2", answer))).toBe(
-      `1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) got ${status} — a server error, a rate limit or a lost response says nothing of the links`,
-    );
-    expect(await noteOf(RELATED, at("/articles/2/tags", answer))).toContain(
-      `the \`related\` link of articles:2's \`tags\` (in /articles, at /data/1) got ${status}`,
-    );
-  });
+    ["408", { status: 408, body: { errors: [{ status: "408", title: "Request Timeout" }] } }],
+  ] as const satisfies ReadonlyArray<readonly [string, Canned]>)(
+    "does not hold a %s against the link",
+    async (status, answer) => {
+      expect(await noteOf(SELF, at("/articles/2", answer))).toBe(
+        `1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) got ${status} — a server error, a rate limit, a request timeout or a lost response says nothing of the links`,
+      );
+      expect(await noteOf(RELATED, at("/articles/2/tags", answer))).toContain(
+        `the \`related\` link of articles:2's \`tags\` (in /articles, at /data/1) got ${status}`,
+      );
+    },
+  );
 
   it("does not hold a lost response against the link", async () => {
     const report = await run(linked(), (client) =>
