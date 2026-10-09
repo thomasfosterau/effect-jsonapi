@@ -1,19 +1,18 @@
 /**
  * Error `meta` carried by a schema, for the 400 a decode failure renders.
  *
- * A closed vocabulary — the include paths an endpoint supports, the fields a
- * resource sorts on — is derived once, at schema-build time, and the schema
- * that enforces it is the only place that knows the whole set. When a request
- * names a member outside it, the spec-compliant answer is a 400 whose `detail`
- * says which value failed; what the caller actually needs next is the set it
- * should have picked from. This annotation lets the codec that owns the set
- * publish it, and lets the schema-error renderer (`Middleware.schemaErrorDocument`)
- * copy it onto the error object's `meta` — `meta.includablePaths`,
- * `meta.sortableFields` — without the renderer knowing anything about
- * includes or sorts.
+ * When a request names a member outside a closed vocabulary — the include
+ * paths an endpoint supports, the fields a resource sorts on — the
+ * spec-compliant answer is a 400 whose `detail` says which value failed;
+ * what the caller actually needs next is the set it should have picked from.
+ * The codec that owns the set publishes it as its vocabulary
+ * (`internal/vocabulary.ts`), and this module lets the schema-error renderer
+ * (`Middleware.schemaErrorDocument`) copy it onto the error object's `meta` —
+ * `meta.includablePaths`, `meta.sortableFields` — without the renderer
+ * knowing anything about includes or sorts.
  *
  * The lookup walks the issue tree once, recording the `meta` of every node
- * whose AST carries the annotation together with the path at which it was
+ * whose AST publishes a vocabulary together with the path at which it was
  * found; a formatted leaf then takes the meta of the nearest annotated node
  * above it (the node's path is a prefix of the leaf's), so a failure inside a
  * repeated-key list (`include[1]`) still reaches the annotation on the list's
@@ -21,24 +20,29 @@
  */
 import type { Schema } from "effect";
 import type { SchemaIssue } from "effect";
+import * as Option from "effect/Option";
+import type { Family } from "./vocabulary.js";
+import { vocabularyOf } from "./vocabulary.js";
 
-/** The annotation key. Namespaced so it can never collide with a consumer's. */
-const ERROR_META_ANNOTATION = "~@thomasfosterau/effect-jsonapi/errorMeta";
+/** The `meta` a vocabulary renders as: members merged into the error object's `meta`. */
+type ErrorMeta = Readonly<Record<string, unknown>>;
 
-/** The shape the annotation carries: members merged into the error object's `meta`. */
-export type ErrorMeta = Readonly<Record<string, unknown>>;
+// The `meta` member each family's vocabulary renders under. A family not
+// listed here publishes its vocabulary to the support check only.
+const META_KEYS: Partial<Readonly<Record<Family, string>>> = {
+  include: "includablePaths",
+  sort: "sortableFields",
+};
 
-/** The annotation object `schema.annotate(...)` takes to publish `meta`. */
-export const errorMeta = (meta: ErrorMeta): { readonly [ERROR_META_ANNOTATION]: ErrorMeta } => ({
-  [ERROR_META_ANNOTATION]: meta,
-});
-
-/** The `meta` a schema node publishes through its annotations, if any. */
-export const errorMetaOf = (
+/** The `meta` a schema node publishes through its vocabulary, if any. */
+const errorMetaOf = (
   annotations: Schema.Annotations.Annotations | undefined,
 ): ErrorMeta | undefined => {
-  const meta = annotations?.[ERROR_META_ANNOTATION];
-  return typeof meta === "object" && meta !== null ? (meta as ErrorMeta) : undefined;
+  if (annotations === undefined) return undefined;
+  const vocabulary = vocabularyOf(annotations);
+  if (Option.isNone(vocabulary)) return undefined;
+  const key = META_KEYS[vocabulary.value.family];
+  return key === undefined ? undefined : { [key]: vocabulary.value.values };
 };
 
 /** One annotated node: where in the decoded value it sits, and what it publishes. */

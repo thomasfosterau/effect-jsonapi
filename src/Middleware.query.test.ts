@@ -717,6 +717,25 @@ describe("spec families an endpoint does not support (#261)", () => {
       // without the unsupported parameter, the same request is the 415
       expect((await serve("/people/1", middleware, contentType)).status).toBe(415);
     });
+
+    // A family declared with an empty vocabulary is unsupported (#282), so
+    // its 400 takes the same precedence; before #282 the request reached the
+    // negotiation, which answered 406 / 415 first.
+    it.each(layers)(
+      "for a family declared with an empty vocabulary, over a 406 and a 415, under %s",
+      async (_, middleware) => {
+        const accept = { headers: { accept: parameterised } };
+        const path = await serve("/tags/1?include=author", middleware, accept);
+        expect(path.status).toBe(400);
+        expect(path.body).toEqual({ errors: [unsupported("include", "include")] });
+        expect((await serve("/tags/1", middleware, accept)).status).toBe(406);
+        const contentType = { headers: { "content-type": parameterised } };
+        const field = await serve("/tags?sort=", middleware, contentType);
+        expect(field.status).toBe(400);
+        expect(field.body).toEqual({ errors: [unsupported("sort", "sort")] });
+        expect((await serve("/tags", middleware, contentType)).status).toBe(415);
+      },
+    );
   });
 
   it("applies under the host-negotiated layer too", async () => {
@@ -743,5 +762,204 @@ describe("spec families an endpoint does not support (#261)", () => {
     const field = await serve("/posts?sort=nope", allowing);
     expect(field.status).toBe(400);
     expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
+  });
+});
+
+describe("which declared `include` / `sort` an endpoint supports (#282)", () => {
+  // The support check reads the vocabulary the `include` / `sort` codecs
+  // publish, on the decoded property of that name only. A family counts as
+  // unsupported when every value its property could decode is drawn from an
+  // empty vocabulary; one that publishes no vocabulary (`Query.IncludeList`,
+  // a custom codec) or a non-empty one somewhere is supported.
+  const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
+  const Post = Resource.make("posts", {
+    attributes: { title: Schema.NonEmptyString },
+    relationships: { author: Relationship.one(() => Person) },
+  });
+  const Tag = Resource.make("tags", { attributes: {} });
+
+  // A recursive codec with no vocabulary, so the walk must not loop on it.
+  // Its recursive member comes first, so a walk that reads union members in
+  // order reaches the recursion before the string that settles the answer.
+  type Nested = { readonly next?: Nested } | string;
+  const Nested: Schema.Codec<Nested> = Schema.Union([
+    Schema.Struct({
+      next: Schema.optionalKey(Schema.suspend((): Schema.Codec<Nested> => Nested)),
+    }),
+    Schema.String,
+  ]);
+
+  const endpoints = {
+    "include-list": Schema.Struct({ include: Schema.optionalKey(Query.IncludeList) }),
+    "custom-sort": Schema.Struct({ sort: Schema.optionalKey(Schema.String) }),
+    "recursive-include": Schema.Struct({ include: Schema.optionalKey(Nested) }),
+    "union-of-queries": Schema.Union([
+      Query.schema(Tag, { include: { paths: [] } }),
+      Query.schema(Post, { include: true }),
+    ]),
+    "union-of-sorts": Schema.Struct({
+      sort: Schema.optionalKey(Schema.Union([Query.Sort([]), Query.Sort(["title"])])),
+    }),
+    "union-with-open-include": Schema.Struct({
+      include: Schema.optionalKey(Schema.Union([Query.Include(Tag), Query.IncludeList])),
+    }),
+    "open-include-beside-empty": Schema.Struct({
+      include: Schema.optionalKey(Query.IncludeList),
+      Other: Schema.optionalKey(Query.Include(Tag)),
+    }),
+    "empty-include-beside-other": Schema.Struct({
+      include: Schema.optionalKey(Query.Include(Tag)),
+      other: Schema.optionalKey(Query.Include(Post)),
+    }),
+    "empty-sort-beside-other": Schema.Struct({
+      sort: Schema.optionalKey(Query.Sort([])),
+      order: Schema.optionalKey(Query.Sort(["title"])),
+    }),
+    "suspended-query": Schema.suspend(() => Query.schema(Tag, { include: { paths: [] } })),
+    "suspended-include": Schema.Struct({
+      include: Schema.optionalKey(Schema.suspend(() => Query.Include(Tag))),
+    }),
+    // `Schema.optional` decodes `undefined` too, which carries no value.
+    "optional-include": Schema.Struct({ include: Schema.optional(Query.Include(Tag)) }),
+    // Only the family's own vocabulary counts.
+    "sort-codec-as-include": Schema.Struct({ include: Schema.optionalKey(Query.Sort([])) }),
+  } as const;
+  type Name = keyof typeof endpoints;
+  const endpoint = <const N extends Name>(name: N) =>
+    HttpApiEndpoint.get(name, `/${name}`, {
+      query: endpoints[name],
+      success: Schema.Unknown,
+    }).middleware(Middleware.SchemaErrors);
+  const VocabulariesApi = HttpApi.make("vocabularies").add(
+    HttpApiGroup.make("vocabularies").add(
+      endpoint("include-list"),
+      endpoint("custom-sort"),
+      endpoint("recursive-include"),
+      endpoint("union-of-queries"),
+      endpoint("union-of-sorts"),
+      endpoint("union-with-open-include"),
+      endpoint("open-include-beside-empty"),
+      endpoint("empty-include-beside-other"),
+      endpoint("empty-sort-beside-other"),
+      endpoint("suspended-query"),
+      endpoint("suspended-include"),
+      endpoint("optional-include"),
+      endpoint("sort-codec-as-include"),
+    ),
+  );
+  // Each handler answers the decoded `query` it received.
+  const echo = ({ query }: { readonly query: unknown }) => Effect.succeed(query);
+  const VocabulariesLive = HttpApiBuilder.group(VocabulariesApi, "vocabularies", (handlers) =>
+    handlers.handleAll({
+      "include-list": echo,
+      "custom-sort": echo,
+      "recursive-include": echo,
+      "union-of-queries": echo,
+      "union-of-sorts": echo,
+      "union-with-open-include": echo,
+      "open-include-beside-empty": echo,
+      "empty-include-beside-other": echo,
+      "empty-sort-beside-other": echo,
+      "suspended-query": echo,
+      "suspended-include": echo,
+      "optional-include": echo,
+      "sort-codec-as-include": echo,
+    }),
+  );
+
+  const serve = async (url: string) => {
+    const appLayer = HttpApiBuilder.layer(VocabulariesApi).pipe(
+      Layer.provide(VocabulariesLive),
+      Layer.provide(Middleware.SchemaErrorsLive),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(new Request(`http://localhost${url}`)).finally(dispose);
+    return { status: response.status, body: decodeJson(await response.text()) };
+  };
+
+  const unsupported = (family: "include" | "sort") => ({
+    errors: [
+      {
+        status: "400",
+        code: "bad_request",
+        title: "Bad Request",
+        detail: expect.stringContaining(`does not support the "${family}" parameter`),
+        source: { parameter: family },
+      },
+    ],
+  });
+
+  it.each([
+    [
+      "`Query.IncludeList`, which publishes no vocabulary",
+      "/include-list?include=author",
+      {
+        include: ["author"],
+      },
+    ],
+    ["`Query.IncludeList`, an empty value", "/include-list?include=", { include: [] }],
+    ["a custom `sort` codec", "/custom-sort?sort=-anything", { sort: "-anything" }],
+    [
+      "a recursive `include` codec with no vocabulary",
+      "/recursive-include?include=a",
+      {
+        include: "a",
+      },
+    ],
+    [
+      "a union of an empty and a non-empty query",
+      "/union-of-queries?include=author",
+      {
+        include: ["author"],
+      },
+    ],
+    [
+      "a union of an empty and a non-empty `sort`",
+      "/union-of-sorts?sort=title",
+      {
+        sort: [{ field: "title", direction: "asc" }],
+      },
+    ],
+    [
+      "a union of an empty `include` and `Query.IncludeList`",
+      "/union-with-open-include?include=author",
+      {
+        include: ["author"],
+      },
+    ],
+    [
+      "`Query.IncludeList` beside an empty vocabulary under another name",
+      "/open-include-beside-empty?include=author",
+      {
+        include: ["author"],
+      },
+    ],
+    ["another family's empty vocabulary", "/sort-codec-as-include?include=", { include: [] }],
+  ] as const)("supports %s", async (_, url, query) => {
+    const response = await serve(url);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual(query);
+  });
+
+  it.each([
+    [
+      "an empty `include` beside a non-empty one under another name",
+      "/empty-include-beside-other?include=author",
+      "include",
+    ],
+    [
+      "an empty `sort` beside a non-empty one under another name",
+      "/empty-sort-beside-other?sort=title",
+      "sort",
+    ],
+    ["a suspended query", "/suspended-query?include=author", "include"],
+    ["a suspended query, an empty value", "/suspended-query?include=", "include"],
+    ["a suspended `include` codec", "/suspended-include?include=author", "include"],
+    ["an optional `include`", "/optional-include?include=", "include"],
+  ] as const)("rejects an empty vocabulary as unsupported: %s", async (_, url, family) => {
+    const response = await serve(url);
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual(unsupported(family));
   });
 });
