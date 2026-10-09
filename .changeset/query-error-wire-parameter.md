@@ -1,0 +1,5 @@
+---
+"@thomasfosterau/effect-jsonapi": patch
+---
+
+A 400 for a rejected query value now names, in `source.parameter`, the parameter the request sent when the query schema renames it on the wire. A property `paths` that `Schema.encodeKeys({ paths: "include" })` sends as `include` is now reported as `include`, and the `limit` of `Query.bracketPageKeys`, `Query.bracketKeys` or `Query.flatList` as `page[limit]`. Before, `source.parameter` named the decoded property (`paths`, `limit`), which is not a parameter the request carries (#305). This covers the `SchemaErrors` middleware and `Middleware.schemaErrorDocument` called with `"Query"` on a host's own decode. A value rejected before the rename was already reported under its wire name and is unchanged, and so is every query that renames nothing.

@@ -95,7 +95,7 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
-import { declaredNames } from "./internal/declaredQuery.js";
+import { declaredNames, queryLeaves } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
@@ -405,6 +405,13 @@ const sourceOf = (
  * whole part is malformed) it is the single-error document of
  * {@link schemaError}.
  *
+ * A query parameter is named as the request sent it. A property the query
+ * schema renames on the wire (`Schema.encodeKeys`, `Query.bracketKeys`,
+ * `Query.bracketPageKeys`, `Query.flatList`) is rejected under its decoded
+ * name once decoded, and `source.parameter` carries its wire name instead:
+ * `include` for a property `paths` sent as `include`, `page[limit]` for a
+ * bracketed `limit`.
+ *
  * Where the schema that rejected the value publishes what it *would* have
  * accepted, the error object carries it as `meta`: a rejected `?include=` path
  * carries `meta.includablePaths` (the endpoint's whole supported set, as
@@ -442,21 +449,37 @@ const sourceOf = (
 export const schemaErrorDocument = (
   part: RequestPart,
   error: Schema.SchemaError | SchemaIssue.Issue,
+): typeof WireDocument.Type => errorDocument(part, error, Option.none());
+
+// `schemaErrorDocument`, given the query schema the request was decoded with
+// when there is one, so a renamed query property is named by its wire name
+// even where the decoder rebuilt the schema's encoded side.
+const errorDocument = (
+  part: RequestPart,
+  error: Schema.SchemaError | SchemaIssue.Issue,
+  query: Option.Option<SchemaAST.AST>,
 ): typeof WireDocument.Type => {
   const issue = SchemaIssue.isIssue(error) ? error : error.issue;
-  const leaves = SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues;
+  // Each leaf's path in decoded names, and as the request spelled it: a
+  // query property renamed on the wire (#305) is named by its wire name.
+  const leaves =
+    part === "Query"
+      ? queryLeaves(issue, query)
+      : SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues.map((leaf) => {
+          const path = (leaf.path ?? []).map((segment) =>
+            typeof segment === "object" ? segment.key : segment,
+          );
+          return { message: leaf.message, path, wire: path };
+        });
   // Error `meta` a schema publishes for its own rejections — the include
   // whitelist, the sortable fields — indexed once per failure and looked up
   // per leaf by the path the leaf sits at.
   const metaAt = indexErrorMeta(issue);
   const errors = leaves.map((leaf) => {
-    const keys = (leaf.path ?? []).map((segment) =>
-      typeof segment === "object" ? segment.key : segment,
-    );
-    const path = keys.flatMap((key) =>
+    const path = leaf.wire.flatMap((key) =>
       typeof key === "string" || typeof key === "number" ? [key] : [],
     );
-    return { detail: leaf.message, source: sourceOf(part, path), meta: metaAt(keys) };
+    return { detail: leaf.message, source: sourceOf(part, path), meta: metaAt(leaf.path) };
   });
   if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part));
   return {
@@ -915,7 +938,10 @@ const badRequestResponse = (part: RequestPart, document: typeof WireDocument.Typ
     Effect.withSpan(Span.schemaError),
   );
 
-const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
+const transformSchemaError = (
+  error: HttpApiError.HttpApiSchemaError,
+  endpoint: HttpApiEndpoint.Top,
+) =>
   isResponsePart(error.kind)
     ? Effect.die(
         new ResponseEncodeError({
@@ -923,7 +949,14 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
           cause: error,
         }),
       )
-    : badRequestResponse(error.kind, schemaErrorDocument(error.kind, error.cause));
+    : badRequestResponse(
+        error.kind,
+        errorDocument(
+          error.kind,
+          error.cause,
+          Option.map(Option.fromNullishOr(endpoint.query), ({ ast }) => ast),
+        ),
+      );
 
 /**
  * Creates the live {@link SchemaErrors} implementation, optionally accepting
@@ -999,7 +1032,7 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
       }
       return yield* Effect.catch(httpEffect, (error) =>
         HttpApiError.HttpApiSchemaError.is(error)
-          ? transformSchemaError(error)
+          ? transformSchemaError(error, endpoint)
           : Effect.fail(error),
       );
     }),
@@ -1036,11 +1069,18 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * the general §Implementation-Specific Query Parameters rule, since that
  * endpoint does not know how to process `sort` as a query parameter from the
  * specification. Only the property the schema decodes the `include` /
- * `sort` parameter into decides whether its vocabulary is empty — the one of
- * that name, or the one its encoding renames to it (`Schema.encodeKeys`) —
- * read through a union or `Schema.suspend`: one whose codec publishes no
+ * `sort` parameter into decides whether its vocabulary is empty, read
+ * through a union or `Schema.suspend`: one whose codec publishes no
  * vocabulary (`Query.IncludeList`, a custom codec), or a non-empty one in
- * any member of a union, supports the family.
+ * any member of a union, supports the family. That is the property the
+ * schema's encoding sends under the parameter's name, whatever its decoded
+ * name: with `Schema.encodeKeys({ paths: "include", order: "sort" })`, the
+ * `include` parameter is decided by `paths` and `sort` by `order`, and a
+ * decoded `include` sent as `inc` decides nothing about `include`. Where the
+ * schema's structure does not settle which property that is (a rename to an
+ * array-index name between properties whose codecs encode alike, say), the
+ * property of that name decides, or failing one, every property whose name
+ * the wire does not declare.
  *
  * The same holds for `fields[TYPE]`, `page[…]` and `filter[…]` (#261): on an
  * endpoint whose `query` schema does not declare the family —
