@@ -284,12 +284,49 @@ describe("allowedQueryParameters entries", () => {
     expect(build).not.toThrow("needs no entry");
   });
 
-  it("accepts base names made only of a-z, the specification's families included", () => {
+  it("accepts base names made only of a-z", () => {
     expect(() =>
-      Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang", "ref", "page"] }),
+      Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang", "ref", "pages"] }),
     ).not.toThrow();
     expect(() => Middleware.layerWith({ allowedQueryParameters: [] })).not.toThrow();
   });
+
+  // Owner decision on #261: the allow-list admits only implementation-
+  // specific names, so a family the specification defines is never silently
+  // ignored. An endpoint supports one by declaring it.
+  const families = ["include", "fields", "sort", "page", "filter"];
+
+  it.each(families)(
+    "refuses the specification's family %j when schemaErrorsLayer is built",
+    (entry) => {
+      const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang", entry] });
+      expect(build).toThrow(Middleware.InvalidAllowedQueryParameter);
+      expect(build).toThrow(
+        expect.objectContaining({
+          _tag: "InvalidAllowedQueryParameter",
+          parameter: entry,
+          message: expect.stringContaining(
+            `"${entry}" names a query parameter family JSON:API defines`,
+          ),
+        }),
+      );
+    },
+  );
+
+  it.each(families)("refuses the specification's family %j when layerWith is built", (entry) => {
+    expect(() => Middleware.layerWith({ allowedQueryParameters: [entry] })).toThrow(
+      Middleware.InvalidAllowedQueryParameter,
+    );
+  });
+
+  it.each(families)(
+    "refuses the specification's family %j in a checkQueryParameters call",
+    (entry) => {
+      expect(() =>
+        Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] }),
+      ).toThrow(Middleware.InvalidAllowedQueryParameter);
+    },
+  );
 });
 
 describe("Middleware.checkQueryParameters", () => {
@@ -297,23 +334,54 @@ describe("Middleware.checkQueryParameters", () => {
 
   it("returns undefined when every name is acceptable", () => {
     expect(check([])).toBeUndefined();
+    expect(check(["fooBar", "x-trace", "foo_bar", "ext:name", "x1", "[odd]"])).toBeUndefined();
     expect(
-      check([
-        "fields[articles]",
-        "page[limit]",
-        "filter[age][gt]",
-        "filter",
-        "fooBar",
-        "x-trace",
-        "foo_bar",
-        "ext:name",
-        "x1",
-        "[odd]",
-      ]),
+      check(["fields[articles]", "page[limit]", "page[offset]", "filter[age][gt]", "filter"], {
+        declared: ["fields[articles]", "page[limit]", "filter["],
+      }),
     ).toBeUndefined();
   });
 
-  it("rejects `include` and `sort` unless declared or allowed (#261)", () => {
+  it("rejects `fields`, `page` and `filter` unless declared (#261)", () => {
+    expect(check(["fields[articles]", "page[limit]", "filter[age][gt]", "filter"])).toEqual({
+      errors: [
+        expect.objectContaining({
+          detail: expect.stringContaining('does not support the "fields[articles]" parameter'),
+          source: { parameter: "fields[articles]" },
+        }),
+        expect.objectContaining({
+          detail: expect.stringContaining('does not support the "page" parameter family'),
+          source: { parameter: "page[limit]" },
+        }),
+        expect.objectContaining({
+          detail: expect.stringContaining('does not support the "filter" parameter family'),
+          source: { parameter: "filter[age][gt]" },
+        }),
+        expect.objectContaining({
+          detail: expect.stringContaining('does not support the "filter" parameter family'),
+          source: { parameter: "filter" },
+        }),
+      ],
+    });
+  });
+
+  // `fields` is per resource type: each `fields[TYPE]` is its own parameter,
+  // so a declared one admits only itself, where a declared `page[limit]`
+  // admits the whole `page` family.
+  it("admits a `fields[TYPE]` only by its own name or a declared `fields[` prefix (#261)", () => {
+    const declared = ["fields[articles]"];
+    expect(check(["fields[articles]"], { declared })).toBeUndefined();
+    expect(
+      check(["fields[people]", "fields", "fields[articles][x]", "fields[]"], { declared })?.errors,
+    ).toEqual(
+      ["fields[people]", "fields", "fields[articles][x]", "fields[]"].map((parameter) =>
+        expect.objectContaining({ source: { parameter } }),
+      ),
+    );
+    expect(check(["fields[people]"], { declared: ["fields["] })).toBeUndefined();
+  });
+
+  it("rejects `include` and `sort` unless declared (#261)", () => {
     expect(check(["include", "sort[x]"])).toEqual({
       errors: [
         expect.objectContaining({
@@ -328,7 +396,6 @@ describe("Middleware.checkQueryParameters", () => {
     });
     expect(check(["include", "sort"], { declared: ["include", "sort"] })).toBeUndefined();
     expect(check(["sort"], { declared: ["include"] })?.errors).toHaveLength(1);
-    expect(check(["include"], { allowedQueryParameters: ["include"] })).toBeUndefined();
   });
 
   it("rejects an all-lowercase base name nothing declares, naming the whole parameter", () => {
@@ -645,46 +712,6 @@ describe("spec families an endpoint does not support (#261)", () => {
     });
   });
 
-  // An allow-listed family is admitted, so an endpoint that declares it with
-  // an empty vocabulary still decodes it, and its codec says why it fails.
-  it("says the endpoint supports none when an allow-listed empty vocabulary rejects a value", async () => {
-    const allowing = Middleware.layerWith({ allowedQueryParameters: ["include", "sort"] });
-    const path = await serve("/tags/1?include=author", allowing);
-    expect(path.status).toBe(400);
-    expect(path.body.errors).toEqual([
-      {
-        status: "400",
-        code: "bad_request",
-        title: "Bad Request",
-        detail: "This endpoint supports no include paths.",
-        source: { parameter: "include" },
-        meta: { includablePaths: [] },
-      },
-    ]);
-    const field = await serve("/tags?sort=name", allowing);
-    expect(field.status).toBe(400);
-    expect(field.body.errors).toEqual([
-      {
-        status: "400",
-        code: "bad_request",
-        title: "Bad Request",
-        detail: "This endpoint supports no sortable fields.",
-        source: { parameter: "sort" },
-        meta: { sortableFields: [] },
-      },
-    ]);
-  });
-
-  // Whether `fields[TYPE]`, `page[…]` and `filter[…]` on an endpoint that
-  // declares none of that family are rejected too is the owner's decision
-  // (#261); until it is taken they stay ignored, as before.
-  it.each(["fields[people]=name", "page[limit]=1", "filter[name]=Ada", "filter=x"])(
-    "still ignores the undeclared `?%s`",
-    async (query) => {
-      expect((await serve(`/people/1?${query}`)).status).toBe(200);
-    },
-  );
-
   // The same precedence as #148's: `SchemaErrors` is the outer middleware,
   // so the 400 wins over a 406 or 415 the same request would otherwise get.
   describe("is decided before content negotiation", () => {
@@ -742,26 +769,6 @@ describe("spec families an endpoint does not support (#261)", () => {
     const response = await serve("/people/1?include=author", Middleware.layerHostNegotiated);
     expect(response.status).toBe(400);
     expect(response.body).toEqual({ errors: [unsupported("include", "include")] });
-  });
-
-  it("admits a family listed in allowedQueryParameters, which the endpoint then ignores", async () => {
-    queries.length = 0;
-    const allowing = Middleware.layerWith({ allowedQueryParameters: ["sort"] });
-    expect((await serve("/posts/1?sort=title", allowing)).status).toBe(200);
-    expect(queries).toEqual([{}]);
-    expect((await serve("/posts?include=author", allowing)).status).toBe(400);
-  });
-
-  // Allowing a family only switches off the 400 where it is undeclared: an
-  // endpoint that declares it still decodes it, value and codec errors alike.
-  it("still decodes a family listed in allowedQueryParameters on an endpoint that declares it", async () => {
-    queries.length = 0;
-    const allowing = Middleware.layerWith({ allowedQueryParameters: ["sort"] });
-    expect((await serve("/posts?sort=title", allowing)).status).toBe(200);
-    expect(queries).toEqual([{ sort: [{ field: "title", direction: "asc" }] }]);
-    const field = await serve("/posts?sort=nope", allowing);
-    expect(field.status).toBe(400);
-    expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
   });
 });
 
@@ -1028,5 +1035,465 @@ describe("which declared `include` / `sort` an endpoint supports (#282)", () => 
     const response = await serve(url);
     expect(response.status).toBe(400);
     expect(response.body).toEqual(unsupported(family));
+  });
+});
+
+describe("`fields`, `page` and `filter` an endpoint does not support (#261)", () => {
+  // Owner decision on #261: an undeclared `fields[…]`, `page[…]` or
+  // `filter[…]` is a 400, exactly as an unsupported `include` / `sort` is,
+  // and so is one declared with an empty vocabulary. JSON:API 1.1
+  // §Implementation-Specific Query Parameters: "If a server encounters a
+  // query parameter that does not follow the naming conventions above, or the
+  // server does not know how to process it as a query parameter from this
+  // specification, it MUST return `400 Bad Request`." For `fields`, ignoring
+  // it would also break §Sparse Fieldsets: "If a client requests a restricted
+  // set of [fields] for a given resource type, an endpoint MUST NOT include
+  // additional [fields] in resource objects of that type in its response."
+  // `fields` is per resource type: each `fields[TYPE]` is its own parameter.
+  const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
+  // No attributes, so its sparse fieldset has no field to select.
+  const Tag = Resource.make("tags", { attributes: {} });
+  const Post = Resource.make("posts", {
+    attributes: { title: Resource.attribute(Schema.NonEmptyString, { filter: true }) },
+    relationships: { author: Relationship.one(() => Person), tags: Relationship.many(() => Tag) },
+  });
+
+  const FamiliesApi = HttpApi.make("fieldsPageFilter")
+    .add(
+      Group.make(
+        Post,
+        Endpoint.get(Post),
+        // `fields[posts]`, `fields[people]` and the empty `fields[tags]`.
+        Endpoint.list(Post, { fields: true, page: Query.Page.Offset, filter: true }),
+        Endpoint.delete(Post),
+      ),
+    )
+    .add(
+      Group.make(
+        Person,
+        Endpoint.get(Person, { fields: true }),
+        // No filterable attribute, and a page strategy with no member.
+        Endpoint.list(Person, { filter: true, page: {} }),
+      ),
+    )
+    // `fields[tags]` only, which is empty, and a filter map with no key.
+    .add(Group.make(Tag, Endpoint.list(Tag, { fields: true, filter: {} })));
+
+  // The decoded `query` each handler call received.
+  const queries: Array<unknown> = [];
+  const FamiliesLive = Layer.mergeAll(
+    HttpApiBuilder.group(FamiliesApi, "posts", (handlers) =>
+      handlers
+        .handle("get", ({ params, query }) => {
+          queries.push(query);
+          return Effect.succeed({
+            data: Post.make({ id: params.id, attributes: { title: "Hello" } }),
+          });
+        })
+        .handle("list", ({ query }) => {
+          queries.push(query);
+          return Effect.succeed({ data: [] });
+        })
+        .handle("delete", () => {
+          // `delete` declares no query: record that it ran.
+          queries.push("delete");
+          return Effect.void;
+        }),
+    ),
+    HttpApiBuilder.group(FamiliesApi, "people", (handlers) =>
+      handlers
+        .handle("get", ({ params, query }) => {
+          queries.push(query);
+          return Effect.succeed({
+            data: Person.make({ id: params.id, attributes: { name: "Ada" } }),
+          });
+        })
+        .handle("list", ({ query }) => {
+          queries.push(query);
+          return Effect.succeed({ data: [] });
+        }),
+    ),
+    HttpApiBuilder.group(FamiliesApi, "tags", (handlers) =>
+      handlers.handle("list", ({ query }) => {
+        queries.push(query);
+        return Effect.succeed({ data: [] });
+      }),
+    ),
+  );
+
+  const serve = async (
+    url: string,
+    middlewareLayer: Layer.Layer<ContentNegotiation | SchemaErrors> = Middleware.layer,
+    init: RequestInit = {},
+  ) => {
+    const appLayer = HttpApiBuilder.layer(FamiliesApi).pipe(
+      Layer.provide(FamiliesLive),
+      Layer.provide(middlewareLayer),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(new Request(`http://localhost${url}`, init)).finally(dispose);
+    const text = await response.text();
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: text === "" ? undefined : decodeJson(text),
+    };
+  };
+
+  // A `fields[TYPE]` rejection names its own parameter; `page` and `filter`
+  // are rejected as a family.
+  const unsupported = (parameter: string) => ({
+    status: "400",
+    code: "bad_request",
+    title: "Bad Request",
+    detail: expect.stringContaining(
+      parameter.startsWith("fields")
+        ? `does not support the "${parameter}" parameter`
+        : `does not support the "${parameter.startsWith("page") ? "page" : "filter"}" parameter family`,
+    ),
+    source: { parameter },
+  });
+
+  // Every way the middleware is provided: the default layer, `layerWith`
+  // (with an allow-list, which admits none of these), and `schemaErrorsLayer`
+  // wired directly beside the live negotiation.
+  const layers = [
+    ["Middleware.layer", Middleware.layer],
+    ["Middleware.layerWith", Middleware.layerWith({ allowedQueryParameters: ["lang"] })],
+    [
+      "schemaErrorsLayer",
+      Layer.mergeAll(
+        Middleware.ContentNegotiationLive,
+        Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] }),
+      ),
+    ],
+  ] as const;
+
+  const rejected: ReadonlyArray<
+    readonly [what: string, url: string, parameters: ReadonlyArray<string>]
+  > = [
+    // Undeclared: the endpoint's `query` has no member of the family.
+    [
+      "`fields[TYPE]` on a fetch with no fieldset",
+      "/posts/1?fields[posts]=title",
+      ["fields[posts]"],
+    ],
+    [
+      "an empty `fields[TYPE]` on a fetch with no fieldset",
+      "/posts/1?fields[posts]=",
+      ["fields[posts]"],
+    ],
+    ["a bare `fields`", "/posts/1?fields=title", ["fields"]],
+    ["`page[…]` on a fetch that does not paginate", "/posts/1?page[limit]=1", ["page[limit]"]],
+    ["an empty `page[…]`", "/posts/1?page[offset]=", ["page[offset]"]],
+    ["a bare `page`", "/posts/1?page=2", ["page"]],
+    [
+      "`filter[…]` on a fetch that does not filter",
+      "/posts/1?filter[title]=Hello",
+      ["filter[title]"],
+    ],
+    ["a nested `filter[…]`", "/posts/1?filter[title][eq]=Hello", ["filter[title][eq]"]],
+    ["a bare `filter`", "/posts/1?filter=x", ["filter"]],
+    ["an empty bare `filter`", "/posts/1?filter=", ["filter"]],
+    [
+      "all three families at once",
+      "/posts/1?fields[posts]=title&page[limit]=1&filter[title]=x",
+      ["fields[posts]", "page[limit]", "filter[title]"],
+    ],
+    // Declared with an empty vocabulary: unsupported (owner decision, #261).
+    ["`filter: true` over no filterable attribute", "/people?filter[name]=Ada", ["filter[name]"]],
+    ["`filter: true` over no filterable attribute, a bare value", "/people?filter=", ["filter"]],
+    ["`filter: {}`", "/tags?filter[name]=x", ["filter[name]"]],
+    ["`page: {}`", "/people?page[limit]=1", ["page[limit]"]],
+    ["`fields[TYPE]` for a type with no attribute", "/tags?fields[tags]=name", ["fields[tags]"]],
+    [
+      "`fields[TYPE]` for a type with no attribute, an empty value",
+      "/tags?fields[tags]=",
+      ["fields[tags]"],
+    ],
+    // Per type: only the offending `fields[TYPE]` is rejected.
+    [
+      "`fields[TYPE]` for a type the endpoint has no fieldset for",
+      "/posts?fields[comments]=body",
+      ["fields[comments]"],
+    ],
+    [
+      "an empty-vocabulary `fields[TYPE]` beside a supported one",
+      "/posts?fields[posts]=title&fields[tags]=",
+      ["fields[tags]"],
+    ],
+    ["a bare `fields` beside declared fieldsets", "/posts?fields=title", ["fields"]],
+    ["a deeper `fields[TYPE][…]`", "/posts?fields[posts][x]=title", ["fields[posts][x]"]],
+    [
+      "`fields[TYPE]` for another type than the fetch declares",
+      "/people/1?fields[posts]=title",
+      ["fields[posts]"],
+    ],
+  ];
+
+  describe.each(layers)("under %s", (_, middleware) => {
+    it.each(rejected)("rejects %s, naming it", async (_, url, parameters) => {
+      queries.length = 0;
+      const response = await serve(url, middleware);
+      expect(response.status).toBe(400);
+      expect(response.contentType).toContain("application/vnd.api+json");
+      expect(response.body).toEqual({ errors: parameters.map(unsupported) });
+      expect(queries).toEqual([]);
+    });
+  });
+
+  it("rejects all three on an endpoint that declares no query schema at all", async () => {
+    queries.length = 0;
+    const response = await serve(
+      "/posts/1?fields[posts]=&page[limit]=1&filter=x",
+      Middleware.layer,
+      {
+        method: "DELETE",
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: ["fields[posts]", "page[limit]", "filter"].map(unsupported),
+    });
+    expect(queries).toEqual([]);
+  });
+
+  it("answers one error object per offending parameter, in request order, beside the other rejections", async () => {
+    const response = await serve(
+      "/posts/1?sort=x&fields[posts]=a&unknown=1&page[limit]=1&fooBar=1",
+    );
+    expect(response.status).toBe(400);
+    expect(response.body.errors.map((error: { source: unknown }) => error.source)).toEqual([
+      { parameter: "sort" },
+      { parameter: "fields[posts]" },
+      { parameter: "unknown" },
+      { parameter: "page[limit]" },
+    ]);
+  });
+
+  it("leaves a family the endpoint supports to its query schema", async () => {
+    queries.length = 0;
+    expect((await serve("/posts?fields[posts]=title&fields[people]=name")).status).toBe(200);
+    expect((await serve("/posts?page[limit]=1&filter[title]=Hello")).status).toBe(200);
+    expect((await serve("/people/1?fields[people]=")).status).toBe(200);
+    expect(queries).toEqual([
+      { fields: { posts: ["title"], people: ["name"] } },
+      {
+        page: { limit: 1 },
+        filter: { _tag: "Compare", op: "eq", field: "title", value: "Hello" },
+      },
+      { fields: { people: [] } },
+    ]);
+    // the family's codec still answers a value it cannot process
+    const field = await serve("/posts?fields[posts]=nope");
+    expect(field.status).toBe(400);
+    expect(field.body.errors[0].source).toEqual({ parameter: "fields[posts]" });
+    expect(field.body.errors[0].meta).toBeUndefined();
+    const limit = await serve("/posts?page[limit]=nope");
+    expect(limit.status).toBe(400);
+    expect(limit.body.errors[0].source).toEqual({ parameter: "page[limit]" });
+  });
+
+  // The decision covers a family the endpoint does not support. An
+  // undeclared member of a `page` family the endpoint declares is still left
+  // to the query schema, which drops it, as an `include[x]` beside a
+  // declared `include` is.
+  it("still leaves an undeclared member of a declared `page` family to the query schema", async () => {
+    queries.length = 0;
+    expect((await serve("/posts?page[size]=1")).status).toBe(200);
+    expect(queries).toEqual([{}]);
+  });
+
+  // The same precedence as `include` / `sort`: `SchemaErrors` is the outer
+  // middleware, so the 400 wins over a 406 or 415.
+  describe("is decided before content negotiation", () => {
+    const parameterised = "application/vnd.api+json; charset=utf-8";
+    const negotiating = [layers[0], layers[2]] as const;
+
+    it.each(negotiating)("over an unacceptable Accept (406), under %s", async (_, middleware) => {
+      const accept = { headers: { accept: parameterised } };
+      const page = await serve("/posts/1?page[limit]=1", middleware, accept);
+      expect(page.status).toBe(400);
+      expect(page.body).toEqual({ errors: [unsupported("page[limit]")] });
+      const filter = await serve("/people?filter[name]=Ada", middleware, accept);
+      expect(filter.status).toBe(400);
+      expect(filter.body).toEqual({ errors: [unsupported("filter[name]")] });
+      // without the unsupported parameter, the same request is the 406
+      expect((await serve("/posts/1", middleware, accept)).status).toBe(406);
+    });
+
+    it.each(negotiating)(
+      "over an unsupported Content-Type (415), under %s",
+      async (_, middleware) => {
+        const contentType = { headers: { "content-type": parameterised } };
+        const response = await serve("/tags?fields[tags]=", middleware, contentType);
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({ errors: [unsupported("fields[tags]")] });
+        const undeclared = await serve("/posts/1?fields[posts]=title", middleware, contentType);
+        expect(undeclared.status).toBe(400);
+        expect(undeclared.body).toEqual({ errors: [unsupported("fields[posts]")] });
+        // without the unsupported parameter, the same request is the 415
+        expect((await serve("/tags", middleware, contentType)).status).toBe(415);
+      },
+    );
+  });
+
+  it("applies under the host-negotiated layer too", async () => {
+    const response = await serve("/posts/1?fields[posts]=title", Middleware.layerHostNegotiated);
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({ errors: [unsupported("fields[posts]")] });
+  });
+
+  // Hand-built query schemas: a union, a suspended schema, a fieldset under
+  // its own wire name or renamed to it, an open `fields[` record, and a
+  // record that admits any name, before which the whole check stands aside.
+  describe("on a hand-built query schema", () => {
+    // Another resource of type `tags`, whose fieldset has a field.
+    const NamedTag = Resource.make("tags", { attributes: { name: Schema.String } });
+    const endpoints = {
+      "union-of-fieldsets": Schema.Union([
+        Query.schema(Tag, { fields: true }),
+        Query.schema(NamedTag, { fields: true }),
+      ]),
+      // The `page` member first: a union decodes through its first member
+      // that accepts the input, and the fieldset member drops `page[…]`.
+      "union-with-empty-fieldset": Schema.Union([
+        Query.schema(Person, { page: Query.Page.Offset }),
+        Query.schema(Tag, { fields: true }),
+      ]),
+      suspended: Schema.suspend(() =>
+        Query.schema(Post, { fields: true, page: Query.Page.Offset }),
+      ),
+      "flat-fieldsets": Schema.Struct({
+        "fields[tags]": Schema.optionalKey(Query.Fieldset(Tag)),
+        "fields[people]": Schema.optionalKey(Query.Fieldset(Person)),
+      }),
+      "renamed-empty-fieldset": Schema.Struct({
+        tagFields: Schema.optionalKey(Query.Fieldset(Tag)),
+      }).pipe(Schema.encodeKeys({ tagFields: "fields[tags]" })),
+      "renamed-fieldset": Schema.Struct({
+        personFields: Schema.optionalKey(Query.Fieldset(Person)),
+      }).pipe(Schema.encodeKeys({ personFields: "fields[people]" })),
+      "open-fieldsets": Schema.Record(
+        Schema.TemplateLiteral(["fields[", Schema.String]),
+        Schema.String,
+      ),
+      record: Schema.Record(Schema.String, Schema.String),
+    } as const;
+    type Name = keyof typeof endpoints;
+    const endpoint = <const N extends Name>(name: N) =>
+      HttpApiEndpoint.get(name, `/${name}`, {
+        query: endpoints[name],
+        success: Schema.Unknown,
+      }).middleware(Middleware.SchemaErrors);
+    const HandBuiltApi = HttpApi.make("handBuilt").add(
+      HttpApiGroup.make("handBuilt").add(
+        endpoint("union-of-fieldsets"),
+        endpoint("union-with-empty-fieldset"),
+        endpoint("suspended"),
+        endpoint("flat-fieldsets"),
+        endpoint("renamed-empty-fieldset"),
+        endpoint("renamed-fieldset"),
+        endpoint("open-fieldsets"),
+        endpoint("record"),
+      ),
+    );
+    const echo = ({ query }: { readonly query: unknown }) => Effect.succeed(query);
+    const HandBuiltLive = HttpApiBuilder.group(HandBuiltApi, "handBuilt", (handlers) =>
+      handlers.handleAll({
+        "union-of-fieldsets": echo,
+        "union-with-empty-fieldset": echo,
+        suspended: echo,
+        "flat-fieldsets": echo,
+        "renamed-empty-fieldset": echo,
+        "renamed-fieldset": echo,
+        "open-fieldsets": echo,
+        record: echo,
+      }),
+    );
+    const serveHandBuilt = async (url: string) => {
+      const appLayer = HttpApiBuilder.layer(HandBuiltApi).pipe(
+        Layer.provide(HandBuiltLive),
+        Layer.provide(Middleware.SchemaErrorsLive),
+        Layer.provide(platformLayer),
+      );
+      const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+      const response = await handler(new Request(`http://localhost${url}`)).finally(dispose);
+      return { status: response.status, body: decodeJson(await response.text()) };
+    };
+
+    it.each([
+      [
+        "a union in which one member's fieldset for the type has a field",
+        "/union-of-fieldsets?fields[tags]=name",
+        { fields: { tags: ["name"] } },
+      ],
+      [
+        "a declared `page` in one member of a union",
+        "/union-with-empty-fieldset?page[limit]=1",
+        { page: { limit: 1 } },
+      ],
+      [
+        "a suspended query's fieldset",
+        "/suspended?fields[posts]=title",
+        { fields: { posts: ["title"] } },
+      ],
+      ["a suspended query's `page`", "/suspended?page[limit]=1", { page: { limit: 1 } }],
+      [
+        "a fieldset under its own wire name",
+        "/flat-fieldsets?fields[people]=name",
+        { "fields[people]": ["name"] },
+      ],
+      [
+        "a fieldset renamed to its wire name",
+        "/renamed-fieldset?fields[people]=name",
+        { personFields: ["name"] },
+      ],
+      [
+        "any `fields[…]` of an open `fields[` record",
+        "/open-fieldsets?fields[anything]=x",
+        { "fields[anything]": "x" },
+      ],
+      [
+        "any family on a record that admits any name",
+        "/record?fields[x]=a&page[y]=b&filter[z]=c",
+        { "fields[x]": "a", "page[y]": "b", "filter[z]": "c" },
+      ],
+    ] as const)("supports %s", async (_, url, query) => {
+      const response = await serveHandBuilt(url);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(query);
+    });
+
+    it.each([
+      [
+        "a union whose every fieldset for the type is empty",
+        "/union-with-empty-fieldset?fields[tags]=",
+        ["fields[tags]"],
+      ],
+      [
+        "`filter` on a union that declares none",
+        "/union-with-empty-fieldset?filter[x]=1",
+        ["filter[x]"],
+      ],
+      ["an empty fieldset in a suspended query", "/suspended?fields[tags]=", ["fields[tags]"]],
+      ["`filter` on a suspended query that declares none", "/suspended?filter[x]=1", ["filter[x]"]],
+      [
+        "an empty fieldset under its own wire name",
+        "/flat-fieldsets?fields[tags]=",
+        ["fields[tags]"],
+      ],
+      [
+        "an empty fieldset renamed to its wire name",
+        "/renamed-empty-fieldset?fields[tags]=",
+        ["fields[tags]"],
+      ],
+      ["`page` beside an open `fields[` record", "/open-fieldsets?page[limit]=1", ["page[limit]"]],
+    ] as const)("rejects %s", async (_, url, parameters) => {
+      const response = await serveHandBuilt(url);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ errors: parameters.map(unsupported) });
+    });
   });
 });

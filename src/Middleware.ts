@@ -24,11 +24,12 @@
  *     reports every offending key together. It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z and that neither the specification defines nor the endpoint
- *     declares (JSON:API 1.1 §Query Parameters), and an `include` or `sort`
- *     parameter on an endpoint that does not declare it, or declares it
- *     with an empty vocabulary (§Inclusion of
- *     Related Resources; §Sorting on a collection endpoint, the general
- *     §Implementation-Specific Query Parameters rule on any other; see
+ *     declares (JSON:API 1.1 §Query Parameters), and a parameter of one of
+ *     the specification's own families — `include`, `fields[TYPE]`, `sort`,
+ *     `page[…]`, `filter[…]` — on an endpoint that does not declare it, or
+ *     declares it with an empty vocabulary (§Inclusion of Related
+ *     Resources; §Sorting on a collection endpoint; the general
+ *     §Implementation-Specific Query Parameters rule otherwise; see
  *     {@link checkQueryParameters}).
  *   - {@link CreatedLocation} — JSON:API §Creating Resources: a 201 create
  *     answers with a `Location` header copied from the created resource's
@@ -98,7 +99,7 @@ import { declaredNames } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
-import { admitsNoValue } from "./internal/vocabulary.js";
+import { admitsNoValue, type Family, isFamily } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
 // ---------------------------------------------------------------------------
@@ -474,29 +475,40 @@ export const schemaErrorDocument = (
 // Reserved query parameter names (JSON:API 1.1 §Query Parameters)
 // ---------------------------------------------------------------------------
 
-// The query parameter families JSON:API 1.1 defines that this check passes
-// through: an endpoint's query schema decodes one it declares and ignores one
-// it does not. Whether an undeclared one should be a 400 too is an open
-// decision (#261).
-const SPEC_FAMILIES: ReadonlyArray<string> = ["fields", "page", "filter"];
+// The general rule every family the specification defines falls back on,
+// §Implementation-Specific Query Parameters: "If a server encounters a query
+// parameter that does not follow the naming conventions above, or the server
+// does not know how to process it as a query parameter from this
+// specification, it MUST return `400 Bad Request`."
+const GENERAL_RULE =
+  "JSON:API requires a server to reject a query parameter from the specification " +
+  "that it does not know how to process.";
 
-// The families JSON:API 1.1 requires an endpoint that does not support them to
-// answer with a 400, each with the detail its rejection carries: `include`
-// under §Inclusion of Related Resources; `sort` under §Sorting on an endpoint
-// that responds with a resource collection, and under the general
-// §Implementation-Specific Query Parameters rule on any other. An endpoint
-// supports one by declaring it with at least one legal value (#282).
-const SUPPORT_FAMILIES: Readonly<Record<"include" | "sort", string>> = {
-  include:
+// The detail of the 400 for a parameter of a family JSON:API 1.1 defines
+// (`FAMILIES`, the single list of them) on an endpoint that does not support
+// it: `include` under §Inclusion of Related Resources; `sort` under §Sorting
+// on an endpoint that responds with a resource collection, and under the
+// general rule on any other; `fields[TYPE]`, `page[…]` and `filter[…]` under
+// the general rule (#261), `fields` also because ignoring it would break
+// §Sparse Fieldsets' MUST NOT on additional fields. An endpoint supports a
+// family by declaring it with at least one legal value (#282), and a
+// `fields[TYPE]` by declaring that very name.
+const UNSUPPORTED: Readonly<Record<Family, (parameter: string) => string>> = {
+  include: () =>
     'This endpoint does not support the "include" parameter. JSON:API requires an ' +
     "endpoint that does not support inclusion of related resources to reject any " +
     "request that carries it.",
-  sort:
+  fields: (parameter) =>
+    `This endpoint does not support the "${parameter}" parameter: it supports no sparse ` +
+    `fieldset of that name. ${GENERAL_RULE}`,
+  sort: () =>
     'This endpoint does not support the "sort" parameter. JSON:API requires a server ' +
     "that does not support the requested sorting to reject it.",
+  page: () =>
+    `This endpoint does not support the "page" parameter family: it does not paginate. ${GENERAL_RULE}`,
+  filter: () =>
+    `This endpoint does not support the "filter" parameter family: it does not filter. ${GENERAL_RULE}`,
 };
-
-const SUPPORT_FAMILY_NAMES = Rec.keys(SUPPORT_FAMILIES);
 
 // A family base name made only of a-z is reserved for the specification.
 const RESERVED_BASE_NAME = /^[a-z]+$/;
@@ -527,12 +539,7 @@ export interface QueryParameterOptions {
    *
    * JSON:API 1.1 reserves these names for the specification, so accepting one
    * is a deliberate deviation: prefer renaming the parameter (`langCode`,
-   * `x-lang`) when the host controls it. Listing `include` or `sort` admits
-   * it on an endpoint that does not support it instead of answering the 400
-   * the specification requires: an endpoint that does not declare it then
-   * ignores it, and one that declares it with an empty vocabulary decodes it,
-   * so its codec rejects any value that names a path or field ("This
-   * endpoint supports no include paths."). Defaults to none.
+   * `x-lang`) when the host controls it. Defaults to none.
    *
    * An entry that is not such a base name — a bracketed member (`lang[x]`),
    * a name with any other character (`Lang`, ` lang`), or `""` — is refused
@@ -541,17 +548,24 @@ export interface QueryParameterOptions {
    * built, {@link checkQueryParameters} when it is called. List a bracketed
    * member by its base name (`lang`) and drop an empty entry; a name with any
    * other character is implementation-specific and never rejected, so it
-   * needs no entry.
+   * needs no entry. So is a family the specification defines (`include`,
+   * `fields`, `sort`, `page`, `filter`): an endpoint supports one by
+   * declaring it in its `query` schema, and the allow-list cannot switch off
+   * the 400 the specification requires on an endpoint that does not, so it
+   * is never silently ignored (#261).
    */
   readonly allowedQueryParameters?: ReadonlyArray<string> | undefined;
 }
 
 /**
  * An `allowedQueryParameters` entry that is not a family base name made only
- * of the letters a-z (see {@link QueryParameterOptions.allowedQueryParameters}).
- * Thrown when {@link schemaErrorsLayer} or {@link layerWith} builds its layer,
- * and by {@link checkQueryParameters}, so a misspelt entry fails at startup
- * instead of leaving the parameter it meant to admit rejected.
+ * of the letters a-z, or that names a family the specification defines
+ * (`include`, `fields`, `sort`, `page`, `filter`; see
+ * {@link QueryParameterOptions.allowedQueryParameters}). Thrown when
+ * {@link schemaErrorsLayer} or {@link layerWith} builds its layer, and by
+ * {@link checkQueryParameters}, so a misspelt entry fails at startup instead
+ * of leaving the parameter it meant to admit rejected, and a spec family
+ * never ends up silently ignored.
  *
  * @example
  * ```ts
@@ -573,18 +587,23 @@ export class InvalidAllowedQueryParameter extends Schema.TaggedError<InvalidAllo
   { parameter: Schema.String, message: Schema.String },
 ) {}
 
-// The allow-list, every entry checked to be a reserved family base name: any
-// other entry could never match a parameter the check rejects.
-const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string> => {
-  const allowed = options?.allowedQueryParameters ?? [];
-  const invalid = Arr.findFirst(allowed, (entry) => !RESERVED_BASE_NAME.test(entry));
-  if (Option.isNone(invalid)) return allowed;
-  const parameter = invalid.value;
+// Why an allow-list entry is refused, if it is: one that is not a reserved
+// family base name could never match a parameter the check rejects, and one
+// the specification defines would switch off the 400 it requires (owner
+// decision on #261).
+const refusal = (parameter: string): Option.Option<string> => {
+  if (isFamily(parameter)) {
+    return Option.some(
+      `allowedQueryParameters entry "${parameter}" names a query parameter family JSON:API ` +
+        "defines. An endpoint supports it by declaring it in its query schema, and the " +
+        "specification requires a 400 on one that does not, which the allow-list cannot " +
+        "switch off; remove the entry.",
+    );
+  }
+  if (RESERVED_BASE_NAME.test(parameter)) return Option.none();
   const base = baseName(parameter);
-  throw new InvalidAllowedQueryParameter({
-    parameter,
-    message:
-      `allowedQueryParameters entry "${parameter}" is not a family base name ` +
+  return Option.some(
+    `allowedQueryParameters entry "${parameter}" is not a family base name ` +
       "made only of the letters a-z. " +
       (parameter === ""
         ? "An empty entry names no parameter; remove it."
@@ -593,7 +612,41 @@ const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string
             "every bracketed member of its family."
           : "A name with any other character is implementation-specific and never rejected, " +
             "so it needs no entry."),
-  });
+  );
+};
+
+// The allow-list, every entry checked to be a reserved family base name the
+// specification does not define.
+const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string> => {
+  const allowed = options?.allowedQueryParameters ?? [];
+  const refused = Arr.findFirst(allowed, (parameter) =>
+    Option.map(
+      refusal(parameter),
+      (message) => new InvalidAllowedQueryParameter({ parameter, message }),
+    ),
+  );
+  if (Option.isSome(refused)) throw refused.value;
+  return allowed;
+};
+
+// Whether a parameter is one the endpoint supports, given the names it
+// declares and the allow-list. A `fields[TYPE]` is its own parameter, one per
+// resource type, so only that very name — or a declared `fields[` prefix, an
+// open record of them — admits it; any other declared name admits its whole
+// family, as does an allowed base name.
+const isSupported = (
+  name: string,
+  declared: ReadonlyArray<string>,
+  allowed: ReadonlyArray<string>,
+): boolean => {
+  const base = baseName(name);
+  if (!RESERVED_BASE_NAME.test(base) || allowed.includes(base)) return true;
+  if (base === "fields") {
+    return declared.some(
+      (entry) => entry === name || (entry.endsWith("[") && name.startsWith(entry)),
+    );
+  }
+  return declared.some((entry) => baseName(entry) === base);
 };
 
 // The check behind `checkQueryParameters`, over an allow-list
@@ -604,12 +657,8 @@ const rejectQueryParameters = (
   declared: ReadonlyArray<string>,
   allowed: ReadonlyArray<string>,
 ): Option.Option<typeof WireDocument.Type> => {
-  const known = [...SPEC_FAMILIES, ...declared.map(baseName), ...allowed];
   const rejected = Arr.dedupe(
-    Arr.filter(Arr.fromIterable(names), (name) => {
-      const base = baseName(name);
-      return RESERVED_BASE_NAME.test(base) && !known.includes(base);
-    }),
+    Arr.filter(Arr.fromIterable(names), (name) => !isSupported(name, declared, allowed)),
   );
   if (!Arr.isReadonlyArrayNonEmpty(rejected)) return Option.none();
   return Option.some({
@@ -618,7 +667,9 @@ const rejectQueryParameters = (
       code: BadRequest.code,
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
       detail: Option.getOrElse(
-        Rec.get<string, string>(SUPPORT_FAMILIES, baseName(parameter)),
+        Option.map(Option.liftPredicate(baseName(parameter), isFamily), (family) =>
+          UNSUPPORTED[family](parameter),
+        ),
         () =>
           `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
           "names made only of the letters a-z for the specification; an implementation-" +
@@ -640,11 +691,17 @@ const rejectQueryParameters = (
 export interface QueryParameterCheck extends QueryParameterOptions {
   /**
    * The query parameter names the endpoint's own query schema declares
-   * (`q`, `page[limit]`, …); each admits its whole family. An endpoint that
-   * supports `include` or `sort` lists it here: undeclared, either is
-   * rejected. One that declares either with an empty vocabulary (no include
-   * path, no sortable field) supports no value of it, so leaves it out, as
-   * {@link SchemaErrorsLive} does. Defaults to none.
+   * (`q`, `page[limit]`, `fields[articles]`, …). Each admits its whole
+   * family, except a name of the `fields` family, which admits only itself:
+   * a sparse fieldset is per resource type, so `fields[articles]` does not
+   * admit `fields[people]`. A name ending in `[` (`fields[`, `filter[`)
+   * admits every name it opens. An endpoint that supports one of the
+   * specification's families (`include`, `fields[TYPE]`, `sort`, `page`,
+   * `filter`) lists it here: undeclared, it is rejected. One that declares
+   * it with an empty vocabulary (no include path, no sortable field, no
+   * filterable field, a resource type with no attribute) supports no value
+   * of it, so leaves it out, as {@link SchemaErrorsLive} does. Defaults to
+   * none.
    */
   readonly declared?: ReadonlyArray<string> | undefined;
 }
@@ -652,12 +709,13 @@ export interface QueryParameterCheck extends QueryParameterOptions {
 /**
  * JSON:API 1.1 §Query Parameters: a query parameter whose family base name is
  * made only of the letters a-z is reserved for the specification, so a server
- * that does not know how to process one MUST answer 400 Bad Request. And
- * §Inclusion of Related Resources and §Sorting require the same 400 for an
- * `include` or `sort` parameter on an endpoint that does not support it —
- * §Sorting on an endpoint that responds with a resource collection; on any
- * other, the general §Implementation-Specific Query Parameters rule applies
- * to `sort`, since the endpoint does not know how to process it.
+ * that does not know how to process one MUST answer 400 Bad Request. That
+ * covers a parameter of one of the specification's own families on an
+ * endpoint that does not support it, and two sections require the same 400
+ * outright: §Inclusion of Related Resources for `include`, and §Sorting for
+ * `sort` on an endpoint that responds with a resource collection. For
+ * `fields[TYPE]`, ignoring it would also break §Sparse Fieldsets, under which
+ * an endpoint "MUST NOT include additional [fields]" beyond the requested set.
  * Returns that 400 document — one error object per offending parameter, each
  * naming it in `source.parameter` — or `undefined` when every parameter is
  * acceptable.
@@ -668,18 +726,20 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * - contains any character outside a-z (`fooBar`, `x-trace`, `foo_bar`,
  *   `ext:name`) — an implementation-specific or extension parameter, ignored
  *   here as before;
- * - is `fields`, `page` or `filter`, the specification's families the
- *   endpoint's query schema decodes when it declares them and ignores
- *   otherwise;
- * - is the base of a name in `declared` — the only way `include` and `sort`
- *   are acceptable besides the allow-list, since an endpoint that does not
- *   declare them does not support them (nor one that declares them with an
- *   empty vocabulary, which {@link SchemaErrorsLive} leaves out of
- *   `declared`); or
+ * - is the base of a name in `declared` — the only way a family the
+ *   specification defines (`include`, `sort`, `page`, `filter`) is
+ *   acceptable, since an endpoint that does not declare one does not
+ *   support it (nor one that declares it with an empty vocabulary, which
+ *   {@link SchemaErrorsLive} leaves out of `declared`). A `fields[TYPE]` is
+ *   acceptable only when `declared` lists that very name (or a `fields[`
+ *   prefix): a sparse fieldset is per resource type, so a declared
+ *   `fields[articles]` does not admit `fields[people]`, a bare `fields` or
+ *   `fields[articles][x]`; or
  * - is listed in `allowedQueryParameters`.
  *
  * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
- * entry that is not a family base name made only of a-z.
+ * entry that is not a family base name made only of a-z, or that names one
+ * of the specification's families.
  *
  * {@link SchemaErrorsLive} runs this on every request before the endpoint
  * decodes anything, with the names the endpoint's query schema declares.
@@ -707,25 +767,19 @@ export const checkQueryParameters = (
     rejectQueryParameters(names, options?.declared ?? [], allowedBaseNames(options)),
   );
 
-// The support families an endpoint's query schema declares with an empty
-// vocabulary: `include: { paths: [] }`, `include: true` over no
-// relationships, `sort: true` over no attributes. Such a family supports no
-// value, so it counts as undeclared (owner decision on #282): every request
-// that carries it gets the same 400 as on an endpoint that never declared it.
-// Each family is read off the property its wire parameter decodes into, and
-// no other (`admitsNoValue`).
-const emptyVocabularies = (ast: SchemaAST.AST): ReadonlyArray<string> =>
-  Arr.filter(SUPPORT_FAMILY_NAMES, (family) => admitsNoValue(ast, family));
-
 // What an endpoint supports, for `checkQueryParameters`: the wire names its
 // query schema declares (`declaredNames`; none when it could accept a name
-// the walk cannot enumerate, and the check then stands aside), less a support
-// family it declares with no legal value.
+// the walk cannot enumerate, and the check then stands aside), less every
+// name of a family it declares with no legal value — `include: { paths: []
+// }`, `sort: true` over no attributes, `filter: true` over no filterable
+// field, a `fields[TYPE]` whose type has no attribute. Such a parameter
+// supports no value, so it counts as undeclared (owner decisions on #282 and
+// #261): every request that carries it gets the same 400 as on an endpoint
+// that never declared it. Each name is read off the property its wire
+// parameter decodes into, and no other (`admitsNoValue`); a `fields[TYPE]`
+// off that type's fieldset alone, so a neighbouring type keeps its own.
 const supportedNames = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<string>> =>
-  Option.map(declaredNames(ast), (names) => {
-    const empty = emptyVocabularies(ast);
-    return Arr.filter(names, (name) => !empty.includes(baseName(name)));
-  });
+  Option.map(declaredNames(ast), (names) => Arr.filter(names, (name) => !admitsNoValue(ast, name)));
 
 // Endpoints are built once and served many times; walk each query schema once.
 const declaredByEndpoint = new WeakMap<HttpApiEndpoint.Top, Option.Option<ReadonlyArray<string>>>();
@@ -759,7 +813,8 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
  * Converts request validation failures (`HttpApiSchemaError`: malformed
  * params, query, payload or headers) into JSON:API 400 error documents, and
  * rejects reserved all-lowercase query parameters the endpoint does not
- * process (see {@link checkQueryParameters}). A failure to encode the
+ * process, the specification's own families included (see
+ * {@link checkQueryParameters}). A failure to encode the
  * handler's response is left a server error (see {@link SchemaErrorsLive}).
  *
  * @since 0.1.0
@@ -880,13 +935,13 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * endpoint's query schema declares: a parameter whose family base name is made
  * only of a-z, that is neither one of the specification's families nor
  * declared nor allowed, is answered with the JSON:API 400 naming it in
- * `source.parameter` (JSON:API 1.1 §Query Parameters), and so is an
- * `include` or `sort` parameter the endpoint neither declares (with at least
- * one legal value) nor allows
- * (§Inclusion of Related Resources; §Sorting on a collection endpoint, the
- * general §Implementation-Specific Query Parameters rule on any other). Then
- * every request validation failure is answered as {@link SchemaErrorsLive}
- * describes.
+ * `source.parameter` (JSON:API 1.1 §Query Parameters), and so is a parameter
+ * of one of the specification's families — `include`, `fields[TYPE]`,
+ * `sort`, `page[…]`, `filter[…]` — the endpoint does not declare with at
+ * least one legal value (§Inclusion of Related Resources; §Sorting on a
+ * collection endpoint; the general §Implementation-Specific Query
+ * Parameters rule otherwise). Then every request validation failure is
+ * answered as {@link SchemaErrorsLive} describes.
  *
  * The `Endpoint` constructors attach {@link SchemaErrors} after
  * {@link ContentNegotiation}, which makes it the outer of the two, so this
@@ -895,7 +950,8 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
  * `allowedQueryParameters` entry that is not a family base name made only of
- * a-z.
+ * a-z, or that names one of the specification's families (`include`,
+ * `fields`, `sort`, `page`, `filter`).
  *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
  * the same option. A host that negotiates content itself composes this with
@@ -984,8 +1040,25 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * that name, or the one its encoding renames to it (`Schema.encodeKeys`) —
  * read through a union or `Schema.suspend`: one whose codec publishes no
  * vocabulary (`Query.IncludeList`, a custom codec), or a non-empty one in
- * any member of a union, supports the family. An undeclared `fields[TYPE]`,
- * `page[…]` or `filter[…]` is still ignored.
+ * any member of a union, supports the family.
+ *
+ * The same holds for `fields[TYPE]`, `page[…]` and `filter[…]` (#261): on an
+ * endpoint whose `query` schema does not declare the family —
+ * `?page[limit]=10` or `?filter[status]=open` on `Endpoint.get(R)`,
+ * `?fields[articles]=title` on an endpoint declared without `fields` — the
+ * parameter is a 400 naming it, whatever its value, under the general
+ * §Implementation-Specific Query Parameters rule; so is one declared with an
+ * empty vocabulary (`filter: true` on a resource with no filterable field,
+ * `page: {}`, `filter: {}`). `fields` is per resource type: a `fields[TYPE]`
+ * the endpoint declares no sparse fieldset for, or whose type has no
+ * attribute to select, is a 400 naming that parameter, and a bare `fields`
+ * or a `fields[TYPE][…]` likewise, while the endpoint's other
+ * `fields[TYPE]` keep decoding. Ignoring such a fieldset would answer with
+ * the very fields the client excluded, which §Sparse Fieldsets forbids ("an
+ * endpoint MUST NOT include additional [fields] in resource objects of that
+ * type in its response"). An undeclared member of a `page` or `filter`
+ * family the endpoint does declare (`page[size]` beside `page[limit]`) is
+ * still left to the query schema.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
@@ -1153,7 +1226,7 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
  * `allowedQueryParameters` entry that is not a family base name made only of
- * a-z.
+ * a-z, or that names one of the specification's families.
  *
  * @example
  * ```ts
