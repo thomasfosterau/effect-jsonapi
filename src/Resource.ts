@@ -49,7 +49,7 @@ import { Effect, Schema, SchemaAST, SchemaIssue, SchemaTransformation, Struct } 
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js";
 import * as Filter from "./Filter.js";
 import { resolveOperators } from "./internal/operators.js";
-import { closedStruct } from "./internal/schemaExt.js";
+import { closedStruct, defaultUndeclaredMemberCap } from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships, RelationshipSchemas } from "./Relationship.js";
 import * as Sort from "./Sort.js";
@@ -1199,10 +1199,20 @@ export interface Resource<
    */
   readonly declaredAttributes: Attributes;
   /**
+   * How many undeclared members each write body member reports, each at its
+   * own pointer, before one more error at the member summarises the rest: the
+   * {@link make} option of the same name, `12` when it isn't given.
+   *
+   * @since 0.17.0
+   */
+  readonly undeclaredMemberCap: number;
+  /**
    * Request body schema for creating this resource (no `id`, optional `lid`,
    * required `one` relationships). Its `attributes` and `relationships`
    * members reject, when decoding and when encoding, every member they don't
-   * declare, each as an "Expected no excess property" issue at that member.
+   * declare: the first `undeclaredMemberCap` each as an "Expected no
+   * excess property" issue at that member, any more as one issue at the
+   * `attributes` / `relationships` member saying how many.
    */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>;
   /**
@@ -1343,6 +1353,16 @@ export interface Any extends Schema.Top {
    * @since 0.15.0
    */
   readonly declaredAttributes?: Schema.Struct.Fields | undefined;
+  /**
+   * How many undeclared members each write body member reports at its own
+   * pointer before one summary error (see {@link make}'s
+   * `undeclaredMemberCap`). Every definition {@link make} or {@link extend}
+   * builds carries one; the atomic `add` / `update` operations read it, and
+   * use `12` when it is absent.
+   *
+   * @since 0.17.0
+   */
+  readonly undeclaredMemberCap?: number | undefined;
 }
 
 /**
@@ -2566,6 +2586,16 @@ const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void =
   }
 };
 
+// The `undeclaredMemberCap` option: a positive integer, or `Infinity` for no
+// cap. Zero would report a summary with no member beside it, and a fraction,
+// a negative number or `NaN` no count at all, so each is refused here.
+const validateUndeclaredMemberCap = (type: string, cap: number): number => {
+  if (cap === Number.POSITIVE_INFINITY || (Number.isInteger(cap) && cap > 0)) return cap;
+  throw new Error(
+    `Resource.make("${type}"): undeclaredMemberCap must be a positive integer or Infinity, got ${String(cap)}`,
+  );
+};
+
 // ---------------------------------------------------------------------------
 // The Resource constructor
 // ---------------------------------------------------------------------------
@@ -2579,6 +2609,7 @@ interface Definition {
   readonly relationships: Relationships;
   readonly meta: Schema.Top;
   readonly annotations: Schema.Annotations.Annotations | undefined;
+  readonly undeclaredMemberCap: number;
 }
 
 const definitions = new WeakMap<object, Definition>();
@@ -2690,8 +2721,26 @@ export const make = <
      * @since 0.15.0
      */
     readonly annotations?: Schema.Annotations.Annotations;
+    /**
+     * How many undeclared members each write body member reports, each as its
+     * own error at its own pointer, before one more error at the member says
+     * how many the rest are ("…and 9,988 more undeclared members"). It bounds
+     * the 400 a request with many undeclared members gets, and applies to
+     * every write body member this definition derives — `createPayload`,
+     * `updatePayload`, `createInput`, `updateInput` and the atomic `add` /
+     * `update` operations — when decoding and when encoding (`Client`). A
+     * positive integer, or `Infinity` to report every undeclared member;
+     * anything else throws. Defaults to `12`. {@link extend} inherits it.
+     *
+     * @since 0.17.0
+     */
+    readonly undeclaredMemberCap?: number | undefined;
   },
 ): Resource<Type, Attributes, Rels, Meta, IdSchema> => {
+  const undeclaredMemberCap = validateUndeclaredMemberCap(
+    type,
+    options.undeclaredMemberCap ?? defaultUndeclaredMemberCap,
+  );
   const relationships = (options.relationships ?? {}) as Rels;
   const meta = (options.meta ?? AnyMeta) as Meta;
   const id = (options.id ?? Id(type)) as IdSchema;
@@ -2716,8 +2765,15 @@ export const make = <
   // client sends that it doesn't declare is a 400 at that member, where a
   // struct with fields would silently drop it (#292) and a bare empty struct
   // would hand it to the handler (#270).
-  const createAttributes = closedStruct(createAttributeFields(options.attributes));
-  const updateAttributes = closedStruct(updateAttributeFields(options.attributes));
+  // Each reports at most `undeclaredMemberCap` of them at their own paths (#308).
+  const createAttributes = closedStruct(
+    createAttributeFields(options.attributes),
+    undeclaredMemberCap,
+  );
+  const updateAttributes = closedStruct(
+    updateAttributeFields(options.attributes),
+    undeclaredMemberCap,
+  );
 
   // Filter declarations are checked now, not on first use: an attribute declared
   // filterable whose encoded form has no literal codec, or a relationship
@@ -2759,7 +2815,7 @@ export const make = <
       createRelationshipFields[key] = Schema.optionalKey(schemaByKey[key]!);
     }
   }
-  const createRelationshipsStruct = closedStruct(createRelationshipFields);
+  const createRelationshipsStruct = closedStruct(createRelationshipFields, undeclaredMemberCap);
 
   const createPayload = Schema.Struct({
     data: Schema.Struct({
@@ -2787,7 +2843,9 @@ export const make = <
       type: Schema.tag(type),
       id,
       attributes: Schema.optionalKey(updateAttributes),
-      relationships: Schema.optionalKey(closedStruct(updateRelationshipFields)),
+      relationships: Schema.optionalKey(
+        closedStruct(updateRelationshipFields, undeclaredMemberCap),
+      ),
     }),
   }) as unknown as UpdatePayload<Type, Attributes, Rels, IdSchema>;
 
@@ -2796,11 +2854,14 @@ export const make = <
   // payloads' attribute projections.
   const createInput = createAttributes as unknown as CreateInput<Attributes>;
   // Closed like the enveloped payload's attributes.
-  const updateInput = closedStruct({
-    ...(updateAttributeFields(options.attributes) as Record<string, Schema.Top>),
-    // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
-    id,
-  }) as unknown as UpdateInput<Attributes, IdSchema>;
+  const updateInput = closedStruct(
+    {
+      ...(updateAttributeFields(options.attributes) as Record<string, Schema.Top>),
+      // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
+      id,
+    },
+    undeclaredMemberCap,
+  ) as unknown as UpdateInput<Attributes, IdSchema>;
 
   // The default `included` union: resources referenced by non-`paginated`
   // relationships. Built lazily so out-of-order / mutually recursive
@@ -2823,6 +2884,7 @@ export const make = <
     localIdentifier,
     relationships,
     declaredAttributes: options.attributes,
+    undeclaredMemberCap,
     createPayload,
     updatePayload,
     createInput,
@@ -2866,6 +2928,7 @@ export const make = <
     relationships,
     meta,
     annotations: options.annotations,
+    undeclaredMemberCap,
   });
 
   return resource;
@@ -2990,6 +3053,7 @@ export const annotate = <R extends Any>(
     relationships: definition.relationships,
     meta: definition.meta,
     annotations: { ...definition.annotations, ...annotationsToAdd },
+    undeclaredMemberCap: definition.undeclaredMemberCap,
   }) as unknown as R;
 };
 
@@ -3162,6 +3226,14 @@ export const extend = <
      * @since 0.15.0
      */
     readonly annotations?: Schema.Annotations.Annotations;
+    /**
+     * How many undeclared members each write body member reports at its own
+     * pointer, exactly as {@link make}'s `undeclaredMemberCap` option.
+     * Defaults to the base's.
+     *
+     * @since 0.17.0
+     */
+    readonly undeclaredMemberCap?: number | undefined;
   },
 ): Resource<
   Type,
@@ -3197,6 +3269,7 @@ export const extend = <
     // Resource-level annotations are inherited like attributes and
     // relationships are, the child's own keys winning.
     annotations: { ...Schema.resolveAnnotations(base), ...options?.annotations },
+    undeclaredMemberCap: options?.undeclaredMemberCap ?? base.undeclaredMemberCap,
   }) as unknown as Resource<
     Type,
     ExtendedAttributes<BaseAttributes, ExtraAttributes>,

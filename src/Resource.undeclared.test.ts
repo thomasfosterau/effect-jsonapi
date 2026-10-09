@@ -8,7 +8,9 @@
  * `Expected object` at the member, a `null` included (#286). The members
  * JSON:API allows around them (`meta`, `jsonapi`, `links`) are still accepted,
  * the OpenAPI document still describes each member's properties, and encoding
- * (what a client does) rejects an undeclared member as decoding does.
+ * (what a client does) rejects an undeclared member as decoding does. A member
+ * reports at most `undeclaredMemberCap` (default 12) of them at their own
+ * pointers, and one summary error at the member for the rest (#308).
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Effect from "effect/Effect";
@@ -17,14 +19,15 @@ import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
-import { HttpRouter } from "effect/http";
+import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
+import * as Client from "./Client.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import { layerWith } from "./Middleware.js";
 import * as Relationship from "./Relationship.js";
-import { attribute, make as Resource } from "./Resource.js";
+import { annotate, attribute, extend, make as Resource } from "./Resource.js";
 import { platformLayer } from "./Registry.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 
@@ -38,6 +41,12 @@ const Flag = Resource("flags", {
 const Note = Resource("notes", { attributes: { body: Schema.String } });
 // Served through the flat `createInput` / `updateInput` payloads.
 const Memo = Resource("memos", { attributes: { body: Schema.String } });
+// Reports two undeclared members per member, not the default 12 (#308).
+const Capped = Resource("capped", {
+  attributes: { body: Schema.String },
+  relationships: { owner: Relationship.optional(() => Owner) },
+  undeclaredMemberCap: 2,
+});
 
 const Api = HttpApi.make("undeclared")
   .add(Group.make(Flag, Endpoint.create(Flag), Endpoint.update(Flag)))
@@ -49,6 +58,7 @@ const Api = HttpApi.make("undeclared")
       Endpoint.update(Memo, { payload: Memo.updateInput }),
     ),
   )
+  .add(Group.make(Capped, Endpoint.create(Capped), Endpoint.update(Capped)))
   .add(Group.make("operations", Endpoint.operations([Flag, Note])));
 
 // Every resource `data` a handler is handed, so a test can assert what reached it.
@@ -101,6 +111,20 @@ const MemosLive = HttpApiBuilder.group(Api, "memos", (handlers) =>
     }),
 );
 
+const CappedLive = HttpApiBuilder.group(Api, "capped", (handlers) =>
+  handlers
+    .handle("create", ({ payload }) => {
+      received.push(payload.data);
+      return Effect.succeed({
+        data: Capped.make({ id: Capped.Id.make("1"), attributes: payload.data.attributes }),
+      });
+    })
+    .handle("update", ({ params, payload }) => {
+      received.push(payload.data);
+      return Effect.succeed({ data: Capped.make({ id: params.id, attributes: { body: "b" } }) });
+    }),
+);
+
 const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
   handlers.handle("operations", ({ payload }) => {
     // These tests send only resource `add` / `update` operations.
@@ -116,7 +140,7 @@ const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers) =>
 );
 
 const AppLive = HttpApiBuilder.layer(Api).pipe(
-  Layer.provide([FlagsLive, NotesLive, MemosLive, OperationsLive]),
+  Layer.provide([FlagsLive, NotesLive, MemosLive, CappedLive, OperationsLive]),
   Layer.provide(layerWith({ extensions: [Atomic.EXTENSION_URI] })),
   Layer.provide(platformLayer),
 );
@@ -142,7 +166,8 @@ const ErrorDocument = Schema.fromJsonString(
         code: Schema.String,
         title: Schema.String,
         detail: Schema.String,
-        source: Schema.Struct({ pointer: Schema.String }),
+        // Absent on an error at the body itself: a flat payload's summary (#308).
+        source: Schema.optionalKey(Schema.Struct({ pointer: Schema.String })),
       }),
     ),
   }),
@@ -333,7 +358,7 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
       // operations, and a rejected union reports an error per candidate (the
       // other resource's `data/type`, an update's missing `ref`). So the
       // assertion is on the errors at the member; elsewhere that is all of them.
-      const atMember = errors.filter(({ source }) => source.pointer === pointer(m));
+      const atMember = errors.filter(({ source }) => source?.pointer === pointer(m));
       expect(path === "/operations" ? atMember : errors).toEqual([
         {
           status: "400",
@@ -349,7 +374,8 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
     });
   });
 
-  it("reports every undeclared member, each at its own pointer", async () => {
+  // Below the cap (#308), so every one is reported.
+  it("reports each undeclared member below the cap at its own pointer", async () => {
     const response = await send(
       "POST",
       "/flags",
@@ -363,7 +389,7 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
     ]);
   });
 
-  it("reports every undeclared member beside a declared one, each at its own pointer (#292)", async () => {
+  it("reports each undeclared member beside a declared one below the cap at its own pointer (#292)", async () => {
     received.length = 0;
     const response = await send(
       "POST",
@@ -371,12 +397,325 @@ describe("a request body member the resource doesn't declare (#270, #292)", () =
       '{"data":{"type":"notes","attributes":{"body":"b","a":1,"b/c":2,"a~b/c":3}}}',
     );
     expect(response.status).toBe(400);
-    expect(errorsOf(response.text).map(({ detail, source }) => [detail, source.pointer])).toEqual([
+    expect(errorsOf(response.text).map(({ detail, source }) => [detail, source?.pointer])).toEqual([
       ["Expected no excess property", "/data/attributes/a"],
       ["Expected no excess property", "/data/attributes/b~1c"],
       ["Expected no excess property", "/data/attributes/a~0b~1c"],
     ]);
     expect(received).toEqual([]);
+  });
+});
+
+describe("the errors a 400 reports for undeclared members are capped (#308)", () => {
+  // `n` undeclared members, `k0` … `k<n-1>`, as the inside of a JSON object.
+  const keys = (n: number): string =>
+    Array.from({ length: n }, (_, index) => `"k${index}":1`).join(",");
+  const pointersTo = (member: string, n: number): ReadonlyArray<string> =>
+    Array.from({ length: n }, (_, index) => `${member}/k${index}`);
+
+  // Every write body member, with a body that sends `members` in it.
+  const sites: ReadonlyArray<
+    readonly [
+      name: string,
+      method: "POST" | "PATCH",
+      path: string,
+      body: (members: string) => string,
+      member: string,
+    ]
+  > = [
+    [
+      "createPayload attributes",
+      "POST",
+      "/notes",
+      (ms) => `{"data":{"type":"notes","attributes":{"body":"b",${ms}}}}`,
+      "/data/attributes",
+    ],
+    [
+      "updatePayload attributes",
+      "PATCH",
+      "/notes/1",
+      (ms) => `{"data":{"type":"notes","id":"1","attributes":{${ms}}}}`,
+      "/data/attributes",
+    ],
+    [
+      "createPayload relationships",
+      "POST",
+      "/flags",
+      (ms) => `{"data":{"type":"flags","attributes":{},"relationships":{${ms}}}}`,
+      "/data/relationships",
+    ],
+    [
+      "updatePayload relationships",
+      "PATCH",
+      "/notes/1",
+      (ms) => `{"data":{"type":"notes","id":"1","relationships":{${ms}}}}`,
+      "/data/relationships",
+    ],
+    ["createInput", "POST", "/memos", (ms) => `{"body":"b",${ms}}`, ""],
+    ["updateInput", "PATCH", "/memos/1", (ms) => `{"id":"1",${ms}}`, ""],
+    [
+      "atomic add attributes",
+      "POST",
+      "/operations",
+      (ms) => op(`{"op":"add","data":{"type":"notes","attributes":{"body":"b",${ms}}}}`),
+      "/atomic:operations/0/data/attributes",
+    ],
+    [
+      "atomic update attributes",
+      "POST",
+      "/operations",
+      (ms) => op(`{"op":"update","data":{"type":"flags","id":"1","attributes":{${ms}}}}`),
+      "/atomic:operations/0/data/attributes",
+    ],
+    [
+      "atomic add relationships",
+      "POST",
+      "/operations",
+      (ms) => op(`{"op":"add","data":{"type":"flags","attributes":{},"relationships":{${ms}}}}`),
+      "/atomic:operations/0/data/relationships",
+    ],
+    [
+      "atomic update relationships",
+      "POST",
+      "/operations",
+      (ms) => op(`{"op":"update","data":{"type":"notes","id":"1","relationships":{${ms}}}}`),
+      "/atomic:operations/0/data/relationships",
+    ],
+  ];
+
+  // The [detail, pointer] of each error at or under the member. An atomic
+  // operation also reports the other resource's rejected candidate (see above).
+  const reportedAt = (text: string, member: string) =>
+    errorsOf(text)
+      .filter(({ source }) => member === "" || source?.pointer.startsWith(member))
+      .map(({ detail, source }) => [detail, source?.pointer]);
+  // A flat payload's member is the body itself: its summary is an error with
+  // no `source`, as the middleware renders any error at the whole body.
+  const memberPointer = (member: string) => (member === "" ? undefined : member);
+  const excess = (member: string, n: number) =>
+    pointersTo(member, n).map((pointer) => ["Expected no excess property", pointer]);
+
+  describe.each(sites)("%s", (_, method, path, body, member) => {
+    it("10,000 undeclared members: 12 at their own pointers, one summary, a bounded body", async () => {
+      received.length = 0;
+      receivedFlat.length = 0;
+      const request = body(keys(10_000));
+      const response = await send(method, path, request);
+      expect(response.status).toBe(400);
+      expect(reportedAt(response.text, member)).toEqual([
+        ...excess(member, 12),
+        ["…and 9,988 more undeclared members", memberPointer(member)],
+      ]);
+      // The request is ~100 KB; the 400 stays a few KB however many keys come.
+      expect(request.length).toBeGreaterThan(90_000);
+      expect(response.text.length).toBeLessThan(path === "/operations" ? 8_192 : 4_096);
+      expect(received).toEqual([]);
+      expect(receivedFlat).toEqual([]);
+    });
+
+    it("exactly 12 undeclared members: each at its own pointer, no summary", async () => {
+      const response = await send(method, path, body(keys(12)));
+      expect(response.status).toBe(400);
+      expect(reportedAt(response.text, member)).toEqual(excess(member, 12));
+    });
+
+    it("13 undeclared members: 12 at their own pointers, and 1 more", async () => {
+      const response = await send(method, path, body(keys(13)));
+      expect(response.status).toBe(400);
+      expect(reportedAt(response.text, member)).toEqual([
+        ...excess(member, 12),
+        ["…and 1 more undeclared member", memberPointer(member)],
+      ]);
+    });
+  });
+
+  it("the summary renders as a 400 error object at the member", async () => {
+    const response = await send("POST", "/notes", sites[0][3](keys(13)));
+    expect(errorsOf(response.text).at(-1)).toEqual({
+      status: "400",
+      code: "bad_request",
+      title: "Bad Request",
+      detail: "…and 1 more undeclared member",
+      source: { pointer: "/data/attributes" },
+    });
+  });
+
+  it("a configured cap is honoured over HTTP, on create and on update", async () => {
+    received.length = 0;
+    const create = await send(
+      "POST",
+      "/capped",
+      `{"data":{"type":"capped","attributes":{"body":"b",${keys(5)}}}}`,
+    );
+    const update = await send(
+      "PATCH",
+      "/capped/1",
+      `{"data":{"type":"capped","id":"1","relationships":{${keys(3)}}}}`,
+    );
+    expect([create.status, update.status]).toEqual([400, 400]);
+    expect(reportedAt(create.text, "/data/attributes")).toEqual([
+      ...excess("/data/attributes", 2),
+      ["…and 3 more undeclared members", "/data/attributes"],
+    ]);
+    expect(reportedAt(update.text, "/data/relationships")).toEqual([
+      ...excess("/data/relationships", 2),
+      ["…and 1 more undeclared member", "/data/relationships"],
+    ]);
+    expect(received).toEqual([]);
+  });
+});
+
+describe("the undeclaredMemberCap option (#308)", () => {
+  const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
+    Result.match(result, {
+      onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+      onSuccess: () => [],
+    });
+  const extras = (n: number): Record<string, number> =>
+    Rec.fromEntries(Array.from({ length: n }, (_, index) => [`k${index}`, 1] as const));
+  // What a member with five undeclared members reports under a cap of 2.
+  const cappedAt = (path: ReadonlyArray<string>) => [
+    { path: [...path, "k0"], message: "Expected no excess property" },
+    { path: [...path, "k1"], message: "Expected no excess property" },
+    { path, message: "…and 3 more undeclared members" },
+  ];
+
+  // Every write body member `Capped` derives, with five undeclared members.
+  const sites: ReadonlyArray<
+    readonly [string, Schema.Codec<unknown, unknown>, object, ReadonlyArray<string>]
+  > = [
+    [
+      "createPayload attributes",
+      Capped.createPayload,
+      { data: { type: "capped", attributes: { body: "b", ...extras(5) } } },
+      ["data", "attributes"],
+    ],
+    [
+      "createPayload relationships",
+      Capped.createPayload,
+      { data: { type: "capped", attributes: { body: "b" }, relationships: extras(5) } },
+      ["data", "relationships"],
+    ],
+    [
+      "updatePayload attributes",
+      Capped.updatePayload,
+      { data: { type: "capped", id: "1", attributes: extras(5) } },
+      ["data", "attributes"],
+    ],
+    [
+      "updatePayload relationships",
+      Capped.updatePayload,
+      { data: { type: "capped", id: "1", relationships: extras(5) } },
+      ["data", "relationships"],
+    ],
+    ["createInput", Capped.createInput, { body: "b", ...extras(5) }, []],
+    ["updateInput", Capped.updateInput, { id: "1", ...extras(5) }, []],
+    [
+      "atomic add attributes",
+      Atomic.AddOperation(Capped),
+      { op: "add", data: { type: "capped", attributes: { body: "b", ...extras(5) } } },
+      ["data", "attributes"],
+    ],
+    [
+      "atomic add relationships",
+      Atomic.AddOperation(Capped),
+      { op: "add", data: { type: "capped", attributes: { body: "b" }, relationships: extras(5) } },
+      ["data", "relationships"],
+    ],
+    [
+      "atomic update attributes",
+      Atomic.UpdateOperation(Capped),
+      { op: "update", data: { type: "capped", id: "1", attributes: extras(5) } },
+      ["data", "attributes"],
+    ],
+    [
+      "atomic update relationships",
+      Atomic.UpdateOperation(Capped),
+      { op: "update", data: { type: "capped", id: "1", relationships: extras(5) } },
+      ["data", "relationships"],
+    ],
+  ];
+
+  it.each(sites)("%s: decode and encode both honour it", (_, schema, value, path) => {
+    // `Client` and `HttpBody` encode a payload through `Schema.toCodecJson`.
+    const codec = Schema.toCodecJson(schema);
+    expect(issuesOf(Schema.decodeUnknownResult(codec)(value))).toEqual(cappedAt(path));
+    expect(issuesOf(Schema.encodeUnknownResult(codec)(value))).toEqual(cappedAt(path));
+  });
+
+  it("a Client fails the call with the capped issues before sending anything", async () => {
+    const sent: Array<HttpClientRequest.HttpClientRequest> = [];
+    const recording = HttpClient.make((request) => {
+      sent.push(request);
+      return Effect.die("no request should be sent");
+    });
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const client = yield* Client.make(Api, { baseUrl: "http://localhost" });
+        return yield* client.capped.create({
+          payload: { data: { type: "capped", attributes: { body: "b", ...extras(5) } } },
+        });
+      }).pipe(Effect.provideService(HttpClient.HttpClient, recording), Effect.flip),
+    );
+    expect(Schema.isSchemaError(error)).toBe(true);
+    expect(
+      Schema.isSchemaError(error)
+        ? SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues
+        : [],
+    ).toEqual(cappedAt(["data", "attributes"]));
+    expect(sent).toEqual([]);
+  });
+
+  it("is 12 by default, and is read back from the definition", () => {
+    expect(Note.undeclaredMemberCap).toBe(12);
+    expect(Capped.undeclaredMemberCap).toBe(2);
+  });
+
+  it("Infinity reports every undeclared member, with no summary", () => {
+    const Open = Resource("open", {
+      attributes: { body: Schema.String },
+      undeclaredMemberCap: Number.POSITIVE_INFINITY,
+    });
+    const issues = issuesOf(
+      Schema.decodeUnknownResult(Open.createInput)({ body: "b", ...extras(100) }),
+    );
+    expect(issues).toHaveLength(100);
+    expect(issues.every(({ message }) => message === "Expected no excess property")).toBe(true);
+  });
+
+  it("is inherited by extend and kept by annotate, and extend can override it", () => {
+    const Child = extend(Capped, "children", { attributes: { extra: Schema.String } });
+    const Wider = extend(Capped, "wider", { undeclaredMemberCap: 4 });
+    const Annotated = annotate(Capped, { "acme/table": "capped" });
+    expect([Child, Wider, Annotated].map((r) => r.undeclaredMemberCap)).toEqual([2, 4, 2]);
+    expect(
+      issuesOf(
+        Schema.decodeUnknownResult(Child.createInput)({ body: "b", extra: "e", ...extras(5) }),
+      ),
+    ).toEqual(cappedAt([]));
+    expect(
+      issuesOf(Schema.decodeUnknownResult(Wider.createInput)({ body: "b", ...extras(5) })),
+    ).toEqual([
+      ...["k0", "k1", "k2", "k3"].map((k) => ({
+        path: [k],
+        message: "Expected no excess property",
+      })),
+      { path: [], message: "…and 1 more undeclared member" },
+    ]);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY])("refuses %s", (cap) => {
+    expect(() =>
+      Resource("bad", { attributes: { body: Schema.String }, undeclaredMemberCap: cap }),
+    ).toThrow(
+      `Resource.make("bad"): undeclaredMemberCap must be a positive integer or Infinity, got ${String(cap)}`,
+    );
+  });
+
+  it("accepts an explicit undefined as the default", () => {
+    expect(
+      Resource("plain", { attributes: {}, undeclaredMemberCap: undefined }).undeclaredMemberCap,
+    ).toBe(12);
   });
 });
 
@@ -520,7 +859,7 @@ describe("a non-object member answers 400 at the member, whether or not it decla
       const response = await send(method, path, body(v));
       expect(response.status).toBe(400);
       const errors = errorsOf(response.text);
-      const atMember = errors.filter(({ source }) => source.pointer.startsWith(pointer));
+      const atMember = errors.filter(({ source }) => source?.pointer.startsWith(pointer));
       expect(path === "/operations" ? atMember : errors).toEqual([
         {
           status: "400",
@@ -943,7 +1282,7 @@ describe("what a closed member reports, and where it reports nothing (#292)", ()
       `{"data":{"type":"flags","attributes":{"a":1,"b":2},"relationships":{"c":${ownerLinkage}}}}`,
     );
     expect(response.status).toBe(400);
-    expect(errorsOf(response.text).map(({ source }) => source.pointer)).toEqual([
+    expect(errorsOf(response.text).map(({ source }) => source?.pointer)).toEqual([
       "/data/attributes/a",
       "/data/attributes/b",
     ]);
@@ -958,7 +1297,7 @@ describe("what a closed member reports, and where it reports nothing (#292)", ()
       '{"data":{"type":"notes","attributes":{"body":5,"isAdmin":true}}}',
     );
     expect(response.status).toBe(400);
-    expect(errorsOf(response.text).map(({ detail, source }) => [detail, source.pointer])).toEqual([
+    expect(errorsOf(response.text).map(({ detail, source }) => [detail, source?.pointer])).toEqual([
       ["Expected string", "/data/attributes/body"],
     ]);
     expect(received).toEqual([]);

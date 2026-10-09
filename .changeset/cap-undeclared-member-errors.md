@@ -1,0 +1,7 @@
+---
+"@thomasfosterau/effect-jsonapi": minor
+---
+
+**The errors a 400 reports for undeclared `attributes` / `relationships` members are capped, and the cap is a new `Resource.make` option, `undeclaredMemberCap`.** A write body member reports its first 12 undeclared members, each as its own error at its own `source.pointer`, as before. If it has more, one further error at the member itself says how many (`detail` `…and 9,988 more undeclared members`, `source.pointer` `/data/attributes`). A flat `createInput` / `updateInput` body's summary has no `source`, since that member is the whole body. A request with 10,000 undeclared keys used to get a 400 of about 1.45 MB, one error per key; it now gets 13 error objects, a few kilobytes.
+
+`Resource.make(type, { …, undeclaredMemberCap: 50 })` sets the cap for every write body member that resource derives: `createPayload`, `updatePayload`, `createInput`, `updateInput` and the atomic `add` / `update` operations. It applies when decoding a request and when encoding one (`Client`), and in a direct decode the summary is an issue with that message at the member's path. Pass a positive integer, or `Infinity` to report every undeclared member with no summary; anything else throws when the resource is defined. `Resource.extend` inherits the base's cap and takes the same option, `Resource.annotate` keeps it, and `Article.undeclaredMemberCap` reads it back. The cap is per resource; there is no process-wide setting.
