@@ -872,3 +872,108 @@ describe("a closed member keeps its fields and its OpenAPI properties (#292)", (
     });
   });
 });
+
+describe("which own keys of a closed member count as members (#292)", () => {
+  const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
+    Result.match(result, {
+      onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+      onSuccess: () => [],
+    });
+  const hidden = Symbol("hidden");
+
+  // A member struct with fields, and one with none.
+  const sites = [
+    ["createInput (declares fields)", Memo.createInput, { body: "b" }],
+    [
+      "createPayload attributes (declares none)",
+      Flag.createPayload.fields.data.fields.attributes,
+      {},
+    ],
+  ] as const;
+
+  // `JSON.parse` never makes a non-enumerable or a symbol key, so these are
+  // in-process values: what a decode outside HTTP (a remote function, RPC,
+  // `Client.decodeInput`) or a client's encode can be handed.
+  describe.each(sites)("%s", (_, schema, declared) => {
+    it("lets a non-enumerable own key through, string or symbol, as onExcessProperty does", () => {
+      const value = { ...declared };
+      Object.defineProperty(value, "isAdmin", { value: true, enumerable: false });
+      Object.defineProperty(value, hidden, { value: true, enumerable: false });
+      expect(issuesOf(Schema.decodeUnknownResult(schema)(value))).toEqual([]);
+      expect(issuesOf(Schema.encodeUnknownResult(schema)(value))).toEqual([]);
+    });
+
+    it("rejects an enumerable symbol key after the string keys, as Reflect.ownKeys orders them", () => {
+      const value = { [hidden]: true, ...declared, isAdmin: true };
+      const expected = [
+        { path: ["isAdmin"], message: "Expected no excess property" },
+        { path: [hidden], message: "Expected no excess property" },
+      ];
+      expect(issuesOf(Schema.decodeUnknownResult(schema)(value))).toEqual(expected);
+      expect(issuesOf(Schema.encodeUnknownResult(schema)(value))).toEqual(expected);
+    });
+  });
+});
+
+describe("what a closed member reports, and where it reports nothing (#292)", () => {
+  const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
+    Result.match(result, {
+      onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
+      onSuccess: () => [],
+    });
+
+  it.each(["first", "all"] as const)(
+    "errors: %s reports only a failing declared field, not the undeclared members beside it",
+    (errors) => {
+      const decode = Schema.decodeUnknownResult(Note.createInput);
+      expect(issuesOf(decode({ body: 5, isAdmin: true }, { errors }))).toEqual([
+        { path: ["body"], message: "Expected string" },
+      ]);
+      expect(issuesOf(decode({ isAdmin: true }, { errors }))).toEqual([
+        { path: ["body"], message: "Missing key" },
+      ]);
+    },
+  );
+
+  it("reports one member's undeclared members per request over HTTP (errors: first)", async () => {
+    received.length = 0;
+    const response = await send(
+      "POST",
+      "/flags",
+      `{"data":{"type":"flags","attributes":{"a":1,"b":2},"relationships":{"c":${ownerLinkage}}}}`,
+    );
+    expect(response.status).toBe(400);
+    expect(errorsOf(response.text).map(({ source }) => source.pointer)).toEqual([
+      "/data/attributes/a",
+      "/data/attributes/b",
+    ]);
+    expect(received).toEqual([]);
+  });
+
+  it("answers a failing declared field alone over HTTP, not the undeclared member beside it", async () => {
+    received.length = 0;
+    const response = await send(
+      "POST",
+      "/notes",
+      '{"data":{"type":"notes","attributes":{"body":5,"isAdmin":true}}}',
+    );
+    expect(response.status).toBe(400);
+    expect(errorsOf(response.text).map(({ detail, source }) => [detail, source.pointer])).toEqual([
+      ["Expected string", "/data/attributes/body"],
+    ]);
+    expect(received).toEqual([]);
+  });
+
+  it("Schema.is answers true for an undeclared member beside declared fields, and make strips it", () => {
+    expect(Schema.is(Note.createInput)({ body: "b", isAdmin: true })).toBe(true);
+    expect(Schema.is(Memo.updateInput)({ id: "1", isAdmin: true })).toBe(true);
+    const withExtra = { body: "b", isAdmin: true };
+    expect(Note.createInput.make(withExtra)).toEqual({ body: "b" });
+  });
+
+  it("Schema.is answers false for an undeclared member where none is declared, and make throws", () => {
+    expect(Schema.is(Flag.createInput)({ isAdmin: true })).toBe(false);
+    const extraOnly = { isAdmin: true };
+    expect(() => Flag.createInput.make(extraOnly)).toThrow("Schema validation failed");
+  });
+});
