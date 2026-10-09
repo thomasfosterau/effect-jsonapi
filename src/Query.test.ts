@@ -160,6 +160,42 @@ describe("Query.Sort", () => {
   });
 });
 
+describe("an empty vocabulary says so when it rejects a value (#282)", () => {
+  // `Schema.Literals([])` is `never`; its rejection would read "Expected never".
+  const Tag = Resource("tags", { attributes: {} });
+
+  const cases: ReadonlyArray<
+    readonly [name: string, schema: Schema.Codec<unknown, unknown>, input: unknown, what: string]
+  > = [
+    ["Query.Include over no relationships", Query.Include(Tag), "author", "include paths"],
+    [
+      "Query.Include with no paths",
+      Query.Include(Article, { paths: [] }),
+      "author",
+      "include paths",
+    ],
+    ["Query.Sort with no fields", Query.Sort([]), "-title", "sortable fields"],
+    [
+      "Query.schema's sort over no attributes",
+      Query.schema(Tag, { sort: true }),
+      { sort: "title" },
+      "sortable fields",
+    ],
+  ];
+
+  it.each(cases)("%s", (_, schema, input, what) => {
+    expect(() => Schema.decodeUnknownSync(schema)(input)).toThrow(
+      `This endpoint supports no ${what}.`,
+    );
+  });
+
+  it("leaves a non-empty vocabulary's rejection as it was", () => {
+    expect(() => Schema.decodeUnknownSync(Query.Sort(["title"]))("body")).toThrow(
+      'Expected "title"',
+    );
+  });
+});
+
 describe("Query.schema", () => {
   const query = Query.schema(Article, {
     include: true,

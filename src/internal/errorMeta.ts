@@ -26,14 +26,17 @@ import type { SchemaIssue } from "effect";
 const ERROR_META_ANNOTATION = "~@thomasfosterau/effect-jsonapi/errorMeta";
 
 /** The shape the annotation carries: members merged into the error object's `meta`. */
-type ErrorMeta = Readonly<Record<string, unknown>>;
+export type ErrorMeta = Readonly<Record<string, unknown>>;
 
 /** The annotation object `schema.annotate(...)` takes to publish `meta`. */
 export const errorMeta = (meta: ErrorMeta): { readonly [ERROR_META_ANNOTATION]: ErrorMeta } => ({
   [ERROR_META_ANNOTATION]: meta,
 });
 
-const metaOf = (annotations: Schema.Annotations.Annotations | undefined): ErrorMeta | undefined => {
+/** The `meta` a schema node publishes through its annotations, if any. */
+export const errorMetaOf = (
+  annotations: Schema.Annotations.Annotations | undefined,
+): ErrorMeta | undefined => {
   const meta = annotations?.[ERROR_META_ANNOTATION];
   return typeof meta === "object" && meta !== null ? (meta as ErrorMeta) : undefined;
 };
@@ -68,7 +71,7 @@ const collect = (
   path: ReadonlyArray<PropertyKey>,
   found: Array<Found>,
 ): void => {
-  const meta = metaOf(astOf(issue)?.annotations);
+  const meta = errorMetaOf(astOf(issue)?.annotations);
   if (meta !== undefined) found.push({ path, meta });
   switch (issue._tag) {
     case "Pointer":

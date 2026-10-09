@@ -62,8 +62,8 @@ import {
   Repeatable,
   repeatable,
   Sort as SortCodec,
+  vocabularyAnnotations,
 } from "./internal/codecs.js";
-import { errorMeta } from "./internal/errorMeta.js";
 import type { FieldCodecs } from "./internal/filter.js";
 import {
   decodeFilter,
@@ -749,7 +749,10 @@ export const Include = <
       // `Middleware.schemaErrorDocument` renders for a rejected path carries
       // `meta.includablePaths` — the same set `ApiError.UnsupportedIncludePath`
       // publishes — and a caller learns the legal paths without a second call.
-      Schema.Literals(paths).annotate(errorMeta({ includablePaths: paths })),
+      // An empty set says so rather than "Expected never" (#282).
+      Schema.Literals(paths).annotate(
+        vocabularyAnnotations("includablePaths", paths, "This endpoint supports no include paths."),
+      ),
     ),
   ) as Include<R, IncludePathsOf<R, O>>;
 };

@@ -445,7 +445,8 @@ describe("spec families an endpoint does not support (#261)", () => {
     relationships: { author: Relationship.one(() => Person) },
   });
   // A resource with no attributes, so `sort: true` legalises no field, and
-  // no relationships, so an include allow-list can only be empty.
+  // no relationships, so `include: true` and an include allow-list can only
+  // be empty.
   const Tag = Resource.make("tags", { attributes: {} });
 
   const FamiliesApi = HttpApi.make("families")
@@ -462,7 +463,7 @@ describe("spec families an endpoint does not support (#261)", () => {
       Group.make(
         Tag,
         Endpoint.get(Tag, { include: { paths: [] } }),
-        Endpoint.list(Tag, { sort: true }),
+        Endpoint.list(Tag, { include: true, sort: true }),
       ),
     );
 
@@ -602,23 +603,76 @@ describe("spec families an endpoint does not support (#261)", () => {
     expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
   });
 
-  // An endpoint that declares the family with an empty vocabulary
-  // (`include: { paths: [] }`, or `sort: true` over no attributes) does
-  // declare the parameter: its codec answers every value naming something,
-  // and an empty value requests nothing.
-  it("leaves a declared family with an empty vocabulary to its codec", async () => {
-    const path = await serve("/tags/1?include=author");
+  // Owner decision on #282: an empty vocabulary means unsupported. A family
+  // declared with no legal value, as `[]` or derived empty from `true`, is
+  // answered exactly like an undeclared one: the same 400 naming it, whatever
+  // its value (an empty one too), before the endpoint decodes anything.
+  it.each([
+    ["`include: { paths: [] }`", "/tags/1?include=author", "include", "include"],
+    ["`include: { paths: [] }`, several paths", "/tags/1?include=a,b", "include", "include"],
+    ["`include: { paths: [] }`, an empty value", "/tags/1?include=", "include", "include"],
+    [
+      "`include: { paths: [] }`, a bracketed member",
+      "/tags/1?include[x]=a",
+      "include[x]",
+      "include",
+    ],
+    ["`include: true` over no relationships", "/tags?include=author", "include", "include"],
+    [
+      "`include: true` over no relationships, an empty value",
+      "/tags?include=",
+      "include",
+      "include",
+    ],
+    ["`sort: true` over no attributes", "/tags?sort=name", "sort", "sort"],
+    ["`sort: true` over no attributes, an empty value", "/tags?sort=", "sort", "sort"],
+  ] as const)(
+    "rejects a family declared with an empty vocabulary as unsupported: %s",
+    async (_, url, parameter, family) => {
+      queries.length = 0;
+      const response = await serve(url);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ errors: [unsupported(parameter, family)] });
+      expect(queries).toEqual([]);
+    },
+  );
+
+  it("answers each empty-vocabulary family with its own error object", async () => {
+    const response = await serve("/tags?sort=name&include=author");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [unsupported("sort", "sort"), unsupported("include", "include")],
+    });
+  });
+
+  // An allow-listed family is admitted, so an endpoint that declares it with
+  // an empty vocabulary still decodes it, and its codec says why it fails.
+  it("says the endpoint supports none when an allow-listed empty vocabulary rejects a value", async () => {
+    const allowing = Middleware.layerWith({ allowedQueryParameters: ["include", "sort"] });
+    const path = await serve("/tags/1?include=author", allowing);
     expect(path.status).toBe(400);
-    expect(path.body.errors[0].source).toEqual({ parameter: "include" });
-    expect(path.body.errors[0].meta).toEqual({ includablePaths: [] });
-    const field = await serve("/tags?sort=name");
+    expect(path.body.errors).toEqual([
+      {
+        status: "400",
+        code: "bad_request",
+        title: "Bad Request",
+        detail: "This endpoint supports no include paths.",
+        source: { parameter: "include" },
+        meta: { includablePaths: [] },
+      },
+    ]);
+    const field = await serve("/tags?sort=name", allowing);
     expect(field.status).toBe(400);
-    expect(field.body.errors[0].source).toEqual({ parameter: "sort" });
-    expect(field.body.errors[0].meta).toEqual({ sortableFields: [] });
-    queries.length = 0;
-    expect((await serve("/tags/1?include=")).status).toBe(200);
-    expect((await serve("/tags?sort=")).status).toBe(200);
-    expect(queries).toEqual([{ include: [] }, { sort: [] }]);
+    expect(field.body.errors).toEqual([
+      {
+        status: "400",
+        code: "bad_request",
+        title: "Bad Request",
+        detail: "This endpoint supports no sortable fields.",
+        source: { parameter: "sort" },
+        meta: { sortableFields: [] },
+      },
+    ]);
   });
 
   // Whether `fields[TYPE]`, `page[…]` and `filter[…]` on an endpoint that
