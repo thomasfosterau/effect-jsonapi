@@ -14,7 +14,6 @@
 // and `test/entry-points.test.ts` pins `effect` as its only external.
 import {
   Array as Arr,
-  HashSet,
   JsonPointer,
   Option,
   Predicate,
@@ -132,9 +131,15 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
 // Rejects every enumerable own key of an object outside `declared`, each as an
 // `UnexpectedKey` at its own path: the issue `onExcessProperty: "error"`
 // reports, so the `SchemaErrors` middleware renders it unchanged ("Expected no
-// excess property"). `Reflect.ownKeys` rather than `Object.keys` so a symbol
-// key counts too, and an own `__proto__` / `constructor` (`JSON.parse` makes
-// both) is rejected like any other name.
+// excess property"). It reads the enumerable own string keys (`Record.keys`),
+// then the enumerable own symbol keys, which is the order `Reflect.ownKeys`
+// gives, at a fraction of its cost. So a symbol key counts too, and an own
+// `__proto__` / `constructor` (`JSON.parse` makes both) is rejected like any
+// other name. A non-enumerable key is let through, as effect's own
+// `onExcessProperty: "error"` lets it through ("only enumerable own properties
+// can be excess"); `JSON.parse` never makes one. `declared` is a native `Set`,
+// read once per key: the check runs twice per parse (see `closedStruct`), on
+// every write body.
 // A non-object is answered first, the way a struct with fields answers it:
 // "Expected object" at the member itself. Only a struct that declares no
 // fields lets one through to here (in the pinned effect it is a bare
@@ -154,33 +159,40 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
 // named component (`noMembers`, `noMembers_1`, …) in every consumer's OpenAPI
 // document and renders a `null` member as "Expected <identifier>", and a title
 // or description would be copied into that document too.
-const noMembers = (declared: HashSet.HashSet<PropertyKey>) =>
+const noMembers = (declared: ReadonlySet<PropertyKey>) =>
   // oxlint-disable-next-line effect/require-filter-metadata -- see above: this check must stay anonymous in consumers' OpenAPI
   Schema.makeFilter<unknown>(
     (input, ast, options) => {
       if (!Predicate.isObject(input)) return "Expected object";
-      const members = Reflect.ownKeys(input)
-        .filter(
-          (key) =>
-            !HashSet.has(declared, key) && Object.prototype.propertyIsEnumerable.call(input, key),
-        )
-        .map(
-          (key) =>
-            new SchemaIssue.Pointer(
-              [key],
-              new SchemaIssue.UnexpectedKey(
-                ast,
-                Object.getOwnPropertyDescriptor(input, key)?.value,
-              ),
+      const undeclared: Array<PropertyKey> = [
+        ...Arr.filter(Rec.keys(input), (key) => !declared.has(key)),
+        ...Arr.filter(
+          Object.getOwnPropertySymbols(input),
+          (key) => !declared.has(key) && Object.prototype.propertyIsEnumerable.call(input, key),
+        ),
+      ];
+      return Arr.isReadonlyArrayNonEmpty(undeclared)
+        ? new SchemaIssue.Composite(
+            Schema.Unknown.ast,
+            Arr.map(
+              undeclared,
+              (key) =>
+                new SchemaIssue.Pointer(
+                  [key],
+                  new SchemaIssue.UnexpectedKey(
+                    ast,
+                    Object.getOwnPropertyDescriptor(input, key)?.value,
+                  ),
+                ),
             ),
-        );
-      return Arr.isReadonlyArrayNonEmpty(members)
-        ? new SchemaIssue.Composite(Schema.Unknown.ast, members, input, options)
+            input,
+            options,
+          )
         : true;
     },
     {
       toJsonSchema: () =>
-        HashSet.isEmpty(declared) ? { type: "object", additionalProperties: false } : {},
+        declared.size === 0 ? { type: "object", additionalProperties: false } : {},
     },
   );
 
@@ -214,6 +226,19 @@ const nullAsObject = { message: "Expected object" } as const;
  * runs the check, so both directions reject an undeclared member: a server
  * decoding a request body, and a client encoding one.
  *
+ * What that ordering means for the issues reported:
+ * - Every undeclared member of one struct is reported, each as its own issue,
+ *   whatever the `errors` parse option says (a cap is #308).
+ * - The encoding check runs only once the node has parsed. So when a declared
+ *   field fails (a wrong type, a missing required key), only that field is
+ *   reported, and the undeclared members beside it are not, even with
+ *   `errors: "all"`.
+ * - `Schema.is(struct)` and `struct.make` validate the type side. A struct
+ *   with fields drops an undeclared member there before the check sees it, so
+ *   `Schema.is` answers `true` for a value with one and `make` strips it. A
+ *   struct with no fields keeps it, so `Schema.is` answers `false` and `make`
+ *   throws.
+ *
  * Deriving a new struct (`mapFields`, `Struct.pick`, …) builds a plain one
  * from the fields, without the check.
  */
@@ -224,7 +249,10 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
     : Schema.Struct(fields);
   const { ast } = struct;
-  const checks = [noMembers(HashSet.fromIterable(Reflect.ownKeys(fields)))] as const;
+  // A native `Set`, not a `HashSet`: the lookup runs per key, twice per parse
+  // of every write body, and `HashSet.has` made a 10-field decode ~45% slower.
+  // oxlint-disable-next-line effect/avoid-native-object-helpers -- hot-path lookup, see above
+  const checks = [noMembers(new Set(Reflect.ownKeys(fields)))] as const;
   return struct.rebuild(
     new SchemaAST.Objects(
       ast.propertySignatures,
