@@ -25,7 +25,8 @@
  *     naming it, a query parameter whose family base name is made only of
  *     a-z and that neither the specification defines nor the endpoint
  *     declares (JSON:API 1.1 §Query Parameters), and an `include` or `sort`
- *     parameter on an endpoint that does not declare it (§Inclusion of
+ *     parameter on an endpoint that does not declare it, or declares it
+ *     with an empty vocabulary (§Inclusion of
  *     Related Resources; §Sorting on a collection endpoint, the general
  *     §Implementation-Specific Query Parameters rule on any other; see
  *     {@link checkQueryParameters}).
@@ -94,7 +95,8 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
-import { indexErrorMeta } from "./internal/errorMeta.js";
+import type { ErrorMeta } from "./internal/errorMeta.js";
+import { errorMetaOf, indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
@@ -483,7 +485,7 @@ const SPEC_FAMILIES: ReadonlyArray<string> = ["fields", "page", "filter"];
 // under §Inclusion of Related Resources; `sort` under §Sorting on an endpoint
 // that responds with a resource collection, and under the general
 // §Implementation-Specific Query Parameters rule on any other. An endpoint
-// supports one by declaring it.
+// supports one by declaring it with at least one legal value (#282).
 const SUPPORT_FAMILIES: Readonly<Record<string, string>> = {
   include:
     'This endpoint does not support the "include" parameter. JSON:API requires an ' +
@@ -636,7 +638,9 @@ export interface QueryParameterCheck extends QueryParameterOptions {
    * The query parameter names the endpoint's own query schema declares
    * (`q`, `page[limit]`, …); each admits its whole family. An endpoint that
    * supports `include` or `sort` lists it here: undeclared, either is
-   * rejected. Defaults to none.
+   * rejected. One that declares either with an empty vocabulary (no include
+   * path, no sortable field) supports no value of it, so leaves it out, as
+   * {@link SchemaErrorsLive} does. Defaults to none.
    */
   readonly declared?: ReadonlyArray<string> | undefined;
 }
@@ -665,7 +669,9 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  *   otherwise;
  * - is the base of a name in `declared` — the only way `include` and `sort`
  *   are acceptable besides the allow-list, since an endpoint that does not
- *   declare them does not support them; or
+ *   declare them does not support them (nor one that declares them with an
+ *   empty vocabulary, which {@link SchemaErrorsLive} leaves out of
+ *   `declared`); or
  * - is listed in `allowedQueryParameters`.
  *
  * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
@@ -735,13 +741,63 @@ const familyPrefix = (parameter: SchemaAST.AST): Option.Option<string> => {
     : Option.none();
 };
 
+// The `meta` member under which each support family's codec publishes its
+// vocabulary: `Query.Include`'s include paths, `Query.Sort`'s sortable fields.
+const VOCABULARY_META = { include: "includablePaths", sort: "sortableFields" } as const;
+
+const isEmptyVocabulary = Schema.is(Schema.Tuple([]));
+
+// The schemas directly under a node that can carry error `meta`. A `Suspend`
+// is not followed, so a recursive schema cannot loop the walk.
+const childrenOf = (ast: SchemaAST.AST): ReadonlyArray<SchemaAST.AST> => {
+  if (SchemaAST.isObjects(ast)) {
+    return [
+      ...ast.propertySignatures.map((signature) => signature.type),
+      ...ast.indexSignatures.map((signature) => signature.type),
+    ];
+  }
+  if (SchemaAST.isArrays(ast)) return [...ast.elements, ...ast.rest];
+  return SchemaAST.isUnion(ast) ? ast.types : [];
+};
+
+// Every error `meta` a schema publishes, from its own node and every node
+// under it (struct members, array elements, union members).
+const errorMetaWithin = (ast: SchemaAST.AST): ReadonlyArray<ErrorMeta> => {
+  const own = errorMetaOf(ast.annotations);
+  return [...(own === undefined ? [] : [own]), ...childrenOf(ast).flatMap(errorMetaWithin)];
+};
+
+// The support families an endpoint's query schema declares with an empty
+// vocabulary: `include: { paths: [] }`, `include: true` over no
+// relationships, `sort: true` over no attributes. Such a family supports no
+// value, so it counts as undeclared (owner decision on #282): every request
+// that carries it gets the same 400 as on an endpoint that never declared it.
+// A family counts as empty only when every vocabulary the schema publishes
+// for it is empty.
+const emptyVocabularies = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const published = errorMetaWithin(SchemaAST.toType(ast));
+  return Arr.filter(Rec.keys(VOCABULARY_META), (family) => {
+    const key = VOCABULARY_META[family];
+    const vocabularies = Arr.flatMap(published, (meta) => (Rec.has(meta, key) ? [meta[key]] : []));
+    return Arr.isReadonlyArrayNonEmpty(vocabularies) && Arr.every(vocabularies, isEmptyVocabulary);
+  });
+};
+
+// What an endpoint supports, for `checkQueryParameters`: the names its query
+// schema declares, less a support family it declares with no legal value.
+const supportedNames = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<string>> =>
+  Option.map(declaredNames(ast), (names) => {
+    const empty = emptyVocabularies(ast);
+    return Arr.filter(names, (name) => !empty.includes(baseName(name)));
+  });
+
 // Endpoints are built once and served many times; walk each query schema once.
 const declaredByEndpoint = new WeakMap<HttpApiEndpoint.Top, Option.Option<ReadonlyArray<string>>>();
 
 const declaredFor = (endpoint: HttpApiEndpoint.Top): Option.Option<ReadonlyArray<string>> => {
   const cached = declaredByEndpoint.get(endpoint);
   if (cached !== undefined) return cached;
-  const names = endpoint.query === undefined ? Option.some([]) : declaredNames(endpoint.query.ast);
+  const names = endpoint.query === undefined ? Option.some([]) : supportedNames(endpoint.query.ast);
   declaredByEndpoint.set(endpoint, names);
   return names;
 };
@@ -889,7 +945,8 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * only of a-z, that is neither one of the specification's families nor
  * declared nor allowed, is answered with the JSON:API 400 naming it in
  * `source.parameter` (JSON:API 1.1 §Query Parameters), and so is an
- * `include` or `sort` parameter the endpoint neither declares nor allows
+ * `include` or `sort` parameter the endpoint neither declares (with at least
+ * one legal value) nor allows
  * (§Inclusion of Related Resources; §Sorting on a collection endpoint, the
  * general §Implementation-Specific Query Parameters rule on any other). Then
  * every request validation failure is answered as {@link SchemaErrorsLive}
@@ -978,13 +1035,16 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * schema does not declare it — `?include=author` on `Endpoint.get(R)`
  * without `include`, `?sort=title` on `Endpoint.get(R)`, which never
  * declares `sort` — is a 400 naming it, whatever its value (an empty
- * `?include=` too). JSON:API 1.1 requires it: §Inclusion of Related
- * Resources for `include`; for `sort`, §Sorting on an endpoint that responds
- * with a resource collection, and on a single-resource endpoint (`GET
- * /articles/1?sort=title`) the general §Implementation-Specific Query
- * Parameters rule, since that endpoint does not know how to process `sort`
- * as a query parameter from the specification. An undeclared
- * `fields[TYPE]`, `page[…]` or `filter[…]` is still ignored.
+ * `?include=` too). So is one the schema declares with an empty vocabulary,
+ * which supports no value: `include: { paths: [] }`, `include: true` on a
+ * resource with no relationships, `sort: true` on one with no attributes.
+ * JSON:API 1.1 requires it: §Inclusion of Related Resources for `include`;
+ * for `sort`, §Sorting on an endpoint that responds with a resource
+ * collection, and on a single-resource endpoint (`GET /articles/1?sort=title`)
+ * the general §Implementation-Specific Query Parameters rule, since that
+ * endpoint does not know how to process `sort` as a query parameter from the
+ * specification. An undeclared `fields[TYPE]`, `page[…]` or `filter[…]` is
+ * still ignored.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server

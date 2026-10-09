@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Option, Record as Rec, Schema, SchemaTransformation } from "effect";
+import { Array as Arr, Option, Record as Rec, Schema, SchemaTransformation } from "effect";
 import type { Term } from "../Sort.js";
 import { define } from "./define.js";
 import { errorMeta } from "./errorMeta.js";
@@ -91,6 +91,22 @@ export const repeatable = <S extends Schema.Top>(
   Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>;
 
 /**
+ * The annotations of a closed vocabulary's literal schema: its whole set as
+ * error `meta` under `key`, and, when the set is empty, a `message` saying so —
+ * `Schema.Literals([])` is `never`, whose rejection would otherwise read
+ * "Expected never" (#282).
+ */
+export const vocabularyAnnotations = (
+  key: string,
+  vocabulary: ReadonlyArray<string>,
+  emptyMessage: string,
+): Schema.Annotations.Annotations =>
+  Arr.match(vocabulary, {
+    onEmpty: () => ({ ...errorMeta({ [key]: vocabulary }), message: emptyMessage }),
+    onNonEmpty: () => errorMeta({ [key]: vocabulary }),
+  });
+
+/**
  * A sort term: an attribute name and a direction — the public `Sort.Term`.
  */
 export type SortTerm<Field extends string> = Term<Field>;
@@ -121,8 +137,9 @@ export const Sort = <const Field extends string>(fields: ReadonlyArray<Field>): 
   const item = Schema.Struct({
     // The sortable set rides on the literal schema as error `meta`, so the 400
     // for an unknown field carries `meta.sortableFields` (see `errorMeta`).
+    // An empty set says so rather than "Expected never" (#282).
     field: Schema.Literals(fields as ReadonlyArray<Field>).annotate(
-      errorMeta({ sortableFields: fields }),
+      vocabularyAnnotations("sortableFields", fields, "This endpoint supports no sortable fields."),
     ),
     direction: Schema.Literals(["asc", "desc"] as ["asc", "desc"]),
   });
