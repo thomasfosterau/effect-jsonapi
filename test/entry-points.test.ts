@@ -86,6 +86,7 @@ const HTTP_TIER = [
   "internal/conformance/report.ts",
   "internal/conformance/spec.ts",
   "internal/conformance/write.ts",
+  "internal/declaredQuery.ts",
   "internal/define.ts",
   "internal/errorMeta.ts",
   "internal/httpMedia.ts",

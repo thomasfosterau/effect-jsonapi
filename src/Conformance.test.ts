@@ -21,10 +21,9 @@ import {
   Predicate,
   Schema,
 } from "effect";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import type { HttpClientRequest } from "effect/http";
-import { HttpApi, HttpApiBuilder } from "effect/http-api";
-import type { HttpApiGroup } from "effect/http-api";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
@@ -1184,9 +1183,205 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     expect(outcomeFor(report, SORT)).toMatchObject({
       _tag: "Skipped",
       reason:
-        "no list or related endpoint without `sort` answered with a resource collection as primary data",
+        "no list or related endpoint without `sort` answered with a resource collection as primary data (/articles/1/author: 200, not a resource collection)",
     });
     expect(seen.some((path) => path.includes("sort="))).toBe(false);
+  });
+
+  it("moves past a to-one related endpoint to the collection endpoint after it", async () => {
+    // Discovery order puts the to-one `author` endpoint first: the rule must
+    // pass over it, not give up on it.
+    const mixed = HttpApi.make("mixed").add(
+      Group.make(
+        Article,
+        Endpoint.related(Article, "author"),
+        Endpoint.list(Article, { include: true, fields: true }),
+      ),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(mixed)(
+      (request) => {
+        seen.push(request.path);
+        return request.path.startsWith("/articles/1/author")
+          ? { body: { data: { type: "people", id: "9", attributes: { firstName: "Dan" } } } }
+          : conformantServe(request);
+      },
+      { only: [SORT] },
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject({ _tag: "Passed", probes: 3, note: undefined });
+    expect(seen).toEqual(["/articles/1/author", "/articles", "/articles?sort=title"]);
+  });
+
+  it("names each baseline's status when no candidate answered a collection", async () => {
+    const report = await verifyUndeclared(
+      (request) =>
+        request.path === "/articles"
+          ? { status: 503, body: { errors: [{ status: "503" }] } }
+          : undeclaredServe(request),
+      { only: [SORT] },
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no list or related endpoint without `sort` answered with a resource collection as primary data (/articles: 503)",
+    });
+  });
+
+  it("says a probe that got no response got none, not that it was not rejected", async () => {
+    const report = await verifyUndeclared(undeclaredServe, { only: [INCLUDE, SORT] }, (client) =>
+      HttpClient.make((request) =>
+        /[?&](include|sort)=/.test(request.url)
+          ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, description: "reset" }),
+              }),
+            )
+          : client.execute(request),
+      ),
+    );
+    const noResponse = (sent: string) => ({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: `${sent} got no response`,
+          expected: "400 Bad Request",
+          observed: expect.stringMatching(/^no response \(/),
+        },
+      ],
+    });
+    expect(outcomeFor(report, INCLUDE)).toMatchObject(
+      noResponse("`?include=author` on /articles/1"),
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject(noResponse("`?sort=title` on /articles"));
+  });
+
+  it("passes a 400 that carries no error objects, and says that is what it carried", async () => {
+    const report = await verifyUndeclared((request) => {
+      const canned = undeclaredServe(request);
+      return canned.status === 400
+        ? { status: 400, contentType: "text/plain", body: "no" }
+        : canned;
+    });
+    const noted = {
+      _tag: "Passed",
+      note: expect.stringContaining("carried no JSON:API error objects"),
+    };
+    expect(outcomeFor(report, INCLUDE)).toMatchObject(noted);
+    expect(outcomeFor(report, SORT)).toMatchObject(noted);
+  });
+
+  it("probes `include` only on an endpoint whose baseline succeeded", async () => {
+    // Both read endpoints lack `include`; the first one's baseline fails, so a
+    // probe there could only fail for that reason. The rule moves on.
+    const bare = HttpApi.make("bare").add(
+      Group.make(Article, Endpoint.get(Article, { fields: true }), Endpoint.list(Article)),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(bare)(
+      (request) => {
+        seen.push(request.path);
+        if (request.path === "/articles/1")
+          return { status: 500, body: { errors: [{ status: "500" }] } };
+        return queryOf(request).has("include")
+          ? badRequest({ source: { parameter: "include" } })
+          : conformantServe(request);
+      },
+      { only: [INCLUDE] },
+    );
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({ _tag: "Passed", probes: 3 });
+    expect(seen).toEqual(["/articles/1", "/articles", "/articles?include=author"]);
+  });
+
+  it("skips `include`, naming each status, when no baseline succeeded", async () => {
+    const seen: Array<string> = [];
+    const report = await verifyUndeclared(
+      (request) => {
+        seen.push(request.path);
+        return request.path === "/articles/1"
+          ? { status: 500, body: { errors: [{ status: "500" }] } }
+          : undeclaredServe(request);
+      },
+      { only: [INCLUDE] },
+    );
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no read endpoint without `include` answered its baseline request with 2xx (/articles/1: 500)",
+    });
+    expect(seen).toEqual(["/articles/1"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Discovery of a hand-built endpoint whose query is not a plain struct (#278)
+// ---------------------------------------------------------------------------
+
+/**
+ * A hand-built endpoint can declare its query as a union, a suspended schema or
+ * a record — shapes the middleware reads (a union's members, a suspend's
+ * target) or stands aside for (a record). Discovery must read them the same
+ * way, or the unsupported-parameter rules probe an endpoint that does accept
+ * the parameter and report a failure against the library's own middleware.
+ */
+describe("Conformance: a hand-built query that is not a plain struct", () => {
+  const INCLUDE = "spec/query/include-unsupported-endpoint";
+  const SORT = "spec/query/sort-unsupported-endpoint";
+
+  const handBuilt = <E extends HttpApiEndpoint.Constraint>(endpoint: E) =>
+    HttpApi.make("handBuilt").add(HttpApiGroup.make("articles").add(endpoint));
+
+  /** A server that honours `sort` on `/articles` — as an endpoint declaring it would. */
+  const sorting = (request: CannedRequest): Canned =>
+    conformantServe(queryOf(request).has("sort") ? withoutQuery(request) : request);
+
+  it("reads the members of a union query", async () => {
+    const get = HttpApiEndpoint.get("get", "/articles/:id", {
+      params: { id: Schema.String },
+      query: Schema.Union([
+        Schema.Struct({ include: Schema.optional(Schema.String) }),
+        Schema.Struct({ "fields[articles]": Schema.optional(Schema.String) }),
+      ]),
+      success: Schema.Unknown,
+    });
+    // `conformantServe` honours `include` on /articles/1, as the endpoint declares it.
+    const report = await verifyOver(handBuilt(get))(conformantServe, { only: [INCLUDE] });
+    expect(outcomeFor(report, INCLUDE)).toMatchObject({
+      _tag: "Skipped",
+      reason: "every read endpoint declares `include`",
+    });
+  });
+
+  it("follows a suspended query", async () => {
+    const list = HttpApiEndpoint.get("list", "/articles", {
+      query: Schema.suspend(() => Schema.Struct({ sort: Schema.optional(Schema.String) })),
+      success: Schema.Unknown,
+    });
+    const report = await verifyOver(handBuilt(list))(sorting, { only: [SORT] });
+    expect(outcomeFor(report, SORT)).toMatchObject({
+      _tag: "Skipped",
+      reason: "every list and related endpoint declares `sort`",
+    });
+  });
+
+  it("does not probe an endpoint whose query names cannot be enumerated", async () => {
+    const list = HttpApiEndpoint.get("list", "/articles", {
+      query: Schema.Record(Schema.String, Schema.String),
+      success: Schema.Unknown,
+    });
+    const seen: Array<string> = [];
+    const report = await verifyOver(handBuilt(list))(
+      (request) => {
+        seen.push(request.path);
+        return sorting(request);
+      },
+      { only: [SORT] },
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "every list and related endpoint declares `sort` or has a query whose parameter names cannot be enumerated (/articles)",
+    });
+    expect(seen).toEqual([]);
   });
 });
 
