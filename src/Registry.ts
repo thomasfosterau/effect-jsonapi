@@ -254,8 +254,14 @@ export interface Options<R> {
    * `Middleware.layerHostNegotiated` — the pairing for a host whose front
    * door runs the `Negotiation` verdict, so the api does not re-negotiate
    * (and reject) a request the host already admitted; its `SchemaErrors`
-   * half is live, giving request-validation failures a JSON:API 400. Pass
+   * and `CreatedLocation` are live, giving request-validation failures a
+   * JSON:API 400 and a create's 201 its `Location` header. Pass
    * `Middleware.layer` for an api that owns its own URLs.
+   *
+   * The router always provides `Middleware.CreatedLocationLive` beneath this
+   * layer, so a set that supplies only `ContentNegotiation` and
+   * `SchemaErrors` still serves a create; a `CreatedLocation` in the set
+   * takes precedence.
    */
   readonly middleware?: Layer.Layer<Middleware.ContentNegotiation | Middleware.SchemaErrors>;
   /**
@@ -316,7 +322,10 @@ export const familyLayer = <R>(
 /**
  * The api's full router layer: `HttpApiBuilder.layer` over every family's
  * {@link familyLayer}, the platform no-ops and the middleware provided, the
- * handlers' per-request services left as the layer's requirement.
+ * handlers' per-request services left as the layer's requirement. The
+ * middleware is {@link Options.middleware} over
+ * `Middleware.CreatedLocationLive`, so a create endpoint is served whatever
+ * set the caller passes.
  *
  * @since 0.16.0
  * @category layers
@@ -333,7 +342,15 @@ export const layer = <R>(
   return HttpApiBuilder.layer(api).pipe(
     Layer.provideMerge(groups),
     Layer.provide(platformLayer),
-    Layer.provide(options?.middleware ?? Middleware.layerHostNegotiated),
+    // `Endpoint.create` requires `CreatedLocation`, which `Options.middleware`
+    // does not name: provide the live one under the caller's set, which comes
+    // later in the merge and so wins when it carries its own.
+    Layer.provide(
+      Layer.mergeAll(
+        Middleware.CreatedLocationLive,
+        options?.middleware ?? Middleware.layerHostNegotiated,
+      ),
+    ),
   ) as unknown as Layer.Layer<
     never,
     never,

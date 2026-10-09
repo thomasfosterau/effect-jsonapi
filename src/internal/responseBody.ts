@@ -38,35 +38,39 @@ const Link = Schema.Union([Schema.String, Schema.Struct({ href: Schema.String })
 /** Anything carrying `links.self`: a resource object, or the top-level document. */
 const SelfLinked = Schema.Struct({ links: Schema.Struct({ self: Link }) });
 
+/** The body text, parsed once; both lookups below read the parsed value. */
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
 /** The created resource's own `data.links.self`. */
-const decodeResourceSelf = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ data: SelfLinked })),
-);
+const decodeResourceSelf = Schema.decodeUnknownOption(Schema.Struct({ data: SelfLinked }));
 
 /** The document's top-level `links.self`. */
-const decodeDocumentSelf = Schema.decodeUnknownOption(Schema.fromJsonString(SelfLinked));
+const decodeDocumentSelf = Schema.decodeUnknownOption(SelfLinked);
 
 /** The URL of a link, whichever way it is spelled. */
 const href = (link: typeof Link.Type): string => (Predicate.isString(link) ? link : link.href);
 
-// RFC 9110 §5.5 field-value: visible characters and obs-text, with spaces and
-// tabs only inside. Anything else — a CR or LF above all — is not a header
-// value, and the platform would throw writing it.
-const FIELD_VALUE = /^[\x21-\x7e\x80-\xff](?:[\t\x20-\x7e\x80-\xff]*[\x21-\x7e\x80-\xff])?$/;
+// `Location` is a URI-reference (RFC 9110 §10.2.2), and RFC 3986 spells one in
+// visible US-ASCII only: no space, no tab, no CR or LF (which the platform
+// would throw writing), no byte above 0x7E. A link outside that is not a
+// `Location`, so the header is omitted rather than sent malformed.
+const URI_REFERENCE = /^[\x21-\x7e]+$/;
 
 /**
  * The `Location` a JSON:API document names for the resource it carries: the
  * primary resource's `data.links.self`, else the document's own `links.self`,
  * copied verbatim. `None` when the text is not JSON, neither link is present
  * as a string or a link object with a string `href`, or the link is not a
- * valid header value.
+ * URI-reference.
  */
 const documentLocation = (text: string): Option.Option<string> =>
-  decodeResourceSelf(text).pipe(
-    Option.map(({ data }) => data.links.self),
-    Option.orElse(() => Option.map(decodeDocumentSelf(text), ({ links }) => links.self)),
-    Option.map(href),
-    Option.filter((location) => FIELD_VALUE.test(location)),
+  Option.flatMap(parseJson(text), (document) =>
+    decodeResourceSelf(document).pipe(
+      Option.map(({ data }) => data.links.self),
+      Option.orElse(() => Option.map(decodeDocumentSelf(document), ({ links }) => links.self)),
+      Option.map(href),
+      Option.filter((location) => URI_REFERENCE.test(location)),
+    ),
   );
 
 /**

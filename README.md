@@ -117,7 +117,7 @@ Every module is a namespace export of the package root (`import { Resource } fro
 | `ServerErrors` | The server's error seam: the domain error catalogue and `ServerErrors.respond`. |
 | `Registry` | The handler registry and router (`Registry.webHandler`). |
 | `Negotiation` | The representation verdict for a host serving JSON:API on its page URLs. |
-| `Middleware` | Protocol middleware (`Middleware.layer`): content negotiation and schema errors. |
+| `Middleware` | Protocol middleware (`Middleware.layer`): content negotiation, schema errors and the create's `Location` header. |
 | `MediaType` | Media type annotation combinators for hand-rolled endpoints. |
 | `Atomic` | The [atomic operations extension](https://jsonapi.org/ext/atomic/). |
 | `Lid` | Local id (`lid`) resolution (`Lid.make`). |
@@ -646,7 +646,7 @@ const self = `/articles/${article.id}`;
 return Effect.succeed(Handlers.data({ ...article, links: { self } }, { self }));
 ```
 
-With neither link the header is omitted. Only a `201` is touched: a create answering another [`status`](#overriding-the-write-status) is left alone, as is a response that already carries `Location`, and a body that isn't a JSON document (or isn't settled bytes) passes through unchanged rather than failing the request. The middleware sits inside `Idempotency.Middleware`, so a [replayed](#idempotent-writes-idempotency-key) `201` keeps its `Location`. `Middleware.layer`, `Middleware.layerWith` and `Middleware.layerHostNegotiated` all provide it; an api that composes its own middleware set adds `Middleware.CreatedLocationLive`. The header is not declared on the endpoint, so the typed client does not surface it.
+With neither link the header is omitted, and so is a link that isn't a URI-reference (a space, a control character or a non-ASCII character in it), rather than sent malformed. Only a `201` is touched: a create answering another [`status`](#overriding-the-write-status) is left alone, as is a response that already carries `Location`, and a body that isn't a JSON document (or isn't settled bytes) passes through unchanged rather than failing the request. The middleware sits inside `Idempotency.Middleware`, so a [replayed](#idempotent-writes-idempotency-key) `201` keeps its `Location`. `Middleware.layer`, `Middleware.layerWith` and `Middleware.layerHostNegotiated` all provide it, and `Registry.layer` / `Registry.webHandler` provide it beneath whatever `middleware` they are given; any other api that composes its own middleware set adds `Middleware.CreatedLocationLive`. The header is not declared on the endpoint, so the typed client does not surface it.
 
 ### Overriding the write payload
 
@@ -1218,7 +1218,7 @@ import { HttpApiBuilder } from "effect/http-api"
 
 const ApiLive = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),
-  Layer.provide(Middleware.layer) // content negotiation + JSON:API 400s
+  Layer.provide(Middleware.layer) // content negotiation, JSON:API 400s, a 201's `Location`
 )
 
 // rc.118 builds a fresh router per entrypoint: serve the API layer through

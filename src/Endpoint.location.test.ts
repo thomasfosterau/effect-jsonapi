@@ -175,12 +175,29 @@ describe("Endpoint.create: the 201's Location header", () => {
     expect(response.location).toBeNull();
   });
 
-  it("omits a self link that is not a valid header value rather than failing", async () => {
+  // `Location` is a URI-reference: visible US-ASCII only (RFC 3986).
+  it.each([
+    ["a CR LF", "/articles/1\r\nset-cookie: x=1"],
+    ["a space", "/articles/a b"],
+    ["a tab", "/articles/a\tb"],
+    ["a byte above 0x7E", "/articles/café"],
+    ["a byte at 0x80", "/articles/\u0080"],
+    ["a byte at 0xFF", "/articles/ÿ"],
+    ["a DEL", "/articles/\u007f"],
+  ])("omits a self link containing %s rather than failing", async (_, self) => {
     const response = await postOnce(() =>
-      Effect.succeed({ data: { ...created, links: { self: "/articles/1\r\nset-cookie: x=1" } } }),
+      Effect.succeed({ data: { ...created, links: { self } } }),
     );
     expect(response.status).toBe(201);
     expect(response.location).toBeNull();
+  });
+
+  it("copies a self link spanning the whole visible ASCII range", async () => {
+    const self = "/articles/1?q=a%20b&x=!$'()*+,;=:@-._~#frag";
+    const response = await postOnce(() =>
+      Effect.succeed({ data: { ...created, links: { self } } }),
+    );
+    expect(response.location).toBe(self);
   });
 
   it("leaves a 201 whose body is a stream unchanged", async () => {

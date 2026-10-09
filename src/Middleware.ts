@@ -1007,14 +1007,17 @@ export const SchemaErrorsLive: Layer.Layer<SchemaErrors> = schemaErrorsLayer();
  *
  * Only a 201 is touched: a create answering another `status`, a response that
  * already carries `Location`, a body that is not JSON (or not settled bytes,
- * such as a stream), and a document naming no usable `self` link all pass
- * through unchanged. It never fails a request.
+ * such as a stream), and a document naming no usable `self` link — none, or
+ * one that is not a URI-reference — all pass through unchanged. It never
+ * fails a request.
  *
  * `Endpoint.create` — and so `Endpoint.resource` / `Group.resource` — attaches
  * it inside `Idempotency.Middleware`, so a recorded 201 keeps its `Location`
  * and a replay returns it. {@link layer}, {@link layerWith} and
- * {@link layerHostNegotiated} provide {@link CreatedLocationLive}; an api that
- * composes its own middleware set adds it beside the others.
+ * {@link layerHostNegotiated} provide {@link CreatedLocationLive}, and so do
+ * `Registry.layer` / `Registry.webHandler`, beneath any `middleware` they are
+ * given; any other api that composes its own middleware set adds it beside
+ * the others.
  *
  * @since 0.17.0
  * @category services
