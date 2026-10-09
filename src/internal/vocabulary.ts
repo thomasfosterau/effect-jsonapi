@@ -21,6 +21,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
+import { declaredNames } from "./declaredQuery.js";
 
 /** The annotation key. Namespaced so it can never collide with a consumer's. */
 const VOCABULARY_ANNOTATION = "~@thomasfosterau/effect-jsonapi/vocabulary";
@@ -56,13 +57,27 @@ export type Vocabulary =
  */
 export type Family = Vocabulary["family"];
 
+// The annotation object `schema.annotate(...)` takes to publish a vocabulary.
+const vocabularyAnnotation = (vocabulary: Vocabulary) =>
+  ({ [VOCABULARY_ANNOTATION]: vocabulary }) satisfies Schema.Annotations.Annotations;
+
 /**
- * The annotation object `schema.annotate(...)` takes to publish a vocabulary.
+ * The annotations of a closed vocabulary's literal schema: its whole set as
+ * the family's vocabulary, which the 400 for a rejected value renders as
+ * error `meta` and the support check reads, and, when the set is empty, a
+ * `message` saying so — `Schema.Literals([])` is `never`, whose rejection
+ * would otherwise read "Expected never" (#282).
  *
  * @internal
  */
-export const vocabularyAnnotation = (vocabulary: Vocabulary) =>
-  ({ [VOCABULARY_ANNOTATION]: vocabulary }) satisfies Schema.Annotations.Annotations;
+export const vocabularyAnnotations = (
+  vocabulary: Vocabulary,
+  emptyMessage: string,
+): Schema.Annotations.Annotations =>
+  Arr.match(vocabulary.values, {
+    onEmpty: () => ({ ...vocabularyAnnotation(vocabulary), message: emptyMessage }),
+    onNonEmpty: () => vocabularyAnnotation(vocabulary),
+  });
 
 const isVocabulary = (value: unknown): value is Vocabulary =>
   Predicate.hasProperty(value, "family") && Predicate.hasProperty(value, "values");
@@ -122,25 +137,36 @@ const drawsOnlyFromEmpty = (ast: SchemaAST.AST, family: Family, visiting: Visiti
     },
   });
 
-// The schemas a query decodes its property `name` with: the property of that
-// name on a struct, on every member of a union, through a suspended schema.
-const propertiesNamed = (
+// The schemas a query decodes its wire parameter `name` with, each read on
+// its decoded side. On a struct that is its property of that name, or, when
+// it has none but its encoded side declares `name`, every property whose name
+// that side does not declare: one of them is the property the struct's
+// encoding renamed to `name` (`Schema.encodeKeys`), and the AST does not say
+// which. Read on every member of a union and through a suspended schema.
+const propertiesFor = (
   ast: SchemaAST.AST,
   name: string,
   visiting: Visiting,
 ): ReadonlyArray<SchemaAST.AST> => {
   if (SchemaAST.isObjects(ast)) {
-    return Arr.flatMap(ast.propertySignatures, (signature) =>
-      signature.name === name ? [signature.type] : [],
-    );
+    const decoded = (signatures: ReadonlyArray<SchemaAST.PropertySignature>) =>
+      Arr.map(signatures, (signature) => SchemaAST.toType(signature.type));
+    const named = Arr.filter(ast.propertySignatures, (signature) => signature.name === name);
+    if (Arr.isReadonlyArrayNonEmpty(named)) return decoded(named);
+    const wire = Option.getOrElse(declaredNames(ast), (): ReadonlyArray<string> => []);
+    return wire.includes(name)
+      ? decoded(
+          Arr.filter(ast.propertySignatures, (signature) => !wire.includes(String(signature.name))),
+        )
+      : [];
   }
   if (SchemaAST.isUnion(ast)) {
-    return Arr.flatMap(ast.types, (member) => propertiesNamed(member, name, visiting));
+    return Arr.flatMap(ast.types, (member) => propertiesFor(member, name, visiting));
   }
   if (SchemaAST.isSuspend(ast)) {
     return Option.match(enter(visiting, ast), {
       onNone: () => [],
-      onSome: (next) => propertiesNamed(ast.thunk(), name, next),
+      onSome: (next) => propertiesFor(ast.thunk(), name, next),
     });
   }
   return [];
@@ -149,18 +175,20 @@ const propertiesNamed = (
 /**
  * Whether a query schema declares `family` only with an empty vocabulary, so
  * that no value of it can decode: `include: { paths: [] }`, `include: true`
- * over no relationships, `sort: true` over no attributes. Reads the decoded
- * property named after the family and nothing else, so a vocabulary under
- * another name never counts. True only when every such property, in every
- * member of a union query, draws its values from empty vocabularies alone; a
- * property that publishes no vocabulary (`Query.IncludeList`, a custom codec)
- * or a non-empty one anywhere admits a value, and so does an endpoint that
- * declares no such property.
+ * over no relationships, `sort: true` over no attributes. Reads the property
+ * the family's wire parameter decodes into and nothing else, so a vocabulary
+ * under another parameter never counts: the property named after the family,
+ * or, where the query's encoding renames another property to the family's
+ * name, every property the wire does not name. True only when every such
+ * property, in every member of a union query, draws its values from empty
+ * vocabularies alone; a property that publishes no vocabulary
+ * (`Query.IncludeList`, a custom codec) or a non-empty one anywhere admits a
+ * value, and so does an endpoint whose decoded query has no such property.
  *
  * @internal
  */
 export const admitsNoValue = (query: SchemaAST.AST, family: Family): boolean => {
-  const properties = propertiesNamed(SchemaAST.toType(query), family, []);
+  const properties = propertiesFor(query, family, []);
   return (
     Arr.isReadonlyArrayNonEmpty(properties) &&
     Arr.every(properties, (property) => drawsOnlyFromEmpty(property, family, []))
