@@ -6,7 +6,7 @@
 
 - **Versions live only in the `pnpm-workspace.yaml` catalog** (`catalogMode: strict`; peer ranges under `catalogs.peers`). After editing it, run `pnpm install` and commit `pnpm-lock.yaml` — a stale lockfile fails CI with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
 - **`@effect/tsgo`, `@typescript/native` and `vite-plus` bump as a set** — read the comment on `@effect/tsgo` in `pnpm-workspace.yaml` first; an unsupported pairing fails `pnpm install` (the `prepare` script's `effect-tsgo patch` hard-errors).
-- **The type checker of record is TypeScript 7** (`tsc`, the native compiler, via `vp run check`). It anchors a failed overload at the _properties_ that fail against the last overload rather than at the one the TS6 checker elaborated, which is why the `@ts-expect-error` markers on effect's `ErrorNoStream` guard in `src/Endpoint.ts` sit on `params:` / `query:` lines as well as `error:`. TS6 (`tsc6`, the JS compiler) is only what the JS-API consumers — `@effect/docgen`, the tsdown declaration bundler, the editor language service — load.
+- **The type checker of record is TypeScript 7** (`tsc`, the native compiler, via `vp run check`). It anchors a failed overload at the _properties_ that fail against the last overload rather than at the one the TS6 checker elaborated, which is why the `@ts-expect-error` markers on effect's `ErrorNoStream` guard in `src/Endpoint.ts` sit on `params:` / `query:` lines as well as `error:`. TS6 (`tsc6`, the JS compiler) is only what the JS-API consumers — `@effect/docgen`'s parse, the tsdown declaration bundler, the editor language service — load.
 - **`vp lint` runs the full Effect preset with a staged rollout.** The `warn` tier in `vite.config.ts` is debt, not headroom: fix any new site, and when a rule's count reaches zero flip it to `error` and delete its line. `@ts-expect-error` is the assertion mechanism of `test/*.types.ts` and stays allowed there.
 - **`dist/` is bundled, not transpiled.** `vp pack` (tsdown) emits one ESM bundle per entry point (`.`, `./schema`) plus bundled declarations. `test/entry-points.test.ts` walks the built graph, and `test/emitted/requirements.types.ts` type-checks against the emitted `.d.ts` — both because what consumers see is not what `src/` resolves to.
 
@@ -20,7 +20,7 @@
 
 ### `vp run docgen` executes your examples
 
-`@effect/docgen` doesn't just type-check JSDoc `@example` blocks — it **compiles them as ESM and runs them** (`vp run docgen`). Note this is a separate command/CI step from `vp check` + `vp run check` + `vp run -r test:unit` — those passing does not mean your examples run; run `docgen` too before you're done. A broken example fails the build, not a lint warning.
+`vp run docgen` doesn't just type-check JSDoc `@example` blocks — it **compiles them as ESM and runs them**. `@effect/docgen` covers the examples on modules, functions, constants, types, namespaces and class methods. The task's second sub-task, `scripts/docgen-class-examples.ts`, covers the `@example` in a class's own doc comment, which docgen skips (#276). Neither covers an `@example` on a class property or constructor yet (#288). Note this is a separate command/CI step from `vp check` + `vp run check` + `vp run -r test:unit` — those passing does not mean your examples run; run `docgen` too before you're done. A broken example fails the build, not a lint warning.
 
 Consequences for any `@example` in `src/*.ts`:
 
@@ -31,7 +31,7 @@ Consequences for any `@example` in `src/*.ts`:
 
 This restriction is **specific to `src/*.ts` JSDoc examples**. `declare const` is fine in `test/*.types.ts` (see below) — those files are asserted by `tsc`, never executed by docgen or vitest. `src/index.ts` is excluded from docgen (`docgen.json`), so nothing executes its module doc; keep it free of code samples.
 
-Docgen drives TypeScript through the JS API, so it sees the TS6 side of the split with its own compiler options (`docgen.json`; `types: ["node"]` is explicit because TypeScript 6 no longer auto-includes `@types`).
+Docgen parses `src/` through the TypeScript JS API, so its parse sees the TS6 side of the split, under `parseCompilerOptions` in `docgen.json`. It compiles the examples by spawning the `tsc` on `PATH`, which under `vp run` is the native TS7 `tsc`, under `examplesCompilerOptions`. The class-example runner spawns the same `tsc`. `types: ["node"]` is explicit in both option sets because TypeScript 6 no longer auto-includes `@types`.
 
 ## Architecture
 
@@ -82,7 +82,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `vp check` — format + lint (Oxfmt + Oxlint). `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
 - `vp run build` — `vp pack` → `dist/`.
-- `vp run docgen` — type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
+- `vp run docgen` — type-check and execute every JSDoc `@example` (class-property examples excepted, #288); generate the API docs under `docs/`.
 - `fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
 
