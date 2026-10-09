@@ -19,6 +19,7 @@ import {
 } from "effect";
 import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
+import { declaredNames } from "../declaredQuery.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
 // ---------------------------------------------------------------------------
@@ -188,6 +189,12 @@ export interface Discovered {
   readonly params: ReadonlyArray<string>;
   /** Flat wire query keys (`include`, `page[limit]`, `fields[articles]`, …). */
   readonly queryKeys: ReadonlyArray<string>;
+  /**
+   * `false` when the query could accept a name discovery cannot enumerate — a
+   * record keyed by any string, say — so `queryKeys` (then empty) cannot say
+   * what it does not declare. `Middleware` stands aside for such an endpoint.
+   */
+  readonly queryEnumerable: boolean;
   /** `true` when the query admits arbitrary `filter[…]` keys — `filter: true`, the grammar. */
   readonly filterGrammar: boolean;
 }
@@ -196,19 +203,22 @@ const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | un
   "~httpApiEncoding",
 );
 
+/**
+ * What an endpoint's query declares, by the walk `Middleware` checks requests
+ * against: its flat keys, apart from the `filter[` prefix a `filter: true`
+ * rest contributes, or nothing enumerable at all.
+ */
 const wireKeys = (
   schema: { readonly ast: SchemaAST.AST } | undefined,
-): { readonly keys: ReadonlyArray<string>; readonly rest: boolean } => {
-  if (schema === undefined) return { keys: [], rest: false };
-  const encoded = SchemaAST.toEncoded(schema.ast) as {
-    readonly propertySignatures?: ReadonlyArray<{ readonly name: PropertyKey }>;
-    readonly indexSignatures?: ReadonlyArray<unknown>;
-  };
-  return {
-    keys: (encoded.propertySignatures ?? []).map((ps) => String(ps.name)),
-    rest: (encoded.indexSignatures ?? []).length > 0,
-  };
-};
+): Pick<Discovered, "queryKeys" | "queryEnumerable" | "filterGrammar"> =>
+  Option.match(schema === undefined ? Option.some([]) : declaredNames(schema.ast), {
+    onNone: () => ({ queryKeys: [], queryEnumerable: false, filterGrammar: false }),
+    onSome: (names) => ({
+      queryKeys: names.filter((name) => !name.endsWith("[")),
+      queryEnumerable: true,
+      filterGrammar: names.includes("filter["),
+    }),
+  });
 
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
@@ -276,8 +286,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
         params: segments
           .filter((segment) => segment.startsWith(":"))
           .map((segment) => segment.slice(1)),
-        queryKeys: query.keys,
-        filterGrammar: query.rest,
+        ...query,
       });
     }
   }

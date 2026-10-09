@@ -1227,23 +1227,51 @@ const unsupportedSort: RuleImpl = {
 
 /**
  * The endpoints of `roles` whose discovered query does not declare `family` —
- * the ones that must refuse it — split as `probeable` splits them.
+ * the ones that must refuse it — split as `probeable` splits them, and the
+ * paths of the ones whose query names discovery cannot enumerate. Whether one
+ * of those declares `family` is unknown (`Middleware` stands aside for it), so
+ * none of them is probed.
  */
-const lacking = (ctx: Context, roles: ReadonlyArray<Role>, family: string) =>
-  probeable(
-    { ...ctx, endpoints: ctx.endpoints.filter(({ queryKeys }) => !queryKeys.includes(family)) },
+const lacking = (ctx: Context, roles: ReadonlyArray<Role>, family: string) => ({
+  ...probeable(
+    {
+      ...ctx,
+      endpoints: ctx.endpoints.filter(
+        ({ queryEnumerable, queryKeys }) => queryEnumerable && !queryKeys.includes(family),
+      ),
+    },
     roles,
-  );
+  ),
+  opaque: ctx.endpoints
+    .filter(({ role, queryEnumerable }) => roles.includes(role) && !queryEnumerable)
+    .map(({ path }) => path),
+});
 
 /** `true` when `probeable` found no endpoint at all, resolvable or not. */
 const noEndpoint = (found: ReturnType<typeof probeable>): boolean =>
   Arr.isReadonlyArrayEmpty(found.resolved) && Arr.isReadonlyArrayEmpty(found.unresolved);
+
+/** The skip reason when `lacking` found no endpoint: each declares `family`, or cannot say. */
+const everyDeclares = (what: string, family: string, opaque: ReadonlyArray<string>): string =>
+  Arr.isReadonlyArrayEmpty(opaque)
+    ? `every ${what} declares \`${family}\``
+    : `every ${what} declares \`${family}\` or has a query whose parameter names cannot be enumerated (${opaque.join(", ")})`;
 
 /** The attribute names the first resource object of a collection carries. */
 const attributeNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> => {
   const attributes = data.find(isRecord)?.["attributes"];
   return isRecord(attributes) ? Rec.keys(attributes) : [];
 };
+
+/** A response's status, or why there was none, for a skip reason. */
+const statusOf = (observation: Observation): string =>
+  observation.transportError === undefined
+    ? `${observation.status}`
+    : `no response (${observation.transportError})`;
+
+/** `true` when a response came back 2xx. */
+const succeeded = (observation: Observation): boolean =>
+  observation.status >= 200 && observation.status < 300;
 
 /**
  * Settles a rule on the answer to `?<parameter>=…` sent to an endpoint that
@@ -1266,7 +1294,10 @@ const settleRefusal = (
   if (observation.status !== 400) {
     return settle(impl, probes, [
       finding(impl, {
-        detail: `${sent} on ${where}, which does not declare \`${parameter}\`, was not rejected`,
+        detail:
+          observation.transportError === undefined
+            ? `${sent} on ${where}, which does not declare \`${parameter}\`, was not rejected`
+            : `${sent} on ${where} got no response`,
         expected: "400 Bad Request",
         observed: describe(observation),
         probe: observation.probe,
@@ -1279,7 +1310,9 @@ const settleRefusal = (
         impl,
         probes,
         [],
-        `the 400 for ${sent} named no \`source.parameter\` (optional in JSON:API), so its status alone decided this rule`,
+        Arr.isReadonlyArrayEmpty(errorObjectsOf(observation.body))
+          ? `the 400 for ${sent} carried no JSON:API error objects, so its status alone decided this rule`
+          : `the 400 for ${sent} named no \`source.parameter\` (optional in JSON:API), so its status alone decided this rule`,
       ),
     onNonEmpty: (parameters) =>
       settle(
@@ -1299,6 +1332,52 @@ const settleRefusal = (
   });
 };
 
+/** What `probeFirstUsable` sends, where, and what it reads off each baseline. */
+interface UsableProbe {
+  readonly parameter: string;
+  readonly targets: ReadonlyArray<{ readonly path: string }>;
+  /** The name to send, or why the endpoint is passed over. */
+  readonly nameFrom: (baseline: Observation) => Result.Result<string, string>;
+  /** The skip reason's head when every target is passed over. */
+  readonly none: string;
+}
+
+/**
+ * Probes `?<parameter>=<name>` on the first of `targets` whose baseline
+ * response `nameFrom` accepts, and settles the rule on the answer. Every
+ * target passed over is named in the skip reason, with why, when none was
+ * usable.
+ */
+const probeFirstUsable = (
+  ctx: Context,
+  impl: Rule,
+  probe: UsableProbe,
+  passedOver: ReadonlyArray<string> = [],
+): Effect.Effect<Outcome> =>
+  Arr.matchLeft(probe.targets, {
+    onEmpty: () => Effect.succeed(skip(impl, `${probe.none} (${passedOver.join("; ")})`)),
+    onNonEmpty: ({ path }, rest) =>
+      Effect.gen(function* () {
+        const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+        const name = probe.nameFrom(baseline);
+        if (Result.isFailure(name)) {
+          return yield* probeFirstUsable(ctx, impl, { ...probe, targets: rest }, [
+            ...passedOver,
+            `${path}: ${name.failure}`,
+          ]);
+        }
+        const observation = yield* ctx.request({
+          url: withQuery(path, [[probe.parameter, name.success]]),
+          headers: jsonApiAccept,
+        });
+        return settleRefusal(impl, passedOver.length + 2, {
+          parameter: probe.parameter,
+          where: path,
+          observation,
+        });
+      }),
+  });
+
 const includeUnsupportedEndpoint: RuleImpl = {
   rule: rule(
     "spec/query/include-unsupported-endpoint",
@@ -1307,64 +1386,37 @@ const includeUnsupportedEndpoint: RuleImpl = {
     "MUST",
     "If an endpoint does not support the `include` parameter, it MUST respond with 400 Bad Request to any requests that include it.",
   ),
-  run: (ctx) =>
-    Effect.gen(function* () {
-      const impl = includeUnsupportedEndpoint.rule;
-      if (noEndpoint(readable(ctx))) return skip(impl, noProbeReason("JSON:API read endpoint", []));
-      const candidates = lacking(ctx, READ_ROLES, "include");
-      if (noEndpoint(candidates)) return skip(impl, "every read endpoint declares `include`");
-      const target = Arr.head(candidates.resolved);
-      if (Option.isNone(target))
-        return skip(impl, noProbeReason("read endpoint without `include`", candidates.unresolved));
-      const { path } = target.value;
-      // A relationship the resource carries inline linkage for is the one an
-      // endpoint that did process `include` would visibly honour, so a server
-      // that ignores the parameter is caught answering 200 with `included`.
-      const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
-      const name = Option.getOrElse(
-        Arr.head(includableOf(baseline.body)),
-        () => "notARelationshipPath",
+  run: (ctx) => {
+    const impl = includeUnsupportedEndpoint.rule;
+    if (noEndpoint(readable(ctx)))
+      return Effect.succeed(skip(impl, noProbeReason("JSON:API read endpoint", [])));
+    const candidates = lacking(ctx, READ_ROLES, "include");
+    if (noEndpoint(candidates))
+      return Effect.succeed(
+        skip(impl, everyDeclares("read endpoint", "include", candidates.opaque)),
       );
-      const observation = yield* ctx.request({
-        url: withQuery(path, [["include", name]]),
-        headers: jsonApiAccept,
-      });
-      return settleRefusal(impl, 2, { parameter: "include", where: path, observation });
-    }),
+    if (Arr.isReadonlyArrayEmpty(candidates.resolved)) {
+      return Effect.succeed(
+        skip(impl, noProbeReason("read endpoint without `include`", candidates.unresolved)),
+      );
+    }
+    // A failed baseline would fail the probe for its own reason, not for
+    // `include`. A relationship the resource carries inline linkage for is the
+    // one an endpoint that did process `include` would visibly honour, so a
+    // server that ignores the parameter is caught answering 200 with `included`.
+    return probeFirstUsable(ctx, impl, {
+      parameter: "include",
+      targets: candidates.resolved,
+      nameFrom: (baseline) =>
+        succeeded(baseline)
+          ? Result.succeed(
+              Option.getOrElse(Arr.head(includableOf(baseline.body)), () => "notARelationshipPath"),
+            )
+          : Result.fail(statusOf(baseline)),
+      none: "no read endpoint without `include` answered its baseline request with 2xx",
+    });
+  },
 };
-
-/**
- * Probes `sort` on the first of `targets` whose baseline response has a
- * resource collection as primary data — the only endpoints §Sorting covers; a
- * to-one related endpoint answers a single resource, and is passed over.
- */
-const sortFirstCollection = (
-  ctx: Context,
-  impl: Rule,
-  targets: ReadonlyArray<{ readonly path: string }>,
-  probes: number,
-): Effect.Effect<Outcome> =>
-  Arr.matchLeft(targets, {
-    onEmpty: () =>
-      Effect.succeed(
-        skip(
-          impl,
-          "no list or related endpoint without `sort` answered with a resource collection as primary data",
-        ),
-      ),
-    onNonEmpty: ({ path }, rest) =>
-      Effect.gen(function* () {
-        const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
-        const data = isRecord(baseline.body) ? baseline.body["data"] : undefined;
-        if (!Array.isArray(data)) return yield* sortFirstCollection(ctx, impl, rest, probes + 1);
-        const name = Option.getOrElse(Arr.head(attributeNamesOf(data)), () => "notASortableField");
-        const observation = yield* ctx.request({
-          url: withQuery(path, [["sort", name]]),
-          headers: jsonApiAccept,
-        });
-        return settleRefusal(impl, probes + 2, { parameter: "sort", where: path, observation });
-      }),
-  });
 
 const sortUnsupportedEndpoint: RuleImpl = {
   rule: rule(
@@ -1379,14 +1431,33 @@ const sortUnsupportedEndpoint: RuleImpl = {
     if (noEndpoint(probeable(ctx, COLLECTION_ROLES)))
       return Effect.succeed(skip(impl, noProbeReason("list or related endpoint", [])));
     const candidates = lacking(ctx, COLLECTION_ROLES, "sort");
-    if (noEndpoint(candidates))
-      return Effect.succeed(skip(impl, "every list and related endpoint declares `sort`"));
+    if (noEndpoint(candidates)) {
+      return Effect.succeed(
+        skip(impl, everyDeclares("list and related endpoint", "sort", candidates.opaque)),
+      );
+    }
     if (Arr.isReadonlyArrayEmpty(candidates.resolved)) {
       return Effect.succeed(
         skip(impl, noProbeReason("list or related endpoint without `sort`", candidates.unresolved)),
       );
     }
-    return sortFirstCollection(ctx, impl, candidates.resolved, 0);
+    // Only an endpoint answering a resource collection as primary data is one
+    // §Sorting covers; a to-one related endpoint answers a single resource, and
+    // is passed over for the next candidate.
+    return probeFirstUsable(ctx, impl, {
+      parameter: "sort",
+      targets: candidates.resolved,
+      nameFrom: (baseline) => {
+        if (!succeeded(baseline)) return Result.fail(statusOf(baseline));
+        const data = isRecord(baseline.body) ? baseline.body["data"] : undefined;
+        return Array.isArray(data)
+          ? Result.succeed(
+              Option.getOrElse(Arr.head(attributeNamesOf(data)), () => "notASortableField"),
+            )
+          : Result.fail(`${baseline.status}, not a resource collection`);
+      },
+      none: "no list or related endpoint without `sort` answered with a resource collection as primary data",
+    });
   },
 };
 
