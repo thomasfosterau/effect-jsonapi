@@ -103,8 +103,9 @@ const noServices = Context.makeUnsafe<unknown>(Context.empty().mapUnsafe);
 // Suspended, so a getter that throws while it runs dies inside the run
 // rather than out of this function. A run that goes asynchronous leaves its
 // fiber behind (`runSyncExitWith` answers `AsyncFiberError` and stops
-// there), so that fiber is interrupted, never left to run the rest of the
-// decode on sentinel values later.
+// there), so that fiber is interrupted rather than left to run the rest of
+// the decode on sentinel values later; an uninterruptible region it is in
+// still runs to its end.
 const decodeProbe = (
   transformation: SchemaTransformation.Transformation<unknown, unknown, unknown, unknown>,
   entries: ReadonlyArray<readonly [name: string, index: number]>,
@@ -230,18 +231,22 @@ const settledByStruct = new WeakMap<SchemaAST.Objects, ReadonlyArray<WirePropert
  * among the rest, and no other wire property alone puts a value there. So a
  * rename is read as the rename it is, and a passthrough between two structs
  * that list the same names in another order pairs each name with itself,
- * while a decoded property that more than one wire property can fill
- * (`include ?? inc`) is paired with none of them. Anything else (a chain of
- * more than one transformation, a source that is no plain struct, a
- * `Middleware`, a decode that fails on a probe, a value the transformation
- * rebuilds) pairs nothing it cannot show, and callers fall back to reading
- * the property by its name (#306's rule).
+ * while a decoded property that more than one wire property fills on its
+ * own (`include ?? inc`) is paired with none of them. This holds on the
+ * probe values only: a decode that chooses a wire property by its value, or
+ * fills a property only from a combination of wire properties, can still be
+ * misread (as the decoded-name fallback misreads it today). Anything else
+ * (a chain of more than one transformation, a source that is no plain
+ * struct, a `Middleware`, a decode that fails on a probe, a value the
+ * transformation rebuilds) pairs nothing it cannot show, and callers fall
+ * back to reading the property by its name (#306's rule).
  *
  * The probes run the schema's own decode, synchronously, outside any request
  * and with no service, once per struct AST (the result is cached): a
  * transformation with a side effect (a log, say) has it run on sentinel
  * values, one that needs a service fails on the probe and so pairs nothing,
- * and one that goes asynchronous is interrupted and pairs nothing.
+ * and one that goes asynchronous is interrupted (an uninterruptible region
+ * in it still runs to its end) and pairs nothing.
  *
  * @internal
  */
