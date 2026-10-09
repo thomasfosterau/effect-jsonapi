@@ -18,14 +18,11 @@
 import * as Arr from "effect/Array";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Formatter from "effect/Formatter";
 import * as HashSet from "effect/HashSet";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
 import {
-  type Context,
   coverageNote,
   describe,
   type Discovered,
@@ -33,7 +30,6 @@ import {
   type Finding,
   identity,
   isRecord,
-  jsonApiAccept,
   noProbeReason,
   type Observation,
   type Outcome,
@@ -48,6 +44,20 @@ import {
   succeeded,
   withQuery,
 } from "./core.js";
+import {
+  budgeted,
+  type Io,
+  Link,
+  linkIn,
+  listed,
+  own,
+  quote,
+  SAYS_NOTHING,
+  Step,
+  stepTo,
+  type Target,
+  unanswered,
+} from "./crawl.js";
 
 const rule: Rule = {
   id: "spec/pagination/links-enumerate-collection",
@@ -71,21 +81,9 @@ const SIZE_KEYS = ["page[limit]", "page[size]"] as const;
 /** The roles of an endpoint that may answer a resource collection. */
 const COLLECTION_ROLES = ["collection", "related"] as const;
 
-/** The longest server value a finding quotes, in UTF-16 code units. */
-const QUOTE_LIMIT = 200;
-
-/** The most resources a finding lists by name. */
-const LIST_LIMIT = 10;
-
 // ---------------------------------------------------------------------------
 // Pages and links
 // ---------------------------------------------------------------------------
-
-/** A URL the kit can request: as sent, and as the absolute href it compares on. */
-interface Target {
-  readonly url: string;
-  readonly href: string;
-}
 
 /** A resource a page lists, by the identity the kit compares on and its label. */
 interface Member {
@@ -104,41 +102,6 @@ interface Page extends Target {
   readonly items: number;
 }
 
-/** A pagination link as a document carries it. */
-type Link =
-  | { readonly _tag: "Unavailable" }
-  | { readonly _tag: "Href"; readonly href: string }
-  | { readonly _tag: "Malformed"; readonly value: unknown };
-const Link = Data.taggedEnum<Link>();
-
-/** Where a link leads, or why the kit does not follow it. */
-type Step =
-  | { readonly _tag: "Follow"; readonly target: Target }
-  | { readonly _tag: "Unparseable"; readonly href: string }
-  | { readonly _tag: "Offsite"; readonly origin: string };
-const Step = Data.taggedEnum<Step>();
-
-/**
- * A server value as a finding quotes it: a string as itself, anything else
- * through `Formatter.format` (a JSON value can be `{"toString":1}`, which
- * `String` throws on), cut to {@link QUOTE_LIMIT}.
- */
-// oxlint-disable-next-line effect/no-unknown-parameters -- quotes whatever JSON a server put where a link belongs; it has no schema to parse it by
-const quote = (value: unknown): string => {
-  const text = Predicate.isString(value) ? value : Formatter.format(value);
-  if (text.length <= QUOTE_LIMIT) return text;
-  // Never split a surrogate pair: a high surrogate the cut would leave last goes too.
-  const end = QUOTE_LIMIT - 1;
-  const last = text.charCodeAt(end - 1);
-  return `${text.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end)}…`;
-};
-
-/** Labels as one line, the first {@link LIST_LIMIT} by name and the rest counted. */
-const listed = (labels: ReadonlyArray<string>): string =>
-  labels.length > LIST_LIMIT
-    ? `${labels.slice(0, LIST_LIMIT).join(", ")} and ${labels.length - LIST_LIMIT} more`
-    : labels.join(", ");
-
 /** `n resource(s)`. */
 const resources = (count: number): string => `${count} resource${count === 1 ? "" : "s"}`;
 
@@ -152,60 +115,9 @@ const unidentified = (count: number): string =>
 /** `true` when a page's `data` holds items but not one the kit can identify. */
 const opaque = (page: Page): boolean => Arr.isReadonlyArrayEmpty(page.members) && page.items > 0;
 
-/**
- * `true` when a response says nothing of the links: no response at all, a
- * rate limit or a server error. The kit does not decide on one.
- */
-const unanswered = (observation: Observation): boolean =>
-  observation.transportError !== undefined ||
-  observation.status === 429 ||
-  observation.status >= 500;
-
-/** Why an {@link unanswered} response decides nothing. */
-const SAYS_NOTHING = "a server error, a rate limit or a lost response says nothing of the links";
-
 /** The `links` member `name` of a page's document. */
-const linkOf = (page: Page, name: string): Link => {
-  const body = page.observation.body;
-  const links = isRecord(body) ? body["links"] : undefined;
-  const value = isRecord(links) ? links[name] : undefined;
-  if (Predicate.isNullish(value)) return Link.Unavailable();
-  if (Predicate.isString(value)) return Link.Href({ href: value });
-  const href = isRecord(value) ? value["href"] : undefined;
-  return Predicate.isString(href) ? Link.Href({ href }) : Link.Malformed({ value });
-};
-
-/**
- * The URL a run sends for an absolute href: relative to the run's base URL
- * when it lies under it, so the report reads as the other rules' do, and
- * absolute otherwise.
- */
-const targetOf = (href: string, baseUrl: string): Target => {
-  const base = baseUrl.replace(/\/$/, "");
-  return { url: href.startsWith(`${base}/`) ? href.slice(base.length) : href, href };
-};
-
-/** A URL a rule built — the endpoint's path, with or without a page size — as a target. */
-const own = (url: string, baseUrl: string): Option.Option<Target> => {
-  const absolute = url.startsWith("http") ? url : `${baseUrl.replace(/\/$/, "")}${url}`;
-  return URL.canParse(absolute)
-    ? Option.some({ url, href: new URL(absolute).href })
-    : Option.none();
-};
-
-/**
- * Where a link found on `from` leads. A link is resolved against the page it
- * was found on, as a browser would; one that leads off the run's origin is
- * not followed, so a server cannot point the kit at another host.
- */
-const stepTo = (href: string, from: Page, baseUrl: string): Step => {
-  if (!URL.canParse(href, from.href)) return Step.Unparseable({ href });
-  const resolved = new URL(href, from.href);
-  const origin = new URL(URL.canParse(baseUrl) ? baseUrl : from.href).origin;
-  return resolved.origin === origin
-    ? Step.Follow({ target: targetOf(resolved.href, baseUrl) })
-    : Step.Offsite({ origin: resolved.origin });
-};
+const linkOf = (page: Page, name: string): Link =>
+  linkIn(isRecord(page.observation.body) ? page.observation.body["links"] : undefined, name);
 
 /** A response as a page of the collection, when it is one: 2xx, with `data` an array. */
 const pageOf = (target: Target, observation: Observation): Option.Option<Page> => {
@@ -240,45 +152,6 @@ const sequenceOf = (page: Page): string => page.members.map(({ key }) => key).jo
 // ---------------------------------------------------------------------------
 // The budgeted transport
 // ---------------------------------------------------------------------------
-
-/**
- * The rule's requests, under its request budget, with each answer remembered
- * by href so a `first` or `last` link to a page the walk already fetched costs
- * nothing. `fetch` answers `None` once the budget is spent.
- */
-interface Io {
-  readonly fetch: (target: Target) => Effect.Effect<Option.Option<Observation>>;
-  /** As `fetch`, but always asks the server again. */
-  readonly refetch: (target: Target) => Effect.Effect<Option.Option<Observation>>;
-  readonly spent: () => number;
-}
-
-const budgeted = (ctx: Context): Io => {
-  let spent = 0;
-  const answers = MutableHashMap.empty<string, Observation>();
-  const refetch = (target: Target): Effect.Effect<Option.Option<Observation>> =>
-    Effect.suspend(() => {
-      if (spent >= REQUEST_BUDGET) return Effect.succeed(Option.none());
-      spent += 1;
-      return ctx.request({ url: target.url, headers: jsonApiAccept }).pipe(
-        Effect.tap((observation) =>
-          Effect.sync(() => MutableHashMap.set(answers, target.href, observation)),
-        ),
-        Effect.map(Option.some),
-      );
-    });
-  return {
-    refetch,
-    fetch: (target) =>
-      Effect.suspend(() =>
-        Option.match(MutableHashMap.get(answers, target.href), {
-          onNone: () => refetch(target),
-          onSome: (observation) => Effect.succeed(Option.some(observation)),
-        }),
-      ),
-    spent: () => spent,
-  };
-};
 
 const REQUESTS_SPENT = `the rule's budget of ${REQUEST_BUDGET} requests ran out before the collection could be checked`;
 
@@ -1001,7 +874,7 @@ export const linksEnumerateCollection: RuleImpl = {
             : noProbeReason("paginated list or related endpoint", unresolved),
         );
       }
-      const io = budgeted(ctx);
+      const io = budgeted(ctx, REQUEST_BUDGET);
       const assessments = yield* Effect.forEach(
         resolved,
         ({ endpoint, path }) => assess(io, ctx.options.baseUrl, endpoint, path),

@@ -3508,6 +3508,507 @@ describe("Conformance: pagination links enumerate the collection", () => {
   });
 });
 // ---------------------------------------------------------------------------
+// `self` and `related` links dereference (#168)
+// ---------------------------------------------------------------------------
+
+describe("Conformance: `self` and `related` links dereference", () => {
+  const SELF = "spec/links/resource-self-dereferences";
+  const RELATED = "spec/links/related-dereferences";
+
+  type Json = Schema.Json;
+
+  /** The links and linkage each article carries; every member can be overridden per test. */
+  interface Site {
+    readonly ids?: ReadonlyArray<string>;
+    readonly self?: (id: string) => Json;
+    readonly author?: (id: string) => Json;
+    readonly tags?: (id: string) => Json;
+    readonly comments?: (id: string) => Json;
+  }
+
+  const articleOf =
+    (site: Site) =>
+    (id: string): Json => ({
+      type: "articles",
+      id,
+      attributes: { title: `article ${id}`, body: "" },
+      relationships: {
+        author: site.author?.(id) ?? {
+          links: { related: `/articles/${id}/author` },
+          data: { type: "people", id: "9" },
+        },
+        tags: site.tags?.(id) ?? {
+          links: { related: `/articles/${id}/tags` },
+          data: [
+            { type: "tags", id: "1" },
+            { type: "tags", id: "2" },
+          ],
+        },
+        // Paginated: links only, no linkage.
+        comments: site.comments?.(id) ?? { links: { related: `/articles/${id}/comments` } },
+      },
+      links: { self: site.self?.(id) ?? `/articles/${id}` },
+    });
+
+  const person = (id: string) => ({ type: "people", id, attributes: { firstName: "Dan" } });
+  const tag = (id: string) => ({ type: "tags", id, attributes: { name: `tag ${id}` } });
+  const comment = (id: string) => ({ type: "comments", id, attributes: { body: "first" } });
+  const notFound: Canned = {
+    status: 404,
+    body: { errors: [{ status: "404", title: "Not Found" }] },
+  };
+
+  /**
+   * A server whose every link resolves to what it names: `/articles`, each
+   * article, its author, its two tags and its (paginated) comments.
+   */
+  const linked =
+    (site: Site = {}) =>
+    (request: CannedRequest): Canned => {
+      const ids = site.ids ?? ["1", "2"];
+      const article = articleOf(site);
+      const path = withoutQuery(request).path;
+      if (path === "/articles") return { body: { data: ids.map(article) } };
+      const match = /^\/articles\/([^/]+)(?:\/([a-z]+))?$/.exec(path);
+      const id = match?.[1];
+      if (id === undefined || !ids.includes(id)) return notFound;
+      return Match.value(match?.[2]).pipe(
+        Match.when(undefined, (): Canned => ({ body: { data: article(id) } })),
+        Match.when("author", (): Canned => ({ body: { data: person("9") } })),
+        Match.when("tags", (): Canned => ({ body: { data: [tag("1"), tag("2")] } })),
+        Match.when("comments", (): Canned => ({
+          body: { data: [comment("5")], links: { next: null } },
+        })),
+        Match.orElse(() => notFound),
+      );
+    };
+
+  /** `serve`, with the answer at `path` replaced. */
+  const at =
+    (path: string, answer: Canned, serve: (request: CannedRequest) => Canned = linked()) =>
+    (request: CannedRequest): Canned =>
+      withoutQuery(request).path === path ? answer : serve(request);
+
+  /** Every URL a canned server was asked for, in order, with its origin. */
+  const recording = (serve: (request: CannedRequest) => Canned) => {
+    const urls: Array<string> = [];
+    return {
+      urls,
+      paths: () => urls.map((url) => new URL(url).pathname),
+      client: (canned: HttpClient.HttpClient) =>
+        HttpClient.make((request) => {
+          urls.push(decodeURIComponent(request.url));
+          return canned.execute(request);
+        }),
+      serve,
+    };
+  };
+
+  const run = (
+    serve: (request: CannedRequest) => Canned,
+    client?: (canned: HttpClient.HttpClient) => HttpClient.HttpClient,
+  ) => verifyCanned(serve, { only: [SELF, RELATED] }, client);
+
+  const findingsOf = (outcome: Conformance.Outcome): ReadonlyArray<string> => {
+    expect(outcome._tag).toBe("Failed");
+    const found = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    Arr.forEach(found, (finding) => {
+      expect(finding.expected).not.toBe("");
+      expect(finding.observed).not.toBe("");
+    });
+    return found.map(({ detail, observed }) => `${detail} | ${observed}`);
+  };
+
+  const failureOf = async (id: string, serve: (request: CannedRequest) => Canned) =>
+    findingsOf(outcomeFor(await run(serve), id));
+
+  const skipReasonOf = async (id: string, serve: (request: CannedRequest) => Canned) => {
+    const outcome = outcomeFor(await run(serve), id);
+    expect(outcome._tag).toBe("Skipped");
+    return Predicate.isTagged(outcome, "Skipped") ? outcome.reason : "";
+  };
+
+  const noteOf = async (id: string, serve: (request: CannedRequest) => Canned) => {
+    const outcome = outcomeFor(await run(serve), id);
+    expect(outcome._tag).toBe("Passed");
+    return Predicate.isTagged(outcome, "Passed") ? outcome.note : undefined;
+  };
+
+  it("follows every resource's `self` link, once each, and passes", async () => {
+    const server = recording(linked());
+    const report = await verifyCanned(server.serve, { only: [SELF] }, server.client);
+    const outcome = outcomeFor(report, SELF);
+    expect(outcome).toMatchObject({ _tag: "Passed", note: undefined });
+    // The read endpoints first, in discovery order, then each `self` the kit
+    // has not already fetched: `/articles/1` is the get endpoint's own answer,
+    // so it costs nothing.
+    expect(server.paths()).toEqual(["/articles/1", "/articles", "/articles/2"]);
+    expect(Predicate.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(3);
+  });
+
+  it("follows every relationship's `related` link, once each, and passes", async () => {
+    const server = recording(linked());
+    const report = await verifyCanned(server.serve, { only: [RELATED] }, server.client);
+    const outcome = outcomeFor(report, RELATED);
+    expect(outcome).toMatchObject({ _tag: "Passed", note: undefined });
+    expect(server.paths()).toEqual([
+      "/articles/1",
+      "/articles",
+      "/articles/1/author",
+      "/articles/1/tags",
+      "/articles/1/comments",
+      "/articles/2/author",
+      "/articles/2/tags",
+      "/articles/2/comments",
+    ]);
+    expect(Predicate.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(8);
+  });
+
+  it("detects a `self` that leads to a different resource", async () => {
+    const found = await failureOf(
+      SELF,
+      linked({ self: (id) => (id === "2" ? "/articles/1" : `/articles/${id}`) }),
+    );
+    expect(found).toEqual([
+      "the `self` link of articles:2 (in /articles, at /data/1) answers a different resource as primary data | articles:1",
+    ]);
+  });
+
+  it("detects a `self` that leads to a 404", async () => {
+    const found = await failureOf(
+      SELF,
+      linked({ self: (id) => (id === "2" ? "/articles/two" : `/articles/${id}`) }),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(
+      /^the `self` link of articles:2 \(in \/articles, at \/data\/1\) answered 404 \| 404 /,
+    );
+  });
+
+  it("detects a `self` whose answer carries no resource as primary data", async () => {
+    const found = await failureOf(SELF, at("/articles/2", { body: { data: null } }));
+    expect(found).toEqual([
+      "the `self` link of articles:2 (in /articles, at /data/1) answers a different resource as primary data | `data: null`",
+    ]);
+  });
+
+  it("detects a `related` that omits a resource its linkage names", async () => {
+    const found = await failureOf(RELATED, at("/articles/2/tags", { body: { data: [tag("1")] } }));
+    expect(found).toEqual([
+      "the `related` link of articles:2's `tags` (in /articles, at /data/1) answers without 1 resource its linkage names | missing: tags:2",
+    ]);
+  });
+
+  it("detects a `related` that answers a resource its linkage does not name", async () => {
+    const found = await failureOf(
+      RELATED,
+      at("/articles/2/tags", { body: { data: [tag("1"), tag("2"), tag("3")] } }),
+    );
+    expect(found).toEqual([
+      "the `related` link of articles:2's `tags` (in /articles, at /data/1) answers 1 resource its linkage does not name | not in the linkage: tags:3",
+    ]);
+  });
+
+  it("detects a to-one `related` that answers a different resource", async () => {
+    const found = await failureOf(
+      RELATED,
+      at("/articles/1/author", { body: { data: person("10") } }),
+    );
+    // Both the get and the list endpoint carry article 1, so its link is
+    // followed once, and named where it was found first.
+    expect(found).toEqual([
+      "the `related` link of articles:1's `author` (in /articles/1, at /data) answers a different resource from the one its linkage names | people:10",
+    ]);
+  });
+
+  it("detects a to-one `related` that answers a resource where its linkage is `null`", async () => {
+    const found = await failureOf(
+      RELATED,
+      linked({
+        author: (id) => ({ links: { related: `/articles/${id}/author` }, data: null }),
+        ids: ["1"],
+      }),
+    );
+    expect(found).toEqual([
+      "the `related` link of articles:1's `author` (in /articles/1, at /data) answers a resource where its linkage is `null` | people:9",
+    ]);
+  });
+
+  it("detects a `related` that answers something other than resource objects", async () => {
+    const found = await failureOf(
+      RELATED,
+      at("/articles/2/comments", { body: { meta: { total: 1 } } }),
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(
+      /^the `related` link of articles:2's `comments` \(in \/articles, at \/data\/1\) answers no related resource objects as primary data \| 200 /,
+    );
+  });
+
+  it("holds a page of a related collection to the linkage as a subset, not as the whole", async () => {
+    // The related collection pages: its first page lacks tags:2, which is not a
+    // finding, but one listing tags:3 the linkage does not name is.
+    const paged = (data: ReadonlyArray<Json>): Canned => ({
+      body: { data, links: { next: "/articles/2/tags?page[offset]=1" } },
+    });
+    expect(await noteOf(RELATED, at("/articles/2/tags", paged([tag("1")])))).toBeUndefined();
+    expect(await failureOf(RELATED, at("/articles/2/tags", paged([tag("3")])))).toEqual([
+      "the `related` link of articles:2's `tags` (in /articles, at /data/1) answers 1 resource its linkage does not name | not in the linkage: tags:3",
+    ]);
+  });
+
+  it("holds paginated linkage as a subset of the related collection, not as the whole", async () => {
+    const pagedLinkage = (id: string): Json => ({
+      links: {
+        related: `/articles/${id}/tags`,
+        next: `/articles/${id}/relationships/tags?page[offset]=1`,
+      },
+      data: [{ type: "tags", id: "1" }],
+    });
+    // The linkage is a page: a related collection that also lists tags:2 is fine.
+    expect(await noteOf(RELATED, linked({ tags: pagedLinkage }))).toBeUndefined();
+    // But one that omits what the page does name is not.
+    expect(
+      await failureOf(
+        RELATED,
+        at("/articles/2/tags", { body: { data: [tag("2")] } }, linked({ tags: pagedLinkage })),
+      ),
+    ).toEqual([
+      "the `related` link of articles:2's `tags` (in /articles, at /data/1) answers without 1 resource its linkage names | missing: tags:1",
+    ]);
+  });
+
+  it("does not compare two pages with each other", async () => {
+    const note = await noteOf(
+      RELATED,
+      at(
+        "/articles/2/tags",
+        { body: { data: [tag("2")], links: { next: "/articles/2/tags?page[offset]=1" } } },
+        linked({
+          tags: (id) => ({
+            links: { related: `/articles/${id}/tags`, next: `/articles/${id}/tags?x=1` },
+            data: [{ type: "tags", id: "1" }],
+          }),
+        }),
+      ),
+    );
+    expect(note).toBe(
+      "1 link not decided: the `related` link of articles:2's `tags` (in /articles, at /data/1) — both its linkage and the collection it answers are pages, so neither can be held against the other",
+    );
+  });
+
+  it("does not compare a collection holding items it cannot identify", async () => {
+    // Without a string `type` and `id`, a missing tags:2 might be either item.
+    const note = await noteOf(
+      RELATED,
+      at("/articles/2/tags", { body: { data: [tag("1"), { type: "tags", id: 2 }] } }),
+    );
+    expect(note).toBe(
+      "1 link not decided: the `related` link of articles:2's `tags` (in /articles, at /data/1) answers 1 item the kit cannot identify (a string `type` and `id`)",
+    );
+  });
+
+  it("follows a link object's `href`, not only a bare URL", async () => {
+    const server = recording(
+      linked({
+        self: (id) => ({ href: `/articles/${id}`, title: "the article" }),
+        author: (id) => ({
+          links: { related: { href: `/articles/${id}/author` } },
+          data: { type: "people", id: "9" },
+        }),
+      }),
+    );
+    const report = await verifyCanned(server.serve, { only: [SELF, RELATED] }, server.client);
+    expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+    expect(outcomeFor(report, RELATED)).toMatchObject({ _tag: "Passed", note: undefined });
+    expect(server.paths()).toContain("/articles/2");
+    expect(server.paths()).toContain("/articles/2/author");
+    // And reads what it found there.
+    const wrong = await failureOf(
+      SELF,
+      linked({ self: (id) => ({ href: id === "2" ? "/articles/1" : `/articles/${id}` }) }),
+    );
+    expect(wrong).toHaveLength(1);
+  });
+
+  it("resolves a relative link against the document that carries it", async () => {
+    // From `/articles/1` this is `/articles/1`; from `/articles`, `/articles/2`.
+    const server = recording(linked({ self: (id) => `../articles/${id}` }));
+    const report = await verifyCanned(server.serve, { only: [SELF] }, server.client);
+    expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed" });
+    expect(server.paths()).toContain("/articles/2");
+  });
+
+  it("detects a link that is not a link, rendering it safely", async () => {
+    const found = await failureOf(
+      SELF,
+      linked({ self: (id) => (id === "2" ? { toString: 1 } : `/articles/${id}`) }),
+    );
+    expect(found).toEqual([
+      'the `self` link of articles:2 (in /articles, at /data/1) is not a link the kit can follow | self: {"toString":1}',
+    ]);
+  });
+
+  it("never follows a link to another origin, and says it did not", async () => {
+    const server = recording(
+      linked({
+        self: (id) => (id === "2" ? "https://elsewhere.test/articles/2" : `/articles/${id}`),
+      }),
+    );
+    const report = await verifyCanned(server.serve, { only: [SELF] }, server.client);
+    expect(outcomeFor(report, SELF)).toMatchObject({
+      _tag: "Passed",
+      note: "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) leads to another origin, https://elsewhere.test, which the kit does not follow",
+    });
+    expect(server.urls.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
+    expect(server.paths()).not.toContain("/articles/2");
+  });
+
+  it("follows an absolute link to the run's own origin", async () => {
+    const server = recording(linked({ self: (id) => `http://fixture.test/articles/${id}` }));
+    const report = await verifyCanned(server.serve, { only: [SELF] }, server.client);
+    expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+    expect(server.paths()).toContain("/articles/2");
+  });
+
+  it("skips, naming the origin, when every link leads to another origin", async () => {
+    const reason = await skipReasonOf(
+      SELF,
+      linked({ ids: ["1"], self: () => "http://fixture.test:8080/articles/1" }),
+    );
+    expect(reason).toBe(
+      "no link could be followed to a verdict (the `self` link of articles:1 (in /articles/1, at /data) leads to another origin, http://fixture.test:8080, which the kit does not follow)",
+    );
+  });
+
+  const unavailable: Canned = {
+    status: 503,
+    body: { errors: [{ status: "503", title: "Service Unavailable" }] },
+  };
+  const limited: Canned = {
+    status: 429,
+    body: { errors: [{ status: "429", title: "Too Many Requests" }] },
+  };
+
+  it.each([
+    ["503", unavailable],
+    ["429", limited],
+  ] as const)("does not hold a %s against the link", async (status, answer) => {
+    expect(await noteOf(SELF, at("/articles/2", answer))).toBe(
+      `1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) got ${status} — a server error, a rate limit or a lost response says nothing of the links`,
+    );
+    expect(await noteOf(RELATED, at("/articles/2/tags", answer))).toContain(
+      `the \`related\` link of articles:2's \`tags\` (in /articles, at /data/1) got ${status}`,
+    );
+  });
+
+  it("does not hold a lost response against the link", async () => {
+    const report = await run(linked(), (client) =>
+      HttpClient.make((request) =>
+        request.url.endsWith("/articles/2")
+          ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, description: "reset" }),
+              }),
+            )
+          : client.execute(request),
+      ),
+    );
+    expect(outcomeFor(report, SELF)).toMatchObject({
+      _tag: "Passed",
+      note: expect.stringContaining(
+        "the `self` link of articles:2 (in /articles, at /data/1) got no response (",
+      ),
+    });
+  });
+
+  it("does not decide a link behind access control", async () => {
+    const forbidden: Canned = { status: 403, body: { errors: [{ status: "403" }] } };
+    expect(await noteOf(SELF, at("/articles/2", forbidden))).toBe(
+      "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered 403 — access control is outside JSON:API, so a link the kit may not follow is not a broken one",
+    );
+  });
+
+  it("skips, naming the budget, a crawl the budget cannot finish — never a partial pass", async () => {
+    const ids = Arr.makeBy(250, (n) => `${n + 1}`);
+    const server = recording(linked({ ids }));
+    const report = await verifyCanned(server.serve, { only: [SELF] }, server.client);
+    expect(server.urls).toHaveLength(200);
+    expect(outcomeFor(report, SELF)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "the rule's budget of 200 requests ran out with 199 of 250 links followed — a partial crawl is not passed",
+    });
+  });
+
+  it("still fails on what it found before the budget ran out", async () => {
+    const ids = Arr.makeBy(250, (n) => `${n + 1}`);
+    const found = await failureOf(
+      SELF,
+      linked({ ids, self: (id) => (id === "3" ? "/articles/4" : `/articles/${id}`) }),
+    );
+    expect(found).toEqual([
+      "the `self` link of articles:3 (in /articles, at /data/2) answers a different resource as primary data | articles:4",
+    ]);
+  });
+
+  it("skips, saying what it searched, when no resource carries a `self` or `related` link", async () => {
+    expect(await skipReasonOf(SELF, conformantServe)).toBe(
+      "no resource object in what the read endpoints answered carries a `self` link (searched /articles/1, /articles)",
+    );
+    expect(await skipReasonOf(RELATED, conformantServe)).toBe(
+      "no relationship in what the read endpoints answered carries a `related` link (searched /articles/1, /articles)",
+    );
+  });
+
+  it("names a read endpoint it could not search", async () => {
+    expect(await skipReasonOf(SELF, at("/articles", unavailable, conformantServe))).toBe(
+      "no resource object in what the read endpoints answered carries a `self` link (searched /articles/1, /articles: 503)",
+    );
+  });
+
+  it("holds the real router to the rule, a link to no route included", async () => {
+    // In process, a path no route serves is the router's 404 — as a deployed
+    // server answers it — not a defect that kills the rule.
+    const linksTo = (self: string) =>
+      runOver(
+        api,
+        HttpApiBuilder.group(api, "articles", (handlers) =>
+          handlers
+            .handle("get", () => Effect.succeed(Handlers.data({ ...article, links: { self } })))
+            .handle("list", () =>
+              Effect.succeed(Handlers.collection([{ ...article, links: { self } }])),
+            ),
+        ).pipe(Layer.provideMerge(Middleware.layer)),
+      )({ only: [SELF] });
+    expect(outcomeFor(await linksTo("/articles/1"), SELF)).toMatchObject({ _tag: "Passed" });
+    const report = await linksTo("/articles/1/moved");
+    expect(findingsOf(outcomeFor(report, SELF))).toEqual([
+      "the `self` link of articles:1 (in /articles/1, at /data) answered 404 | 404",
+    ]);
+  });
+
+  it("is in the spec tier, at the specification's MUST, and closes its coverage gap", () => {
+    expect(Conformance.rules.find(({ id }) => id === SELF)).toMatchObject({
+      tier: "spec",
+      level: "MUST",
+      reference: "https://jsonapi.org/format/1.1/#document-resource-object-links",
+    });
+    expect(Conformance.rules.find(({ id }) => id === RELATED)).toMatchObject({
+      tier: "spec",
+      level: "MUST",
+      reference: "https://jsonapi.org/format/1.1/#document-resource-object-related-resource-links",
+    });
+    expect(Conformance.gaps.map(({ area }) => area)).not.toContain("Link dereferenceability");
+    // What it does not follow yet is declared, narrower, in its place.
+    expect(
+      Conformance.gaps.find(({ area }) => area === "Relationship and top-level `self` links")
+        ?.tracking,
+    ).toEqual(["#309"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // In-process: the same rules over the real router
 // ---------------------------------------------------------------------------
 

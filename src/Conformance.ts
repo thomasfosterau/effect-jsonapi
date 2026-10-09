@@ -89,6 +89,7 @@
  */
 import {
   Array as Arr,
+  Cause,
   Data,
   Effect,
   Layer,
@@ -101,7 +102,13 @@ import {
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
-import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
+import {
+  HttpClient,
+  HttpRouter,
+  HttpServerError,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/http";
 import type { Etag } from "effect/http";
 import type { HttpPlatform } from "effect/http/HttpPlatform";
 import { HttpApiBuilder } from "effect/http-api";
@@ -658,10 +665,10 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: ["#123", "#165"],
   },
   {
-    area: "Link dereferenceability",
+    area: "Relationship and top-level `self` links",
     reason:
-      "That a document's `self` and `related` links are well-formed is checkable; that each resolves to the resource it claims is a second crawl the kit does not perform.",
-    tracking: [],
+      "A resource object's `self` link and a relationship's `related` link are followed and held to what they claim. Two more links a server must serve are not yet followed: a relationship's own `self` link, which must answer the relationship's linkage, and a document's top-level `self` link.",
+    tracking: ["#309"],
   },
   {
     area: "Concerns outside JSON:API",
@@ -923,7 +930,13 @@ export const verify = Effect.fnUntraced(function* <
       const serverRequest = HttpServerRequest.fromClientRequest(request);
       const response = yield* handler.pipe(
         Effect.provideService(HttpServerRequest.HttpServerRequest, serverRequest),
-        Effect.orDie,
+        // A failure is answered as a deployed server answers it — a path no
+        // route serves is the router's 404, not a defect that kills the rule
+        // that requested it (a link the server emitted, say). A defect still
+        // dies, as a transport that throws does.
+        Effect.catch((error) =>
+          Effect.map(HttpServerError.causeResponse(Cause.fail(error)), ([answer]) => answer),
+        ),
       );
       return HttpServerResponse.toClientResponse(response);
     }, Effect.scoped),

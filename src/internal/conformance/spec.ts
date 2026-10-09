@@ -27,6 +27,7 @@ import {
 } from "effect";
 import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
+import { relatedDereferences, resourceSelfDereferences } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import {
   atomicMediaType,
@@ -2088,6 +2089,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   includeUnsupportedEndpoint,
   sortUnsupportedEndpoint,
   linksEnumerateCollection,
+  resourceSelfDereferences,
+  relatedDereferences,
   resourceNotFound,
   createResponseDocument,
   createLocation,
