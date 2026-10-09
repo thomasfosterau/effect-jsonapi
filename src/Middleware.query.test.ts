@@ -1206,6 +1206,23 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
           },
         ),
       ),
+    // `include` and `inc` each fill `paths` when sent alone, so a value
+    // rejected there may have come from either: neither is its wire name.
+    "include-or-inc": Schema.Struct({
+      include: Schema.optionalKey(Schema.toEncoded(Query.Include(Post))),
+      inc: Schema.optionalKey(Schema.toEncoded(Query.Include(Post))),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) }),
+        SchemaTransformation.transform({
+          decode: ({ include, inc }) => {
+            const paths = include ?? inc;
+            return paths === undefined ? {} : { paths };
+          },
+          encode: ({ paths }) => (paths === undefined ? {} : { include: paths }),
+        }),
+      ),
+    ),
     // Both members decode a `paths`; only the first renames it on the wire.
     "union-of-branches": Schema.Union([
       Schema.Struct({ paths: Query.Include(Post) }).pipe(Schema.encodeKeys({ paths: "include" })),
@@ -1242,6 +1259,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       endpoint("passthrough-reordered"),
       endpoint("passthrough-reordered-empty"),
       endpoint("checked-rename"),
+      endpoint("include-or-inc"),
     ),
   );
   const echo = ({ query }: { readonly query: unknown }) => Effect.succeed(query);
@@ -1269,6 +1287,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       "passthrough-reordered": echo,
       "passthrough-reordered-empty": echo,
       "checked-rename": echo,
+      "include-or-inc": echo,
     }),
   );
 
@@ -1470,6 +1489,14 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
         "/checked-rename?page[size]=500",
         [rejected("page[size]", "too big"), rejected("page[size]", "far too big")],
       ],
+      // Read off one probe of both names, `paths` was paired with `include`,
+      // a parameter this request never sent. Neither name is shown to be
+      // `paths`'s, so it keeps its decoded name, as on trunk.
+      [
+        "a property either of two wire parameters fills",
+        "/include-or-inc?inc=nope",
+        [includable("paths")],
+      ],
       // Neither names a property, so each is the generic rejection, as
       // before: the formatter reports a check with a message of its own
       // whole, at the struct, never at the property it points to.
@@ -1487,6 +1514,102 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       expect(
         Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
       ).toEqual({ errors: [includable("inc")] });
+    });
+
+    // A struct check's pointer below a renamed property: only its first key
+    // is the property, renamed; the rest is inside the property's value.
+    it("a struct check that points below a renamed property", () => {
+      const fieldsets = Schema.Struct({
+        fieldsets: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+      })
+        .pipe(Schema.encodeKeys({ fieldsets: "fields" }))
+        .check(
+          Schema.makeFilter(
+            ({ fieldsets: sets }) =>
+              sets?.["people"] === "secret"
+                ? { path: ["fieldsets", "people"], issue: "not public" }
+                : undefined,
+            {
+              identifier: "publicFieldsets",
+              title: "public fieldsets",
+              description: "rejects the secret fieldset of people",
+            },
+          ),
+        );
+      const result = Schema.decodeUnknownResult(fieldsets)({ fields: { people: "secret" } });
+      expect(
+        Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
+      ).toEqual({ errors: [rejected("fields[people]", "not public")] });
+    });
+
+    // The renamed struct is the source of another transformation: its
+    // decoded side's issue sits under the outer schema's `Encoding`.
+    it("a renamed struct's issue under another schema's encoding", () => {
+      const renamed = Schema.Struct({ paths: Query.Include(Post) }).pipe(
+        Schema.encodeKeys({ paths: "include" }),
+      );
+      const outer = renamed.pipe(
+        Schema.decodeTo(Schema.toType(renamed), SchemaTransformation.passthrough()),
+      );
+      const result = Schema.decodeUnknownResult(outer)({ include: "nope" });
+      expect(
+        Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
+      ).toEqual({ errors: [includable("include")] });
+    });
+
+    // HttpApi builds an endpoint's codecs once, so the renamed struct's AST
+    // is the same on every request it rejects: the query's own decode runs
+    // on one set of probes, not on a set per rejected request.
+    it("probes a renamed query once, however many requests it rejects", async () => {
+      const decoded: Array<{ readonly include?: string }> = [];
+      const Wire = Schema.Struct({ include: Schema.optionalKey(Schema.String) });
+      const Paths = Schema.Struct({ paths: Schema.optionalKey(Query.Include(Post)) });
+      const counted = Wire.pipe(
+        Schema.decodeTo(
+          Paths,
+          SchemaTransformation.transform<typeof Paths.Encoded, typeof Wire.Type>({
+            decode: (wire) => {
+              decoded.push(wire);
+              return wire.include === undefined ? {} : { paths: wire.include };
+            },
+            // `Query.Include` encodes a list as one comma-separated value.
+            encode: ({ paths }) => (paths === undefined ? {} : { include: String(paths) }),
+          }),
+        ),
+      );
+      const CountedApi = HttpApi.make("counted").add(
+        HttpApiGroup.make("counted").add(
+          HttpApiEndpoint.get("counted", "/counted", {
+            query: counted,
+            success: Schema.Unknown,
+          }).middleware(Middleware.SchemaErrors),
+        ),
+      );
+      const CountedLive = HttpApiBuilder.group(CountedApi, "counted", (handlers) =>
+        handlers.handle("counted", echo),
+      );
+      const { dispose, handler } = HttpRouter.toWebHandler(
+        HttpApiBuilder.layer(CountedApi).pipe(
+          Layer.provide(CountedLive),
+          Layer.provide(Middleware.SchemaErrorsLive),
+          Layer.provide(platformLayer),
+        ),
+      );
+      const reject = async () => {
+        const response = await handler(new Request("http://localhost/counted?include=nope"));
+        return { status: response.status, body: decodeJson(await response.text()) };
+      };
+      // Every decode but of the requests' own `nope` is a probe.
+      const probes = () => decoded.filter(({ include }) => include !== "nope").length;
+      const rejectFive = async () => {
+        expect(await reject()).toEqual({ status: 400, body: { errors: [includable("include")] } });
+        // One set: the full probe, and the one wire name's own.
+        expect(probes()).toBe(2);
+        const more = await Promise.all([reject(), reject(), reject(), reject()]);
+        expect(more.map(({ status }) => status)).toEqual([400, 400, 400, 400]);
+        expect(probes()).toBe(2);
+      };
+      await rejectFive().finally(dispose);
     });
   });
 });

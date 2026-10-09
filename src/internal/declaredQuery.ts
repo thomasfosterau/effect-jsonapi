@@ -9,14 +9,16 @@
  *
  * A query renamed on the wire (`Schema.encodeKeys`, and `Query.bracketKeys`
  * built on it) hides which decoded property each wire parameter feeds inside
- * an opaque transformation. `wireProperties` recovers it by running that
- * transformation on a probe, so the support check reads the property a
- * parameter actually decodes into and a rejected value's `source.parameter`
- * names the parameter the request sent (`queryLeaves`).
+ * an opaque transformation. `wireProperties` recovers it, where it can show
+ * it, by running that transformation on probes, so the support check reads
+ * the property a parameter actually decodes into and a rejected value's
+ * `source.parameter` names the parameter the request sent (`queryLeaves`).
  *
  * @internal
  */
 import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Match from "effect/Match";
@@ -90,47 +92,127 @@ export interface WireProperty {
 // so a transformation that reads its input as one still runs.
 const sentinel = (index: number): string => `\u0000effect-jsonapi:probe:${index}`;
 
-// Where a struct transformation's decode moves each wire property: run on a
-// probe whose every wire name holds its own sentinel, a wire name goes to
-// the one output key its sentinel lands on. A sentinel that lands nowhere
-// (the value was rebuilt, nested or dropped) or on more than one key leaves
-// its wire name out, and a decode that fails, dies, goes asynchronous or is
-// no `Transformation` (a `Middleware`) leaves every one out. The decode is
-// `effect`'s own getter: for `Schema.encodeKeys` it is
-// `Struct.renameKeys`, which settles every rename, swaps and array-index
-// names included.
+// The context a probe runs in: it provides no service, so a getter that asks
+// for one dies looking it up, inside the run, and a failed run pairs nothing.
+const noServices = Context.makeUnsafe<unknown>(Context.empty().mapUnsafe);
+
+// What a struct transformation's decode makes of a probe that holds the
+// given wire names, each with its own sentinel: the own properties of the
+// object it decodes to, or none when it fails, dies or goes asynchronous, or
+// decodes to no object.
+// Suspended, so a getter that throws while it runs dies inside the run
+// rather than out of this function. A run that goes asynchronous leaves its
+// fiber behind (`runSyncExitWith` answers `AsyncFiberError` and stops
+// there), so that fiber is interrupted, never left to run the rest of the
+// decode on sentinel values later.
+const decodeProbe = (
+  transformation: SchemaTransformation.Transformation<unknown, unknown, unknown, unknown>,
+  entries: ReadonlyArray<readonly [name: string, index: number]>,
+): Option.Option<ReadonlyArray<readonly [key: PropertyKey, value: unknown]>> => {
+  const input = Rec.fromEntries(
+    Arr.map(entries, ([name, index]) => [name, sentinel(index)] as const),
+  );
+  const decode = Effect.suspend(() =>
+    SchemaGetter.run(transformation.decode, Option.some(input), {}),
+  );
+  const output = Exit.match(Effect.runSyncExitWith(noServices)(decode), {
+    onFailure: (cause) => {
+      const defect = Cause.squash(cause);
+      if (Cause.isAsyncFiberError(defect)) defect.fiber.interruptUnsafe();
+      return Option.none<unknown>();
+    },
+    onSuccess: (decoded) => decoded,
+  });
+  return Option.map(Option.filter(output, Predicate.isObject), (decoded) =>
+    Arr.map(Reflect.ownKeys(decoded), (key) => [key, decoded[key]] as const),
+  );
+};
+
+// The keys of a decoded probe that hold wire name `index`'s sentinel.
+const landing = (
+  decoded: ReadonlyArray<readonly [key: PropertyKey, value: unknown]>,
+  index: number,
+): ReadonlyArray<PropertyKey> =>
+  Arr.filterMap(decoded, ([key, value]) =>
+    value === sentinel(index) ? Result.succeed(key) : Result.failVoid,
+  );
+
+// The one key a decoded probe lands wire name `index`'s sentinel on, if it
+// lands it on exactly one.
+const landsOn = (
+  decoded: ReadonlyArray<readonly [key: PropertyKey, value: unknown]>,
+  index: number,
+): Option.Option<PropertyKey> => {
+  const [key, ...more] = landing(decoded, index);
+  return key !== undefined && Arr.isReadonlyArrayEmpty(more) ? Option.some(key) : Option.none();
+};
+
+// Where a struct transformation's decode moves each wire property. It runs
+// the decode on a full probe, every wire name holding its own sentinel, and
+// on a solo probe per wire name, that name alone. A wire name is paired with
+// a decoded key only when its sentinel lands on that one key in both its
+// solo probe and the full one, and no other wire name's solo probe reaches
+// the key: puts any value on it, or fails, and so could. A decode whose
+// output at a key depends on which names are present (`include ?? inc`) is
+// read as the rename it is only when each name stays on its own key. A
+// sentinel that lands nowhere (the value was rebuilt, nested or dropped) or
+// on more than one key pairs nothing, and a full probe that fails, dies,
+// goes asynchronous or is no `Transformation` (a `Middleware`) pairs nothing
+// at all. For `Schema.encodeKeys` the decode is `Struct.renameKeys`, which
+// settles every rename, swaps and array-index names included.
 const probe = (
   transformation: SchemaAST.Link["transformation"],
   wire: ReadonlyArray<string>,
 ): ReadonlyArray<readonly [wire: string, decoded: PropertyKey]> => {
   if (!SchemaTransformation.isTransformation(transformation)) return [];
-  const input = Rec.fromEntries(Arr.map(wire, (name, index) => [name, sentinel(index)] as const));
-  // Suspended, so a getter that throws while it runs dies inside the run
-  // rather than out of this function.
-  // SAFETY: the run provides no service; a getter that asks for one dies
-  // looking it up, inside the run, and a failed run pairs nothing.
-  const decode = Effect.suspend(() =>
-    SchemaGetter.run(transformation.decode, Option.some(input), {}),
-  ) as Effect.Effect<Option.Option<unknown>, SchemaIssue.Issue>;
-  const output = Exit.match(Effect.runSyncExit(decode), {
-    onFailure: () => Option.none<unknown>(),
-    onSuccess: (decoded) => decoded,
-  });
-  return Option.match(Option.filter(output, Predicate.isObject), {
-    onNone: () => [],
-    onSome: (decoded) => {
-      const landed = Arr.flatMap(Reflect.ownKeys(decoded), (key) =>
-        Arr.filterMap(wire, (name, index) =>
-          decoded[key] === sentinel(index) ? Result.succeed([name, key] as const) : Result.failVoid,
-        ),
-      );
-      return Arr.filter(
-        landed,
-        ([name]) => Arr.filter(landed, ([other]) => other === name).length === 1,
-      );
+  return Option.match(
+    decodeProbe(
+      transformation,
+      Arr.map(wire, (name, index) => [name, index] as const),
+    ),
+    {
+      onNone: () => [],
+      onSome: (full) => {
+        const solos = Arr.map(wire, (name, index) => ({
+          name,
+          index,
+          decoded: decodeProbe(transformation, [[name, index]]),
+        }));
+        // Whether a solo probe could put a value on `key`: it did, or it
+        // failed, and so shows nothing.
+        const reaches = (
+          solo: Option.Option<ReadonlyArray<readonly [key: PropertyKey, value: unknown]>>,
+          key: PropertyKey,
+        ): boolean =>
+          Option.match(solo, {
+            onNone: () => true,
+            onSome: (decoded) =>
+              Arr.some(decoded, ([other, value]) => other === key && value !== undefined),
+          });
+        return Arr.filterMap(solos, ({ name, index, decoded }) =>
+          Option.match(
+            Option.filter(
+              landsOn(full, index),
+              (key) =>
+                Option.exists(decoded, (solo) => Option.contains(landsOn(solo, index), key)) &&
+                !Arr.some(solos, (other) => other.index !== index && reaches(other.decoded, key)),
+            ),
+            {
+              onNone: () => Result.failVoid,
+              onSome: (key) => Result.succeed([name, key] as const),
+            },
+          ),
+        );
+      },
     },
-  });
+  );
 };
+
+// The pairings `wireProperties` settles, per struct AST. HttpApi builds an
+// endpoint's codecs once, so a struct's AST outlives the requests it
+// rejects, and the probe (the schema's own decode) runs once per struct
+// rather than once per rejected request.
+const settledByStruct = new WeakMap<SchemaAST.Objects, ReadonlyArray<WireProperty>>();
 
 /**
  * The wire name of every property of a struct's decoded side that its
@@ -142,23 +224,30 @@ const probe = (
  * A struct with no encoding of its own pairs each property with its own
  * name. A struct decoded from another struct (`Schema.encodeKeys`, or any
  * `Schema.decodeTo` between two structs) is read by running that one
- * transformation's decode on a probe (`probe`): each wire property is paired
- * with the decoded property its value lands in, so a rename is read as the
- * rename it is and a passthrough between two structs that list the same
- * names in another order pairs each name with itself. Anything else (a
- * chain of more than one transformation, a source that is no plain struct,
- * a `Middleware`, a decode that fails on the probe, a value the
- * transformation rebuilds) pairs nothing it cannot show, and callers fall
- * back to reading the property by its name (#306's rule).
+ * transformation's decode on probes (`probe`): on every wire property at
+ * once, and on each alone. A wire property is paired with a decoded property
+ * when its value lands in that property, and only there, both alone and
+ * among the rest, and no other wire property alone puts a value there. So a
+ * rename is read as the rename it is, and a passthrough between two structs
+ * that list the same names in another order pairs each name with itself,
+ * while a decoded property that more than one wire property can fill
+ * (`include ?? inc`) is paired with none of them. Anything else (a chain of
+ * more than one transformation, a source that is no plain struct, a
+ * `Middleware`, a decode that fails on a probe, a value the transformation
+ * rebuilds) pairs nothing it cannot show, and callers fall back to reading
+ * the property by its name (#306's rule).
  *
- * The probe runs the schema's own decode, synchronously, outside any
- * request and with no service: a transformation with a side effect (a log,
- * say) has it run on sentinel values each time this is called, and one that
- * needs a service fails on the probe and so pairs nothing.
+ * The probes run the schema's own decode, synchronously, outside any request
+ * and with no service, once per struct AST (the result is cached): a
+ * transformation with a side effect (a log, say) has it run on sentinel
+ * values, one that needs a service fails on the probe and so pairs nothing,
+ * and one that goes asynchronous is interrupted and pairs nothing.
  *
  * @internal
  */
 export const wireProperties = (ast: SchemaAST.Objects): ReadonlyArray<WireProperty> => {
+  const cached = settledByStruct.get(ast);
+  if (cached !== undefined) return cached;
   const names = (struct: SchemaAST.Objects) =>
     Arr.map(struct.propertySignatures, ({ name }) => String(name));
   const routes = Option.match(Option.fromNullishOr(ast.encoding), {
@@ -170,7 +259,7 @@ export const wireProperties = (ast: SchemaAST.Objects): ReadonlyArray<WireProper
         ? probe(link.transformation, names(link.to))
         : [],
   });
-  return Arr.flatMap(routes, ([wire, name]) =>
+  const settled = Arr.flatMap(routes, ([wire, name]) =>
     Arr.fromOption(
       Option.map(
         Arr.findFirst(ast.propertySignatures, (property) => property.name === name),
@@ -178,6 +267,8 @@ export const wireProperties = (ast: SchemaAST.Objects): ReadonlyArray<WireProper
       ),
     ),
   );
+  settledByStruct.set(ast, settled);
+  return settled;
 };
 
 // The wire name a struct issue's property `key` was sent under, when the

@@ -274,8 +274,21 @@ describe("wireProperties", () => {
   });
 
   // `Query.schema` relates its flat wire struct to its nested decoded one by
-  // a transformation of its own, not by renaming properties: nothing in it
-  // may be paired with another name.
+  // a transformation of its own, not by renaming properties: it pairs its
+  // bare `include` and `sort` with themselves, and nothing with another name.
+  it("pairs a `Query.schema`'s `include` and `sort` with themselves", () => {
+    expect(
+      settled(
+        Query.schema(Post, { include: true, fields: true, sort: true, page: Query.Page.Offset }),
+      ),
+    ).toEqual([
+      ["include", "include"],
+      ["sort", "sort"],
+    ]);
+  });
+
+  // `filter: true`'s grammar rejects the probe's bare `filter`, so the probe
+  // pairs nothing and callers read each property by its name.
   it("never pairs a `Query.schema` property with another name", () => {
     const query = Query.schema(Post, {
       include: true,
@@ -287,5 +300,148 @@ describe("wireProperties", () => {
     expect(
       wireProperties(objects(query)).filter(({ property, wire }) => wire !== property.name),
     ).toEqual([]);
+  });
+
+  // The review's case: `include` alone and `inc` alone both land in `paths`,
+  // so a value rejected there may have been sent as either. Read off the
+  // full probe alone, `include` was paired with `paths`, and `?inc=nope` was
+  // reported as `include`, a parameter the request never sent.
+  it("pairs nothing with a decoded property two wire properties can each fill", () => {
+    const schema = Schema.Struct({
+      include: Schema.optionalKey(Schema.String),
+      inc: Schema.optionalKey(Schema.String),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ paths: Schema.optionalKey(Schema.String) }),
+        SchemaTransformation.transform({
+          decode: ({ include, inc }) => {
+            const paths = include ?? inc;
+            return paths === undefined ? {} : { paths };
+          },
+          encode: ({ paths }) => (paths === undefined ? {} : { include: paths }),
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([]);
+  });
+
+  // `inc` alone fills `paths` with a value of its own making, never its
+  // sentinel: it still reaches `paths`, so `include` is not paired with it.
+  it("pairs nothing with a decoded property another wire property computes", () => {
+    const schema = Schema.Struct({
+      include: Schema.optionalKey(Schema.String),
+      inc: Schema.optionalKey(Schema.String),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ paths: Schema.optionalKey(Schema.String) }),
+        SchemaTransformation.transform({
+          decode: ({ include, inc }) => {
+            const paths = include ?? (inc === undefined ? undefined : `${inc}!`);
+            return paths === undefined ? {} : { paths };
+          },
+          encode: ({ paths }) => (paths === undefined ? {} : { include: paths }),
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([]);
+  });
+
+  // `a` lands in `x` only beside `b`, and no wire property alone fills `x`;
+  // but `b` and `c` without `a` put `c` there, so a value rejected in `x`
+  // need not have been sent as `a`.
+  it("pairs nothing a wire property lands in only beside another", () => {
+    const schema = Schema.Struct({
+      a: Schema.optionalKey(Schema.String),
+      b: Schema.optionalKey(Schema.String),
+      c: Schema.optionalKey(Schema.String),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ x: Schema.optionalKey(Schema.String) }),
+        SchemaTransformation.transform({
+          decode: ({ a, b, c }) => {
+            const x = b === undefined ? undefined : (a ?? c);
+            return x === undefined ? {} : { x };
+          },
+          encode: ({ x }) => (x === undefined ? {} : { a: x, b: "" }),
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([]);
+  });
+
+  // `b` alone fails, so its solo probe shows nothing about where it lands:
+  // `a` is not paired with `x`, which `b` may fill.
+  it("pairs nothing another wire property's failed solo probe may fill", () => {
+    const schema = Schema.Struct({
+      a: Schema.optionalKey(Schema.String),
+      b: Schema.optionalKey(Schema.String),
+    }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ x: Schema.String }),
+        SchemaTransformation.transform({
+          // `BigInt` throws a `SyntaxError` on the probe's non-numeric value.
+          decode: ({ a, b }) => ({ x: a ?? String(BigInt(b ?? "")) }),
+          encode: ({ x }) => ({ a: x }),
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([]);
+  });
+
+  // In effect 4.0.0 a synchronous run that goes asynchronous answers
+  // `AsyncFiberError` and leaves the fiber running: the rest of the decode
+  // would run later on the probe's sentinel values.
+  it("interrupts a decode that goes asynchronous, so it never resumes on the probe", async () => {
+    const resumed: Array<unknown> = [];
+    const schema = Schema.Struct({ a: Schema.String, b: Schema.String }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ a: Schema.String, b: Schema.String }),
+        SchemaTransformation.transformEffect<
+          { readonly a: string; readonly b: string },
+          { readonly a: string; readonly b: string }
+        >({
+          decode: (input) =>
+            Effect.sleep("20 millis").pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  resumed.push(input);
+                  return input;
+                }),
+              ),
+            ),
+          encode: Effect.succeed,
+        }),
+      ),
+    );
+    expect(settled(schema)).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(resumed).toEqual([]);
+  });
+
+  // HttpApi builds an endpoint's codec once, so the struct's AST is the same
+  // on every request it rejects: the schema's own decode runs on one set of
+  // probes (the full one and one per wire name), never once per request.
+  it("runs the probes once per struct", () => {
+    const probes: Array<unknown> = [];
+    const schema = Schema.Struct({ x: Schema.String, y: Schema.String }).pipe(
+      Schema.decodeTo(
+        Schema.Struct({ a: Schema.String, b: Schema.String }),
+        SchemaTransformation.transform({
+          decode: (wire) => {
+            probes.push(wire);
+            return { a: wire.x, b: wire.y };
+          },
+          encode: ({ a, b }) => ({ x: a, y: b }),
+        }),
+      ),
+    );
+    const pairs = [
+      ["a", "x"],
+      ["b", "y"],
+    ];
+    expect(settled(schema)).toEqual(pairs);
+    expect(probes).toHaveLength(3);
+    expect(settled(schema)).toEqual(pairs);
+    expect(probes).toHaveLength(3);
   });
 });
