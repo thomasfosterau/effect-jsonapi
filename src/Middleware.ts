@@ -563,10 +563,14 @@ export interface QueryParameterOptions {
    * member by its base name (`lang`) and drop an empty entry; a name with any
    * other character is implementation-specific and never rejected, so it
    * needs no entry. So is a family the specification defines (`include`,
-   * `fields`, `sort`, `page`, `filter`): an endpoint supports one by
-   * declaring it in its `query` schema, and the allow-list cannot switch off
-   * the 400 the specification requires on an endpoint that does not, so it
-   * is never silently ignored (#261).
+   * `fields`, `sort`, `page`, `filter`), and any bracketed member of one
+   * (`page[size]`): an endpoint supports one by declaring it in its `query`
+   * schema, and answers 400 under the specification's general rule when it
+   * does not (JSON:API 1.1 §Implementation-Specific Query Parameters: a
+   * server that "does not know how to process it as a query parameter from
+   * this specification … MUST return `400 Bad Request`"). The allow-list
+   * cannot switch that 400 off, so a spec family is never silently ignored
+   * (#261).
    */
   readonly allowedQueryParameters?: ReadonlyArray<string> | undefined;
 }
@@ -574,7 +578,8 @@ export interface QueryParameterOptions {
 /**
  * An `allowedQueryParameters` entry that is not a family base name made only
  * of the letters a-z, or that names a family the specification defines
- * (`include`, `fields`, `sort`, `page`, `filter`; see
+ * (`include`, `fields`, `sort`, `page`, `filter`) or a member of one
+ * (`page[size]`; see
  * {@link QueryParameterOptions.allowedQueryParameters}). Thrown when
  * {@link schemaErrorsLayer} or {@link layerWith} builds its layer, and by
  * {@link checkQueryParameters}, so a misspelt entry fails at startup instead
@@ -603,19 +608,24 @@ export class InvalidAllowedQueryParameter extends Schema.TaggedError<InvalidAllo
 
 // Why an allow-list entry is refused, if it is: one that is not a reserved
 // family base name could never match a parameter the check rejects, and one
-// the specification defines would switch off the 400 it requires (owner
-// decision on #261).
+// of a family the specification defines — the family itself or a bracketed
+// member such as `page[size]`, whose base name would be refused in turn —
+// would switch off the 400 the general rule calls for (owner decision on
+// #261).
 const refusal = (parameter: string): Option.Option<string> => {
-  if (isFamily(parameter)) {
+  const base = baseName(parameter);
+  if (isFamily(base)) {
     return Option.some(
-      `allowedQueryParameters entry "${parameter}" names a query parameter family JSON:API ` +
-        "defines. An endpoint supports it by declaring it in its query schema, and the " +
-        "specification requires a 400 on one that does not, which the allow-list cannot " +
-        "switch off; remove the entry.",
+      `allowedQueryParameters entry "${parameter}" ` +
+        (base === parameter
+          ? "names a query parameter family JSON:API defines. "
+          : `is a member of the "${base}" query parameter family JSON:API defines. `) +
+        "An endpoint supports it by declaring it in its query schema, and answers 400 " +
+        "under the specification's general rule when it does not, which the allow-list " +
+        "cannot switch off; remove the entry.",
     );
   }
   if (RESERVED_BASE_NAME.test(parameter)) return Option.none();
-  const base = baseName(parameter);
   return Option.some(
     `allowedQueryParameters entry "${parameter}" is not a family base name ` +
       "made only of the letters a-z. " +
@@ -1044,12 +1054,14 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * `?include=` too). So is one the schema declares with an empty vocabulary,
  * which supports no value: `include: { paths: [] }`, `include: true` on a
  * resource with no relationships, `sort: true` on one with no attributes.
- * JSON:API 1.1 requires it: §Inclusion of Related Resources for `include`;
- * for `sort`, §Sorting on an endpoint that responds with a resource
- * collection, and on a single-resource endpoint (`GET /articles/1?sort=title`)
- * the general §Implementation-Specific Query Parameters rule, since that
- * endpoint does not know how to process `sort` as a query parameter from the
- * specification. Only the property the schema decodes the `include` /
+ * This 400 falls under JSON:API 1.1's general rule (§Implementation-Specific
+ * Query Parameters: a server that "does not know how to process it as a
+ * query parameter from this specification … MUST return `400 Bad
+ * Request`"), which covers every case here, `sort` on a single-resource
+ * endpoint (`GET /articles/1?sort=title`) included. Two sections repeat it
+ * for their own family: §Inclusion of Related Resources for `include`, and
+ * §Sorting for `sort` on an endpoint that responds with a resource
+ * collection. Only the property the schema decodes the `include` /
  * `sort` parameter into decides whether its vocabulary is empty, read
  * through a union or `Schema.suspend`: one whose codec publishes no
  * vocabulary (`Query.IncludeList`, a custom codec), or a non-empty one in
