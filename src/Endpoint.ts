@@ -1214,8 +1214,9 @@ export const collection = <
     /** Enable the `?include=` query parameter (paths span all resources' graphs). */
     readonly include?: Include;
     /**
-     * Enable `?fields[TYPE]=` sparse fieldsets for all resources, their targets
-     * and every type an `include` path reaches.
+     * Enable `?fields[TYPE]=` sparse fieldsets for all resources, their
+     * non-`paginated` targets (unless `include` is a declared
+     * `Include.Surface`) and every type an `include` path reaches.
      */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for every attribute of every resource, or an explicit list. */
@@ -1308,8 +1309,9 @@ export const polymorphic = <
     /** Enable the `?include=` query parameter (paths span all members' graphs). */
     readonly include?: Include;
     /**
-     * Enable `?fields[TYPE]=` sparse fieldsets for all members, their targets
-     * and every type an `include` path reaches.
+     * Enable `?fields[TYPE]=` sparse fieldsets for all members, their
+     * non-`paginated` targets (unless `include` is a declared
+     * `Include.Surface`) and every type an `include` path reaches.
      */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
@@ -1538,8 +1540,9 @@ export const related = <
      */
     readonly include?: Include;
     /**
-     * Enable `?fields[TYPE]=` sparse fieldsets for the target, its targets and
-     * every type an `include` path reaches.
+     * Enable `?fields[TYPE]=` sparse fieldsets for the target, its
+     * non-`paginated` targets (unless `include` is a declared
+     * `Include.Surface`) and every type an `include` path reaches.
      */
     readonly fields?: Fields;
     /** Enable `?sort=` over the target's attributes (to-many relationships). */

@@ -1920,8 +1920,8 @@ export const directTargets = (resource: Any): ReadonlyArray<Any> =>
 
 /**
  * Resource definitions referenced by *all* of `resource`'s relationships,
- * including `paginated` ones — e.g. for sparse-fieldset configuration, where
- * a paginated relationship's target is still addressable.
+ * including `paginated` ones, whose data never appears inline (compare
+ * {@link directTargets}).
  *
  * @since 0.1.0
  * @category accessors
