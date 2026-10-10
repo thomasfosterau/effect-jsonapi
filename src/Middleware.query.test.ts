@@ -274,7 +274,7 @@ describe("allowedQueryParameters entries", () => {
 
   // A bracketed member of a family the specification defines: listing its
   // base name would be refused in turn, so the advice is the family's own.
-  it.each(["page[size]", "filter[status]", "fields[articles]", "include[]", "sort[x][y]"])(
+  it.each(["page[size]", "filter[status]", "fields[articles]", "page[]", "filter[a_b]"])(
     "refuses %j as a member of a specification family, not by its base name",
     (entry) => {
       const family = entry.slice(0, entry.indexOf("["));
@@ -299,6 +299,62 @@ describe("allowedQueryParameters entries", () => {
       ).toThrow(`"${entry}" is a member of the "${family}" query parameter family`);
     },
   );
+
+  // JSON:API defines only the bare `include` and `sort` (#329): declaring a
+  // bracketed member in the query schema is no way to support it, so the
+  // advice says so rather than pointing at a schema setting.
+  it.each(["include[]", "include[x]", "sort[title]", "sort[x][y]"])(
+    "refuses %j as a bracketed member of a family JSON:API defines only bare",
+    (entry) => {
+      const family = entry.slice(0, entry.indexOf("["));
+      const message =
+        `allowedQueryParameters entry "${entry}" is a bracketed member of the "${family}" ` +
+        `query parameter family, but JSON:API defines only the bare "${family}" parameter. ` +
+        "An endpoint answers a bracketed one 400 under the specification's general rule " +
+        "unless its query schema declares that very name, which the allow-list cannot " +
+        "switch off; remove the entry.";
+      const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] });
+      expect(build).toThrow(
+        expect.objectContaining({
+          _tag: "InvalidAllowedQueryParameter",
+          parameter: entry,
+          message,
+        }),
+      );
+      expect(build).not.toThrow("is a member of the");
+      expect(() => Middleware.layerWith({ allowedQueryParameters: [entry] })).toThrow(message);
+      expect(() =>
+        Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] }),
+      ).toThrow(message);
+    },
+  );
+
+  // A name that only starts like a family's — an unclosed bracket, a member
+  // name §Member Names does not allow — is not a member of it, and the
+  // advice does not call it one.
+  it.each([
+    ["page[", "page"],
+    ["page[size", "page"],
+    ["filter[_]", "filter"],
+    ["include[", "include"],
+    ["sort[x]y", "sort"],
+  ])("refuses the malformed %j as no member of its family", (entry, family) => {
+    const message =
+      `allowedQueryParameters entry "${entry}" starts with the "${family}" query parameter ` +
+      `family name JSON:API defines but is not a well-formed member of it: a member is ` +
+      `"${family}" followed by "[]" or square-bracketed member names. The allow-list cannot ` +
+      "admit a name of that family; remove the entry.";
+    const build = () => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] });
+    expect(build).toThrow(
+      expect.objectContaining({ _tag: "InvalidAllowedQueryParameter", parameter: entry, message }),
+    );
+    expect(build).not.toThrow("is a member of the");
+    expect(build).not.toThrow("List its base name");
+    expect(() => Middleware.layerWith({ allowedQueryParameters: [entry] })).toThrow(message);
+    expect(() =>
+      Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] }),
+    ).toThrow(message);
+  });
 
   // The allow-list is matched against the decoded parameter names, so a
   // percent-encoded spelling of a bracket names nothing the check ever sees:

@@ -55,19 +55,38 @@ export const isFamily = (base: string): base is Family =>
   FAMILIES.some((family) => family === base);
 
 /**
- * Whether a family's bracketed members are each a parameter of its own,
- * which an endpoint supports only by declaring that very member
- * (`declaresName`): `fields[TYPE]` per resource type (#261), and `page[KEY]`
- * and `filter[KEY]` per declared key (#321), so `page[sise]` beside a
- * declared `page[size]` is no more supported than an undeclared family is.
- * An open record of the family (`filter[`, the `filter: true` grammar's
- * rest) declares every member. `include` and `sort` are one unbracketed
- * parameter each, so any declared name of theirs admits the family.
+ * Whether JSON:API defines bracketed members of a family: `fields[TYPE]` per
+ * resource type, and the `page[…]` / `filter[…]` members an endpoint's
+ * strategy or filter map declares. `include` and `sort` are one bare
+ * parameter each, so a bracketed `include[…]` / `sort[…]` is a parameter the
+ * specification does not define (#329). Every family is supported member by
+ * member all the same (`declaresName`): a name is supported only when the
+ * endpoint declares that very name or a prefix that opens it.
  *
  * @internal
  */
-export const isMemberwise = (family: Family): boolean =>
+export const definesMembers = (family: Family): boolean =>
   family === "fields" || family === "page" || family === "filter";
+
+// JSON:API 1.1 §Member Names: a legal member name starts and ends with a
+// globally allowed character (a-z, A-Z, 0-9, U+0080 and above), and may
+// also carry `-`, `_` and a space in between.
+const GLOBALLY_ALLOWED = String.raw`a-zA-Z0-9\u{80}-\u{10FFFF}`;
+const MEMBER_NAME = String.raw`[${GLOBALLY_ALLOWED}](?:[${GLOBALLY_ALLOWED}\- _]*[${GLOBALLY_ALLOWED}])?`;
+const MEMBER_SUFFIX = new RegExp(String.raw`^(?:\[(?:${MEMBER_NAME})?\])+$`, "u");
+
+/**
+ * Whether a parameter name is a bracketed member of a family under JSON:API
+ * 1.1 §Query Parameter Families: the base name "followed by zero or more
+ * instances of empty square brackets (i.e. `[]`) or square-bracketed legal
+ * member names", at least one of them (`include[]`, `sort[x][y]`,
+ * `page[size]`). A suffix that breaks that grammar — `page[`, `page[size`,
+ * `filter[_]` — is malformed, not a member.
+ *
+ * @internal
+ */
+export const isFamilyMember = (name: string, family: Family): boolean =>
+  name.startsWith(family) && MEMBER_SUFFIX.test(name.slice(family.length));
 
 /**
  * A closed vocabulary: every value one JSON:API query parameter family's
