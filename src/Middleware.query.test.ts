@@ -388,7 +388,7 @@ describe("Middleware.checkQueryParameters", () => {
     expect(check(["fooBar", "x-trace", "foo_bar", "ext:name", "x1", "[odd]"])).toBeUndefined();
     expect(
       check(["fields[articles]", "page[limit]", "page[offset]", "filter[age][gt]", "filter"], {
-        declared: ["fields[articles]", "page[limit]", "filter["],
+        declared: ["fields[articles]", "page[limit]", "page[offset]", "filter", "filter["],
       }),
     ).toBeUndefined();
   });
@@ -1925,14 +1925,16 @@ describe("`fields`, `page` and `filter` an endpoint does not support (#261)", ()
     expect(limit.body.errors[0].source).toEqual({ parameter: "page[limit]" });
   });
 
-  // The decision covers a family the endpoint does not support. An
-  // undeclared member of a `page` family the endpoint declares is still left
-  // to the query schema, which drops it, as an `include[x]` beside a
-  // declared `include` is.
-  it("still leaves an undeclared member of a declared `page` family to the query schema", async () => {
+  // An undeclared member of a `page` family the endpoint declares is a 400
+  // too since #321, which `Middleware.members.test.ts` covers.
+  it("rejects an undeclared member of a declared `page` family (#321)", async () => {
     queries.length = 0;
-    expect((await serve("/posts?page[size]=1")).status).toBe(200);
-    expect(queries).toEqual([{}]);
+    const response = await serve("/posts?page[size]=1");
+    expect(response.status).toBe(400);
+    expect(response.body.errors.map((error: { source: unknown }) => error.source)).toEqual([
+      { parameter: "page[size]" },
+    ]);
+    expect(queries).toEqual([]);
   });
 
   // The check reads the decoded parameter names, so a percent-encoded

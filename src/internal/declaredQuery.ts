@@ -60,6 +60,19 @@ export const declaredNames = (ast: SchemaAST.AST): Option.Option<ReadonlyArray<s
 };
 
 /**
+ * Whether a list of declared wire names (`declaredNames`) declares the wire
+ * parameter `name` itself: lists that very name, or a family prefix ending
+ * in `[` (`filter[`, an open record of the family) that opens it. A prefix
+ * never admits the bare family name (`filter[` does not admit `filter`), nor
+ * does a declared member admit a deeper one (`filter[status]` does not admit
+ * `filter[status][eq]`): each is a parameter of its own.
+ *
+ * @internal
+ */
+export const declaresName = (declared: ReadonlyArray<string>, name: string): boolean =>
+  declared.some((entry) => entry === name || (entry.endsWith("[") && name.startsWith(entry)));
+
+/**
  * The family an index signature's key admits, when it names one: a template
  * literal whose literal head opens the bracket after the base name (`filter[`).
  * Any other key could match a base name of any spelling.
