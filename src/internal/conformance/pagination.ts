@@ -47,6 +47,7 @@ import {
 } from "./core.js";
 import {
   budgeted,
+  counted,
   type Io,
   Link,
   linkIn,
@@ -103,15 +104,9 @@ interface Page extends Target {
   readonly items: number;
 }
 
-/** `n resource(s)`. */
-const resources = (count: number): string => `${count} resource${count === 1 ? "" : "s"}`;
-
-/** `n item(s)`. */
-const itemsOf = (count: number): string => `${count} item${count === 1 ? "" : "s"}`;
-
 /** What a page of items none of which the kit can identify is said to list. */
 const unidentified = (count: number): string =>
-  `${itemsOf(count)}, none of them a resource the kit can identify (a string \`type\` and \`id\` or \`lid\`)`;
+  `${counted(count, "item")}, none of them a resource the kit can identify (a string \`type\` and \`id\` or \`lid\`)`;
 
 /** `true` when a page's `data` holds items but not one the kit can identify. */
 const opaque = (page: Page): boolean => Arr.isReadonlyArrayEmpty(page.members) && page.items > 0;
@@ -169,7 +164,7 @@ type End =
   | { readonly _tag: "Unanswered"; readonly from: number; readonly observation: Observation }
   | { readonly _tag: "Opaque"; readonly from: number; readonly items: number }
   | { readonly _tag: "NotALink"; readonly from: number; readonly value: unknown }
-  | { readonly _tag: "Offsite"; readonly from: number; readonly origin: string }
+  | { readonly _tag: "Offsite"; readonly from: number; readonly to: string }
   | { readonly _tag: "Stalled"; readonly at: number }
   | { readonly _tag: "Overflow"; readonly at: number }
   | { readonly _tag: "Spent"; readonly reason: string };
@@ -233,7 +228,7 @@ const nextOf = (
   if (Link.$is("Malformed")(next)) return Result.fail(End.NotALink({ from, value: next.value }));
   const to = stepTo(next.href, current, baseUrl);
   if (Step.$is("Unparseable")(to)) return Result.fail(End.NotALink({ from, value: to.href }));
-  if (Step.$is("Offsite")(to)) return Result.fail(End.Offsite({ from, origin: to.origin }));
+  if (Step.$is("Offsite")(to)) return Result.fail(End.Offsite({ from, to: to.to }));
   const back = pages.findIndex(({ href }) => href === to.target.href);
   if (back !== -1) return Result.fail(End.Cycle({ from, to: back + 1 }));
   return from >= PAGE_BUDGET
@@ -343,7 +338,7 @@ const judgeEnd = (run: Walk, start: string): ReadonlyArray<Judged> => {
     out.push({
       ordered: true,
       finding: finding(rule, {
-        detail: `following \`next\` from ${start} listed ${resources(repeats.length)} a second time${stalled}`,
+        detail: `following \`next\` from ${start} listed ${counted(repeats.length, "resource")} a second time${stalled}`,
         expected: "each resource on exactly one page",
         observed: listed(repeats),
         probe: undefined,
@@ -411,8 +406,8 @@ const judgeEnd = (run: Walk, start: string): ReadonlyArray<Judged> => {
 const unfinishedOf = (end: End, pages: ReadonlyArray<Page>): Option.Option<string> => {
   const on = (from: number): string => `\`next\` on page ${from} (${pages[from - 1]?.url ?? ""})`;
   return End.$match(end, {
-    Offsite: ({ from, origin }) =>
-      Option.some(`${on(from)} leads to another origin, ${origin}, which the kit does not follow`),
+    Offsite: ({ from, to }) =>
+      Option.some(`${on(from)} leads to ${to}, which the kit does not follow`),
     Unanswered: ({ from, observation }) =>
       Option.some(
         `${on(from)} got ${statusOf(observation)}, so the walk could not be finished — ${SAYS_NOTHING}`,
@@ -762,7 +757,7 @@ const assessPaged = (
         path,
         all,
         Option.some(
-          `\`${key}=${size}\` answered all ${resources(holds)} on one page, with no \`next\` to follow — the server does not page at that size`,
+          `\`${key}=${size}\` answered all ${counted(holds, "resource")} on one page, with no \`next\` to follow — the server does not page at that size`,
         ),
       );
     }
@@ -831,7 +826,7 @@ const crossCheck = (reference: Walk, paged: Walk, path: string): ReadonlyArray<J
           {
             ordered: true,
             finding: finding(rule, {
-              detail: `following \`next\` from ${start} never reached ${resources(missed.length)} ${path} lists`,
+              detail: `following \`next\` from ${start} never reached ${counted(missed.length, "resource")} ${path} lists`,
               expected: `every resource ${path} lists, on some page`,
               observed: `never reached: ${listed(missed)}`,
               probe: undefined,
@@ -844,7 +839,7 @@ const crossCheck = (reference: Walk, paged: Walk, path: string): ReadonlyArray<J
           {
             ordered: true,
             finding: finding(rule, {
-              detail: `following \`next\` from ${start} reached ${resources(extra.length)} ${path} does not list`,
+              detail: `following \`next\` from ${start} reached ${counted(extra.length, "resource")} ${path} does not list`,
               expected: `only resources ${path} lists`,
               observed: `not in ${path}: ${listed(extra)}`,
               probe: undefined,
