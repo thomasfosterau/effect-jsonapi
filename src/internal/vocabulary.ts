@@ -55,6 +55,21 @@ export const isFamily = (base: string): base is Family =>
   FAMILIES.some((family) => family === base);
 
 /**
+ * Whether a family's bracketed members are each a parameter of its own,
+ * which an endpoint supports only by declaring that very member
+ * (`declaresName`): `fields[TYPE]` per resource type (#261), and `page[KEY]`
+ * and `filter[KEY]` per declared key (#321), so `page[sise]` beside a
+ * declared `page[size]` is no more supported than an undeclared family is.
+ * An open record of the family (`filter[`, the `filter: true` grammar's
+ * rest) declares every member. `include` and `sort` are one unbracketed
+ * parameter each, so any declared name of theirs admits the family.
+ *
+ * @internal
+ */
+export const isMemberwise = (family: Family): boolean =>
+  family === "fields" || family === "page" || family === "filter";
+
+/**
  * A closed vocabulary: every value one JSON:API query parameter family's
  * codec admits. `include`, `sort`, the per-type `fields[TYPE]` and the
  * `filter: true` grammar publish one; `page` is spelled here so a codec can

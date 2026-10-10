@@ -27,8 +27,9 @@
  *     declares (JSON:API 1.1 §Query Parameters), and a parameter of one of
  *     the specification's own families — `include`, `fields[TYPE]`, `sort`,
  *     `page[…]`, `filter[…]` — on an endpoint that does not declare it, or
- *     declares it with an empty vocabulary (§Inclusion of Related
- *     Resources; §Sorting on a collection endpoint; the general
+ *     declares it with an empty vocabulary, or a `page` / `filter` member
+ *     the endpoint does not declare beside members it does (§Inclusion of
+ *     Related Resources; §Sorting on a collection endpoint; the general
  *     §Implementation-Specific Query Parameters rule otherwise; see
  *     {@link checkQueryParameters}).
  *   - {@link CreatedLocation} — JSON:API §Creating Resources: a 201 create
@@ -95,11 +96,11 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
-import { declaredNames, queryLeaves } from "./internal/declaredQuery.js";
+import { declaredNames, declaresName, queryLeaves } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
-import { admitsNoValue, type Family, isFamily } from "./internal/vocabulary.js";
+import { admitsNoValue, type Family, isFamily, isMemberwise } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
 // ---------------------------------------------------------------------------
@@ -524,6 +525,36 @@ const UNSUPPORTED: Readonly<Record<Family, (parameter: string) => string>> = {
     `This endpoint does not support the "filter" parameter family: it does not filter. ${GENERAL_RULE}`,
 };
 
+// The detail of the 400 for a `page` or `filter` parameter on an endpoint
+// that declares other members of its family but not this one (#321): a
+// misspelt `filter[stauts]` beside a declared `filter[status]`, a
+// `page[sise]` beside `page[size]`, which the query schema would otherwise
+// drop. It names the members the endpoint does declare, a family prefix
+// (an open record of it) as `filter[…]`.
+const undeclaredMember = (
+  parameter: string,
+  family: Family,
+  members: ReadonlyArray<string>,
+): string =>
+  `This endpoint does not support the "${parameter}" parameter: of the "${family}" family ` +
+  `it supports only ${members.map((member) => `"${member.endsWith("[") ? `${member}…]` : member}"`).join(", ")}. ` +
+  GENERAL_RULE;
+
+// The detail of the 400 for a parameter of a family the specification
+// defines: an undeclared member of a memberwise family the endpoint declares
+// other members of, or the family's own detail otherwise. `fields[TYPE]`
+// keeps its own, which already names the parameter.
+const unsupportedDetail = (
+  parameter: string,
+  family: Family,
+  declared: ReadonlyArray<string>,
+): string => {
+  const members = Arr.dedupe(Arr.filter(declared, (entry) => baseName(entry) === family));
+  return family !== "fields" && isMemberwise(family) && Arr.isReadonlyArrayNonEmpty(members)
+    ? undeclaredMember(parameter, family, members)
+    : UNSUPPORTED[family](parameter);
+};
+
 // A family base name made only of a-z is reserved for the specification.
 const RESERVED_BASE_NAME = /^[a-z]+$/;
 
@@ -654,10 +685,12 @@ const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string
 };
 
 // Whether a parameter is one the endpoint supports, given the names it
-// declares and the allow-list. A `fields[TYPE]` is its own parameter, one per
-// resource type, so only that very name — or a declared `fields[` prefix, an
-// open record of them — admits it; any other declared name admits its whole
-// family, as does an allowed base name.
+// declares and the allow-list. A member of `fields`, `page` or `filter` is
+// its own parameter — a `fields[TYPE]` per resource type (#261), a
+// `page[KEY]` or `filter[KEY]` per declared key (#321) — so only that very
+// name, or a declared prefix of its family (`fields[`, `filter[`: an open
+// record of it), admits it (`isMemberwise`, `declaresName`); any other
+// declared name admits its whole family, as does an allowed base name.
 const isSupported = (
   name: string,
   declared: ReadonlyArray<string>,
@@ -665,11 +698,7 @@ const isSupported = (
 ): boolean => {
   const base = baseName(name);
   if (!RESERVED_BASE_NAME.test(base) || allowed.includes(base)) return true;
-  if (base === "fields") {
-    return declared.some(
-      (entry) => entry === name || (entry.endsWith("[") && name.startsWith(entry)),
-    );
-  }
+  if (isFamily(base) && isMemberwise(base)) return declaresName(declared, name);
   return declared.some((entry) => baseName(entry) === base);
 };
 
@@ -692,7 +721,7 @@ const rejectQueryParameters = (
       ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
       detail: Option.getOrElse(
         Option.map(Option.liftPredicate(baseName(parameter), isFamily), (family) =>
-          UNSUPPORTED[family](parameter),
+          unsupportedDetail(parameter, family, declared),
         ),
         () =>
           `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
@@ -716,16 +745,17 @@ export interface QueryParameterCheck extends QueryParameterOptions {
   /**
    * The query parameter names the endpoint's own query schema declares
    * (`q`, `page[limit]`, `fields[articles]`, …). Each admits its whole
-   * family, except a name of the `fields` family, which admits only itself:
-   * a sparse fieldset is per resource type, so `fields[articles]` does not
-   * admit `fields[people]`. A name ending in `[` (`fields[`, `filter[`)
-   * admits every name it opens. An endpoint that supports one of the
-   * specification's families (`include`, `fields[TYPE]`, `sort`, `page`,
-   * `filter`) lists it here: undeclared, it is rejected. One that declares
-   * it with an empty vocabulary (no include path, no sortable field, no
-   * filterable field, a resource type with no attribute) supports no value
-   * of it, so leaves it out, as {@link SchemaErrorsLive} does. Defaults to
-   * none.
+   * family, except a name of the `fields`, `page` or `filter` family, which
+   * admits only itself: a sparse fieldset is per resource type, so
+   * `fields[articles]` does not admit `fields[people]`, and a page or filter
+   * key is per key, so `page[limit]` does not admit `page[size]` (#321). A
+   * name ending in `[` (`fields[`, `filter[`) admits every name it opens.
+   * An endpoint that supports one of the specification's families
+   * (`include`, `fields[TYPE]`, `sort`, `page`, `filter`) lists it here:
+   * undeclared, it is rejected. One that declares it with an empty
+   * vocabulary (no include path, no sortable field, no filterable field, a
+   * resource type with no attribute) supports no value of it, so leaves it
+   * out, as {@link SchemaErrorsLive} does. Defaults to none.
    */
   readonly declared?: ReadonlyArray<string> | undefined;
 }
@@ -758,7 +788,12 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  *   acceptable only when `declared` lists that very name (or a `fields[`
  *   prefix): a sparse fieldset is per resource type, so a declared
  *   `fields[articles]` does not admit `fields[people]`, a bare `fields` or
- *   `fields[articles][x]`; or
+ *   `fields[articles][x]`. A `page[…]` or `filter[…]`, and a bare `page` or
+ *   `filter`, likewise (#321): a declared `page[limit]` does not admit
+ *   `page[size]`, and a declared `filter[status]` does not admit
+ *   `filter[stauts]` or `filter[status][eq]`, each of which is answered
+ *   naming the members `declared` does list; a `filter[` prefix (the open
+ *   `filter: true` grammar) admits every `filter[…]`; or
  * - is listed in `allowedQueryParameters`.
  *
  * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
@@ -964,8 +999,11 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * `sort`, `page[…]`, `filter[…]` — the endpoint does not declare with at
  * least one legal value (§Inclusion of Related Resources; §Sorting on a
  * collection endpoint; the general §Implementation-Specific Query
- * Parameters rule otherwise). Then every request validation failure is
- * answered as {@link SchemaErrorsLive} describes.
+ * Parameters rule otherwise), as is a member of a `page` or `filter` family
+ * the endpoint declares other members of but not that one (`filter[stauts]`
+ * beside a declared `filter[status]`, under the general rule). Then every
+ * request validation failure is answered as {@link SchemaErrorsLive}
+ * describes.
  *
  * The `Endpoint` constructors attach {@link SchemaErrors} after
  * {@link ContentNegotiation}, which makes it the outer of the two, so this
@@ -1091,9 +1129,25 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * `fields[TYPE]` keep decoding. Ignoring such a fieldset would answer with
  * the very fields the client excluded, which §Sparse Fieldsets forbids ("an
  * endpoint MUST NOT include additional [fields] in resource objects of that
- * type in its response"). An undeclared member of a `page` or `filter`
- * family the endpoint does declare (`page[size]` beside `page[limit]`) is
- * still left to the query schema.
+ * type in its response").
+ *
+ * `page` and `filter` are per member too (#321): on an endpoint that declares
+ * an explicit `filter: { key: Schema }` map or a set of page keys
+ * (`Query.Page.Offset`'s `page[offset]` / `page[limit]`, `Query.Page.Number`,
+ * `Query.Page.Cursor`, a `Query.bracketPageKeys` struct), a member it does
+ * not declare — `?filter[stauts]=open` beside a declared `filter[status]`,
+ * `?page[sise]=10` beside `page[size]`, a deeper `filter[status][eq]`, or a
+ * bare `filter` / `page` — is a 400 naming that parameter as the request
+ * spelt it and listing the members the endpoint does declare, under the
+ * spec's general rule. The query schema would otherwise drop it, and the
+ * client would get an unfiltered or unpaginated collection. A member counts
+ * by the name its encoding sends it under, so `Schema.encodeKeys({ state:
+ * "filter[status]" })` declares `filter[status]`, not `filter[state]`. The
+ * open `filter: true` grammar declares the bare `filter` and every
+ * `filter[…]`, so its own codec still rejects a malformed member as before;
+ * so does a hand-built open record of a family
+ * (`Schema.Record(Schema.TemplateLiteral(["filter[", Schema.String, "]"]), …)`),
+ * which admits every member it opens.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
