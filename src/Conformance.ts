@@ -89,7 +89,6 @@
  */
 import {
   Array as Arr,
-  Cause,
   Data,
   Effect,
   Layer,
@@ -102,13 +101,7 @@ import {
 import type { FileSystem } from "effect/FileSystem";
 import type { Path } from "effect/Path";
 import type { Scope } from "effect/Scope";
-import {
-  HttpClient,
-  HttpRouter,
-  HttpServerError,
-  HttpServerRequest,
-  HttpServerResponse,
-} from "effect/http";
+import { HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import type { Etag } from "effect/http";
 import type { HttpPlatform } from "effect/http/HttpPlatform";
 import { HttpApiBuilder } from "effect/http-api";
@@ -667,7 +660,7 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "Relationship and top-level `self` links",
     reason:
-      "A resource object's `self` link and a relationship's `related` link are followed and held to what they claim. Two more links a server must serve are not yet followed: a relationship's own `self` link, which must answer the relationship's linkage, and a document's top-level `self` link.",
+      "A resource object's `self` link is followed and held to the resource it names, and a relationship's `related` link to answering resource data (a MUST) and to the resources its linkage names (a SHOULD). Two more links a server must serve are not yet followed: a relationship's own `self` link, which must answer the relationship's linkage, and a document's top-level `self` link.",
     tracking: ["#309"],
   },
   {
@@ -928,15 +921,12 @@ export const verify = Effect.fnUntraced(function* <
   const client = HttpClient.make(
     Effect.fnUntraced(function* (request) {
       const serverRequest = HttpServerRequest.fromClientRequest(request);
-      const response = yield* handler.pipe(
-        Effect.provideService(HttpServerRequest.HttpServerRequest, serverRequest),
-        // A failure is answered as a deployed server answers it — a path no
-        // route serves is the router's 404, not a defect that kills the rule
-        // that requested it (a link the server emitted, say). A defect still
-        // dies, as a transport that throws does.
-        Effect.catch((error) =>
-          Effect.map(HttpServerError.causeResponse(Cause.fail(error)), ([answer]) => answer),
-        ),
+      // A path no route serves is the router's 404, as a deployed server
+      // answers it, not a defect that kills the rule that requested it (a
+      // link the server emitted, say). Any other failure, and any defect,
+      // still dies, as a transport that throws does.
+      const response = yield* Core.answeredAsDeployed(
+        Effect.provideService(handler, HttpServerRequest.HttpServerRequest, serverRequest),
       );
       return HttpServerResponse.toClientResponse(response);
     }, Effect.scoped),
@@ -959,6 +949,15 @@ export const verify = Effect.fnUntraced(function* <
  * media types. Nothing about the rules changes between here and
  * {@link verify} — which is the point, since the two answers to "in-process or
  * over the wire?" should not be two different kits.
+ *
+ * No probe follows a redirect, as none does in process: the kit provides
+ * `FetchHttpClient.RequestInit` with `redirect: "manual"` for its own
+ * requests (keeping the rest of the `RequestInit` the run's context holds), so
+ * a `3xx` answers as itself and a server cannot lead the kit to another origin.
+ * A client that follows redirects by other means (`HttpClient.followRedirects`)
+ * still sends the request; the kit then does not read an answer from another
+ * origin, but pass a client that does not follow redirects. There is no
+ * per-request timeout: a server that holds a response open holds the run.
  *
  * @example
  * ```ts

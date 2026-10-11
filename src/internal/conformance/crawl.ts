@@ -109,7 +109,11 @@ export const linkIn = (links: unknown, name: string): Link => {
 export type Step =
   | { readonly _tag: "Follow"; readonly target: Target }
   | { readonly _tag: "Unparseable"; readonly href: string }
-  | { readonly _tag: "Offsite"; readonly origin: string };
+  | {
+      readonly _tag: "Offsite";
+      /** Where it leads, as a finding names it: "another origin, https://…", or a URL with no origin. */
+      readonly to: string;
+    };
 
 /** @internal */
 export const Step = Data.taggedEnum<Step>();
@@ -138,6 +142,17 @@ export const own = (url: string, baseUrl: string): Option.Option<Target> => {
 };
 
 /**
+ * Where a URL off the run's origin leads, as a finding names it. A URL whose
+ * scheme gives it no origin of its own (`javascript:`, `data:`, `mailto:`)
+ * serialises its origin as `"null"`, which names nothing, so it is named by
+ * its scheme instead.
+ */
+const offsite = (url: URL): string =>
+  url.origin === "null"
+    ? `a \`${quote(url.protocol)}\` URL (no origin)`
+    : `another origin, ${quote(url.origin)}`;
+
+/**
  * Where a link found on `from` leads. A link is resolved against the document
  * it was found on, as a browser would; one that leads off the run's origin is
  * not followed, so a server cannot point the kit at another host.
@@ -150,7 +165,7 @@ export const stepTo = (href: string, from: Target, baseUrl: string): Step => {
   const origin = new URL(URL.canParse(baseUrl) ? baseUrl : from.href).origin;
   return resolved.origin === origin
     ? Step.Follow({ target: targetOf(resolved.href, baseUrl) })
-    : Step.Offsite({ origin: resolved.origin });
+    : Step.Offsite({ to: offsite(resolved) });
 };
 
 // ---------------------------------------------------------------------------

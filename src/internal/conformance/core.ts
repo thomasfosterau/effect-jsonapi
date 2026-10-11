@@ -9,6 +9,7 @@
  */
 import {
   Array as Arr,
+  Cause,
   Effect,
   Formatter,
   MutableHashSet,
@@ -17,7 +18,14 @@ import {
   Result,
   SchemaAST,
 } from "effect";
-import { HttpBody, HttpClient, HttpClientRequest } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpBody,
+  HttpClient,
+  HttpClientRequest,
+  HttpServerError,
+  type HttpServerResponse,
+} from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { declaredNames } from "../declaredQuery.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
@@ -472,9 +480,52 @@ const clientRequest = (url: string, probe: Probe): HttpClientRequest.HttpClientR
 };
 
 /**
+ * `effect`, with any redirect a `fetch`-based transport would follow left
+ * unfollowed (`redirect: "manual"`), the rest of the run's own
+ * `FetchHttpClient.RequestInit` kept. A redirect answers as itself, the `3xx`
+ * the server sent, exactly as the in-process transport has always answered
+ * one — so a server cannot lead a probe, or a link the kit follows, to
+ * another origin through a redirect. A transport that is not `fetch`-based
+ * never reads `RequestInit`, and is unaffected.
+ */
+const unredirected = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+  Effect.flatMap(Effect.serviceOption(FetchHttpClient.RequestInit), (init) =>
+    Effect.provideService(effect, FetchHttpClient.RequestInit, {
+      ...Option.getOrUndefined(init),
+      redirect: "manual",
+    }),
+  );
+
+/**
+ * The origin a transport says its answer came from, when that is not the
+ * origin the request went to: a transport that follows redirects itself (one
+ * wrapped in `HttpClient.followRedirects`, say) reports where it ended up.
+ */
+const answeredOffsite = (sent: string, answered: string): Option.Option<string> =>
+  URL.canParse(sent) && URL.canParse(answered) && new URL(sent).origin !== new URL(answered).origin
+    ? Option.some(new URL(answered).origin)
+    : Option.none();
+
+/** An `Observation` for a probe the transport returned no answer to read for. */
+const unread = (probe: Probe, transportError: string): Observation => ({
+  probe,
+  status: 0,
+  headers: {},
+  contentType: undefined,
+  text: "",
+  body: undefined,
+  transportError,
+});
+
+/**
  * Builds the probe runner over an `HttpClient`. A transport failure becomes an
  * `Observation` with `status: 0` rather than an error, so one unreachable
  * endpoint is reported as a finding instead of aborting the whole run.
+ *
+ * No probe follows a redirect (see {@link unredirected}). An answer a
+ * transport fetched from another origin all the same — it followed a redirect
+ * on its own — is not read: it is recorded as a transport failure, naming the
+ * origin.
  *
  * @internal
  */
@@ -489,19 +540,16 @@ export const runner =
         : `${baseUrl.replace(/\/$/, "")}${probe.url}`;
       const record: Probe = { method, url: probe.url, headers, body: probe.body };
       const request = clientRequest(url, record);
-      const result = yield* Effect.result(client.execute(request));
-      if (result._tag === "Failure") {
-        return {
-          probe: record,
-          status: 0,
-          headers: {},
-          contentType: undefined,
-          text: "",
-          body: undefined,
-          transportError: String(result.failure),
-        } satisfies Observation;
-      }
+      const result = yield* Effect.result(unredirected(client.execute(request)));
+      if (result._tag === "Failure") return unread(record, String(result.failure));
       const response = result.success;
+      const offsite = answeredOffsite(url, response.url);
+      if (Option.isSome(offsite)) {
+        return unread(
+          record,
+          `the transport followed a redirect to another origin, ${offsite.value}, whose answer the kit does not read`,
+        );
+      }
       const textResult = yield* Effect.result(response.text);
       const text = textResult._tag === "Success" ? textResult.success : "";
       const headersOut = headerRecord(response.headers);
@@ -523,6 +571,25 @@ export const runner =
         transportError: undefined,
       } satisfies Observation;
     }).pipe(Effect.scoped, Effect.orDie);
+
+/**
+ * A router's answer as a deployed server gives it, for the in-process
+ * transport: a request no route serves (`RouteNotFound`) is the router's own
+ * empty 404, not a defect that kills the rule that sent it — a link the server
+ * emitted can lead to such a path. Any other failure is not something a
+ * deployed server answers in a known way, so it dies, as before.
+ *
+ * @internal
+ */
+export const answeredAsDeployed = <R>(
+  handler: Effect.Effect<HttpServerResponse.HttpServerResponse, HttpServerError.HttpServerError, R>,
+): Effect.Effect<HttpServerResponse.HttpServerResponse, never, R> =>
+  handler.pipe(
+    Effect.catchReason("HttpServerError", "RouteNotFound", (reason) =>
+      Effect.map(HttpServerError.causeResponse(Cause.fail(reason)), ([answer]) => answer),
+    ),
+    Effect.orDie,
+  );
 
 // ---------------------------------------------------------------------------
 // Rule authoring helpers
