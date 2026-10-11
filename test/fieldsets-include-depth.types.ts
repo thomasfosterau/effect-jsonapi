@@ -1,9 +1,14 @@
 /**
  * Type-level tests for the sparse fieldsets `fields: true` declares (#311).
  *
- * `fields: true` declares a `fields[TYPE]` for the resource, its direct
- * relationship targets and, when `include` is on, every type a legal include
- * path reaches. The runtime half is `src/Query.fieldsets.test.ts`; this file
+ * `fields: true` declares a `fields[TYPE]` for every type the response can
+ * carry: the resource, its non-`paginated` direct relationship targets
+ * (unless `include` is a declared `Include.Surface`) and, when `include` is
+ * on, every type a legal include path reaches. A type reachable only through
+ * a `paginated` relationship, or a direct target a surface leaves out, is not
+ * declared (owner decision on #311, 0.17.0). The runtime half is
+ * `src/Query.fieldsets.test.ts`, whose `expectFieldsets` also checks each
+ * runtime key set against the type's; this file
  * pins the decoded `fields` struct and the flat `fields[TYPE]` keys, so that a
  * type the endpoint can carry in `included` is a key a client can write and a
  * type it can never carry is not.
@@ -45,6 +50,7 @@ const Article = Resource.make("articles", {
   relationships: {
     comments: Relationship.many(() => Comment),
     tags: Relationship.many(() => Tag),
+    history: Relationship.paginated(() => Revision),
   },
 });
 
@@ -72,8 +78,9 @@ assertType<FieldsOf<typeof deep>>({
   people: ["title"],
 });
 
-// A type no include path reaches is still rejected: `revisions` is behind a
-// paginated relationship, `companies` three hops away.
+// A type no include path reaches is rejected: `revisions` is behind a
+// paginated relationship (`history`, `comments.revisions`), `companies` three
+// hops away.
 assertType<FieldsOf<typeof deep>>({
   // @ts-expect-error -- `revisions` is unreachable
   revisions: ["editedAt"],
@@ -100,6 +107,9 @@ assertType<
 assertType<
   Equals<Query.FieldsetResources<typeof Article>["type"], "articles" | "comments" | "tags">
 >(true);
+assertType<
+  Equals<Query.FieldsetResources<typeof Article, false>["type"], "articles" | "comments" | "tags">
+>(true);
 
 // ---------------------------------------------------------------------------
 // `include` off, a `depth`, an allow-list and a surface
@@ -111,6 +121,15 @@ assertType<FieldsOf<typeof shallow>>({ comments: ["body"] });
 assertType<FieldsOf<typeof shallow>>({
   // @ts-expect-error -- no include path, so no `people` fieldset
   people: ["name"],
+});
+assertType<FieldsOf<typeof shallow>>({
+  // @ts-expect-error -- `history` is paginated, so no `revisions` fieldset
+  revisions: ["editedAt"],
+});
+assertType<typeof shallow.Encoded>({ "fields[tags]": "name" });
+assertType<typeof shallow.Encoded>({
+  // @ts-expect-error -- no wire key for a paginated-only target
+  "fields[revisions]": "editedAt",
 });
 
 const depth1 = Query.schema(Article, { include: { depth: 1 }, fields: true });
@@ -132,11 +151,33 @@ assertType<
   Equals<FieldsetTypes<typeof listed>, "articles" | "comments" | "tags" | "people" | "companies">
 >(true);
 
+// A declared surface: exactly the resource and what its paths reach (its
+// `included` union), so the direct target `tags` it leaves out is dropped.
 const surface = Include.make(Article, { comments: Include.nested(Comment, { author: Person }) });
 const declared = Query.schema(Article, { include: surface, fields: true });
-assertType<Equals<FieldsetTypes<typeof declared>, "articles" | "comments" | "tags" | "people">>(
-  true,
-);
+assertType<Equals<FieldsetTypes<typeof declared>, "articles" | "comments" | "people">>(true);
+assertType<
+  Equals<
+    Query.FieldsetResources<typeof Article, typeof surface>["type"],
+    FieldsetTypes<typeof declared>
+  >
+>(true);
+assertType<FieldsOf<typeof declared>>({ people: ["name"] });
+assertType<FieldsOf<typeof declared>>({
+  // @ts-expect-error -- the surface leaves `tags` out of `included`
+  tags: ["name"],
+});
+assertType<typeof declared.Encoded>({ "fields[people]": "name" });
+assertType<typeof declared.Encoded>({
+  // @ts-expect-error -- no wire key for a direct target the surface leaves out
+  "fields[tags]": "name",
+});
+// A surface over every direct target declares them all.
+const wide = Query.schema(Article, {
+  include: Include.make(Article, { comments: Comment, tags: Tag }),
+  fields: true,
+});
+assertType<Equals<FieldsetTypes<typeof wide>, "articles" | "comments" | "tags">>(true);
 
 // ---------------------------------------------------------------------------
 // A heterogeneous endpoint, a self-referencing graph, and an endpoint
@@ -144,11 +185,23 @@ assertType<Equals<FieldsetTypes<typeof declared>, "articles" | "comments" | "tag
 
 const mixed = Query.schema([Tag, Comment], { include: true, fields: true });
 assertType<
-  Equals<
-    FieldsetTypes<typeof mixed>,
-    "tags" | "comments" | "people" | "labels" | "revisions" | "companies"
-  >
+  Equals<FieldsetTypes<typeof mixed>, "tags" | "comments" | "people" | "labels" | "companies">
 >(true);
+assertType<FieldsOf<typeof mixed>>({
+  // @ts-expect-error -- `Comment`'s `revisions` is paginated
+  revisions: ["editedAt"],
+});
+// Under a surface, every member plus what the surface's paths reach: the
+// direct target `labels` it leaves out is dropped.
+const mixedSurface = Query.schema([Tag, Comment], {
+  include: Include.make(Comment, { author: Person }),
+  fields: true,
+});
+assertType<Equals<FieldsetTypes<typeof mixedSurface>, "tags" | "comments" | "people">>(true);
+assertType<FieldsOf<typeof mixedSurface>>({
+  // @ts-expect-error -- the surface leaves `labels` out of `included`
+  labels: [],
+});
 
 const Territory = Resource.make("territories", { attributes: { region: Schema.String } });
 const employeeAttributes = { name: Schema.String };
@@ -180,3 +233,6 @@ assertType<FieldsOf<typeof orders>>({ territories: ["region"] });
 const get = Endpoint.get(Article, { include: true, fields: true });
 type GetFields = NonNullable<HttpApiEndpoint.Query<typeof get>["Type"]["fields"]>;
 assertType<Equals<keyof GetFields, FieldsetTypes<typeof deep>>>(true);
+const list = Endpoint.list(Article, { include: surface, fields: true });
+type ListFields = NonNullable<HttpApiEndpoint.Query<typeof list>["Type"]["fields"]>;
+assertType<Equals<keyof ListFields, FieldsetTypes<typeof declared>>>(true);

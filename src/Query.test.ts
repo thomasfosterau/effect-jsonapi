@@ -341,20 +341,26 @@ describe("Query.schema", () => {
     expect(Schema.decodeUnknownSync(empty)({})).toEqual({});
   });
 
-  it("paginated targets still get sparse fieldsets (their related endpoint uses them)", () => {
+  it("a paginated-only target gets no sparse fieldset; its related endpoint declares one (#311)", () => {
     const feedQuery = Query.schema(Feed, { include: true, fields: true });
     const decoded = Schema.decodeUnknownSync(feedQuery)({
       "fields[feeds]": "name",
       "fields[people]": "firstName",
-      // Article is only reachable via the paginated `entries` relationship,
-      // but its fieldset is still configurable.
-      "fields[articles]": "title",
     });
-    expect(decoded).toEqual({
-      fields: { feeds: ["name"], people: ["firstName"], articles: ["title"] },
-    });
-    // ... while `entries` remains invalid as an include path.
+    expect(decoded).toEqual({ fields: { feeds: ["name"], people: ["firstName"] } });
+    // Article is only reachable via the paginated `entries` relationship,
+    // which is never an include path (so never in a feed's `included`): the
+    // feed's query declares no `fields[articles]`.
     expect(() => Schema.decodeUnknownSync(feedQuery)({ include: "entries" })).toThrow();
+    expect(feedQuery.from.fields).not.toHaveProperty(["fields[articles]"]);
+    expect(feedQuery.from.fields).toHaveProperty(["fields[people]"]);
+    type FeedFieldsets = keyof NonNullable<typeof feedQuery.Type.fields>;
+    expectTypeOf<FeedFieldsets>().toEqualTypeOf<"feeds" | "people">();
+    // The related endpoint, whose primary data the articles are, declares it.
+    const entries = Query.schema(Article, { fields: true });
+    expect(
+      Schema.decodeUnknownSync(entries)({ "fields[articles]": "title" }).fields?.articles,
+    ).toEqual(["title"]);
   });
 });
 

@@ -60,7 +60,7 @@ import {
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
-import type { AnySurface, SurfaceFor } from "./Include.js";
+import { type AnySurface, isSurface, type SurfaceFor } from "./Include.js";
 import type { Pair as CanonicalPair } from "./internal/canonical.js";
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js";
 import {
@@ -86,13 +86,13 @@ import type {
   AttributeKeys,
   Filterable,
   FilterableKeys,
+  IncludableTargets,
   IncludeDepth,
   IncludePath,
   IncludePathsTo,
-  RelationshipTargets,
   ResolveIncludePath,
 } from "./Resource.js";
-import { allTargets, attributeKeys, filterable, includePaths } from "./Resource.js";
+import { attributeKeys, directTargets, filterable, includePaths } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -1431,11 +1431,14 @@ export interface Options<R extends Any> {
    */
   readonly include?: IncludeOption<R> | undefined;
   /**
-   * Enable `?fields[TYPE]=` — sparse fieldsets for this resource, its
-   * direct relationship targets and, when `include` is on, every type a legal
-   * include path reaches (`include: true`'s `comments.author` declares
-   * `fields[people]`), so every type the response's `included` can carry has
-   * one. Unknown field names produce a 400.
+   * Enable `?fields[TYPE]=` — sparse fieldsets for every type the response
+   * can carry, and no other: this resource; its non-`paginated` direct
+   * relationship targets, which a server MAY include by default, unless
+   * `include` is a declared `Include.Surface`; and, when `include` is on,
+   * every type a legal include path reaches (`include: true`'s
+   * `comments.author` declares `fields[people]`). A type reachable only
+   * through a `paginated` relationship is never in `included`, so it has
+   * none. Unknown field names produce a 400.
    *
    * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
    * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
@@ -1484,6 +1487,27 @@ export interface Options<R extends Any> {
 // `IncludeOptions` object. Everything else (`false`, absent) leaves it off.
 type IncludeEnabled<I> = [I] extends [true] ? true : [I] extends [object] ? true : false;
 
+// Whether an `include` option is a declared `Include.Surface`. Its paths are
+// then the whole of what the endpoint's `included` union carries
+// (`Include.Surface.included`), so they alone bound the fieldsets.
+type DeclaresSurface<I> = [I] extends [
+  { readonly "~@thomasfosterau/effect-jsonapi/include": "surface" },
+]
+  ? true
+  : false;
+
+// The direct targets `fields: true` declares beside the include paths' walk:
+// each member's non-`paginated` relationship targets, the default `included`
+// union (`Resource.DefaultIncluded`), which a server MAY include by default —
+// none under a declared surface, whose own `included` union replaces that
+// default. A `paginated` relationship's target never appears in `included`.
+type DefaultFieldsetTargets<R extends Any, I> =
+  DeclaresSurface<I> extends true
+    ? never
+    : R extends Any
+      ? IncludableTargets<R["relationships"]>
+      : never;
+
 // The resource definitions each of `R`'s members reaches along `Paths`: every
 // resource on the way down a path, its leaf included. The paths are the whole
 // endpoint's, so on a heterogeneous endpoint each member walks every path, and
@@ -1492,23 +1516,32 @@ type ReachedBy<R extends Any, Paths> = R extends Any ? ResolveIncludePath<R, Pat
 
 /**
  * Resource definitions whose sparse fieldsets appear in `?fields[TYPE]=`:
- * the resource(s) themselves, their direct relationship targets, and, when
- * the endpoint's `include` option `I` turns `include` on, every resource a
- * legal include path reaches — the leaf of each path and every resource on
- * the way to it (`comments.author` reaches `comments` and `people`). A type
- * an `included` member can carry therefore always has a fieldset.
+ * every type the endpoint's response can carry, and no other.
  *
- * The walk is the include paths', so it is bounded as they are: two hops
- * under `include: true`, the `depth` an {@link IncludeOptions} names, or the
- * exact `paths` of an allow-list or a declared `Include.Surface`.
+ * - The resource(s) themselves.
+ * - Their non-`paginated` direct relationship targets, the default
+ *   `included` union a server MAY include by default — unless the
+ *   endpoint's `include` option `I` is a declared `Include.Surface`, whose
+ *   own `included` union replaces that default.
+ * - When `I` turns `include` on, every resource a legal include path
+ *   reaches: the leaf of each path and every resource on the way to it
+ *   (`comments.author` reaches `comments` and `people`). The walk is the
+ *   include paths', so it is bounded as they are: two hops under
+ *   `include: true`, the `depth` an {@link IncludeOptions} names, or the
+ *   exact `paths` of an allow-list or a declared `Include.Surface`.
+ *
+ * A type reachable only through a `paginated` relationship is never declared:
+ * such a relationship is never an include path, so its target never appears
+ * in `included`.
  *
  * Distributes over unions of resource definitions.
  *
- * @since 0.1.0
+ * @since 0.1.0 (`I` since 0.17.0)
  * @category type-level
  */
 export type FieldsetResources<R extends Any, I = false> =
-  | (R extends Any ? R | RelationshipTargets<R["relationships"]> : never)
+  | R
+  | DefaultFieldsetTargets<R, I>
   | (IncludeEnabled<I> extends true ? ReachedBy<R, IncludePathsOf<R, I>> : never);
 
 // The resource definitions `resource` reaches along an include path's
@@ -1529,16 +1562,18 @@ const reachedBy = (resource: Any, segments: ReadonlyArray<string>): ReadonlyArra
   });
 
 // The resource definitions `fields: true` declares a sparse fieldset for —
-// the runtime mirror of `FieldsetResources`: the resources, their direct
-// relationship targets, and every resource the endpoint's legal include
-// `paths` reach (none while `include` is off).
+// the runtime mirror of `FieldsetResources`: the resources, their
+// non-`paginated` direct targets unless `include` is a declared `surface`,
+// and every resource the endpoint's legal include `paths` reach (none while
+// `include` is off).
 const fieldsetResources = (
   resources: ReadonlyArray<Any>,
+  surface: boolean,
   paths: ReadonlyArray<string>,
 ): ReadonlyArray<Any> =>
   dedupe([
     ...resources,
-    ...resources.flatMap(allTargets),
+    ...(surface ? [] : resources.flatMap(directTargets)),
     ...paths.flatMap((path) =>
       resources.flatMap((resource) => reachedBy(resource, path.split("."))),
     ),
@@ -1709,13 +1744,17 @@ export const schema = <R extends Any, const O extends Options<R>>(
   if (include === true || typeof include === "object") {
     const includeOptions = (typeof include === "object" ? include : undefined) as never;
     includable = includePathsFor(resources, includeOptions);
-    nestedFields.include = Schema.optionalKey(Include(resources, includeOptions));
+    // The paths are computed once: `Include` takes them as an allow-list,
+    // which legalises exactly the same set.
+    nestedFields.include = Schema.optionalKey(
+      Include<Any, { readonly paths: ReadonlyArray<string> }>(resources, { paths: includable }),
+    );
     flatFields.include = Schema.optionalKey(Repeatable);
   }
 
   if (options.fields === true) {
     const fieldsetFields: Record<string, Schema.Top> = {};
-    for (const target of fieldsetResources(resources, includable)) {
+    for (const target of fieldsetResources(resources, isSurface(include), includable)) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target));
       flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable);
     }

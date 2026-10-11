@@ -1,7 +1,10 @@
 /**
  * `fields: true` declares a sparse fieldset for every type an include path
  * the endpoint legalises can reach (#311), not only for the resource and its
- * direct relationship targets.
+ * direct relationship targets — and for no type the response can never carry
+ * (#311, owner decision for 0.17.0): not a direct target a declared
+ * `Include.Surface` leaves out, nor a target reachable only through a
+ * `paginated` relationship.
  *
  * JSON:API 1.1 §Sparse Fieldsets: "A client MAY request that an endpoint
  * return only specific fields in the response on a per-type basis by
@@ -16,6 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
+import * as SchemaAST from "effect/SchemaAST";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -52,6 +56,8 @@ const Article = Resource.make("articles", {
   relationships: {
     comments: Relationship.many(() => Comment),
     tags: Relationship.many(() => Tag),
+    // Paginated: a direct target that never appears in `included`.
+    history: Relationship.paginated(() => Revision),
   },
 });
 
@@ -81,10 +87,39 @@ const declared = (query: { readonly from: { readonly fields: Schema.Struct.Field
     Order.String,
   );
 
+// The `fields[TYPE]` keys a query schema's type declares on the wire.
+type WireFieldsets<Q extends { readonly Encoded: object }> = Extract<
+  keyof Q["Encoded"],
+  `fields[${string}]`
+>;
+
+// Asserts that `query` declares exactly `keys` as `fields[TYPE]` parameters,
+// at runtime and in its type alike: each listed key must be one of the type's
+// (the constraint), the type may declare no other (the intersection names the
+// keys the list is missing), and the runtime schema must declare exactly the
+// list. So the runtime walk and `Query.FieldsetResources` cannot drift apart.
+const expectFieldsets = <
+  Q extends {
+    readonly Encoded: object;
+    readonly from: { readonly fields: Schema.Struct.Fields };
+  },
+  const K extends ReadonlyArray<WireFieldsets<Q>>,
+>(
+  query: Q,
+  keys: K &
+    ([Exclude<WireFieldsets<Q>, K[number]>] extends [never]
+      ? unknown
+      : { readonly missing: Exclude<WireFieldsets<Q>, K[number]> }),
+): void => {
+  expect(declared(query)).toEqual(Arr.sort(keys, Order.String));
+};
+
 describe("Query.schema `fields: true` — the types the include paths reach (#311)", () => {
   it("declares a fieldset for every type a depth-2 path reaches under `include: true`", () => {
+    // `revisions` (behind `history` and `comments.revisions`, both paginated)
+    // is on no include path and never in `included`.
     const query = Query.schema(Article, { include: true, fields: true });
-    expect(declared(query)).toEqual([
+    expectFieldsets(query, [
       "fields[articles]",
       "fields[comments]",
       "fields[labels]",
@@ -110,26 +145,47 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
     );
   });
 
-  it("keeps the resource and its direct targets when `include` is off", () => {
-    expect(declared(Query.schema(Article, { fields: true }))).toEqual([
+  it("declares the resource and its non-paginated direct targets when `include` is off", () => {
+    // The default `included` union: `history`'s `revisions` is paginated, so
+    // it is not declared.
+    expectFieldsets(Query.schema(Article, { fields: true }), [
       "fields[articles]",
       "fields[comments]",
       "fields[tags]",
     ]);
-    expect(declared(Query.schema(Article, { include: false, fields: true }))).toEqual([
+    expectFieldsets(Query.schema(Article, { include: false, fields: true }), [
       "fields[articles]",
       "fields[comments]",
       "fields[tags]",
     ]);
   });
 
+  it("never declares a target reachable only through a paginated relationship", () => {
+    // `revisions` is a direct target of `Article` and of `Comment`, both
+    // through a paginated relationship, so no configuration declares it.
+    const Archive = Resource.make("archives", {
+      attributes: { name: Schema.String },
+      relationships: { revisions: Relationship.paginated(() => Revision) },
+    });
+    expectFieldsets(Query.schema(Archive, { fields: true }), ["fields[archives]"]);
+    expectFieldsets(Query.schema(Archive, { include: { depth: 3 }, fields: true }), [
+      "fields[archives]",
+    ]);
+    expectFieldsets(Query.schema(Comment, { include: true, fields: true }), [
+      "fields[comments]",
+      "fields[companies]",
+      "fields[labels]",
+      "fields[people]",
+    ]);
+  });
+
   it("follows the `depth` an include option names", () => {
-    expect(declared(Query.schema(Article, { include: { depth: 1 }, fields: true }))).toEqual([
+    expectFieldsets(Query.schema(Article, { include: { depth: 1 }, fields: true }), [
       "fields[articles]",
       "fields[comments]",
       "fields[tags]",
     ]);
-    expect(declared(Query.schema(Article, { include: { depth: 3 }, fields: true }))).toEqual([
+    expectFieldsets(Query.schema(Article, { include: { depth: 3 }, fields: true }), [
       "fields[articles]",
       "fields[comments]",
       "fields[companies]",
@@ -141,39 +197,55 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
 
   it("follows an explicit `paths` allow-list, every resource on the way down included", () => {
     // `comments.author.employer` reaches `comments`, `people` and `companies`;
-    // `labels` is on no listed path. The direct targets stay declared.
-    expect(
-      declared(
-        Query.schema(Article, { include: { paths: ["comments.author.employer"] }, fields: true }),
-      ),
-    ).toEqual([
-      "fields[articles]",
-      "fields[comments]",
-      "fields[companies]",
-      "fields[people]",
-      "fields[tags]",
-    ]);
+    // `labels` is on no listed path. The non-paginated direct targets stay
+    // declared (`tags`): the default `included` union admits them.
+    expectFieldsets(
+      Query.schema(Article, { include: { paths: ["comments.author.employer"] }, fields: true }),
+      [
+        "fields[articles]",
+        "fields[comments]",
+        "fields[companies]",
+        "fields[people]",
+        "fields[tags]",
+      ],
+    );
   });
 
-  it("follows a declared `Include.Surface`", () => {
+  it("declares exactly what a declared `Include.Surface` reaches", () => {
+    // The surface's `included` union is `comments | people`, so the direct
+    // target `tags` the surface leaves out is not declared.
     const surface = Include.make(Article, {
       comments: Include.nested(Comment, { author: Person }),
     });
-    expect(declared(Query.schema(Article, { include: surface, fields: true }))).toEqual([
+    expectFieldsets(Query.schema(Article, { include: surface, fields: true }), [
       "fields[articles]",
       "fields[comments]",
       "fields[people]",
+    ]);
+    // A surface naming every direct target declares them all again.
+    const wide = Include.make(Article, { comments: Comment, tags: Tag });
+    expectFieldsets(Query.schema(Article, { include: wide, fields: true }), [
+      "fields[articles]",
+      "fields[comments]",
       "fields[tags]",
     ]);
   });
 
   it("walks each member of a heterogeneous endpoint", () => {
-    expect(declared(Query.schema([Tag, Comment], { include: true, fields: true }))).toEqual([
+    // `Comment`'s paginated `revisions` is not declared.
+    expectFieldsets(Query.schema([Tag, Comment], { include: true, fields: true }), [
       "fields[comments]",
       "fields[companies]",
       "fields[labels]",
       "fields[people]",
-      "fields[revisions]",
+      "fields[tags]",
+    ]);
+    // Under a surface, every member is declared, plus what the surface's
+    // paths reach from each: `Comment`'s direct target `labels` is left out.
+    const surface = Include.make(Comment, { author: Person });
+    expectFieldsets(Query.schema([Tag, Comment], { include: surface, fields: true }), [
+      "fields[comments]",
+      "fields[people]",
       "fields[tags]",
     ]);
   });
@@ -183,7 +255,7 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
       attributes: { shipped: Schema.Boolean },
       relationships: { employee: Relationship.one(() => Employee) },
     });
-    expect(declared(Query.schema(Order, { include: true, fields: true }))).toEqual([
+    expectFieldsets(Query.schema(Order, { include: true, fields: true }), [
       "fields[employees]",
       "fields[orders]",
       "fields[territories]",
@@ -195,11 +267,14 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
   const surface = Include.make(Article, {
     comments: Include.nested(Comment, { author: Person }),
   });
+  // The issue's endpoint: the graph to depth 2, no projection.
+  const get = Endpoint.get(Article, { include: true, fields: true });
   const Api = HttpApi.make("fieldsetsIncludeDepth").add(
     Group.make(
       Article,
-      // The issue's endpoint: the graph to depth 2, no projection.
-      Endpoint.get(Article, { include: true, fields: true }),
+      get,
+      // `include` off: the resource and its non-paginated direct targets.
+      Endpoint.get(Article, { name: "getShallow", path: "/shallow/:id", fields: true }),
       // A declared surface, whose handler projects the fieldsets. A projected
       // resource's attributes are partial, which the default document (every
       // required attribute present) does not admit (#322), hence the open `success`.
@@ -227,6 +302,7 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
     relationships: {
       comments: { data: [{ type: "comments", id: Comment.Id.make("5") }] },
       tags: { data: [] },
+      history: { links: { related: "/articles/1/history" } },
     },
   });
 
@@ -237,6 +313,10 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
       .handle("get", ({ query }) => {
         queries.push(query);
         return Effect.succeed({ data: article, included: [comment] });
+      })
+      .handle("getShallow", ({ query }) => {
+        queries.push(query);
+        return Effect.succeed({ data: article });
       })
       .handle("list", ({ query }) => {
         queries.push(query);
@@ -290,10 +370,11 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
     ]);
   });
 
-  // `revisions` is behind a paginated relationship, and `companies` one hop
-  // past the surface's `comments.author`.
-  it.each(["fields[revisions]", "fields[companies]"])(
-    "still rejects a type no include path reaches: %s",
+  // `revisions` is behind a paginated relationship, `companies` one hop past
+  // the surface's `comments.author`, and `tags` a direct target the surface
+  // leaves out.
+  it.each(["fields[revisions]", "fields[companies]", "fields[tags]"])(
+    "rejects a type a declared surface's response can never carry: %s",
     async (parameter) => {
       const response = await serve(`/articles?include=comments&${parameter}=name`);
       expect(response.status).toBe(400);
@@ -301,12 +382,49 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
     },
   );
 
+  // `revisions` is the target of `Article`'s paginated `history` and of
+  // `Comment`'s paginated `revisions`: never an include path, never in
+  // `included`, so a 400 whether `include` is on or off.
+  it.each(["/articles/1", "/shallow/1"])(
+    "rejects a type reachable only through a paginated relationship: %s",
+    async (path) => {
+      const response = await serve(`${path}?fields[revisions]=editedAt`);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual(rejected("fields[revisions]"));
+    },
+  );
+
+  // A non-paginated direct target stays declared without a surface: the
+  // default `included` union admits it, and a server MAY include it by
+  // default.
+  it.each(["/articles/1", "/shallow/1"])(
+    "keeps a non-paginated direct target without a surface: %s",
+    async (path) => {
+      queries.length = 0;
+      const response = await serve(`${path}?fields[tags]=name`);
+      expect(response.status).toBe(200);
+      expect(queries).toEqual([{ fields: { tags: ["name"] } }]);
+    },
+  );
+
   // `labels` is declared (depth 2, `comments.label`) but has no field to
   // select, so no value of `fields[labels]` decodes: the #261 empty-vocabulary
-  // 400, an empty value included.
+  // 400, an empty value included. The response is the same as for an
+  // undeclared type, so the endpoint's query is checked to declare
+  // `fields[labels]` and to read it as an empty vocabulary: this is that 400,
+  // not the undeclared-type one.
   it.each(["/articles/1?fields[labels]=name", "/articles/1?fields[labels]="])(
-    "rejects a reached type with no attribute as an empty vocabulary: %s",
+    "rejects a declared reached type with no attribute as an empty vocabulary: %s",
     async (url) => {
+      // The endpoint's query, as the middleware reads it (`endpoint.query.ast`).
+      const ast = get.query?.ast;
+      const wire = ast === undefined ? undefined : SchemaAST.toEncoded(ast);
+      expect(
+        wire !== undefined && SchemaAST.isObjects(wire)
+          ? wire.propertySignatures.map((property) => property.name)
+          : [],
+      ).toContain("fields[labels]");
+      expect(ast !== undefined && admitsNoValue(ast, "fields[labels]")).toBe(true);
       const response = await serve(url);
       expect(response.status).toBe(400);
       expect(response.body).toEqual(rejected("fields[labels]"));
