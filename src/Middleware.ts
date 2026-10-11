@@ -28,10 +28,11 @@
  *     the specification's own families — `include`, `fields[TYPE]`, `sort`,
  *     `page[…]`, `filter[…]` — on an endpoint that does not declare it, or
  *     declares it with an empty vocabulary, or a `page` / `filter` member
- *     the endpoint does not declare beside members it does (§Inclusion of
- *     Related Resources; §Sorting on a collection endpoint; the general
- *     §Implementation-Specific Query Parameters rule otherwise; see
- *     {@link checkQueryParameters}).
+ *     the endpoint does not declare beside members it does, or a bracketed
+ *     `include[…]` / `sort[…]`, which the specification does not define
+ *     (§Inclusion of Related Resources; §Sorting on a collection endpoint;
+ *     the general §Implementation-Specific Query Parameters rule otherwise;
+ *     see {@link checkQueryParameters}).
  *   - {@link CreatedLocation} — JSON:API §Creating Resources: a 201 create
  *     answers with a `Location` header copied from the created resource's
  *     `self` link.
@@ -100,7 +101,13 @@ import { declaredNames, declaresName, queryLeaves } from "./internal/declaredQue
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
-import { admitsNoValue, type Family, isFamily, isMemberwise } from "./internal/vocabulary.js";
+import {
+  admitsNoValue,
+  definesMembers,
+  type Family,
+  isFamily,
+  isFamilyMember,
+} from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
 // ---------------------------------------------------------------------------
@@ -525,12 +532,12 @@ const UNSUPPORTED: Readonly<Record<Family, (parameter: string) => string>> = {
     `This endpoint does not support the "filter" parameter family: it does not filter. ${GENERAL_RULE}`,
 };
 
-// The detail of the 400 for a `page` or `filter` parameter on an endpoint
-// that declares other members of its family but not this one (#321): a
-// misspelt `filter[stauts]` beside a declared `filter[status]`, a
-// `page[sise]` beside `page[size]`, which the query schema would otherwise
-// drop. It names the members the endpoint does declare, a family prefix
-// (an open record of it) as `filter[…]`.
+// The detail of the 400 for a parameter of a family on an endpoint that
+// declares other names of the family but not this one (#321): a misspelt
+// `filter[stauts]` beside a declared `filter[status]`, a `page[sise]` beside
+// `page[size]`, a bare `include` beside a hand-built `include[x]`, which the
+// query schema would otherwise drop. It names the ones the endpoint does
+// declare, a family prefix (an open record of it) as `filter[…]`.
 const undeclaredMember = (
   parameter: string,
   family: Family,
@@ -540,19 +547,32 @@ const undeclaredMember = (
   `it supports only ${members.map((member) => `"${member.endsWith("[") ? `${member}…]` : member}"`).join(", ")}. ` +
   GENERAL_RULE;
 
+// The detail of the 400 for a bracketed `include[…]` or `sort[…]` on an
+// endpoint that supports the bare parameter (#329): JSON:API defines only
+// the bare one, so the query schema would otherwise drop it and the handler
+// would never see it.
+const bracketedBareOnly = (parameter: string, family: Family): string =>
+  `This endpoint does not support the "${parameter}" parameter: JSON:API defines only ` +
+  `the bare "${family}" parameter, which this endpoint supports. ${GENERAL_RULE}`;
+
 // The detail of the 400 for a parameter of a family the specification
-// defines: an undeclared member of a memberwise family the endpoint declares
-// other members of, or the family's own detail otherwise. `fields[TYPE]`
-// keeps its own, which already names the parameter.
+// defines, on an endpoint that declares other names of that family: a
+// bracketed `include[…]` / `sort[…]` beside the bare parameter, or an
+// undeclared member of the names the endpoint does declare. With none
+// declared, the family's own detail; `fields[TYPE]` always keeps its own,
+// which already names the parameter.
 const unsupportedDetail = (
   parameter: string,
   family: Family,
   declared: ReadonlyArray<string>,
 ): string => {
   const members = Arr.dedupe(Arr.filter(declared, (entry) => baseName(entry) === family));
-  return family !== "fields" && isMemberwise(family) && Arr.isReadonlyArrayNonEmpty(members)
-    ? undeclaredMember(parameter, family, members)
-    : UNSUPPORTED[family](parameter);
+  if (family === "fields" || !Arr.isReadonlyArrayNonEmpty(members)) {
+    return UNSUPPORTED[family](parameter);
+  }
+  return !definesMembers(family) && parameter !== family && members.includes(family)
+    ? bracketedBareOnly(parameter, family)
+    : undeclaredMember(parameter, family, members);
 };
 
 // A family base name made only of a-z is reserved for the specification.
@@ -594,12 +614,17 @@ export interface QueryParameterOptions {
    * member by its base name (`lang`) and drop an empty entry; a name with any
    * other character is implementation-specific and never rejected, so it
    * needs no entry. So is a family the specification defines (`include`,
-   * `fields`, `sort`, `page`, `filter`), and any bracketed member of one
-   * (`page[size]`): an endpoint supports one by declaring it in its `query`
-   * schema, and answers 400 under the specification's general rule when it
-   * does not (JSON:API 1.1 §Implementation-Specific Query Parameters: a
-   * server that "does not know how to process it as a query parameter from
-   * this specification … MUST return `400 Bad Request`"). The allow-list
+   * `fields`, `sort`, `page`, `filter`), and any bracketed name of one: an
+   * endpoint supports a family, or a `fields`, `page` or `filter` member
+   * (`page[size]`), by declaring it in its `query` schema, and answers 400
+   * under the specification's general rule when it does not (JSON:API 1.1
+   * §Implementation-Specific Query Parameters: a server that "does not know
+   * how to process it as a query parameter from this specification … MUST
+   * return `400 Bad Request`"). JSON:API defines only the bare `include` and
+   * `sort`, so a bracketed `include[]` or `sort[title]` is that 400 even
+   * where the endpoint declares the bare parameter (#329), and the refusal
+   * says so; a name that only starts like a family's (`page[`, `filter[_]`)
+   * is no member of it, and the refusal says that instead. The allow-list
    * cannot switch that 400 off, so a spec family is never silently ignored
    * (#261).
    */
@@ -609,8 +634,8 @@ export interface QueryParameterOptions {
 /**
  * An `allowedQueryParameters` entry that is not a family base name made only
  * of the letters a-z, or that names a family the specification defines
- * (`include`, `fields`, `sort`, `page`, `filter`) or a member of one
- * (`page[size]`; see
+ * (`include`, `fields`, `sort`, `page`, `filter`) or a bracketed name of one
+ * (`page[size]`, `include[]`, `page[`; see
  * {@link QueryParameterOptions.allowedQueryParameters}). Thrown when
  * {@link schemaErrorsLayer} or {@link layerWith} builds its layer, and by
  * {@link checkQueryParameters}, so a misspelt entry fails at startup instead
@@ -637,25 +662,54 @@ export class InvalidAllowedQueryParameter extends Schema.TaggedError<InvalidAllo
   { parameter: Schema.String, message: Schema.String },
 ) {}
 
-// Why an allow-list entry is refused, if it is: one that is not a reserved
-// family base name could never match a parameter the check rejects, and one
-// of a family the specification defines — the family itself or a bracketed
-// member such as `page[size]`, whose base name would be refused in turn —
-// would switch off the 400 the general rule calls for (owner decision on
-// #261).
-const refusal = (parameter: string): Option.Option<string> => {
-  const base = baseName(parameter);
-  if (isFamily(base)) {
-    return Option.some(
-      `allowedQueryParameters entry "${parameter}" ` +
-        (base === parameter
-          ? "names a query parameter family JSON:API defines. "
-          : `is a member of the "${base}" query parameter family JSON:API defines. `) +
-        "An endpoint supports it by declaring it in its query schema, and answers 400 " +
-        "under the specification's general rule when it does not, which the allow-list " +
-        "cannot switch off; remove the entry.",
+// The tail of the refusal of an allow-list entry the 400 for a family the
+// specification defines covers.
+const CANNOT_SWITCH_OFF =
+  "answers 400 under the specification's general rule when it does not, which the " +
+  "allow-list cannot switch off; remove the entry.";
+
+// Why an allow-list entry of a family the specification defines is refused:
+// the family itself, a bracketed member of it such as `page[size]` (whose
+// base name would be refused in turn), a bracketed `include[…]` / `sort[…]`,
+// which the specification does not define at all (#329), or a name that
+// only starts like one (`page[`, `filter[_]`), which is not a member.
+const familyRefusal = (parameter: string, family: Family): string => {
+  const entry = `allowedQueryParameters entry "${parameter}"`;
+  if (parameter === family) {
+    return (
+      `${entry} names a query parameter family JSON:API defines. An endpoint supports ` +
+      `it by declaring it in its query schema, and ${CANNOT_SWITCH_OFF}`
     );
   }
+  if (!isFamilyMember(parameter, family)) {
+    return (
+      `${entry} starts with the "${family}" query parameter family name JSON:API defines ` +
+      `but is not a well-formed member of it: a member is "${family}" followed by "[]" or ` +
+      "square-bracketed member names. The allow-list cannot admit a name of that family; " +
+      "remove the entry."
+    );
+  }
+  if (!definesMembers(family)) {
+    return (
+      `${entry} is a bracketed member of the "${family}" query parameter family, but ` +
+      `JSON:API defines only the bare "${family}" parameter. An endpoint answers a ` +
+      "bracketed one 400 under the specification's general rule unless its query schema " +
+      "declares that very name, which the allow-list cannot switch off; remove the entry."
+    );
+  }
+  return (
+    `${entry} is a member of the "${family}" query parameter family JSON:API defines. ` +
+    `An endpoint supports it by declaring it in its query schema, and ${CANNOT_SWITCH_OFF}`
+  );
+};
+
+// Why an allow-list entry is refused, if it is: one that is not a reserved
+// family base name could never match a parameter the check rejects, and one
+// of a family the specification defines would switch off the 400 the
+// general rule calls for (owner decision on #261).
+const refusal = (parameter: string): Option.Option<string> => {
+  const base = baseName(parameter);
+  if (isFamily(base)) return Option.some(familyRefusal(parameter, base));
   if (RESERVED_BASE_NAME.test(parameter)) return Option.none();
   return Option.some(
     `allowedQueryParameters entry "${parameter}" is not a family base name ` +
@@ -685,12 +739,14 @@ const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string
 };
 
 // Whether a parameter is one the endpoint supports, given the names it
-// declares and the allow-list. A member of `fields`, `page` or `filter` is
-// its own parameter — a `fields[TYPE]` per resource type (#261), a
-// `page[KEY]` or `filter[KEY]` per declared key (#321) — so only that very
-// name, or a declared prefix of its family (`fields[`, `filter[`: an open
-// record of it), admits it (`isMemberwise`, `declaresName`); any other
-// declared name admits its whole family, as does an allowed base name.
+// declares and the allow-list. Every name of a family the specification
+// defines is its own parameter — a `fields[TYPE]` per resource type (#261),
+// a `page[KEY]` or `filter[KEY]` per declared key (#321), and the bare
+// `include` / `sort`, which admit no bracketed member (#329) — so only that
+// very name, or a declared prefix of its family (`fields[`, `filter[`: an
+// open record of it), admits it (`declaresName`). A declared name of any
+// other reserved family admits its whole family, as does an allowed base
+// name.
 const isSupported = (
   name: string,
   declared: ReadonlyArray<string>,
@@ -698,7 +754,7 @@ const isSupported = (
 ): boolean => {
   const base = baseName(name);
   if (!RESERVED_BASE_NAME.test(base) || allowed.includes(base)) return true;
-  if (isFamily(base) && isMemberwise(base)) return declaresName(declared, name);
+  if (isFamily(base)) return declaresName(declared, name);
   return declared.some((entry) => baseName(entry) === base);
 };
 
@@ -745,11 +801,13 @@ export interface QueryParameterCheck extends QueryParameterOptions {
   /**
    * The query parameter names the endpoint's own query schema declares
    * (`q`, `page[limit]`, `fields[articles]`, …). Each admits its whole
-   * family, except a name of the `fields`, `page` or `filter` family, which
+   * family, except a name of a family the specification defines, which
    * admits only itself: a sparse fieldset is per resource type, so
-   * `fields[articles]` does not admit `fields[people]`, and a page or filter
-   * key is per key, so `page[limit]` does not admit `page[size]` (#321). A
-   * name ending in `[` (`fields[`, `filter[`) admits every name it opens.
+   * `fields[articles]` does not admit `fields[people]`; a page or filter
+   * key is per key, so `page[limit]` does not admit `page[size]` (#321); and
+   * JSON:API defines only the bare `include` and `sort`, so a declared
+   * `include` does not admit `include[]` (#329). A name ending in `[`
+   * (`fields[`, `filter[`) admits every name it opens.
    * An endpoint that supports one of the specification's families
    * (`include`, `fields[TYPE]`, `sort`, `page`, `filter`) lists it here:
    * undeclared, it is rejected. One that declares it with an empty
@@ -793,12 +851,15 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  *   `page[size]`, and a declared `filter[status]` does not admit
  *   `filter[stauts]` or `filter[status][eq]`, each of which is answered
  *   naming the members `declared` does list; a `filter[` prefix (the open
- *   `filter: true` grammar) admits every `filter[…]`; or
+ *   `filter: true` grammar) admits every `filter[…]`. A declared `include`
+ *   or `sort` admits only the bare parameter (#329): JSON:API defines no
+ *   bracketed member of either, so `include[]` or `sort[title]` is answered
+ *   saying so, unless `declared` lists that very name; or
  * - is listed in `allowedQueryParameters`.
  *
  * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
  * entry that is not a family base name made only of a-z, or that names one
- * of the specification's families.
+ * of the specification's families or a bracketed name of one.
  *
  * {@link SchemaErrorsLive} runs this on every request before the endpoint
  * decodes anything, with the names the endpoint's query schema declares.
@@ -1001,9 +1062,11 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * collection endpoint; the general §Implementation-Specific Query
  * Parameters rule otherwise), as is a member of a `page` or `filter` family
  * the endpoint declares other members of but not that one (`filter[stauts]`
- * beside a declared `filter[status]`, under the general rule). Then every
- * request validation failure is answered as {@link SchemaErrorsLive}
- * describes.
+ * beside a declared `filter[status]`, under the general rule), and a
+ * bracketed `include[…]` / `sort[…]` beside a declared bare `include` /
+ * `sort` (`include[]`, `sort[title]`; JSON:API defines only the bare
+ * parameter, so the general rule applies). Then every request validation
+ * failure is answered as {@link SchemaErrorsLive} describes.
  *
  * The `Endpoint` constructors attach {@link SchemaErrors} after
  * {@link ContentNegotiation}, which makes it the outer of the two, so this
@@ -1013,7 +1076,8 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
  * `allowedQueryParameters` entry that is not a family base name made only of
  * a-z, or that names one of the specification's families (`include`,
- * `fields`, `sort`, `page`, `filter`).
+ * `fields`, `sort`, `page`, `filter`) or a bracketed name of one
+ * (`page[size]`, `include[]`).
  *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
  * the same option. A host that negotiates content itself composes this with
@@ -1148,6 +1212,14 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * so does a hand-built open record of a family
  * (`Schema.Record(Schema.TemplateLiteral(["filter[", Schema.String, "]"]), …)`),
  * which admits every member it opens.
+ *
+ * JSON:API defines only the bare `include` and `sort` (#329), so a bracketed
+ * one — `?include[]=author`, `?include[x]=author`, `?sort[title]=1`,
+ * `?sort[x][y]=1` — is a 400 naming it under the spec's general rule, on an
+ * endpoint that declares the bare parameter as on one that does not; the
+ * query schema would otherwise drop it. A hand-built query schema that
+ * declares such a name itself (a `"sort[x]"` property) supports that very
+ * name, and only it.
  *
  * A handler whose response fails to encode against its endpoint's own schema
  * (`HttpApiSchemaError` kind `"Body"` or `"ResponseHeaders"`) is a server
@@ -1315,7 +1387,8 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
  * `allowedQueryParameters` entry that is not a family base name made only of
- * a-z, or that names one of the specification's families.
+ * a-z, or that names one of the specification's families or a bracketed
+ * name of one.
  *
  * @example
  * ```ts
