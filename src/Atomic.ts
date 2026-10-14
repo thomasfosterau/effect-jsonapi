@@ -59,7 +59,11 @@ import { Schema } from "effect";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js";
-import { closedStruct, defaultUndeclaredMemberCap } from "./internal/schemaExt.js";
+import {
+  closedStruct,
+  defaultMaxUndeclaredMemberErrors,
+  validateMaxUndeclaredMemberErrors,
+} from "./internal/schemaExt.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
 import type {
@@ -333,9 +337,15 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
 
 // How many undeclared members each operation member reports at its own path
 // (#308): the resource's own cap, which every definition `Resource.make` builds
-// carries, or the default for a hand-rolled `Any` that carries none.
-const undeclaredMemberCapOf = (resource: Any): number =>
-  resource.undeclaredMemberCap ?? defaultUndeclaredMemberCap;
+// carries, or the default for a hand-rolled `Any` that carries none. A
+// hand-rolled `Any`'s cap was never through `Resource.make`'s validation, so it
+// is validated here by the same rule, and a bad one throws when the operation
+// schema is defined, as `Resource.make` throws when the resource is.
+const maxUndeclaredMemberErrorsOf = (operation: string, resource: Any): number =>
+  validateMaxUndeclaredMemberErrors(
+    `Atomic.${operation}("${resource.type}")`,
+    resource.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
+  );
 
 // Runtime construction of the add / update operation relationship members.
 const addRelationshipMembers = (
@@ -403,7 +413,7 @@ export interface AddOperation<R extends Any> extends Schema.Struct<{
  * @category schemas
  */
 export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
-  const cap = undeclaredMemberCapOf(resource);
+  const cap = maxUndeclaredMemberErrorsOf("AddOperation", resource);
   const { required, struct } = addRelationshipMembers(resource.relationships, cap);
   return Schema.Struct({
     op: Schema.tag("add"),
@@ -455,7 +465,7 @@ export interface UpdateOperation<R extends Any> extends Schema.Struct<{
  * @category schemas
  */
 export const UpdateOperation = <R extends Any>(resource: R): UpdateOperation<R> => {
-  const cap = undeclaredMemberCapOf(resource);
+  const cap = maxUndeclaredMemberErrorsOf("UpdateOperation", resource);
   return Schema.Struct({
     op: Schema.tag("update"),
     ref: Schema.optionalKey(ResourceRef(resource)),

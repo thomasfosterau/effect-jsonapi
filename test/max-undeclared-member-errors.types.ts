@@ -1,11 +1,12 @@
 /**
- * Type-level tests for the `undeclaredMemberCap` option (#308).
+ * Type-level tests for the `maxUndeclaredMemberErrors` option (#308).
  *
  *   - `Resource.make` and `Resource.extend` take it as `number | undefined`, so
  *     a caller can forward its own optional option (`exactOptionalPropertyTypes`
  *     is on), and refuse anything that isn't a number.
  *   - A definition reads it back as `number`, the resolved cap; `Resource.Any`
- *     carries it optionally, so a hand-rolled `Any` need not supply it.
+ *     carries it optionally, so a hand-rolled `Any` need not supply it. A
+ *     `Resource.family` reads its base's (`undefined` with no base).
  *
  * This file is type-checked by `tsconfig.test.json`; the `@ts-expect-error`
  * annotations are the assertions, each paired with the negative control that
@@ -27,31 +28,38 @@ const attributes = { name: Schema.NonEmptyString };
 // ---------------------------------------------------------------------------
 
 // The negative control: a number, and `Infinity`, are accepted.
-export const Capped = Resource.make("capped", { attributes, undeclaredMemberCap: 50 });
+export const Capped = Resource.make("capped", { attributes, maxUndeclaredMemberErrors: 50 });
 export const Open = Resource.make("open", {
   attributes,
-  undeclaredMemberCap: Number.POSITIVE_INFINITY,
+  maxUndeclaredMemberErrors: Number.POSITIVE_INFINITY,
 });
 
 // An explicit `undefined`, as a caller forwarding its own optional option.
 export const forwarded = (cap?: number | undefined) =>
-  Resource.make("forwarded", { attributes, undeclaredMemberCap: cap });
+  Resource.make("forwarded", { attributes, maxUndeclaredMemberErrors: cap });
 
 // @ts-expect-error -- the cap is a number, not a numeric string
-export const stringCap = Resource.make("strings", { attributes, undeclaredMemberCap: "12" });
+export const stringCap = Resource.make("strings", { attributes, maxUndeclaredMemberErrors: "12" });
 
-export const Extended = Resource.extend(Capped, "extended", { undeclaredMemberCap: 4 });
+export const Extended = Resource.extend(Capped, "extended", { maxUndeclaredMemberErrors: 4 });
 export const extendForwarded = (cap?: number | undefined) =>
-  Resource.extend(Capped, "extended", { undeclaredMemberCap: cap });
-// @ts-expect-error -- `extend` takes the same option, with the same type
-export const extendString = Resource.extend(Capped, "extended", { undeclaredMemberCap: true });
+  Resource.extend(Capped, "extended", { maxUndeclaredMemberErrors: cap });
+export const extendString = Resource.extend(Capped, "extended", {
+  // @ts-expect-error -- `extend` takes the same option, with the same type
+  maxUndeclaredMemberErrors: true,
+});
 
 // ---------------------------------------------------------------------------
 // Reading it back
 // ---------------------------------------------------------------------------
 
-export const resolved: Equals<typeof Capped.undeclaredMemberCap, number> = true;
-export const inherited: Equals<typeof Extended.undeclaredMemberCap, number> = true;
-export const onAny: Equals<Resource.Any["undeclaredMemberCap"], number | undefined> = true;
+export const resolved: Equals<typeof Capped.maxUndeclaredMemberErrors, number> = true;
+export const inherited: Equals<typeof Extended.maxUndeclaredMemberErrors, number> = true;
+export const onAny: Equals<Resource.Any["maxUndeclaredMemberErrors"], number | undefined> = true;
 // @ts-expect-error -- a definition's cap is resolved: never `undefined`
-export const neverUndefined: Equals<typeof Capped.undeclaredMemberCap, number | undefined> = true;
+export const neverUndefined: Equals<typeof Capped.maxUndeclaredMemberErrors, number | undefined> =
+  true;
+export const Family = Resource.family(Capped, [Extended]);
+export const onFamily: Equals<typeof Family.maxUndeclaredMemberErrors, number> = true;
+export const Named = Resource.family("named", [Extended]);
+export const onNamedFamily: Equals<typeof Named.maxUndeclaredMemberErrors, undefined> = true;

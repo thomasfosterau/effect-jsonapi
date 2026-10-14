@@ -132,13 +132,42 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
  * How many undeclared members a closed struct reports at their own paths
  * before it summarises the rest in one issue at the struct (#308).
  */
-export const defaultUndeclaredMemberCap = 12;
+export const defaultMaxUndeclaredMemberErrors = 12;
 
-// The summary issue's message: "…and 9,988 more undeclared members". The count
-// is grouped with commas whatever the host's locale, so a response body never
-// depends on where the server runs.
+/**
+ * Validates a `maxUndeclaredMemberErrors` value: a positive integer, or
+ * `Infinity` for no cap. Zero would report a summary with no member beside
+ * it, and a fraction, a negative number, `NaN` or a non-number (from a caller
+ * the types don't check) no count at all, so each throws, naming `where`
+ * (`Resource.make("notes")`) and the value: a number with `String`, anything
+ * else with `JSON.stringify`.
+ */
+export const validateMaxUndeclaredMemberErrors = (where: string, cap: number): number => {
+  if (
+    Predicate.isNumber(cap) &&
+    (cap === Number.POSITIVE_INFINITY || (Number.isInteger(cap) && cap > 0))
+  ) {
+    return cap;
+  }
+  throw new Error(
+    `${where}: maxUndeclaredMemberErrors must be a positive integer or Infinity, got ${showValue(cap)}`,
+  );
+};
+
+// A number prints with `String` (`NaN`, `-Infinity`, `1.5`), anything else
+// with `JSON.stringify` (`"12"`, `true`), or `String` again for a value JSON
+// writes as nothing (a symbol, a function).
+const showValue = (value: number): string =>
+  Predicate.isNumber(value)
+    ? String(value)
+    : // oxlint-disable-next-line effect/avoid-direct-json -- a diagnostic rendering of an arbitrary value, not a wire boundary
+      (JSON.stringify(value) ?? String(value));
+
+// The summary issue's message: "9988 more undeclared members not listed". The
+// count is plain digits (`String`), so a response body never depends on the
+// host's locale.
 const moreUndeclared = (count: number): string =>
-  `…and ${count.toLocaleString("en-US")} more undeclared member${count === 1 ? "" : "s"}`;
+  `${String(count)} more undeclared member${count === 1 ? "" : "s"} not listed`;
 
 // Rejects every enumerable own key of an object outside `declared`. The first
 // `cap` of them are reported each as an `UnexpectedKey` at its own path: the
@@ -227,10 +256,9 @@ const nullAsObject = { message: "Expected object" } as const;
 
 /**
  * `Schema.Struct(fields)`, closed: a member of its input that `fields` doesn't
- * declare is rejected, each of the first `cap` (default
- * {@link defaultUndeclaredMemberCap}) as an `UnexpectedKey` issue at that
- * member's path ("Expected no excess property"), and any beyond them by one
- * `InvalidValue` at the struct ("…and 9,988 more undeclared members"). A
+ * declare is rejected, each of the first `cap` as an `UnexpectedKey` issue at
+ * that member's path ("Expected no excess property"), and any beyond them by one
+ * `InvalidValue` at the struct ("9988 more undeclared members not listed"). A
  * non-object, an array or a `null` is rejected at its own path ("Expected
  * object"). The result is still a
  * `Schema.Struct`: its `fields`, its `Type` / `Encoded`, the JSON Schema /
@@ -252,8 +280,11 @@ const nullAsObject = { message: "Expected object" } as const;
  * - The first `cap` undeclared members of one struct are reported, each as
  *   its own issue, and the rest by one summary issue at the struct, whatever
  *   the `errors` parse option says (#308). `cap` is a positive integer or
- *   `Infinity` (every member reported, the summary never); the caller
- *   validates it (`Resource.make`'s `undeclaredMemberCap`).
+ *   `Infinity` (every member reported, the summary never). It is required,
+ *   so no write body member can silently fall back to a default its resource
+ *   doesn't carry; the caller resolves it ({@link defaultMaxUndeclaredMemberErrors}
+ *   when none is configured) and validates it
+ *   ({@link validateMaxUndeclaredMemberErrors}).
  * - The encoding check runs only once the node has parsed. So when a declared
  *   field fails (a wrong type, a missing required key), only that field is
  *   reported, and the undeclared members beside it are not, even with
@@ -269,7 +300,7 @@ const nullAsObject = { message: "Expected object" } as const;
  */
 export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
-  cap: number = defaultUndeclaredMemberCap,
+  cap: number,
 ): Schema.Struct<Fields> => {
   const struct = Rec.isEmptyReadonlyRecord(fields)
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
