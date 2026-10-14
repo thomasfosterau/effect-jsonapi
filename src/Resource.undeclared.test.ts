@@ -9,7 +9,7 @@
  * JSON:API allows around them (`meta`, `jsonapi`, `links`) are still accepted,
  * the OpenAPI document still describes each member's properties, and encoding
  * (what a client does) rejects an undeclared member as decoding does. A member
- * reports at most `undeclaredMemberCap` (default 12) of them at their own
+ * reports at most `maxUndeclaredMemberErrors` (default 12) of them at their own
  * pointers, and one summary error at the member for the rest (#308).
  */
 import { describe, expect, it } from "vite-plus/test";
@@ -27,7 +27,8 @@ import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import { layerWith } from "./Middleware.js";
 import * as Relationship from "./Relationship.js";
-import { annotate, attribute, extend, make as Resource } from "./Resource.js";
+import { annotate, attribute, extend, family, make as Resource } from "./Resource.js";
+import type { Any } from "./Resource.js";
 import { platformLayer } from "./Registry.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 
@@ -45,7 +46,7 @@ const Memo = Resource("memos", { attributes: { body: Schema.String } });
 const Capped = Resource("capped", {
   attributes: { body: Schema.String },
   relationships: { owner: Relationship.optional(() => Owner) },
-  undeclaredMemberCap: 2,
+  maxUndeclaredMemberErrors: 2,
 });
 
 const Api = HttpApi.make("undeclared")
@@ -504,7 +505,7 @@ describe("the errors a 400 reports for undeclared members are capped (#308)", ()
       expect(response.status).toBe(400);
       expect(reportedAt(response.text, member)).toEqual([
         ...excess(member, 12),
-        ["…and 9,988 more undeclared members", memberPointer(member)],
+        ["9988 more undeclared members not listed", memberPointer(member)],
       ]);
       // The request is ~100 KB; the 400 stays a few KB however many keys come.
       expect(request.length).toBeGreaterThan(90_000);
@@ -524,7 +525,7 @@ describe("the errors a 400 reports for undeclared members are capped (#308)", ()
       expect(response.status).toBe(400);
       expect(reportedAt(response.text, member)).toEqual([
         ...excess(member, 12),
-        ["…and 1 more undeclared member", memberPointer(member)],
+        ["1 more undeclared member not listed", memberPointer(member)],
       ]);
     });
   });
@@ -535,7 +536,7 @@ describe("the errors a 400 reports for undeclared members are capped (#308)", ()
       status: "400",
       code: "bad_request",
       title: "Bad Request",
-      detail: "…and 1 more undeclared member",
+      detail: "1 more undeclared member not listed",
       source: { pointer: "/data/attributes" },
     });
   });
@@ -555,17 +556,17 @@ describe("the errors a 400 reports for undeclared members are capped (#308)", ()
     expect([create.status, update.status]).toEqual([400, 400]);
     expect(reportedAt(create.text, "/data/attributes")).toEqual([
       ...excess("/data/attributes", 2),
-      ["…and 3 more undeclared members", "/data/attributes"],
+      ["3 more undeclared members not listed", "/data/attributes"],
     ]);
     expect(reportedAt(update.text, "/data/relationships")).toEqual([
       ...excess("/data/relationships", 2),
-      ["…and 1 more undeclared member", "/data/relationships"],
+      ["1 more undeclared member not listed", "/data/relationships"],
     ]);
     expect(received).toEqual([]);
   });
 });
 
-describe("the undeclaredMemberCap option (#308)", () => {
+describe("the maxUndeclaredMemberErrors option (#308)", () => {
   const issuesOf = (result: Result.Result<unknown, Schema.SchemaError>) =>
     Result.match(result, {
       onFailure: (error) => SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues,
@@ -577,7 +578,7 @@ describe("the undeclaredMemberCap option (#308)", () => {
   const cappedAt = (path: ReadonlyArray<string>) => [
     { path: [...path, "k0"], message: "Expected no excess property" },
     { path: [...path, "k1"], message: "Expected no excess property" },
-    { path, message: "…and 3 more undeclared members" },
+    { path, message: "3 more undeclared members not listed" },
   ];
 
   // Every write body member `Capped` derives, with five undeclared members.
@@ -667,14 +668,14 @@ describe("the undeclaredMemberCap option (#308)", () => {
   });
 
   it("is 12 by default, and is read back from the definition", () => {
-    expect(Note.undeclaredMemberCap).toBe(12);
-    expect(Capped.undeclaredMemberCap).toBe(2);
+    expect(Note.maxUndeclaredMemberErrors).toBe(12);
+    expect(Capped.maxUndeclaredMemberErrors).toBe(2);
   });
 
   it("Infinity reports every undeclared member, with no summary", () => {
     const Open = Resource("open", {
       attributes: { body: Schema.String },
-      undeclaredMemberCap: Number.POSITIVE_INFINITY,
+      maxUndeclaredMemberErrors: Number.POSITIVE_INFINITY,
     });
     const issues = issuesOf(
       Schema.decodeUnknownResult(Open.createInput)({ body: "b", ...extras(100) }),
@@ -685,9 +686,9 @@ describe("the undeclaredMemberCap option (#308)", () => {
 
   it("is inherited by extend and kept by annotate, and extend can override it", () => {
     const Child = extend(Capped, "children", { attributes: { extra: Schema.String } });
-    const Wider = extend(Capped, "wider", { undeclaredMemberCap: 4 });
+    const Wider = extend(Capped, "wider", { maxUndeclaredMemberErrors: 4 });
     const Annotated = annotate(Capped, { "acme/table": "capped" });
-    expect([Child, Wider, Annotated].map((r) => r.undeclaredMemberCap)).toEqual([2, 4, 2]);
+    expect([Child, Wider, Annotated].map((r) => r.maxUndeclaredMemberErrors)).toEqual([2, 4, 2]);
     expect(
       issuesOf(
         Schema.decodeUnknownResult(Child.createInput)({ body: "b", extra: "e", ...extras(5) }),
@@ -700,21 +701,123 @@ describe("the undeclaredMemberCap option (#308)", () => {
         path: [k],
         message: "Expected no excess property",
       })),
-      { path: [], message: "…and 1 more undeclared member" },
+      { path: [], message: "1 more undeclared member not listed" },
     ]);
   });
 
-  it.each([0, -1, 1.5, Number.NaN, Number.NEGATIVE_INFINITY])("refuses %s", (cap) => {
+  it("is carried by a family anchored on a base, and absent on a name-only one", () => {
+    const Member = extend(Capped, "members");
+    const Anchored = family(Capped, [Member]);
+    const Named = family("named", [Member]);
+    expect([Anchored.maxUndeclaredMemberErrors, Named.maxUndeclaredMemberErrors]).toEqual([
+      2,
+      undefined,
+    ]);
+    expect(
+      issuesOf(
+        Schema.decodeUnknownResult(Atomic.AddOperation(Anchored))({
+          op: "add",
+          data: { type: "capped", attributes: { body: "b", ...extras(5) } },
+        }),
+      ),
+    ).toEqual(cappedAt(["data", "attributes"]));
+  });
+
+  // Invalid values, and how each message prints them: a number with `String`,
+  // anything else with `JSON.stringify`. The non-numbers stand for what a
+  // caller the types don't check (plain JavaScript) could pass.
+  type Invalid = number | string | boolean | { readonly cap: number };
+  const invalid: ReadonlyArray<readonly [Invalid, string]> = [
+    [0, "0"],
+    [-1, "-1"],
+    [1.5, "1.5"],
+    [Number.NaN, "NaN"],
+    [Number.NEGATIVE_INFINITY, "-Infinity"],
+    ["12", '"12"'],
+    [true, "true"],
+    [{ cap: 12 }, '{"cap":12}'],
+  ];
+  const refusal = (where: string, shown: string) =>
+    `${where}: maxUndeclaredMemberErrors must be a positive integer or Infinity, got ${shown}`;
+  // Sets `maxUndeclaredMemberErrors` to an `Invalid` value at runtime, as an
+  // unchecked caller would. `Object.assign` types the result as the
+  // intersection, in which the property still reads as the target's number,
+  // so the call it is passed to type-checks.
+  const withCap = <T extends { readonly maxUndeclaredMemberErrors: number }>(
+    target: T,
+    cap: Invalid,
+  ) => Object.assign(target, { maxUndeclaredMemberErrors: cap });
+
+  it.each(invalid)("Resource.make refuses %s", (cap, shown) => {
     expect(() =>
-      Resource("bad", { attributes: { body: Schema.String }, undeclaredMemberCap: cap }),
-    ).toThrow(
-      `Resource.make("bad"): undeclaredMemberCap must be a positive integer or Infinity, got ${String(cap)}`,
+      Resource(
+        "bad",
+        withCap({ attributes: { body: Schema.String }, maxUndeclaredMemberErrors: 1 }, cap),
+      ),
+    ).toThrow(refusal('Resource.make("bad")', shown));
+  });
+
+  it.each(invalid)("Resource.extend refuses %s, naming the extend call", (cap, shown) => {
+    expect(() => extend(Capped, "child", withCap({ maxUndeclaredMemberErrors: 1 }, cap))).toThrow(
+      refusal('Resource.extend("child")', shown),
+    );
+  });
+
+  // A hand-rolled `Any`: a schema with the members `Any` names, never through
+  // `Resource.make`, so its cap is whatever it carries.
+  const handRolled = <Cap extends Pick<Any, "maxUndeclaredMemberErrors">>(cap: Cap) =>
+    Object.assign(Schema.Struct({}), {
+      type: Note.type,
+      Id: Note.Id,
+      identifier: Note.identifier,
+      relationships: Note.relationships,
+      fields: Note.fields,
+      declaredAttributes: Note.declaredAttributes,
+      ...cap,
+    });
+
+  it("a hand-rolled Any with no cap gets the default in the atomic operations", () => {
+    const add = Atomic.AddOperation(handRolled({}));
+    const update = Atomic.UpdateOperation(handRolled({}));
+    const reported = (issues: ReadonlyArray<{ readonly message: string }>) =>
+      issues.map(({ message }) => message);
+    const twelve = Array.from({ length: 12 }, () => "Expected no excess property");
+    expect(
+      reported(
+        issuesOf(
+          Schema.decodeUnknownResult(add)({
+            op: "add",
+            data: { type: "notes", attributes: { body: "b", ...extras(13) } },
+          }),
+        ),
+      ),
+    ).toEqual([...twelve, "1 more undeclared member not listed"]);
+    expect(
+      reported(
+        issuesOf(
+          Schema.decodeUnknownResult(update)({
+            op: "update",
+            data: { type: "notes", id: "1", attributes: extras(13) },
+          }),
+        ),
+      ),
+    ).toEqual([...twelve, "1 more undeclared member not listed"]);
+  });
+
+  it.each(invalid)("the atomic operations refuse a hand-rolled Any's cap of %s", (cap, shown) => {
+    const resource = withCap(handRolled({ maxUndeclaredMemberErrors: 1 }), cap);
+    expect(() => Atomic.AddOperation(resource)).toThrow(
+      refusal('Atomic.AddOperation("notes")', shown),
+    );
+    expect(() => Atomic.UpdateOperation(resource)).toThrow(
+      refusal('Atomic.UpdateOperation("notes")', shown),
     );
   });
 
   it("accepts an explicit undefined as the default", () => {
     expect(
-      Resource("plain", { attributes: {}, undeclaredMemberCap: undefined }).undeclaredMemberCap,
+      Resource("plain", { attributes: {}, maxUndeclaredMemberErrors: undefined })
+        .maxUndeclaredMemberErrors,
     ).toBe(12);
   });
 });
