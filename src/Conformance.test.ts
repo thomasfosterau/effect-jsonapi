@@ -22,7 +22,7 @@ import {
   Schema,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
-import type { HttpClientRequest } from "effect/http";
+import { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
@@ -1786,6 +1786,97 @@ describe("Conformance: the write fixture", () => {
       ),
     );
 
+  /**
+   * A transport in front of the server that answers every request outside
+   * `/live` with a `status` redirect to `to(path)` — on the run's origin, or
+   * not — and serves `/live/…` as the server serves `…`. `sent` is every URL
+   * the kit sent.
+   */
+  const redirectingAll = (status: number, to: (path: string) => string) => {
+    const sent: Array<string> = [];
+    return {
+      sent,
+      client: (canned: HttpClient.HttpClient) =>
+        HttpClient.make((request, url) => {
+          sent.push(url.href);
+          if (url.pathname.startsWith("/live/")) {
+            return canned.execute(
+              HttpClientRequest.setUrl(
+                request,
+                `${url.origin}${url.pathname.slice("/live".length)}${url.search}`,
+              ),
+            );
+          }
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response(null, {
+                status,
+                headers: { location: to(`${url.pathname}${url.search}`) },
+              }),
+            ),
+          );
+        }),
+    };
+  };
+
+  /** Every outcome as the report gives it, less the request count a redirect adds to. */
+  const verdicts = (report: Conformance.Report) =>
+    report.outcomes.map((outcome) =>
+      Predicate.isTagged(outcome, "Passed") || Predicate.isTagged(outcome, "Failed")
+        ? { ...outcome, probes: 0 }
+        : outcome,
+    );
+
+  it("grades a target that redirects every request within its origin as the URL that serves", async () => {
+    const direct = await run();
+    const redirected = redirectingAll(308, (path) => `/live${path}`);
+    const { report } = await run(undefined, undefined, { client: redirected.client });
+    expect(redirected.sent.some((url) => url.includes("/live/"))).toBe(true);
+    expect(redirected.sent.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
+    expect(verdicts(report)).toEqual(verdicts(direct.report));
+  });
+
+  it.each([
+    ["another host", "https://elsewhere.test"],
+    // A change of scheme is a change of origin, on the same host as much as any.
+    ["the same host over https", "https://fixture.test"],
+  ])(
+    "reports a target that redirects every request to %s once, as unreachable, and decides nothing on it",
+    async (_, origin) => {
+      const redirected = redirectingAll(302, (path) => `${origin}${path}`);
+      const { report } = await run(undefined, undefined, { client: redirected.client });
+      expect(redirected.sent.filter((url) => !url.startsWith("http://fixture.test/"))).toEqual([]);
+      expect(outcomeFor(report, "spec/target/reachable")).toEqual({
+        _tag: "Failed",
+        rule: expect.anything(),
+        probes: 1,
+        findings: [
+          {
+            rule: expect.anything(),
+            detail:
+              "every read endpoint the kit probed answered with a redirect it does not follow, so the rules that probe it have no answer to decide on — point `baseUrl` at the URL that serves the api",
+            expected:
+              "an answer from the base URL's origin, directly or through redirects that stay on it",
+            observed: `/articles/1: a 302 redirect to ${origin}/articles/1, which the kit does not follow: ${origin} is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`,
+            probe: expect.anything(),
+          },
+        ],
+      });
+      // Nothing else is failed on answers the kit never read — no "was not
+      // rejected" — and nothing passes on them either.
+      expect(failed(report)).toEqual(["spec/target/reachable"]);
+      expect(Conformance.summarise(report).passed).toBe(0);
+      // A create the kit could not read is named by its redirect, not by a bare 0.
+      expect(outcomeFor(report, "spec/status/create-response-document")).toMatchObject({
+        _tag: "Skipped",
+        reason: expect.stringContaining(
+          `the server did not accept writes["articles"].create (a 302 redirect to ${origin}/articles,`,
+        ),
+      });
+    },
+  );
+
   it("runs every write rule against a conformant server, on targets it created", async () => {
     const { report, store, writes } = await run();
     expect(failed(report)).toEqual([]);
@@ -3167,6 +3258,29 @@ describe("Conformance: pagination links enumerate the collection", () => {
     );
   });
 
+  it("follows a `next` that redirects within the origin, and leaves one that redirects off it unfinished", async () => {
+    const onPage2 = (answer: Canned) => (request: CannedRequest) =>
+      queryOf(request).get("page[offset]") === "3" && !queryOf(request).has("moved")
+        ? answer
+        : offsetPager()(request);
+    // The same page, a hop away on the run's origin: the walk goes on.
+    const report = await verifyOver(offsetApi)(
+      onPage2({ status: 307, headers: { location: "/tags?page[offset]=3&page[limit]=3&moved=1" } }),
+      { only: [RULE] },
+    );
+    expect(outcomeFor(report, RULE)._tag).toBe("Passed");
+    expect(
+      await skipReason(
+        onPage2({
+          status: 302,
+          headers: { location: "https://elsewhere.test/tags?page[offset]=3" },
+        }),
+      ),
+    ).toBe(
+      "no paginated collection could be walked to a verdict (/tags: `next` on page 1 (/tags?page[limit]=3) answered a 302 redirect to https://elsewhere.test/tags?page[offset]=3, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin, so the walk could not be finished)",
+    );
+  });
+
   it("does not hold a lost response mid-walk against `next`", async () => {
     const report = await verifyOver(offsetApi)(offsetPager(), { only: [RULE] }, (client) =>
       HttpClient.make((request) =>
@@ -4318,13 +4432,35 @@ describe("Conformance: `self` and `related` links dereference", () => {
     });
   });
 
+  it("counts a read endpoint whose URL does not resolve as not searched", async () => {
+    // 202 list endpoints, one of them given a path that is no URL: the budget
+    // fetches 200 of the other 201, so 200 were searched — not 201.
+    const many = Arr.makeBy(202, (n) => Resource.make(`r${n}`, { attributes: {} }));
+    const wide = HttpApi.make("wide").add(
+      ...Arr.map(many, (resource) => Group.make(resource, Endpoint.list(resource))),
+    );
+    const report = await verifyOver(wide)(() => ({ body: { data: [] } }), {
+      only: [SELF],
+      paths: { "r201.list": "http://[" },
+    });
+    expect(outcomeFor(report, SELF)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "the rule's budget of 200 requests ran out with 200 of 202 read endpoints searched for links — a partial crawl is not passed",
+    });
+  });
+
   /** A JSON body for a hand-built `Response`. */
   const jsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-  it("lets no transport follow a redirect, to another origin least of all", async () => {
+  /**
+   * A `fetch` over `linked()` that follows a redirect unless told not to, as
+   * the platform's does: `/articles/2` redirects to `elsewhere`. It records
+   * every URL it was sent and the `credentials` each request carried.
+   */
+  const redirectingFetch = (elsewhere: string) => {
     const sent: Array<string> = [];
     const credentials: Array<string> = [];
-    const elsewhere = "https://elsewhere.test/articles/2";
     const respond = (url: URL): Response => {
       const canned = linked()({
         method: "GET",
@@ -4336,7 +4472,6 @@ describe("Conformance: `self` and `related` links dereference", () => {
         headers: { "content-type": MEDIA_TYPE },
       });
     };
-    // A `fetch` that follows a redirect unless told not to, as the platform's does.
     const fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = new URL(input instanceof Request ? input.url : input);
       sent.push(url.href);
@@ -4350,7 +4485,15 @@ describe("Conformance: `self` and `related` links dereference", () => {
       sent.push(elsewhere);
       return Promise.resolve(respond(new URL(elsewhere)));
     };
-    const exit = await Effect.runPromiseExit(
+    return { sent, credentials, fetch };
+  };
+
+  /** A `self` run over `fetch`, with `init` as the run's own `RequestInit`. */
+  const overFetch = (
+    fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
+    init: RequestInit,
+  ) =>
+    Effect.runPromiseExit(
       Effect.gen(function* () {
         const client = yield* HttpClient.HttpClient;
         return yield* Conformance.verifyWith(api, {
@@ -4362,18 +4505,170 @@ describe("Conformance: `self` and `related` links dereference", () => {
       }).pipe(
         Effect.provide(FetchHttpClient.layer),
         Effect.provideService(FetchHttpClient.Fetch, fetch),
-        // The run's own `RequestInit` is kept; only `redirect` is overridden.
-        Effect.provideService(FetchHttpClient.RequestInit, { credentials: "include" }),
+        Effect.provideService(FetchHttpClient.RequestInit, init),
       ),
-    );
+    ).then((exit) => {
+      if (Exit.isFailure(exit)) return expect.unreachable(Cause.pretty(exit.cause));
+      return exit.value;
+    });
+
+  it("never sends a request off the run's origin on a redirect's say-so, and leaves the link not decided", async () => {
+    const elsewhere = "https://elsewhere.test/articles/2";
+    const { sent, credentials, fetch } = redirectingFetch(elsewhere);
+    // The run's own `RequestInit` is kept; only `redirect` is overridden.
+    const report = await overFetch(fetch, { credentials: "include" });
     expect(sent.filter((url) => !url.startsWith("http://fixture.test/"))).toEqual([]);
     expect(credentials.every((value) => value === "include")).toBe(true);
-    // A redirect answers as itself, as it always has in process.
-    expect(Exit.isSuccess(exit)).toBe(true);
-    if (!Exit.isSuccess(exit)) return;
-    expect(findingsOf(outcomeFor(exit.value, SELF))).toEqual([
-      "the `self` link of articles:2 (in /articles, at /data/1) answered 302 | 302",
+    expect(outcomeFor(report, SELF)).toMatchObject({
+      _tag: "Passed",
+      note: "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered a 302 redirect to https://elsewhere.test/articles/2, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin",
+    });
+  });
+
+  it("keeps redirects off the transport even when the run's `RequestInit` says to follow them", async () => {
+    // `redirect: "manual"` is applied over the run's own `RequestInit`, never
+    // under it: a run that asks `fetch` to follow cannot let it.
+    const { sent, fetch } = redirectingFetch("https://elsewhere.test/articles/2");
+    const report = await overFetch(fetch, { redirect: "follow", credentials: "include" });
+    expect(sent.filter((url) => !url.startsWith("http://fixture.test/"))).toEqual([]);
+    expect(outcomeFor(report, SELF)).toMatchObject({
+      _tag: "Passed",
+      note: expect.stringContaining("answered a 302 redirect to https://elsewhere.test/articles/2"),
+    });
+  });
+
+  /** `serve`, with `from` redirecting (`status`) to `to`. */
+  const redirecting =
+    (
+      from: string,
+      to: string,
+      serve: (request: CannedRequest) => Canned = linked(),
+      status = 302,
+    ) =>
+    (request: CannedRequest): Canned =>
+      withoutQuery(request).path === from ? { status, headers: { location: to } } : serve(request);
+
+  it("follows a redirect that stays on the run's origin, grading the final answer, and counts the hop", async () => {
+    const plain = recording(linked());
+    const direct = await run(plain.serve, plain.client);
+    const hopped = recording(
+      redirecting(
+        "/old/2",
+        "/articles/2",
+        linked({ self: (id) => (id === "2" ? "/old/2" : `/articles/${id}`) }),
+      ),
+    );
+    const report = await run(hopped.serve, hopped.client);
+    expect(outcomeFor(report, SELF)).toMatchObject({ _tag: "Passed", note: undefined });
+    expect(hopped.paths()).toContain("/old/2");
+    expect(hopped.urls.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
+    // The hop is a request of its own, counted against the rule's budget.
+    const probesOf = (outcome: Conformance.Outcome) =>
+      Predicate.isTagged(outcome, "Passed") ? outcome.probes : -1;
+    expect(probesOf(outcomeFor(report, SELF))).toBe(probesOf(outcomeFor(direct, SELF)) + 1);
+    // What the redirect leads to is what is graded.
+    expect(
+      await failureOf(
+        SELF,
+        redirecting(
+          "/old/2",
+          "/articles/1",
+          linked({ self: (id) => (id === "2" ? "/old/2" : `/articles/${id}`) }),
+        ),
+      ),
+    ).toEqual([
+      "the `self` link of articles:2 (in /articles, at /data/1) answers a different resource as primary data | articles:1",
     ]);
+  });
+
+  it("treats an http → https redirect on the same host as a redirect to another origin", async () => {
+    const hopped = recording(redirecting("/articles/2", "https://fixture.test/articles/2"));
+    expect(await noteOf(SELF, hopped.serve)).toBe(
+      "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered a 302 redirect to https://fixture.test/articles/2, which the kit does not follow: https://fixture.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin",
+    );
+    const report = await run(hopped.serve, hopped.client);
+    expect(hopped.urls.filter((url) => url.startsWith("https:"))).toEqual([]);
+    expect(outcomeFor(report, SELF)._tag).toBe("Passed");
+  });
+
+  it("follows at most five redirects for one link, naming the one it stopped at", async () => {
+    // `/hop/n` redirects to `/hop/n+1`, until `/hop/<end>` redirects to the article.
+    const chain =
+      (end: number) =>
+      (request: CannedRequest): Canned => {
+        const match = /^\/hop\/(\d+)$/.exec(withoutQuery(request).path);
+        if (match === null)
+          return linked({ self: (id) => (id === "2" ? "/hop/1" : `/articles/${id}`) })(request);
+        const n = Number(match[1]);
+        return { status: 307, headers: { location: n === end ? "/articles/2" : `/hop/${n + 1}` } };
+      };
+    // Five hops: /hop/1 … /hop/5, then the article.
+    expect(await noteOf(SELF, chain(5))).toBeUndefined();
+    expect(await noteOf(SELF, chain(6))).toBe(
+      "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered a 307 redirect to http://fixture.test/articles/2, which the kit does not follow: it would be redirect 6 in a row, past the kit's cap of 5",
+    );
+  });
+
+  it("resolves a relative link in a redirected answer against where the answer came from", async () => {
+    // `/articles` redirects to `/v2/articles`, whose `self` links are
+    // relative: `articles/1` resolves to `/v2/articles/1`, not `/articles/1`.
+    const v2 = (request: CannedRequest): Canned => {
+      const path = withoutQuery(request).path;
+      if (path === "/articles") return { status: 308, headers: { location: "/v2/articles" } };
+      if (path === "/v2/articles") {
+        return { body: { data: [{ type: "articles", id: "1", links: { self: "articles/1" } }] } };
+      }
+      if (path === "/v2/articles/1") return { body: { data: { type: "articles", id: "1" } } };
+      return notFound;
+    };
+    expect(await noteOf(SELF, v2)).toBeUndefined();
+  });
+
+  it("holds `related` to answering resource data: a string or an array of strings is not", async () => {
+    const answering = (data: Json) => at("/articles/2/author", { body: { data } });
+    expect(await failureOf(RELATED, answering(["x"]))).toEqual([
+      'the `related` link of articles:2\'s `author` (in /articles, at /data/1) answers no related resource data as primary data | 200 application/vnd.api+json — {"data":["x"]}',
+    ]);
+    expect(await failureOf(RELATED, answering("x"))).toEqual([
+      'the `related` link of articles:2\'s `author` (in /articles, at /data/1) answers no related resource data as primary data | 200 application/vnd.api+json — {"data":"x"}',
+    ]);
+    // A resource object carries a string `type`.
+    expect(await failureOf(RELATED, answering([{ id: "1" }]))).toEqual([
+      'the `related` link of articles:2\'s `author` (in /articles, at /data/1) answers no related resource data as primary data | 200 application/vnd.api+json — {"data":[{"id":"1"}]}',
+    ]);
+    expect(await noteOf(RELATED, answering(null))).toBeUndefined();
+  });
+
+  it("quotes the label of a resource its linkage names", async () => {
+    const long = "y".repeat(300);
+    const found = await failureOf(
+      MATCHES,
+      linked({
+        ids: ["1"],
+        author: (id) => ({
+          links: { related: `/articles/${id}/author` },
+          data: { type: "people", id: long },
+        }),
+      }),
+    );
+    expect(found).toEqual([
+      "the `related` link of articles:1's `author` (in /articles/1, at /data) answers a different resource from the one its linkage names | people:9",
+    ]);
+    const outcome = outcomeFor(
+      await run(
+        linked({
+          ids: ["1"],
+          author: (id) => ({
+            links: { related: `/articles/${id}/author` },
+            data: { type: "people", id: long },
+          }),
+        }),
+      ),
+      MATCHES,
+    );
+    expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
+      `${`people:${long}`.slice(0, 199)}… as primary data`,
+    );
   });
 
   it("does not read an answer a transport fetched from another origin all the same", async () => {

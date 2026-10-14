@@ -46,6 +46,7 @@ import {
   withQuery,
 } from "./core.js";
 import {
+  answeredFrom,
   budgeted,
   counted,
   type Io,
@@ -120,7 +121,7 @@ const pageOf = (target: Target, observation: Observation): Option.Option<Page> =
   const data = isRecord(observation.body) ? observation.body["data"] : undefined;
   return succeeded(observation) && Array.isArray(data)
     ? Option.some({
-        ...target,
+        ...answeredFrom(target, observation),
         observation,
         items: data.length,
         members: Arr.filterMap(data, (item) =>
@@ -410,7 +411,9 @@ const unfinishedOf = (end: End, pages: ReadonlyArray<Page>): Option.Option<strin
       Option.some(`${on(from)} leads to ${to}, which the kit does not follow`),
     Unanswered: ({ from, observation }) =>
       Option.some(
-        `${on(from)} got ${statusOf(observation)}, so the walk could not be finished — ${SAYS_NOTHING}`,
+        Option.isSome(observation.unfollowed)
+          ? `${on(from)} answered ${statusOf(observation)}, so the walk could not be finished`
+          : `${on(from)} got ${statusOf(observation)}, so the walk could not be finished — ${SAYS_NOTHING}`,
       ),
     Opaque: ({ from, items }) =>
       Option.some(
@@ -865,6 +868,9 @@ const declaresSize = (endpoint: Discovered): boolean =>
  */
 export const linksEnumerateCollection: RuleImpl = {
   rule,
+  // A page a redirect the kit does not follow answers leaves its walk
+  // unfinished, naming the redirect, not dropped from the rule.
+  ownsRedirects: true,
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = probeable(

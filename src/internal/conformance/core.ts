@@ -17,12 +17,14 @@ import {
   Predicate,
   Result,
   SchemaAST,
+  type Scope,
 } from "effect";
 import {
   FetchHttpClient,
   HttpBody,
   HttpClient,
   HttpClientRequest,
+  type HttpClientResponse,
   HttpServerError,
   type HttpServerResponse,
 } from "effect/http";
@@ -130,6 +132,38 @@ export interface Observation {
   /** The parsed JSON body, or `undefined` when the body was empty or not JSON. */
   readonly body: unknown;
   readonly transportError: string | undefined;
+  /**
+   * Each redirect the kit followed to reach this answer, as the absolute URL
+   * it then requested, in order; empty when the first answer was the answer.
+   * Each is one more request (see {@link runner}).
+   */
+  readonly redirects: ReadonlyArray<string>;
+  /**
+   * The redirect the kit did not follow, when the answer was one: `status` is
+   * then `0` and `transportError` says why, as for a lost response, since the
+   * kit has no answer to read.
+   */
+  readonly unfollowed: Option.Option<Unfollowed>;
+}
+
+/**
+ * A redirect the kit did not follow, and why.
+ *
+ * @internal
+ */
+export interface Unfollowed {
+  /** The `3xx` the server answered. */
+  readonly status: number;
+  /** Its `Location`, resolved against the URL that answered it when it parses. */
+  readonly location: string;
+  /**
+   * Why: it leads off the base URL's origin, it is one hop past
+   * {@link HOP_CAP}, the rule's request budget has no request left for it, it
+   * would turn a write into a `GET`, or its `Location` does not parse.
+   */
+  readonly reason: "offsite" | "cap" | "budget" | "method" | "unparseable";
+  /** The reason as a note names it. */
+  readonly why: string;
 }
 
 /**
@@ -446,6 +480,12 @@ export interface Context {
     readonly url: string;
     readonly headers?: Readonly<Record<string, string>>;
     readonly body?: unknown;
+    /**
+     * The most requests this probe may make, the redirects it follows
+     * included — what a budgeted rule has left. Defaults to the first request
+     * and {@link HOP_CAP} redirects.
+     */
+    readonly requests?: number;
   }) => Effect.Effect<Observation>;
 }
 
@@ -482,11 +522,12 @@ const clientRequest = (url: string, probe: Probe): HttpClientRequest.HttpClientR
 /**
  * `effect`, with any redirect a `fetch`-based transport would follow left
  * unfollowed (`redirect: "manual"`), the rest of the run's own
- * `FetchHttpClient.RequestInit` kept. A redirect answers as itself, the `3xx`
- * the server sent, exactly as the in-process transport has always answered
- * one — so a server cannot lead a probe, or a link the kit follows, to
- * another origin through a redirect. A transport that is not `fetch`-based
- * never reads `RequestInit`, and is unaffected.
+ * `FetchHttpClient.RequestInit` kept — `redirect` is set last, so a run's
+ * `redirect: "follow"` cannot override it. A redirect answers the transport as
+ * itself, the `3xx` the server sent, and the kit decides whether to follow it
+ * (see {@link runner}), checking where it leads before it is requested. A
+ * transport that is not `fetch`-based never reads `RequestInit`, and is
+ * unaffected.
  */
 const unredirected = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   Effect.flatMap(Effect.serviceOption(FetchHttpClient.RequestInit), (init) =>
@@ -507,7 +548,12 @@ const answeredOffsite = (sent: string, answered: string): Option.Option<string> 
     : Option.none();
 
 /** An `Observation` for a probe the transport returned no answer to read for. */
-const unread = (probe: Probe, transportError: string): Observation => ({
+const unread = (
+  probe: Probe,
+  transportError: string,
+  redirects: ReadonlyArray<string> = [],
+  unfollowed: Option.Option<Unfollowed> = Option.none(),
+): Observation => ({
   probe,
   status: 0,
   headers: {},
@@ -515,14 +561,118 @@ const unread = (probe: Probe, transportError: string): Observation => ({
   text: "",
   body: undefined,
   transportError,
+  redirects,
+  unfollowed,
 });
+
+/**
+ * The most redirects the kit follows for one probe. A chain longer than this
+ * leaves the probe not decided, naming the `Location` it stopped at.
+ *
+ * @internal
+ */
+export const HOP_CAP = 5;
+
+/** The statuses that redirect to their `Location`. */
+const REDIRECTS: ReadonlyArray<number> = [301, 302, 303, 307, 308];
+
+/** The longest `Location` a note quotes, in UTF-16 code units. */
+const LOCATION_LIMIT = 200;
+
+/**
+ * A redirect as a note names it, and why the kit did not follow it: "302 to
+ * https://elsewhere.test/articles, another origin than the base URL's
+ * (http://fixture.test) — the kit follows a redirect only within that origin".
+ *
+ * @internal
+ */
+export const unfollowedNote = ({ status, location, why }: Unfollowed): string =>
+  `a ${status} redirect to ${capped(location, LOCATION_LIMIT)}, which the kit does not follow: ${why}`;
+
+/** Where a `Location` off the base URL's origin leads, as a note names it. */
+const offsiteWhy = (resolved: URL, origin: string): string =>
+  `${resolved.origin === "null" ? `a \`${resolved.protocol}\` URL has no origin` : `${resolved.origin} is another origin than the base URL's, ${origin}`} — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`;
+
+/** `true` when a redirect re-sends the method it answers: `307` and `308` do; the rest turn it into a `GET`. */
+const keepsMethod = (status: number, method: string): boolean =>
+  status === 307 || status === 308 || method === "GET" || method === "HEAD";
+
+/**
+ * Why the kit does not take a hop to `resolved`, the first that applies in
+ * order, or none when it takes it.
+ */
+const refusalOf = (
+  status: number,
+  resolved: URL,
+  sent: { readonly method: string },
+  origin: string,
+  budget: { readonly hops: number; readonly allowed: number },
+): Option.Option<readonly [Unfollowed["reason"], string]> => {
+  const refusals: ReadonlyArray<readonly [boolean, Unfollowed["reason"], () => string]> = [
+    [resolved.origin !== origin, "offsite", () => offsiteWhy(resolved, origin)],
+    [
+      !keepsMethod(status, sent.method),
+      "method",
+      () =>
+        `a ${status} turns a ${sent.method} into a \`GET\`, which the kit does not send in its place`,
+    ],
+    [
+      budget.hops >= HOP_CAP,
+      "cap",
+      () => `it would be redirect ${budget.hops + 1} in a row, past the kit's cap of ${HOP_CAP}`,
+    ],
+    [
+      budget.hops + 1 >= budget.allowed,
+      "budget",
+      () => "the rule's request budget has no request left for it",
+    ],
+  ];
+  return Option.map(
+    Option.fromUndefinedOr(refusals.find(([applies]) => applies)),
+    ([, reason, why]) => [reason, why()] as const,
+  );
+};
+
+/** The next hop of a redirect `answer` to `sent`, or why the kit does not take it. */
+const hopOf = (
+  answer: { readonly status: number; readonly location: string },
+  sent: { readonly method: string; readonly url: string },
+  origin: string,
+  budget: { readonly hops: number; readonly allowed: number },
+): Result.Result<{ readonly method: string; readonly url: string }, Unfollowed> => {
+  const { status, location } = answer;
+  if (!URL.canParse(location, sent.url)) {
+    return Result.fail({
+      status,
+      location,
+      reason: "unparseable",
+      why: "its `Location` is not a URL the kit can resolve",
+    });
+  }
+  const resolved = new URL(location, sent.url);
+  return Option.match(refusalOf(status, resolved, sent, origin, budget), {
+    onNone: () => Result.succeed({ method: sent.method, url: resolved.href }),
+    onSome: ([reason, why]) => Result.fail({ status, location: resolved.href, reason, why }),
+  });
+};
 
 /**
  * Builds the probe runner over an `HttpClient`. A transport failure becomes an
  * `Observation` with `status: 0` rather than an error, so one unreachable
  * endpoint is reported as a finding instead of aborting the whole run.
  *
- * No probe follows a redirect (see {@link unredirected}). An answer a
+ * A redirect is followed only when its `Location` stays on the base URL's
+ * origin (owner decision on #168): the kit requests each hop itself, after
+ * checking where it leads, so no request is ever sent to another origin on a
+ * server's say-so. A `301`, `302` or `303` is followed only for a `GET` or
+ * `HEAD`, since `fetch` would turn any other method into a `GET`; a `307` or
+ * `308` re-sends the same method and body. At most {@link HOP_CAP} hops are
+ * followed, and no more than `requests` allows, the first request included.
+ * The final answer is the observation, with the hops in `redirects`. A redirect
+ * the kit does not follow leaves the probe with no answer to read: `status: 0`,
+ * with the redirect in `unfollowed` and named in `transportError`.
+ *
+ * The transport itself follows nothing (see {@link unredirected}). An answer a
  * transport fetched from another origin all the same — it followed a redirect
  * on its own — is not read: it is recorded as a transport failure, naming the
  * origin.
@@ -531,46 +681,82 @@ const unread = (probe: Probe, transportError: string): Observation => ({
  */
 export const runner =
   (client: HttpClient.HttpClient, baseUrl: string): Context["request"] =>
-  (probe) =>
-    Effect.gen(function* () {
-      const method = probe.method ?? "GET";
-      const headers = probe.headers ?? jsonApiAccept;
-      const url = probe.url.startsWith("http")
-        ? probe.url
-        : `${baseUrl.replace(/\/$/, "")}${probe.url}`;
-      const record: Probe = { method, url: probe.url, headers, body: probe.body };
-      const request = clientRequest(url, record);
-      const result = yield* Effect.result(unredirected(client.execute(request)));
-      if (result._tag === "Failure") return unread(record, String(result.failure));
-      const response = result.success;
-      const offsite = answeredOffsite(url, response.url);
-      if (Option.isSome(offsite)) {
-        return unread(
-          record,
-          `the transport followed a redirect to another origin, ${offsite.value}, whose answer the kit does not read`,
-        );
-      }
-      const textResult = yield* Effect.result(response.text);
-      const text = textResult._tag === "Success" ? textResult.success : "";
-      const headersOut = headerRecord(response.headers);
-      let body: unknown;
-      if (text !== "") {
-        try {
-          body = JSON.parse(text) as unknown;
-        } catch {
-          body = undefined;
+  (probe) => {
+    const method = probe.method ?? "GET";
+    const headers = probe.headers ?? jsonApiAccept;
+    const first = probe.url.startsWith("http")
+      ? probe.url
+      : `${baseUrl.replace(/\/$/, "")}${probe.url}`;
+    const record: Probe = { method, url: probe.url, headers, body: probe.body };
+    const origin = new URL(URL.canParse(baseUrl) ? baseUrl : first).origin;
+    const allowed = probe.requests ?? HOP_CAP + 1;
+    /** Sends one request, then the hop its redirect leads to, if the kit takes it. */
+    const send = (
+      sent: { readonly method: string; readonly url: string },
+      redirects: ReadonlyArray<string>,
+    ): Effect.Effect<Observation, never, Scope.Scope> =>
+      Effect.gen(function* () {
+        const request = clientRequest(sent.url, { ...record, method: sent.method });
+        const result = yield* Effect.result(unredirected(client.execute(request)));
+        if (Result.isFailure(result)) return unread(record, String(result.failure), redirects);
+        const response = result.success;
+        const offsite = answeredOffsite(sent.url, response.url);
+        if (Option.isSome(offsite)) {
+          return unread(
+            record,
+            `the transport followed a redirect to another origin, ${offsite.value}, whose answer the kit does not read`,
+            redirects,
+          );
         }
+        const location = response.headers["location"];
+        if (!REDIRECTS.includes(response.status) || location === undefined) {
+          return yield* answerOf(record, response, redirects);
+        }
+        const hop = hopOf({ status: response.status, location }, sent, origin, {
+          hops: redirects.length,
+          allowed,
+        });
+        return yield* Result.match(hop, {
+          onFailure: (unfollowed) =>
+            Effect.succeed(
+              unread(record, unfollowedNote(unfollowed), redirects, Option.some(unfollowed)),
+            ),
+          onSuccess: (next) => send(next, [...redirects, next.url]),
+        });
+      });
+    return send({ method, url: first }, []).pipe(Effect.scoped, Effect.orDie);
+  };
+
+/** The observation of an answer the kit reads: its status, headers and body. */
+const answerOf = (
+  probe: Probe,
+  response: HttpClientResponse.HttpClientResponse,
+  redirects: ReadonlyArray<string>,
+): Effect.Effect<Observation> =>
+  Effect.gen(function* () {
+    const textResult = yield* Effect.result(response.text);
+    const text = Result.isSuccess(textResult) ? textResult.success : "";
+    const headersOut = headerRecord(response.headers);
+    let body: unknown;
+    if (text !== "") {
+      try {
+        body = JSON.parse(text) as unknown;
+      } catch {
+        body = undefined;
       }
-      return {
-        probe: record,
-        status: response.status,
-        headers: headersOut,
-        contentType: headersOut["content-type"],
-        text,
-        body,
-        transportError: undefined,
-      } satisfies Observation;
-    }).pipe(Effect.scoped, Effect.orDie);
+    }
+    return {
+      probe,
+      status: response.status,
+      headers: headersOut,
+      contentType: headersOut["content-type"],
+      text,
+      body,
+      transportError: undefined,
+      redirects,
+      unfollowed: Option.none(),
+    } satisfies Observation;
+  });
 
 /**
  * A router's answer as a deployed server gives it, for the in-process
@@ -605,6 +791,13 @@ export interface RuleImpl {
    * before any create is vetted against it — see `Context.observed`.
    */
   readonly creates?: true;
+  /**
+   * Set on a rule that decides for itself what a redirect the kit did not
+   * follow means for it — `spec/target/reachable`, and the rules that follow
+   * a server's links, which leave each such link not decided. Every other
+   * rule is held to {@link undecidedByRedirects}.
+   */
+  readonly ownsRedirects?: true;
 }
 
 /** @internal */
@@ -636,9 +829,9 @@ const MESSAGE_LIMIT = 500;
  * cut never splits a surrogate pair: a high surrogate it would leave last is
  * dropped too.
  */
-const capped = (message: string): string => {
-  if (message.length <= MESSAGE_LIMIT) return message;
-  const end = MESSAGE_LIMIT - 1;
+const capped = (message: string, limit: number = MESSAGE_LIMIT): string => {
+  if (message.length <= limit) return message;
+  const end = limit - 1;
   const last = message.charCodeAt(end - 1);
   return `${message.slice(0, last >= 0xd800 && last <= 0xdbff ? end - 1 : end)}…`;
 };
@@ -693,7 +886,18 @@ export const renderThrown = (thrown: unknown): string =>
  * @internal
  */
 export const runRule = (implementation: RuleImpl, ctx: Context): Effect.Effect<Outcome> =>
-  Effect.suspend(() => implementation.run(ctx)).pipe(
+  Effect.suspend(() => {
+    if (implementation.ownsRedirects === true) return implementation.run(ctx);
+    const sent: Array<Observation> = [];
+    const watched: Context = {
+      ...ctx,
+      request: (probe) =>
+        Effect.tap(ctx.request(probe), (observation) => Effect.sync(() => sent.push(observation))),
+    };
+    return Effect.map(implementation.run(watched), (outcome) =>
+      undecidedByRedirects(outcome, sent),
+    );
+  }).pipe(
     Effect.catchDefect((defect) =>
       Effect.succeed<Outcome>({
         _tag: "Errored",
@@ -703,6 +907,80 @@ export const runRule = (implementation: RuleImpl, ctx: Context): Effect.Effect<O
       }),
     ),
   );
+
+/** How many reasons a note or skip reason names; the rest are counted. */
+const REASON_LIMIT = 3;
+
+/**
+ * A rule's outcome once the requests a redirect the kit did not follow
+ * answered are taken out of it: such a request has no answer to read, so it
+ * decides nothing — not a "was not rejected", and not a pass. A finding it
+ * produced is dropped; any other finding still fails the rule. With none left,
+ * a rule that read some other answer passes, noting each request it could not
+ * decide; one that read none skips, naming the redirects — which, when every
+ * request was redirected off the base URL's origin, is a `baseUrl` that does
+ * not serve (`spec/target/reachable` says so).
+ *
+ * @internal
+ */
+export const undecidedByRedirects = (
+  outcome: Outcome,
+  sent: ReadonlyArray<Observation>,
+): Outcome => {
+  const unread = sent.filter(({ unfollowed }) => Option.isSome(unfollowed));
+  if (
+    Arr.isReadonlyArrayEmpty(unread) ||
+    Predicate.isTagged(outcome, "Skipped") ||
+    Predicate.isTagged(outcome, "Errored")
+  ) {
+    return outcome;
+  }
+  const stands = failedOnRead(outcome, unread);
+  if (Option.isSome(stands)) return stands.value;
+  const named = redirectsNamed(unread);
+  if (unread.length === sent.length) {
+    return skip(
+      outcome.rule,
+      `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named})`,
+    );
+  }
+  const note = `${unread.length} of ${sent.length} requests not decided, each answered by a redirect the kit does not follow (${named})`;
+  return pass(
+    outcome.rule,
+    outcome.probes,
+    Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined
+      ? `${outcome.note}; ${note}`
+      : note,
+  );
+};
+
+/** `outcome`, failed on the findings no request in `unread` produced, when there are any. */
+const failedOnRead = (
+  outcome: Passed | Failed,
+  unread: ReadonlyArray<Observation>,
+): Option.Option<Failed> => {
+  if (Predicate.isTagged(outcome, "Passed")) return Option.none();
+  const lost = unread.map(({ probe }) => probe);
+  const findings = outcome.findings.filter(
+    ({ probe }) => probe === undefined || !lost.includes(probe),
+  );
+  return Arr.isReadonlyArrayNonEmpty(findings)
+    ? Option.some({ ...outcome, findings })
+    : Option.none();
+};
+
+/** The redirects that answered `unread`, the first {@link REASON_LIMIT} named and the rest counted. */
+const redirectsNamed = (unread: ReadonlyArray<Observation>): string => {
+  const notes = Arr.dedupe(
+    unread.map(
+      (observation) =>
+        `${observation.probe.method} ${observation.probe.url} answered ${statusOf(observation)}`,
+    ),
+  );
+  return notes.length > REASON_LIMIT
+    ? `${notes.slice(0, REASON_LIMIT).join("; ")}; and ${notes.length - REASON_LIMIT} more`
+    : notes.join("; ");
+};
 
 /**
  * Turns a rule's collected findings into its outcome: no findings is a pass,
@@ -744,7 +1022,17 @@ export const finding = (
 export const statusOf = (observation: Observation): string =>
   observation.transportError === undefined
     ? `${observation.status}`
-    : `no response (${observation.transportError})`;
+    : unansweredAs(observation, observation.transportError);
+
+/**
+ * A probe with no answer to read, as a finding or a note names it: the
+ * redirect the kit did not follow, or the lost response.
+ */
+const unansweredAs = (observation: Observation, transportError: string): string =>
+  Option.match(observation.unfollowed, {
+    onNone: () => `no response (${transportError})`,
+    onSome: unfollowedNote,
+  });
 
 /**
  * `true` when a response came back 2xx.
@@ -762,7 +1050,7 @@ export const succeeded = (observation: Observation): boolean =>
  */
 export const describe = (observation: Observation): string => {
   if (observation.transportError !== undefined)
-    return `no response (${observation.transportError})`;
+    return unansweredAs(observation, observation.transportError);
   const type = observation.contentType === undefined ? "" : ` ${observation.contentType}`;
   const excerpt =
     observation.text === ""

@@ -53,6 +53,7 @@ import {
   type Rule,
   settle,
   skip,
+  statusOf,
   type WriteRecord,
 } from "./core.js";
 
@@ -79,7 +80,7 @@ type Patch = Omit<Payload, "type">;
  *
  * @internal
  */
-export interface Target {
+export interface WriteTarget {
   /** The `writes` key — the create endpoint's first literal path segment. */
   readonly key: string;
   readonly create: () => Payload;
@@ -88,6 +89,9 @@ export interface Target {
   readonly createPath: string;
   readonly endpoint: Discovered;
 }
+
+/** A {@link WriteTarget}, as this module names it. */
+type Target = WriteTarget;
 
 /** @internal */
 export interface Targets {
@@ -614,7 +618,7 @@ export const accepted = (target: Target, created: Created): Result.Result<Accept
         onSome: (entry) => Result.succeed({ payload, observation, entry }),
         onNone: () =>
           Result.fail(
-            `the server did not accept writes["${target.key}"].create (${observation.status}${
+            `the server did not accept writes["${target.key}"].create (${statusOf(observation)}${
               observation.text === "" ? "" : ` — ${observation.text.slice(0, 160)}`
             }) — a write rule needs a payload the server accepts`,
           ),

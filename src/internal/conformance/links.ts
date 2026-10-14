@@ -52,6 +52,7 @@ import {
   succeeded,
 } from "./core.js";
 import {
+  answeredFrom,
   budgeted,
   counted,
   type Io,
@@ -279,10 +280,21 @@ const primaryOf = (observation: Observation): string => {
 const dataOf = (observation: Observation): unknown =>
   isRecord(observation.body) ? observation.body["data"] : undefined;
 
+/**
+ * `true` when a JSON value could be a resource object: an object with a string
+ * `type`, which every resource object carries (§Resource Objects). Its `id` is
+ * left to the rules that compare identities.
+ */
+// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
+const isResourceObject = (value: unknown): boolean =>
+  isRecord(value) && Predicate.isString(value["type"]);
+
 /** `true` when an answer's primary data is resource data: a resource object, an array of them, or `null`. */
 const isResourceData = (observation: Observation): boolean => {
   const data = dataOf(observation);
-  return data === null || isRecord(data) || (Array.isArray(data) && data.every(isRecord));
+  return (
+    data === null || isResourceObject(data) || (Array.isArray(data) && data.every(isResourceObject))
+  );
 };
 
 /** `true` when the related collection a response answers carries a `next` link: it is one page. */
@@ -424,6 +436,9 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
 
 /** The answer to a followed link held against what it claims. */
 const judge = (judging: Judging, found: Found, observation: Observation): Verdict => {
+  if (Option.isSome(observation.unfollowed)) {
+    return Verdict.Undecided({ why: `${found.where} answered ${statusOf(observation)}` });
+  }
   if (unanswered(observation)) {
     return Verdict.Undecided({
       why: `${found.where} got ${statusOf(observation)} — ${SAYS_NOTHING}`,
@@ -686,7 +701,7 @@ const outcomeOf = (
   if (left > 0) {
     return skip(
       rule,
-      `the rule's budget of ${REQUEST_BUDGET} requests ran out with ${fetched.length - left} of ${counted(fetched.length, "read endpoint")} searched for links — a partial crawl is not passed`,
+      `the rule's budget of ${REQUEST_BUDGET} requests ran out with ${fetched.filter(({ observation }) => Option.isSome(observation)).length} of ${counted(fetched.length, "read endpoint")} searched for links — a partial crawl is not passed`,
     );
   }
   if (result.unfollowed > 0) {
@@ -715,6 +730,9 @@ const dereferencing = (
   collect: (from: Target, body: Observation["body"]) => ReadonlyArray<Found>,
 ): RuleImpl => ({
   rule: judging.rule,
+  // A link a redirect the kit does not follow answers is left not decided,
+  // naming the redirect (`judge`), not dropped from the rule.
+  ownsRedirects: true,
   run: (ctx) =>
     Effect.gen(function* () {
       const { rule } = judging;
@@ -730,7 +748,9 @@ const dereferencing = (
           Option.match(Option.all([observation, target]), {
             onNone: () => [],
             onSome: ([answer, from]) =>
-              succeeded(answer) ? collect(from, answer.body).filter(available) : [],
+              succeeded(answer)
+                ? collect(answeredFrom(from, answer), answer.body).filter(available)
+                : [],
           }),
         ),
       );
