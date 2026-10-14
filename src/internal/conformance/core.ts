@@ -593,9 +593,13 @@ export const unfollowedNote = ({ status, location, why }: Unfollowed): string =>
 const offsiteWhy = (resolved: URL, origin: string): string =>
   `${resolved.origin === "null" ? `a \`${resolved.protocol}\` URL has no origin` : `${resolved.origin} is another origin than the base URL's, ${origin}`} — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`;
 
-/** `true` when a redirect re-sends the method it answers: `307` and `308` do; the rest turn it into a `GET`. */
+/**
+ * `true` when following a redirect sends the method it answers: `307` and
+ * `308` re-send it; the rest turn it into a `GET`, which only a `GET` keeps.
+ * The kit sends no `HEAD`.
+ */
 const keepsMethod = (status: number, method: string): boolean =>
-  status === 307 || status === 308 || method === "GET" || method === "HEAD";
+  status === 307 || status === 308 || method === "GET";
 
 /**
  * Why the kit does not take a hop to `resolved`, the first that applies in
@@ -664,9 +668,9 @@ const hopOf = (
  * A redirect is followed only when its `Location` stays on the base URL's
  * origin (owner decision on #168): the kit requests each hop itself, after
  * checking where it leads, so no request is ever sent to another origin on a
- * server's say-so. A `301`, `302` or `303` is followed only for a `GET` or
- * `HEAD`, since `fetch` would turn any other method into a `GET`; a `307` or
- * `308` re-sends the same method and body. At most {@link HOP_CAP} hops are
+ * server's say-so. A `301`, `302` or `303` is followed only for a `GET`,
+ * since `fetch` would turn any other method into a `GET`; a `307` or `308`
+ * re-sends the same method and body. At most {@link HOP_CAP} hops are
  * followed, and no more than `requests` allows, the first request included.
  * The final answer is the observation, with the hops in `redirects`. A redirect
  * the kit does not follow leaves the probe with no answer to read: `status: 0`,
@@ -709,7 +713,8 @@ export const runner =
           );
         }
         const location = response.headers["location"];
-        if (!REDIRECTS.includes(response.status) || location === undefined) {
+        // An empty `Location` names nothing to follow, as a missing one does.
+        if (!REDIRECTS.includes(response.status) || location === undefined || location === "") {
           return yield* answerOf(record, response, redirects);
         }
         const hop = hopOf({ status: response.status, location }, sent, origin, {
@@ -914,12 +919,12 @@ const REASON_LIMIT = 3;
 /**
  * A rule's outcome once the requests a redirect the kit did not follow
  * answered are taken out of it: such a request has no answer to read, so it
- * decides nothing — not a "was not rejected", and not a pass. A finding it
- * produced is dropped; any other finding still fails the rule. With none left,
- * a rule that read some other answer passes, noting each request it could not
- * decide; one that read none skips, naming the redirects — which, when every
- * request was redirected off the base URL's origin, is a `baseUrl` that does
- * not serve (`spec/target/reachable` says so).
+ * decides nothing — not a "was not rejected", and not a pass (owner decision
+ * on #333). A finding it produced is dropped; a finding on an answer the kit
+ * did read still fails the rule. With none left, the rule is skipped, naming
+ * the redirects and keeping its own note: never a partial pass on the answers
+ * it did read. When every request was redirected off the base URL's origin,
+ * `baseUrl` does not serve the api, which `spec/target/reachable` says.
  *
  * @internal
  */
@@ -928,6 +933,8 @@ export const undecidedByRedirects = (
   sent: ReadonlyArray<Observation>,
 ): Outcome => {
   const unread = sent.filter(({ unfollowed }) => Option.isSome(unfollowed));
+  // A rule's `run` never returns `Errored` itself — `runRule` makes one from a
+  // defect, after this — but `Outcome` admits it, and it is kept as it is.
   if (
     Arr.isReadonlyArrayEmpty(unread) ||
     Predicate.isTagged(outcome, "Skipped") ||
@@ -938,19 +945,15 @@ export const undecidedByRedirects = (
   const stands = failedOnRead(outcome, unread);
   if (Option.isSome(stands)) return stands.value;
   const named = redirectsNamed(unread);
-  if (unread.length === sent.length) {
-    return skip(
-      outcome.rule,
-      `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named})`,
-    );
-  }
-  const note = `${unread.length} of ${sent.length} requests not decided, each answered by a redirect the kit does not follow (${named})`;
-  return pass(
-    outcome.rule,
-    outcome.probes,
+  const own =
     Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined
-      ? `${outcome.note}; ${note}`
-      : note,
+      ? `; the rule's own note: ${outcome.note}`
+      : "";
+  return skip(
+    outcome.rule,
+    unread.length === sent.length
+      ? `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named})${own}`
+      : `not decided: ${unread.length} of ${sent.length} requests the rule sent were answered by a redirect the kit does not follow (${named}), and a rule is not passed on the answers it did read alone${own}`,
   );
 };
 

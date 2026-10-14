@@ -114,8 +114,35 @@ describe("runner (redirects)", () => {
     expect((await valueOf(read.request({ url: "/0" }))).status).toBe(200);
   });
 
-  it("answers a `3xx` without a `Location` as itself", async () => {
-    const observation = await valueOf(served(() => [302]).request({ url: "/0" }));
+  it("follows a `303` for a `GET`", async () => {
+    const read = served(chain(303, 1));
+    const answer = await valueOf(read.request({ url: "/0" }));
+    expect(answer.status).toBe(200);
+    expect(answer.redirects).toEqual(["http://origin.test/1"]);
+    expect(read.sent.map(({ method, url }) => `${method} ${url}`)).toEqual([
+      "GET http://origin.test/0",
+      "GET http://origin.test/1",
+    ]);
+  });
+
+  it.each(["POST", "PATCH"])(
+    "refuses a `303` that would turn a `%s` into a `GET`",
+    async (method) => {
+      const write = served(chain(303, 1));
+      const refused = await valueOf(write.request({ method, url: "/0", body: { data: 1 } }));
+      expect(write.sent).toHaveLength(1);
+      expect(refused.status).toBe(0);
+      expect(Option.map(refused.unfollowed, ({ reason }) => reason)).toEqual(Option.some("method"));
+    },
+  );
+
+  it.each([
+    ["no", undefined],
+    ["an empty", ""],
+  ] as const)("answers a `3xx` with %s `Location` as itself", async (_, location) => {
+    const target = served(() => (location === undefined ? [302] : [302, location]));
+    const observation = await valueOf(target.request({ url: "/0" }));
+    expect(target.sent).toHaveLength(1);
     expect(observation.status).toBe(302);
     expect(observation.unfollowed).toEqual(Option.none());
   });

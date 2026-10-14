@@ -194,6 +194,10 @@ const withoutQuery = <R extends { readonly path: string }>(request: R): R => ({
   path: request.path.replace(/\?.*$/, ""),
 });
 
+/** A note naming a `302` to `https://elsewhere.test` + `path`, which the kit does not follow. */
+const offsite = (path: string) =>
+  `a 302 redirect to https://elsewhere.test${path}, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`;
+
 /**
  * A correct-enough server: negotiates per §5, answers well-formed documents,
  * projects sparse fieldsets, rejects unknown query parameters and absent ids.
@@ -1877,6 +1881,72 @@ describe("Conformance: the write fixture", () => {
     },
   );
 
+  /**
+   * A transport in front of the server that answers each request `moved`
+   * picks with a `302` to the same path on another origin, and passes the rest
+   * to the server.
+   */
+  const redirectingSome =
+    (moved: (request: HttpClientRequest.HttpClientRequest, url: URL) => boolean) =>
+    (canned: HttpClient.HttpClient) =>
+      HttpClient.make((request, url) =>
+        moved(request, url)
+          ? Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response(null, {
+                  status: 302,
+                  headers: { location: `https://elsewhere.test${url.pathname}${url.search}` },
+                }),
+              ),
+            )
+          : canned.execute(request),
+      );
+
+  it("skips a rule some of whose requests were redirected off the origin, rather than passing it on the rest", async () => {
+    // Only the DELETE leaves: the create before it was answered, the delete was not.
+    const deletes = await run(undefined, undefined, {
+      client: redirectingSome((request) => request.method === "DELETE"),
+    });
+    expect(outcomeFor(deletes.report, "spec/status/delete-response")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringMatching(
+        /^not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow \(DELETE \/articles\/\d+ answered a 302 redirect to https:\/\/elsewhere\.test\/articles\/\d+, which the kit does not follow: .*\), and a rule is not passed on the answers it did read alone$/,
+      ),
+    });
+    // Only the requests that carry a query leave: the baseline was answered,
+    // the `include` probe was not.
+    const queries = await run(undefined, undefined, {
+      client: redirectingSome((_, url) => url.search !== ""),
+    });
+    expect(outcomeFor(queries.report, "spec/query/include-unsupported-endpoint")).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?include=author answered ${offsite("/articles/1?include=author")}), and a rule is not passed on the answers it did read alone`,
+    });
+  });
+
+  it("still fails a rule on a finding from an answer it read, beside a request redirected off the origin", async () => {
+    // The absent id's 404 is no error document; `?unknown=1` is redirected away.
+    const { report } = await run(
+      (canned, request) =>
+        request.method === "GET" && canned.status === 404 && request.path.startsWith("/articles/")
+          ? { ...canned, body: { errors: "not an array" } }
+          : canned,
+      undefined,
+      { client: redirectingSome((_, url) => url.searchParams.has("unknown")) },
+    );
+    expect(outcomeFor(report, "spec/errors/error-document-shape")).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: "a 404 response was not a JSON:API error document",
+          observed: expect.stringContaining('{"errors":"not an array"}'),
+        },
+      ],
+    });
+  });
+
   it("runs every write rule against a conformant server, on targets it created", async () => {
     const { report, store, writes } = await run();
     expect(failed(report)).toEqual([]);
@@ -2913,9 +2983,9 @@ describe("Conformance: pagination links enumerate the collection", () => {
     readonly last?: LinkValue;
   }
 
-  /** The offset pager's links, as `Handlers.offsetPaginationLinks` spells them. */
-  const offsetLinks = ({ offset, limit, total }: Window): Links => {
-    const at = (start: number) => `/tags?page[offset]=${start}&page[limit]=${limit}`;
+  /** The offset pager's links on `path`, as `Handlers.offsetPaginationLinks` spells them. */
+  const offsetLinks = ({ offset, limit, total }: Window, path = "/tags"): Links => {
+    const at = (start: number) => `${path}?page[offset]=${start}&page[limit]=${limit}`;
     return {
       first: at(0),
       prev: offset > 0 ? at(Math.max(offset - limit, 0)) : null,
@@ -3279,6 +3349,32 @@ describe("Conformance: pagination links enumerate the collection", () => {
     ).toBe(
       "no paginated collection could be walked to a verdict (/tags: `next` on page 1 (/tags?page[limit]=3) answered a 302 redirect to https://elsewhere.test/tags?page[offset]=3, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin, so the walk could not be finished)",
     );
+  });
+
+  it("passes on a collection it walked beside one a redirect off the origin left unfinished, noting it", async () => {
+    // `/cats` pages as `/tags` does, and walks; `/tags` page 2 leaves the origin.
+    const Cat = Resource.make("cats", { attributes: { name: Schema.String } });
+    const twoApi = HttpApi.make("paged").add(
+      Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Offset })),
+      Group.make(Cat, Endpoint.list(Cat, { page: Query.Page.Offset })),
+    );
+    const serve = (request: CannedRequest): Canned => {
+      if (request.path.startsWith("/cats")) {
+        return offsetPager({ links: (window) => offsetLinks(window, "/cats") })({
+          ...request,
+          path: request.path.replace(/^\/cats/, "/tags"),
+        });
+      }
+      return queryOf(request).get("page[offset]") === "3"
+        ? { status: 302, headers: { location: "https://elsewhere.test/tags?page[offset]=3" } }
+        : offsetPager()(request);
+    };
+    // The walk owns its redirects: the rule is not skipped for the one it
+    // could not follow, as a rule that does not would be.
+    expect(outcomeFor(await verifyPaged(serve, twoApi), RULE)).toMatchObject({
+      _tag: "Passed",
+      note: "1 collection not decided: /tags: `next` on page 1 (/tags?page[limit]=3) answered a 302 redirect to https://elsewhere.test/tags?page[offset]=3, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin, so the walk could not be finished",
+    });
   });
 
   it("does not hold a lost response mid-walk against `next`", async () => {
@@ -4610,11 +4706,14 @@ describe("Conformance: `self` and `related` links dereference", () => {
   });
 
   it("resolves a relative link in a redirected answer against where the answer came from", async () => {
-    // `/articles` redirects to `/v2/articles`, whose `self` links are
-    // relative: `articles/1` resolves to `/v2/articles/1`, not `/articles/1`.
+    // `/articles` redirects to `/v1/articles`, which redirects to
+    // `/v2/articles`, whose `self` links are relative: `articles/1` resolves
+    // against the last hop, `/v2/articles/1` — not the first hop's
+    // `/v1/articles/1`, nor the requested `/articles/1`.
     const v2 = (request: CannedRequest): Canned => {
       const path = withoutQuery(request).path;
-      if (path === "/articles") return { status: 308, headers: { location: "/v2/articles" } };
+      if (path === "/articles") return { status: 308, headers: { location: "/v1/articles" } };
+      if (path === "/v1/articles") return { status: 308, headers: { location: "/v2/articles" } };
       if (path === "/v2/articles") {
         return { body: { data: [{ type: "articles", id: "1", links: { self: "articles/1" } }] } };
       }
@@ -4635,6 +4734,10 @@ describe("Conformance: `self` and `related` links dereference", () => {
     // A resource object carries a string `type`.
     expect(await failureOf(RELATED, answering([{ id: "1" }]))).toEqual([
       'the `related` link of articles:2\'s `author` (in /articles, at /data/1) answers no related resource data as primary data | 200 application/vnd.api+json — {"data":[{"id":"1"}]}',
+    ]);
+    // …and a `type` that is a string, not merely present.
+    expect(await failureOf(RELATED, answering([{ type: 1, id: "1" }]))).toEqual([
+      'the `related` link of articles:2\'s `author` (in /articles, at /data/1) answers no related resource data as primary data | 200 application/vnd.api+json — {"data":[{"type":1,"id":"1"}]}',
     ]);
     expect(await noteOf(RELATED, answering(null))).toBeUndefined();
   });
@@ -4811,5 +4914,41 @@ describe("Conformance: in-process", () => {
     expect(outcomeFor(report, "spec/content-negotiation/accept-weight-zero-refuses")._tag).toBe(
       "Passed",
     );
+  });
+});
+
+describe("Conformance: a target that redirects some read endpoints off its origin", () => {
+  // Six list endpoints, `/r0` … `/r3` redirected to another origin, and a
+  // `get` with no id to probe, which every read rule notes as not probed.
+  const lists = Arr.makeBy(6, (n) => Resource.make(`r${n}`, { attributes: {} }));
+  const Unprobed = Resource.make("unprobed", { attributes: {} });
+  const partly = HttpApi.make("partly")
+    .add(...Arr.map(lists, (resource) => Group.make(resource, Endpoint.list(resource))))
+    .add(Group.make(Unprobed, Endpoint.get(Unprobed)));
+  const serve = (request: CannedRequest): Canned =>
+    /^\/r[0-3]$/.test(request.path)
+      ? { status: 302, headers: { location: `https://elsewhere.test${request.path}` } }
+      : { body: { data: [] } };
+
+  it("reports the redirected endpoints once, and skips a rule that read the rest, keeping its note", async () => {
+    const report = await verifyOver(partly)(serve, {
+      only: ["spec/target/reachable", "spec/content-negotiation/response-media-type"],
+    });
+    expect(outcomeFor(report, "spec/target/reachable")).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail:
+            "4 of 6 read endpoints the kit probed answered with a redirect it does not follow, so the rules that probe them have no answer to decide on — point `baseUrl` at the URL that serves the api",
+          observed: `/r0: ${offsite("/r0")}; and 3 more (/r1, /r2, /r3)`,
+        },
+      ],
+    });
+    // Four redirects named, three of them in full; the rule's own coverage note kept.
+    expect(outcomeFor(report, "spec/content-negotiation/response-media-type")).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `not decided: 4 of 6 requests the rule sent were answered by a redirect the kit does not follow (GET /r0 answered ${offsite("/r0")}; GET /r1 answered ${offsite("/r1")}; GET /r2 answered ${offsite("/r2")}; and 1 more), and a rule is not passed on the answers it did read alone; the rule's own note: 1 endpoint not probed: no sample id for "unprobed" — pass ids["unprobed"] or paths["unprobed.get"]`,
+    });
   });
 });
