@@ -12,9 +12,12 @@
  * all optional keys, and everything else (`type`, `id`, `relationships`,
  * `links`, `meta`) stays exactly as declared.
  *
- * A {@link Resource.family} keeps its own schema: its `type` is a family name,
- * never a wire type, so no `fields[TYPE]` selection can reach its members
- * through it.
+ * A `Resource.family` in `data` or `included` is not a resource object of its
+ * own: its `type` is a family name, never a wire type, and what the wire
+ * carries are its members, each under its own type. So it becomes the union of
+ * its members, each made partial as any other resource is when its type is
+ * one a fieldset names — which every member of a family the fieldset set
+ * reaches is (`Query.FieldsetResources`, #350).
  *
  * @internal
  */
@@ -25,7 +28,8 @@ import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import { isSurface } from "../Include.js";
 import type { Any } from "../Resource.js";
-import { includedResources, includePathsFor } from "./includeGraph.js";
+import { isFamily } from "../Resource.js";
+import { includedResources, includePathsFor, withFamilyMembers } from "./includeGraph.js";
 
 // Resolves to `T` for every concrete field map; needed because the mapped
 // types below can't be proven to satisfy `Struct.Fields` while generic.
@@ -59,12 +63,16 @@ export interface SparseResource<R extends Any> extends Schema.Struct<
 
 /**
  * One member of a default document's `data` or `included` union: the
- * {@link SparseResource} of a resource whose type is in `Types`, anything else
- * (a family, a type no fieldset names) as it stands. Distributes over unions.
+ * {@link SparseResource} of a resource whose type is in `Types`; a family with
+ * a member whose type is in `Types`, the {@link SparseUnion} of its members;
+ * anything else (a type no fieldset names) as it stands. Distributes over
+ * unions.
  */
 export type SparseMember<M, Types extends string> = M extends Any
-  ? M extends { readonly members: ReadonlyArray<unknown> }
-    ? M
+  ? M extends { readonly members: ReadonlyArray<infer F extends Any> }
+    ? [Extract<F["type"], Types>] extends [never]
+      ? M
+      : SparseUnion<F, Types>
     : [M["type"]] extends [Types]
       ? SparseResource<M>
       : M
@@ -141,8 +149,14 @@ export const sparseResource = (resource: ResourceStruct): Schema.Top => {
 /**
  * The runtime {@link SparseMember}.
  */
-export const sparseMember = (member: Schema.Top, types: ReadonlyArray<string>): Schema.Top =>
-  isResource(member) && Arr.contains(types, member.type) ? sparseResource(member) : member;
+export const sparseMember = (member: Schema.Top, types: ReadonlyArray<string>): Schema.Top => {
+  if (isFamily(member)) {
+    return member.members.some((m) => Arr.contains(types, m.type))
+      ? Schema.Union(member.members.map((m) => sparseMember(m, types)))
+      : member;
+  }
+  return isResource(member) && Arr.contains(types, member.type) ? sparseResource(member) : member;
+};
 
 /**
  * The runtime {@link SparseUnion}, over a `Schema.Union`'s members. Anything
@@ -165,17 +179,18 @@ const includablePaths = (
 
 /**
  * The runtime mirror of `Query.FieldsetResources`: the resources, then every
- * type their response can carry in `included`, each once.
+ * type their response can carry in `included`, each followed by its members
+ * when it is a family, each once.
  */
 export const fieldsetResources = (
   resources: ReadonlyArray<Any>,
   includable: ReadonlyArray<string>,
   include?: IncludeArgument,
 ): ReadonlyArray<Any> =>
-  Arr.dedupeWith(
-    [...resources, ...includedResources(resources, isSurface(include), includable)],
-    (a, b) => a === b,
-  );
+  withFamilyMembers([
+    ...resources,
+    ...includedResources(resources, isSurface(include), includable),
+  ]);
 
 /**
  * The wire types `?fields[TYPE]=` can name on an endpoint over `resources`
