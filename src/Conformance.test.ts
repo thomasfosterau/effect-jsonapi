@@ -1111,6 +1111,24 @@ describe("Conformance: detects a deliberately broken server", () => {
  * rule has nothing to probe there. This api drops it from `get` and keeps it on
  * `list`, which declares no `sort`: one endpoint for each rule to probe.
  */
+/**
+ * Twenty-one list endpoints, `/burner0` … `/burner20`, declaring no query
+ * parameter: more candidates than a refusal rule's budget of 20 requests
+ * reaches when their baselines are unusable.
+ */
+const burners = HttpApi.make("burners").add(
+  ...Arr.map(
+    Arr.makeBy(21, (n) => `burner${n}`),
+    (type) => {
+      const Burner = Resource.make(type, { attributes: { name: Schema.String } });
+      return Group.make(Burner, Endpoint.list(Burner));
+    },
+  ),
+);
+
+/** A 500 error document, the answer that makes a baseline unusable. */
+const serverError: Canned = { status: 500, body: { errors: [{ status: "500" }] } };
+
 describe("Conformance: include / sort on an endpoint that does not declare them", () => {
   const INCLUDE = "spec/query/include-unsupported-endpoint";
   const SORT = "spec/query/sort-unsupported-endpoint";
@@ -1425,6 +1443,29 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     });
     expect(seen).toEqual(["/articles/1"]);
   });
+
+  it.each([INCLUDE, SORT])(
+    "stops %s at the refusal rules' budget of 20 requests, skipping rather than passing",
+    async (id) => {
+      // The #278 rules share the #310 rules' driver, and with it its budget:
+      // twenty-one candidates, every baseline a 500, and nineteen are tried.
+      const seen: Array<string> = [];
+      const report = await verifyOver(burners)(
+        (request) => {
+          seen.push(request.path);
+          return serverError;
+        },
+        { only: [id] },
+      );
+      expect(outcomeFor(report, id)).toMatchObject({
+        _tag: "Skipped",
+        reason: expect.stringMatching(
+          /^the rule's budget of 20 requests ran out with 2 endpoints left untried \(\/burner0: 500; .*\/burner18: 500\)$/,
+        ),
+      });
+      expect(seen).toEqual(Arr.makeBy(19, (n) => `/burner${n}`));
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1764,6 +1805,74 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
     });
   });
 
+  it.each(["include", "sort"] as const)(
+    "never probes `%s[]` on an endpoint that declares it beside the bare parameter",
+    async (family) => {
+      // A hand-built query may accept the bracketed spelling too; the
+      // endpoint then knows how to process it, so there is nothing to refuse.
+      const both = Schema.Struct({
+        [family]: Schema.optional(Schema.String),
+        [`${family}[]`]: Schema.optional(Schema.String),
+      });
+      const handBuilt = HttpApi.make("bracketed").add(
+        HttpApiGroup.make("articles")
+          .add(
+            HttpApiEndpoint.get("get", "/articles/:id", {
+              params: { id: Schema.String },
+              query: both,
+              success: Schema.Unknown,
+            }),
+          )
+          .add(HttpApiEndpoint.get("list", "/articles", { query: both, success: Schema.Unknown })),
+      );
+      const seen: Array<string> = [];
+      const report = await verifyOver(handBuilt)(
+        (request) => {
+          seen.push(request.path);
+          return conformantServe(request);
+        },
+        { only: [RULES[family]] },
+      );
+      expect(outcomeFor(report, RULES[family])).toEqual({
+        _tag: "Skipped",
+        rule: expect.objectContaining({ id: RULES[family] }),
+        reason: `no read endpoint declares the bare \`${family}\` and not \`${family}[]\``,
+      });
+      expect(seen).toEqual([]);
+    },
+  );
+
+  it("never puts a type or attribute name that needs encoding into a probe's parameter", async () => {
+    // Every baseline shows an attribute `a b` first, and `/articles/1` a
+    // primary resource of type `a b` beside an included `articles`: each rule
+    // reaches past them for a name that goes into a parameter as itself, or
+    // falls back on its placeholder.
+    const awkward = { "a b": "x", title: "t" };
+    const seen: Array<string> = [];
+    const report = await verifyFamily(
+      (request) => {
+        seen.push(request.path);
+        if (request.path === "/articles/1")
+          return {
+            body: {
+              data: { type: "a b", id: "1", attributes: { "a b": "x" } },
+              included: [{ type: "articles", id: "1", attributes: awkward }],
+            },
+          };
+        if (request.path === "/articles")
+          return { body: { data: [{ type: "articles", id: "1", attributes: awkward }] } };
+        return familyServe()(request);
+      },
+      { only: [RULES.fields, RULES.filter, RULES.sort] },
+    );
+    expect(failed(report)).toEqual([]);
+    expect(seen.filter((path) => path.includes("?"))).toEqual([
+      "/articles/1?fields[articles]=title",
+      "/articles/1?filter[x]=1",
+      "/articles?sort[]=title",
+    ]);
+  });
+
   it("never probes an open `filter[…]` grammar, which validates every member itself", async () => {
     const Product = Resource.make("products", {
       attributes: { name: Schema.String.pipe(Filter.able([Filter.Op.eq])) },
@@ -1842,18 +1951,11 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
   it("stops at its request budget, skipping rather than passing", async () => {
     // Twenty-one read endpoints without `page`, every baseline a 500: the rule
     // tries nineteen, which leaves no room for a baseline and its probe.
-    const types = Arr.makeBy(21, (n) => `burner${n}`);
-    const burners = HttpApi.make("burners").add(
-      ...Arr.map(types, (type) => {
-        const Burner = Resource.make(type, { attributes: { name: Schema.String } });
-        return Group.make(Burner, Endpoint.list(Burner));
-      }),
-    );
     const seen: Array<string> = [];
     const report = await verifyOver(burners)(
       (request) => {
         seen.push(request.path);
-        return { status: 500, body: { errors: [{ status: "500" }] } };
+        return serverError;
       },
       { only: [RULES.page] },
     );
@@ -1863,7 +1965,37 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
         /^the rule's budget of 20 requests ran out with 2 endpoints left untried \(\/burner0: 500; .*\/burner18: 500\)$/,
       ),
     });
-    expect(seen).toHaveLength(19);
+    expect(seen).toEqual(Arr.makeBy(19, (n) => `/burner${n}`));
+  });
+
+  it("counts the redirects a baseline follows against its request budget", async () => {
+    // Each baseline is a same-origin 302 the kit follows to a 500: two
+    // requests an endpoint. Nine take eighteen; the tenth baseline gets the
+    // one request the probe would not need, which leaves its 302 unfollowed,
+    // and the rule stops there — nineteen requests, not thirty-eight.
+    const seen: Array<string> = [];
+    const report = await verifyOver(burners)(
+      (request) => {
+        seen.push(request.path);
+        return request.path.startsWith("/moved/")
+          ? serverError
+          : { status: 302, headers: { location: `/moved${request.path}` } };
+      },
+      { only: [RULES.page] },
+    );
+    const tenth =
+      "/burner9: a 302 redirect to http://fixture.test/moved/burner9, which the kit does not follow: the rule's request budget has no request left for it";
+    expect(outcomeFor(report, RULES.page)).toMatchObject({
+      _tag: "Skipped",
+      reason: `the rule's budget of 20 requests ran out with 11 endpoints left untried (${Arr.makeBy(9, (n) => `/burner${n}: 500`).join("; ")}; ${tenth}); 1 of 10 requests the rule sent were answered by a redirect the kit does not follow or read (GET ${tenth.replace(": a 302", " answered a 302")})`,
+    });
+    expect(seen).toEqual([
+      ...Arr.flatMap(
+        Arr.makeBy(9, (n) => `/burner${n}`),
+        (path) => [path, `/moved${path}`],
+      ),
+      "/burner9",
+    ]);
   });
 });
 // ---------------------------------------------------------------------------

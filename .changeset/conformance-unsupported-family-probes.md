@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-jsonapi": patch
+"@thomasfosterau/effect-jsonapi": minor
 ---
 
 `Conformance` gains seven spec-tier rules that send an endpoint a parameter of a family JSON:API defines that the endpoint does not declare, so the kit now guards the 400 `Middleware.SchemaErrors` answers there. Each rests on JSON:API 1.1 §Implementation-Specific Query Parameters: "If a server encounters a query parameter that does not follow the naming conventions above, or the server does not know how to process it as a query parameter from this specification, it **MUST** return `400 Bad Request`."
@@ -10,3 +10,5 @@
 - `spec/query/include-bracketed` and `spec/query/sort-bracketed` send `include[]` / `sort[]` to an endpoint that supports the bare parameter.
 
 Each probes only an endpoint whose baseline request answered 2xx, never a name the endpoint declares, and sends at most 20 requests. A status other than 400, or a 400 whose `source.parameter` names only other parameters, fails the rule; a probe answered by a server error, a rate limit, a request timeout or nothing at all leaves it not decided. A server that silently ignored any of these parameters, and passed every rule before, now fails one.
+
+The two existing refusal rules, `spec/query/include-unsupported-endpoint` and `spec/query/sort-unsupported-endpoint`, now share that driver and its cap: each sends at most 20 requests, redirects included, and skips, naming the endpoints it left untried, where it used to try a baseline on every candidate endpoint until one answered 2xx. Their findings and their other outcomes are unchanged.
