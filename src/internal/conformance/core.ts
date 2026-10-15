@@ -738,7 +738,7 @@ const refusalOf = (
  * server the client sends to: the kit reads it as a `Location` of that path
  * alone, on its own origin, so the hop is a request the kit builds and the
  * client rewrites once, as any other. A client that rewrites the path too
- * (adding a prefix, say) so adds it again to the path a hop names, as it does
+ * (adding a prefix, say) adds it again to the path a hop names, as it does
  * to a relative `Location`'s. A rewritten URL with no origin (a `data:` or
  * custom-scheme one, whose origin is `"null"`) is never matched, so a
  * `Location` with no origin is not read as a path on the kit's.

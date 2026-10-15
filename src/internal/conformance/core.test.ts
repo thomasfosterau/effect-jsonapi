@@ -6,7 +6,13 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
-import { HttpClient, HttpClientResponse, HttpServerError, HttpServerRequest } from "effect/http";
+import {
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  HttpServerError,
+  HttpServerRequest,
+} from "effect/http";
 import { TestClock } from "effect/testing";
 import {
   answeredAsDeployed,
@@ -183,6 +189,35 @@ describe("runner (redirects)", () => {
     expect(Option.map(observation.unfollowed, ({ reason }) => reason)).toEqual(
       Option.some("budget"),
     );
+  });
+});
+
+describe("runner (a client that rewrites the path too)", () => {
+  it("adds a path prefix the client adds again to the path an absolute `Location` on its origin names", async () => {
+    // The documented caveat on `resolvedLocation` (#359): the kit reads an
+    // absolute `Location` on the rewritten origin as a path on its own, and the
+    // client rewrites that path once more, so its prefix is added twice.
+    const sent: Array<string> = [];
+    const server = HttpClient.make((request, url) =>
+      Effect.sync(() => {
+        sent.push(url.href);
+        return HttpClientResponse.fromWeb(
+          request,
+          url.pathname === "/v1/a"
+            ? new Response(null, { status: 302, headers: { location: "http://127.0.0.1:9/v1/b" } })
+            : new Response('{"data":null}', { status: 200 }),
+        );
+      }),
+    );
+    const rewriting = HttpClient.mapRequest(server, (request) =>
+      HttpClientRequest.setUrl(request, `http://127.0.0.1:9/v1${new URL(request.url).pathname}`),
+    );
+    const observation = await valueOf(
+      runner(rewriting, "http://origin.test", Option.none())({ url: "/a" }),
+    );
+    expect(sent).toEqual(["http://127.0.0.1:9/v1/a", "http://127.0.0.1:9/v1/v1/b"]);
+    expect(observation.status).toBe(200);
+    expect(observation.redirects).toEqual(["http://origin.test/v1/b"]);
   });
 });
 
