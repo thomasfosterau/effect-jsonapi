@@ -507,7 +507,9 @@ describe("the errors a 400 reports for undeclared members are capped (#308)", ()
         ...excess(member, 12),
         ["9988 more undeclared members not listed", memberPointer(member)],
       ]);
-      // The request is ~100 KB; the 400 stays a few KB however many keys come.
+      // The request is ~100 KB. The 400 lists a bounded number of members
+      // however many keys come; it stays this small only because these keys
+      // are short.
       expect(request.length).toBeGreaterThan(90_000);
       expect(response.text.length).toBeLessThan(path === "/operations" ? 8_192 : 4_096);
       expect(received).toEqual([]);
@@ -706,7 +708,9 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
   });
 
   it("is carried by a family anchored on a base, and absent on a name-only one", () => {
-    const Member = extend(Capped, "members");
+    // The member's cap differs from the base's, so a family that read its cap
+    // from a member instead of the base would carry 4, not 2.
+    const Member = extend(Capped, "members", { maxUndeclaredMemberErrors: 4 });
     const Anchored = family(Capped, [Member]);
     const Named = family("named", [Member]);
     expect([Anchored.maxUndeclaredMemberErrors, Named.maxUndeclaredMemberErrors]).toEqual([
@@ -724,9 +728,12 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
   });
 
   // Invalid values, and how each message prints them: a number with `String`,
-  // anything else with `JSON.stringify`. The non-numbers stand for what a
-  // caller the types don't check (plain JavaScript) could pass.
-  type Invalid = number | string | boolean | { readonly cap: number };
+  // anything else with `JSON.stringify`, or `String` again for a value JSON
+  // writes as nothing (a symbol). The non-numbers stand for what a caller the
+  // types don't check (plain JavaScript) could pass. `null` is not among them:
+  // it counts as not given (the tests after these).
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `null` an unchecked caller passes, not a modelled absence
+  type Invalid = number | string | boolean | symbol | { readonly cap: number } | null;
   const invalid: ReadonlyArray<readonly [Invalid, string]> = [
     [0, "0"],
     [-1, "-1"],
@@ -736,6 +743,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     ["12", '"12"'],
     [true, "true"],
     [{ cap: 12 }, '{"cap":12}'],
+    [Symbol("x"), "Symbol(x)"],
   ];
   const refusal = (where: string, shown: string) =>
     `${where}: maxUndeclaredMemberErrors must be a positive integer or Infinity, got ${shown}`;
@@ -819,6 +827,36 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
       Resource("plain", { attributes: {}, maxUndeclaredMemberErrors: undefined })
         .maxUndeclaredMemberErrors,
     ).toBe(12);
+  });
+
+  // An unchecked caller's `null` counts as not given, as `undefined` does.
+  it("Resource.make takes a null cap as the default", () => {
+    expect(
+      Resource("plain", withCap({ attributes: {}, maxUndeclaredMemberErrors: 1 }, null))
+        .maxUndeclaredMemberErrors,
+    ).toBe(12);
+  });
+
+  it("Resource.extend takes a null cap as the base's", () => {
+    expect(
+      extend(Capped, "child", withCap({ maxUndeclaredMemberErrors: 1 }, null))
+        .maxUndeclaredMemberErrors,
+    ).toBe(2);
+  });
+
+  it("the atomic operations take a hand-rolled Any's null cap as the default", () => {
+    const add = Atomic.AddOperation(withCap(handRolled({ maxUndeclaredMemberErrors: 1 }), null));
+    expect(
+      issuesOf(
+        Schema.decodeUnknownResult(add)({
+          op: "add",
+          data: { type: "notes", attributes: { body: "b", ...extras(13) } },
+        }),
+      ).map(({ message }) => message),
+    ).toEqual([
+      ...Array.from({ length: 12 }, () => "Expected no excess property"),
+      "1 more undeclared member not listed",
+    ]);
   });
 });
 
