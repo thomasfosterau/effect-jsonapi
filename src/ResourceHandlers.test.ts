@@ -626,12 +626,26 @@ describe("a write whose re-read fails", () => {
       expect(cacheStore.has(ids(1))).toBe(false);
     });
 
+    it("fails with the empty cause, rather than hiding it, when the re-read fails with no reason", async () => {
+      const { ops } = hidingOps(() => Effect.failCause(Cause.empty));
+      const { handlers, cacheStore } = build(ops, {
+        hiddenWrite: { type: "people", when: () => true },
+      });
+      const exit = await Effect.runPromiseExit(
+        handlers.update(renameFirst).pipe(Effect.provide(admin)),
+      );
+      expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(0);
+      expect(cacheStore.has(ids(1))).toBe(false);
+    });
+
     // `version` is `unknown`: what reaches the wire is a string or a finite
     // number as is, a bigint as its decimal string, and nothing else.
     it.each([
       ["a bigint", 12n, { version: "12" }],
       ["a string", "v3", { version: "v3" }],
-      ["a non-finite number", Number.NaN, undefined],
+      ["NaN", Number.NaN, undefined],
+      ["positive infinity", Number.POSITIVE_INFINITY, undefined],
+      ["negative infinity", Number.NEGATIVE_INFINITY, undefined],
       ["an object", { revision: 3 }, undefined],
     ])(
       "echoes a version that is %s as meta.version only when it has a wire form",
