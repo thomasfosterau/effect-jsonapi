@@ -492,17 +492,49 @@ assertType<Equals<(typeof flagCommentUnion)["Type"], IncludedOf<typeof flagRelat
 // Negative control: not only the direct targets, which `include: false` gives.
 assertType<Equals<(typeof flagUnion)["Type"], (typeof offUnion)["Type"]>>(false);
 
-// `collection` and `polymorphic` do not distribute: their type admits the
-// direct targets alone, and the members form matches them.
+// `collection` and `polymorphic` distribute too (#382): the endpoint built
+// from `true` binds every member's full walk, so a widened `boolean` admits
+// it, and the members form matches them.
 export const flagSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",
   include: flag,
 });
 export const flagNode = Endpoint.polymorphic(AnyNode, { include: flag });
+assertType<Equals<IncludedOf<typeof flagSearch>, IncludedOf<typeof search>>>(true);
+assertType<Equals<IncludedOf<typeof flagNode>, IncludedOf<typeof node>>>(true);
+// The runtime union under `true` is admitted: `people` (via `comments.author`)
+// is not a direct target of either member's `comments`.
+assertType<SuccessOf<typeof flagSearch>>(
+  Handlers.collection([article], { included: [comment, person] }),
+);
+const author = Author.make({
+  id: Author.Id.make("3"),
+  attributes: { name: "Grace" },
+  relationships: { comments: { data: [{ type: "comments", id: comment.id }] } },
+});
+assertType<SuccessOf<typeof flagNode>>(Handlers.data(author, { included: [comment, person] }));
+// The same under `fields: true`, whose sparse document distributes too.
+export const flagSparseSearch = Endpoint.collection([Article, Person], {
+  name: "search",
+  path: "/search",
+  include: flag,
+  fields: true,
+});
+export const flagSparseNode = Endpoint.polymorphic(AnyNode, { include: flag, fields: true });
+assertType<SuccessOf<typeof flagSparseSearch>>(
+  Handlers.collection([article], { included: [comment, person] }),
+);
+assertType<SuccessOf<typeof flagSparseNode>>(
+  Handlers.data(author, { included: [comment, person] }),
+);
+// Negative control: not only the direct targets, which `include: false` gives.
+assertType<Equals<IncludedOf<typeof flagSearch>, IncludedOf<typeof plainSearch>>>(false);
+assertType<Equals<IncludedOf<typeof flagNode>, IncludedOf<typeof plainNode>>>(false);
+// The members form matches each endpoint under the same widened option.
 const flagSearchUnion = Include.included([Article, Person], { include: flag });
 assertType<Equals<(typeof flagSearchUnion)["Type"], IncludedOf<typeof flagSearch>>>(true);
-assertType<Equals<(typeof flagSearchUnion)["Type"], (typeof plainSearchUnion)["Type"]>>(true);
+assertType<Equals<(typeof flagSearchUnion)["Type"], (typeof searchUnion)["Type"]>>(true);
 const flagNodeUnion = Include.included(AnyNode.members, { include: flag });
 assertType<Equals<(typeof flagNodeUnion)["Type"], IncludedOf<typeof flagNode>>>(true);
 // Its public name.
@@ -510,7 +542,7 @@ assertType<Include.MembersReachable<typeof Article | typeof Person, boolean>>(fl
 
 // An `include` that may be a surface or not is typed as either union, as the
 // runtime returns one or the other: the surface's own, and the members' union
-// for the rest of the option, undistributed over a widened `boolean` (#382).
+// for the rest of the option, distributed over a widened `boolean` (#382).
 declare const which: boolean;
 const mixedSearchUnion = Include.included([Article, Person], {
   include: which ? articleSurface : true,
@@ -526,6 +558,7 @@ const mixedFlagSearchUnion = Include.included([Article, Person], {
 assertType<
   Equals<typeof mixedFlagSearchUnion, (typeof articleSurface)["included"] | typeof flagSearchUnion>
 >(true);
+assertType<Equals<(typeof mixedFlagSearchUnion)["Type"], (typeof mixedSearchUnion)["Type"]>>(true);
 
 // The use it exists for: a wire-variant `success` keeps the default's union.
 const WireArticle = Schema.Struct({ ...Article.fields });

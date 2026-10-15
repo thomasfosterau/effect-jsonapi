@@ -221,7 +221,7 @@ describe("Include.included(resource, { include }) is the default document's unio
       Include.included([Article, Person], { include: widen(false) }),
       Endpoint.collection([Article, Person], { name: "search", path: "/search" }),
     );
-    // The members form too, though its type is the direct targets alone (#382).
+    // The members form too, whose type distributes with the endpoints' (#382).
     expectSameUnion(
       Include.included([Article, Person], { include: widen(true) }),
       Endpoint.collection([Article, Person], { name: "search", path: "/search", include: true }),

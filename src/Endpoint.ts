@@ -1339,17 +1339,21 @@ export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extend
 // endpoint: its `Default` union, whose members are `DefaultMembers` — widened,
 // when the `include` option is `true` or a `Query.IncludeOptions`, by every
 // resource a legal include path reaches from any of `Members` (#320).
+// Distributes over a widened `include`, as `IncludedOf` does (#382): under
+// `include: boolean` it admits what either value admits, since the endpoint
+// built from that value may have turned `include` on.
 type MembersIncludedOf<
   Members extends Any,
   Include,
   Default extends Schema.Top,
   DefaultMembers extends Any,
-> =
-  IncludeEnabled<Include> extends true
+> = Include extends unknown
+  ? IncludeEnabled<Include> extends true
     ? DeclaresSurface<Include> extends true
       ? Default
       : MembersReachableIncluded<Members, Include, DefaultMembers>
-    : Default;
+    : Default
+  : never;
 
 /**
  * The `included` union of a heterogeneous endpoint (`collection`,
@@ -1367,13 +1371,18 @@ export interface MembersReachableIncluded<
   DefaultMembers extends Any,
 > extends Schema.Union<ReadonlyArray<DefaultMembers | IncludedResources<Members, Include>>> {}
 
-// The members of `MembersIncludedOf`'s union.
-type MembersIncludedMembers<Members extends Any, Include, DefaultMembers extends Any> =
-  IncludeEnabled<Include> extends true
+// The members of `MembersIncludedOf`'s union, distributed as it is.
+type MembersIncludedMembers<
+  Members extends Any,
+  Include,
+  DefaultMembers extends Any,
+> = Include extends unknown
+  ? IncludeEnabled<Include> extends true
     ? DeclaresSurface<Include> extends true
       ? DefaultMembers
       : DefaultMembers | IncludedResources<Members, Include>
-    : DefaultMembers;
+    : DefaultMembers
+  : never;
 
 // The success document of a heterogeneous endpoint (`collection`,
 // `polymorphic`) over `Members`: its `Default` document, or — when the

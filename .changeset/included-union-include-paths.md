@@ -6,4 +6,6 @@ The default success document of a read endpoint whose `include` option is `true`
 
 An endpoint with `include` off, or with a declared `Include.Surface`, keeps exactly the document it had, on the wire and in its type.
 
-The widened union is visible to clients too, since it is what `HttpApiClient` decodes `included` into and what the OpenAPI output describes: an exhaustive `switch` on `included[].type` and a client regenerated from the OpenAPI document both see the new member types, and `Group.resource` turns this on for its derived `get`, `list` and related endpoints by default, since it defaults to `include: true`.
+A widened `include: boolean` (say `include: flag` with `flag: boolean`) is typed as admitting what either value admits, since the endpoint built from it may have turned `include` on and then binds the full walk at runtime. This holds on every read endpoint, `collection` and `polymorphic` included (#382), so their client-side `included` type is no narrower than what the server sends.
+
+The widened union is visible to clients too, since it is what `HttpApiClient` decodes `included` into and what the OpenAPI output describes: a client regenerated from the OpenAPI document sees the new member types, and an exhaustive `switch` on `included[].type` needs an arm for each of them, under a widened `include: boolean` as well as `include: true`. `Group.resource` turns this on for its derived `get`, `list` and related endpoints by default, since it defaults to `include: true`.
