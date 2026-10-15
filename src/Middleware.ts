@@ -97,10 +97,11 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
-import { declaredNames, declaresName, wireLeaves } from "./internal/declaredQuery.js";
+import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
+import { wireLeaves } from "./internal/wireNames.js";
 import {
   admitsNoValue,
   definesMembers,

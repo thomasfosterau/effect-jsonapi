@@ -97,6 +97,7 @@ const HTTP_TIER = [
   "internal/linkage.ts",
   "internal/responseBody.ts",
   "internal/vocabulary.ts",
+  "internal/wireNames.ts",
 ];
 
 /**
