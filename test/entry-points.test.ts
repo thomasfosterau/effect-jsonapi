@@ -31,6 +31,10 @@ const SCHEMA_TIER = [
   "Resource.ts",
   "Sort.ts",
   "internal/filter.ts",
+  // `Include.included(resource, { include })` derives an endpoint's default
+  // `included` union from this walk (#342); it imports neither `Query` nor
+  // an `effect` subpath.
+  "internal/includeGraph.ts",
   "internal/media.ts",
   "internal/operators.ts",
   "internal/schemaExt.ts",
@@ -93,7 +97,6 @@ const HTTP_TIER = [
   "internal/define.ts",
   "internal/errorMeta.ts",
   "internal/httpMedia.ts",
-  "internal/includeGraph.ts",
   "internal/linkage.ts",
   "internal/responseBody.ts",
   "internal/sparse.ts",

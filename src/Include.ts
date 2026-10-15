@@ -63,7 +63,9 @@
  * @since 0.15.0
  */
 import { Schema } from "effect";
-import type { Any, IncludableKeys, Target } from "./Resource.js";
+import type { IncludedResources } from "./internal/includeGraph.js";
+import { includedResources, includePathsFor } from "./internal/includeGraph.js";
+import type { Any, IncludableKeys, IncludeDepth, IncludePathsTo, Target } from "./Resource.js";
 
 // The discriminant key both a branch and a surface carry, so neither can be
 // confused with a resource definition (or with `Query.IncludeOptions`, whose
@@ -538,21 +540,95 @@ export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>
 };
 
 /**
- * The `included` union a declaration derives: one flat `Schema.Union` over
- * every resource the walk can hoist, at every depth.
+ * The `included` union of a read endpoint's default document, for an endpoint
+ * over `R` with the `include` option `I`: a `Schema.Union` over the
+ * non-`paginated` direct targets (unless `I` is a declared {@link Surface})
+ * and, when `I` turns `include` on, every resource a legal include path
+ * reaches (#320). For a declared surface that is exactly the resources the
+ * surface declares, its own {@link Included} union.
  *
- * Members are deduplicated by schema **identity**, in walk order — two keys
- * pointing at the same resource contribute one member, and two genuinely
- * distinct resources that happen to share a shape do not collapse. The walk
- * appends to one flat list, so no nested unions arise to flatten.
+ * What {@link included} returns for a resource (or the members of a
+ * heterogeneous endpoint) and an endpoint `include` option.
  *
- * This is the standalone projection; a {@link Surface} carries the same schema
- * as its `included`.
+ * @since 0.17.0
+ * @category models
+ */
+export interface Reachable<R extends Any, I> extends Schema.Union<
+  ReadonlyArray<IncludedResources<R, I>>
+> {}
+
+// A `Query.IncludeOptions` over `R`, and an endpoint's `include` option over
+// `R` (`Query.IncludeOption`), spelled out here because `Query` is HTTP-tier
+// and this module belongs to the schema-only entry point
+// (`test/entry-points.test.ts`). `test/include-depth-included.types.ts` pins that
+// every `Query.IncludeOption` is accepted.
+interface GraphOptions<R extends Any> {
+  readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>;
+  readonly depth?: IncludeDepth;
+  readonly "~@thomasfosterau/effect-jsonapi/include"?: never;
+}
+type EndpointInclude<R extends Any> = boolean | GraphOptions<R> | SurfaceFor<R>;
+
+// What an endpoint's `include` option is at runtime: a boolean, a
+// `Query.IncludeOptions`, or a declared surface.
+type IncludeInput =
+  | boolean
+  | AnySurface
+  | { readonly paths?: ReadonlyArray<string>; readonly depth?: number };
+
+// The `included` union an endpoint over `resources` with the `include` option
+// `include` binds by default — the runtime `Reachable`, built as `Endpoint`'s
+// default documents build theirs: a surface's own union, else the direct
+// targets and every resource the legal paths reach (none while `include` is
+// off).
+const endpointIncluded = (resources: ReadonlyArray<Any>, include: IncludeInput): Schema.Top => {
+  if (isSurface(include)) return include.included;
+  const paths =
+    include === false
+      ? []
+      : include === true
+        ? includePathsFor(resources)
+        : includePathsFor(resources, include);
+  return Schema.Union(includedResources(resources, false, paths));
+};
+
+// Whether `included`'s first argument is the members of a heterogeneous
+// endpoint, rather than one resource or a declaration.
+const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is ReadonlyArray<Any> =>
+  Array.isArray(source);
+
+/**
+ * The `included` union a declaration derives, or the one a read endpoint's
+ * default document carries.
+ *
+ * **From a declaration** — `Include.included(spec)`: one flat `Schema.Union`
+ * over every resource the walk can hoist, at every depth. Members are
+ * deduplicated by schema **identity**, in walk order — two keys pointing at
+ * the same resource contribute one member, and two genuinely distinct
+ * resources that happen to share a shape do not collapse. This is the
+ * standalone projection; a {@link Surface} carries the same schema as its
+ * `included`.
+ *
+ * **From a resource and an endpoint `include` option** —
+ * `Include.included(Article, { include: true })`: the union the default
+ * document of `Endpoint.get` / `list` over `Article` with that `include`
+ * option admits in `included` — the non-`paginated` direct targets and, when
+ * `include` is `true` or a `Query.IncludeOptions`, every resource a legal
+ * include path reaches; a declared {@link Surface}'s own `included`. Pass a
+ * `related` endpoint's *target*, or the array of a `collection` endpoint's
+ * resources (`family.members` for a `polymorphic` endpoint over `family`) with
+ * a boolean or `Query.IncludeOptions`, for theirs. This is the union an
+ * endpoint that overrides `success` with a wire variant must declare, so that
+ * every path it advertises can still be encoded.
+ *
+ * The two forms are told apart by the first argument: a declaration is a
+ * plain record of relationship keys, a resource a schema, and members an
+ * array; only the second form takes the `{ include }` options.
  *
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { Include, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Endpoint, Include, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
  *   attributes: { firstName: Schema.NonEmptyString }
@@ -561,29 +637,73 @@ export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>
  *   attributes: { body: Schema.NonEmptyString },
  *   relationships: { author: Relationship.one(() => Person) }
  * })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.NonEmptyString },
+ *   relationships: {
+ *     author: Relationship.one(() => Person),
+ *     comments: Relationship.many(() => Comment)
+ *   }
+ * })
  *
- * // `author` and `comments.author` are the same resource: one member, not two
- * const union = Include.included({
+ * // From a declaration: `author` and `comments.author` are the same resource,
+ * // so one member, not two
+ * const declared = Include.included({
  *   author: Person,
  *   comments: Include.nested(Comment, { author: Person })
  * })
+ * declared.members.length // 2
  *
- * union.members.length // 2
+ * // From a resource and an endpoint's `include` option: the union
+ * // `Endpoint.get(Article, { include: true })` binds by default
+ * const reachable = Include.included(Article, { include: true })
+ * reachable.members.length // 2 — Person and Comment
+ *
+ * // …which a wire-variant `success` reuses instead of listing the types by hand
+ * const WireArticle = Schema.Struct({ ...Article.fields })
+ * const get = Endpoint.get(Article, {
+ *   include: true,
+ *   success: Document.DataDocument(WireArticle, { included: reachable })
+ * })
  * ```
  *
- * @since 0.15.0
+ * @since 0.15.0 (the resource form since 0.17.0)
  * @category accessors
  */
-export const included = <const S extends AnySpec>(spec: S): Included<S> => {
+export function included<const S extends AnySpec>(spec: S): Included<S>;
+export function included<R extends Any, const I extends EndpointInclude<R>>(
+  resource: R,
+  options: { readonly include: I },
+): Reachable<R, I>;
+export function included<
+  const Resources extends ReadonlyArray<Any>,
+  const I extends boolean | GraphOptions<Resources[number]>,
+>(resources: Resources, options: { readonly include: I }): Reachable<Resources[number], I>;
+export function included(
+  source: AnySpec | Any | ReadonlyArray<Any>,
+  options?: { readonly include: IncludeInput },
+): Schema.Top {
+  if (isMembers(source)) {
+    // The members form mirrors `collection` / `polymorphic`, whose default
+    // document does not take a declared surface's union (#336); refused here
+    // rather than answered with a union no endpoint binds.
+    if (isSurface(options?.include)) {
+      throw new Error(
+        "Include.included: a declared surface describes one resource's paths; " +
+          "pass that resource, not an array of resources",
+      );
+    }
+    return endpointIncluded(source, options?.include ?? false);
+  }
+  if (Schema.isSchema(source)) return endpointIncluded([source], options?.include ?? false);
   const seen = new Set<Any>();
   const members: Array<Any> = [];
-  for (const entry of entriesOf(undefined, spec)) {
+  for (const entry of entriesOf(undefined, source)) {
     if (seen.has(entry.target)) continue;
     seen.add(entry.target);
     members.push(entry.target);
   }
-  return Schema.Union(members) as unknown as Included<S>;
-};
+  return Schema.Union(members);
+}
 
 /**
  * Declares a resource's `?include=` surface — the one declaration the

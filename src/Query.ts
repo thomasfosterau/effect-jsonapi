@@ -72,7 +72,12 @@ import {
   operatorCheck,
   prepare,
 } from "./internal/filter.js";
-import type { ExpandFamilies, IncludeEnabled, IncludedResources } from "./internal/includeGraph.js";
+import type {
+  ExpandFamilies,
+  IncludedResources,
+  IncludeEnabled,
+  LegalIncludePaths,
+} from "./internal/includeGraph.js";
 import { includePathsFor } from "./internal/includeGraph.js";
 import { fieldsetResources } from "./internal/sparse.js";
 import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
@@ -623,16 +628,7 @@ export type IncludeOption<R extends Any> = boolean | IncludeOptions<R> | Surface
  * @since 0.9.0
  * @category type-level
  */
-export type IncludePathsOf<R extends Any, I> = Extract<
-  I extends { readonly paths: ReadonlyArray<infer P> }
-    ? P
-    : I extends { readonly depth: infer D }
-      ? D extends IncludeDepth
-        ? IncludePathsTo<R, D>
-        : IncludePath<R>
-      : IncludePath<R>,
-  string
->;
+export type IncludePathsOf<R extends Any, I> = LegalIncludePaths<R, I>;
 
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,

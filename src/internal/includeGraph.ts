@@ -10,16 +10,41 @@
  *
  * @internal
  */
-import * as Arr from "effect/Array";
-import * as Option from "effect/Option";
-import * as Rec from "effect/Record";
-import type { IncludePathsOf } from "../Query.js";
-import type { Any, IncludableTargets, ResolveIncludePath } from "../Resource.js";
+// The barrel, not `effect/Array` and friends: `Include` reaches this module,
+// and the schema-only entry point resolves `effect` alone
+// (`test/entry-points.test.ts`). For the same reason nothing here imports
+// `Query`, which is HTTP-tier.
+import { Array as Arr, Option, Record as Rec } from "effect";
+import type {
+  Any,
+  IncludableTargets,
+  IncludeDepth,
+  IncludePath,
+  IncludePathsTo,
+  ResolveIncludePath,
+} from "../Resource.js";
 import { directTargets, includePaths, isFamily } from "../Resource.js";
 
 // Each resource once, by identity, first occurrence first.
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> =>
   Arr.dedupeWith(values, (a, b) => a === b);
+
+/**
+ * The `include` paths an `include` option legalises — what
+ * `Query.IncludePathsOf` publishes: a declared `Include.Surface`'s paths or an
+ * explicit allow-list (both read off the option's `paths`), else the graph
+ * derived to the requested depth, else the depth-2 default.
+ */
+export type LegalIncludePaths<R extends Any, I> = Extract<
+  I extends { readonly paths: ReadonlyArray<infer P> }
+    ? P
+    : I extends { readonly depth: infer D }
+      ? D extends IncludeDepth
+        ? IncludePathsTo<R, D>
+        : IncludePath<R>
+      : IncludePath<R>,
+  string
+>;
 
 /**
  * Whether an `include` option turns the parameter on: `true`, or an object
@@ -70,7 +95,7 @@ type ReachedBy<R extends Any, Paths> = ResolveIncludePath<R, Paths>;
  */
 export type IncludedResources<R extends Any, I> =
   | DefaultTargets<R, I>
-  | (IncludeEnabled<I> extends true ? ReachedBy<R, IncludePathsOf<R, I>> : never);
+  | (IncludeEnabled<I> extends true ? ReachedBy<R, LegalIncludePaths<R, I>> : never);
 
 /**
  * `R` with every `Resource.family` in it replaced by its members, and a

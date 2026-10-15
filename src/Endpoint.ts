@@ -518,9 +518,9 @@ export const get = <
      * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
      * decodes those attributes as optional. Pass `fields: false` to keep
      * strict attributes. A `success` override replaces the whole default
-     * document: with `include` on or `meta` overridden, it must list every
+     * document: with `include` on or `meta` overridden, it must admit every
      * reachable type in `included` and carry the `meta` itself
-     * (`R.document({ included, meta })`; #342 tracks a helper for the union).
+     * (`R.document({ included: Include.included(R, { include }), meta })`).
      */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
@@ -742,9 +742,9 @@ export const list = <
      * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
      * decodes those attributes as optional. Pass `fields: false` to keep
      * strict attributes. A `success` override replaces the whole default
-     * document: with `include` on or `meta` overridden, it must list every
+     * document: with `include` on or `meta` overridden, it must admit every
      * reachable type in `included` and carry the `meta` itself
-     * (`R.collection({ included, meta })`; #342 tracks a helper for the union).
+     * (`R.collection({ included: Include.included(R, { include }), meta })`).
      */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for all attributes, or an array of sortable attribute names. */
