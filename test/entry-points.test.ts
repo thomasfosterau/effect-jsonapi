@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
+import config from "../vite.config.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = path.join(ROOT, "src");
@@ -227,6 +228,24 @@ describe("schema-only entry point", () => {
 
   it("reaches exactly the modules assigned to the schema tier", () => {
     expect(schema.modules).toEqual([...SCHEMA_TIER].sort());
+  });
+
+  /**
+   * The lint exemption follows the tier. `vite.config.ts` turns
+   * `effect/no-barrel-imports` off for exactly the modules this entry point
+   * reaches, because the plain `effect` barrel is the only import they may
+   * use. A module that leaves the tier must lose the exemption, and one that
+   * joins it must gain it, so the override's `files` are pinned to
+   * `SCHEMA_TIER` (which includes `schema.ts` itself).
+   */
+  it("exempts exactly the schema tier from `no-barrel-imports`", () => {
+    const exemptions = (config.lint?.overrides ?? []).filter(
+      (override) => override.rules?.["effect/no-barrel-imports"] === "off",
+    );
+    expect(exemptions).toHaveLength(1);
+    expect([...(exemptions[0]?.files ?? [])].sort()).toEqual(
+      SCHEMA_TIER.map((module) => `src/${module}`).sort(),
+    );
   });
 
   it("reaches none of the HTTP-tier modules", () => {

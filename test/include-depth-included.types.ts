@@ -418,7 +418,9 @@ export const forwardMembers = <const I extends Query.IncludeOption<typeof Articl
   include: I,
 ) => Include.included([Article, Person], { include });
 
-// The overloads cannot be confused.
+// The overloads cannot be confused. Their order (declaration, resource,
+// members) is deliberate: see the comment above the resource overload of
+// `included` in src/Include.ts before reordering them.
 const declared = Include.included({ comments: Include.nested(Comment, { author: Person }) });
 assertType<Equals<(typeof declared)["Type"], typeof Comment.Type | typeof Person.Type>>(true);
 // @ts-expect-error -- a resource without an `include` option is no declaration
