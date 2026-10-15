@@ -2363,7 +2363,7 @@ const atomicLidResolution: RuleImpl = {
  * What a caller does about the redirects that answered `redirected`, each
  * remedy once: a chain on the base URL's origin past {@link HOP_CAP} is not
  * cured by another `baseUrl`, nor is a transport that followed a redirect
- * itself.
+ * itself or a `Location` the server got wrong.
  */
 const remedies = (redirected: ReadonlyArray<Observation>): string =>
   Arr.dedupe(
@@ -2374,6 +2374,9 @@ const remedies = (redirected: ReadonlyArray<Observation>): string =>
       }
       if (reason === "transport") {
         return "hand the kit a client that does not follow redirects itself";
+      }
+      if (reason === "unparseable") {
+        return "fix the server's `Location`, which is not a URL the kit can resolve";
       }
       return "point `baseUrl` at the URL that serves the api";
     }),
@@ -2400,7 +2403,7 @@ const redirectedFinding = (
       });
       return [
         finding(impl, {
-          detail: `${which} read endpoint${probed === 1 ? "" : "s"} the kit probed answered with a redirect it does not follow, so the rules that probe ${them} have no answer to decide on — ${remedies(redirected)}`,
+          detail: `${which} read endpoint${probed === 1 ? "" : "s"} the kit probed answered with a redirect it does not follow or read, so the rules that probe ${them} have no answer to decide on — ${remedies(redirected)}`,
           expected:
             "an answer from the base URL's origin, directly or through redirects that stay on it",
           observed: `${first.probe.url}: ${describe(first)}${more}`,

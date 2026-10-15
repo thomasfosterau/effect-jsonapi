@@ -202,22 +202,33 @@ const offsite = (path: string) =>
  * A transport that follows each redirect itself (`HttpClient.followRedirects`)
  * in front of `canned`: each request `moved` picks is answered with a `302` to
  * the same path on `https://elsewhere.test`, which the transport then requests,
- * and whose answer — a 200 with an empty document — is all the kit is handed.
+ * and whose answer — a 200 with an empty document — is all the kit is handed;
+ * or, when `ends` is `"refused"`, which fails there as a refused connection or
+ * a DNS failure does over real sockets.
  */
 const followingOffsite =
-  (moved: (request: HttpClientRequest.HttpClientRequest, url: URL) => boolean) =>
+  (
+    moved: (request: HttpClientRequest.HttpClientRequest, url: URL) => boolean,
+    ends: "answered" | "refused" = "answered",
+  ) =>
   (canned: HttpClient.HttpClient) =>
     HttpClient.followRedirects(
       HttpClient.make((request, url) => {
         if (url.origin === "https://elsewhere.test") {
-          return Effect.succeed(
-            HttpClientResponse.fromWeb(
-              request,
-              new Response('{"meta":{}}', {
-                headers: { "content-type": MEDIA_TYPE },
-              }),
-            ),
-          );
+          return ends === "refused"
+            ? Effect.fail(
+                new HttpClientError.HttpClientError({
+                  reason: new HttpClientError.TransportError({ request }),
+                }),
+              )
+            : Effect.succeed(
+                HttpClientResponse.fromWeb(
+                  request,
+                  new Response('{"meta":{}}', {
+                    headers: { "content-type": MEDIA_TYPE },
+                  }),
+                ),
+              );
         }
         return moved(request, url)
           ? Effect.succeed(
@@ -235,7 +246,11 @@ const followingOffsite =
 
 /** A redirect the transport followed to `https://elsewhere.test` + `path`, as a note names it. */
 const followed = (path: string) =>
-  `a redirect the transport followed itself, ending at https://elsewhere.test${path}, whose answer the kit does not read: https://elsewhere.test is another origin than the one the request was sent to, http://fixture.test — the transport has sent the request there already, so hand the kit a client that does not follow redirects`;
+  `a redirect the transport followed itself, ending at https://elsewhere.test${path} with a 200, whose answer the kit does not read: https://elsewhere.test is another origin than the one the request was sent to, http://fixture.test, and the transport has already tried the request there`;
+
+/** A redirect the transport followed to `https://elsewhere.test` + `path` and failed at, as a note names it. */
+const refused = (path: string) =>
+  `a redirect the transport followed itself, ending in a transport error at https://elsewhere.test${path}: https://elsewhere.test is another origin than the one the request was sent to, http://fixture.test, and the transport has already tried the request there`;
 
 /** The families of query parameter JSON:API defines. */
 const FAMILIES = ["include", "sort", "page", "filter", "fields"];
@@ -1595,7 +1610,7 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
           _tag: "Skipped",
           reason: expect.stringContaining(
             // The URL the transport ended at is named as it sent it, brackets encoded.
-            `1 of 2 requests the rule sent were answered by a redirect the kit does not follow (GET ${url} answered ${followed(url.replaceAll("[", "%5B").replaceAll("]", "%5D"))})`,
+            `1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET ${url} answered ${followed(url.replaceAll("[", "%5B").replaceAll("]", "%5D"))})`,
           ),
         }),
       ),
@@ -2308,7 +2323,7 @@ describe("Conformance: the write fixture", () => {
           {
             rule: expect.anything(),
             detail:
-              "every read endpoint the kit probed answered with a redirect it does not follow, so the rules that probe it have no answer to decide on — point `baseUrl` at the URL that serves the api",
+              "every read endpoint the kit probed answered with a redirect it does not follow or read, so the rules that probe it have no answer to decide on — point `baseUrl` at the URL that serves the api",
             expected:
               "an answer from the base URL's origin, directly or through redirects that stay on it",
             observed: `/articles/1: a 302 redirect to ${origin}/articles/1, which the kit does not follow: ${origin} is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`,
@@ -2343,6 +2358,18 @@ describe("Conformance: the write fixture", () => {
       "hand the kit a client that does not follow redirects itself",
       `/articles/1: ${followed("/articles/1")}`,
     ],
+    [
+      "a transport that follows each redirect off the origin itself, failing there",
+      followingOffsite(() => true, "refused"),
+      "hand the kit a client that does not follow redirects itself",
+      `/articles/1: ${refused("/articles/1")}`,
+    ],
+    [
+      "a `Location` that does not parse",
+      redirectingAll(302, () => "http://[").client,
+      "fix the server's `Location`, which is not a URL the kit can resolve",
+      "/articles/1: a 302 redirect to http://[, which the kit does not follow: its `Location` is not a URL the kit can resolve",
+    ],
   ])(
     "tells the caller what to change for %s, not to move `baseUrl`, and decides nothing else",
     async (_, client, remedy, observed) => {
@@ -2351,7 +2378,7 @@ describe("Conformance: the write fixture", () => {
         _tag: "Failed",
         findings: [
           {
-            detail: `every read endpoint the kit probed answered with a redirect it does not follow, so the rules that probe it have no answer to decide on — ${remedy}`,
+            detail: `every read endpoint the kit probed answered with a redirect it does not follow or read, so the rules that probe it have no answer to decide on — ${remedy}`,
             observed,
           },
         ],
@@ -2391,7 +2418,7 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(deletes.report, "spec/status/delete-response")).toMatchObject({
       _tag: "Skipped",
       reason: expect.stringMatching(
-        /^not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow \(DELETE \/articles\/\d+ answered a 302 redirect to https:\/\/elsewhere\.test\/articles\/\d+, which the kit does not follow: .*\), and a rule is not passed on the answers it did read alone$/,
+        /^not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read \(DELETE \/articles\/\d+ answered a 302 redirect to https:\/\/elsewhere\.test\/articles\/\d+, which the kit does not follow: .*\), and a rule is not passed on the answers it did read alone$/,
       ),
     });
     // Only the requests that carry a query leave: the baseline was answered,
@@ -2402,7 +2429,7 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(queries.report, "spec/query/include-unsupported-endpoint")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?include=author answered ${offsite("/articles/1?include=author")}), and a rule is not passed on the answers it did read alone`,
+      reason: `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?include=author answered ${offsite("/articles/1?include=author")}), and a rule is not passed on the answers it did read alone`,
     });
   });
 
@@ -2436,7 +2463,7 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(report, "spec/errors/error-source-discrimination")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `no provoked error object carried a \`source\` member; 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${offsite("/articles/1?unknown=1")})`,
+      reason: `no provoked error object carried a \`source\` member; 1 of 3 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${offsite("/articles/1?unknown=1")})`,
     });
   });
 
@@ -2444,7 +2471,8 @@ describe("Conformance: the write fixture", () => {
   const tags = (report: Conformance.Report) =>
     report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`);
 
-  it.each([
+  /** The requests a transport redirects off the origin, by what picks them. */
+  const offsiteMoves = [
     [
       "only `?unknown=1`",
       (_: HttpClientRequest.HttpClientRequest, url: URL) => url.searchParams.has("unknown"),
@@ -2459,18 +2487,118 @@ describe("Conformance: the write fixture", () => {
       "every request with a query",
       (_: HttpClientRequest.HttpClientRequest, url: URL) => url.search !== "",
     ],
-  ])(
-    "decides nothing on a request a transport followed off the origin itself, when it redirects %s",
-    async (_, moved) => {
+    ["only the POSTs", (request: HttpClientRequest.HttpClientRequest) => request.method === "POST"],
+  ] as const;
+
+  it.each(
+    Arr.flatMap(offsiteMoves, ([which, moved]) =>
+      Arr.map(["answered", "refused"] as const, (ends) => [which, ends, moved] as const),
+    ),
+  )(
+    "decides nothing on a request a transport followed off the origin itself, when it redirects %s and the other origin %s",
+    async (_, ends, moved) => {
       const kit = await run(undefined, undefined, { client: redirectingSome(moved) });
-      const transport = await run(undefined, undefined, { client: followingOffsite(moved) });
-      // No rule fails on an answer from the other origin — no "was not
-      // rejected", no "got no response" — and none passes on the rest of its
-      // requests: every rule ends as it does when the kit sees the redirect.
+      const transport = await run(undefined, undefined, {
+        client: followingOffsite(moved, ends),
+      });
+      // No rule fails on an answer from the other origin, or on its failing
+      // there — no "was not rejected", no "got no response" — and none passes
+      // on the rest of its requests: every rule ends as it does when the kit
+      // sees the redirect.
       expect(failed(transport.report)).toEqual([]);
       expect(tags(transport.report)).toEqual(tags(kit.report));
     },
   );
+
+  it("names a redirect the transport followed to another origin that failed there as such", async () => {
+    const { report } = await run(undefined, undefined, {
+      client: followingOffsite((_, url) => url.searchParams.has("unknown"), "refused"),
+    });
+    expect(outcomeFor(report, "spec/query/unknown-query-parameter")).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${refused("/articles/1?unknown=1")})`,
+    });
+  });
+
+  /**
+   * A transport in front of the server that answers each request `moved`
+   * picks with a `status` redirect to the same path under `/moved`, on the
+   * run's origin, serves `/moved/…` as the server serves `…`, and passes the
+   * rest to the server; wrapped in `HttpClient.followRedirects` when `follows`.
+   */
+  const redirectingWithin =
+    (
+      status: number,
+      moved: (request: HttpClientRequest.HttpClientRequest) => boolean,
+      follows: boolean,
+    ) =>
+    (canned: HttpClient.HttpClient) => {
+      const client = HttpClient.make((request, url) => {
+        if (url.pathname.startsWith("/moved/")) {
+          return canned.execute(
+            HttpClientRequest.setUrl(
+              request,
+              `${url.origin}${url.pathname.slice("/moved".length)}${url.search}`,
+            ),
+          );
+        }
+        return moved(request)
+          ? Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response(null, {
+                  status,
+                  headers: { location: `/moved${url.pathname}${url.search}` },
+                }),
+              ),
+            )
+          : canned.execute(request);
+      });
+      return follows ? HttpClient.followRedirects(client) : client;
+    };
+
+  it.each([
+    [303, "DELETE"],
+    [303, "PATCH"],
+    [302, "POST"],
+    [301, "POST"],
+  ] as const)(
+    "does not read a %i a transport followed itself within the origin, turning a %s into a GET, as the answer to it",
+    async (status, method) => {
+      const moved = (request: HttpClientRequest.HttpClientRequest) => request.method === method;
+      const kit = await run(undefined, undefined, {
+        client: redirectingWithin(status, moved, false),
+      });
+      const transport = await run(undefined, undefined, {
+        client: redirectingWithin(status, moved, true),
+      });
+      expect(failed(transport.report)).toEqual(failed(kit.report));
+      expect(tags(transport.report)).toEqual(tags(kit.report));
+      expect(
+        transport.report.outcomes.some(
+          (outcome) =>
+            Predicate.isTagged(outcome, "Skipped") &&
+            outcome.reason.includes(
+              `a redirect the transport followed itself, ending at http://fixture.test/`,
+            ) &&
+            outcome.reason.includes(
+              `the transport turned the ${method} into a GET on the way, which the kit does not send in its place`,
+            ),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("still reads a redirect a transport followed itself within the origin, keeping the method", async () => {
+    const moved = (request: HttpClientRequest.HttpClientRequest) => request.method === "DELETE";
+    const direct = await run();
+    const transport = await run(undefined, undefined, {
+      client: redirectingWithin(307, moved, true),
+    });
+    expect(failed(transport.report)).toEqual([]);
+    expect(tags(transport.report)).toEqual(tags(direct.report));
+  });
 
   it("names a redirect the transport followed off the origin in the rule it leaves undecided", async () => {
     const unknown = await run(undefined, undefined, {
@@ -2479,7 +2607,7 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(unknown.report, "spec/query/unknown-query-parameter")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
+      reason: `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
     });
     const errors = [
       "spec/errors/error-document-shape",
@@ -2491,7 +2619,7 @@ describe("Conformance: the write fixture", () => {
         expect.objectContaining({
           _tag: "Skipped",
           reason: expect.stringContaining(
-            `1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
+            `1 of 3 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
           ),
         }),
       ),
@@ -2502,7 +2630,7 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(deletes.report, "spec/status/delete-response")).toMatchObject({
       _tag: "Skipped",
       reason: expect.stringMatching(
-        /^not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow \(DELETE \/articles\/\d+ answered a redirect the transport followed itself, ending at https:\/\/elsewhere\.test\/articles\/\d+, whose answer the kit does not read: .*\), and a rule is not passed on the answers it did read alone$/,
+        /^not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read \(DELETE \/articles\/\d+ answered a redirect the transport followed itself, ending at https:\/\/elsewhere\.test\/articles\/\d+ with a 200, whose answer the kit does not read: .*\), and a rule is not passed on the answers it did read alone$/,
       ),
     });
     // The unsupported-family and bracketed probes: each rule's baseline was
@@ -3926,7 +4054,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
         }),
       ),
     ).toBe(
-      `no paginated collection could be walked to a verdict (/tags: \`next\` on page 1 (/tags?page[limit]=3) answered ${offsite("/tags?page[offset]=3")}, so the walk could not be finished); 1 of 5 requests the rule sent were answered by a redirect the kit does not follow (GET /tags?page[offset]=3&page[limit]=3 answered ${offsite("/tags?page[offset]=3")})`,
+      `no paginated collection could be walked to a verdict (/tags: \`next\` on page 1 (/tags?page[limit]=3) answered ${offsite("/tags?page[offset]=3")}, so the walk could not be finished); 1 of 5 requests the rule sent were answered by a redirect the kit does not follow or read (GET /tags?page[offset]=3&page[limit]=3 answered ${offsite("/tags?page[offset]=3")})`,
     );
   });
 
@@ -3956,7 +4084,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
     expect(outcomeFor(await verifyPaged(serve, twoApi), RULE)).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `not decided: 1 of 11 requests the rule sent were answered by a redirect the kit does not follow (GET /tags?page[offset]=3&page[limit]=3 answered ${offsite("/tags?page[offset]=3")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 collection not decided: /tags: \`next\` on page 1 (/tags?page[limit]=3) answered ${offsite("/tags?page[offset]=3")}, so the walk could not be finished`,
+      reason: `not decided: 1 of 11 requests the rule sent were answered by a redirect the kit does not follow or read (GET /tags?page[offset]=3&page[limit]=3 answered ${offsite("/tags?page[offset]=3")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 collection not decided: /tags: \`next\` on page 1 (/tags?page[limit]=3) answered ${offsite("/tags?page[offset]=3")}, so the walk could not be finished`,
     });
   });
 
@@ -5215,7 +5343,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     expect(credentials.every((value) => value === "include")).toBe(true);
     expect(outcomeFor(report, SELF)).toMatchObject({
       _tag: "Skipped",
-      reason: `not decided: 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/2 answered ${offsite("/articles/2")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) answered ${offsite("/articles/2")}`,
+      reason: `not decided: 1 of 3 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/2 answered ${offsite("/articles/2")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) answered ${offsite("/articles/2")}`,
     });
   });
 
@@ -5413,7 +5541,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     expect(outcomeFor(report, SELF)).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `not decided: 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/2 answered ${followed("/articles/2")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) answered ${followed("/articles/2")}`,
+      reason: `not decided: 1 of 3 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/2 answered ${followed("/articles/2")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) answered ${followed("/articles/2")}`,
     });
   });
 
@@ -5555,7 +5683,7 @@ describe("Conformance: a target that redirects some read endpoints off its origi
       findings: [
         {
           detail:
-            "4 of 6 read endpoints the kit probed answered with a redirect it does not follow, so the rules that probe them have no answer to decide on — point `baseUrl` at the URL that serves the api",
+            "4 of 6 read endpoints the kit probed answered with a redirect it does not follow or read, so the rules that probe them have no answer to decide on — point `baseUrl` at the URL that serves the api",
           observed: `/r0: ${offsite("/r0")}; and 3 more (/r1, /r2, /r3)`,
         },
       ],
@@ -5564,7 +5692,7 @@ describe("Conformance: a target that redirects some read endpoints off its origi
     expect(outcomeFor(report, "spec/content-negotiation/response-media-type")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `not decided: 4 of 6 requests the rule sent were answered by a redirect the kit does not follow (GET /r0 answered ${offsite("/r0")}; GET /r1 answered ${offsite("/r1")}; GET /r2 answered ${offsite("/r2")}; and 1 more), and a rule is not passed on the answers it did read alone; the rule's own note: 1 endpoint not probed: no sample id for "unprobed" — pass ids["unprobed"] or paths["unprobed.get"]`,
+      reason: `not decided: 4 of 6 requests the rule sent were answered by a redirect the kit does not follow or read (GET /r0 answered ${offsite("/r0")}; GET /r1 answered ${offsite("/r1")}; GET /r2 answered ${offsite("/r2")}; and 1 more), and a rule is not passed on the answers it did read alone; the rule's own note: 1 endpoint not probed: no sample id for "unprobed" — pass ids["unprobed"] or paths["unprobed.get"]`,
     });
   });
 });

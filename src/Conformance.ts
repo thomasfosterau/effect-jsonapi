@@ -953,21 +953,26 @@ export const verify = Effect.fnUntraced(function* <
  * The kit follows a redirect only when its `Location` stays on `baseUrl`'s
  * origin (scheme, host and port), at most five hops for one request, each
  * counted against a rule's request budget, and grades the final answer. It
- * checks each hop before requesting it, so it never sends a request to another
- * origin on a server's say-so: a redirect it does not follow leaves the
- * request with no answer to read, and `spec/target/reachable` reports a read
- * endpoint that answers with one — point `baseUrl` at the URL that serves, or
- * shorten a chain on its origin longer than the cap. To keep the transport
+ * checks each hop before requesting it, so, given a client that does not
+ * follow redirects itself, it never sends a request to another origin on a
+ * server's say-so: a redirect it does not follow leaves the request with no
+ * answer to read, and `spec/target/reachable` reports a read endpoint that
+ * answers with one — point `baseUrl` at the URL that serves, shorten a chain on
+ * its origin longer than the cap, or fix a `Location` that does not parse. To
+ * keep the transport
  * from following a redirect itself, the kit provides
  * `FetchHttpClient.RequestInit` with `redirect: "manual"` for its own
  * requests, over the rest of the `RequestInit` the run's context holds. A
  * `RequestInit` given only to the client's layer
  * (`FetchHttpClient.layer.pipe(Layer.provide(…))`) is replaced for the kit's
  * requests, so give it to the run instead. A client that follows redirects by
- * other means (`HttpClient.followRedirects`) still sends the request: the kit
- * does not read an answer that came from another origin, and a rule that sent
- * the request is not decided by it, as for any redirect off the origin, but
- * the request has been made, so pass a client that does not follow redirects.
+ * other means (`HttpClient.followRedirects`) still sends the request. The kit
+ * reads neither the answer nor the transport error such a client ends in on
+ * another origin, or after turning the method into a `GET`, and a rule that
+ * sent the request is not decided by it, as for any redirect the kit does not
+ * follow; but only the final URL and method are checked, so a chain off the
+ * origin and back is read, and the request has been made either way — pass a
+ * client that does not follow redirects.
  * There is no per-request timeout: a server that holds a response open holds
  * the run.
  *

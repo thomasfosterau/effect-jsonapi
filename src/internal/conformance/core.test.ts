@@ -262,7 +262,7 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
     expect(undecidedByRedirects(pass(rule, 2), [read("/a"), redirected("/b")])).toEqual(
       skip(
         rule,
-        `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow (${named("/b")}), and a rule is not passed on the answers it did read alone`,
+        `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (${named("/b")}), and a rule is not passed on the answers it did read alone`,
       ),
     );
   });
@@ -271,7 +271,7 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
     expect(undecidedByRedirects(pass(rule, 1, "its note"), [redirected("/b")])).toEqual(
       skip(
         rule,
-        `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named("/b")}); the rule's own note: its note`,
+        `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (${named("/b")}); the rule's own note: its note`,
       ),
     );
   });
@@ -291,7 +291,7 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
     expect(undecidedByRedirects(pass(rule, 2), [redirected("/b"), redirected("/b")])).toEqual(
       skip(
         rule,
-        `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named("/b")})`,
+        `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (${named("/b")})`,
       ),
     );
   });
@@ -302,7 +302,7 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
     ).toEqual(
       skip(
         rule,
-        `nothing to grade; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow (${named("/b")})`,
+        `nothing to grade; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (${named("/b")})`,
       ),
     );
   });
