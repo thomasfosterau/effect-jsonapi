@@ -174,12 +174,21 @@ const usable = (
  * create endpoint whose type has a `create` fixture; for `"update"` and
  * `"delete"` it is every such endpoint whose type also has a create endpoint
  * and fixture — the kit acts on resources it created itself, never on a
- * caller's sample — and, for `"update"`, an `update` fixture.
+ * caller's sample — and, for `"update"`, an `update` fixture. `admits`
+ * narrows the candidates to the endpoints a rule is about (those declaring
+ * `Idempotency-Key`, say), so one it leaves out is neither a target nor missing.
  *
  * @internal
  */
-export const targets = (ctx: Context, role: WriteRole): Targets => {
-  const candidates = Arr.filter(ctx.endpoints, (endpoint) => endpoint.role === role);
+export const targets = (
+  ctx: Context,
+  role: WriteRole,
+  admits: (endpoint: Discovered) => boolean = () => true,
+): Targets => {
+  const candidates = Arr.filter(
+    ctx.endpoints,
+    (endpoint) => endpoint.role === role && admits(endpoint),
+  );
   const [found, missing] = Arr.partition(candidates, (endpoint) => usable(ctx, role, endpoint));
   return { targets: found, missing, candidates: candidates.length };
 };

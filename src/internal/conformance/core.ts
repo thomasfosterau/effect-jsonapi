@@ -30,6 +30,7 @@ import {
   type HttpServerResponse,
 } from "effect/http";
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
+import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { declaredNames } from "../declaredQuery.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
@@ -257,6 +258,12 @@ export interface Discovered {
    * it opens. `queryKeys` leaves them out.
    */
   readonly queryPrefixes: ReadonlyArray<string>;
+  /**
+   * `true` when the endpoint's headers schema declares `Idempotency-Key` — it
+   * opts into the idempotency profile (`docs/idempotency.md`), as
+   * `idempotency: true | "required"` does.
+   */
+  readonly idempotencyKey: boolean;
 }
 
 const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | undefined }>(
@@ -286,6 +293,17 @@ const wireKeys = (
       queryPrefixes: names.filter((name) => name.endsWith("[")),
     }),
   });
+
+/**
+ * Whether an endpoint's headers schema declares the `Idempotency-Key` request
+ * header. Header names are matched case-insensitively, as HTTP matches them; a
+ * headers schema whose names cannot be enumerated declares nothing this can see.
+ */
+const declaresIdempotencyKey = (schema: { readonly ast: SchemaAST.AST } | undefined): boolean =>
+  schema !== undefined &&
+  Option.exists(declaredNames(schema.ast), (names) =>
+    names.some((name) => name.toLowerCase() === IDEMPOTENCY_HEADER),
+  );
 
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
@@ -354,6 +372,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
           .filter((segment) => segment.startsWith(":"))
           .map((segment) => segment.slice(1)),
         ...query,
+        idempotencyKey: declaresIdempotencyKey(endpoint.headers),
       });
     }
   }

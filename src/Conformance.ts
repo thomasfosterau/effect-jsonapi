@@ -655,8 +655,8 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "The Idempotency-Key profile",
     reason:
-      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`), and the profile tier does not check it at all — it covers the filter grammar and two library conventions only. Its rules are almost entirely about what a *retried write* does (replay of the recorded response, the fingerprint mismatch conflict, the in-flight case), so beyond the `writes` fixture they need a way to replay a request the kit has already sent. Its one non-mutating rule — that a write endpoint declaring the header advertises the profile on its response media type — is checkable today and simply not yet written.",
-    tracking: ["#123", "#165"],
+      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`). The profile tier checks its advertisement (§1): given a `writes` fixture and `mutating: true`, a create on an endpoint declaring `Idempotency-Key` must answer with the profile URI in `jsonapi.profile` or on its media type. What a *retried* write does is not checked: replay of the recorded response, the fingerprint mismatch conflict, the in-flight case and the scope of a key. Each needs the kit to resend a request it has already sent, byte for byte, which neither the write fixture (#162) nor the kit yet provides.",
+    tracking: ["#123", "#162", "#165"],
   },
   {
     area: "Relationship and top-level `self` links",
