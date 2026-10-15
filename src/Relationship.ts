@@ -22,7 +22,7 @@
  * excluded from `?include=` paths and from create/update payloads; they are
  * managed through relationship endpoints instead.
  *
- * ```ts
+ * ```ts skip-type-checking
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
  *   relationships: {

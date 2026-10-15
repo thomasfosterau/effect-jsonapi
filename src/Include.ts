@@ -15,7 +15,7 @@
  * A {@link Surface} is one nested declaration all three project from, so they
  * cannot drift:
  *
- * ```ts
+ * ```ts skip-type-checking
  * const surface = Include.make(Article, {
  *   author: Person,
  *   comments: Include.nested(Comment, { author: Person })

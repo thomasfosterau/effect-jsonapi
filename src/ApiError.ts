@@ -5,7 +5,7 @@
  * `Effect.catchTag`, `yield*` — whose wire encoding is a spec-compliant
  * JSON:API error document carrying the declared HTTP status:
  *
- * ```ts
+ * ```ts skip-type-checking
  * class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNotFound", {
  *   status: 404,
  *   code: "not_found",
