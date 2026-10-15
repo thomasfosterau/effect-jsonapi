@@ -98,6 +98,7 @@ const HTTP_TIER = [
   "internal/responseBody.ts",
   "internal/sparse.ts",
   "internal/vocabulary.ts",
+  "internal/wireNames.ts",
 ];
 
 /**

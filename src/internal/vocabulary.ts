@@ -24,7 +24,8 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
-import { declaredNames, wireProperties } from "./declaredQuery.js";
+import { declaredNames } from "./declaredQuery.js";
+import { wireProperties } from "./wireNames.js";
 
 /** The annotation key. Namespaced so it can never collide with a consumer's. */
 const VOCABULARY_ANNOTATION = "~@thomasfosterau/effect-jsonapi/vocabulary";
