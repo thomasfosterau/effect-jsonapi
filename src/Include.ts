@@ -568,12 +568,10 @@ export interface Reachable<R extends Any, I> extends Schema.Union<
  * targets and, when `I` turns `include` on, every resource a legal include
  * path reaches from any member.
  *
- * Unlike {@link Reachable} it does not distribute over a widened `include`,
- * because `collection` and `polymorphic` don't (#382): under
- * `include: boolean` their default document's `included` is typed as the
- * direct targets alone, and so is this. Only the type narrows: at runtime the
- * union is the one for the value `include` holds, the full walk when it is
- * `true`. When #382 is fixed this distributes with them.
+ * Like {@link Reachable} it distributes over a widened `include`, as
+ * `collection` and `polymorphic` do (#382): under `include: boolean` it admits
+ * what either value admits, since the endpoint built from that value may have
+ * turned `include` on.
  *
  * A declared {@link Surface} gives the surface's own `included` (see
  * {@link included}), which `collection` and `polymorphic` do not bind yet
@@ -583,12 +581,12 @@ export interface Reachable<R extends Any, I> extends Schema.Union<
  * @category models
  */
 export interface MembersReachable<Members extends Any, I> extends Schema.Union<
-  ReadonlyArray<IncludedResources<Members, I>>
+  ReadonlyArray<I extends unknown ? IncludedResources<Members, I> : never>
 > {}
 
 // The members form's result. Each declared surface in `I` gives its own
 // `included`; the rest of `I` (a boolean or a `Query.IncludeOptions`) gives
-// `MembersReachable` over it, undistributed as `collection` / `polymorphic`
+// `MembersReachable` over it, distributed as `collection` / `polymorphic`
 // type theirs (#382). So `which ? surface : true` is typed as either union,
 // as the runtime returns one or the other.
 type MembersIncluded<Members extends Any, I> =
@@ -666,9 +664,8 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * `collection` endpoint's resources, or `family.members` for a `polymorphic`
  * endpoint over `family`, gives the union of their default documents, over
  * every member's direct targets and paths ({@link MembersReachable}). A
- * widened `include: boolean` is typed as the direct targets alone, as those
- * endpoints' types are (#382); at runtime it is the union for the value it
- * holds, the full walk when that is `true`. A declared surface gives the
+ * widened `include: boolean` gives what either value admits, as those
+ * endpoints do (#382). A declared surface gives the
  * surface's own `included`, and an `include` that may be a surface or not
  * (`which ? surface : true`) is typed as either union. Until #336 is fixed,
  * `collection` and `polymorphic` ignore a surface's union and bind their
