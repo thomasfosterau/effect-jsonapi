@@ -569,8 +569,8 @@ const unredirected = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A,
  * `302` turns a `POST`, a `303` any method but `GET`, into a `GET`). `sent` is
  * the kit's request after the client's own `preprocess`, so a client that
  * rewrites every request (`HttpClient.mapRequest` onto another origin, say)
- * is read as the server it sends to, not as one that followed a redirect. The kit
- * does not read that answer, so the request is left as one a redirect
+ * is read as the server it sends to, not as one that followed a redirect.
+ * The kit does not read that answer, so the request is left as one a redirect
  * answered that the kit did not follow — not decided, as for any other (owner
  * decision on #333). `status` is the answer's, or `0` when the transport
  * failed there. Only where the transport ended is checked: a chain that left
@@ -705,10 +705,31 @@ const refusalOf = (
   );
 };
 
-/** The next hop of a redirect `answer` to `sent`, or why the kit does not take it. */
+/**
+ * Where `location` leads, resolved against `sent`, the URL the kit built. A
+ * client that rewrites each request onto another origin
+ * (`HttpClient.mapRequest` onto a local port, say) sends it to `sentTo`, the
+ * URL after its own `preprocess`, and an absolute `Location` on that origin names a path on the
+ * server the client sends to: the kit reads it as a `Location` of that path
+ * alone, on its own origin, so the hop is a request the kit builds and the
+ * client rewrites once, as any other.
+ */
+const resolvedLocation = (location: string, sent: string, sentTo: string): URL => {
+  const resolved = new URL(location, sent);
+  const own = new URL(sent).origin;
+  const rewritten = URL.canParse(sentTo) ? new URL(sentTo).origin : own;
+  return rewritten !== own && resolved.origin === rewritten
+    ? new URL(`${resolved.pathname}${resolved.search}${resolved.hash}`, sent)
+    : resolved;
+};
+
+/**
+ * The next hop of a redirect `answer` to `sent`, which the client sent to
+ * `sentTo`, or why the kit does not take it.
+ */
 const hopOf = (
   answer: { readonly status: number; readonly location: string },
-  sent: { readonly method: string; readonly url: string },
+  sent: { readonly method: string; readonly url: string; readonly sentTo: string },
   origin: string,
   budget: { readonly hops: number; readonly allowed: number },
 ): Result.Result<{ readonly method: string; readonly url: string }, Unfollowed> => {
@@ -721,7 +742,7 @@ const hopOf = (
       why: "its `Location` is not a URL the kit can resolve",
     });
   }
-  const resolved = new URL(location, sent.url);
+  const resolved = resolvedLocation(location, sent.url, sent.sentTo);
   return Option.match(refusalOf(status, resolved, sent, origin, budget), {
     onNone: () => Result.succeed({ method: sent.method, url: resolved.href }),
     onSome: ([reason, why]) => Result.fail({ status, location: resolved.href, reason, why }),
@@ -744,13 +765,20 @@ const hopOf = (
  * the kit does not follow leaves the probe with no answer to read: `status: 0`,
  * with the redirect in `unfollowed` and named in `transportError`.
  *
+ * The kit runs each request through the client as its own `execute` does —
+ * `postprocess` over `preprocess` — and keeps the request `preprocess` last
+ * produced, where `HttpClient.mapRequest` rewrites it: the request the client
+ * sent. A `Location` on that request's origin is followed as one on the base
+ * URL's (see {@link resolvedLocation}).
+ *
  * The transport itself follows nothing (see {@link unredirected}). An answer,
  * or a transport error, a transport brought back all the same from a redirect
- * it followed on its own — to another origin than the client sent the request
- * to after its own `preprocess` (where `HttpClient.mapRequest` rewrites it),
- * or turning the method into a `GET` — is not read: it is recorded as a redirect the kit did not follow
- * (`reason: "transport"`), naming where the transport ended up, so it leaves
- * the rule not decided as any other does (see {@link transportFollowed}).
+ * it followed on its own — to another origin than the request the client
+ * sent, or turning the method into a `GET` — is not read: it is recorded as a
+ * redirect the kit did not follow (`reason: "transport"`), naming where the
+ * transport ended up, so it leaves the rule not decided as any other does
+ * (see {@link transportFollowed}). A failure of `preprocess` itself, with no
+ * request sent, is read as any other transport error.
  *
  * @internal
  */
@@ -771,17 +799,35 @@ export const runner =
       redirects: ReadonlyArray<string>,
     ): Effect.Effect<Observation, never, Scope.Scope> =>
       Effect.gen(function* () {
-        // The request as the client sends it: after its own `preprocess`, where
-        // `HttpClient.mapRequest` rewrites it (onto another origin, say), and
-        // before its `postprocess`, where `HttpClient.followRedirects` follows.
-        const prepared = yield* Effect.result(
-          client.preprocess(clientRequest(sent.url, { ...record, method: sent.method })),
-        );
-        if (Result.isFailure(prepared)) return unread(record, String(prepared.failure), redirects);
-        const request = prepared.success;
+        const request = clientRequest(sent.url, { ...record, method: sent.method });
+        // The request as the client sends it: what its own `preprocess` — where
+        // `HttpClient.mapRequest` rewrites it (onto another origin, say) — last
+        // produced. `postprocess` is handed `preprocess` itself, as `execute`
+        // hands it, so a client's `retry` or `catchTag` (built on its
+        // `postprocess`) still runs `preprocess` again for each attempt, and
+        // recovers from its failure; `HttpClient.followRedirects` follows in
+        // `postprocess`, after it. Reset each attempt, so none when the last
+        // one never sent a request.
+        let prepared = Option.none<HttpClientRequest.HttpClientRequest>();
         const result = yield* Effect.result(
-          unredirected(client.postprocess(Effect.succeed(request))),
+          unredirected(
+            client.postprocess(
+              Effect.suspend(() => {
+                prepared = Option.none();
+                return Effect.tap(client.preprocess(request), (sentAs) =>
+                  Effect.sync(() => {
+                    prepared = Option.some(sentAs);
+                  }),
+                );
+              }),
+            ),
+          ),
         );
+        // A `preprocess` that failed sent nothing, so no redirect was followed.
+        if (Option.isNone(prepared) && Result.isFailure(result)) {
+          return unread(record, String(result.failure), redirects);
+        }
+        const sentAs = Option.getOrElse(prepared, () => request);
         // Where the transport ended: the request behind its failure or its
         // answer, which is not the one the client sent when it followed a
         // redirect.
@@ -797,7 +843,8 @@ export const runner =
             url: response.url,
           }),
         });
-        const followed = transportFollowed({ method: request.method, url: urlOf(request) }, ended);
+        const sentTo = urlOf(sentAs);
+        const followed = transportFollowed({ method: sentAs.method, url: sentTo }, ended);
         if (Option.isSome(followed)) {
           return unread(record, unfollowedNote(followed.value), redirects, followed);
         }
@@ -808,7 +855,7 @@ export const runner =
         if (!REDIRECTS.includes(response.status) || location === undefined || location === "") {
           return yield* answerOf(record, response, redirects);
         }
-        const hop = hopOf({ status: response.status, location }, sent, origin, {
+        const hop = hopOf({ status: response.status, location }, { ...sent, sentTo }, origin, {
           hops: redirects.length,
           allowed,
         });

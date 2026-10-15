@@ -970,11 +970,14 @@ export const verify = Effect.fnUntraced(function* <
  * reads neither the answer nor the transport error such a client ends in on
  * another origin than it sent the request to, or after turning the method
  * into a `GET`, and a rule that sent the request is not decided by it, as for
- * any redirect the kit does not follow; but only the final URL and method are checked, so a chain off the
- * origin and back is read, and the request has been made either way — pass a
- * client that does not follow redirects. A client that only rewrites each
- * request (`HttpClient.mapRequest` onto another origin, say) follows nothing,
- * and is read as any other.
+ * any redirect the kit does not follow; but only the final URL and method are
+ * checked, so a chain off the origin and back is read, and the request has
+ * been made either way — pass a client that does not follow redirects. A
+ * client that only rewrites each request (`HttpClient.mapRequest` onto
+ * another origin, say) follows nothing, and is read as any other: the kit
+ * runs each request through it as its `execute` does, so its `retry` still
+ * re-prepares a request, and a `Location` on the origin it sends to is
+ * followed as one on the base URL's.
  * There is no per-request timeout: a server that holds a response open holds
  * the run.
  *
