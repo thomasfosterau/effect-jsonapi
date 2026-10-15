@@ -32,9 +32,12 @@ catalogMode: strict
 
 catalog:
   "@changesets/cli": ^3.0.3
-  # Compiles AND executes every JSDoc `@example` (`vp run docgen`); runs the
-  # examples under `tsx`, hence that entry below. Drives TypeScript through the
-  # JS API, so it sees the TS6 side of the split.
+  # Compiles AND executes every JSDoc `@example` (`vp run docgen`). 0.5.x never
+  # loads the `typescript` package: its `bin.cjs` bundles TypeScript 5.5.2 (via
+  # ts-morph) to parse `src/`, type-checks the examples with the `tsc` on PATH
+  # (native TS7 under `vp run`), and runs them under `tsx`, hence that entry
+  # below. It prepends `import * as assert from 'assert'` to an example that
+  # uses `assert.`.
   "@effect/docgen": ^0.5.2
   "@effect/language-service": ^0.87.3
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
@@ -67,8 +70,9 @@ catalog:
   # The runtime `@effect/docgen` executes examples under.
   tsx: ^4.23.13
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
-  # until 7.1, so JS-API consumers (@effect/language-service, @effect/docgen,
-  # the tsdown declaration bundler behind `vp pack`) stay on TS6 while native
+  # until 7.1, so JS-API consumers (@effect/language-service, the tsdown
+  # declaration bundler behind `vp pack`, scripts/docgen-class-examples.ts;
+  # not @effect/docgen, which bundles its own) stay on TS6 while native
   # `tsc` type-checks the sources, the type-level tests and the emitted
   # declarations. The alias keeps the package importable as `typescript`
   # name-stable at the TS6 JS compiler (bin `tsc6`); `@typescript/native` is
@@ -148,9 +152,9 @@ peerDependencyRules:
   allowedVersions:
     vite: "*"
     vitest: "*"
-    # @effect/docgen declares `typescript ^5.2.2` and drives it through the JS
-    # API, which the TS6 alias above still provides (TS6 is the last JS-based
-    # compiler line); `vp run docgen` is the proof, in CI on every push.
+    # @effect/docgen 0.5.x declares `typescript ^5.2.2` but never loads it (it
+    # bundles its own 5.5.2), so this only satisfies pnpm's peer-range check
+    # against the TS6 alias. Drop it once docgen's declared range admits TS6.
     "@effect/docgen>typescript": "6"
 
 # Supply-chain delay (owner's policy, gardeneria #1149): hold newly published
