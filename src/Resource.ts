@@ -1739,6 +1739,13 @@ export type IncludePathsTo<R extends Any, Depth extends IncludeDepth> = R extend
 // a key `R` does not declare.
 type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
 
+// One hop of an include path: a wide `string` segment (from a `string` or
+// `${string}.${string}` path) may name any includable relationship, so it
+// reaches every includable direct target; a literal segment reaches its own.
+type IncludeHop<R extends Any, Segment> = string extends Segment
+  ? IncludableTarget<R, IncludableKeys<R>>
+  : IncludableTarget<R, Segment>;
+
 /**
  * The resource definitions brought into a compound document by one include
  * path. Dotted paths include the intermediate resources as well as the leaf,
@@ -1751,13 +1758,18 @@ type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Targ
  * `paginated` relationship's target never appears in `included`. A segment a
  * member does not declare likewise reaches nothing for it.
  *
+ * A wide segment — a `string` path, or the `string` parts of a template
+ * literal such as `` `${string}.${string}` `` — may name any relationship, so
+ * it reaches every includable direct target of the resource it is resolved
+ * against.
+ *
  * @since 0.1.0
  * @category type-level
  */
 export type ResolveIncludePath<R extends Any, Path> = R extends Any
   ? Path extends `${infer Head}.${infer Rest}`
-    ? IncludableTarget<R, Head> | ResolveIncludePath<IncludableTarget<R, Head>, Rest>
-    : IncludableTarget<R, Path>
+    ? IncludeHop<R, Head> | ResolveIncludePath<IncludeHop<R, Head>, Rest>
+    : IncludeHop<R, Path>
   : never;
 
 /**
