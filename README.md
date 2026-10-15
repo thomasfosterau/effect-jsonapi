@@ -2003,6 +2003,11 @@ Two tiers, separately runnable. `spec` is JSON:API v1.1 alone; `profile` is this
 
 Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` carrying the rule, its requirement, its citation and the request that decided it. A rule that died is not a finding about your server, but the run could not decide it either, so `assert` dies on it — with a defect tagged `RuleDied` naming the rule and the defect, the original as its `cause` — rather than passing. If you gate on `summarise(report).failed` or `findings(report)` instead of `assert`, also check `summarise(report).errored === 0`.
 
+**Against a live server, bound the run.** `verifyWith` runs the identical rules over any `HttpClient` and `baseUrl`. Two options bound what that costs the server:
+
+- `skip` — rule-id prefixes to leave out, the complement of `only` and matched the same way: `skip: ["spec/pagination/links-enumerate-collection", "spec/links/"]` leaves out the pagination walk and the link crawl, the rules that make the most requests. It removes rules from what `tiers` and `only` select, and a rule it leaves out is absent from the report, as one `only` does not select is.
+- `requestTimeout` — a `Duration.Input` (`"10 seconds"`) bounding each request, its body included; each redirect hop gets its own. A request still unanswered then is aborted and reads as a lost response naming the timeout, which every rule treats as any transport error. Thirty seconds by default, for `verify` and `verifyWith` alike; `requestTimeout: "Infinity"` (or `Duration.infinity`) turns it off, so the kit waits as long as the transport does. A duration that is not positive is a defect.
+
 Full design note, including the coverage ledger and what it would take to close each gap: [`docs/conformance.md`](./docs/conformance.md).
 
 ## Examples

@@ -58,6 +58,7 @@ const context = (): Core.Context => {
           cleanup: (id) => Effect.sync(() => MutableHashMap.remove(store, id)),
         },
       },
+      requestTimeout: Option.none(),
     },
     writes: [],
     observed,

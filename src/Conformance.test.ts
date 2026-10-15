@@ -11,6 +11,7 @@ import {
   Array as Arr,
   Cause,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -24,6 +25,7 @@ import {
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
+import { TestClock } from "effect/testing";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
@@ -721,10 +723,210 @@ describe("Conformance: discovery and selection", () => {
     if (skipped._tag === "Skipped") expect(skipped.reason).toContain(`ids["articles"]`);
   });
 
+  const ids = (report: Conformance.Report) => report.outcomes.map((outcome) => outcome.rule.id);
+
+  it("leaves out the skipped rule ids, matching on prefix as `only` does", async () => {
+    const all = ids(await verifyCanned(conformantServe));
+    const skip = ["spec/pagination/links-enumerate-collection", "spec/links/", "spec/content-neg"];
+    const report = await verifyCanned(conformantServe, { skip });
+    const left = all.filter((id) => !skip.some((prefix) => id.startsWith(prefix)));
+    // Each prefix leaves something out, and nothing else is.
+    expect(skip.every((prefix) => all.some((id) => id.startsWith(prefix)))).toBe(true);
+    expect(left.length).toBeLessThan(all.length - 5);
+    expect(ids(report)).toEqual(left);
+    // A skipped rule is absent from the report, as one `only` did not select
+    // is — never a `Skipped` outcome that would read as a rule the run tried.
+    expect(Conformance.summarise(report).skipped).toBe(
+      Conformance.summarise(await verifyCanned(conformantServe, { only: left })).skipped,
+    );
+  });
+
+  it("leaves out the skipped rules from what `only` and `tiers` select", async () => {
+    const selected = ids(
+      await verifyCanned(conformantServe, { only: ["spec/content-negotiation"] }),
+    );
+    const weight = "spec/content-negotiation/accept-weight";
+    const report = await verifyCanned(conformantServe, {
+      only: ["spec/content-negotiation"],
+      skip: [weight],
+    });
+    expect(selected.filter((id) => id.startsWith(weight)).length).toBeGreaterThan(1);
+    expect(ids(report)).toEqual(selected.filter((id) => !id.startsWith(weight)));
+    // A rule both name is left out; `skip` naming everything leaves nothing.
+    const both = await verifyCanned(conformantServe, {
+      only: ["spec/document/top-level-members"],
+      skip: ["spec/document/top-level-members"],
+    });
+    expect(both.outcomes).toEqual([]);
+    const profile = await verifyCanned(conformantServe, { tiers: ["profile"], skip: ["spec/"] });
+    expect(profile.outcomes.length).toBeGreaterThan(0);
+    const spec = await verifyCanned(conformantServe, { tiers: ["spec"], skip: ["spec/"] });
+    expect(spec.outcomes).toEqual([]);
+  });
+
   it("records the transport it drove", async () => {
     const report = await verifyCanned(conformantServe);
     expect(report.transport).toBe("http");
     expect(report.target).toBe("fixture");
+  });
+});
+
+describe("Conformance: requestTimeout", () => {
+  /** A client that never answers, counting the requests the timeout cut short. */
+  const silent = () => {
+    let interrupted = 0;
+    const client = HttpClient.make(() =>
+      Effect.never.pipe(
+        Effect.onInterrupt(() =>
+          Effect.sync(() => {
+            interrupted += 1;
+          }),
+        ),
+      ),
+    );
+    return { client: () => client, interrupted: () => interrupted };
+  };
+
+  const rules = ["spec/target/reachable", "spec/content-negotiation/response-media-type"];
+
+  it("reads a server that never answers as a lost response, rather than hanging", async () => {
+    const server = silent();
+    const report = await verifyCanned(
+      conformantServe,
+      { requestTimeout: 10, only: rules },
+      server.client,
+    );
+    const note = "no answer within 10ms, the run's `requestTimeout`";
+    expect(outcomeFor(report, "spec/target/reachable")).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        { detail: "/articles/1 produced no HTTP response", observed: `no response (${note})` },
+        { detail: "/articles produced no HTTP response", observed: `no response (${note})` },
+      ],
+    });
+    // Every request was cut short, not left running.
+    expect(server.interrupted()).toBe(Conformance.summarise(report).probes);
+    // Exactly what a transport that fails at once reports, but for the note: a
+    // timeout is a transport error, never a redirect the kit did not follow.
+    const lost = await verifyCanned(conformantServe, { only: rules }, () =>
+      HttpClient.make((request) =>
+        Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({ request, description: "reset" }),
+          }),
+        ),
+      ),
+    );
+    const why = (outcomes: ReadonlyArray<Conformance.Outcome>) =>
+      Arr.map(outcomes, (outcome) =>
+        Predicate.isTagged(outcome, "Failed")
+          ? {
+              ...outcome,
+              findings: Arr.map(outcome.findings, (found) => ({
+                ...found,
+                observed: found.observed.replace(/^no response \(.*\)$/, "no response (…)"),
+              })),
+            }
+          : outcome,
+      );
+    expect(why(report.outcomes)).toEqual(why(lost.outcomes));
+  });
+
+  /**
+   * A run of `reachable` against a server that never answers, under the test
+   * clock, advanced by each of `steps` in turn; `settled` says, after each
+   * step, whether the run had finished. A run still going after the last step
+   * is interrupted.
+   */
+  const clocked = (options: Conformance.Options, steps: ReadonlyArray<Duration.Input>) => {
+    const server = silent();
+    return Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          Conformance.verifyWith(api, {
+            client: server.client(),
+            baseUrl: "http://fixture.test",
+            ids: { articles: "1" },
+            only: ["spec/target/reachable"],
+            ...options,
+          }),
+        );
+        const settled = yield* Effect.forEach(
+          steps,
+          (step) => Effect.map(TestClock.adjust(step), () => fiber.pollUnsafe() !== undefined),
+          { concurrency: 1 },
+        );
+        const report =
+          settled.at(-1) === true ? Option.some(yield* Fiber.join(fiber)) : Option.none();
+        yield* Fiber.interrupt(fiber);
+        return { settled, report, interrupted: server.interrupted() };
+      }).pipe(Effect.provide(TestClock.layer())),
+    );
+  };
+
+  it("waits thirty seconds for each request by default", async () => {
+    const exit = await clocked({}, ["29999 millis", "1 millis", "30 seconds"]);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isFailure(exit)) return;
+    const run = exit.value;
+    // The first request is cut short at thirty seconds, the second thirty after.
+    expect(run.settled).toEqual([false, false, true]);
+    expect(run.interrupted).toBe(2);
+    const note = "no answer within 30s, the run's `requestTimeout`";
+    expect(Option.map(run.report, (report) => outcomeFor(report, "spec/target/reachable"))).toEqual(
+      Option.some(
+        expect.objectContaining({
+          _tag: "Failed",
+          findings: [
+            expect.objectContaining({ observed: `no response (${note})` }),
+            expect.objectContaining({ observed: `no response (${note})` }),
+          ],
+        }),
+      ),
+    );
+  });
+
+  it.each(["Infinity", Duration.infinity] as const)(
+    "waits as long as the transport does when the run turns it off with %s",
+    async (requestTimeout) => {
+      const exit = await clocked({ requestTimeout }, ["30 seconds", "1 hour"]);
+      expect(Exit.isSuccess(exit)).toBe(true);
+      if (Exit.isFailure(exit)) return;
+      const run = exit.value;
+      expect(run.settled).toEqual([false, false]);
+      // Only the first request was sent; it was still waiting.
+      expect(run.interrupted).toBe(1);
+    },
+  );
+
+  it.each([0, -1, Number.NaN, "-Infinity"] as const)(
+    "dies on a `requestTimeout` of %s before it sends a request",
+    async (requestTimeout) => {
+      let sent = 0;
+      const exit = await Effect.runPromiseExit(
+        Conformance.verifyWith(api, {
+          client: HttpClient.make(() =>
+            Effect.sync(() => {
+              sent += 1;
+            }).pipe(Effect.andThen(Effect.never)),
+          ),
+          baseUrl: "http://fixture.test",
+          ids: { articles: "1" },
+          requestTimeout,
+        }),
+      );
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+      expect(Exit.isFailure(exit) && String(Cause.squash(exit.cause))).toContain(
+        "`requestTimeout` must be a positive duration",
+      );
+      expect(sent).toBe(0);
+    },
+  );
+
+  it("changes nothing for a server that answers within it", async () => {
+    const report = await verifyCanned(conformantServe, { requestTimeout: "1 minute" });
+    expect(failed(report)).toEqual([]);
+    expect(report.outcomes).toEqual((await verifyCanned(conformantServe)).outcomes);
   });
 });
 
@@ -2842,26 +3044,34 @@ describe("Conformance: the write fixture", () => {
     expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual([]);
   });
 
-  it("lets a client retry a request whose preparation failed, as its own `execute` does", async () => {
-    const direct = await run();
-    const failedOnce = new WeakSet<HttpClientRequest.HttpClientRequest>();
-    let refused = 0;
-    const { report } = await run(undefined, undefined, {
-      client: (canned) =>
-        HttpClient.retry(
-          HttpClient.mapRequestEffect(canned, (request) => {
-            if (failedOnce.has(request)) return Effect.succeed(request);
-            failedOnce.add(request);
-            refused += 1;
-            return Effect.fail(unprepared(request));
-          }),
-          { times: 1 },
-        ),
-    });
-    expect(refused).toBeGreaterThan(0);
-    expect(failed(report)).toEqual([]);
-    expect(verdicts(report)).toEqual(verdicts(direct.report));
-  });
+  // The timeout wraps the client's whole `execute`, so a `retry` runs within it
+  // and the request still runs through the client exactly as before.
+  it.each([
+    ["", undefined],
+    [", within a `requestTimeout`", "1 minute"],
+  ] as const)(
+    "lets a client retry a request whose preparation failed, as its own `execute` does%s",
+    async (_, requestTimeout) => {
+      const direct = await run();
+      const failedOnce = new WeakSet<HttpClientRequest.HttpClientRequest>();
+      let refused = 0;
+      const { report } = await run(undefined, () => ({ requestTimeout }), {
+        client: (canned) =>
+          HttpClient.retry(
+            HttpClient.mapRequestEffect(canned, (request) => {
+              if (failedOnce.has(request)) return Effect.succeed(request);
+              failedOnce.add(request);
+              refused += 1;
+              return Effect.fail(unprepared(request));
+            }),
+            { times: 1 },
+          ),
+      });
+      expect(refused).toBeGreaterThan(0);
+      expect(failed(report)).toEqual([]);
+      expect(verdicts(report)).toEqual(verdicts(direct.report));
+    },
+  );
 
   it("names a redirect the transport followed off the origin in the rule it leaves undecided", async () => {
     const unknown = await run(undefined, undefined, {
@@ -3222,6 +3432,8 @@ describe("Conformance: the write fixture", () => {
             ids: { articles: "1" },
             mutating: true,
             writes: { articles: fixture(store, cleaned) },
+            // The PATCH must still be waiting when the interrupt comes.
+            requestTimeout: "Infinity",
           }),
         );
         yield* Deferred.await(patching);
