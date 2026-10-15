@@ -2,7 +2,8 @@
  * `Include.included`'s resource form (#342): `Include.included(resource,
  * { include })`, or `Include.included(members, { include })` for a
  * `collection` / `polymorphic` endpoint, builds the `included` union the
- * matching endpoint's default document binds — so a wire-variant `success`
+ * matching endpoint's default document binds (bar a declared surface on the
+ * members form, which those endpoints ignore until #336) — so a wire-variant `success`
  * can reuse it rather than list every reachable type by hand, and a type the
  * endpoint's include paths reach is never missing from it (a missing one is a
  * `ResponseEncodeError` on the path that reaches it, #320).
@@ -62,21 +63,27 @@ const Article = Resource.make("articles", {
 });
 
 // The members of a union schema (none for anything else).
-const membersOf = (union: unknown): ReadonlyArray<unknown> =>
-  Predicate.hasProperty(union, "members") && Array.isArray(union.members) ? union.members : [];
+const membersOf = (union: Schema.Top): ReadonlyArray<Schema.Top> =>
+  Predicate.hasProperty(union, "members") && Array.isArray(union.members)
+    ? union.members.filter(Schema.isSchema)
+    : [];
 
 // The `included` union of a JSON:API document struct —
 // `included: Schema.optionalKey(Schema.Array(union))` — looking through a
-// wrapper (`HttpApiSchema.asJson`'s) that holds the struct under `schema`.
-const includedOf = (schema: unknown): unknown => {
+// wrapper (`HttpApiSchema.asJson`'s) that holds the struct under `schema`;
+// `Schema.Never`, which has no members, when there is none.
+const includedOf = (schema: Schema.Top): Schema.Top => {
   if (Predicate.hasProperty(schema, "fields") && Predicate.hasProperty(schema.fields, "included")) {
     const optional = schema.fields.included;
     return Predicate.hasProperty(optional, "schema") &&
-      Predicate.hasProperty(optional.schema, "value")
+      Predicate.hasProperty(optional.schema, "value") &&
+      Schema.isSchema(optional.schema.value)
       ? optional.schema.value
-      : undefined;
+      : Schema.Never;
   }
-  return Predicate.hasProperty(schema, "schema") ? includedOf(schema.schema) : undefined;
+  return Predicate.hasProperty(schema, "schema") && Schema.isSchema(schema.schema)
+    ? includedOf(schema.schema)
+    : Schema.Never;
 };
 
 // The same members, by identity, in any order: the order of `included`'s
@@ -175,14 +182,32 @@ describe("Include.included(resource, { include }) is the default document's unio
     ]);
   });
 
-  it("refuses a surface beside an array of members", () => {
-    // As a caller without the types would make it: the overloads refuse it.
-    expect(() =>
-      Include.included([Article, Person], {
-        // @ts-expect-error -- a surface describes one resource, not an array of members
-        include: surface,
-      }),
-    ).toThrow(/pass that resource, not an array/);
+  it("`collection` and `polymorphic` under a declared surface: the surface's own union", () => {
+    const union = Include.included([Article, Person], { include: surface });
+    expect(union).toBe(surface.included);
+    const nodeSurface = Include.make(Author, { comments: Comment });
+    expect(Include.included(AnyNode.members, { include: nodeSurface })).toBe(nodeSurface.included);
+    // Which `collection` does not bind yet (#336): its document keeps the
+    // members' direct targets. When #336 is fixed this flips, and the docs'
+    // caveat goes.
+    const [success] = Endpoint.collection([Article, Person], {
+      name: "search",
+      path: "/search",
+      include: surface,
+    }).success;
+    expectSameMembers(membersOf(includedOf(success)), [Comment, AnyNode, Company]);
+  });
+
+  it("a widened `include` is the value it holds at runtime", () => {
+    const widen = (value: boolean): boolean => value;
+    expectSameUnion(
+      Include.included(Article, { include: widen(true) }),
+      Endpoint.get(Article, { include: true }),
+    );
+    expectSameUnion(
+      Include.included([Article, Person], { include: widen(false) }),
+      Endpoint.collection([Article, Person], { name: "search", path: "/search" }),
+    );
   });
 
   it("encodes a wire variant's document carrying what `comments.author` reaches", () => {
