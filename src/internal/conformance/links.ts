@@ -472,13 +472,19 @@ const isResourceData = (observation: Observation): boolean => {
 /** The members a resource identifier object may carry (§Resource Identifier Objects). */
 const IDENTIFIER_MEMBERS: ReadonlyArray<string> = ["type", "id", "lid", "meta"];
 
+/** An extension member's name: an alphanumeric namespace, one colon, and a member name. */
+const EXTENSION_MEMBER = /^[A-Za-z0-9]+:[^:]+$/;
+
 /**
  * Whether a member name is one an identifier may carry whatever the base
  * specification defines: an @-member, which §Member Names has a processor
- * ignore, or an extension member (`ns:member`), which an applied extension
- * defines.
+ * ignore, or an extension member, which an applied extension defines. An
+ * extension member's name is its extension's namespace — alphanumeric
+ * characters only (§Extensions) — a colon and the member's own name, so
+ * `ns:member` is one and `:member`, `ns:` and `a:b:c` are not. Whether the
+ * response applied that extension is not checked.
  */
-const ignoredMember = (key: string): boolean => key.startsWith("@") || key.includes(":");
+const ignoredMember = (key: string): boolean => key.startsWith("@") || EXTENSION_MEMBER.test(key);
 
 /**
  * Why a JSON value is no resource identifier object a server answers with —

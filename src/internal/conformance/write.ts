@@ -43,9 +43,11 @@ import { MEDIA_TYPE } from "../media.js";
 import {
   type Context,
   type Discovered,
+  errorObjectsOf,
   type Finding,
   type Fixture,
   idKey,
+  isRecord,
   type Observation,
   type Outcome,
   type Payload,
@@ -84,6 +86,36 @@ export const idempotencyHeaders = (
         [IDEMPOTENCY_HEADER]: `conformance-${globalThis.crypto.randomUUID()}`,
       }))
     : Effect.succeed({});
+
+/**
+ * Whether `observation` is an endpoint's refusal of a write the kit sent it
+ * without a key: a 4xx from an endpoint that declares `Idempotency-Key`, to a
+ * request that carried none (`key` is what {@link idempotencyHeaders} gave
+ * it), whose error document names the header as a `source` — the package's
+ * own `400` for a missing required key (`docs/idempotency.md` §2). The kit
+ * keys only an endpoint whose headers schema plainly requires the header, so
+ * one that requires it some other way (through a union, say) reads as
+ * optional and is sent none. Any other 4xx is an answer to the write.
+ *
+ * @internal
+ */
+export const refusedForMissingKey = (
+  endpoint: Discovered,
+  key: Readonly<Record<string, string>>,
+  observation: Observation,
+): boolean =>
+  observation.status >= 400 &&
+  observation.status < 500 &&
+  endpoint.idempotencyKey !== "absent" &&
+  !Object.hasOwn(key, IDEMPOTENCY_HEADER) &&
+  errorObjectsOf(observation.body).some((error) => {
+    const source = error["source"];
+    return (
+      isRecord(source) &&
+      Predicate.isString(source["header"]) &&
+      source["header"].toLowerCase() === IDEMPOTENCY_HEADER
+    );
+  });
 
 // ---------------------------------------------------------------------------
 // Targets
