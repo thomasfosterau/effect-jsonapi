@@ -179,7 +179,9 @@ export const widePaths: [
   Pin<Resource.ResolveIncludePath<typeof Story, `auth${string}.${string}`>, typeof Person>,
   // An `any` path is as wide as `${string}.${string}`.
   Pin<Resource.ResolveIncludePath<typeof Story, any>, StoryDirect | typeof Tag>,
-] = [true, true, true, true, true, true, true, true, true];
+  // A union of a dotted and a plain path resolves each path on its own.
+  Pin<Resource.IncludedFor<typeof Story, ["author", "remarks.tag"]>, StoryDirect | typeof Tag>,
+] = [true, true, true, true, true, true, true, true, true, true];
 
 // The endpoint walk (`Endpoint`'s `included` union, `Query.FieldsetResources`)
 // resolves its paths with `Resource.ResolveIncludePath`, so a wide `paths`
