@@ -224,11 +224,8 @@ describe("northwind example: listing & filtering", () => {
       }),
     );
 
-    // The endpoint declares `fields`, so a client reads `unitPrice` as
-    // optional (#322); no fieldset was requested, so a missing price would
-    // shorten the list and fail the assertion below.
     const prices = document.data
-      .flatMap((product) => product.attributes.unitPrice ?? [])
+      .map((product) => product.attributes.unitPrice)
       .sort((a, b) => a - b);
     expect(prices).toEqual([10, 18, 19]);
   });

@@ -14,9 +14,12 @@
  * `Handlers.linkage`), which are validated against the endpoint's document
  * schema on the way out. Each of those documents advertises the JSON:API
  * version it implements (`jsonapi: Document.v1_1`); the `ApiError` error
- * documents carry no `jsonapi` member. Every read that declares `fields`
- * answers `?fields[TYPE]=` by projecting each resource it carries — primary
- * data and `included` alike — with `onResource: Handlers.project(query.fields)`.
+ * documents carry no `jsonapi` member. The reads that declare `fields` —
+ * `GET /products/:id`, `GET /orders/:id` and `/search` — answer
+ * `?fields[TYPE]=` by projecting each resource they carry, primary data and
+ * `included` alike, with `onResource: Handlers.project(query.fields)`; the
+ * other reads declare no `fields`, so their clients read every attribute as
+ * required.
  */
 import { Effect, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
@@ -559,14 +562,10 @@ const matches = (haystack: ReadonlyArray<string | undefined>, needle: string): b
 
 export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers) =>
   handlers
-    .handle("get", ({ params, query }) =>
+    .handle("get", ({ params }) =>
       loadCategory(params.id).pipe(
         Effect.map((category) =>
-          Handlers.data(category, {
-            self: `/categories/${category.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
+          Handlers.data(category, { self: `/categories/${category.id}`, jsonapi: Document.v1_1 }),
         ),
       ),
     )
@@ -577,7 +576,6 @@ export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers)
         Handlers.collection(page, {
           meta: { total },
           links: Handlers.offsetPaginationLinks("/categories", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -586,14 +584,10 @@ export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers)
 
 export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =>
   handlers
-    .handle("get", ({ params, query }) =>
+    .handle("get", ({ params }) =>
       loadSupplier(params.id).pipe(
         Effect.map((supplier) =>
-          Handlers.data(supplier, {
-            self: `/suppliers/${supplier.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
+          Handlers.data(supplier, { self: `/suppliers/${supplier.id}`, jsonapi: Document.v1_1 }),
         ),
       ),
     )
@@ -609,7 +603,6 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
         Handlers.collection(page, {
           meta: { total },
           links: Handlers.offsetPaginationLinks("/suppliers", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -618,14 +611,10 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
 
 export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
   handlers
-    .handle("get", ({ params, query }) =>
+    .handle("get", ({ params }) =>
       loadShipper(params.id).pipe(
         Effect.map((shipper) =>
-          Handlers.data(shipper, {
-            self: `/shippers/${shipper.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
+          Handlers.data(shipper, { self: `/shippers/${shipper.id}`, jsonapi: Document.v1_1 }),
         ),
       ),
     )
@@ -636,7 +625,6 @@ export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
         Handlers.collection(page, {
           meta: { total },
           links: Handlers.offsetPaginationLinks("/shippers", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -645,12 +633,11 @@ export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
 
 export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handlers) =>
   handlers
-    .handle("get", ({ params, query }) =>
+    .handle("get", ({ params }) =>
       loadTerritory(params.id).pipe(
         Effect.map((territory) =>
           Handlers.data(territory, {
             self: `/territories/${territory.id}`,
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           }),
         ),
@@ -668,7 +655,6 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
         Handlers.collection(page, {
           meta: { total },
           links: Handlers.offsetPaginationLinks("/territories", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -677,14 +663,10 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
 
 export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =>
   handlers
-    .handle("get", ({ params, query }) =>
+    .handle("get", ({ params }) =>
       loadCustomer(params.id).pipe(
         Effect.map((customer) =>
-          Handlers.data(customer, {
-            self: `/customers/${customer.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
+          Handlers.data(customer, { self: `/customers/${customer.id}`, jsonapi: Document.v1_1 }),
         ),
       ),
     )
@@ -700,7 +682,6 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
         Handlers.collection(page, {
           meta: { total },
           links: Handlers.offsetPaginationLinks("/customers", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -773,7 +754,6 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
               : page.flatMap((product) => resolveProductIncluded(product, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -828,13 +808,12 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       ),
     )
     // GET /products/:id/supplier — the supplying company as a full resource
-    .handle("supplier", ({ params, query }) =>
+    .handle("supplier", ({ params }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) => {
           const supplier = store.suppliers.get(product.relationships!.supplier.data.id) ?? null;
           return Handlers.data(supplier, {
             self: Handlers.relatedLink("products", product.id, "supplier"),
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           });
         }),
@@ -897,7 +876,6 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
                 ? undefined
                 : resolveEmployeeIncluded(employee, query.include),
             self: `/employees/${employee.id}`,
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           }),
         ),
@@ -920,7 +898,6 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
               : page.flatMap((employee) => resolveEmployeeIncluded(employee, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -1062,7 +1039,6 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
               : page.flatMap((order) => resolveOrderIncluded(order, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -1127,7 +1103,6 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
                 : page.flatMap((item) => resolveOrderItemIncluded(item, query.include)),
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           });
         }),

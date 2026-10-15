@@ -13,9 +13,12 @@
  * `Handlers.linkage`), which are validated against the endpoint's document
  * schema on the way out. Each of those documents advertises the JSON:API
  * version it implements (`jsonapi: Document.v1_1`); the `ApiError` error
- * documents carry no `jsonapi` member. Every read that declares `fields`
- * answers `?fields[TYPE]=` by projecting each resource it carries — primary
- * data and `included` alike — with `onResource: Handlers.project(query.fields)`.
+ * documents carry no `jsonapi` member. The reads that declare `fields` —
+ * `GET /repositories/:id`, `GET /issues/:id` and `/search` — answer
+ * `?fields[TYPE]=` by projecting each resource they carry, primary data and
+ * `included` alike, with `onResource: Handlers.project(query.fields)`; the
+ * other reads declare no `fields`, so their clients read every attribute as
+ * required.
  */
 import { Effect, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
@@ -436,14 +439,10 @@ const paginate = <A>(
 
 export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
   handlers
-    .handle("get", ({ params, query }) =>
+    .handle("get", ({ params }) =>
       loadUser(params.id).pipe(
         Effect.map((user) =>
-          Handlers.data(user, {
-            self: `/users/${user.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
+          Handlers.data(user, { self: `/users/${user.id}`, jsonapi: Document.v1_1 }),
         ),
       ),
     )
@@ -454,7 +453,6 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
         Handlers.collection(page, {
           meta: { total },
           links: Handlers.numberPaginationLinks("/users", { number, size }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -518,7 +516,6 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
               : page.flatMap((repository) => resolveRepositoryIncluded(repository, query.include)),
           meta: { total },
           links: Handlers.numberPaginationLinks("/repositories", { number, size }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -571,13 +568,12 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       ),
     )
     // GET /repositories/:id/owner — the related user as a full resource
-    .handle("owner", ({ params, query }) =>
+    .handle("owner", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
           const owner = store.users.get(repository.relationships!.owner.data.id) ?? null;
           return Handlers.data(owner, {
             self: Handlers.relatedLink("repositories", repository.id, "owner"),
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           });
         }),
@@ -641,7 +637,6 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
               : page.flatMap((issue) => resolveIssueIncluded(issue, query.include)),
           meta: { total },
           links: Handlers.numberPaginationLinks("/issues", { number, size }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -715,7 +710,6 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
                   : [],
             meta: { total },
             links: Handlers.numberPaginationLinks(path, { number, size }, total),
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           });
         }),
@@ -824,7 +818,6 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
             included:
               query.include === undefined ? undefined : resolvePullIncluded(pull, query.include),
             self: `/pulls/${pull.id}`,
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           }),
         ),
@@ -853,7 +846,6 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
               : page.flatMap((pull) => resolvePullIncluded(pull, query.include)),
           meta: { total },
           links: Handlers.numberPaginationLinks("/pulls", { number, size }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );

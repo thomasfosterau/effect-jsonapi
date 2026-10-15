@@ -16,10 +16,11 @@ import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
 /**
  * The rules this example is known to break, each with the issue tracking it.
  * Remove an entry when its issue is fixed; the test will tell you to. Empty
- * since #169: the handlers project `?fields[TYPE]=` with
- * `onResource: Handlers.project(query.fields)` and stamp
- * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` /
- * `linkage` document.
+ * since #169: the handlers of the reads that declare `fields`
+ * (`GET /repositories/:id`, `GET /issues/:id` and `/search`) project
+ * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
+ * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
+ * document.
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 

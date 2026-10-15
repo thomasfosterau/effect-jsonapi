@@ -12,11 +12,13 @@
  * and return document values (`Handlers.data` / `Handlers.collection` /
  * `Handlers.linkage`), which are validated against the endpoint's document
  * schema on the way out. Each of those documents advertises the JSON:API
- * version it implements (`jsonapi: Document.v1_1`); the `Atomic.results`
- * answer to `/operations` and the `ApiError` error documents carry no
- * `jsonapi` member. Every read that declares `fields`
- * answers `?fields[TYPE]=` by projecting each resource it carries — primary
- * data and `included` alike — with `onResource: Handlers.project(query.fields)`.
+ * version it implements (`jsonapi: Document.v1_1`); the `Atomic.results` answer
+ * to `/operations` and the `ApiError` error documents carry no `jsonapi`
+ * member. The reads that declare `fields` — `GET /articles/:id` and `/search` —
+ * answer `?fields[TYPE]=` by projecting each resource they carry, primary data
+ * and `included` alike, with `onResource: Handlers.project(query.fields)`; the
+ * other reads declare no `fields`, so their clients read every attribute as
+ * required.
  */
 import { Effect, Layer, Match } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
@@ -202,7 +204,6 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
               : page.flatMap((article) => resolveIncluded(article, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total),
-          onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),
       );
@@ -266,13 +267,12 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       ),
     )
     // --- Related resource endpoints -----------------------------------------
-    .handle("author", ({ params, query }) =>
+    .handle("author", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           const author = store.people.get(article.relationships!.author.data.id) ?? null;
           return Handlers.data(author, {
             self: Handlers.relatedLink("articles", article.id, "author"),
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           });
         }),
@@ -299,7 +299,6 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
                   : [],
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
-            onResource: Handlers.project(query.fields),
             jsonapi: Document.v1_1,
           });
         }),
