@@ -456,13 +456,14 @@ describe("blog example: heterogeneous search", () => {
     const types = [...new Set(document.data.map((result) => result.type))].sort();
     expect(types).toEqual(["articles", "people"]);
 
-    // the union is discriminated by the `type` tag
+    // the union is discriminated by the `type` tag; the endpoint declares
+    // `fields`, so a client reads each attribute as optional (#322)
     for (const result of document.data) {
       if (result.type === "articles") {
-        expectTypeOf(result.attributes.title).toEqualTypeOf<string>();
+        expectTypeOf(result.attributes.title).toEqualTypeOf<string | undefined>();
         expect(typeof result.attributes.title).toBe("string");
       } else {
-        expectTypeOf(result.attributes.firstName).toEqualTypeOf<string>();
+        expectTypeOf(result.attributes.firstName).toEqualTypeOf<string | undefined>();
         expect(typeof result.attributes.firstName).toBe("string");
       }
     }

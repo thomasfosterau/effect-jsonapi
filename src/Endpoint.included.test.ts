@@ -262,14 +262,29 @@ describe("a depth-2 include path answered over HTTP (#320)", () => {
   });
 
   // The handlers return the depth-2 `people` resource the path brings in: a
-  // compile error before #320, and a 500 when forced.
+  // compile error before #320, and a 500 when forced. They project the
+  // requested fieldsets, which the default document admits (#322).
   const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     handlers
-      .handle("get", () => Effect.succeed(Handlers.data(article, { included: [comment, person] })))
-      .handle("list", () =>
-        Effect.succeed(Handlers.collection([article], { included: [comment, person] })),
+      .handle("get", ({ query }) =>
+        Effect.succeed(
+          Handlers.data(article, {
+            included: [comment, person],
+            onResource: Handlers.project(query.fields),
+          }),
+        ),
+      )
+      .handle("list", ({ query }) =>
+        Effect.succeed(
+          Handlers.collection([article], {
+            included: [comment, person],
+            onResource: Handlers.project(query.fields),
+          }),
+        ),
       ),
   );
+  // `fields[people]=name` omits `email` (§Sparse Fieldsets, #322).
+  const projectedPerson = { ...wire.people, attributes: { name: "Ada" } };
 
   const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Any));
   const serve = async (url: string) => {
@@ -289,7 +304,7 @@ describe("a depth-2 include path answered over HTTP (#320)", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       data: wire.articles,
-      included: [wire.comments, wire.people],
+      included: [wire.comments, projectedPerson],
     });
   });
 
@@ -298,7 +313,7 @@ describe("a depth-2 include path answered over HTTP (#320)", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({
       data: [wire.articles],
-      included: [wire.comments, wire.people],
+      included: [wire.comments, projectedPerson],
     });
   });
 });

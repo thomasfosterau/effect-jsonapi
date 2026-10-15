@@ -96,6 +96,7 @@ const HTTP_TIER = [
   "internal/includeGraph.ts",
   "internal/linkage.ts",
   "internal/responseBody.ts",
+  "internal/sparse.ts",
   "internal/vocabulary.ts",
 ];
 
