@@ -29,7 +29,13 @@ import { declaresName } from "../declaredQuery.js";
 import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
 import { counted, listed } from "./crawl.js";
-import { relatedDereferences, relatedMatchesLinkage, resourceSelfDereferences } from "./links.js";
+import {
+  relatedDereferences,
+  relatedMatchesLinkage,
+  relationshipSelfDereferences,
+  resourceSelfDereferences,
+  topLevelSelfDereferences,
+} from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import {
   atomicMediaType,
@@ -2500,6 +2506,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   resourceSelfDereferences,
   relatedDereferences,
   relatedMatchesLinkage,
+  relationshipSelfDereferences,
+  topLevelSelfDereferences,
   resourceNotFound,
   createResponseDocument,
   createLocation,

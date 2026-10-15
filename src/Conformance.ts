@@ -659,12 +659,6 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: ["#123", "#162", "#165"],
   },
   {
-    area: "Relationship and top-level `self` links",
-    reason:
-      "A resource object's `self` link is followed and held to the resource it names, and a relationship's `related` link to answering resource data (a MUST) and to the resources its linkage names (a SHOULD). Two more links a server must serve are not yet followed: a relationship's own `self` link, which must answer the relationship's linkage, and a document's top-level `self` link.",
-    tracking: ["#309"],
-  },
-  {
     area: "Concerns outside JSON:API",
     reason:
       "Authentication, authorisation, caching and conditional requests, rate limiting and CORS. JSON:API takes no position on any of them, so neither does this kit.",
