@@ -442,6 +442,8 @@ describe("github example: writing", () => {
     expect(document.data?.attributes.state).toBe("closed");
     // other attributes are untouched
     expect(document.data?.attributes.title).toBe(bugIssue.attributes.title);
+    // a write response advertises JSON:API 1.1 too, not only the reads
+    expect(document.jsonapi?.version).toBe("1.1");
   });
 
   it("403s with a typed error when updating a locked issue", async () => {
