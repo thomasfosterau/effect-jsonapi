@@ -200,7 +200,6 @@ export default defineConfig({
           "test/declaration-emit.test.ts",
         ],
         rules: {
-          "effect/use-temp-file-scoped": "off",
           "effect/avoid-node-imports": "off",
           "effect/avoid-sync-fs": "off",
           "effect/avoid-process-env": "off",
@@ -210,6 +209,15 @@ export default defineConfig({
           "effect/use-command-executor-service": "off",
           "effect/avoid-native-fetch": "off",
           "effect/effect-promise-vs-trypromise": "off",
+        },
+      },
+      // The consumer project test/declaration-emit.test.ts compiles lives in
+      // a temp directory made in `beforeAll` and removed in `afterAll`,
+      // around every case, outside any Effect scope.
+      {
+        files: ["test/declaration-emit.test.ts"],
+        rules: {
+          "effect/use-temp-file-scoped": "off",
         },
       },
     ],
@@ -257,10 +265,11 @@ export default defineConfig({
         input: [...cacheInputs, "dist/**"],
         output: [],
       },
-      // Emits `dist/` (one bundle per entry point plus its declarations) with
-      // `vp pack` — see the `pack` block below.
+      // Emits `dist/`: the JavaScript with `vp pack` (see the `pack` block
+      // below), then one declaration file per source module with `tsc`
+      // (tsconfig.build.json, which says why the declarations are not bundled).
       build: {
-        command: "vp pack",
+        command: "vp pack && tsc -p tsconfig.build.json",
         input: cacheInputs,
         output: ["dist/**"],
       },
@@ -282,16 +291,19 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      // Lets the tests import the library by its package name, exactly like
-      // user code does. The subpath entry must come first: string aliases
-      // match by prefix, so the root entry would otherwise swallow
-      // "@thomasfosterau/effect-jsonapi/schema".
-      "@thomasfosterau/effect-jsonapi/schema": fileURLToPath(
-        new URL("./src/schema.ts", import.meta.url),
-      ),
-      "@thomasfosterau/effect-jsonapi": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
-    },
+    // Lets the tests import the library by its package name and subpaths,
+    // exactly like user code does, resolved to the sources. Anchored
+    // patterns, so the root cannot swallow a subpath by prefix.
+    alias: [
+      {
+        find: /^@thomasfosterau\/effect-jsonapi$/,
+        replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+      },
+      {
+        find: /^@thomasfosterau\/effect-jsonapi\/(schema|[A-Z]\w*)$/,
+        replacement: `${fileURLToPath(new URL("./src/", import.meta.url))}$1.ts`,
+      },
+    ],
   },
   test: {
     environment: "node",
@@ -300,16 +312,24 @@ export default defineConfig({
       ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) }
       : {}),
   },
-  // The published artifact: one ESM bundle per entry point (`dist/index.js`,
-  // `dist/schema.js`, sharing chunks for the schema-tier modules both reach)
-  // plus bundled declarations. `effect` is a peer and stays external.
+  // The published JavaScript: one ESM entry per `package.json` export — the
+  // root barrel, the schema barrel and every public module (`src/[A-Z]*.ts`,
+  // published as `@thomasfosterau/effect-jsonapi/<Module>`, #385) — with the
+  // code they share split into hashed chunks, so each module is evaluated
+  // once whichever entry reaches it, and `Resource.make` from the root and
+  // from `./Resource` is the same function. test/entry-points.test.ts pins
+  // the entries to the exports map. `effect` is a peer and stays external.
   // `platform: "neutral"` because the library runs wherever Effect does —
   // Workers included — and must not pick up Node built-ins.
+  //
+  // No `dts` here: bundled declarations put a module's types in a hashed
+  // chunk under mangled names, which a consumer's declaration emit cannot
+  // name. The `build` task emits them per module with `tsc` instead.
   pack: {
-    entry: ["src/index.ts", "src/schema.ts"],
+    entry: ["src/index.ts", "src/schema.ts", "src/[A-Z]*.ts", "!src/**/*.test.ts"],
     format: "esm",
     platform: "neutral",
-    dts: true,
+    dts: false,
     sourcemap: false,
     clean: true,
     fixedExtension: false,

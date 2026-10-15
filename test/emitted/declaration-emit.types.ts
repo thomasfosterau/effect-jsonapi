@@ -5,30 +5,25 @@
  *
  * Declaration emit writes an exported value's inferred type into the
  * consumer's `.d.ts`, so every type that inferred type mentions must be
- * nameable from the consumer's file. Against the bundled `dist/index.d.ts`
- * that is narrower than "exported somewhere": the bundler lowers each
- * `export * as Query from "./Query.js"` to a module-local
- * `declare namespace Query_d_exports { export { QuerySchema, … } }`, and the
- * TypeScript checker does not follow a namespace alias when it looks for a
- * name. A type is nameable only through a namespace the consumer's file
- * imports itself, or through a direct export of the package root. When
- * neither holds, the checker reports TS4023 — or, worse, inlines the type
- * structurally until it reaches a name it cannot spell, such as `effect`'s
+ * nameable from the consumer's file. That is narrower than "exported
+ * somewhere": the TypeScript checker does not follow a namespace alias
+ * (`export * as Query from "./Query.js"`) when it looks for a name. A type is
+ * nameable only through a namespace the consumer's file imports itself, or
+ * through a module that exports it directly — since #385, its module's own
+ * subpath (`@thomasfosterau/effect-jsonapi/Query`), and before that the root's
+ * type aliases (`src/index.ts`, now deprecated). When neither holds, the
+ * checker reports TS2883 / TS4023 — or, worse, inlines the type structurally
+ * until it reaches a name it cannot spell, such as `effect`'s
  * `NodeInspectSymbol` in an inlined error class.
  *
  * Every export below imports only the namespaces it calls, as the issue's
- * reproduction does, so a type it needs from any other module must reach it
- * through the root's own type exports (`src/index.ts`). Two checks compile it
- * with `declaration: true`, which reports declaration diagnostics under
- * `noEmit` without writing any file: `tsconfig.dist.json` (`typecheck:dist`),
- * and `test/declaration-emit.test.ts`, which compiles it as a consumer that
- * resolves the package through `node_modules` and so also sees a name only
- * the bundle's shared chunk exports.
- *
- * Out of scope here (#385): a file that exports an endpoint over a resource
- * *imported from another file* also needs the schema-tier types
- * (`Resource.Resource`, `Resource.Id`, …) that file has no namespace import
- * for.
+ * reproduction does. Two checks compile it with `declaration: true`, which
+ * reports declaration diagnostics under `noEmit` without writing any file:
+ * `tsconfig.dist.json` (`typecheck:dist`), and `test/declaration-emit.test.ts`,
+ * which compiles it as a consumer that resolves the package through
+ * `node_modules` and its `exports` map — with and without the root aliases —
+ * alongside an endpoint, a group and a client over resources imported from
+ * another file (#385).
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";

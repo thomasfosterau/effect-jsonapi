@@ -13,7 +13,9 @@
     // anything after `vp run build`; the `typecheck:dist` task depends on it.
     "paths": {
       "@thomasfosterau/effect-jsonapi": ["./dist/index.d.ts"],
-      "@thomasfosterau/effect-jsonapi/schema": ["./dist/schema.d.ts"]
+      "@thomasfosterau/effect-jsonapi/schema": ["./dist/schema.d.ts"],
+      // Every module subpath (#385), each its own declaration file.
+      "@thomasfosterau/effect-jsonapi/*": ["./dist/*.d.ts"]
     }
   },
   "include": ["test/emitted"],

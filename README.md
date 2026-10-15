@@ -94,6 +94,17 @@ import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema";
 
 `/schema` re-exports `Document`, `Filter`, `FlatQuery`, `Include`, `Relationship`, `Resource`, `Sort` and `MEDIA_TYPE` — the modules whose import graph is `effect` alone. Every symbol is the same object under both imports. Which modules are in the tier, and why `Query` (whose `Query.validateIncludePaths` fails with `HttpApi`-bound error classes) and `Client` are not: see the `/schema` module doc.
 
+### Module subpaths
+
+Every module is also published as a subpath of its own, as `effect` publishes `effect/Schema`: `@thomasfosterau/effect-jsonapi/Resource`, `…/Endpoint`, `…/Group`, and so on for each namespace the root exports. A subpath is the same module as the root's namespace, not a copy, so `Resource.make` and the error classes are identical whichever way they are imported, and the schema-tier modules (`Document`, `Filter`, `FlatQuery`, `Include`, `Relationship`, `Resource`, `Sort`) keep `effect` as their only dependency under their subpaths too.
+
+```ts
+import * as Endpoint from "@thomasfosterau/effect-jsonapi/Endpoint";
+import * as Resource from "@thomasfosterau/effect-jsonapi/Resource";
+```
+
+Each subpath ships its module's own declaration file, which is what lets declaration emit name a type the inferred type of an exported value mentions — see [Declaration emit](#declaration-emit). The root import stays the default; nothing needs to move.
+
 ## API
 
 Every module is a namespace export of the package root (`import { Resource } from "@thomasfosterau/effect-jsonapi"`); the sections below walk through them in the order you would build a server.
@@ -2091,6 +2102,22 @@ Article.collection({ meta: Schema.Struct({ total: Schema.Int }) })
 
 Relationship and resource-identifier `meta` currently accept free-form records (untyped).
 
+## Declaration emit
+
+A project that compiles with `declaration: true` can export what it builds — an endpoint, a group, an `HttpApi`, a client — with no annotation, wherever the resources it is built over are defined:
+
+```ts
+// endpoints.ts
+import { Endpoint } from "@thomasfosterau/effect-jsonapi";
+import { Person } from "./resources.js";
+
+export const getPerson = Endpoint.get(Person);
+```
+
+Declaration emit writes the value's inferred type into the `.d.ts`, so it must be able to name every type that type mentions, such as `Resource.Resource` and `Resource.Id` here. The TypeScript checker names a type only through a namespace the file imports itself or through a module that exports the type directly, never through a namespace alias like the root's `Resource`, and the module subpaths are those modules: it writes `import("@thomasfosterau/effect-jsonapi/Resource").Resource<"people", …>`. Before the subpaths ([#385](https://github.com/thomasfosterau/effect-jsonapi/issues/385)), a resource imported from another file failed here with TS2883.
+
+The type-only aliases at the package root (`QuerySchema`, `ContentNegotiation`, `ApiErrorWire`, `BadRequest`, … — [#348](https://github.com/thomasfosterau/effect-jsonapi/issues/348)) served the same purpose for the single-file case. Declaration emit no longer needs them, and they are **deprecated** in favour of the subpaths: write `Query.QuerySchema`, or import it from `@thomasfosterau/effect-jsonapi/Query`. They remain exported for now.
+
 ## Limitations
 
 - **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling, pagination links (following `next` must enumerate the collection), resource `self` and relationship `related` links (each followed must answer resource data, a `self` the resource it names, and a `related` should answer the resources its linkage names) and the filter grammar profile. Filter _evaluation_ semantics, sort-ordering correctness, the write rules beyond the success responses (conflicts, client-generated ids, relationship mutation), atomic processing and relationship / top-level `self` links are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](./docs/conformance.md).
@@ -2100,7 +2127,6 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document meta are typed via options.
 - **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each other. See [Mutually recursive resources](#mutually-recursive-resources) for the pattern; everything derived from the definitions is unaffected.
 - **`narrowIncluded` over a heterogeneous response narrows by the whole union, not per primary resource**: pass the union of the response's resource definitions (a family's members, say) and each path resolves against every member that declares it, never crossing a member's `paginated` relationship. `included` is document-wide, so it narrows to everything any member reaches; which primary resource reached a given entry is not tracked.
-- **Declaration emit needs the resource's namespaces in scope when the resource lives in another file** ([#385](https://github.com/thomasfosterau/effect-jsonapi/issues/385)). A project that compiles with `declaration: true` can `export const getArticle = Endpoint.get(Article)` (or export a group, an `HttpApi` or a client) with no annotation: every type such a value's inferred type mentions is either in a namespace the file already imports or exported from the package root for exactly this purpose (`QuerySchema`, `ContentNegotiation`, …). The exception is a resource imported from another file into a module that does not import `Resource` itself: its type then needs `Resource.Resource` and friends, which the file cannot name, and `tsc` stops with TS2883. Import the namespaces the resource's type uses and reference them, e.g. `import { Endpoint, type Resource } from "@thomasfosterau/effect-jsonapi"` with `Endpoint.get(Article satisfies Resource.Any)` (add `Relationship` when the resource has relationships), or annotate the export.
 - **Atomic operations requests are accepted with or without the `ext` media type parameter**: spec-compliant clients send `application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"` (accepted once the middleware declares the extension), but the bare media type is not rejected. Responses always carry the parameter.
 
 ## License

@@ -1,0 +1,29 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // The published declarations: one `.d.ts` per source module, written
+    // next to the JavaScript `vp pack` emits (`vp run build` runs both).
+    //
+    // Not bundled (#385). A bundler gives every module that more than one
+    // entry reaches a hashed chunk and exports its types from there under
+    // mangled names, so `dist/Resource.d.ts` would only re-export
+    // `Z as Resource` from `dist/Resource-<hash>.d.ts`. A consumer's
+    // declaration emit names a type only through a module that exports it
+    // directly, and the exports map hides the chunk, so the inferred type of
+    // `export const getPerson = Endpoint.get(Person)` would fail with TS2883.
+    // Emitted per module, each `@thomasfosterau/effect-jsonapi/<Module>`
+    // subpath is the canonical home of its module's types, as in `effect`.
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "sourceMap": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "types": [],
+    // The Effect language service's diagnostics belong to the type gate
+    // (`vp run check`), not the build.
+    "plugins": [{ "name": "@effect/language-service", "diagnostics": false }]
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

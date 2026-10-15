@@ -2,8 +2,8 @@
  * Declaration-emit test, the group-only half (#348): a module that builds its
  * API from `Group.resource` alone imports neither `Endpoint`, `Query`,
  * `Middleware` nor `Idempotency`, so every type the generated endpoints'
- * inferred types mention from those namespaces must be nameable through the
- * package root's own type exports (`src/index.ts`). See
+ * inferred types mention from those namespaces must be nameable through each
+ * module's subpath (#385), or the deprecated root type aliases. See
  * `declaration-emit.types.ts` for why, and for the checks that compile both
  * files with `declaration: true`.
  */

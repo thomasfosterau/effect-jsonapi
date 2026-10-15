@@ -1,6 +1,9 @@
 /**
  * Mechanical proof that the schema-only entry point keeps its promise: that
  * `@thomasfosterau/effect-jsonapi/schema` resolves `effect` and nothing else.
+ * The same holds for each schema-tier module subpath
+ * (`@thomasfosterau/effect-jsonapi/Resource`, …, #385), and every module the
+ * root re-exports is published as a subpath of its own.
  *
  * The property is a packaging commitment, and a comment asserting it would rot
  * within two releases — one `import type` added to `Resource.ts` is enough to
@@ -12,6 +15,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
+import * as Rec from "effect/Record";
 import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
 import config from "../vite.config.js";
@@ -153,14 +157,15 @@ const specifiersOf = (file: string): ReadonlyArray<string> => {
   return found;
 };
 
+/**
+ * The file a relative specifier names. A declaration file's `./x.js` is its
+ * sibling `./x.d.ts`, never the JavaScript beside it: `dist/` holds both.
+ */
 const resolveRelative = (from: string, specifier: string): string | null => {
   const base = path.resolve(path.dirname(from), specifier);
-  const candidates = [
-    base.replace(/\.js$/, ".ts"),
-    `${base}.ts`,
-    path.join(base, "index.ts"),
-    base,
-  ];
+  const candidates = from.endsWith(".d.ts")
+    ? [base.replace(/\.js$/, ".d.ts")]
+    : [base.replace(/\.js$/, ".ts"), `${base}.ts`, path.join(base, "index.ts"), base];
   return (
     candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) ??
     null
@@ -209,6 +214,64 @@ const isHttpSurface = (specifier: string): boolean =>
   specifier.startsWith("effect/http/") ||
   specifier === "effect/http-api" ||
   specifier.startsWith("effect/http-api/");
+
+/** Whether `specifier` is `effect` or one of its modules: the package's only peer. */
+const isEffect = (specifier: string): boolean =>
+  specifier === "effect" || specifier.startsWith("effect/");
+
+/** Externals of `graph` that are not `effect`, each with the chain that reached it. */
+const foreign = (graph: Graph): ReadonlyArray<string> =>
+  Arr.sort(
+    [...graph.externals.entries()]
+      .filter(([specifier]) => !isEffect(specifier))
+      .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`),
+    Order.String,
+  );
+
+/** The externals of `graph` other than `effect` itself, labelled with `label`. */
+const beyondEffect = (label: string, graph: Graph): ReadonlyArray<string> =>
+  [...graph.externals.keys()]
+    .filter((specifier) => specifier !== "effect")
+    .map((specifier) => `${label}: ${specifier}`);
+
+/**
+ * The namespaces a barrel re-exports, read off its `export * as X from
+ * "./X.js"` statements. Each is published as the subpath `./X` (#385), so
+ * the barrels, not a hand-kept list, say which subpaths must exist.
+ */
+const namespacesOf = (barrel: string): ReadonlyArray<string> => {
+  const source = ts.createSourceFile(
+    barrel,
+    fs.readFileSync(barrel, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  return source.statements
+    .filter(ts.isExportDeclaration)
+    .flatMap((node) =>
+      node.exportClause !== undefined &&
+      ts.isNamespaceExport(node.exportClause) &&
+      node.moduleSpecifier !== undefined &&
+      ts.isStringLiteral(node.moduleSpecifier)
+        ? [{ name: node.exportClause.name.text, specifier: node.moduleSpecifier.text }]
+        : [],
+    )
+    .map(({ name, specifier }) => {
+      // A namespace re-exported under another module's name would publish
+      // `./X` as a module that is not `X`.
+      expect(specifier, `${path.basename(barrel)} re-exports ${name}`).toBe(`./${name}.js`);
+      return name;
+    });
+};
+
+/** Every module the root barrel re-exports: one subpath each. */
+const PUBLIC_MODULES = namespacesOf(path.join(SRC, "index.ts"));
+
+/** The modules the schema barrel re-exports: the schema-tier subpaths. */
+const SCHEMA_MODULES = namespacesOf(path.join(SRC, "schema.ts"));
+
+/** The public modules that are not schema tier: they may resolve Effect's HTTP surface. */
+const HTTP_MODULES = PUBLIC_MODULES.filter((module) => !SCHEMA_MODULES.includes(module));
 
 const httpSurface = (graph: Graph): ReadonlyArray<string> =>
   [...graph.externals.entries()]
@@ -277,6 +340,57 @@ describe("schema-only entry point", () => {
   });
 });
 
+describe("module subpaths", () => {
+  it("publish every public module, and only those", () => {
+    // `vp pack` takes every `src/[A-Z]*.ts` as an entry (vite.config.ts), so
+    // a module file the root does not re-export would ship unlisted.
+    const files = fs
+      .readdirSync(SRC)
+      .filter((file) => /^[A-Z]\w*\.ts$/.test(file))
+      .map((file) => path.basename(file, ".ts"));
+    expect(Arr.sort(PUBLIC_MODULES, Order.String)).toEqual(Arr.sort(files, Order.String));
+    expect(PUBLIC_MODULES.length).toBeGreaterThan(SCHEMA_MODULES.length);
+  });
+
+  it("puts every schema-barrel module in the schema tier", () => {
+    expect(SCHEMA_MODULES.filter((module) => !SCHEMA_TIER.includes(`${module}.ts`))).toEqual([]);
+    expect(SCHEMA_MODULES.every((module) => PUBLIC_MODULES.includes(module))).toBe(true);
+  });
+
+  it("resolve `effect` alone from each schema-tier module", () => {
+    const graphs = SCHEMA_MODULES.map(
+      (module) => [module, graphFrom(path.join(SRC, `${module}.ts`), SRC)] as const,
+    );
+    expect(graphs.map(([module, graph]) => [module, [...graph.externals.keys()]])).toEqual(
+      SCHEMA_MODULES.map((module) => [module, ["effect"]]),
+    );
+    expect(
+      graphs.flatMap(([module, graph]) =>
+        graph.modules
+          .filter((reached) => !SCHEMA_TIER.includes(reached))
+          .map((reached) => `./${module} reaches ${reached}`),
+      ),
+    ).toEqual([]);
+  });
+
+  it("resolve nothing but `effect` from each HTTP-tier module", () => {
+    expect(HTTP_MODULES.filter((module) => !HTTP_TIER.includes(`${module}.ts`))).toEqual([]);
+    expect(
+      HTTP_MODULES.flatMap((module) => foreign(graphFrom(path.join(SRC, `${module}.ts`), SRC))),
+    ).toEqual([]);
+  });
+
+  /**
+   * Control: the per-subpath walk above must be able to see the HTTP surface,
+   * or "resolves `effect` alone" proves nothing. `Endpoint` reaches it.
+   */
+  it("is checked by a walk that does see an HTTP-tier subpath's `effect/http-api` (control)", () => {
+    expect(httpSurface(graphFrom(path.join(SRC, "Endpoint.ts"), SRC)).join("\n")).toContain(
+      "effect/http-api",
+    );
+  });
+});
+
 describe("root entry point", () => {
   it("still exports every namespace, unchanged", async () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
@@ -321,15 +435,55 @@ describe("root entry point", () => {
   });
 });
 
+describe("module subpaths, from source", () => {
+  it("are the root's namespaces", () =>
+    import("@thomasfosterau/effect-jsonapi")
+      .then((index) =>
+        Promise.all(
+          PUBLIC_MODULES.map((module) =>
+            import(`@thomasfosterau/effect-jsonapi/${module}`).then((subpath) =>
+              Arr.some(
+                Rec.toEntries(index),
+                ([name, namespace]) => name === module && namespace === subpath,
+              )
+                ? []
+                : [module],
+            ),
+          ),
+        ),
+      )
+      .then((differing) => expect(differing.flat()).toEqual([])));
+});
+
 describe("package exports map", () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")) as {
     exports: Record<string, { types: string; default: string }>;
   };
 
-  it("publishes the root unchanged and the schema subpath alongside it", () => {
+  it("publishes the root and the schema subpath unchanged", () => {
+    expect(manifest.exports["."]).toEqual({
+      types: "./dist/index.d.ts",
+      default: "./dist/index.js",
+    });
+    expect(manifest.exports["./schema"]).toEqual({
+      types: "./dist/schema.d.ts",
+      default: "./dist/schema.js",
+    });
+  });
+
+  it("publishes a subpath for every public module, and nothing else", () => {
     expect(manifest.exports).toEqual({
       ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
       "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" },
+      ...Rec.fromEntries(
+        PUBLIC_MODULES.map(
+          (module) =>
+            [
+              `./${module}`,
+              { types: `./dist/${module}.d.ts`, default: `./dist/${module}.js` },
+            ] as const,
+        ),
+      ),
     });
   });
 
@@ -343,8 +497,9 @@ describe("package exports map", () => {
 
 /**
  * `dist/` is not the source graph: `vp pack` (tsdown) bundles it into one ESM
- * file per entry point (`index.js`, `schema.js`), code the two share split out
- * into hashed chunks, plus bundled declarations. A clean source graph does not
+ * file per entry point (`index.js`, `schema.js` and one per module subpath),
+ * code they share split out into hashed chunks, and `tsc` writes one
+ * declaration file per source module beside them. A clean source graph does not
  * prove the bundler kept the schema entry's imports clean, so this re-checks
  * the property on the artifact, because that is what actually ships. The cases
  * read `dist/`, so they need `vp run build` first; CI builds before it runs
@@ -361,10 +516,79 @@ describe("built artifact", () => {
     expect([...graphFrom(built, DIST).externals.keys()]).toEqual(["effect"]);
   });
 
-  it.skipIf(!hasDist)("ships declarations for both entry points", () => {
-    for (const file of ["index.js", "index.d.ts", "schema.js", "schema.d.ts"]) {
-      expect(fs.existsSync(path.join(DIST, file)), `dist/${file} missing`).toBe(true);
-    }
+  it.skipIf(!hasDist)("ships JavaScript and declarations for every entry point", () => {
+    const missing = ["index", "schema", ...PUBLIC_MODULES]
+      .flatMap((entry) => [`${entry}.js`, `${entry}.d.ts`])
+      .filter((file) => !fs.existsSync(path.join(DIST, file)));
+    expect(missing).toEqual([]);
+  });
+
+  it.skipIf(!hasDist)("ships schema-tier subpaths that resolve `effect` alone", () => {
+    const entries = ["schema", ...SCHEMA_MODULES];
+    // `effect` at most: a module whose bundled code needs nothing from it
+    // (`dist/Sort.js`) imports no package at all.
+    expect(
+      entries.flatMap((entry) =>
+        beyondEffect(`dist/${entry}.js`, graphFrom(path.join(DIST, `${entry}.js`), DIST)),
+      ),
+    ).toEqual([]);
+    // The declarations may name an `effect` module (`import("effect/Cause")`
+    // in an inferred type), but never its HTTP surface.
+    const types = entries.map((entry) => graphFrom(path.join(DIST, `${entry}.d.ts`), DIST));
+    expect(types.flatMap(httpSurface)).toEqual([]);
+    expect(types.flatMap(foreign)).toEqual([]);
+  });
+
+  it.skipIf(!hasDist)("ships HTTP-tier subpaths that resolve nothing but `effect`", () => {
+    expect(
+      ["index", ...HTTP_MODULES]
+        .flatMap((entry) => [`${entry}.js`, `${entry}.d.ts`])
+        .flatMap((file) => foreign(graphFrom(path.join(DIST, file), DIST))),
+    ).toEqual([]);
+  });
+
+  /**
+   * Control for the declaration walk: `dist/Endpoint.d.ts` names
+   * `effect/http-api`, so a walk that cannot see it there cannot be trusted
+   * to see its absence above.
+   */
+  it.skipIf(!hasDist)("walks declarations that do reach `effect/http-api` (control)", () => {
+    expect(httpSurface(graphFrom(path.join(DIST, "Endpoint.d.ts"), DIST)).join("\n")).toContain(
+      "effect/http-api",
+    );
+  });
+
+  /**
+   * One module, one instance: the subpath and the root namespace must be the
+   * same module object's members, not a second copy whose classes fail
+   * `instanceof` against the first. Resolved through Node's real `exports`
+   * map. A subpath may carry one binding its namespace lacks: the bundler
+   * builds the namespace object the root re-exports in the module's own
+   * chunk and exports it from there under a short name (`t`). Nothing else
+   * may ride along, and the declarations (`tsc`'s) do not mention it.
+   */
+  it.skipIf(!hasDist)("ships subpaths whose members are the root namespaces' own", () => {
+    // The module names arrive as arguments; each mismatch is one line out.
+    const script = `
+      const root = await import("@thomasfosterau/effect-jsonapi");
+      for (const name of process.argv.slice(1)) {
+        const sub = await import("@thomasfosterau/effect-jsonapi/" + name);
+        for (const key of Object.keys(root[name])) {
+          if (sub[key] !== root[name][key]) console.log(name + "." + key + " differs");
+        }
+        for (const key of Object.keys(sub).filter((key) => !(key in root[name]))) {
+          if (sub[key] !== root[name]) console.log(name + " also exports " + key);
+        }
+      }
+      console.log("CHECKED");
+    `;
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-e", script, ...PUBLIC_MODULES],
+      { cwd: ROOT, encoding: "utf8" },
+    );
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("CHECKED\n");
   });
 
   /**
@@ -373,7 +597,7 @@ describe("built artifact", () => {
    * `exports` map, in a process where no non-core Effect namespace (`effect/http`, `effect/rpc`, ...) can be resolved
    * at all.
    */
-  const loadWithoutHttp = (entry: string) =>
+  const loadWithoutHttp = (...entries: ReadonlyArray<string>) =>
     spawnSync(
       process.execPath,
       [
@@ -381,15 +605,21 @@ describe("built artifact", () => {
         fileURLToPath(new URL("./fixtures/forbid-http-peer.mjs", import.meta.url)),
         "--input-type=module",
         "-e",
-        `await import(${JSON.stringify(entry)}); console.log("LOADED")`,
+        `${entries.map((entry) => `await import(${JSON.stringify(entry)});`).join(" ")} console.log("LOADED")`,
       ],
       { cwd: ROOT, encoding: "utf8" },
     );
 
   it.skipIf(!hasDist)(
-    "loads the schema subpath with every non-core effect namespace unresolvable",
+    "loads every schema-tier subpath with every non-core effect namespace unresolvable",
     () => {
-      const result = loadWithoutHttp("@thomasfosterau/effect-jsonapi/schema");
+      // One process for all of them: any one that reached a blocked
+      // specifier would fail the whole load.
+      const result = loadWithoutHttp(
+        ...["schema", ...SCHEMA_MODULES].map(
+          (subpath) => `@thomasfosterau/effect-jsonapi/${subpath}`,
+        ),
+      );
       expect(`${result.stdout}${result.stderr}`).toContain("LOADED");
       expect(result.status).toBe(0);
     },
