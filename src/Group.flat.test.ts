@@ -7,7 +7,7 @@
  * consuming application's contract snapshot pins.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Exit, Schema } from "effect";
+import { Array as Arr, Exit, Option, Schema } from "effect";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -30,6 +30,7 @@ interface EndpointLike {
   readonly path: string;
   readonly query?: Schema.Top;
   readonly error: ReadonlySet<Schema.Top>;
+  readonly success: ReadonlySet<Schema.Codec<unknown>>;
 }
 const endpointOf = (group: GroupLike, name: string): EndpointLike => {
   const endpoint = group.endpoints[name];
@@ -102,12 +103,12 @@ describe("Group.flat: hiddenWrites", () => {
   const options = { resource: Widget, create: Create, update: Update, list: ListWidgets };
   const hiding = Group.flat({ ...options, hiddenWrites: true }).group;
   const plain = Group.flat(options).group;
-  // SAFETY: every endpoint of a flat group declares exactly one success schema.
-  const successOf = (group: GroupLike, name: string) =>
-    [
-      ...(group.endpoints[name] as { readonly success: ReadonlySet<Schema.Codec<unknown>> })
-        .success,
-    ][0]!;
+  // Every endpoint of a flat group declares exactly one success schema.
+  const successOf = (group: GroupLike, name: string): Schema.Codec<unknown> =>
+    Option.match(Arr.head(Arr.fromIterable(endpointOf(group, name).success)), {
+      onNone: () => expect.fail(`${name} declares no success schema`),
+      onSome: (success) => success,
+    });
   const encode = (group: GroupLike, name: string) =>
     Schema.encodeUnknownExit(successOf(group, name));
 
@@ -124,6 +125,17 @@ describe("Group.flat: hiddenWrites", () => {
     expect(encode(hiding, name)(full)).toEqual(Exit.succeed(full));
     expect(decode(successOf(hiding, name))(full)).toEqual(full);
   });
+
+  // The identifier member is closed: a full document that fails the resource
+  // schema must not fall through to it, stripped to `{ type, id }`.
+  it.each(["create", "update"])(
+    "rejects a full %s document that fails the resource's schema, encoding and decoding",
+    (name) => {
+      const invalid = { data: { type: "widgets", id, attributes: { name: 42 } } };
+      expect(Exit.isFailure(encode(hiding, name)(invalid))).toBe(true);
+      expect(Exit.isFailure(Schema.decodeUnknownExit(successOf(hiding, name))(invalid))).toBe(true);
+    },
+  );
 
   it("leaves get declaring the full document alone", () => {
     expect(Exit.isFailure(encode(hiding, "get")(committed))).toBe(true);

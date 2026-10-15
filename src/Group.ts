@@ -308,6 +308,7 @@ export interface FlatOptions<
    *
    * @since 0.17.0
    */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
   readonly hiddenWrites?: Hidden | undefined;
 }
 
@@ -466,20 +467,18 @@ export const flat = <
   type Document = typeof document;
   // Only the writes widen: `get` keeps the full document, so a hidden
   // resource stays a 404 there.
+  type Committed = DataDocument<
+    Schema.Struct<Parameter<Type, Attributes, Rels, Meta, IdSchema>["identifier"]["fields"]>
+  >;
+  type Success = Hidden extends true ? Schema.Union<readonly [Document, Committed]> : Document;
   // SAFETY: `Hidden` is the literal type of `options.hiddenWrites`, so the
   // branch taken is the one the conditional type names.
+  // oxlint-disable-next-line effect/casting-awareness -- a ternary can't narrow a generic conditional type (`Success`); the SAFETY comment above is why the branch matches
   const success = (
     options.hiddenWrites === true
       ? Endpoint.WriteDocument(options.resource, { included: options.include?.included })
       : document
-  ) as Hidden extends true
-    ? Schema.Union<
-        readonly [
-          Document,
-          DataDocument<Parameter<Type, Attributes, Rels, Meta, IdSchema>["identifier"]>,
-        ]
-      >
-    : Document;
+  ) as Success;
   const write = { payloadMediaType: FLAT_PAYLOAD_MEDIA_TYPE, success } as const;
   return {
     group: resource(options.resource, {

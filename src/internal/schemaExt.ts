@@ -6,7 +6,8 @@
  * depends on an unpublished package. Everything public is re-exported from a
  * public module (`ServerErrors.pathToJsonPointer`, `FlatQuery.suppliedValue`)
  * so the move is an import change, not an API change; `closedStruct` is used
- * only inside the library's own request-body schemas.
+ * only inside the library's own request-body schemas and the closed
+ * identifier of `Endpoint.CommittedDocument`.
  *
  * @internal
  */

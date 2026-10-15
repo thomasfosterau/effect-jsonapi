@@ -7,7 +7,7 @@
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Cause, Context, Effect, Exit, Layer, Option, Schema } from "effect";
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Schema } from "effect";
 import * as ApiError from "./ApiError.js";
 import type * as Assemble from "./Assemble.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -87,6 +87,12 @@ interface ListInput {
   readonly q?: string | undefined;
 }
 
+/** The update input the stub ops take. */
+interface UpdateInput {
+  readonly id: string;
+  readonly name?: string | undefined;
+}
+
 /** A stub op set over an in-memory store, counting every call. */
 const makeOps = (seed: ReadonlyArray<PersonLike>) => {
   const store = new Map<string, PersonLike>(seed.map((p) => [p.id, p]));
@@ -94,7 +100,7 @@ const makeOps = (seed: ReadonlyArray<PersonLike>) => {
   const ops: ResourceHandlers.Ops<
     ListInput,
     { readonly name: string },
-    { readonly id: string; readonly name?: string | undefined },
+    UpdateInput,
     PersonLike,
     string,
     ServerErrors.NotFound,
@@ -197,13 +203,16 @@ const targets = {
 const seeded = () =>
   makeOps([person(ids(1), "Alpha"), person(ids(2), "Beta"), person(ids(3), "Gamma")]);
 
+// SAFETY: the stub ops read the same members the family's list query decodes.
+const listQuery = peopleListQuery as ResourceHandlers.ListQuery<ListInput>;
+
 const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
   const { cache, store: cacheStore, state } = makeCache();
   const { transact, opened } = makeTransact();
   const handlers = ResourceHandlers.make({
     ops,
     segment: "people",
-    listQuery: peopleListQuery as ResourceHandlers.ListQuery<ListInput>,
+    listQuery,
     linkBase: Effect.succeed("https://example.test"),
     viewer,
     capabilities,
@@ -218,6 +227,13 @@ const failure = async <A, E>(effect: Effect.Effect<A, E, never>) => {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isSuccess(exit)) return expect.fail("expected a failure");
   return Option.getOrThrow(Cause.findErrorOption(exit.cause)) as { readonly _tag: string };
+};
+
+/** Runs `effect` to its success, failing the test on any other exit. */
+const success = async <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> => {
+  const exit = await Effect.runPromiseExit(effect);
+  if (Exit.isFailure(exit)) return expect.fail(`expected a success: ${Cause.pretty(exit.cause)}`);
+  return exit.value;
 };
 
 describe("assertIdMatchesPath", () => {
@@ -301,7 +317,7 @@ describe("a write whose re-read fails", () => {
     const ops: ResourceHandlers.Ops<
       ListInput,
       { readonly name: string },
-      { readonly id: string; readonly name?: string | undefined },
+      UpdateInput,
       PersonLike,
       string,
       ServerErrors.NotFound | StoreDown,
@@ -325,25 +341,45 @@ describe("a write whose re-read fails", () => {
     return { ...seededOps, ops, hidden };
   };
 
-  /** The handler config the tests vary: a transaction seam, and the hidden-write rule. */
+  class CommitFailed extends Schema.TaggedError<CommitFailed>()("CommitFailed", {}) {}
+  type HiddenRule = ResourceHandlers.HiddenWrite<ServerErrors.NotFound | StoreDown, "people">;
+
+  /**
+   * The handler config the tests vary: a transaction seam, the hidden-write
+   * rule, and a cache whose eviction is asynchronous (it signals
+   * `evicting`, then yields to the scheduler before it deletes), so an
+   * interrupt can land part-way through it.
+   */
   const build = (
     ops: ReturnType<typeof hidingOps>["ops"],
     options: {
-      readonly transact?: ResourceHandlers.Transact<Transaction, never, never>;
-      readonly hiddenWrite?:
-        | ResourceHandlers.HiddenWrite<ServerErrors.NotFound | StoreDown, "people">
-        | undefined;
+      readonly transact?: ResourceHandlers.Transact<Transaction, CommitFailed, never>;
+      // oxlint-disable-next-line effect/prefer-option-over-null -- forwarded as is to `ResourceHandlers.make`'s own `?: T | undefined` option
+      readonly hiddenWrite?: HiddenRule | undefined;
+      readonly evicting?: Deferred.Deferred<void>;
     } = {},
   ) => {
-    const { cache, store: cacheStore } = makeCache();
+    const made = makeCache();
+    const { store: cacheStore } = made;
+    const { evicting } = options;
+    const cache: typeof made.cache =
+      evicting === undefined
+        ? made.cache
+        : {
+            ...made.cache,
+            delete: (id) =>
+              Effect.andThen(
+                Deferred.succeed(evicting, undefined),
+                Effect.andThen(Effect.sleep("10 millis"), made.cache.delete(id)),
+              ),
+          };
     // The public entry a reader cached before the write.
     cacheStore.set(ids(1), person(ids(1), "Public"));
     cacheStore.set(ids(2), person(ids(2), "Public"));
     const handlers = ResourceHandlers.make({
       ops,
       segment: "people",
-      // SAFETY: the stub ops read the same members the family's list query decodes.
-      listQuery: peopleListQuery as ResourceHandlers.ListQuery<ListInput>,
+      listQuery,
       linkBase: Effect.succeed("https://example.test"),
       viewer,
       capabilities,
@@ -356,6 +392,77 @@ describe("a write whose re-read fails", () => {
 
   const admin = as(Option.some(ADMIN));
   const renameFirst = { params: { id: ids(1) }, payload: { id: ids(1), name: "Private" } };
+
+  // The guarantee is that an interrupt can't separate a commit from its
+  // cache step: with the re-read pending (it never answers), an external
+  // interrupt still lets the eviction that follows run to completion, though
+  // the eviction itself is asynchronous.
+  it.each(["create", "update"] as const)(
+    "evicts in full when the %s is interrupted while its re-read is pending",
+    async (kind) => {
+      const rereading = Deferred.makeUnsafe<void>();
+      const evicting = Deferred.makeUnsafe<void>();
+      const { ops } = hidingOps(() =>
+        Effect.andThen(Deferred.succeed(rereading, undefined), Effect.never),
+      );
+      const { handlers, cacheStore } = build(ops, { evicting });
+      // A stale entry under the id the create is about to write.
+      cacheStore.set(ids(4), person(ids(4), "Stale"));
+      const written = kind === "create" ? ids(4) : ids(1);
+      const write =
+        kind === "create"
+          ? handlers.create({ payload: { name: "Delta" } })
+          : handlers.update(renameFirst);
+      await success(
+        Effect.gen(function* () {
+          const fiber = yield* Effect.forkChild(write.pipe(Effect.provide(admin)));
+          yield* Deferred.await(rereading);
+          yield* Fiber.interrupt(fiber);
+        }),
+      );
+      expect(Deferred.isDoneUnsafe(evicting)).toBe(true);
+      expect(cacheStore.has(written)).toBe(false);
+    },
+  );
+
+  it("evicts in full when a delete is interrupted during its eviction", async () => {
+    const evicting = Deferred.makeUnsafe<void>();
+    const { ops, store } = hidingOps();
+    const { handlers, cacheStore } = build(ops, { evicting });
+    await success(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
+        );
+        yield* Deferred.await(evicting);
+        yield* Fiber.interrupt(fiber);
+      }),
+    );
+    expect(store.has(ids(2))).toBe(false);
+    expect(cacheStore.has(ids(2))).toBe(false);
+  });
+
+  // The operation ran, then the commit failed: the write may have committed
+  // (a lost acknowledgement), so a plain failure evicts too, not only an
+  // interruption.
+  it("evicts when the transaction fails after the operation succeeded", async () => {
+    const failingCommit: ResourceHandlers.Transact<Transaction, CommitFailed, never> = (effect) =>
+      Effect.andThen(
+        Effect.provideService(effect, Transaction, { depth: 1 }),
+        Effect.fail(new CommitFailed()),
+      );
+    const { ops, calls } = hidingOps();
+    const { handlers, cacheStore } = build(ops, { transact: failingCommit });
+    expect(await failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toBeInstanceOf(
+      CommitFailed,
+    );
+    expect(cacheStore.has(ids(1))).toBe(false);
+    expect(
+      await failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
+    ).toBeInstanceOf(CommitFailed);
+    expect(cacheStore.has(ids(2))).toBe(false);
+    expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
+  });
 
   it("evicts the cached entry when the writer can no longer read the row, and fails as the re-read did", async () => {
     const { ops, store } = hidingOps();
@@ -447,9 +554,7 @@ describe("a write whose re-read fails", () => {
     it("answers a hidden update with the committed identifier and version, after evicting", async () => {
       const { ops } = hidingOps();
       const { handlers, cacheStore } = build(ops, { hiddenWrite });
-      const document = await Effect.runPromise(
-        handlers.update(renameFirst).pipe(Effect.provide(admin)),
-      );
+      const document = await success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
       expect(document).toEqual({
         data: { type: "people", id: ids(1), meta: { version: 7 } },
         jsonapi: { version: "1.1" },
@@ -459,7 +564,7 @@ describe("a write whose re-read fails", () => {
 
     it("answers a hidden create the same way, and omits meta when the op reports no version", async () => {
       const { ops } = hidingOps();
-      const created = await Effect.runPromise(
+      const created = await success(
         build(ops, { hiddenWrite })
           .handlers.create({ payload: { name: "Delta" } })
           .pipe(Effect.provide(admin)),
@@ -473,13 +578,96 @@ describe("a write whose re-read fails", () => {
         create: (input: { readonly name: string }) =>
           Effect.map(ops.create(input), ({ id }) => ({ id })),
       };
-      const bare = await Effect.runPromise(
+      const bare = await success(
         build(versionless, { hiddenWrite })
           .handlers.create({ payload: { name: "Echo" } })
           .pipe(Effect.provide(admin)),
       );
       expect(bare.data).toEqual({ type: "people", id: ids(5) });
     });
+
+    // Only the re-read is asked: a write the operation itself refuses never
+    // committed, so it fails as refused, whatever the rule would say.
+    it("fails a create / update the operation refuses, even with a rule that names everything", async () => {
+      const { ops } = hidingOps();
+      const refused = (id: string) => new ServerErrors.NotFound({ resource: "people", id });
+      const refusing = {
+        ...ops,
+        create: (_input: { readonly name: string }) => Effect.fail(refused(ids(4))),
+        update: (input: UpdateInput) => Effect.fail(refused(input.id)),
+      };
+      const { handlers, cacheStore } = build(refusing, {
+        hiddenWrite: { type: "people", when: () => true },
+      });
+      // `failure` fails the test on a success, so no committed document went out.
+      expect(
+        await failure(handlers.create({ payload: { name: "Delta" } }).pipe(Effect.provide(admin))),
+      ).toEqual(refused(ids(4)));
+      expect(await failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toEqual(
+        refused(ids(1)),
+      );
+      expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
+    });
+
+    it("fails with the whole cause when the rule names only some of its failures", async () => {
+      const { ops } = hidingOps((id) =>
+        Effect.failCause(
+          Cause.combine(
+            Cause.fail(new ServerErrors.NotFound({ resource: "people", id })),
+            Cause.fail(new StoreDown()),
+          ),
+        ),
+      );
+      const { handlers, cacheStore } = build(ops, { hiddenWrite });
+      const exit = await Effect.runPromiseExit(
+        handlers.update(renameFirst).pipe(Effect.provide(admin)),
+      );
+      expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
+      expect(cacheStore.has(ids(1))).toBe(false);
+    });
+
+    it("fails with the empty cause, rather than hiding it, when the re-read fails with no reason", async () => {
+      const { ops } = hidingOps(() => Effect.failCause(Cause.empty));
+      const { handlers, cacheStore } = build(ops, {
+        hiddenWrite: { type: "people", when: () => true },
+      });
+      const exit = await Effect.runPromiseExit(
+        handlers.update(renameFirst).pipe(Effect.provide(admin)),
+      );
+      expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(0);
+      expect(cacheStore.has(ids(1))).toBe(false);
+    });
+
+    // `version` is `unknown`: what reaches the wire is a string or a finite
+    // number as is, a bigint as its decimal string, and nothing else.
+    it.each([
+      ["a bigint", 12n, { version: "12" }],
+      ["a string", "v3", { version: "v3" }],
+      ["NaN", Number.NaN, undefined],
+      ["positive infinity", Number.POSITIVE_INFINITY, undefined],
+      ["negative infinity", Number.NEGATIVE_INFINITY, undefined],
+      ["an object", { revision: 3 }, undefined],
+    ])(
+      "echoes a version that is %s as meta.version only when it has a wire form",
+      async (_, version, meta) => {
+        const { ops } = hidingOps();
+        const versioned = {
+          ...ops,
+          create: (input: { readonly name: string }) =>
+            Effect.map(ops.create(input), ({ id }) => ({ id, version })),
+        };
+        const created = await success(
+          build(versioned, { hiddenWrite })
+            .handlers.create({ payload: { name: "Delta" } })
+            .pipe(Effect.provide(admin)),
+        );
+        expect(created.data).toEqual(
+          meta === undefined
+            ? { type: "people", id: ids(4) }
+            : { type: "people", id: ids(4), meta },
+        );
+      },
+    );
 
     it("still fails with a re-read error the rule does not name", async () => {
       const { ops } = hidingOps(() => new StoreDown());
@@ -494,13 +682,11 @@ describe("a write whose re-read fails", () => {
       const { ops, hidden } = hidingOps();
       const visible = {
         ...ops,
-        update: (input: { readonly id: string; readonly name?: string | undefined }) =>
+        update: (input: UpdateInput) =>
           Effect.tap(ops.update(input), () => Effect.sync(() => void hidden.splice(0))),
       };
       const { handlers, cacheStore } = build(visible, { hiddenWrite });
-      const document = await Effect.runPromise(
-        handlers.update(renameFirst).pipe(Effect.provide(admin)),
-      );
+      const document = await success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
       expect(document.data).toMatchObject({ id: ids(1), attributes: { name: "Private" } });
       expect(cacheStore.get(ids(1))?.attributes.name).toBe("Private");
     });
