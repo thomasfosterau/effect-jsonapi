@@ -6976,16 +6976,15 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
     });
   });
 
-  it("passes a create that names the profile in `jsonapi.profile`, sending a fresh key", async () => {
+  it("passes a create that names the profile in `jsonapi.profile`, sending no key where it is optional", async () => {
     const keys: Array<string> = [];
     const report = await runRule(verifyIdempotent, idempotentServer("document", keys));
     expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
-    // One create, carrying a key no earlier request did — never a replay.
-    expect(keys).toEqual([expect.stringMatching(/^conformance-/)]);
+    expect(keys).toEqual(["(no key)"]);
     expect(report.writes?.map((write) => write.rule)).toEqual([RULE]);
   });
 
-  it("holds an endpoint that requires the key too, sending one", async () => {
+  it("holds an endpoint that requires the key too, sending a fresh one", async () => {
     const keys: Array<string> = [];
     const report = await runRule(verifyRequired, (request) =>
       request.method === "POST" && !request.headers.has("idempotency-key")
@@ -6993,7 +6992,89 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
         : idempotentServer("neither", keys)(request),
     );
     expect(outcomeFor(report, RULE)._tag).toBe("Failed");
-    expect(keys).toHaveLength(1);
+    // One create, carrying a key no earlier request did — never a replay.
+    expect(keys).toEqual([expect.stringMatching(/^conformance-/)]);
+  });
+
+  it("sends each required endpoint a key of its own", async () => {
+    const twoTypes = HttpApi.make("two").add(
+      Group.make(
+        Article,
+        Endpoint.get(Article),
+        Endpoint.create(Article, { idempotency: "required" }),
+      ),
+      Group.make(Person, Endpoint.create(Person, { idempotency: "required" })),
+    );
+    const keys: Array<string> = [];
+    let next = 100;
+    const report = await verifyOver(twoTypes)(
+      (request) => {
+        if (request.method !== "POST") return conformantServe(request);
+        keys.push(request.headers.get("idempotency-key") ?? "(no key)");
+        const type = request.path.slice(1);
+        return {
+          status: 201,
+          body: { jsonapi: Idempotency.jsonapi, data: { type, id: `${next++}`, attributes: {} } },
+        };
+      },
+      {
+        only: [RULE],
+        mutating: true,
+        writes: {
+          articles: fixture,
+          people: {
+            create: () => ({ type: "people", attributes: { firstName: "a", lastName: "b" } }),
+          },
+        },
+      },
+    );
+    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 2 });
+    expect(keys).toEqual([
+      expect.stringMatching(/^conformance-/),
+      expect.stringMatching(/^conformance-/),
+    ]);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("finds the profile in a space-separated `profile` list", async () => {
+    const report = await runRule(verifyIdempotent, (request) =>
+      request.method === "POST"
+        ? {
+            ...idempotentServer("neither", [])(request),
+            contentType: `${MEDIA_TYPE}; profile="${Filter.PROFILE_URI} ${Idempotency.PROFILE_URI}"`,
+          }
+        : conformantServe(request),
+    );
+    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
+  });
+
+  it("counts only the `profile` parameter, not `ext` naming the URI", async () => {
+    const report = await runRule(verifyIdempotent, (request) =>
+      request.method === "POST"
+        ? {
+            ...idempotentServer("neither", [])(request),
+            contentType: `${MEDIA_TYPE}; ext="${Idempotency.PROFILE_URI}"`,
+          }
+        : conformantServe(request),
+    );
+    expect(outcomeFor(report, RULE)._tag).toBe("Failed");
+  });
+
+  it("does not take another profile of this package's for this one", async () => {
+    // The filter grammar's URI shares the idempotency profile's prefix.
+    const report = await runRule(verifyIdempotent, (request) =>
+      request.method === "POST"
+        ? {
+            ...idempotentServer("neither", [])(request),
+            contentType: `${MEDIA_TYPE}; profile="${Filter.PROFILE_URI}"`,
+            body: {
+              jsonapi: { version: "1.1", profile: [Filter.PROFILE_URI] },
+              data: { type: "articles", id: "100", attributes: { title: "t", body: "" } },
+            },
+          }
+        : conformantServe(request),
+    );
+    expect(outcomeFor(report, RULE)._tag).toBe("Failed");
   });
 
   it("passes a create that names the profile on its media type", async () => {
@@ -7033,13 +7114,127 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
     );
   });
 
+  it("passes a 2xx with no document whose media type names the profile", async () => {
+    const report = await runRule(verifyIdempotent, (request) =>
+      request.method === "POST"
+        ? { status: 204, headers: { "content-type": profiled } }
+        : conformantServe(request),
+    );
+    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
+  });
+
+  describe("on update endpoints", () => {
+    const updatableApi = (create: Idempotency.Option) =>
+      HttpApi.make("updatable").add(
+        Group.make(
+          Article,
+          Endpoint.get(Article),
+          Endpoint.create(Article, { idempotency: create }),
+          Endpoint.update(Article, { idempotency: "required" }),
+        ),
+      );
+
+    /** One request the server saw: its method and path, and the key it carried. */
+    type Seen = { readonly request: string; readonly key: string };
+
+    /**
+     * Creates as {@link idempotentServer} does; an update answers 200 with the
+     * article, naming the profile where `onUpdate` says, or `updateStatus`.
+     */
+    const updatableServer =
+      (onCreate: Advertises, onUpdate: Advertises, seen: Array<Seen>, updateStatus = 200) =>
+      (request: CannedRequest): Canned => {
+        const line = `${request.method} ${request.path}`;
+        if (request.method === "POST" || request.method === "PATCH")
+          seen.push({ request: line, key: request.headers.get("idempotency-key") ?? "(no key)" });
+        if (request.method !== "PATCH") return idempotentServer(onCreate, [])(request);
+        const id = request.path.split("/")[2] ?? "";
+        const data = { type: "articles", id, attributes: { title: "u", body: "" } };
+        return {
+          status: updateStatus,
+          contentType: onUpdate === "media type" ? profiled : MEDIA_TYPE,
+          body:
+            onUpdate === "document"
+              ? { jsonapi: Idempotency.jsonapi, data }
+              : { jsonapi: { version: "1.1" }, data },
+        };
+      };
+
+    const updating: Conformance.WriteFixture = {
+      ...fixture,
+      update: () => ({ attributes: { title: "updated" } }),
+    };
+
+    const runUpdates = (
+      create: Idempotency.Option,
+      serve: (request: CannedRequest) => Canned,
+      writes: Conformance.Options["writes"] = { articles: updating },
+    ) => verifyOver(updatableApi(create))(serve, { only: [RULE], mutating: true, writes });
+
+    it("judges one create and one update per type, keying only the required update", async () => {
+      const seen: Array<Seen> = [];
+      const report = await runUpdates(true, updatableServer("document", "media type", seen));
+      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 2 });
+      expect(seen).toEqual([
+        { request: "POST /articles", key: "(no key)" },
+        { request: "PATCH /articles/100", key: expect.stringMatching(/^conformance-/) },
+      ]);
+    });
+
+    it("fails an update that names the profile in neither place", async () => {
+      const report = await runUpdates(true, updatableServer("document", "neither", []));
+      expect(outcomeFor(report, RULE)).toMatchObject({
+        _tag: "Failed",
+        findings: [
+          { detail: expect.stringContaining("updating articles:100 through /articles/:id") },
+        ],
+      });
+    });
+
+    it("judges the create too when its endpoint declares the header", async () => {
+      const report = await runUpdates(true, updatableServer("neither", "document", []));
+      expect(outcomeFor(report, RULE)).toMatchObject({
+        _tag: "Failed",
+        findings: [{ detail: expect.stringContaining(`creating a "articles" resource`) }],
+      });
+    });
+
+    it("judges only the update when the create endpoint does not declare the header", async () => {
+      const report = await runUpdates(false, updatableServer("neither", "document", []));
+      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
+    });
+
+    it("does not decide on an update the server did not accept", async () => {
+      const report = await runUpdates(false, updatableServer("neither", "document", [], 422));
+      expect(outcomeFor(report, RULE)).toEqual(
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining(`did not accept writes["articles"].update`),
+        }),
+      );
+    });
+
+    it("still probes the create when there is no update fixture", async () => {
+      const seen: Array<Seen> = [];
+      const report = await runUpdates(true, updatableServer("document", "neither", seen), {
+        articles: fixture,
+      });
+      expect(outcomeFor(report, RULE)).toMatchObject({
+        _tag: "Passed",
+        probes: 1,
+        note: expect.stringContaining(`writes["articles"].update`),
+      });
+      expect(seen.map(({ request }) => request)).toEqual(["POST /articles"]);
+    });
+  });
+
   it("skips, naming why, when no create endpoint declares the header", async () => {
     const keys: Array<string> = [];
     const report = await runRule(verifyPlain, idempotentServer("neither", keys));
     expect(outcomeFor(report, RULE)).toEqual(
       expect.objectContaining({
         _tag: "Skipped",
-        reason: "no create endpoint declaring the `Idempotency-Key` header in this api",
+        reason: "no create or update endpoint declaring the `Idempotency-Key` header in this api",
       }),
     );
     expect(keys).toEqual([]);
@@ -7067,6 +7262,75 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
         reason: expect.stringContaining(`writes["articles"].create`),
       }),
     );
+  });
+
+  describe("the spec tier's writes", () => {
+    const keyedApi = (idempotency: Idempotency.Option) =>
+      HttpApi.make("keyed").add(
+        Group.make(
+          Article,
+          Endpoint.get(Article),
+          Endpoint.create(Article, { idempotency }),
+          Endpoint.update(Article, { idempotency }),
+          Endpoint.delete(Article, { idempotency }),
+        ),
+      );
+
+    /**
+     * A server that refuses a write without a key when `required`, as an
+     * `idempotency: "required"` endpoint does, and records the key each write
+     * carried.
+     */
+    const keyedServer = (required: boolean, seen: Array<string>) => {
+      let next = 100;
+      return (request: CannedRequest): Canned => {
+        if (request.method === "GET") return conformantServe(request);
+        const key = request.headers.get("idempotency-key");
+        seen.push(`${request.method} ${key === null ? "(no key)" : "key"}`);
+        if (required && key === null) return { status: 400, body: { errors: [{ status: "400" }] } };
+        if (request.method === "DELETE") return { status: 204 };
+        const id = request.method === "POST" ? `${next++}` : (request.path.split("/")[2] ?? "");
+        return {
+          status: request.method === "POST" ? 201 : 200,
+          headers: { location: `/articles/${id}` },
+          body: { data: { type: "articles", id, attributes: { title: "t", body: "" } } },
+        };
+      };
+    };
+
+    const options: Conformance.Options = {
+      only: [
+        "spec/status/create-response-document",
+        "spec/status/update-response",
+        "spec/status/delete-response",
+      ],
+      mutating: true,
+      writes: {
+        articles: { ...fixture, update: () => ({ attributes: { title: "updated" } }) },
+      },
+    };
+
+    it("send a fresh key to every endpoint that requires one", async () => {
+      const seen: Array<string> = [];
+      const report = await verifyOver(keyedApi("required"))(keyedServer(true, seen), options);
+      expect(report.outcomes.map((outcome) => outcome._tag)).toEqual([
+        "Passed",
+        "Passed",
+        "Passed",
+      ]);
+      expect(seen).toEqual(["POST key", "POST key", "PATCH key", "POST key", "DELETE key"]);
+    });
+
+    it("send none where the key is optional", async () => {
+      const seen: Array<string> = [];
+      const report = await verifyOver(keyedApi(true))(keyedServer(false, seen), options);
+      expect(report.outcomes.map((outcome) => outcome._tag)).toEqual([
+        "Passed",
+        "Passed",
+        "Passed",
+      ]);
+      expect(seen.every((line) => line.endsWith("(no key)"))).toBe(true);
+    });
   });
 
   describe("against a package-built server", () => {

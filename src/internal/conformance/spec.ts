@@ -75,6 +75,7 @@ import {
   atomicTargets,
   buildUpdate,
   decided,
+  idempotencyHeaders,
   onAccepted,
   overTargets,
   ownId,
@@ -2011,18 +2012,19 @@ const updateResponse: RuleImpl = {
           Result.match(Result.all({ id: ownId(created), patch: buildUpdate(target) }), {
             onFailure: (reason) => Effect.succeed(undecided(reason)),
             onSuccess: ({ id, patch }) =>
-              ctx
-                .request({
-                  method: target.endpoint.method,
-                  url: pathFor(target.endpoint, id),
-                  headers: writeHeaders,
-                  body: { data: { ...patch, type: created.payload.type, id } },
-                })
-                .pipe(
-                  Effect.map((observation) =>
-                    judgeUpdate(target, created.payload.type, id, observation),
-                  ),
+              idempotencyHeaders(target.endpoint).pipe(
+                Effect.flatMap((key) =>
+                  ctx.request({
+                    method: target.endpoint.method,
+                    url: pathFor(target.endpoint, id),
+                    headers: { ...writeHeaders, ...key },
+                    body: { data: { ...patch, type: created.payload.type, id } },
+                  }),
                 ),
+                Effect.map((observation) =>
+                  judgeUpdate(target, created.payload.type, id, observation),
+                ),
+              ),
           }),
         ),
       ),
@@ -2165,22 +2167,23 @@ const deleteResponse: RuleImpl = {
             Result.match(ownId(created), {
               onFailure: (reason) => Effect.succeed(undecided(reason)),
               onSuccess: (id) =>
-                ctx
-                  .request({
-                    method: target.endpoint.method,
-                    url: pathFor(target.endpoint, id),
-                    headers: jsonApiAccept,
-                  })
-                  .pipe(
-                    // A completed deletion is the disposal; anything else still owes a cleanup.
-                    Effect.tap((observation) =>
-                      Effect.sync(() => {
-                        if (observation.status === 200 || observation.status === 204)
-                          created.entry.disposal = "deleted";
-                      }),
-                    ),
-                    Effect.map((observation) => decided(2, judgeDelete(observation))),
+                idempotencyHeaders(target.endpoint).pipe(
+                  Effect.flatMap((key) =>
+                    ctx.request({
+                      method: target.endpoint.method,
+                      url: pathFor(target.endpoint, id),
+                      headers: { ...jsonApiAccept, ...key },
+                    }),
                   ),
+                  // A completed deletion is the disposal; anything else still owes a cleanup.
+                  Effect.tap((observation) =>
+                    Effect.sync(() => {
+                      if (observation.status === 200 || observation.status === 204)
+                        created.entry.disposal = "deleted";
+                    }),
+                  ),
+                  Effect.map((observation) => decided(2, judgeDelete(observation))),
+                ),
             }),
           ),
         ),

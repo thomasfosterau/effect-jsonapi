@@ -259,12 +259,21 @@ export interface Discovered {
    */
   readonly queryPrefixes: ReadonlyArray<string>;
   /**
-   * `true` when the endpoint's headers schema declares `Idempotency-Key` — it
-   * opts into the idempotency profile (`docs/idempotency.md`), as
-   * `idempotency: true | "required"` does.
+   * Whether the endpoint's headers schema declares `Idempotency-Key`, opting
+   * into the idempotency profile (`docs/idempotency.md`): `"required"` when it
+   * insists on the header (`idempotency: "required"`), `"optional"` when it
+   * accepts one (`idempotency: true`), `"absent"` when it declares none.
    */
-  readonly idempotencyKey: boolean;
+  readonly idempotencyKey: IdempotencyKey;
 }
+
+/**
+ * How an endpoint's headers schema declares `Idempotency-Key`. See
+ * {@link Discovered.idempotencyKey}.
+ *
+ * @internal
+ */
+export type IdempotencyKey = "absent" | "optional" | "required";
 
 const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | undefined }>(
   "~httpApiEncoding",
@@ -294,16 +303,33 @@ const wireKeys = (
     }),
   });
 
+const isIdempotencyHeader = (name: PropertyKey): boolean =>
+  String(name).toLowerCase() === IDEMPOTENCY_HEADER;
+
 /**
- * Whether an endpoint's headers schema declares the `Idempotency-Key` request
+ * How an endpoint's headers schema declares the `Idempotency-Key` request
  * header. Header names are matched case-insensitively, as HTTP matches them; a
- * headers schema whose names cannot be enumerated declares nothing this can see.
+ * headers schema whose names cannot be enumerated declares nothing this can
+ * see. The header is `"required"` only when a struct's own property for it is
+ * not optional; one declared any other way (through a union, say) reads as
+ * `"optional"`, so the kit sends no key it cannot tell the endpoint insists on.
  */
-const declaresIdempotencyKey = (schema: Option.Option<{ readonly ast: SchemaAST.AST }>): boolean =>
-  Option.exists(
-    Option.flatMap(schema, ({ ast }) => declaredNames(ast)),
-    (names) => names.some((name) => name.toLowerCase() === IDEMPOTENCY_HEADER),
-  );
+const idempotencyKeyOf = (schema: Option.Option<{ readonly ast: SchemaAST.AST }>): IdempotencyKey =>
+  Option.match(schema, {
+    onNone: () => "absent",
+    onSome: ({ ast }): IdempotencyKey => {
+      if (!Option.exists(declaredNames(ast), (names) => names.some(isIdempotencyHeader)))
+        return "absent";
+      const encoded = SchemaAST.toEncoded(ast);
+      const required =
+        SchemaAST.isObjects(encoded) &&
+        encoded.propertySignatures.some(
+          (signature) =>
+            isIdempotencyHeader(signature.name) && !SchemaAST.isOptional(signature.type),
+        );
+      return required ? "required" : "optional";
+    },
+  });
 
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
@@ -372,7 +398,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
           .filter((segment) => segment.startsWith(":"))
           .map((segment) => segment.slice(1)),
         ...query,
-        idempotencyKey: declaresIdempotencyKey(Option.fromUndefinedOr(endpoint.headers)),
+        idempotencyKey: idempotencyKeyOf(Option.fromUndefinedOr(endpoint.headers)),
       });
     }
   }
