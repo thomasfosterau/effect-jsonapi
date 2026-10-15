@@ -569,8 +569,11 @@ export interface Reachable<R extends Any, I> extends Schema.Union<
  * path reaches from any member.
  *
  * Unlike {@link Reachable} it does not distribute over a widened `include`,
- * because `collection` and `polymorphic` don't: under `include: boolean` their
- * default document's type admits the direct targets alone, and so does this.
+ * because `collection` and `polymorphic` don't (#382): under
+ * `include: boolean` their default document's `included` is typed as the
+ * direct targets alone, and so is this. Only the type narrows: at runtime the
+ * union is the one for the value `include` holds, the full walk when it is
+ * `true`. When #382 is fixed this distributes with them.
  *
  * A declared {@link Surface} gives the surface's own `included` (see
  * {@link included}), which `collection` and `polymorphic` do not bind yet
@@ -582,6 +585,17 @@ export interface Reachable<R extends Any, I> extends Schema.Union<
 export interface MembersReachable<Members extends Any, I> extends Schema.Union<
   ReadonlyArray<IncludedResources<Members, I>>
 > {}
+
+// The members form's result. Each declared surface in `I` gives its own
+// `included`; the rest of `I` (a boolean or a `Query.IncludeOptions`) gives
+// `MembersReachable` over it, undistributed as `collection` / `polymorphic`
+// type theirs (#382). So `which ? surface : true` is typed as either union,
+// as the runtime returns one or the other.
+type MembersIncluded<Members extends Any, I> =
+  | (I extends { readonly included: infer Declared } ? Declared : never)
+  | ([Exclude<I, { readonly included: unknown }>] extends [never]
+      ? never
+      : MembersReachable<Members, Exclude<I, { readonly included: unknown }>>);
 
 // A `Query.IncludeOptions` over `R`, and an endpoint's `include` option over
 // `R` (`Query.IncludeOption`), spelled out here because `Query` is HTTP-tier
@@ -613,7 +627,7 @@ const endpointIncluded = (resources: ReadonlyArray<Any>, include: IncludeInput):
   if (include === true) {
     return Schema.Union(includedResources(resources, false, includePathsFor(resources)));
   }
-  if (TAG in include) return include.included;
+  if (TAG in include && include[TAG] === "surface") return include.included;
   return Schema.Union(includedResources(resources, false, includePathsFor(resources, include)));
 };
 
@@ -651,11 +665,14 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * `collection` endpoint's resources, or `family.members` for a `polymorphic`
  * endpoint over `family`, gives the union of their default documents, over
  * every member's direct targets and paths ({@link MembersReachable}). A
- * widened `include: boolean` gives the direct targets alone, as those
- * endpoints' types do. A declared surface gives the surface's own `included`;
- * until #336 is fixed, `collection` and `polymorphic` ignore that union and
- * bind their members' direct targets instead, so for a surface this answer
- * differs from what those endpoints accept.
+ * widened `include: boolean` is typed as the direct targets alone, as those
+ * endpoints' types are (#382); at runtime it is the union for the value it
+ * holds, the full walk when that is `true`. A declared surface gives the
+ * surface's own `included`, and an `include` that may be a surface or not
+ * (`which ? surface : true`) is typed as either union. Until #336 is fixed,
+ * `collection` and `polymorphic` ignore a surface's union and bind their
+ * members' direct targets instead, so for a surface this answer differs from
+ * what those endpoints accept.
  *
  * The resource and members forms give the union of an endpoint that does not
  * declare `fields`. With `fields: true` the default document's `included`
@@ -718,21 +735,19 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * @category accessors
  */
 export function included<const S extends AnySpec>(spec: S): Included<S>;
-export function included<
-  const Resources extends ReadonlyArray<Any>,
-  const I extends EndpointInclude<Resources[number]>,
->(
-  resources: Resources,
-  options: { readonly include: I },
-): [I] extends [{ readonly included: infer Declared }]
-  ? Declared
-  : MembersReachable<Resources[number], I>;
-// The resource form last: an overload failure is reported against the last
-// overload, and a bad `paths` / `depth` is likeliest meant for this one.
+// The resource form before the members form: TypeScript 6 (the editor's
+// language service, and most consumers' checker) lists the failing overloads
+// in declaration order, so a bad `paths` / `depth` on a resource — likeliest
+// meant for this form — leads with this form's error. TypeScript 7 reports
+// the last overload's error alone, at the failing property.
 export function included<R extends Any, const I extends EndpointInclude<R>>(
   resource: R,
   options: { readonly include: I },
 ): Reachable<R, I>;
+export function included<
+  const Resources extends ReadonlyArray<Any>,
+  const I extends EndpointInclude<Resources[number]>,
+>(resources: Resources, options: { readonly include: I }): MembersIncluded<Resources[number], I>;
 export function included(
   source: AnySpec | Any | ReadonlyArray<Any>,
   options?: { readonly include: IncludeInput },

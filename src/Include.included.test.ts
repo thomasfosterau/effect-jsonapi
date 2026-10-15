@@ -185,17 +185,30 @@ describe("Include.included(resource, { include }) is the default document's unio
   it("`collection` and `polymorphic` under a declared surface: the surface's own union", () => {
     const union = Include.included([Article, Person], { include: surface });
     expect(union).toBe(surface.included);
-    const nodeSurface = Include.make(Author, { comments: Comment });
+    const nodeSurface = Include.make(Author, {
+      comments: Include.nested(Comment, { author: Person }),
+    });
     expect(Include.included(AnyNode.members, { include: nodeSurface })).toBe(nodeSurface.included);
-    // Which `collection` does not bind yet (#336): its document keeps the
-    // members' direct targets. When #336 is fixed this flips, and the docs'
-    // caveat goes.
+    // Which `collection` and `polymorphic` do not bind yet (#336): their
+    // documents keep the members' direct targets. When #336 is fixed these
+    // flip, and the docs' caveat goes.
     const [success] = Endpoint.collection([Article, Person], {
       name: "search",
       path: "/search",
       include: surface,
     }).success;
     expectSameMembers(membersOf(includedOf(success)), [Comment, AnyNode, Company]);
+    const [nodeSuccess] = Endpoint.polymorphic(AnyNode, { include: nodeSurface }).success;
+    expectSameMembers(membersOf(includedOf(nodeSuccess)), [Comment, Company]);
+  });
+
+  it("an `include` that may be a surface or not: the union for the value it holds", () => {
+    const pick = (useSurface: boolean) => (useSurface ? surface : true);
+    expect(Include.included([Article, Person], { include: pick(true) })).toBe(surface.included);
+    expectSameUnion(
+      Include.included([Article, Person], { include: pick(false) }),
+      Endpoint.collection([Article, Person], { name: "search", path: "/search", include: true }),
+    );
   });
 
   it("a widened `include` is the value it holds at runtime", () => {
@@ -207,6 +220,15 @@ describe("Include.included(resource, { include }) is the default document's unio
     expectSameUnion(
       Include.included([Article, Person], { include: widen(false) }),
       Endpoint.collection([Article, Person], { name: "search", path: "/search" }),
+    );
+    // The members form too, though its type is the direct targets alone (#382).
+    expectSameUnion(
+      Include.included([Article, Person], { include: widen(true) }),
+      Endpoint.collection([Article, Person], { name: "search", path: "/search", include: true }),
+    );
+    expectSameUnion(
+      Include.included(AnyNode.members, { include: widen(true) }),
+      Endpoint.polymorphic(AnyNode, { include: true }),
     );
   });
 
