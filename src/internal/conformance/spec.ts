@@ -33,8 +33,10 @@ import {
   relatedDereferences,
   relatedMatchesLinkage,
   relationshipSelfDereferences,
+  relationshipSelfMatchesLinkage,
   resourceSelfDereferences,
   topLevelSelfDereferences,
+  topLevelSelfMatchesDocument,
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import {
@@ -2510,7 +2512,9 @@ export const rules: ReadonlyArray<RuleImpl> = [
   relatedDereferences,
   relatedMatchesLinkage,
   relationshipSelfDereferences,
+  relationshipSelfMatchesLinkage,
   topLevelSelfDereferences,
+  topLevelSelfMatchesDocument,
   resourceNotFound,
   createResponseDocument,
   createLocation,

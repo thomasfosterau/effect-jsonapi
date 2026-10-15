@@ -136,6 +136,28 @@ describe("github: JSON:API conformance", () => {
     expect(summary.passed).toBeGreaterThan(15);
   });
 
+  it("follows every relationship's and document's `self` link to a verdict", () => {
+    // #309: the relationship `self` link `Handlers.paginatedRelationship`
+    // writes for an issue's comments (`/issues/:id/relationships/comments`) is served by a declared
+    // `Endpoint.getRelationship`, so both MUSTs pass rather than skip. That
+    // relationship is links-only, so the relationship SHOULD has no linkage to
+    // compare and skips.
+    const ids = [
+      "spec/links/relationship-self-dereferences",
+      "spec/links/relationship-self-matches-linkage",
+      "spec/links/top-level-self-dereferences",
+      "spec/links/top-level-self-matches-document",
+    ];
+    expect(
+      ids.map((id) => `${id}: ${report.outcomes.find((outcome) => outcome.rule.id === id)?._tag}`),
+    ).toEqual([
+      "spec/links/relationship-self-dereferences: Passed",
+      "spec/links/relationship-self-matches-linkage: Skipped",
+      "spec/links/top-level-self-dereferences: Passed",
+      "spec/links/top-level-self-matches-document: Passed",
+    ]);
+  });
+
   it("ran the write rules against targets it created, and left nothing behind", () => {
     const writeRules = [
       "spec/status/create-response-document",
