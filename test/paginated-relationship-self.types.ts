@@ -9,7 +9,7 @@
  * unused-local error can never stand in for the assertion an
  * `@ts-expect-error` expects.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const Article = Resource.make("articles", {

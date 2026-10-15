@@ -1568,10 +1568,15 @@ export const relatedLink = (type: string, id: string, name: string): string =>
  *
  * - omitted (or `undefined`): `self` is `/<type>/<id>/relationships/<name>`;
  * - a string: `self` is that string, verbatim — for a relationship endpoint
- *   served at another path, or an absolute URL;
+ *   served at another path, or an absolute URL. It is not validated: any
+ *   string, the empty string included, is written as given;
  * - `false`: no `self` member, for an API that declares no relationship
- *   endpoint for this relationship. `related` is always written: it is the
- *   only way to reach a paginated relationship's members.
+ *   endpoint for this relationship.
+ *
+ * `related` is always written, and always as the default
+ * `/<type>/<id>/<name>` — the `self` option never changes it, so a custom
+ * `self` under another prefix (say `/v2/…`) still pairs with an unprefixed
+ * `related`. It is the only way to reach a paginated relationship's members.
  *
  * The option only shapes the relationship object. The pagination links of the
  * relationship endpoint's own response (`first`/`next`/`prev`/`last`) are built
@@ -1628,7 +1633,8 @@ export const paginatedRelationship = <const Self extends string | false | undefi
   options?: {
     /**
      * The relationship's `self` link: omit it for
-     * `/<type>/<id>/relationships/<name>`, pass a string to use that path, or
+     * `/<type>/<id>/relationships/<name>`, pass a string to use that path
+     * verbatim (not validated), or
      * `false` to leave `self` out — for an API that does not declare the
      * relationship endpoint.
      *
