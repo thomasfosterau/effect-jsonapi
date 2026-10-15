@@ -800,7 +800,7 @@ export const requestTimeoutOf = (
   }
   return Effect.die(
     new RangeError(
-      `Conformance: \`requestTimeout\` must be a positive duration, or "Infinity" for no timeout; got ${Formatter.format(input)}`,
+      `Conformance: \`requestTimeout\` must be a positive duration \`Duration\` can read, or "Infinity" for no timeout; got ${Formatter.format(input)}`,
     ),
   );
 };

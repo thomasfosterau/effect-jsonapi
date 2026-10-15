@@ -33,6 +33,7 @@ import * as Group from "./Group.js";
 import * as Handlers from "./Handlers.js";
 import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
+import * as Registry from "./Registry.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "./internal/media.js";
@@ -886,6 +887,70 @@ describe("Conformance: requestTimeout", () => {
     );
   });
 
+  it("waits thirty seconds for each request in process too", async () => {
+    // Handlers that never answer, through the real router: the default is
+    // the same for `verify` as for `verifyWith`.
+    let interrupted = 0;
+    const hang = Effect.never.pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          interrupted += 1;
+        }),
+      ),
+    );
+    const Live = HttpApiBuilder.group(api, "articles", (handlers) =>
+      handlers.handle("get", () => hang).handle("list", () => hang),
+    ).pipe(Layer.provideMerge(Middleware.layer));
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const fiber = yield* Effect.forkChild(
+          Conformance.verify(api, { ids: { articles: "1" }, only: ["spec/target/reachable"] }),
+        );
+        // After each step: whether the run had finished, and how many
+        // requests had been cut short.
+        const steps = yield* Effect.forEach(
+          ["29999 millis", "1 millis", "30 seconds"] as const,
+          (step) =>
+            Effect.map(TestClock.adjust(step), () => ({
+              settled: fiber.pollUnsafe() !== undefined,
+              interrupted,
+            })),
+          { concurrency: 1 },
+        );
+        const report =
+          steps.at(-1)?.settled === true ? Option.some(yield* Fiber.join(fiber)) : Option.none();
+        yield* Fiber.interrupt(fiber);
+        return { steps, report };
+      }).pipe(
+        Effect.provide(Layer.mergeAll(Live, Registry.platformLayer, TestClock.layer())),
+        Effect.scoped,
+      ),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isFailure(exit)) return;
+    // Still waiting a millisecond before thirty seconds; the first request is
+    // cut short at thirty, the second thirty after.
+    expect(exit.value.steps).toEqual([
+      { settled: false, interrupted: 0 },
+      { settled: false, interrupted: 1 },
+      { settled: true, interrupted: 2 },
+    ]);
+    const note = "no answer within 30s, the run's `requestTimeout`";
+    expect(
+      Option.map(exit.value.report, (report) => outcomeFor(report, "spec/target/reachable")),
+    ).toEqual(
+      Option.some(
+        expect.objectContaining({
+          _tag: "Failed",
+          findings: [
+            expect.objectContaining({ observed: `no response (${note})` }),
+            expect.objectContaining({ observed: `no response (${note})` }),
+          ],
+        }),
+      ),
+    );
+  });
+
   it.each(["Infinity", Duration.infinity] as const)(
     "waits as long as the transport does when the run turns it off with %s",
     async (requestTimeout) => {
@@ -899,19 +964,28 @@ describe("Conformance: requestTimeout", () => {
     },
   );
 
-  it.each([0, -1, Number.NaN, "-Infinity"] as const)(
+  it.each([0, -1, Number.NaN, "-Infinity", "1e3 seconds"] as const)(
     "dies on a `requestTimeout` of %s before it sends a request",
     async (requestTimeout) => {
       let sent = 0;
+      // The client answers every request at once, so a run that sent one
+      // before reading its options still finishes, and fails on `sent`
+      // rather than hanging.
       const exit = await Effect.runPromiseExit(
         Conformance.verifyWith(api, {
-          client: HttpClient.make(() =>
-            Effect.sync(() => {
+          client: HttpClient.make((request) =>
+            Effect.suspend(() => {
               sent += 1;
-            }).pipe(Effect.andThen(Effect.never)),
+              return Effect.fail(
+                new HttpClientError.HttpClientError({
+                  reason: new HttpClientError.TransportError({ request, description: "reset" }),
+                }),
+              );
+            }),
           ),
           baseUrl: "http://fixture.test",
           ids: { articles: "1" },
+          only: ["spec/target/reachable"],
           requestTimeout,
         }),
       );

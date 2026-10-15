@@ -786,8 +786,9 @@ export interface Options {
    * Defaults to thirty seconds, for `verify` and `verifyWith` alike.
    * `"Infinity"` (or `Duration.infinity`) turns it off: the kit then waits as
    * long as the transport does, so a server that holds a response open holds
-   * the run. A duration that is not positive — zero, negative or `NaN` — is a
-   * defect: the run dies before it sends a request.
+   * the run. A duration that is not positive — zero, negative or `NaN` — or
+   * one `Duration` cannot read (e.g. `"1e3 seconds"`) is a defect: the run
+   * dies before it sends a request.
    *
    * @since 0.17.0
    */
@@ -899,6 +900,9 @@ const execute = (
  * in-memory `HttpClient` over the real router, so requests go through request
  * decoding, routing, middleware, the handler and response encoding, and the
  * rules observe raw statuses, media types and bodies. No port is bound.
+ * Each request has {@link Options.requestTimeout} (thirty seconds unless the
+ * run says otherwise) to be answered; a request it cuts short reads as a lost
+ * response.
  *
  * Use {@link verifyWith} to run the identical rules against a deployed server.
  *

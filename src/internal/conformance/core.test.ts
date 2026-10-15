@@ -398,18 +398,24 @@ describe("requestTimeoutOf", () => {
     [Number.NaN, "NaN"],
     ["-5 seconds", '"-5 seconds"'],
     ["-Infinity", '"-Infinity"'],
+    // The type admits these, but `Duration` cannot read them.
+    ["1e3 seconds", '"1e3 seconds"'],
+    [".5 seconds", '".5 seconds"'],
     [Duration.zero, null],
-  ] as const)("dies on a duration that is not positive: %s", async (input, named) => {
-    const exit = await valueOf(Effect.exit(requestTimeoutOf(Option.some(input))));
-    const cause = Exit.isFailure(exit) ? Option.some(exit.cause) : Option.none();
-    expect(Option.map(cause, Cause.hasDies)).toEqual(Option.some(true));
-    const message = Option.match(cause, {
-      onNone: () => "",
-      onSome: (c) => String(Cause.squash(c)),
-    });
-    expect(message).toContain("`requestTimeout` must be a positive duration");
-    expect(named === null || message.endsWith(`got ${named}`)).toBe(true);
-  });
+  ] as const)(
+    "dies on a duration that is not positive, or not readable: %s",
+    async (input, named) => {
+      const exit = await valueOf(Effect.exit(requestTimeoutOf(Option.some(input))));
+      const cause = Exit.isFailure(exit) ? Option.some(exit.cause) : Option.none();
+      expect(Option.map(cause, Cause.hasDies)).toEqual(Option.some(true));
+      const message = Option.match(cause, {
+        onNone: () => "",
+        onSome: (c) => String(Cause.squash(c)),
+      });
+      expect(message).toContain("`requestTimeout` must be a positive duration");
+      expect(named === null || message.endsWith(`got ${named}`)).toBe(true);
+    },
+  );
 });
 
 describe("budgeted (each redirect is a request)", () => {
