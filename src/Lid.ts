@@ -10,7 +10,7 @@
  * request, it records the real id assigned to each lid and resolves lid-based
  * refs back to typed identifiers — including inside relationship linkage.
  *
- * ```ts
+ * ```ts skip-type-checking
  * const lids = Lid.make()
  *
  * // when a creation with a lid succeeds:

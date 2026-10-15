@@ -46,7 +46,7 @@
  * {@link narrowIncluded} narrows a compound document's `included` member to
  * exactly the resources reachable via the include paths the client requested:
  *
- * ```ts
+ * ```ts skip-type-checking
  * const include = ["author", "comments.author"] as const
  *
  * const document = yield* client.articles.get({

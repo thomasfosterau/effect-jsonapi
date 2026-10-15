@@ -15,7 +15,7 @@
  * On the wire these are flat, bracket-keyed string parameters; handlers see an
  * ergonomic nested, fully-decoded shape:
  *
- * ```ts
+ * ```ts skip-type-checking
  * {
  *   include?: ReadonlyArray<"author" | "comments" | "comments.author">   // from the relationship graph
  *   fields?:  { articles?: ReadonlyArray<"title" | "body">, ... }

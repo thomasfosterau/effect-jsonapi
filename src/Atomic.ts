@@ -27,7 +27,7 @@
  * schemas; {@link Operations} / {@link RequestDocument} build the request
  * union from it.
  *
- * ```ts
+ * ```ts skip-type-checking
  * // The endpoint (one per api, conventionally POST /operations):
  * const operations = Group.make("operations",
  *   Endpoint.operations([Article, Comment])

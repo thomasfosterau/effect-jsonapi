@@ -26,7 +26,7 @@
  * (`withMeta`) uniform: a document cannot come out describing one resource
  * type two different ways depending on where it landed.
  *
- * ```ts
+ * ```ts skip-type-checking
  * handlers.handle("fetch", ({ params, query }) =>
  *   loadArticle(params.id).pipe(Effect.map((article) =>
  *     data(article, {

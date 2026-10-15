@@ -33,7 +33,7 @@
  * assignment to the handler. {@link memoryStore} is a reference
  * implementation for tests and single-process development.
  *
- * ```ts
+ * ```ts skip-type-checking
  * // Declare the header on the writes that honour it, and the middleware
  * // comes with it — the api cannot be built without a store.
  * const articles = Group.make(

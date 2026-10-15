@@ -5,7 +5,7 @@
  * plain name, for heterogeneous endpoints like search), holding JSON:API
  * endpoints.
  *
- * ```ts
+ * ```ts skip-type-checking
  * const articles = Group.make(Article,
  *   Endpoint.get(Article, { include: true, errors: [ArticleNotFound] }),
  *   Endpoint.list(Article, { page: Query.Page.Offset }),

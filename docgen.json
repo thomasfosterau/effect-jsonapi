@@ -1,6 +1,7 @@
 {
   "$schema": "./node_modules/@effect/docgen/schema.json",
   "exclude": ["src/**/*.test.ts", "src/internal/**/*.ts", "src/index.ts", "src/schema.ts"],
+  "runExamples": true,
   "parseCompilerOptions": {
     "module": "nodenext",
     "moduleResolution": "nodenext",

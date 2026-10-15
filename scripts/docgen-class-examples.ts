@@ -1,32 +1,42 @@
 /**
  * Type-checks and runs the `@example` in each exported class's own doc
- * comment — the examples `@effect/docgen` parses and prints on the class's doc
- * page but never collects for checking (#276).
+ * comment — the examples `@effect/docgen` 0.5.x parses and prints on the
+ * class's doc page but never collects for checking (#276).
  *
  * docgen 0.5.2's `getExampleFiles` gathers the examples of modules, class
  * methods and static methods, interfaces, type aliases, constants, functions
  * and namespaces — not the class declaration's own JSDoc — and has no option
  * to add them. So a broken class example passes docgen while still being
- * published on the class's doc page. This runner repeats docgen's own example
- * pipeline for exactly the examples it skips:
+ * published on the class's doc page. docgen 4.x collects class (and class
+ * property) examples itself, so under it this runner checks them a second
+ * time. It is written to agree with both versions while the bump (#343) is in
+ * flight, repeating docgen's own example pipeline for exactly the examples
+ * 0.5.x skips:
  *
  * - modules are `<srcDir>/**\/*.ts` minus `exclude`, from `docgen.json`;
  * - a class counts when it is top-level and exported (by an `export`
  *   modifier or a local `export { … }` / `export default`, as ts-morph's
  *   `isExported()` reads it) and its last JSDoc block carries neither
  *   `@internal` nor `@ignore`;
- * - each `@example` loses its code fence (docgen's `fencedExampleRegex`), its
- *   package-name imports are rewritten to `../../src`, and an `assert` import
- *   is added when it uses `assert.`;
+ * - each `@example` yields one program per code fence whose info string
+ *   starts with `ts` / `typescript` and does not carry `skip-type-checking`
+ *   (4.x's `extractFencedCode`), or, with no fence at all, the example as
+ *   written (0.5.x's `parseExample`); its package-name imports are rewritten
+ *   to `../../src` (0.5.x's `replaceProjectName`; 4.x resolves the name
+ *   through the package's own `exports` instead). Nothing else is added: 0.5.x
+ *   prepends `import * as assert from 'assert'` to an example that uses
+ *   `assert.`, 4.x does not, so an example imports its assertion functions by
+ *   name and compiles under both;
  * - the files are compiled by `tsc --noEmit` under a tsconfig holding only
  *   docgen's `examplesCompilerOptions`, then run by `tsx` through one
  *   `index.ts` that imports them all — the same `tsc` and `tsx` docgen spawns
  *   from `PATH` (under `vp run`, `node_modules/.bin`: native TypeScript 7).
+ *   Both versions run what they compile here (4.x through `"runExamples":
+ *   true` in `docgen.json`).
  *
  * The second sub-task of the `docgen` task in vite.config.ts, so `vp run
  * docgen` (and its CI step) fails on a class example that does not compile or
- * that throws. Delete this file and that wiring once docgen collects class
- * examples itself.
+ * that throws. Delete this file and that wiring once docgen 4.x is pinned.
  */
 
 import { spawnSync } from "node:child_process";
@@ -97,25 +107,37 @@ const parseTags = (jsDoc: string): ReadonlyArray<Tag> =>
     },
   );
 
-// docgen's `fencedExampleRegex` / `parseExample`: an unfenced example is
-// used as written.
-const fencedExampleRegex =
-  /^(?<fenceStart>(```|~~~)[^\n]*)\n(?<body>[\S\s]*)(?<fenceEnd>\n(```|~~~))$/;
-const exampleBody = (example: string): string =>
-  fencedExampleRegex.exec(example)?.groups?.["body"] ?? example;
+// docgen 4.x's `extractFencedCode`: every fence whose info string starts
+// with `ts` / `typescript` and lacks `skip-type-checking` is one program. An
+// example with no fence at all is used as written, as 0.5.x's `parseExample`
+// does (4.x would skip it).
+const fenceRegex = /(?:```|~~~)(.*?)\n([\s\S]*?)(?:```|~~~|$)/g;
+const isCheckedFence = (info: string): boolean => {
+  const meta = info.toLowerCase();
+  return (
+    (meta.startsWith("ts") || meta.startsWith("typescript")) && !meta.includes("skip-type-checking")
+  );
+};
+const examplePrograms = (example: string): ReadonlyArray<string> =>
+  Arr.match(Arr.fromIterable(example.matchAll(fenceRegex)), {
+    onEmpty: () => [example],
+    onNonEmpty: (fences) =>
+      fences
+        .filter((fence) => isCheckedFence(fence[1] ?? ""))
+        .map((fence) => (fence[2] ?? "").trim()),
+  });
 
-// docgen's `replaceProjectName` + `addAssertImport`.
+// docgen 0.5.x's `replaceProjectName`. Its `addAssertImport` is left out on
+// purpose: 4.x has no such step, so neither does this runner.
 const importRegex = new RegExp(
   `from (?<quote>['"])${projectName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:/lib)?(?:/(?<path>.*))?\\k<quote>`,
   "g",
 );
-const handleImports = (code: string): string => {
-  const source = code.replace(importRegex, (...args) => {
+const handleImports = (code: string): string =>
+  code.replace(importRegex, (...args) => {
     const subpath = args.at(-1)?.path;
     return `from '../../src${subpath ? `/${subpath}` : ""}'`;
   });
-  return source.includes("assert.") ? `import * as assert from 'assert'\n${source}` : source;
-};
 
 // The local names a module exports without an `export` modifier on the
 // declaration: `export { X }`, `export { X as Y }`, `export type { X }` and
@@ -166,9 +188,10 @@ const classExamples = (file: string): ReadonlyArray<ExampleFile> => {
       const className = node.name.text;
       return tags
         .filter((tag) => tag.title === "example")
-        .map((tag, i) => ({
+        .flatMap((tag) => examplePrograms(tag.body))
+        .map((program, i) => ({
           name: `${prefix}-class-${className}-${i}.ts`,
-          content: `${handleImports(exampleBody(tag.body))}\n`,
+          content: `${handleImports(program)}\n`,
         }));
     });
 };
