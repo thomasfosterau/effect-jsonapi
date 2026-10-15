@@ -237,6 +237,26 @@ describe("the default `included` union reaches every legal include path (#320)",
       ).toEqual(["people", "companies"]);
     });
 
+    // The type of `collection`'s `included` agrees (#337,
+    // `test/include-depth-included.types.ts`).
+    it.each([
+      ["without `include`", {}, ["people"]],
+      ["with `fields: true`", { fields: true }, ["people"]],
+      [
+        "with `include: true` and `fields: true`",
+        { include: true, fields: true },
+        ["people", "companies"],
+      ],
+    ] as const)("is not admitted by `collection` %s", (_, options, expected) => {
+      expect(
+        admitted(
+          Endpoint.collection([Post, Draft], { name: "entries", path: "/entries", ...options }),
+          post,
+          true,
+        ),
+      ).toEqual(expected);
+    });
+
     it("is not admitted by `polymorphic`", () => {
       const postFirst = Resource.family(Entry, [Post, Draft]);
       const draftFirst = Resource.family(Entry, [Draft, Post]);

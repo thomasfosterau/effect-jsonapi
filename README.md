@@ -984,7 +984,7 @@ for (const result of doc.data) {
 }
 ```
 
-The `included` union spans every searched resource's relationship targets (and, with `include` on, every resource a legal include path reaches), and query features (`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
+The `included` union spans every searched resource's non-`paginated` relationship targets (and, with `include` on, every resource a legal include path reaches), and query features (`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
 
 ### Atomic operations
 

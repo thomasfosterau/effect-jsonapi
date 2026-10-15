@@ -117,7 +117,6 @@ import type {
   RelationshipName,
   Resource,
   Target,
-  TargetsOf,
   ToManyName,
 } from "./Resource.js";
 import { directTargets } from "./Resource.js";
@@ -1282,14 +1281,15 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> => [...new Set(va
 
 /**
  * The default compound `included` union of a heterogeneous collection
- * endpoint: every resource directly referenced by any of the member
- * resources' relationships.
+ * endpoint: the non-`paginated` relationship targets of every member
+ * resource, as `Resource.FamilyDefaultIncluded` is for a family. A
+ * `paginated` relationship's target never appears in `included`.
  *
  * @since 0.1.0
  * @category models
  */
 export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extends Schema.Union<
-  ReadonlyArray<TargetsOf<Resources[number]>>
+  ReadonlyArray<IncludedResources<Resources[number], false>>
 > {}
 
 // The `included` union of a heterogeneous collection or a polymorphic
@@ -1385,8 +1385,9 @@ const membersDocumentParts = (
 };
 
 // The runtime document of `collection`. The cast at its use is sound: every
-// direct target of every member of `Resources` is, by construction, a member
-// of `TargetsOf<...>`, every resource an include path reaches one of
+// non-`paginated` direct target of every member of `Resources` (what
+// `directTargets` returns) is, by construction, a member of
+// `IncludedResources<..., false>`, every resource an include path reaches one of
 // `IncludedResources`, and `membersDocumentParts` makes partial exactly the
 // members `MembersDocument` does.
 const collectionDocument = (
@@ -1418,7 +1419,7 @@ const collectionDocument = (
  *
  * Success is a 200 collection document whose `data` member is the union of
  * the given resources and whose `included` union spans all of their
- * relationship targets and, when `include` is `true` or a
+ * non-`paginated` relationship targets and, when `include` is `true` or a
  * `Query.IncludeOptions`, every resource a legal include path reaches.
  *
  * @example
@@ -1518,7 +1519,7 @@ export const collection = <
         Include,
         Fields,
         CollectionIncluded<Resources>,
-        TargetsOf<Resources[number]>,
+        IncludedResources<Resources[number], false>,
         DocMeta
       >,
     ),
@@ -1571,7 +1572,7 @@ const polymorphicDocument = (
  *
  * Success is a 200 single-resource document whose primary `data` is the family's
  * member union (discriminated by `type`) and whose `included` spans every
- * member's targets and, when `include` is `true` or a `Query.IncludeOptions`,
+ * member's non-`paginated` targets and, when `include` is `true` or a `Query.IncludeOptions`,
  * every resource a legal include path reaches. The `:id` param is the family's
  * shared id, and `?include=` / `?fields[TYPE]=` span all members' graphs.
  *
