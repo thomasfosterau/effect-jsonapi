@@ -93,7 +93,7 @@ Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` inst
 Before you report work as done, run the gates below in order and quote each command with its final pass/fail. If a gate can't run here, say which and why in the PR body; never imply it ran.
 
 1. `pnpm install --frozen-lockfile`
-2. `vp run build` — first, as in CI: `vp run docgen` and `typecheck:dist` read `dist/`.
+2. `vp run build` — first, as in CI: `typecheck:dist` (the emitted-declaration checks, `test/emitted/*`) and `test/entry-points.test.ts` read `dist/`; `vp run docgen` compiles and runs examples against `src/`, because its import rewrite sends package imports there.
 3. `vp check`
 4. `vp run check`
 5. `vp run -r test:unit`

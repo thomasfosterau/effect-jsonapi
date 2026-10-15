@@ -55,7 +55,9 @@ jobs:
             vp-task-v1-${{ runner.os }}-
 
       # First, so the `check` graph's `build` dependency is a task-cache hit
-      # and `typecheck:dist` / docgen read a fresh `dist/`.
+      # and `typecheck:dist` (test/emitted/*) and test/entry-points.test.ts
+      # read a fresh `dist/`. docgen does not: its import rewrite sends package
+      # imports to src/, so the examples compile and run against the sources.
       - name: Build
         run: vp run build
 
