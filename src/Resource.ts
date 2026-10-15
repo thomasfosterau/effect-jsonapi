@@ -1734,17 +1734,31 @@ export type IncludePathsTo<R extends Any, Depth extends IncludeDepth> = R extend
       : IncludePath<R>
   : never;
 
+// The target of `R`'s relationship `Key` when an include path may cross it:
+// `never` for a `paginated` relationship (whose data is never inlined) and for
+// a key `R` does not declare.
+type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
+
 /**
  * The resource definitions brought into a compound document by one include
  * path. Dotted paths include the intermediate resources as well as the leaf,
  * per the spec.
  *
+ * Distributes over unions of resource definitions, and walks each member's
+ * includable relationships only: a path segment naming a member's `paginated`
+ * relationship (legal for another member, where it is a to-one or to-many)
+ * reaches nothing for that member, at the first hop or any later one, since a
+ * `paginated` relationship's target never appears in `included`. A segment a
+ * member does not declare likewise reaches nothing for it.
+ *
  * @since 0.1.0
  * @category type-level
  */
-export type ResolveIncludePath<R extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
-  ? Target<R, Head> | ResolveIncludePath<Target<R, Head>, Rest>
-  : Target<R, Path>;
+export type ResolveIncludePath<R extends Any, Path> = R extends Any
+  ? Path extends `${infer Head}.${infer Rest}`
+    ? IncludableTarget<R, Head> | ResolveIncludePath<IncludableTarget<R, Head>, Rest>
+    : IncludableTarget<R, Path>
+  : never;
 
 /**
  * The union of resource definitions brought into a compound document by a set

@@ -14,7 +14,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Rec from "effect/Record";
 import type { IncludePathsOf } from "../Query.js";
-import type { Any, IncludableKeys, IncludableTargets, Target } from "../Resource.js";
+import type { Any, IncludableTargets, ResolveIncludePath } from "../Resource.js";
 import { directTargets, includePaths } from "../Resource.js";
 
 // Each resource once, by identity, first occurrence first.
@@ -50,28 +50,12 @@ type DefaultTargets<R extends Any, I> =
       ? IncludableTargets<R["relationships"]>
       : never;
 
-// The target of `R`'s relationship `Key` when an include path may cross it:
-// `never` for a `paginated` relationship (whose data is never inlined) and for
-// a key `R` does not declare.
-type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
-
-// The resource definitions `R` reaches along one include path: every resource
-// on the way down, its leaf included, stopping at the first segment that is
-// not one of the current resource's includable relationships. Unlike the
-// public `ResolveIncludePath`, it never crosses a `paginated` relationship —
-// on a heterogeneous endpoint a path legal for one member (`author`, a to-one
-// there) can name another member's paginated relationship.
-type ResolveIncludable<R extends Any, Path> = R extends Any
-  ? Path extends `${infer Head}.${infer Rest}`
-    ? IncludableTarget<R, Head> | ResolveIncludable<IncludableTarget<R, Head>, Rest>
-    : IncludableTarget<R, Path>
-  : never;
-
 // The resource definitions each of `R`'s members reaches along `Paths`. The
 // paths are the whole endpoint's, so on a heterogeneous endpoint each member
 // walks every path, and one it has no includable relationship for reaches
-// nothing.
-type ReachedBy<R extends Any, Paths> = ResolveIncludable<R, Paths>;
+// nothing — `Resource.ResolveIncludePath`, which never crosses a `paginated`
+// relationship.
+type ReachedBy<R extends Any, Paths> = ResolveIncludePath<R, Paths>;
 
 /**
  * The resource definitions a response of an endpoint over `R` with the
