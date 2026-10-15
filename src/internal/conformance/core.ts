@@ -152,16 +152,27 @@ export interface Observation {
  * @internal
  */
 export interface Unfollowed {
-  /** The `3xx` the server answered. */
+  /**
+   * The `3xx` the server answered; for `"transport"`, the status of the
+   * answer the transport ended with, or `0` when it ended in a transport
+   * error — the note says which.
+   */
   readonly status: number;
-  /** Its `Location`, resolved against the URL that answered it when it parses. */
+  /**
+   * Its `Location`, resolved against the URL that answered it when it parses;
+   * for `"transport"`, the URL the transport ended at.
+   */
   readonly location: string;
   /**
    * Why: it leads off the base URL's origin, it is one hop past
    * {@link HOP_CAP}, the rule's request budget has no request left for it, it
-   * would turn a write into a `GET`, or its `Location` does not parse.
+   * would turn a write into a `GET`, its `Location` does not parse, or the
+   * transport followed it itself (one wrapped in `HttpClient.followRedirects`,
+   * say) to another origin or turning the method into a `GET` — the kit then
+   * has an answer, or a transport error, from a request it would not have
+   * sent, and does not read it.
    */
-  readonly reason: "offsite" | "cap" | "budget" | "method" | "unparseable";
+  readonly reason: "offsite" | "cap" | "budget" | "method" | "unparseable" | "transport";
   /** The reason as a note names it. */
   readonly why: string;
 }
@@ -551,14 +562,53 @@ const unredirected = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A,
   );
 
 /**
- * The origin a transport says its answer came from, when that is not the
- * origin the request went to: a transport that follows redirects itself (one
- * wrapped in `HttpClient.followRedirects`, say) reports where it ended up.
+ * The redirect a transport followed itself (one wrapped in
+ * `HttpClient.followRedirects`, say), when where it `ended` — the request
+ * behind its answer, or behind its failure — is one the kit would not have
+ * sent for `sent`: on another origin, or with another method (a `301` or
+ * `302` turns a `POST`, a `303` any method but `GET`, into a `GET`). The kit
+ * does not read that answer, so the request is left as one a redirect
+ * answered that the kit did not follow — not decided, as for any other (owner
+ * decision on #333). `status` is the answer's, or `0` when the transport
+ * failed there. Only where the transport ended is checked: a chain that left
+ * the origin and came back, keeping the method, is read.
  */
-const answeredOffsite = (sent: string, answered: string): Option.Option<string> =>
-  URL.canParse(sent) && URL.canParse(answered) && new URL(sent).origin !== new URL(answered).origin
-    ? Option.some(new URL(answered).origin)
-    : Option.none();
+const transportFollowed = (
+  sent: { readonly method: string; readonly url: string },
+  ended: { readonly status: number; readonly method: string; readonly url: string },
+): Option.Option<Unfollowed> => {
+  if (!URL.canParse(sent.url) || !URL.canParse(ended.url)) return Option.none();
+  const from = new URL(sent.url).origin;
+  const to = new URL(ended.url).origin;
+  const refusals: ReadonlyArray<readonly [boolean, () => string]> = [
+    [
+      from !== to,
+      () =>
+        `${to} is another origin than the one the request was sent to, ${from}, and the transport has already tried the request there`,
+    ],
+    [
+      ended.method !== sent.method,
+      () =>
+        `the transport turned the ${sent.method} into a ${ended.method} on the way, which the kit does not send in its place`,
+    ],
+  ];
+  return Option.map(
+    Option.fromUndefinedOr(refusals.find(([applies]) => applies)),
+    ([, why]): Unfollowed => ({
+      status: ended.status,
+      location: ended.url,
+      reason: "transport",
+      why: why(),
+    }),
+  );
+};
+
+/** The URL `request` is sent to, its query included. */
+const urlOf = (request: HttpClientRequest.HttpClientRequest): string =>
+  Option.match(HttpClientRequest.toUrl(request), {
+    onNone: () => request.url,
+    onSome: (url) => url.href,
+  });
 
 /** An `Observation` for a probe the transport returned no answer to read for. */
 const unread = (
@@ -599,8 +649,10 @@ const LOCATION_LIMIT = 200;
  *
  * @internal
  */
-export const unfollowedNote = ({ status, location, why }: Unfollowed): string =>
-  `a ${status} redirect to ${capped(location, LOCATION_LIMIT)}, which the kit does not follow: ${why}`;
+export const unfollowedNote = ({ status, location, reason, why }: Unfollowed): string =>
+  reason === "transport"
+    ? `a redirect the transport followed itself, ${status === 0 ? `ending in a transport error at ${capped(location, LOCATION_LIMIT)}` : `ending at ${capped(location, LOCATION_LIMIT)} with a ${status}, whose answer the kit does not read`}: ${why}`
+    : `a ${status} redirect to ${capped(location, LOCATION_LIMIT)}, which the kit does not follow: ${why}`;
 
 /** Where a `Location` off the base URL's origin leads, as a note names it. */
 const offsiteWhy = (resolved: URL, origin: string): string =>
@@ -689,10 +741,12 @@ const hopOf = (
  * the kit does not follow leaves the probe with no answer to read: `status: 0`,
  * with the redirect in `unfollowed` and named in `transportError`.
  *
- * The transport itself follows nothing (see {@link unredirected}). An answer a
- * transport fetched from another origin all the same — it followed a redirect
- * on its own — is not read: it is recorded as a transport failure, naming the
- * origin.
+ * The transport itself follows nothing (see {@link unredirected}). An answer,
+ * or a transport error, a transport brought back all the same from a redirect
+ * it followed on its own — to another origin, or turning the method into a
+ * `GET` — is not read: it is recorded as a redirect the kit did not follow
+ * (`reason: "transport"`), naming where the transport ended up, so it leaves
+ * the rule not decided as any other does (see {@link transportFollowed}).
  *
  * @internal
  */
@@ -715,16 +769,26 @@ export const runner =
       Effect.gen(function* () {
         const request = clientRequest(sent.url, { ...record, method: sent.method });
         const result = yield* Effect.result(unredirected(client.execute(request)));
+        // Where the transport ended: the request behind its failure or its
+        // answer, which is not the one the kit sent when it followed a redirect.
+        const ended = Result.match(result, {
+          onFailure: ({ request: failed }) => ({
+            status: 0,
+            method: failed.method,
+            url: urlOf(failed),
+          }),
+          onSuccess: (response) => ({
+            status: response.status,
+            method: response.request.method,
+            url: response.url,
+          }),
+        });
+        const followed = transportFollowed(sent, ended);
+        if (Option.isSome(followed)) {
+          return unread(record, unfollowedNote(followed.value), redirects, followed);
+        }
         if (Result.isFailure(result)) return unread(record, String(result.failure), redirects);
         const response = result.success;
-        const offsite = answeredOffsite(sent.url, response.url);
-        if (Option.isSome(offsite)) {
-          return unread(
-            record,
-            `the transport followed a redirect to another origin, ${offsite.value}, whose answer the kit does not read`,
-            redirects,
-          );
-        }
         const location = response.headers["location"];
         // An empty `Location` names nothing to follow, as a missing one does.
         if (!REDIRECTS.includes(response.status) || location === undefined || location === "") {
@@ -954,7 +1018,7 @@ export const undecidedByRedirects = (
     return outcome;
   }
   const every = unread.length === sent.length;
-  const redirected = `${every ? "every request the rule sent was" : `${unread.length} of ${sent.length} requests the rule sent were`} answered by a redirect the kit does not follow (${redirectsNamed(unread)})`;
+  const redirected = `${every ? "every request the rule sent was" : `${unread.length} of ${sent.length} requests the rule sent were`} answered by a redirect the kit does not follow or read (${redirectsNamed(unread)})`;
   if (Predicate.isTagged(outcome, "Skipped")) {
     return { ...outcome, reason: `${outcome.reason}; ${redirected}` };
   }
