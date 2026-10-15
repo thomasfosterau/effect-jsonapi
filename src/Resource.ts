@@ -1734,17 +1734,44 @@ export type IncludePathsTo<R extends Any, Depth extends IncludeDepth> = R extend
       : IncludePath<R>
   : never;
 
+// The target of `R`'s relationship `Key` when an include path may cross it:
+// `never` for a `paginated` relationship (whose data is never inlined) and for
+// a key `R` does not declare.
+type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
+
+// One hop of an include path: the targets of every includable relationship of
+// `R` whose key the segment admits. A literal segment admits its own key; a
+// wide `string` segment (from a `string` or `${string}.${string}` path) admits
+// every key; a pattern segment such as `auth${string}` admits the keys it
+// matches.
+type IncludeHop<R extends Any, Segment> = IncludableTarget<R, Extract<IncludableKeys<R>, Segment>>;
+
 /**
  * The resource definitions brought into a compound document by one include
  * path. Dotted paths include the intermediate resources as well as the leaf,
  * per the spec.
  *
+ * Distributes over unions of resource definitions, and walks each member's
+ * includable relationships only: a path segment naming a member's `paginated`
+ * relationship (legal for another member, where it is a to-one or to-many)
+ * reaches nothing for that member, at the first hop or any later one, since a
+ * `paginated` relationship's target never appears in `included`. A segment a
+ * member does not declare likewise reaches nothing for it.
+ *
+ * A wide segment — a `string` path, or the `string` parts of a template
+ * literal such as `` `${string}.${string}` `` — may name any relationship, so
+ * it reaches every includable direct target of the resource it is resolved
+ * against; a pattern segment such as `` `auth${string}` `` reaches the
+ * includable targets of the keys it matches.
+ *
  * @since 0.1.0
  * @category type-level
  */
-export type ResolveIncludePath<R extends Any, Path> = Path extends `${infer Head}.${infer Rest}`
-  ? Target<R, Head> | ResolveIncludePath<Target<R, Head>, Rest>
-  : Target<R, Path>;
+export type ResolveIncludePath<R extends Any, Path> = R extends Any
+  ? Path extends `${infer Head}.${infer Rest}`
+    ? IncludeHop<R, Head> | ResolveIncludePath<IncludeHop<R, Head>, Rest>
+    : IncludeHop<R, Path>
+  : never;
 
 /**
  * The union of resource definitions brought into a compound document by a set

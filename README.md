@@ -2041,7 +2041,7 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 - **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided via `Client.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document meta are typed via options.
 - **Mutually recursive resources** (A ↔ B) need one interface annotation per resource in the cycle — `Resource.make`'s return type is inferred, and two inferred types cannot reference each other. See [Mutually recursive resources](#mutually-recursive-resources) for the pattern; everything derived from the definitions is unaffected.
-- **`narrowIncluded` is single-resource**: narrowing the `included` of heterogeneous (search) responses by include paths is not yet supported.
+- **`narrowIncluded` over a heterogeneous response narrows by the whole union, not per primary resource**: pass the union of the response's resource definitions (a family's members, say) and each path resolves against every member that declares it, never crossing a member's `paginated` relationship. `included` is document-wide, so it narrows to everything any member reaches; which primary resource reached a given entry is not tracked.
 - **Atomic operations requests are accepted with or without the `ext` media type parameter**: spec-compliant clients send `application/vnd.api+json;ext="https://jsonapi.org/ext/atomic"` (accepted once the middleware declares the extension), but the bare media type is not rejected. Responses always carry the parameter.
 
 ## License
