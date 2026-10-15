@@ -171,6 +171,79 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     ).toBe(true);
   });
 
+  it("`polymorphic` with `include` makes a member reached at depth 2 partial", () => {
+    // `editors.author` is a `people`, whose `employer` is a `companies`: the
+    // `author.employer` path reaches it, beyond the members' direct targets.
+    const Owned = Resource.make("owned", {
+      attributes: { name: Schema.String },
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const Draft = Resource.extend(Owned, "drafts", { inheritId: true });
+    const Memo = Resource.extend(Owned, "memos", { inheritId: true });
+    const endpoint = Endpoint.polymorphic(Resource.family(Owned, [Draft, Memo]), {
+      include: true,
+      fields: true,
+    });
+    const draft = {
+      type: "drafts",
+      id: "5",
+      attributes: {},
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+    expect(admitsPartial(endpoint, draft, false, [partialPerson, only(wire.companies)])).toBe(true);
+    expect(admitsPartial(endpoint, draft, false, [wire.companies])).toBe(true);
+  });
+
+  describe("a family reached as a relationship target keeps its own schema", () => {
+    // `holders.node` targets the `nodes` family: the family is the `included`
+    // member, and its `type` is a family name, so its members stay strict.
+    const Holder = Resource.make("holders", {
+      attributes: { label: Schema.String },
+      relationships: { node: Relationship.one(() => AnyNode) },
+    });
+    const holder = {
+      type: "holders",
+      id: "1",
+      attributes: {},
+      relationships: { node: { data: { type: "editors", id: "7" } } },
+    };
+
+    it.each([
+      ["get", Endpoint.get(Holder, { fields: true }), false],
+      ["get with `include`", Endpoint.get(Holder, { include: true, fields: true }), false],
+      ["list", Endpoint.list(Holder, { fields: true }), true],
+    ] as const)("%s", (_, endpoint, many) => {
+      // Positive control: the primary resource is partial, a whole member decodes.
+      expect(admitsPartial(endpoint, holder, many, [wire.editors])).toBe(true);
+      // The family member is not made partial…
+      expect(admitsPartial(endpoint, holder, many, [only(wire.editors, "name")])).toBe(false);
+      // …and still decodes as itself, `type` and `id` intact.
+      const decoded = Schema.decodeUnknownSync(successOf(endpoint))({
+        data: many ? [holder] : holder,
+        included: [wire.editors],
+      });
+      expect(decoded).toMatchObject({ included: [{ type: "editors", id: "7" }] });
+    });
+  });
+
+  describe("keeps the resource's typed document `meta`", () => {
+    const Counted = Resource.make("counted", {
+      attributes: { name: Schema.String },
+      meta: Schema.Struct({ revision: Schema.Number }),
+    });
+    const counted = { type: "counted", id: "1", attributes: {} };
+
+    it.each([
+      ["get", Endpoint.get(Counted, { fields: true }), false],
+      ["get with `include`", Endpoint.get(Counted, { include: true, fields: true }), false],
+      ["list", Endpoint.list(Counted, { fields: true }), true],
+    ] as const)("%s", (_, endpoint, many) => {
+      const data = many ? [counted] : counted;
+      expect(decodes(endpoint, { data, meta: { revision: 3 } })).toBe(true);
+      expect(decodes(endpoint, { data, meta: { revision: "3" } })).toBe(false);
+    });
+  });
+
   it("`Endpoint.resource` / `Group.resource` default `fields` on, so their reads are partial", () => {
     // Whether the generated endpoint `name` admits the partial resources.
     const admits = (
