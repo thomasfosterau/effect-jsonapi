@@ -797,10 +797,10 @@ export interface RuleImpl {
    */
   readonly creates?: true;
   /**
-   * Set on a rule that decides for itself what a redirect the kit did not
-   * follow means for it — `spec/target/reachable`, and the rules that follow
-   * a server's links, which leave each such link not decided. Every other
-   * rule is held to {@link undecidedByRedirects}.
+   * Set on the one rule that decides for itself what a redirect the kit did
+   * not follow means: `spec/target/reachable`, which reports a read endpoint
+   * that answers with one. Every other rule — the link rules and the
+   * pagination walk included — is held to {@link undecidedByRedirects}.
    */
   readonly ownsRedirects?: true;
 }
@@ -923,8 +923,10 @@ const REASON_LIMIT = 3;
  * on #333). A finding it produced is dropped; a finding on an answer the kit
  * did read still fails the rule. With none left, the rule is skipped, naming
  * the redirects and keeping its own note: never a partial pass on the answers
- * it did read. When every request was redirected off the base URL's origin,
- * `baseUrl` does not serve the api, which `spec/target/reachable` says.
+ * it did read, whether those are a source, a link or a page. A rule that
+ * skipped on its own keeps its reason, the redirects named after it. When
+ * every request was redirected off the base URL's origin, `baseUrl` does not
+ * serve the api, which `spec/target/reachable` says.
  *
  * @internal
  */
@@ -935,25 +937,25 @@ export const undecidedByRedirects = (
   const unread = sent.filter(({ unfollowed }) => Option.isSome(unfollowed));
   // A rule's `run` never returns `Errored` itself — `runRule` makes one from a
   // defect, after this — but `Outcome` admits it, and it is kept as it is.
-  if (
-    Arr.isReadonlyArrayEmpty(unread) ||
-    Predicate.isTagged(outcome, "Skipped") ||
-    Predicate.isTagged(outcome, "Errored")
-  ) {
+  if (Arr.isReadonlyArrayEmpty(unread) || Predicate.isTagged(outcome, "Errored")) {
     return outcome;
+  }
+  const every = unread.length === sent.length;
+  const redirected = `${every ? "every request the rule sent was" : `${unread.length} of ${sent.length} requests the rule sent were`} answered by a redirect the kit does not follow (${redirectsNamed(unread)})`;
+  if (Predicate.isTagged(outcome, "Skipped")) {
+    return { ...outcome, reason: `${outcome.reason}; ${redirected}` };
   }
   const stands = failedOnRead(outcome, unread);
   if (Option.isSome(stands)) return stands.value;
-  const named = redirectsNamed(unread);
   const own =
     Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined
       ? `; the rule's own note: ${outcome.note}`
       : "";
   return skip(
     outcome.rule,
-    unread.length === sent.length
-      ? `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named})${own}`
-      : `not decided: ${unread.length} of ${sent.length} requests the rule sent were answered by a redirect the kit does not follow (${named}), and a rule is not passed on the answers it did read alone${own}`,
+    every
+      ? `no answer to decide on: ${redirected}${own}`
+      : `not decided: ${redirected}, and a rule is not passed on the answers it did read alone${own}`,
   );
 };
 

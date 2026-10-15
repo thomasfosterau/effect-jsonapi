@@ -1947,6 +1947,19 @@ describe("Conformance: the write fixture", () => {
     });
   });
 
+  it("names the redirects in the reason of a rule that skipped on what it did read", async () => {
+    // `?unknown=1` is the one probe whose error carries a `source`; with it
+    // redirected away, the rule skips, and says the redirect is why.
+    const { report } = await run(undefined, undefined, {
+      client: redirectingSome((_, url) => url.searchParams.has("unknown")),
+    });
+    expect(outcomeFor(report, "spec/errors/error-source-discrimination")).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `no provoked error object carried a \`source\` member; 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${offsite("/articles/1?unknown=1")})`,
+    });
+  });
+
   it("runs every write rule against a conformant server, on targets it created", async () => {
     const { report, store, writes } = await run();
     expect(failed(report)).toEqual([]);
@@ -3347,33 +3360,52 @@ describe("Conformance: pagination links enumerate the collection", () => {
         }),
       ),
     ).toBe(
-      "no paginated collection could be walked to a verdict (/tags: `next` on page 1 (/tags?page[limit]=3) answered a 302 redirect to https://elsewhere.test/tags?page[offset]=3, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin, so the walk could not be finished)",
+      `no paginated collection could be walked to a verdict (/tags: \`next\` on page 1 (/tags?page[limit]=3) answered ${offsite("/tags?page[offset]=3")}, so the walk could not be finished); 1 of 5 requests the rule sent were answered by a redirect the kit does not follow (GET /tags?page[offset]=3&page[limit]=3 answered ${offsite("/tags?page[offset]=3")})`,
     );
   });
 
-  it("passes on a collection it walked beside one a redirect off the origin left unfinished, noting it", async () => {
-    // `/cats` pages as `/tags` does, and walks; `/tags` page 2 leaves the origin.
-    const Cat = Resource.make("cats", { attributes: { name: Schema.String } });
-    const twoApi = HttpApi.make("paged").add(
-      Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Offset })),
-      Group.make(Cat, Endpoint.list(Cat, { page: Query.Page.Offset })),
-    );
-    const serve = (request: CannedRequest): Canned => {
-      if (request.path.startsWith("/cats")) {
-        return offsetPager({ links: (window) => offsetLinks(window, "/cats") })({
-          ...request,
-          path: request.path.replace(/^\/cats/, "/tags"),
-        });
-      }
-      return queryOf(request).get("page[offset]") === "3"
+  /** `/tags`, with `/cats` paging as `/tags` does beside it. */
+  const Cat = Resource.make("cats", { attributes: { name: Schema.String } });
+  const twoApi = HttpApi.make("paged").add(
+    Group.make(Tag, Endpoint.list(Tag, { page: Query.Page.Offset })),
+    Group.make(Cat, Endpoint.list(Cat, { page: Query.Page.Offset })),
+  );
+  const besideCats =
+    (tags: (request: CannedRequest) => Canned) =>
+    (request: CannedRequest): Canned =>
+      request.path.startsWith("/cats")
+        ? offsetPager({ links: (window) => offsetLinks(window, "/cats") })({
+            ...request,
+            path: request.path.replace(/^\/cats/, "/tags"),
+          })
+        : tags(request);
+
+  it("skips — never passes — a collection it walked beside one a redirect off the origin left unfinished", async () => {
+    // `/cats` walks; `/tags` page 2 leaves the origin.
+    const serve = besideCats((request) =>
+      queryOf(request).get("page[offset]") === "3"
         ? { status: 302, headers: { location: "https://elsewhere.test/tags?page[offset]=3" } }
-        : offsetPager()(request);
-    };
-    // The walk owns its redirects: the rule is not skipped for the one it
-    // could not follow, as a rule that does not would be.
+        : offsetPager()(request),
+    );
+    expect(outcomeFor(await verifyPaged(serve, twoApi), RULE)).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `not decided: 1 of 11 requests the rule sent were answered by a redirect the kit does not follow (GET /tags?page[offset]=3&page[limit]=3 answered ${offsite("/tags?page[offset]=3")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 collection not decided: /tags: \`next\` on page 1 (/tags?page[limit]=3) answered ${offsite("/tags?page[offset]=3")}, so the walk could not be finished`,
+    });
+  });
+
+  it("skips, naming the redirect, a collection whose every request leaves the origin beside one it walked", async () => {
+    const serve = besideCats((request) =>
+      withoutQuery(request).path === "/tags"
+        ? {
+            status: 302,
+            headers: { location: `https://elsewhere.test${decodeURIComponent(request.path)}` },
+          }
+        : offsetPager()(request),
+    );
     expect(outcomeFor(await verifyPaged(serve, twoApi), RULE)).toMatchObject({
-      _tag: "Passed",
-      note: "1 collection not decided: /tags: `next` on page 1 (/tags?page[limit]=3) answered a 302 redirect to https://elsewhere.test/tags?page[offset]=3, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin, so the walk could not be finished",
+      _tag: "Skipped",
+      reason: expect.stringContaining(`GET /tags answered ${offsite("/tags")}`),
     });
   });
 
@@ -4608,7 +4640,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       return exit.value;
     });
 
-  it("never sends a request off the run's origin on a redirect's say-so, and leaves the link not decided", async () => {
+  it("never sends a request off the run's origin on a redirect's say-so, and does not decide the rule", async () => {
     const elsewhere = "https://elsewhere.test/articles/2";
     const { sent, credentials, fetch } = redirectingFetch(elsewhere);
     // The run's own `RequestInit` is kept; only `redirect` is overridden.
@@ -4616,8 +4648,8 @@ describe("Conformance: `self` and `related` links dereference", () => {
     expect(sent.filter((url) => !url.startsWith("http://fixture.test/"))).toEqual([]);
     expect(credentials.every((value) => value === "include")).toBe(true);
     expect(outcomeFor(report, SELF)).toMatchObject({
-      _tag: "Passed",
-      note: "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered a 302 redirect to https://elsewhere.test/articles/2, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin",
+      _tag: "Skipped",
+      reason: `not decided: 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/2 answered ${offsite("/articles/2")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) answered ${offsite("/articles/2")}`,
     });
   });
 
@@ -4628,8 +4660,10 @@ describe("Conformance: `self` and `related` links dereference", () => {
     const report = await overFetch(fetch, { redirect: "follow", credentials: "include" });
     expect(sent.filter((url) => !url.startsWith("http://fixture.test/"))).toEqual([]);
     expect(outcomeFor(report, SELF)).toMatchObject({
-      _tag: "Passed",
-      note: expect.stringContaining("answered a 302 redirect to https://elsewhere.test/articles/2"),
+      _tag: "Skipped",
+      reason: expect.stringContaining(
+        "answered a 302 redirect to https://elsewhere.test/articles/2",
+      ),
     });
   });
 
@@ -4643,6 +4677,20 @@ describe("Conformance: `self` and `related` links dereference", () => {
     ) =>
     (request: CannedRequest): Canned =>
       withoutQuery(request).path === from ? { status, headers: { location: to } } : serve(request);
+
+  it("skips — never passes — a rule a `self` link redirected off the origin left undecided", async () => {
+    // Every other link decides; the one that leaves the origin is not passed over.
+    expect(
+      await skipReasonOf(SELF, redirecting("/articles/2", "https://elsewhere.test/articles/2")),
+    ).toContain(`/articles/2 answered ${offsite("/articles/2")}`);
+  });
+
+  it("skips, naming the redirect, a rule whose read endpoint a redirect took off the origin", async () => {
+    // `/articles` leaves; `/articles/1` answers, and its links all decide.
+    expect(
+      await skipReasonOf(SELF, redirecting("/articles", "https://elsewhere.test/articles")),
+    ).toContain(`GET /articles answered ${offsite("/articles")}`);
+  });
 
   it("follows a redirect that stays on the run's origin, grading the final answer, and counts the hop", async () => {
     const plain = recording(linked());
@@ -4679,12 +4727,12 @@ describe("Conformance: `self` and `related` links dereference", () => {
 
   it("treats an http → https redirect on the same host as a redirect to another origin", async () => {
     const hopped = recording(redirecting("/articles/2", "https://fixture.test/articles/2"));
-    expect(await noteOf(SELF, hopped.serve)).toBe(
-      "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered a 302 redirect to https://fixture.test/articles/2, which the kit does not follow: https://fixture.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin",
+    expect(await skipReasonOf(SELF, hopped.serve)).toContain(
+      "the `self` link of articles:2 (in /articles, at /data/1) answered a 302 redirect to https://fixture.test/articles/2, which the kit does not follow: https://fixture.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin",
     );
     const report = await run(hopped.serve, hopped.client);
     expect(hopped.urls.filter((url) => url.startsWith("https:"))).toEqual([]);
-    expect(outcomeFor(report, SELF)._tag).toBe("Passed");
+    expect(outcomeFor(report, SELF)._tag).toBe("Skipped");
   });
 
   it("follows at most five redirects for one link, naming the one it stopped at", async () => {
@@ -4700,8 +4748,8 @@ describe("Conformance: `self` and `related` links dereference", () => {
       };
     // Five hops: /hop/1 … /hop/5, then the article.
     expect(await noteOf(SELF, chain(5))).toBeUndefined();
-    expect(await noteOf(SELF, chain(6))).toBe(
-      "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) answered a 307 redirect to http://fixture.test/articles/2, which the kit does not follow: it would be redirect 6 in a row, past the kit's cap of 5",
+    expect(await skipReasonOf(SELF, chain(6))).toContain(
+      "the `self` link of articles:2 (in /articles, at /data/1) answered a 307 redirect to http://fixture.test/articles/2, which the kit does not follow: it would be redirect 6 in a row, past the kit's cap of 5",
     );
   });
 
