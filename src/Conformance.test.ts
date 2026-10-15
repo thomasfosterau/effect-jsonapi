@@ -6742,6 +6742,25 @@ describe("Conformance: `self` and `related` links dereference", () => {
     });
   });
 
+  it("counts a member against an identifier when it is no extension member's name", async () => {
+    // An extension member is an alphanumeric namespace, one colon and a name;
+    // a colon anywhere else does not make one.
+    const failures = await Promise.all(
+      [":x", "a:", "a:b:c"].map((member) =>
+        relationshipFailures(
+          at("/articles/2/relationships/tags", {
+            body: { data: [{ type: "tags", id: "1", [member]: "v" }] },
+          }),
+        ),
+      ),
+    );
+    expect(failures).toEqual(
+      [":x", "a:", "a:b:c"].map((member) => [
+        `the \`self\` link of articles:2's \`tags\` (in /articles, at /data/1) answers no resource linkage as primary data | /data/0 carries \`${member}\`, which a resource identifier object does not`,
+      ]),
+    );
+  });
+
   it("fails a relationship `self` answering linkage of the wrong cardinality — the MUST, not the SHOULD", async () => {
     const report = await run(
       at(
@@ -7461,16 +7480,23 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
     type Seen = { readonly request: string; readonly key: string };
 
     /**
-     * Creates as {@link idempotentServer} does; an update answers 200 with the
-     * article, naming the profile where `onUpdate` says, or `updateStatus`.
+     * Creates as {@link idempotentServer} does; an update (a `PATCH` or a
+     * `PUT`) answers 200 with the article, naming the profile where
+     * `onUpdate` says, or `updateStatus`.
      */
-    const updatableServer =
-      (onCreate: Advertises, onUpdate: Advertises, seen: Array<Seen>, updateStatus = 200) =>
-      (request: CannedRequest): Canned => {
+    const updatableServer = (
+      onCreate: Advertises,
+      onUpdate: Advertises,
+      seen: Array<Seen>,
+      updateStatus = 200,
+    ) => {
+      const create = idempotentServer(onCreate, []);
+      return (request: CannedRequest): Canned => {
         const line = `${request.method} ${request.path}`;
-        if (request.method === "POST" || request.method === "PATCH")
+        const updates = request.method === "PATCH" || request.method === "PUT";
+        if (request.method === "POST" || updates)
           seen.push({ request: line, key: request.headers.get("idempotency-key") ?? "(no key)" });
-        if (request.method !== "PATCH") return idempotentServer(onCreate, [])(request);
+        if (!updates) return create(request);
         const id = request.path.split("/")[2] ?? "";
         const data = { type: "articles", id, attributes: { title: "u", body: "" } };
         return {
@@ -7482,6 +7508,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
               : { jsonapi: { version: "1.1" }, data },
         };
       };
+    };
 
     const updating: Conformance.WriteFixture = {
       ...fixture,
@@ -7501,6 +7528,39 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       expect(seen).toEqual([
         { request: "POST /articles", key: "(no key)" },
         { request: "PATCH /articles/100", key: expect.stringMatching(/^conformance-/) },
+      ]);
+    });
+
+    it("probes each of a type's update endpoints with a create and an update of its own", async () => {
+      // A `PUT` beside the `PATCH`: each gets the create and update the spec
+      // tier's `update-response` gives it, rather than one per type.
+      const withPut = HttpApi.make("put").add(
+        Group.make(
+          Article,
+          Endpoint.get(Article),
+          Endpoint.create(Article, { idempotency: true }),
+          Endpoint.update(Article, { idempotency: "required" }),
+        ),
+        HttpApiGroup.make("replace").add(
+          HttpApiEndpoint.put("replace", "/articles/:id", {
+            params: { id: Schema.String },
+            headers: Schema.Struct({ "idempotency-key": Schema.String }),
+            success: Schema.Unknown,
+          }),
+        ),
+      );
+      const seen: Array<Seen> = [];
+      const report = await verifyOver(withPut)(updatableServer("document", "document", seen), {
+        only: [RULE],
+        mutating: true,
+        writes: { articles: updating },
+      });
+      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 4 });
+      expect(seen).toEqual([
+        { request: "POST /articles", key: "(no key)" },
+        { request: "PATCH /articles/100", key: expect.stringMatching(/^conformance-/) },
+        { request: "POST /articles", key: "(no key)" },
+        { request: "PUT /articles/101", key: expect.stringMatching(/^conformance-/) },
       ]);
     });
 
@@ -7656,15 +7716,22 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       expect(seen.every((line) => line.endsWith("(no key)"))).toBe(true);
     });
 
-    it("leave a delete refused without a key undecided where the endpoint declares the header", async () => {
+    /** The package's own `400` for a missing required key, naming the header as its source. */
+    const missingKey = (status = 400): Canned => ({
+      status,
+      body: { errors: [{ status: `${status}`, source: { header: "idempotency-key" } }] },
+    });
+
+    it("leave a delete refused for the missing key undecided where the endpoint declares the header", async () => {
       // `idempotency: true` reads as optional, as a key required through a
-      // union does, so the kit sends none — and a 4xx may be that refusal.
+      // union does, so the kit sends none — and a 4xx naming the header as its
+      // source is that refusal, not an answer to the delete.
       const seen: Array<string> = [];
       const serve = keyedServer(false, seen);
       const report = await verifyOver(keyedApi(true))(
         (request) =>
           request.method === "DELETE" && !request.headers.has("idempotency-key")
-            ? { status: 400, body: { errors: [{ status: "400" }] } }
+            ? missingKey()
             : serve(request),
         { ...options, only: ["spec/status/delete-response"] },
       );
@@ -7672,60 +7739,89 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
         expect.objectContaining({
           _tag: "Skipped",
           reason: expect.stringContaining(
-            "which declares `Idempotency-Key` without plainly requiring it, so the kit sent no key",
+            "which declares `Idempotency-Key` without plainly requiring it, so the kit sent no key, and the error names that header as its source",
           ),
         }),
       );
     });
 
     it("still fail a refused delete the missing key cannot explain", async () => {
-      // A 4xx from an endpoint declaring no key, a 4xx to a delete that did
-      // carry the key its endpoint requires, and a 5xx, which no missing key is.
+      // Each case but one names the header as the error's source, so each
+      // fails on its own condition: an endpoint declaring no key, a delete
+      // that did carry the key its endpoint requires, a 5xx and a 3xx, which
+      // no missing key is, and a 4xx that does not name the header.
       const cases = [
-        { idempotency: false, status: 400 },
-        { idempotency: "required", status: 400 },
-        { idempotency: true, status: 500 },
+        { idempotency: false, answer: missingKey() },
+        { idempotency: "required", answer: missingKey() },
+        { idempotency: true, answer: missingKey(500) },
+        { idempotency: true, answer: missingKey(303) },
+        { idempotency: true, answer: { status: 400, body: { errors: [{ status: "400" }] } } },
+        {
+          idempotency: true,
+          answer: {
+            status: 400,
+            body: { errors: [{ status: "400", source: { parameter: "idempotency-key" } }] },
+          },
+        },
       ] as const;
       const outcomes = await Promise.all(
-        cases.map(async ({ idempotency, status }) => {
+        cases.map(async ({ idempotency, answer }) => {
           const serve = keyedServer(idempotency === "required", []);
           const report = await verifyOver(keyedApi(idempotency))(
-            (request) =>
-              request.method === "DELETE"
-                ? { status, body: { errors: [{ status: `${status}` }] } }
-                : serve(request),
+            (request) => (request.method === "DELETE" ? answer : serve(request)),
             { ...options, only: ["spec/status/delete-response"] },
           );
           return outcomeFor(report, "spec/status/delete-response")._tag;
         }),
       );
-      expect(outcomes).toEqual(["Failed", "Failed", "Failed"]);
+      expect(outcomes).toEqual(cases.map(() => "Failed"));
+    });
+
+    it("read the header as the error's source case-insensitively", async () => {
+      const serve = keyedServer(false, []);
+      const report = await verifyOver(keyedApi(true))(
+        (request) =>
+          request.method === "DELETE"
+            ? {
+                status: 400,
+                body: { errors: [{ status: "400" }, { source: { header: "Idempotency-Key" } }] },
+              }
+            : serve(request),
+        { ...options, only: ["spec/status/delete-response"] },
+      );
+      expect(outcomeFor(report, "spec/status/delete-response")._tag).toBe("Skipped");
     });
 
     describe("through the atomic operations endpoint", () => {
-      const atomicApi = HttpApi.make("atomic")
-        .add(Group.make(Article, Endpoint.get(Article)))
-        .add(Group.make("operations", Endpoint.operations([Article], { idempotency: "required" })));
+      const atomicApi = (idempotency: Idempotency.Option) =>
+        HttpApi.make("atomic")
+          .add(Group.make(Article, Endpoint.get(Article)))
+          .add(Group.make("operations", Endpoint.operations([Article, Person], { idempotency })));
 
       const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
 
       const decodeOperations = Schema.decodeUnknownOption(
-        Schema.Struct({ "atomic:operations": Schema.Array(Schema.Unknown) }),
+        Schema.Struct({
+          "atomic:operations": Schema.Array(
+            Schema.Struct({ data: Schema.Struct({ type: Schema.String }) }),
+          ),
+        }),
       );
 
       /**
-       * An operations endpoint that refuses a request without a key, as an
-       * `idempotency: "required"` one does, and otherwise applies every `add`
-       * — and, unless `rejects`, answers a document that is no operations
-       * document 200 too. `seen` records whether each request carried a key.
+       * An operations endpoint that, when `requiresKey`, refuses a request
+       * without a key with the package's missing-key `400`, and otherwise
+       * applies every `add` — and, unless `rejects`, answers a document that
+       * is no operations document 200 too. `seen` records the key each request
+       * carried.
        */
-      const atomicServer =
-        (seen: Array<string>, rejects: boolean) =>
-        (request: CannedRequest): Canned => {
+      const atomicServer = (seen: Array<string>, rejects: boolean, requiresKey = true) => {
+        let next = 100;
+        return (request: CannedRequest): Canned => {
           if (request.method !== "POST") return conformantServe(request);
           const key = request.headers.get("idempotency-key");
-          seen.push(key === null ? "(no key)" : "key");
-          if (key === null) return { status: 400, body: { errors: [{ status: "400" }] } };
+          seen.push(key ?? "(no key)");
+          if (requiresKey && key === null) return missingKey();
           return Option.match(decodeOperations(request.body), {
             onNone: (): Canned =>
               rejects
@@ -7734,48 +7830,102 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
             onSome: (document): Canned => ({
               contentType: atomicType,
               body: {
-                "atomic:results": document["atomic:operations"].map((_, index) => ({
-                  data: { type: "articles", id: `${100 + index}`, attributes: {} },
+                "atomic:results": document["atomic:operations"].map(({ data }) => ({
+                  data: { type: data.type, id: `${next++}`, attributes: {} },
                 })),
               },
             }),
           });
         };
+      };
 
       const atomicOptions = (only: string): Conformance.Options => ({
         only: [only],
         mutating: true,
-        writes: { articles: fixture },
+        writes: {
+          articles: fixture,
+          people: {
+            create: () => ({ type: "people", attributes: { firstName: "a", lastName: "b" } }),
+          },
+        },
       });
 
-      it("key the `add` sent to an endpoint that requires one", async () => {
+      it("key each `add` sent to an endpoint that requires one afresh", async () => {
         const seen: Array<string> = [];
-        const report = await verifyOver(atomicApi)(
+        const report = await verifyOver(atomicApi("required"))(
           atomicServer(seen, true),
           atomicOptions("spec/atomic/response-ext-parameter"),
         );
         expect(outcomeFor(report, "spec/atomic/response-ext-parameter")).toMatchObject({
           _tag: "Passed",
-          probes: 1,
+          probes: 2,
         });
-        expect(seen).toEqual(["key"]);
+        // One `add` per type, each with a key no earlier request carried.
+        expect(seen).toEqual([
+          expect.stringMatching(/^conformance-/),
+          expect.stringMatching(/^conformance-/),
+        ]);
+        expect(seen[0]).not.toBe(seen[1]);
       });
 
       it("key the malformed document, so a 4xx is never the missing key's", async () => {
         const seen: Array<string> = [];
-        const report = await verifyOver(atomicApi)(
+        const report = await verifyOver(atomicApi("required"))(
           atomicServer(seen, false),
           atomicOptions("spec/atomic/malformed-operations-rejected"),
         );
         expect(outcomeFor(report, "spec/atomic/malformed-operations-rejected")._tag).toBe("Failed");
-        expect(seen).toEqual(["key"]);
-        const rejected = await verifyOver(atomicApi)(
+        expect(seen).toEqual([expect.stringMatching(/^conformance-/)]);
+        const rejected = await verifyOver(atomicApi("required"))(
           atomicServer([], true),
           atomicOptions("spec/atomic/malformed-operations-rejected"),
         );
         expect(outcomeFor(rejected, "spec/atomic/malformed-operations-rejected")._tag).toBe(
           "Passed",
         );
+      });
+
+      it("send no key where it is optional", async () => {
+        const adds: Array<string> = [];
+        const added = await verifyOver(atomicApi(true))(
+          atomicServer(adds, true, false),
+          atomicOptions("spec/atomic/response-ext-parameter"),
+        );
+        expect(outcomeFor(added, "spec/atomic/response-ext-parameter")).toMatchObject({
+          _tag: "Passed",
+          probes: 2,
+        });
+        expect(adds).toEqual(["(no key)", "(no key)"]);
+        const malformed: Array<string> = [];
+        const rejected = await verifyOver(atomicApi(true))(
+          atomicServer(malformed, true, false),
+          atomicOptions("spec/atomic/malformed-operations-rejected"),
+        );
+        // A 4xx that does not name the header rejects the document.
+        expect(outcomeFor(rejected, "spec/atomic/malformed-operations-rejected")._tag).toBe(
+          "Passed",
+        );
+        expect(malformed).toEqual(["(no key)"]);
+      });
+
+      it("leave a malformed document refused for the missing key undecided", async () => {
+        // `idempotency: true` reads as optional, as a key required through a
+        // union does, so the kit sends none; a 4xx naming the header as its
+        // source refused the missing key, not the document.
+        const seen: Array<string> = [];
+        const report = await verifyOver(atomicApi(true))(
+          atomicServer(seen, true),
+          atomicOptions("spec/atomic/malformed-operations-rejected"),
+        );
+        expect(outcomeFor(report, "spec/atomic/malformed-operations-rejected")).toEqual(
+          expect.objectContaining({
+            _tag: "Skipped",
+            reason: expect.stringContaining(
+              "which declares `Idempotency-Key` without plainly requiring it, so the kit sent no key, and the error names that header as its source",
+            ),
+          }),
+        );
+        expect(seen).toEqual(["(no key)"]);
       });
     });
   });

@@ -83,6 +83,7 @@ import {
   ownId,
   pathFor,
   primaryIdentity,
+  refusedForMissingKey,
   type WriteTarget as Target,
   targets,
   undecided,
@@ -2200,24 +2201,19 @@ const deleteResponse: RuleImpl = {
 };
 
 /**
- * A 4xx to a delete the kit sent no key with, from an endpoint that declares
- * `Idempotency-Key`, decides nothing: the kit keys only a write to an endpoint
- * whose headers schema plainly requires the header, so one that requires it
- * some other way (through a union, say) reads as optional, and its 4xx may be
- * the refusal of a write without a key rather than an answer to the delete.
+ * The refusal of a delete the kit sent no key with, for the missing key (see
+ * {@link refusedForMissingKey}), decides nothing: it is no answer to the
+ * delete. Any other 4xx from the same endpoint is, and is judged.
  */
 const unkeyedRefusal = (
   target: Target,
   key: Readonly<Record<string, string>>,
   observation: Observation,
 ): Option.Option<Verdict> =>
-  observation.status >= 400 &&
-  observation.status < 500 &&
-  target.endpoint.idempotencyKey !== "absent" &&
-  Rec.isEmptyReadonlyRecord(key)
+  refusedForMissingKey(target.endpoint, key, observation)
     ? Option.some(
         undecided(
-          `deleting the "${target.key}" resource the kit had just created answered ${observation.status} from ${target.endpoint.path}, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key and the refusal may be for the missing key (${describe(observation)})`,
+          `deleting the "${target.key}" resource the kit had just created answered ${observation.status} from ${target.endpoint.path}, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key, and the error names that header as its source (${describe(observation)})`,
         ),
       )
     : Option.none();
@@ -2286,6 +2282,13 @@ const atomicMalformedRejected: RuleImpl = {
         headers: { ...atomicHeaders, ...key },
         body: { "atomic:operations": "not an array" },
       });
+      // Sent no key, the endpoint may refuse it for that alone, which says
+      // nothing of the document.
+      if (refusedForMissingKey(endpoint, key, observation))
+        return skip(
+          atomicMalformedRejected.rule,
+          `the malformed document answered ${observation.status} from ${endpoint.path}, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key, and the error names that header as its source (${describe(observation)})`,
+        );
       const findings =
         observation.status >= 400 && observation.status < 500
           ? []
