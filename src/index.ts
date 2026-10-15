@@ -215,3 +215,235 @@ export * as Sort from "./Sort.js";
  * @category constants
  */
 export { MEDIA_TYPE } from "./internal/media.js";
+
+// ---------------------------------------------------------------------------
+// Declaration-emit names (#348)
+// ---------------------------------------------------------------------------
+//
+// The bundled `dist/index.d.ts` lowers each `export * as X` above to a
+// module-local `declare namespace X_d_exports { export { … } }`, and the
+// TypeScript checker does not follow a namespace alias when declaration emit
+// looks for a name. So a type an endpoint's *inferred* type mentions is
+// nameable in a consumer's `.d.ts` only through a namespace that consumer's
+// file imports itself, or through a direct export of this module. Without
+// one, `export const x = Endpoint.get(R)` fails with TS4023 — or the checker
+// inlines the type structurally until it hits a name it cannot spell, such as
+// `effect`'s `NodeInspectSymbol` inside an inlined error class.
+//
+// Each type below is canonical in its namespace; the root export exists only
+// so declaration emit can always name it, and a name that would be ambiguous
+// at the root carries its namespace as a prefix.
+// `test/declaration-emit.test.ts` pins the set: drop one and an export of
+// `test/emitted/declaration-emit*.types.ts` stops emitting (or, for a
+// middleware, is inlined into every endpoint's type).
+
+export type {
+  /**
+   * `ApiError.Wire`, at the package root so declaration emit can name it: the
+   * endpoint error schema of an `ApiError` class.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  Wire as ApiErrorWire,
+  /**
+   * `ApiError.BadRequest`, at the package root so declaration emit can name
+   * it: the `SchemaErrors` middleware's error, in every client method's error
+   * channel.
+   *
+   * @since 0.17.0
+   * @category errors
+   */
+  BadRequest,
+  /**
+   * `ApiError.Conflict`, at the package root so declaration emit can name it:
+   * the error `Group.flat` declares on its `create` and `update` endpoints.
+   *
+   * @since 0.17.0
+   * @category errors
+   */
+  Conflict,
+  /**
+   * `ApiError.NotAcceptable`, at the package root so declaration emit can name
+   * it: a `ContentNegotiation` middleware error, in every client method's
+   * error channel.
+   *
+   * @since 0.17.0
+   * @category errors
+   */
+  NotAcceptable,
+  /**
+   * `ApiError.UnsupportedMediaType`, at the package root so declaration emit
+   * can name it: a `ContentNegotiation` middleware error, in every client
+   * method's error channel.
+   *
+   * @since 0.17.0
+   * @category errors
+   */
+  UnsupportedMediaType,
+} from "./ApiError.js";
+
+export type {
+  /**
+   * `Atomic.Operations`, at the package root so declaration emit can name it:
+   * the payload of `Endpoint.operations`.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  Operations as AtomicOperations,
+  /**
+   * `Atomic.Result`, at the package root so declaration emit can name it: one
+   * result object of `Endpoint.operations`' success document.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  Result as AtomicResult,
+} from "./Atomic.js";
+
+export type {
+  /**
+   * `Document.CollectionDocument`, at the package root so declaration emit can
+   * name it: the collection document of `Group.flat`'s list endpoint.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  CollectionDocument,
+  /**
+   * `Document.DataDocument`, at the package root so declaration emit can name
+   * it: the single-resource document of `Group.flat`'s other endpoints.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  DataDocument,
+  /**
+   * `Document.WireSchema`, at the package root so declaration emit can name
+   * it: the wire form of a document `Group.flat` serves.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  WireSchema,
+} from "./Document.js";
+
+export type {
+  /**
+   * `Endpoint.IncludedResources`, at the package root so declaration emit can
+   * name it.
+   *
+   * @since 0.17.0
+   * @category type-level
+   */
+  IncludedResources,
+  /**
+   * `Endpoint.ReachableIncluded`, at the package root so declaration emit can
+   * name it.
+   *
+   * @since 0.17.0
+   * @category schemas
+   */
+  ReachableIncluded,
+  /**
+   * `Endpoint.SparseResource`, at the package root so declaration emit can
+   * name it.
+   *
+   * @since 0.17.0
+   * @category schemas
+   */
+  SparseResource,
+  /**
+   * `Endpoint.SparseUnion`, at the package root so declaration emit can name
+   * it.
+   *
+   * @since 0.17.0
+   * @category schemas
+   */
+  SparseUnion,
+} from "./Endpoint.js";
+
+export type {
+  /**
+   * `Idempotency.Headers`, at the package root so declaration emit can name
+   * it: the request headers of a write endpoint that accepts an
+   * `idempotency-key`.
+   *
+   * @since 0.17.0
+   * @category schemas
+   */
+  Headers as IdempotencyHeaders,
+  /**
+   * `Idempotency.KeyInProgress`, at the package root so declaration emit can
+   * name it: an idempotency middleware error, in the error channel of a client
+   * method whose endpoint accepts an `idempotency-key`.
+   *
+   * @since 0.17.0
+   * @category errors
+   */
+  KeyInProgress as IdempotencyKeyInProgress,
+  /**
+   * `Idempotency.KeyMismatch`, at the package root so declaration emit can
+   * name it: an idempotency middleware error, in the error channel of a client
+   * method whose endpoint accepts an `idempotency-key`.
+   *
+   * @since 0.17.0
+   * @category errors
+   */
+  KeyMismatch as IdempotencyKeyMismatch,
+  /**
+   * `Idempotency.Middleware`, at the package root so declaration emit can name
+   * it: the middleware of a write endpoint declared with `idempotency: true`.
+   *
+   * @since 0.17.0
+   * @category services
+   */
+  Middleware as IdempotencyMiddleware,
+} from "./Idempotency.js";
+
+export type {
+  /**
+   * `Middleware.ContentNegotiation`, at the package root so declaration emit
+   * can name it: the middleware on every endpoint.
+   *
+   * @since 0.17.0
+   * @category services
+   */
+  ContentNegotiation,
+  /**
+   * `Middleware.CreatedLocation`, at the package root so declaration emit can
+   * name it: the middleware on every `create` endpoint.
+   *
+   * @since 0.17.0
+   * @category services
+   */
+  CreatedLocation,
+  /**
+   * `Middleware.SchemaErrors`, at the package root so declaration emit can
+   * name it: the middleware on every endpoint.
+   *
+   * @since 0.17.0
+   * @category services
+   */
+  SchemaErrors,
+} from "./Middleware.js";
+
+export type {
+  /**
+   * `Query.BracketedKeys`, at the package root so declaration emit can name
+   * it: the flat list query `Group.flat` builds.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  BracketedKeys,
+  /**
+   * `Query.QuerySchema`, at the package root so declaration emit can name it:
+   * the query schema of every read endpoint.
+   *
+   * @since 0.17.0
+   * @category models
+   */
+  QuerySchema,
+} from "./Query.js";

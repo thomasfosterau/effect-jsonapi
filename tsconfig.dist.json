@@ -2,6 +2,11 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
+    // Report declaration-emit diagnostics (TS4023 and friends) for every
+    // exported value, as a consumer emitting `.d.ts` files would see them.
+    // `noEmit` still holds, so nothing is written (see
+    // test/emitted/declaration-emit.types.ts).
+    "declaration": true,
     // Resolve the package name to the EMITTED declarations rather than the
     // sources: this is what consumers actually see, and the two are not
     // interchangeable (see test/emitted/requirements.types.ts). Only means
