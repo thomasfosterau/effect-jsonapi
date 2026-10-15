@@ -189,6 +189,32 @@ assertType<
 >(true);
 assertType<Equals<AttributesOf<DataOf<typeof entries>>, { readonly title?: string }>>(true);
 
+// A family reached as a relationship target is an `included` member as
+// itself: its `type` is a family name, so its members stay strict.
+const Holder = Resource.make("holders", {
+  attributes: { label: Schema.String },
+  relationships: { node: Relationship.one(() => AnyNode) },
+});
+const holder = Holder.make({
+  id: Holder.Id.make("1"),
+  attributes: { label: "L" },
+  relationships: { node: { data: { type: "editors", id: Editor.Id.make("7") } } },
+});
+export const held = Endpoint.get(Holder, { fields: true });
+assertType<Equals<AttributesOf<DataOf<typeof held>>, { readonly label?: string }>>(true);
+assertType<
+  Equals<
+    AttributesOf<Extract<IncludedOf<typeof held>, { readonly type: "editors" }>>,
+    { readonly name: string }
+  >
+>(true);
+assertType<SuccessOf<typeof held>>(
+  // @ts-expect-error -- a projected family member does not fit its strict schema
+  Handlers.data(holder, { included: [editor], onResource: project }),
+);
+// Positive control: the unprojected member fits.
+assertType<SuccessOf<typeof held>>(Handlers.data(holder, { included: [editor] }));
+
 // `Endpoint.resource` / `Group.resource` default `fields` to `true`.
 const group = Group.resource(Article);
 type GroupEndpoint<Name extends string> = Extract<
@@ -215,9 +241,40 @@ export const offGet = Endpoint.get(Article, { fields: false });
 export const explicitGet = Endpoint.get(Article, { success: Article.document() });
 assertType<SameSuccess<typeof plainGet, typeof explicitGet>>(true);
 assertType<SameSuccess<typeof offGet, typeof explicitGet>>(true);
-// The escape hatch: an explicit strict `success` beside `fields: true`.
+// A strict `success` beside `fields: true` (the first escape hatch is
+// `fields: false`, above). With `include` off, the resource's own document is
+// exactly the strict default.
 export const hatch = Endpoint.get(Article, { fields: true, success: Article.document() });
 assertType<SameSuccess<typeof hatch, typeof explicitGet>>(true);
+// With `include` on it is not: `Article.document()`'s `included` is only the
+// direct targets, so `companies` (`author.employer`) is dropped, and an
+// endpoint `meta` override is ignored.
+const Total = Schema.Struct({ total: Schema.Number });
+export const hatchIncluded = Endpoint.get(Article, {
+  include: true,
+  fields: true,
+  meta: Total,
+  success: Article.document(),
+});
+assertType<Equals<IncludedOf<typeof hatchIncluded>["type"], "people" | "tags">>(true);
+assertType<Equals<IncludedOf<typeof strict>["type"], "people" | "tags" | "companies">>(true);
+assertType<Equals<NonNullable<SuccessOf<typeof hatchIncluded>["meta"]>, typeof Total.Type>>(false);
+// So the override reproduces the union and the `meta` (#342): strict
+// attributes, and the document the strict default with `include` would bind.
+export const hatchUnion = Endpoint.get(Article, {
+  include: true,
+  fields: true,
+  meta: Total,
+  success: Article.document({ included: Schema.Union([Person, Tag, Company]), meta: Total }),
+});
+export const strictTotal = Endpoint.get(Article, { include: true, meta: Total });
+assertType<Equals<SuccessOf<typeof hatchUnion>, SuccessOf<typeof strictTotal>>>(true);
+assertType<
+  Equals<
+    AttributesOf<DataOf<typeof hatchUnion>>,
+    { readonly title: string; readonly body: string; readonly subtitle?: string }
+  >
+>(true);
 // Negative control: `fields: true` changes the document.
 assertType<SameSuccess<typeof get, typeof strict>>(false);
 
@@ -230,8 +287,9 @@ assertType<SameSuccess<typeof bareList, typeof explicitList>>(true);
 assertType<SameSuccess<typeof plainList, typeof list>>(false);
 
 // `related`, `collection` and `polymorphic` take no `success` override, so
-// their strict documents are pinned through what a client decodes. (Their
-// declaration emit is unchanged from trunk: see the PR.)
+// their strict documents are pinned through what a client decodes. These pins
+// stand in for a declaration-emit comparison, which a consumer cannot make
+// for an exported endpoint (TS4023, #348).
 type StrictPerson = { readonly name: string; readonly email: string };
 export const plainAuthor = Endpoint.related(Article, "author");
 assertType<Equals<AttributesOf<Exclude<DataOf<typeof plainAuthor>, null>>, StrictPerson>>(true);

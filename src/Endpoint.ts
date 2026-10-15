@@ -517,8 +517,11 @@ export const get = <
      * then admits any subset of the attributes of every resource type a
      * fieldset can name, primary and `included` alike, so a handler can answer
      * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
-     * decodes those attributes as optional. Pass the resource's own
-     * `document()` / `collection()` as `success` to keep strict attributes.
+     * decodes those attributes as optional. Pass `fields: false` to keep
+     * strict attributes. A `success` override replaces the whole default
+     * document: with `include` on or `meta` overridden, it must list every
+     * reachable type in `included` and carry the `meta` itself
+     * (`R.document({ included, meta })`; #342 tracks a helper for the union).
      */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
@@ -738,8 +741,11 @@ export const list = <
      * then admits any subset of the attributes of every resource type a
      * fieldset can name, primary and `included` alike, so a handler can answer
      * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
-     * decodes those attributes as optional. Pass the resource's own
-     * `document()` / `collection()` as `success` to keep strict attributes.
+     * decodes those attributes as optional. Pass `fields: false` to keep
+     * strict attributes. A `success` override replaces the whole default
+     * document: with `include` on or `meta` overridden, it must list every
+     * reachable type in `included` and carry the `meta` itself
+     * (`R.collection({ included, meta })`; #342 tracks a helper for the union).
      */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for all attributes, or an array of sortable attribute names. */
