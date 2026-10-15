@@ -299,10 +299,10 @@ const wireKeys = (
  * header. Header names are matched case-insensitively, as HTTP matches them; a
  * headers schema whose names cannot be enumerated declares nothing this can see.
  */
-const declaresIdempotencyKey = (schema: { readonly ast: SchemaAST.AST } | undefined): boolean =>
-  schema !== undefined &&
-  Option.exists(declaredNames(schema.ast), (names) =>
-    names.some((name) => name.toLowerCase() === IDEMPOTENCY_HEADER),
+const declaresIdempotencyKey = (schema: Option.Option<{ readonly ast: SchemaAST.AST }>): boolean =>
+  Option.exists(
+    Option.flatMap(schema, ({ ast }) => declaredNames(ast)),
+    (names) => names.some((name) => name.toLowerCase() === IDEMPOTENCY_HEADER),
   );
 
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
@@ -372,7 +372,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
           .filter((segment) => segment.startsWith(":"))
           .map((segment) => segment.slice(1)),
         ...query,
-        idempotencyKey: declaresIdempotencyKey(endpoint.headers),
+        idempotencyKey: declaresIdempotencyKey(Option.fromUndefinedOr(endpoint.headers)),
       });
     }
   }

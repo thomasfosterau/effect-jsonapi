@@ -6513,11 +6513,11 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
    * profile where `advertises` says; `status` overrides the create's status.
    * `keys` collects the `Idempotency-Key` each create carried.
    */
-  const idempotentServer = (advertises: Advertises, keys: Array<string | null>, status = 201) => {
+  const idempotentServer = (advertises: Advertises, keys: Array<string>, status = 201) => {
     let next = 100;
     return (request: CannedRequest): Canned => {
       if (`${request.method} ${request.path}` !== "POST /articles") return conformantServe(request);
-      keys.push(request.headers.get("idempotency-key"));
+      keys.push(request.headers.get("idempotency-key") ?? "(no key)");
       const id = `${next++}`;
       const data = { type: "articles", id, attributes: { title: "t", body: "" } };
       return {
@@ -6562,7 +6562,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
   });
 
   it("passes a create that names the profile in `jsonapi.profile`, sending a fresh key", async () => {
-    const keys: Array<string | null> = [];
+    const keys: Array<string> = [];
     const report = await runRule(verifyIdempotent, idempotentServer("document", keys));
     expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
     // One create, carrying a key no earlier request did — never a replay.
@@ -6571,9 +6571,9 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
   });
 
   it("holds an endpoint that requires the key too, sending one", async () => {
-    const keys: Array<string | null> = [];
+    const keys: Array<string> = [];
     const report = await runRule(verifyRequired, (request) =>
-      request.method === "POST" && request.headers.get("idempotency-key") === null
+      request.method === "POST" && !request.headers.has("idempotency-key")
         ? { status: 400, body: { errors: [{ status: "400" }] } }
         : idempotentServer("neither", keys)(request),
     );
@@ -6619,7 +6619,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
   });
 
   it("skips, naming why, when no create endpoint declares the header", async () => {
-    const keys: Array<string | null> = [];
+    const keys: Array<string> = [];
     const report = await runRule(verifyPlain, idempotentServer("neither", keys));
     expect(outcomeFor(report, RULE)).toEqual(
       expect.objectContaining({
@@ -6631,7 +6631,7 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
   });
 
   it("skips without `mutating: true`, writing nothing", async () => {
-    const keys: Array<string | null> = [];
+    const keys: Array<string> = [];
     const report = await runRule(verifyIdempotent, idempotentServer("neither", keys), {
       mutating: false,
     });

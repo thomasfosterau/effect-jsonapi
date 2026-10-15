@@ -24,7 +24,11 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Effect, Option, Predicate, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { PROFILE_URI } from "../../Filter.js";
 import { HEADER, PROFILE_URI as IDEMPOTENCY_PROFILE_URI } from "../../Idempotency.js";
 import {
@@ -395,20 +399,22 @@ const decodeJsonApiProfile = Schema.decodeUnknownOption(
   }),
 );
 
-/** The profile URIs a response document's top-level `jsonapi.profile` names. */
-const documentProfiles = (body: unknown): ReadonlyArray<string> =>
-  Option.match(decodeJsonApiProfile(body), {
+/** The profile URIs an answer's top-level `jsonapi.profile` names. */
+const documentProfiles = (observation: Observation): ReadonlyArray<string> =>
+  Option.match(decodeJsonApiProfile(observation.body), {
     onNone: () => [],
     onSome: ({ jsonapi }) => Arr.filter(jsonapi.profile, Predicate.isString),
   });
 
-/** The profile URIs a `Content-Type`'s `profile` parameter names (space-separated). */
-const mediaTypeProfiles = (header: string | undefined): ReadonlyArray<string> =>
-  header === undefined
-    ? []
-    : parseMediaType(header)
+/** The profile URIs an answer's `Content-Type` names in its `profile` parameter (space-separated). */
+const mediaTypeProfiles = (observation: Observation): ReadonlyArray<string> =>
+  Option.match(Option.fromUndefinedOr(observation.contentType), {
+    onNone: () => [],
+    onSome: (header) =>
+      parseMediaType(header)
         .parameters.filter(([name]) => name === "profile")
-        .flatMap(([, value]) => value.split(" "));
+        .flatMap(([, value]) => value.split(" ")),
+  });
 
 /** What a create's 2xx answer says of the profile: a document naming it in either place passes. */
 const advertisedOn = (rule: Rule, target: WriteTarget, observation: Observation): Verdict => {
@@ -416,10 +422,7 @@ const advertisedOn = (rule: Rule, target: WriteTarget, observation: Observation)
     return undecided(
       `creating a "${target.key}" resource answered ${observation.status} with no document, so neither a \`jsonapi\` member nor a media type could name the profile`,
     );
-  const named = [
-    ...documentProfiles(observation.body),
-    ...mediaTypeProfiles(observation.contentType),
-  ];
+  const named = [...documentProfiles(observation), ...mediaTypeProfiles(observation)];
   if (named.includes(IDEMPOTENCY_PROFILE_URI)) return decided(1, []);
   const jsonapi = isRecord(observation.body) ? observation.body["jsonapi"] : undefined;
   return decided(1, [
