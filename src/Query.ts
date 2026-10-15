@@ -72,7 +72,7 @@ import {
   operatorCheck,
   prepare,
 } from "./internal/filter.js";
-import type { FamilyMembers, IncludeEnabled, IncludedResources } from "./internal/includeGraph.js";
+import type { ExpandFamilies, IncludeEnabled, IncludedResources } from "./internal/includeGraph.js";
 import { includePathsFor } from "./internal/includeGraph.js";
 import { fieldsetResources } from "./internal/sparse.js";
 import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
@@ -1475,12 +1475,15 @@ export interface Options<R extends Any> {
  *   include paths', so it is bounded as they are: two hops under
  *   `include: true`, the `depth` an {@link IncludeOptions} names, or the
  *   exact `paths` of an allow-list or a declared `Include.Surface`.
- * - The members of every `Resource.family` among those: a family's
+ * - Every `Resource.family` among those is replaced by its members (and a
+ *   member that is itself a family by its own members, in turn): a family's
  *   `type` is its name, never a wire type, so the resource objects a
- *   response carries for it are its members', each under its own type
- *   (`fields[editors]`, `fields[reviewers]` for a relationship targeting a
- *   family over `editors` and `reviewers`). The family itself stays in the
- *   set too, so `fields[<family name>]` is declared as before.
+ *   response carries for it are its members', each under its own type. A
+ *   relationship targeting a family over `editors` and `reviewers` declares
+ *   `fields[editors]` and `fields[reviewers]`, and not `fields[<family
+ *   name>]`, which is a 400 like any undeclared type (#350). A real resource
+ *   whose type is the family's name (the base of a base-anchored family,
+ *   reached in its own right) is still declared as itself.
  *
  * A type reachable only through a `paginated` relationship is never declared:
  * such a relationship is never an include path, so its target never appears
@@ -1491,10 +1494,9 @@ export interface Options<R extends Any> {
  * @since 0.1.0 (`I` and family members since 0.17.0)
  * @category type-level
  */
-export type FieldsetResources<R extends Any, I = false> =
-  | R
-  | IncludedResources<R, I>
-  | FamilyMembers<R | IncludedResources<R, I>>;
+export type FieldsetResources<R extends Any, I = false> = ExpandFamilies<
+  R | IncludedResources<R, I>
+>;
 
 /**
  * The nested (decoded) struct fields of a query schema.

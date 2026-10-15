@@ -5,6 +5,9 @@
  * schema itself, the definition's annotations carry over to the partial
  * schema, and its `identifier` does not — that names the strict definition,
  * so the two would collide as one OpenAPI component.
+ *
+ * `sparseMember`: a resource whose type `types` names becomes partial; one
+ * whose type it does not name stays strict, alone or as a family's member.
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Predicate from "effect/Predicate";
@@ -14,7 +17,7 @@ import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "../Endpoint.js";
 import * as Group from "../Group.js";
 import * as Resource from "../Resource.js";
-import { sparseResource } from "./sparse.js";
+import { sparseMember, sparseResource } from "./sparse.js";
 
 const subtitle = Schema.optionalKey(Schema.String);
 const Article = Resource.make("articles", {
@@ -95,5 +98,34 @@ describe("sparseResource (#322)", () => {
     expect(document).toMatchObject(
       getData({ properties: { attributes: { properties: { title: { type: "string" } } } } }),
     );
+  });
+});
+
+describe("sparseMember (#350)", () => {
+  const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
+  const Media = Resource.family("media", [Article, Photo]);
+  // A resource object with no attributes: only a partial schema admits it.
+  interface Bare {
+    readonly type: string;
+    readonly id: string;
+    readonly attributes: Readonly<Record<never, never>>;
+  }
+  const decodes = (schema: Schema.Top, object: Bare): boolean =>
+    Schema.is(Schema.toType(schema))(object);
+  const article: Bare = { type: "articles", id: "1", attributes: {} };
+  const photo: Bare = { type: "photos", id: "2", attributes: {} };
+
+  it("keeps a resource whose type `types` does not name strict", () => {
+    expect(sparseMember(Article, ["photos"])).toBe(Article);
+    expect(decodes(sparseMember(Article, ["photos"]), article)).toBe(false);
+    // Positive control: named, it is the partial schema.
+    expect(sparseMember(Article, ["articles"])).toBe(sparseResource(Article));
+    expect(decodes(sparseMember(Article, ["articles"]), article)).toBe(true);
+  });
+
+  it("keeps a family member whose type `types` does not name strict", () => {
+    const sparse = sparseMember(Media, ["photos"]);
+    expect(decodes(sparse, photo)).toBe(true);
+    expect(decodes(sparse, article)).toBe(false);
   });
 });

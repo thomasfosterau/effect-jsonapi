@@ -59,6 +59,15 @@ const Holder = Resource.make("holders", {
   attributes: { label: Schema.String },
   relationships: { node: Relationship.one(() => AnyNode) },
 });
+// A family nested in another: `outer` is a name-only family over the `nodes`
+// family and `others`, so its wire types are `editors`, `reviewers` and
+// `others` (#350).
+const Other = Resource.make("others", { attributes: { rank: Schema.String } });
+const Outer = Resource.family("outer", [AnyNode, Other]);
+const Nest = Resource.make("nests", {
+  attributes: { label: Schema.String },
+  relationships: { o: Relationship.one(() => Outer) },
+});
 
 // One wire resource object of each type, every attribute present.
 const wire = {
@@ -85,6 +94,13 @@ const wire = {
     id: "1",
     attributes: { label: "L" },
     relationships: { node: { data: { type: "editors", id: "7" } } },
+  },
+  others: { type: "others", id: "4", attributes: { rank: "first" } },
+  nests: {
+    type: "nests",
+    id: "1",
+    attributes: { label: "N" },
+    relationships: { o: { data: { type: "reviewers", id: "8" } } },
   },
 } as const;
 
@@ -251,6 +267,54 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
       expect(admitsPartial(Endpoint.related(Holder, "node"), only(wire.editors), false)).toBe(
         false,
       );
+      const strict = Endpoint.related(Holder, "node", { fields: false });
+      expect(admitsPartial(strict, wire.editors, false)).toBe(true);
+      expect(admitsPartial(strict, only(wire.editors, "name"), false)).toBe(false);
+      expect(admitsPartial(strict, only(reviewer, "note"), false)).toBe(false);
+    });
+  });
+
+  describe("a nested family is partial through its innermost members (#350)", () => {
+    const nest = only(wire.nests);
+    const reviewer = { type: "reviewers", id: "8", attributes: { name: "Rue", note: "second" } };
+
+    it("`related` makes every member of the inner family partial", () => {
+      const endpoint = Endpoint.related(Nest, "o", { fields: true });
+      expect(admitsPartial(endpoint, only(wire.editors, "note"), false)).toBe(true);
+      expect(admitsPartial(endpoint, only(reviewer), false)).toBe(true);
+      expect(admitsPartial(endpoint, only(wire.others), false)).toBe(true);
+      // Whole members still decode, as themselves.
+      expect(
+        Schema.decodeUnknownSync(successOf(endpoint))({ data: only(reviewer, "name") }),
+      ).toMatchObject({ data: { type: "reviewers", id: "8", attributes: { name: "Rue" } } });
+      expect(admitsPartial(endpoint, wire.others, false)).toBe(true);
+      expect(admitsPartial(endpoint, only(wire.tags), false)).toBe(false);
+    });
+
+    it.each([
+      ["get", Endpoint.get(Nest, { fields: true }), false],
+      ["list with `include`", Endpoint.list(Nest, { include: true, fields: true }), true],
+    ] as const)(
+      "%s makes the inner family's members partial in `included`",
+      (_, endpoint, many) => {
+        expect(
+          admitsPartial(endpoint, nest, many, [
+            only(wire.editors, "name"),
+            only(reviewer),
+            only(wire.others),
+          ]),
+        ).toBe(true);
+      },
+    );
+
+    it("without `fields` the members stay strict", () => {
+      const strict = Endpoint.related(Nest, "o", { fields: false });
+      expect(admitsPartial(strict, wire.editors, false)).toBe(true);
+      expect(admitsPartial(strict, only(wire.editors, "name"), false)).toBe(false);
+      expect(admitsPartial(strict, only(wire.others), false)).toBe(false);
+      expect(
+        admitsPartial(Endpoint.get(Nest), wire.nests, false, [only(wire.editors, "name")]),
+      ).toBe(false);
     });
   });
 
@@ -615,13 +679,47 @@ describe("a projected answer over HTTP (#322)", () => {
       { data: wire.holders, included: [only(wire.editors, "name")] },
     ],
     ["/holders/1/node?fields[editors]=name", { data: only(wire.editors, "name") }],
-    // The family name is still declared, and names no resource object, so it
-    // trims nothing (the alias question on #350 is the owner's).
-    ["/holders/1?fields[nodes]=name", { data: wire.holders, included: [wire.editors] }],
   ])("answers 200 omitting the excluded attributes: %s", async (url, expected) => {
     const response = await serve(url);
     expect(response.status).toBe(200);
     expect(response.body).toEqual(expected);
+  });
+
+  // A family's name is never a wire type, so `fields[<family name>]` is not
+  // declared: like any undeclared type, it is a 400 naming the parameter
+  // (owner decision on #350, the #261 rule) — on a relationship targeting the
+  // family and on an endpoint whose primary data is the family alike.
+  it.each([
+    "/holders/1?fields[nodes]=name",
+    "/holders/1/node?fields[nodes]=name",
+    "/nodes/7?fields[nodes]=name",
+  ])("rejects a family's name as a fieldset type: %s", async (url) => {
+    const response = await serve(url);
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [
+        expect.objectContaining({
+          status: "400",
+          detail: expect.stringContaining('does not support the "fields[nodes]" parameter'),
+          source: { parameter: "fields[nodes]" },
+        }),
+      ],
+    });
+  });
+
+  // A member type's fieldset is closed over that member's own attributes.
+  it("rejects an attribute a family member does not have", async () => {
+    const response = await serve("/holders/1?fields[editors]=score");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [
+        expect.objectContaining({
+          status: "400",
+          detail: 'Expected "name" | "note"',
+          source: { parameter: "fields[editors]" },
+        }),
+      ],
+    });
   });
 
   // An `HttpClient` that sends every request to the in-memory api.
