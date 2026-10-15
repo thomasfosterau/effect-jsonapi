@@ -7724,13 +7724,13 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
     });
 
     /**
-     * The package's own answer with `error`, at the status its document
-     * carries; both errors name the header as their source.
+     * The package's own answer with `Refusal`, at that error's status; both
+     * errors name the header as their source.
      */
-    const keyError = (error: Idempotency.KeyInProgress | Idempotency.KeyMismatch): Canned => {
-      const body = ApiError.toDocument(error);
-      return { status: Number(body.errors[0]?.status), body };
-    };
+    const keyError = (Refusal: (typeof Idempotency.Errors)[number]): Canned => ({
+      status: Refusal.status,
+      body: ApiError.toDocument(new Refusal()),
+    });
 
     it("leave a delete refused for the missing key undecided where the endpoint declares the header", async () => {
       // `idempotency: true` reads as optional, as a key required through a
@@ -7767,8 +7767,8 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
         { idempotency: "required", answer: missingKey() },
         { idempotency: true, answer: missingKey(500) },
         { idempotency: true, answer: missingKey(303) },
-        { idempotency: true, answer: keyError(new Idempotency.KeyInProgress()) },
-        { idempotency: true, answer: keyError(new Idempotency.KeyMismatch()) },
+        { idempotency: true, answer: keyError(Idempotency.KeyInProgress) },
+        { idempotency: true, answer: keyError(Idempotency.KeyMismatch) },
         { idempotency: true, answer: { status: 400, body: { errors: [{ status: "400" }] } } },
         {
           idempotency: true,
@@ -7940,6 +7940,24 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
           }),
         );
         expect(seen).toEqual(["(no key)"]);
+      });
+
+      it("leave a malformed document refused on any other key grounds undecided", async () => {
+        // Unlike the delete rule, which judges the answer itself, this rule
+        // judges only whether the server examined the document; a 409 or 422
+        // naming the header refused the request over its key, which says
+        // nothing about that.
+        const outcomes = await Promise.all(
+          [Idempotency.KeyInProgress, Idempotency.KeyMismatch].map(async (Refusal) => {
+            const serve = atomicServer([], true, false);
+            const report = await verifyOver(atomicApi(true))(
+              (request) => (request.method === "POST" ? keyError(Refusal) : serve(request)),
+              atomicOptions("spec/atomic/malformed-operations-rejected"),
+            );
+            return outcomeFor(report, "spec/atomic/malformed-operations-rejected")._tag;
+          }),
+        );
+        expect(outcomes).toEqual(["Skipped", "Skipped"]);
       });
     });
   });
