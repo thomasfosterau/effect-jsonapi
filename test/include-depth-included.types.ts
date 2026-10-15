@@ -9,12 +9,17 @@
  * with `include` off, or with a declared `Include.Surface`, keeps exactly the
  * document it had. The runtime half is `src/Endpoint.included.test.ts`.
  *
+ * `Include.included(resource, { include })` returns that union (#342), so an
+ * endpoint that overrides `success` can declare it; the last section pins it
+ * to every endpoint's default here.
+ *
  * This file is type-checked by `tsconfig.json`; the `@ts-expect-error`
  * annotations are the assertions, each paired with a positive control.
  */
 import * as Schema from "effect/Schema";
 import type { HttpApiEndpoint } from "effect/http-api";
 import {
+  Document,
   Endpoint,
   Handlers,
   Include,
@@ -334,3 +339,106 @@ export const surface = Endpoint.get(Article, {
   include: Include.make(Article, { comments: Comment }),
 });
 assertType<Equals<IncludedOf<typeof surface>, typeof Comment.Type>>(true);
+
+// ---------------------------------------------------------------------------
+// `Include.included(resource, { include })` is that union (#342)
+// ---------------------------------------------------------------------------
+
+// What an endpoint that overrides `success` declares in `included` to keep the
+// default's union: each pin compares the helper's members with the default
+// document's, for every endpoint above. The runtime half is
+// `src/Include.included.test.ts`.
+
+// `get` and `list`, under each `include` option.
+const onUnion = Include.included(Article, { include: true });
+assertType<Equals<(typeof onUnion)["Type"], IncludedOf<typeof get>>>(true);
+assertType<Equals<(typeof onUnion)["Type"], IncludedOf<typeof list>>>(true);
+// Its public name.
+assertType<Include.Reachable<typeof Article, true>>(onUnion);
+const deepUnion = Include.included(Article, { include: { depth: 3 } });
+assertType<Equals<(typeof deepUnion)["Type"], IncludedOf<typeof deep>>>(true);
+// Negative control: the depth-2 union is narrower than the depth-3 default.
+assertType<Equals<(typeof onUnion)["Type"], IncludedOf<typeof deep>>>(false);
+const allowUnion = Include.included(Article, { include: { paths: ["comments"] } });
+assertType<Equals<(typeof allowUnion)["Type"], IncludedOf<typeof allowList>>>(true);
+const offUnion = Include.included(Article, { include: false });
+assertType<Equals<(typeof offUnion)["Type"], IncludedOf<typeof plain>>>(true);
+assertType<Equals<(typeof offUnion)["Type"], IncludedOf<typeof off>>>(true);
+assertType<Equals<(typeof offUnion)["Type"], IncludedOf<typeof plainList>>>(true);
+// Negative control: with `include` off, `comments.author`'s `Person` is not admitted.
+assertType<Equals<(typeof offUnion)["Type"], IncludedOf<typeof get>>>(false);
+
+// A declared surface: the surface's own union (the same schema at runtime).
+const articleSurface = Include.make(Article, {
+  comments: Include.nested(Comment, { author: Person }),
+});
+export const surfaceGet = Endpoint.get(Article, { include: articleSurface });
+const surfaceUnion = Include.included(Article, { include: articleSurface });
+assertType<Equals<(typeof surfaceUnion)["Type"], IncludedOf<typeof surfaceGet>>>(true);
+assertType<Equals<typeof surfaceUnion, (typeof articleSurface)["included"]>>(true);
+
+// `related`: the target's graph, to-many and to-one.
+const commentUnion = Include.included(Comment, { include: true });
+assertType<Equals<(typeof commentUnion)["Type"], IncludedOf<typeof related>>>(true);
+assertType<Equals<(typeof commentUnion)["Type"], IncludedOf<typeof relatedOne>>>(true);
+const plainCommentUnion = Include.included(Comment, { include: false });
+assertType<Equals<(typeof plainCommentUnion)["Type"], IncludedOf<typeof plainRelated>>>(true);
+assertType<Equals<(typeof plainCommentUnion)["Type"], IncludedOf<typeof plainRelatedOne>>>(true);
+// Negative control: the source resource's union is not the target's.
+assertType<Equals<(typeof onUnion)["Type"], IncludedOf<typeof related>>>(false);
+
+// `collection`: every member's graph, without the paginated targets (#365).
+const searchUnion = Include.included([Article, Person], { include: true });
+assertType<Equals<(typeof searchUnion)["Type"], IncludedOf<typeof search>>>(true);
+const plainSearchUnion = Include.included([Article, Person], { include: false });
+assertType<Equals<(typeof plainSearchUnion)["Type"], IncludedOf<typeof plainSearch>>>(true);
+const entryUnion = Include.included([Post, Draft], { include: true });
+assertType<Equals<(typeof entryUnion)["Type"], IncludedOf<typeof entryCollection>>>(true);
+const plainEntryUnion = Include.included([Post, Draft], { include: false });
+assertType<Equals<(typeof plainEntryUnion)["Type"], IncludedOf<typeof plainEntryCollection>>>(true);
+// Negative control: `include: true` widens the collection's union.
+assertType<Equals<(typeof plainSearchUnion)["Type"], IncludedOf<typeof search>>>(false);
+
+// `polymorphic`: the family's members, a path from a member other than the
+// first, and a target one member reaches only through a paginated relationship.
+const nodeUnion = Include.included(AnyNode.members, { include: true });
+assertType<Equals<(typeof nodeUnion)["Type"], IncludedOf<typeof node>>>(true);
+assertType<Equals<(typeof nodeUnion)["Type"], IncludedOf<typeof editorFirst>>>(true);
+const plainNodeUnion = Include.included(AnyNode.members, { include: false });
+assertType<Equals<(typeof plainNodeUnion)["Type"], IncludedOf<typeof plainNode>>>(true);
+assertType<Equals<(typeof entryUnion)["Type"], IncludedOf<typeof entries>>>(true);
+const secondHopUnion = Include.included([SecondPost, SecondDraft], { include: true });
+assertType<Equals<(typeof secondHopUnion)["Type"], IncludedOf<typeof secondHop>>>(true);
+
+// Every `Query.IncludeOption` an endpoint accepts, the helper accepts: its own
+// constraint is spelled out, `Query` being outside the schema tier.
+export const forward = <const I extends Query.IncludeOption<typeof Article>>(include: I) =>
+  Include.included(Article, { include });
+export const forwardMembers = <const I extends boolean | Query.IncludeOptions<typeof Article>>(
+  include: I,
+) => Include.included([Article, Person], { include });
+
+// The overloads cannot be confused.
+const declared = Include.included({ comments: Include.nested(Comment, { author: Person }) });
+assertType<Equals<(typeof declared)["Type"], typeof Comment.Type | typeof Person.Type>>(true);
+// @ts-expect-error -- a resource without an `include` option is no declaration
+Include.included(Article);
+// Positive control: with the option, it is the resource form.
+Include.included(Article, { include: false });
+// @ts-expect-error -- a declaration takes no `include` option
+Include.included({ comments: Comment }, { include: true });
+// @ts-expect-error -- an include path `Article` does not have
+Include.included(Article, { include: { paths: ["author"] } });
+// @ts-expect-error -- another resource's surface
+Include.included(Comment, { include: articleSurface });
+// @ts-expect-error -- a surface describes one resource; `collection` ignores it (#336)
+Include.included([Article, Person], { include: articleSurface });
+
+// The use it exists for: a wire-variant `success` keeps the default's union.
+const WireArticle = Schema.Struct({ ...Article.fields });
+export const wireGet = Endpoint.get(Article, {
+  include: true,
+  success: Document.DataDocument(WireArticle, { included: onUnion }),
+});
+assertType<Equals<IncludedOf<typeof wireGet>, IncludedOf<typeof get>>>(true);
+assertType<SuccessOf<typeof wireGet>>(deepDocument);

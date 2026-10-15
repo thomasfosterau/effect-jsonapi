@@ -701,7 +701,7 @@ const articles = Group.resource(Article, {
 
 Pass `success` to supply that schema. It defaults to today's `document()` / `collection()`, so existing endpoints are unchanged; only the response moves — path, params, query parameters, request payload, errors and middleware stay exactly as they were. Any schema works, exactly as with `payload`: the document envelope is untouched, so `Handlers.offsetPaginationLinks` and the rest of the handler helpers still apply.
 
-With `include` on (`true` or a `Query.IncludeOptions`), the default document's `included` covers every type a legal include path reaches, not only the resource's direct targets (see [Constraining the advertised include paths](#constraining-the-advertised-include-paths)). A hand-written `success` replaces that union with whatever its own `included` admits, and `Document.DataDocument` / `CollectionDocument` admit nothing in `included` unless you pass the union. So an override on an endpoint that advertises `comments.author` must list `Comment` and `Person` itself, or the response for that path fails to encode; the `Group.resource` example below, whose `get` and `list` default to `include: true`, lists what `Article`'s paths reach ([#342](https://github.com/thomasfosterau/effect-jsonapi/issues/342) tracks a public helper that builds the union). On an endpoint that declares `fields`, a hand-written `success` also replaces the default's partial attributes (see [Sparse fieldsets and the default document](#sparse-fieldsets-and-the-default-document)).
+With `include` on (`true` or a `Query.IncludeOptions`), the default document's `included` covers every type a legal include path reaches, not only the resource's direct targets (see [Constraining the advertised include paths](#constraining-the-advertised-include-paths)). A hand-written `success` replaces that union with whatever its own `included` admits, and `Document.DataDocument` / `CollectionDocument` admit nothing in `included` unless you pass the union. So an override on an endpoint that advertises `comments.author` must admit `Comment` and `Person` itself, or the response for that path fails to encode. `Include.included(Article, { include })` builds that union: given the resource and the endpoint's `include` option, it returns the same `included` union the default document binds, so it follows the relationship graph rather than drifting from it. For a `related` endpoint pass the relationship's target, and for `collection` / `polymorphic` the array of members (`family.members`) with a boolean or `Query.IncludeOptions`. The `Group.resource` example below, whose `get` and `list` default to `include: true`, uses it. On an endpoint that declares `fields`, a hand-written `success` also replaces the default's partial attributes (see [Sparse fieldsets and the default document](#sparse-fieldsets-and-the-default-document)).
 
 ```ts
 // The wire variant: the resource, with its link members narrowed to plain strings
@@ -723,14 +723,15 @@ Endpoint.list(Article, {
 The same option is available per-endpoint when generating a whole group, so a `Group.resource` call site can adopt the wire variant without giving up the generated surface:
 
 ```ts
+// The `included` union `Endpoint.get(Article, { include: true })` binds by default
+const included = Include.included(Article, { include: true });
+
 const articles = Group.resource(Article, {
   endpoints: {
-    // `Group.resource` turns `include: true` on for `get` and `list`, whose paths
-    // (`author`, `editor`, `tags`) reach `Person` and `Tag`: list them in `included`.
-    get: { success: Document.DataDocument(WireArticle, { included: Schema.Union([Person, Tag]) }) },
-    list: {
-      success: Document.CollectionDocument(WireArticle, { included: Schema.Union([Person, Tag]) }),
-    },
+    // `Group.resource` turns `include: true` on for `get` and `list`: their documents
+    // admit what `Article`'s include paths reach (`Person` and `Tag`).
+    get: { success: Document.DataDocument(WireArticle, { included }) },
+    list: { success: Document.CollectionDocument(WireArticle, { included }) },
     create: { success: Document.DataDocument(WireArticle) },
     update: { success: Document.DataDocument(WireArticle) },
   },
@@ -1389,7 +1390,7 @@ HttpApiBuilder.group(Api, "articles", (handlers) =>
 
 **Keeping strict attributes.** When every caller wants every attribute, leave `fields` off: `fields: false`, which `Group.resource` / `Endpoint.resource` take at the top level or per endpoint. The endpoint then binds the strict document it would have without `fields`, and `?fields[TYPE]=` is a 400 rather than an answer the client cannot trim.
 
-Keeping `fields` and passing a strict `success` also works, at two costs. First, the handler must not project, so a request for a fieldset is answered with every attribute, including those the client excluded. Second, `success` replaces the whole default document, and `Article.document()` (`Article.collection()` for `list`) equals the strict default only while `include` is off and the endpoint's `meta` is not overridden. With `include` on, which is the `Group.resource` default, its `included` admits only `Article`'s direct targets, not every type an include path reaches, and an endpoint `meta` option no longer applies. The override must then reproduce both: `Article.document({ included: Schema.Union([...]), meta })`, listing every type `Article`'s include paths reach (see [Overriding the success document](#overriding-the-success-document); [#342](https://github.com/thomasfosterau/effect-jsonapi/issues/342) tracks a public helper that builds the union).
+Keeping `fields` and passing a strict `success` also works, at two costs. First, the handler must not project, so a request for a fieldset is answered with every attribute, including those the client excluded. Second, `success` replaces the whole default document, and `Article.document()` (`Article.collection()` for `list`) equals the strict default only while `include` is off and the endpoint's `meta` is not overridden. With `include` on, which is the `Group.resource` default, its `included` admits only `Article`'s direct targets, not every type an include path reaches, and an endpoint `meta` option no longer applies. The override must then reproduce both: `Article.document({ included: Include.included(Article, { include }), meta })`, whose `included` admits every type `Article`'s include paths reach (see [Overriding the success document](#overriding-the-success-document)).
 
 `Handlers.withMeta` merges the computed members over whatever `meta` the resource already carries, and emits **no** `meta` member when the merged result is empty: to the spec an empty `meta` object is a present-but-empty meta, which says something different from saying nothing.
 
