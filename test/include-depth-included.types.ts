@@ -131,13 +131,10 @@ export const search = Endpoint.collection([Article, Person], {
   path: "/search",
   include: true,
 });
-// The members' `TargetsOf` (paginated `Revision` included, as before) plus the
-// depth-2 `comments.author`.
+// The members' non-`paginated` direct targets plus the depth-2
+// `comments.author`; `Article.history`'s paginated `Revision` is not one (#337).
 assertType<
-  Equals<
-    IncludedOf<typeof search>,
-    typeof Comment.Type | typeof Person.Type | typeof Company.Type | typeof Revision.Type
-  >
+  Equals<IncludedOf<typeof search>, typeof Comment.Type | typeof Person.Type | typeof Company.Type>
 >(true);
 
 const Node = Resource.make("nodes", { attributes: { name: Schema.String } });
@@ -193,18 +190,64 @@ assertType<
     "posts" | "drafts" | "people" | "companies"
   >
 >(true);
-// #337: `collection` still widens its `included` type with every member's
-// `TargetsOf`, paginated `Revision` included, though the runtime document
-// rejects a `revisions` member. Fixing #337 changes this pin.
+// `collection` admits what `polymorphic` does: `drafts.author`'s paginated
+// `Revision` is no member's includable target, so it is not in `included`,
+// as the runtime document rejects a `revisions` member (#337).
 export const entryCollection = Endpoint.collection([Post, Draft], {
   name: "entries",
   path: "/entries",
   include: true,
 });
+assertType<Equals<IncludedOf<typeof entryCollection>, typeof Person.Type | typeof Company.Type>>(
+  true,
+);
+// The same with `include` off, and with `fields: true` (whose `included`
+// members are partial, so compare their `type` tags).
+export const plainEntryCollection = Endpoint.collection([Post, Draft], {
+  name: "entries",
+  path: "/entries",
+});
+assertType<Equals<IncludedOf<typeof plainEntryCollection>, typeof Person.Type>>(true);
+export const sparseEntryCollection = Endpoint.collection([Post, Draft], {
+  name: "entries",
+  path: "/entries",
+  include: true,
+  fields: true,
+});
+assertType<Equals<IncludedOf<typeof sparseEntryCollection>["type"], "people" | "companies">>(true);
+
+// A handler's document for `entries` may carry `people` but not `revisions`.
+const post = Post.make({
+  id: Post.Id.make("1"),
+  attributes: { title: "Hello" },
+  relationships: { author: { data: { type: "people", id: person.id } } },
+});
+const revision = Revision.make({
+  id: Revision.Id.make("3"),
+  attributes: { editedAt: "2026-01-01" },
+});
+assertType<SuccessOf<typeof plainEntryCollection>>(
+  Handlers.collection([post], { included: [person] }),
+);
+assertType<SuccessOf<typeof plainEntryCollection>>(
+  // @ts-expect-error -- `revisions` is only behind `drafts.author`, a paginated relationship (#337)
+  Handlers.collection([post], { included: [revision] }),
+);
+assertType<SuccessOf<typeof entryCollection>>(
+  // @ts-expect-error -- not under `include: true` either (#337)
+  Handlers.collection([post], { included: [person, revision] }),
+);
+// Positive control: the include walk's `people` and `companies` fit.
+assertType<SuccessOf<typeof entryCollection>>(
+  Handlers.collection([post], {
+    included: [person, Company.make({ id: Company.Id.make("2"), attributes: { name: "Acme" } })],
+  }),
+);
+// The public `CollectionIncluded` is the members' non-`paginated` targets.
 assertType<
   Equals<
-    IncludedOf<typeof entryCollection>,
-    typeof Person.Type | typeof Company.Type | typeof Revision.Type
+    Endpoint.CollectionIncluded<readonly [typeof Post, typeof Draft]>["Type"],
+    typeof Person.Type
   >
 >(true);
 
@@ -278,12 +321,10 @@ export const plainSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",
 });
-assertType<
-  Equals<
-    IncludedOf<typeof plainSearch>,
-    typeof Comment.Type | typeof Revision.Type | typeof Company.Type
-  >
->(true);
+// `Article.history` is paginated, so its `Revision` is not admitted (#337).
+assertType<Equals<IncludedOf<typeof plainSearch>, typeof Comment.Type | typeof Company.Type>>(true);
+// @ts-expect-error -- `revisions` is reached only through a paginated relationship
+assertType<IncludedOf<typeof plainSearch>>(revision);
 
 export const plainNode = Endpoint.polymorphic(AnyNode);
 assertType<Equals<IncludedOf<typeof plainNode>, typeof Comment.Type>>(true);
