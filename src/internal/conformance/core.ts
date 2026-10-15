@@ -239,6 +239,12 @@ export interface Discovered {
   readonly queryEnumerable: boolean;
   /** `true` when the query admits arbitrary `filter[…]` keys — `filter: true`, the grammar. */
   readonly filterGrammar: boolean;
+  /**
+   * The family prefixes the query declares an open record of (`filter[`, the
+   * grammar's; a hand-built `fields[` or `page[`), each admitting every name
+   * it opens. `queryKeys` leaves them out.
+   */
+  readonly queryPrefixes: ReadonlyArray<string>;
 }
 
 const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | undefined }>(
@@ -247,18 +253,25 @@ const resolveEncoding = SchemaAST.resolveAt<{ readonly contentType?: string | un
 
 /**
  * What an endpoint's query declares, by the walk `Middleware` checks requests
- * against: its flat keys, apart from the `filter[` prefix a `filter: true`
- * rest contributes, or nothing enumerable at all.
+ * against: its flat keys, and apart from them the family prefixes an open
+ * record contributes (`filter[`, a `filter: true` rest's), or nothing
+ * enumerable at all.
  */
 const wireKeys = (
   schema: { readonly ast: SchemaAST.AST } | undefined,
-): Pick<Discovered, "queryKeys" | "queryEnumerable" | "filterGrammar"> =>
+): Pick<Discovered, "queryKeys" | "queryEnumerable" | "filterGrammar" | "queryPrefixes"> =>
   Option.match(schema === undefined ? Option.some([]) : declaredNames(schema.ast), {
-    onNone: () => ({ queryKeys: [], queryEnumerable: false, filterGrammar: false }),
+    onNone: () => ({
+      queryKeys: [],
+      queryEnumerable: false,
+      filterGrammar: false,
+      queryPrefixes: [],
+    }),
     onSome: (names) => ({
       queryKeys: names.filter((name) => !name.endsWith("[")),
       queryEnumerable: true,
       filterGrammar: names.includes("filter["),
+      queryPrefixes: names.filter((name) => name.endsWith("[")),
     }),
   });
 

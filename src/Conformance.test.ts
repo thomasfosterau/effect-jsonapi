@@ -198,6 +198,26 @@ const withoutQuery = <R extends { readonly path: string }>(request: R): R => ({
 const offsite = (path: string) =>
   `a 302 redirect to https://elsewhere.test${path}, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`;
 
+/** The families of query parameter JSON:API defines. */
+const FAMILIES = ["include", "sort", "page", "filter", "fields"];
+
+/**
+ * The names of the specification's families `conformantServe` processes: the
+ * bare `include` and `sort` (it refuses every `sort`), and a sparse fieldset
+ * for each type it serves. It does not paginate or filter, so any other name
+ * of a family is one it does not know how to process (#310).
+ */
+const PROCESSED = ["include", "sort", "fields[articles]", "fields[people]"];
+
+/**
+ * Whether `conformantServe` refuses a query parameter with a 400: a name of a
+ * family the specification defines that it does not process, or — §Query
+ * Parameters: an implementation-specific name must carry a non a-z character
+ * — a purely a-z name it does not know.
+ */
+const refusesParameter = (key: string): boolean =>
+  FAMILIES.includes(key.split("[")[0] ?? key) ? !PROCESSED.includes(key) : /^[a-z]+$/.test(key);
+
 /**
  * A correct-enough server: negotiates per §5, answers well-formed documents,
  * projects sparse fieldsets, rejects unknown query parameters and absent ids.
@@ -266,19 +286,8 @@ const conformantServe = (request: {
   // baseline unions repeated keys before reading any of them.
   const params = new URLSearchParams();
   for (const key of new Set(raw.keys())) params.set(key, raw.getAll(key).join(","));
-  const reserved = new Set(["include", "sort", "page", "filter", "fields"]);
-  for (const key of params.keys()) {
-    const family = key.split("[")[0]!;
-    if (reserved.has(family)) continue;
-    // §Query Parameters: an implementation-specific name must carry a non a-z
-    // character; a purely a-z name the server does not know is a 400.
-    if (/^[a-z]+$/.test(key)) {
-      return {
-        status: 400,
-        body: { errors: [{ status: "400", title: "Bad Request", source: { parameter: key } }] },
-      };
-    }
-  }
+  const refused = Arr.findFirst([...params.keys()], refusesParameter);
+  if (Option.isSome(refused)) return badRequest({ source: { parameter: refused.value } });
 
   const include =
     params
@@ -996,6 +1005,37 @@ describe("Conformance: detects a deliberately broken server", () => {
       queryOf(request).has("sort") ? conformantServe(withoutQuery(request)) : canned,
   );
 
+  // No endpoint of the fixture paginates or filters, and each declares only
+  // the bare `include`: a server that drops a parameter of either family, or a
+  // bracketed `include[]`, answers as if it had never been sent (#310).
+  broken(
+    "a `page[…]` on an endpoint that declares no `page`, ignored",
+    "spec/query/page-unsupported-endpoint",
+    (canned, request) =>
+      queryOf(request).has("page[limit]") ? conformantServe(withoutQuery(request)) : canned,
+  );
+
+  broken(
+    "a `filter[…]` on an endpoint that declares no `filter`, ignored",
+    "spec/query/filter-unsupported-endpoint",
+    (canned, request) =>
+      [...queryOf(request).keys()].some((key) => key.startsWith("filter["))
+        ? conformantServe(withoutQuery(request))
+        : canned,
+  );
+
+  broken(
+    "a bracketed `include[]` read as `include`",
+    "spec/query/include-bracketed",
+    (canned, request) =>
+      queryOf(request).has("include[]")
+        ? conformantServe({
+            ...request,
+            path: `${withoutQuery(request).path}?include=${queryOf(request).get("include[]")}`,
+          })
+        : canned,
+  );
+
   it("does not flag anything else when one rule is broken", async () => {
     const report = await verifyCanned((request) => {
       const canned = conformantServe(request);
@@ -1407,6 +1447,338 @@ describe("Conformance: a hand-built query that is not a plain struct", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A family or member the endpoint does not declare (#310)
+// ---------------------------------------------------------------------------
+
+/**
+ * `get` declares no query at all, so it must refuse `fields[articles]`,
+ * `page[…]` and `filter[…]`; `list` declares the bare `include` and `sort`,
+ * offset page keys and a `filter[title]` member, so it must refuse a
+ * bracketed `include[]` / `sort[]` and an undeclared `page` / `filter` member.
+ */
+describe("Conformance: a family or member the endpoint does not declare", () => {
+  const RULES = {
+    fields: "spec/query/fields-unsupported-endpoint",
+    page: "spec/query/page-unsupported-endpoint",
+    filter: "spec/query/filter-unsupported-endpoint",
+    pageMember: "spec/query/page-undeclared-member",
+    filterMember: "spec/query/filter-undeclared-member",
+    include: "spec/query/include-bracketed",
+    sort: "spec/query/sort-bracketed",
+  } as const;
+  const ALL = [
+    RULES.fields,
+    RULES.page,
+    RULES.filter,
+    RULES.pageMember,
+    RULES.filterMember,
+    RULES.include,
+    RULES.sort,
+  ];
+
+  const familyApi = HttpApi.make("families").add(
+    Group.make(
+      Article,
+      Endpoint.get(Article),
+      Endpoint.list(Article, {
+        include: true,
+        sort: true,
+        page: Query.Page.Offset,
+        filter: { title: Schema.optionalKey(Schema.String) },
+      }),
+    ),
+  );
+  const verifyFamily = verifyOver(familyApi);
+
+  /** The names of the specification's families the endpoint at `path` declares. */
+  const declaredAt = (path: string): ReadonlyArray<string> =>
+    path === "/articles" ? ["include", "sort", "page[offset]", "page[limit]", "filter[title]"] : [];
+  const FAMILY = /^(include|sort|page|filter|fields)(\[|$)/;
+
+  /**
+   * A server that refuses a name of a family its endpoint does not declare,
+   * naming it, as `Middleware.SchemaErrors` does — except the ones `ignored`
+   * picks, which it drops, answering as if they had never been sent.
+   */
+  const familyServe =
+    (ignored: (key: string) => boolean = () => false) =>
+    (request: CannedRequest): Canned => {
+      const { path } = withoutQuery(request);
+      const sent = Arr.filter([...queryOf(request)], ([key]) => !ignored(key));
+      const refused = Arr.findFirst(
+        sent,
+        ([key]) => FAMILY.test(key) && !declaredAt(path).includes(key),
+      );
+      if (Option.isSome(refused)) return badRequest({ source: { parameter: refused.value[0] } });
+      const kept = new URLSearchParams(sent);
+      return conformantServe({ ...request, path: kept.size === 0 ? path : `${path}?${kept}` });
+    };
+
+  /** Each rule, the parameter it sends, and the URL it sends it to. */
+  const PROBES = [
+    [RULES.fields, "fields[articles]", "/articles/1?fields[articles]=title"],
+    [RULES.page, "page[limit]", "/articles/1?page[limit]=1"],
+    [RULES.filter, "filter[title]", "/articles/1?filter[title]=1"],
+    [RULES.pageMember, "page[offset_x]", "/articles?page[offset_x]=1"],
+    [RULES.filterMember, "filter[title_x]", "/articles?filter[title_x]=1"],
+    [RULES.include, "include[]", "/articles?include[]=author"],
+    [RULES.sort, "sort[]", "/articles?sort[]=title"],
+  ] as const;
+
+  it("passes against a server that refuses each, having probed only an undeclared name", async () => {
+    const seen: Array<string> = [];
+    const report = await verifyFamily((request) => {
+      seen.push(request.path);
+      return familyServe()(request);
+    });
+    expect(failed(report)).toEqual([]);
+    expect(Arr.map(ALL, (id) => outcomeFor(report, id))).toEqual(
+      Arr.map(ALL, () => expect.objectContaining({ _tag: "Passed", probes: 2, note: undefined })),
+    );
+    // A baseline, then the probe, for each rule in turn: never a declared name.
+    const probed = seen.filter((path) => PROBES.some(([, , url]) => url === path));
+    expect(probed).toEqual(PROBES.map(([, , url]) => url));
+  });
+
+  it.each(PROBES)("fails %s alone when the server ignores `%s`", async (id, parameter, url) => {
+    const report = await verifyFamily(familyServe((key) => key === parameter));
+    expect(failed(report)).toEqual([id]);
+    expect(outcomeFor(report, id)).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: `\`${url.slice(url.indexOf("?"))}\` on ${url.split("?")[0]}, which does not declare \`${parameter}\`, was not rejected`,
+          expected: "400 Bad Request",
+          observed: expect.stringMatching(/^200 /),
+          probe: { url },
+        },
+      ],
+    });
+  });
+
+  it("fails a 400 whose `source.parameter` blames another parameter", async () => {
+    const report = await verifyFamily(
+      (request) => {
+        const canned = familyServe()(request);
+        return canned.status === 400 ? badRequest({ source: { parameter: "include" } }) : canned;
+      },
+      { only: [RULES.page] },
+    );
+    expect(outcomeFor(report, RULES.page)).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          expected: `source: { parameter: "page[limit]" }`,
+          observed: "source.parameter: `include`",
+        },
+      ],
+    });
+  });
+
+  it.each([503, 429, 408])("does not decide on a probe answered %i", async (status) => {
+    const report = await verifyFamily((request) =>
+      queryOf(request).size > 0
+        ? { status, body: { errors: [{ status: `${status}` }] } }
+        : familyServe()(request),
+    );
+    expect(Arr.map(PROBES, ([id]) => outcomeFor(report, id))).toEqual(
+      Arr.map(PROBES, ([id, , url]) => ({
+        _tag: "Skipped",
+        rule: expect.objectContaining({ id }),
+        reason: `not decided: \`${url.slice(url.indexOf("?"))}\` on ${url.split("?")[0]} answered ${status}, and a server error, a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter`,
+      })),
+    );
+  });
+
+  it("does not decide on a probe that got no response", async () => {
+    const report = await verifyFamily(familyServe(), { only: ALL }, (client) =>
+      HttpClient.make((request) =>
+        request.url.includes("?")
+          ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, description: "reset" }),
+              }),
+            )
+          : client.execute(request),
+      ),
+    );
+    expect(Arr.map(ALL, (id) => outcomeFor(report, id))).toEqual(
+      Arr.map(ALL, () =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringMatching(/^not decided: .* answered no response \(/),
+        }),
+      ),
+    );
+  });
+
+  it("probes a member derived past every name the endpoint declares", async () => {
+    const crowded = HttpApi.make("crowded").add(
+      Group.make(
+        Article,
+        Endpoint.list(Article, {
+          filter: {
+            title: Schema.optionalKey(Schema.String),
+            title_x: Schema.optionalKey(Schema.String),
+          },
+        }),
+      ),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(crowded)(
+      (request) => {
+        seen.push(request.path);
+        return queryOf(request).has("filter[title_x_x]")
+          ? badRequest({ source: { parameter: "filter[title_x_x]" } })
+          : conformantServe(request);
+      },
+      { only: [RULES.filterMember] },
+    );
+    expect(outcomeFor(report, RULES.filterMember)).toMatchObject({ _tag: "Passed" });
+    expect(seen).toEqual(["/articles", "/articles?filter[title_x_x]=1"]);
+  });
+
+  it("probes `fields` only for a type the endpoint does not declare", async () => {
+    // Every endpoint of the main fixture declares `fields[TYPE]` for every type
+    // it can show, so there is no undeclared fieldset to probe.
+    const seen: Array<string> = [];
+    const report = await verifyCanned(
+      (request) => {
+        seen.push(request.path);
+        return conformantServe(request);
+      },
+      { only: [RULES.fields] },
+    );
+    expect(outcomeFor(report, RULES.fields)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no read endpoint answered its baseline request with 2xx showing a type it does not declare `fields[TYPE]` for (/articles/1: declares `fields[TYPE]` for every type its baseline shows (articles); /articles: declares `fields[TYPE]` for every type its baseline shows (articles))",
+    });
+    expect(seen).toEqual(["/articles/1", "/articles"]);
+  });
+
+  it("skips, naming why, when no endpoint has the shape a rule probes", async () => {
+    const report = await verifyCanned(conformantServe, {
+      only: [RULES.pageMember, RULES.filterMember, RULES.sort],
+    });
+    expect(outcomeFor(report, RULES.pageMember)).toMatchObject({
+      _tag: "Skipped",
+      reason: "no read endpoint declares `page[…]` members by name without an open `page[` record",
+    });
+    expect(outcomeFor(report, RULES.filterMember)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no read endpoint declares `filter[…]` members by name without an open `filter[` record",
+    });
+    expect(outcomeFor(report, RULES.sort)).toMatchObject({
+      _tag: "Skipped",
+      reason: "no read endpoint declares the bare `sort` and not `sort[]`",
+    });
+  });
+
+  it("never probes an open `filter[…]` grammar, which validates every member itself", async () => {
+    const Product = Resource.make("products", {
+      attributes: { name: Schema.String.pipe(Filter.able([Filter.Op.eq])) },
+    });
+    const grammar = HttpApi.make("grammar").add(
+      Group.make(Product, Endpoint.list(Product, { filter: true, page: Query.Page.Offset })),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(grammar)(
+      (request) => {
+        seen.push(request.path);
+        return conformantServe(request);
+      },
+      { only: [RULES.filter, RULES.filterMember, RULES.page] },
+    );
+    expect(outcomeFor(report, RULES.filter)).toMatchObject({
+      _tag: "Skipped",
+      reason: "every read endpoint declares a `filter` parameter",
+    });
+    expect(outcomeFor(report, RULES.filterMember)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no read endpoint declares `filter[…]` members by name without an open `filter[` record",
+    });
+    expect(outcomeFor(report, RULES.page)).toMatchObject({
+      _tag: "Skipped",
+      reason: "every read endpoint declares a `page` parameter",
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it("reads a hand-built open record of a family as declaring all of it", async () => {
+    // `/articles` declares `filter[status]` beside an open `filter[…]` record,
+    // `/articles/:id` an open `page[…]` record alone: each admits every member
+    // of its family, so neither is probed for one.
+    const open = (head: string) =>
+      Schema.Record(Schema.TemplateLiteral([head, Schema.String, "]"]), Schema.String);
+    const handBuilt = HttpApi.make("open").add(
+      HttpApiGroup.make("articles")
+        .add(
+          HttpApiEndpoint.get("get", "/articles/:id", {
+            params: { id: Schema.String },
+            query: Schema.StructWithRest(Schema.Struct({}), [open("page[")]),
+            success: Schema.Unknown,
+          }),
+        )
+        .add(
+          HttpApiEndpoint.get("list", "/articles", {
+            query: Schema.StructWithRest(
+              Schema.Struct({ "filter[status]": Schema.optional(Schema.String) }),
+              [open("filter[")],
+            ),
+            success: Schema.Unknown,
+          }),
+        ),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(handBuilt)(
+      (request) => {
+        seen.push(request.path);
+        return conformantServe(request);
+      },
+      { only: [RULES.filterMember, RULES.page] },
+    );
+    expect(outcomeFor(report, RULES.filterMember)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no read endpoint declares `filter[…]` members by name without an open `filter[` record",
+    });
+    // `/articles/1`, first, declares every `page[…]`; `/articles` declares no
+    // `page`, so it is the one `page[limit]` is sent to.
+    expect(outcomeFor(report, RULES.page)).toMatchObject({ _tag: "Passed" });
+    expect(seen).toEqual(["/articles", "/articles?page[limit]=1"]);
+  });
+
+  it("stops at its request budget, skipping rather than passing", async () => {
+    // Twenty-one read endpoints without `page`, every baseline a 500: the rule
+    // tries nineteen, which leaves no room for a baseline and its probe.
+    const types = Arr.makeBy(21, (n) => `burner${n}`);
+    const burners = HttpApi.make("burners").add(
+      ...Arr.map(types, (type) => {
+        const Burner = Resource.make(type, { attributes: { name: Schema.String } });
+        return Group.make(Burner, Endpoint.list(Burner));
+      }),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(burners)(
+      (request) => {
+        seen.push(request.path);
+        return { status: 500, body: { errors: [{ status: "500" }] } };
+      },
+      { only: [RULES.page] },
+    );
+    expect(outcomeFor(report, RULES.page)).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringMatching(
+        /^the rule's budget of 20 requests ran out with 2 endpoints left untried \(\/burner0: 500; .*\/burner18: 500\)$/,
+      ),
+    });
+    expect(seen).toHaveLength(19);
+  });
+});
+// ---------------------------------------------------------------------------
 // The filter grammar profile rules
 // ---------------------------------------------------------------------------
 
@@ -1719,9 +2091,13 @@ describe("Conformance: the write fixture", () => {
       const route = `${request.method} ${request.path}`;
       if (route === "POST /articles") return onCreate(request);
       if (route === "POST /operations") return onOperations(request);
-      // `writeApi` declares `include` on no endpoint, so it refuses one on every
-      // endpoint, as JSON:API requires (#278).
-      if (queryOf(request).has("include")) return badRequest({ source: { parameter: "include" } });
+      // `writeApi` declares `include` and `fields[TYPE]` on no endpoint, so it
+      // refuses either on every endpoint, as JSON:API requires (#278, #310).
+      const refused = Arr.findFirst(
+        [...queryOf(request).keys()],
+        (key) => key === "include" || key.startsWith("fields["),
+      );
+      if (Option.isSome(refused)) return badRequest({ source: { parameter: refused.value } });
       return Option.getOrElse(onStored(request), () => conformantServe(request));
     };
   };
