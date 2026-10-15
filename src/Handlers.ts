@@ -1557,8 +1557,26 @@ export const relatedLink = (type: string, id: string, name: string): string =>
 
 /**
  * Builds the relationship object value for a `paginated` relationship: no
- * inline `data`, just the required `related` link (and the relationship
- * endpoint as `self`).
+ * inline `data`, just the required `related` link (`/<type>/<id>/<name>`) and,
+ * by default, the relationship endpoint (`/<type>/<id>/relationships/<name>`)
+ * as `self`.
+ *
+ * A relationship's `self` link is a promise that the server answers it
+ * (JSON:API §Fetching Relationships), so advertise it only when the API
+ * declares that endpoint — `Endpoint.getRelationship` for this relationship.
+ * The `self` option controls it:
+ *
+ * - omitted (or `undefined`): `self` is `/<type>/<id>/relationships/<name>`;
+ * - a string: `self` is that string, verbatim — for a relationship endpoint
+ *   served at another path, or an absolute URL;
+ * - `false`: no `self` member, for an API that declares no relationship
+ *   endpoint for this relationship. `related` is always written: it is the
+ *   only way to reach a paginated relationship's members.
+ *
+ * The option only shapes the relationship object. The pagination links of the
+ * relationship endpoint's own response (`first`/`next`/`prev`/`last`) are built
+ * by its handler, from whatever path it serves, with {@link offsetPaginationLinks}
+ * and its siblings; nothing here feeds them.
  *
  * @example
  * ```ts
@@ -1576,6 +1594,7 @@ export const relatedLink = (type: string, id: string, name: string): string =>
  * const id = Person.Id.make("9")
  * const attributes = { firstName: "Dan", lastName: "Gebhardt" }
  *
+ * // The API declares `Endpoint.getRelationship(Person, "articles")`:
  * Person.make({
  *   id,
  *   attributes,
@@ -1585,21 +1604,49 @@ export const relatedLink = (type: string, id: string, name: string): string =>
  *     //              related: "/people/9/articles" } }
  *   }
  * })
+ *
+ * // The API declares no relationship endpoint for `articles`:
+ * const linksOnly = Handlers.paginatedRelationship("people", id, "articles", { self: false })
+ * console.log(linksOnly) // { links: { related: "/people/9/articles" } }
+ * Person.make({ id, attributes, relationships: { articles: linksOnly } })
+ *
+ * // The relationship endpoint is served at another path:
+ * console.log(
+ *   Handlers.paginatedRelationship("people", id, "articles", {
+ *     self: "/v2/people/9/relationships/articles"
+ *   }).links.self
+ * ) // "/v2/people/9/relationships/articles"
  * ```
  *
  * @since 0.1.0
  * @category constructors
  */
-export const paginatedRelationship = (
+export const paginatedRelationship = <const Self extends string | false | undefined = undefined>(
   type: string,
   id: string,
   name: string,
-): { readonly links: { readonly self: string; readonly related: string } } => ({
-  links: {
-    self: relationshipLink(type, id, name),
-    related: relatedLink(type, id, name),
+  options?: {
+    /**
+     * The relationship's `self` link: omit it for
+     * `/<type>/<id>/relationships/<name>`, pass a string to use that path, or
+     * `false` to leave `self` out — for an API that does not declare the
+     * relationship endpoint.
+     *
+     * @since 0.17.0
+     */
+    readonly self?: Self;
   },
-});
+): Self extends false
+  ? { readonly links: { readonly related: string } }
+  : { readonly links: { readonly self: string; readonly related: string } } => {
+  const self = options?.self ?? relationshipLink(type, id, name);
+  const related = relatedLink(type, id, name);
+  return {
+    links: self === false ? { related } : { self, related },
+  } as Self extends false
+    ? { readonly links: { readonly related: string } }
+    : { readonly links: { readonly self: string; readonly related: string } };
+};
 
 /**
  * The linkage shapes accepted by {@link linkage}: one identifier (to-one),
