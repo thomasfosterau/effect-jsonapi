@@ -168,6 +168,20 @@ export const stepTo = (href: string, from: Target, baseUrl: string): Step => {
     : Step.Offsite({ to: offsite(resolved) });
 };
 
+/**
+ * The URL that answered a request for `target`: the target itself, or the
+ * last redirect the kit followed to reach the answer. Its `url` stays the one
+ * requested, as findings name it; its `href` is where the answer came from, so
+ * a relative link in it resolves as a browser would resolve it.
+ *
+ * @internal
+ */
+export const answeredFrom = (target: Target, observation: Observation): Target =>
+  Option.match(Option.fromUndefinedOr(observation.redirects.at(-1)), {
+    onNone: () => target,
+    onSome: (href) => ({ url: target.url, href }),
+  });
+
 // ---------------------------------------------------------------------------
 // Responses that say nothing
 // ---------------------------------------------------------------------------
@@ -200,8 +214,10 @@ export const SAYS_NOTHING =
 
 /**
  * A rule's requests, under its request budget, with each answer remembered
- * by href so a link to a URL the rule already fetched costs nothing. `fetch`
- * answers `None` once the budget is spent. Every request is a `GET` asking
+ * by href so a link to a URL the rule already fetched costs nothing. Each
+ * redirect the kit follows (`Observation.redirects`) costs a request too.
+ * `fetch` answers `None` once the budget is spent, or when it runs out partway
+ * through a chain of redirects. Every request is a `GET` asking
  * for the JSON:API media type.
  *
  * @internal
@@ -224,13 +240,19 @@ export const budgeted = (ctx: Context, budget: number): Io => {
   const refetch = (target: Target): Effect.Effect<Option.Option<Observation>> =>
     Effect.suspend(() => {
       if (spent >= budget) return Effect.succeed(Option.none());
-      spent += 1;
-      return ctx.request({ url: target.url, headers: jsonApiAccept }).pipe(
-        Effect.tap((observation) =>
-          Effect.sync(() => MutableHashMap.set(answers, target.href, observation)),
-        ),
-        Effect.map(Option.some),
-      );
+      return ctx
+        .request({ url: target.url, headers: jsonApiAccept, requests: budget - spent })
+        .pipe(
+          Effect.map((observation) => {
+            // Each redirect followed is a request of its own.
+            spent += 1 + observation.redirects.length;
+            if (Option.exists(observation.unfollowed, ({ reason }) => reason === "budget")) {
+              return Option.none();
+            }
+            MutableHashMap.set(answers, target.href, observation);
+            return Option.some(observation);
+          }),
+        );
     });
   return {
     refetch,

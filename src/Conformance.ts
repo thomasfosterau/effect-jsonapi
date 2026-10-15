@@ -950,14 +950,23 @@ export const verify = Effect.fnUntraced(function* <
  * {@link verify} — which is the point, since the two answers to "in-process or
  * over the wire?" should not be two different kits.
  *
- * No probe follows a redirect, as none does in process: the kit provides
- * `FetchHttpClient.RequestInit` with `redirect: "manual"` for its own
- * requests (keeping the rest of the `RequestInit` the run's context holds), so
- * a `3xx` answers as itself and a server cannot lead the kit to another origin.
- * A client that follows redirects by other means (`HttpClient.followRedirects`)
- * still sends the request; the kit then does not read an answer from another
- * origin, but pass a client that does not follow redirects. There is no
- * per-request timeout: a server that holds a response open holds the run.
+ * The kit follows a redirect only when its `Location` stays on `baseUrl`'s
+ * origin (scheme, host and port), at most five hops for one request, each
+ * counted against a rule's request budget, and grades the final answer. It
+ * checks each hop before requesting it, so it never sends a request to another
+ * origin on a server's say-so: a redirect it does not follow leaves the
+ * request with no answer to read, and `spec/target/reachable` reports a read
+ * endpoint that answers with one — point `baseUrl` at the URL that serves. For
+ * that, the kit provides `FetchHttpClient.RequestInit` with
+ * `redirect: "manual"` for its own requests, over the rest of the
+ * `RequestInit` the run's context holds. A `RequestInit` given only to the
+ * client's layer (`FetchHttpClient.layer.pipe(Layer.provide(…))`) is replaced
+ * for the kit's requests, so give it to the run instead. A client that follows
+ * redirects by other means (`HttpClient.followRedirects`) still sends the
+ * request: the kit does not read an answer that came from another origin, but
+ * the request has been made, so pass a client that does not follow redirects.
+ * There is no per-request timeout: a server that holds a response open holds
+ * the run.
  *
  * @example
  * ```ts

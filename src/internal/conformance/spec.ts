@@ -27,6 +27,7 @@ import {
 } from "effect";
 import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
+import { listed } from "./crawl.js";
 import { relatedDereferences, relatedMatchesLinkage, resourceSelfDereferences } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import {
@@ -70,7 +71,7 @@ import {
   ownId,
   pathFor,
   primaryIdentity,
-  type Target,
+  type WriteTarget as Target,
   targets,
   undecided,
   type Verdict,
@@ -2018,33 +2019,73 @@ const atomicLidResolution: RuleImpl = {
 // Reachability
 // ---------------------------------------------------------------------------
 
+/**
+ * The one finding for the read endpoints a redirect the kit does not follow
+ * answered, out of `probed`, or none when no endpoint was.
+ */
+const redirectedFinding = (
+  impl: Rule,
+  redirected: ReadonlyArray<Observation>,
+  probed: number,
+): ReadonlyArray<Finding> =>
+  Arr.match(redirected, {
+    onEmpty: () => [],
+    onNonEmpty: ([first, ...rest]) => {
+      const which = redirected.length === probed ? "every" : `${redirected.length} of ${probed}`;
+      const them = redirected.length === 1 ? "it" : "them";
+      const more = Arr.match(rest, {
+        onEmpty: () => "",
+        onNonEmpty: (others) =>
+          `; and ${others.length} more (${listed(others.map(({ probe }) => probe.url))})`,
+      });
+      return [
+        finding(impl, {
+          detail: `${which} read endpoint${probed === 1 ? "" : "s"} the kit probed answered with a redirect it does not follow, so the rules that probe ${them} have no answer to decide on — point \`baseUrl\` at the URL that serves the api`,
+          expected:
+            "an answer from the base URL's origin, directly or through redirects that stay on it",
+          observed: `${first.probe.url}: ${describe(first)}${more}`,
+          probe: first.probe,
+        }),
+      ];
+    },
+  });
+
 const reachable: RuleImpl = {
   rule: rule(
     "spec/target/reachable",
     "Conformance preconditions",
     "introduction",
     "MUST",
-    "Every endpoint the kit probes must answer with an HTTP response — a kit cannot report conformance for a target it cannot reach.",
+    "Every endpoint the kit probes must answer with an HTTP response — a kit cannot report conformance for a target it cannot reach. A redirect is followed only within the base URL's origin, so a read endpoint that redirects anywhere else has not answered.",
   ),
+  // A read endpoint a redirect the kit does not follow answers is this rule's
+  // to report, once, rather than every rule's to be not decided by silently.
+  ownsRedirects: true,
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
       if (resolved.length === 0)
         return skip(reachable.rule, noProbeReason("JSON:API read endpoint", unresolved));
-      const findings: Array<Finding> = [];
-      for (const { path } of resolved) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-        if (observation.status === 0) {
-          findings.push(
-            finding(reachable.rule, {
-              detail: `${path} produced no HTTP response`,
-              expected: "any HTTP response",
-              observed: describe(observation),
-              probe: observation.probe,
-            }),
-          );
-        }
-      }
+      const observations = yield* Effect.forEach(
+        resolved,
+        ({ path }) => ctx.request({ url: path, headers: jsonApiAccept }),
+        { concurrency: 1 },
+      );
+      const redirected = observations.filter(({ unfollowed }) => Option.isSome(unfollowed));
+      const lost = observations.filter(
+        ({ status, unfollowed }) => status === 0 && Option.isNone(unfollowed),
+      );
+      const findings = [
+        ...redirectedFinding(reachable.rule, redirected, resolved.length),
+        ...lost.map((observation) =>
+          finding(reachable.rule, {
+            detail: `${observation.probe.url} produced no HTTP response`,
+            expected: "any HTTP response",
+            observed: describe(observation),
+            probe: observation.probe,
+          }),
+        ),
+      ];
       return settle(reachable.rule, resolved.length, findings, coverageNote(unresolved));
     }),
 };

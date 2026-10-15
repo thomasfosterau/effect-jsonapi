@@ -53,6 +53,7 @@ import {
   type Rule,
   settle,
   skip,
+  statusOf,
   type WriteRecord,
 } from "./core.js";
 
@@ -79,7 +80,7 @@ type Patch = Omit<Payload, "type">;
  *
  * @internal
  */
-export interface Target {
+export interface WriteTarget {
   /** The `writes` key — the create endpoint's first literal path segment. */
   readonly key: string;
   readonly create: () => Payload;
@@ -91,7 +92,7 @@ export interface Target {
 
 /** @internal */
 export interface Targets {
-  readonly targets: ReadonlyArray<Target>;
+  readonly targets: ReadonlyArray<WriteTarget>;
   /** Why each other candidate endpoint could not be driven — names the missing option. */
   readonly missing: ReadonlyArray<string>;
   /** The candidate endpoints considered, so "none in this api" reads apart from "none usable". */
@@ -150,7 +151,7 @@ const usable = (
   ctx: Context,
   role: WriteRole,
   endpoint: Discovered,
-): Result.Result<Target, string> =>
+): Result.Result<WriteTarget, string> =>
   Result.gen(function* () {
     const noCreate = `${endpoint.method} ${endpoint.path} has no create endpoint to make a disposable target with`;
     const key = yield* Result.fromOption(Option.fromUndefinedOr(endpoint.segment), () => noCreate);
@@ -194,7 +195,7 @@ export const targets = (ctx: Context, role: WriteRole): Targets => {
 export const atomicTargets = (ctx: Context, operations: Discovered): Targets => {
   const found = Arr.filterMap(Arr.fromRecord(ctx.options.writes), ([key, fixture]) =>
     usableFixture(key, fixture).pipe(
-      Result.map((fields): Target => ({
+      Result.map((fields): WriteTarget => ({
         key,
         ...fields,
         createPath: operations.path,
@@ -310,7 +311,7 @@ export interface Via {
   readonly identify: (observation: Observation) => Option.Option<Identity>;
 }
 
-const build = (target: Target): Result.Result<Payload, string> =>
+const build = (target: WriteTarget): Result.Result<Payload, string> =>
   Result.try({
     try: target.create,
     catch: (error) => `writes["${target.key}"].create threw: ${renderThrown(error)}`,
@@ -321,7 +322,7 @@ const build = (target: Target): Result.Result<Payload, string> =>
  *
  * @internal
  */
-export const buildUpdate = (target: Target): Result.Result<Patch, string> =>
+export const buildUpdate = (target: WriteTarget): Result.Result<Patch, string> =>
   Option.match(target.update, {
     onNone: () =>
       Result.fail(`no update fixture for "${target.key}" — pass writes["${target.key}"].update`),
@@ -378,7 +379,7 @@ const isOwnSegment = (id: string): boolean =>
  */
 const vet = (
   ctx: Context,
-  target: Target,
+  target: WriteTarget,
   payload: Payload,
   named: Identity,
 ): Result.Result<string, string> => {
@@ -416,7 +417,7 @@ const vet = (
 const record = (
   ctx: Context,
   rule: Rule,
-  target: Target,
+  target: WriteTarget,
   payload: Payload,
   named: Option.Option<Identity>,
 ): Entry => {
@@ -473,7 +474,7 @@ const runCleanup = (
   );
 
 /** Disposes of one ledger entry, unless it has no id the kit may act on or is already gone. */
-const disposeEntry = (target: Target, entry: Entry): Effect.Effect<void> => {
+const disposeEntry = (target: WriteTarget, entry: Entry): Effect.Effect<void> => {
   const id = entry.id;
   if (id === undefined || entry.disposal !== "left") return Effect.void;
   return Option.match(target.cleanup, {
@@ -491,7 +492,7 @@ const disposeEntry = (target: Target, entry: Entry): Effect.Effect<void> => {
  * propagated — whatever it fails with, since {@link renderThrown} is total —
  * so one bad cleanup cannot cost the rest of the run its report.
  */
-const dispose = (target: Target, created: Created): Effect.Effect<void> =>
+const dispose = (target: WriteTarget, created: Created): Effect.Effect<void> =>
   Created.$match(created, {
     Unbuilt: () => Effect.void,
     Sent: ({ entry }) =>
@@ -505,7 +506,7 @@ const isSuccessful = (observation: Observation): boolean =>
   observation.status >= 200 && observation.status < 300;
 
 /** Builds the fixture's payload and sends it; a non-2xx answer is taken to have created nothing. */
-const create = (ctx: Context, rule: Rule, target: Target, via: Via): Effect.Effect<Created> =>
+const create = (ctx: Context, rule: Rule, target: WriteTarget, via: Via): Effect.Effect<Created> =>
   Result.match(build(target), {
     onFailure: (reason) => Effect.succeed(Created.Unbuilt({ reason })),
     onSuccess: (payload) =>
@@ -536,7 +537,7 @@ const create = (ctx: Context, rule: Rule, target: Target, via: Via): Effect.Effe
 export const withCreated = <A>(
   ctx: Context,
   rule: Rule,
-  target: Target,
+  target: WriteTarget,
   via: Via,
   use: (created: Created) => Effect.Effect<A>,
 ): Effect.Effect<A> =>
@@ -550,7 +551,7 @@ export const withCreated = <A>(
  *
  * @internal
  */
-export const viaCreateEndpoint = (ctx: Context, target: Target): Via => ({
+export const viaCreateEndpoint = (ctx: Context, target: WriteTarget): Via => ({
   send: (payload) =>
     ctx.request({
       method: "POST",
@@ -606,7 +607,7 @@ export interface Accepted {
  *
  * @internal
  */
-export const accepted = (target: Target, created: Created): Result.Result<Accepted, string> =>
+export const accepted = (target: WriteTarget, created: Created): Result.Result<Accepted, string> =>
   Created.$match(created, {
     Unbuilt: ({ reason }) => Result.fail(reason),
     Sent: ({ payload, observation, entry }) =>
@@ -614,7 +615,7 @@ export const accepted = (target: Target, created: Created): Result.Result<Accept
         onSome: (entry) => Result.succeed({ payload, observation, entry }),
         onNone: () =>
           Result.fail(
-            `the server did not accept writes["${target.key}"].create (${observation.status}${
+            `the server did not accept writes["${target.key}"].create (${statusOf(observation)}${
               observation.text === "" ? "" : ` — ${observation.text.slice(0, 160)}`
             }) — a write rule needs a payload the server accepts`,
           ),
@@ -640,7 +641,7 @@ export const ownId = (created: Accepted): Result.Result<string, string> =>
  * @internal
  */
 export const onAccepted =
-  (target: Target, decide: (created: Accepted) => Effect.Effect<Verdict>) =>
+  (target: WriteTarget, decide: (created: Accepted) => Effect.Effect<Verdict>) =>
   (created: Created): Effect.Effect<Verdict> =>
     Result.match(accepted(target, created), {
       onFailure: (reason) => Effect.succeed(undecided(reason)),
@@ -665,7 +666,7 @@ export const overTargets = (
   rule: Rule,
   found: Targets,
   what: string,
-  probe: (target: Target) => Effect.Effect<Verdict>,
+  probe: (target: WriteTarget) => Effect.Effect<Verdict>,
 ): Effect.Effect<Outcome> =>
   Effect.gen(function* () {
     if (!ctx.options.mutating) return skip(rule, MUTATING_SKIP);

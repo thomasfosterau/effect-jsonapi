@@ -3,6 +3,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApi } from "effect/http-api";
@@ -68,6 +69,8 @@ const context = (): Core.Context => {
           contentType: undefined,
           text: "",
           transportError: undefined,
+          redirects: [],
+          unfollowed: Option.none(),
           ...serve(probe),
         })),
       observed,
