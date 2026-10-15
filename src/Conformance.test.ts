@@ -7947,17 +7947,49 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
         // judges only whether the server examined the document; a 409 or 422
         // naming the header refused the request over its key, which says
         // nothing about that.
+        const refusals = [Idempotency.KeyInProgress, Idempotency.KeyMismatch] as const;
+        const results = await Promise.all(
+          refusals.map(async (Refusal) => {
+            const seen: Array<string> = [];
+            const serve = atomicServer([], true, false);
+            const report = await verifyOver(atomicApi(true))((request) => {
+              if (request.method !== "POST") return serve(request);
+              seen.push(request.headers.get("idempotency-key") ?? "(no key)");
+              return keyError(Refusal);
+            }, atomicOptions("spec/atomic/malformed-operations-rejected"));
+            return {
+              outcome: outcomeFor(report, "spec/atomic/malformed-operations-rejected"),
+              seen,
+            };
+          }),
+        );
+        expect(results).toEqual(
+          refusals.map((Refusal) => ({
+            outcome: expect.objectContaining({
+              _tag: "Skipped",
+              reason: expect.stringContaining(
+                `the malformed document answered ${Refusal.status} from /operations, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key, and the error names that header as its source`,
+              ),
+            }),
+            seen: ["(no key)"],
+          })),
+        );
+      });
+
+      it("still fail a malformed document refused outside the 4xx range", async () => {
+        // A 5xx or a 3xx naming the header as its source is no refusal over
+        // the key, so it answers the document — wrongly.
         const outcomes = await Promise.all(
-          [Idempotency.KeyInProgress, Idempotency.KeyMismatch].map(async (Refusal) => {
+          [500, 303].map(async (status) => {
             const serve = atomicServer([], true, false);
             const report = await verifyOver(atomicApi(true))(
-              (request) => (request.method === "POST" ? keyError(Refusal) : serve(request)),
+              (request) => (request.method === "POST" ? missingKey(status) : serve(request)),
               atomicOptions("spec/atomic/malformed-operations-rejected"),
             );
             return outcomeFor(report, "spec/atomic/malformed-operations-rejected")._tag;
           }),
         );
-        expect(outcomes).toEqual(["Skipped", "Skipped"]);
+        expect(outcomes).toEqual(["Failed", "Failed"]);
       });
     });
   });
