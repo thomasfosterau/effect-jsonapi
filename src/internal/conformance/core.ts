@@ -718,13 +718,17 @@ const refusalOf = (
  * URL after its own `preprocess`, and an absolute `Location` on that origin names a path on the
  * server the client sends to: the kit reads it as a `Location` of that path
  * alone, on its own origin, so the hop is a request the kit builds and the
- * client rewrites once, as any other.
+ * client rewrites once, as any other. A client that rewrites the path too
+ * (adding a prefix, say) so adds it again to the path a hop names, as it does
+ * to a relative `Location`'s. A rewritten URL with no origin (a `data:` or
+ * custom-scheme one, whose origin is `"null"`) is never matched, so a
+ * `Location` with no origin is not read as a path on the kit's.
  */
 const resolvedLocation = (location: string, sent: string, sentTo: string): URL => {
   const resolved = new URL(location, sent);
   const own = new URL(sent).origin;
   const rewritten = URL.canParse(sentTo) ? new URL(sentTo).origin : own;
-  return rewritten !== own && resolved.origin === rewritten
+  return rewritten !== own && rewritten !== "null" && resolved.origin === rewritten
     ? new URL(`${resolved.pathname}${resolved.search}${resolved.hash}`, sent)
     : resolved;
 };
@@ -751,7 +755,9 @@ const hopOf = (
   const resolved = resolvedLocation(location, sent.url, sent.sentTo);
   return Option.match(refusalOf(status, resolved, sent, origin, budget), {
     onNone: () => Result.succeed({ method: sent.method, url: resolved.href }),
-    onSome: ([reason, why]) => Result.fail({ status, location: resolved.href, reason, why }),
+    // Named as the server sent it, not as the kit translated it to its own origin.
+    onSome: ([reason, why]) =>
+      Result.fail({ status, location: new URL(location, sent.url).href, reason, why }),
   });
 };
 
@@ -905,17 +911,21 @@ export const runner =
         // recovers from its failure; `HttpClient.followRedirects` follows in
         // `postprocess`, after it. Reset each attempt, so none when the last
         // one never sent a request.
+        // `preprocess` is built once, as `execute` builds it, so a
+        // `HttpClient.mapRequestInput` runs its function once per request, not
+        // once per attempt.
         let prepared = Option.none<HttpClientRequest.HttpClientRequest>();
+        const preprocessed = Effect.tap(client.preprocess(request), (sentAs) =>
+          Effect.sync(() => {
+            prepared = Option.some(sentAs);
+          }),
+        );
         const result = yield* Effect.result(
           unredirected(
             client.postprocess(
               Effect.suspend(() => {
                 prepared = Option.none();
-                return Effect.tap(client.preprocess(request), (sentAs) =>
-                  Effect.sync(() => {
-                    prepared = Option.some(sentAs);
-                  }),
-                );
+                return preprocessed;
               }),
             ),
           ),
