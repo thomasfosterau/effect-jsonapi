@@ -1739,12 +1739,12 @@ export type IncludePathsTo<R extends Any, Depth extends IncludeDepth> = R extend
 // a key `R` does not declare.
 type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
 
-// One hop of an include path: a wide `string` segment (from a `string` or
-// `${string}.${string}` path) may name any includable relationship, so it
-// reaches every includable direct target; a literal segment reaches its own.
-type IncludeHop<R extends Any, Segment> = string extends Segment
-  ? IncludableTarget<R, IncludableKeys<R>>
-  : IncludableTarget<R, Segment>;
+// One hop of an include path: the targets of every includable relationship of
+// `R` whose key the segment admits. A literal segment admits its own key; a
+// wide `string` segment (from a `string` or `${string}.${string}` path) admits
+// every key; a pattern segment such as `auth${string}` admits the keys it
+// matches.
+type IncludeHop<R extends Any, Segment> = IncludableTarget<R, Extract<IncludableKeys<R>, Segment>>;
 
 /**
  * The resource definitions brought into a compound document by one include
@@ -1761,7 +1761,8 @@ type IncludeHop<R extends Any, Segment> = string extends Segment
  * A wide segment — a `string` path, or the `string` parts of a template
  * literal such as `` `${string}.${string}` `` — may name any relationship, so
  * it reaches every includable direct target of the resource it is resolved
- * against.
+ * against; a pattern segment such as `` `auth${string}` `` reaches the
+ * includable targets of the keys it matches.
  *
  * @since 0.1.0
  * @category type-level

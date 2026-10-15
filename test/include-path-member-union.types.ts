@@ -18,7 +18,7 @@
  * `src/Endpoint.included.test.ts`, on fixtures of their own.
  */
 import * as Schema from "effect/Schema";
-import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
+import { Client, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 // Compiles only when `A` and `B` are identical, not merely mutually assignable.
 type Pin<A, B> = [
@@ -173,7 +173,27 @@ export const widePaths: [
   Pin<Resource.ResolveIncludePath<typeof Story, `remarks.${string}`>, typeof Remark | typeof Tag>,
   // Over a member union, each member's includable direct targets.
   Pin<Resource.ResolveIncludePath<Members, string>, typeof Person | typeof Editor>,
-] = [true, true, true, true, true];
+  // A pattern segment reaches the includable targets of the keys it matches.
+  Pin<Resource.ResolveIncludePath<typeof Story, `auth${string}`>, typeof Person>,
+  Pin<Resource.ResolveIncludePath<typeof Story, `${string}s`>, typeof Remark>,
+  Pin<Resource.ResolveIncludePath<typeof Story, `auth${string}.${string}`>, typeof Person>,
+  // An `any` path is as wide as `${string}.${string}`.
+  Pin<Resource.ResolveIncludePath<typeof Story, any>, StoryDirect | typeof Tag>,
+] = [true, true, true, true, true, true, true, true, true];
+
+// The endpoint walk (`Endpoint`'s `included` union, `Query.FieldsetResources`)
+// resolves its paths with `Resource.ResolveIncludePath`, so a wide `paths`
+// allow-list follows the same rule.
+export const wideAllowList: [
+  Pin<
+    Query.FieldsetResources<typeof Story, { readonly paths: ReadonlyArray<string> }>,
+    typeof Story | StoryDirect
+  >,
+  Pin<
+    Query.FieldsetResources<typeof Story, { readonly paths: ReadonlyArray<`${string}.${string}`> }>,
+    typeof Story | StoryDirect | typeof Tag
+  >,
+] = [true, true];
 
 // Positive control for the negative one below.
 export const wideAuthor: Resource.IncludedFor<typeof Story, ReadonlyArray<string>> = Person;
