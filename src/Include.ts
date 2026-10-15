@@ -665,8 +665,8 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * endpoint over `family`, gives the union of their default documents, over
  * every member's direct targets and paths ({@link MembersReachable}). A
  * widened `include: boolean` gives what either value admits, as those
- * endpoints do (#382). A declared surface gives the
- * surface's own `included`, and an `include` that may be a surface or not
+ * endpoints do (#382). A declared surface gives the surface's own
+ * `included`, and an `include` that may be a surface or not
  * (`which ? surface : true`) is typed as either union. Until #336 is fixed,
  * `collection` and `polymorphic` ignore a surface's union and bind their
  * members' direct targets instead, so for a surface this answer differs from

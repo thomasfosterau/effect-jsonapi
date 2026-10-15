@@ -514,7 +514,12 @@ const author = Author.make({
   relationships: { comments: { data: [{ type: "comments", id: comment.id }] } },
 });
 assertType<SuccessOf<typeof flagNode>>(Handlers.data(author, { included: [comment, person] }));
-// The same under `fields: true`, whose sparse document distributes too.
+// The same under `fields: true`. The sparse fieldset types
+// (`Query.FieldsetResources`) do not distribute over a widened `boolean`, so on
+// `flagSparseNode` a depth-2 resource that is neither a member nor a direct
+// target (`people`, trimmed by `fields[people]`) is not admitted as it is under
+// `include: true` (#397). On `flagSparseSearch` `people` is a member, so a
+// sparse person is admitted there.
 export const flagSparseSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",
@@ -558,7 +563,45 @@ const mixedFlagSearchUnion = Include.included([Article, Person], {
 assertType<
   Equals<typeof mixedFlagSearchUnion, (typeof articleSurface)["included"] | typeof flagSearchUnion>
 >(true);
-assertType<Equals<(typeof mixedFlagSearchUnion)["Type"], (typeof mixedSearchUnion)["Type"]>>(true);
+// The widened `boolean` half is the full walk, not the direct targets: under
+// a surface that does not reach `people` itself, `people` comes only from the
+// members' `comments.author`.
+const commentsSurface = Include.make(Article, { comments: Comment });
+const shallowMixedSearchUnion = Include.included([Article, Person], {
+  include: which ? commentsSurface : true,
+});
+const shallowMixedFlagSearchUnion = Include.included([Article, Person], {
+  include: which ? commentsSurface : flag,
+});
+assertType<
+  Equals<(typeof shallowMixedFlagSearchUnion)["Type"], (typeof shallowMixedSearchUnion)["Type"]>
+>(true);
+// Negative control: not the surface's union beside the direct targets alone.
+assertType<
+  Equals<
+    (typeof shallowMixedFlagSearchUnion)["Type"],
+    (typeof commentsSurface)["included"]["Type"] | (typeof plainSearchUnion)["Type"]
+  >
+>(false);
+
+// The endpoints under such an `include`: the surface half binds the members'
+// direct targets (#336) and the `true` half the full walk, so the union is
+// `include: true`'s and a handler returning depth-2 `people` type-checks.
+export const mixedSearch = Endpoint.collection([Article, Person], {
+  name: "search",
+  path: "/search",
+  include: which ? articleSurface : true,
+});
+assertType<Equals<IncludedOf<typeof mixedSearch>, IncludedOf<typeof search>>>(true);
+assertType<SuccessOf<typeof mixedSearch>>(
+  Handlers.collection([article], { included: [comment, person] }),
+);
+export const mixedNode = Endpoint.polymorphic(AnyNode, { include: which ? nodeSurface : true });
+assertType<Equals<IncludedOf<typeof mixedNode>, IncludedOf<typeof node>>>(true);
+assertType<SuccessOf<typeof mixedNode>>(Handlers.data(author, { included: [comment, person] }));
+// Negative control: not the direct targets alone.
+assertType<Equals<IncludedOf<typeof mixedSearch>, IncludedOf<typeof plainSearch>>>(false);
+assertType<Equals<IncludedOf<typeof mixedNode>, IncludedOf<typeof plainNode>>>(false);
 
 // The use it exists for: a wire-variant `success` keeps the default's union.
 const WireArticle = Schema.Struct({ ...Article.fields });
