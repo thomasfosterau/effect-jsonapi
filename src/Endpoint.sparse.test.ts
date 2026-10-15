@@ -199,6 +199,66 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     expect(admits(strict, "author", partialPerson, false)).toEqual([false]);
   });
 
+  describe("a type one member reaches only through a paginated relationship (#320)", () => {
+    // `posts.author` is a to-one `people`, so `author` is a legal path;
+    // `drafts.author` is a paginated `revisions`, which no path may cross. So
+    // `revisions` is neither an `included` member nor a `fields[TYPE]` type:
+    // the partial set follows `Query.FieldsetResources`, which stops there.
+    const Revision = Resource.make("revisions", { attributes: { editedAt: Schema.String } });
+    const Entry = Resource.make("entries", { attributes: { title: Schema.String } });
+    const Post = Resource.extend(Entry, "posts", {
+      inheritId: true,
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const Draft = Resource.extend(Entry, "drafts", {
+      inheritId: true,
+      relationships: { author: Relationship.paginated(() => Revision) },
+    });
+    const post = {
+      type: "posts",
+      id: "1",
+      attributes: { title: "T" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+    const revision = { type: "revisions", id: "4", attributes: { editedAt: "2026-01-01" } };
+
+    it.each([
+      [
+        "collection",
+        Endpoint.collection([Post, Draft], {
+          name: "entries",
+          path: "/entries",
+          include: true,
+          fields: true,
+        }),
+        true,
+      ],
+      [
+        "polymorphic",
+        Endpoint.polymorphic(Resource.family(Entry, [Post, Draft]), {
+          include: true,
+          fields: true,
+        }),
+        false,
+      ],
+      [
+        "polymorphic, the paginated member first",
+        Endpoint.polymorphic(Resource.family(Entry, [Draft, Post]), {
+          include: true,
+          fields: true,
+        }),
+        false,
+      ],
+    ] as const)("`%s` neither admits it nor makes it partial", (_, endpoint, many) => {
+      // Positive control: the member reached through the to-one is partial.
+      expect(admitsPartial(endpoint, only(post), many, [partialPerson, only(wire.companies)])).toBe(
+        true,
+      );
+      expect(admitsPartial(endpoint, only(post), many, [revision])).toBe(false);
+      expect(admitsPartial(endpoint, only(post), many, [only(revision)])).toBe(false);
+    });
+  });
+
   it("leaves everything but `attributes` as declared", () => {
     const endpoint = Endpoint.get(Article, { fields: true });
     // `type`, `id` and the relationship linkage are still checked.
