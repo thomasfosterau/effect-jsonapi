@@ -89,13 +89,15 @@ export const idempotencyHeaders = (
 
 /**
  * Whether `observation` is an endpoint's refusal of a write the kit sent it
- * without a key: a 4xx from an endpoint that declares `Idempotency-Key`, to a
- * request that carried none (`key` is what {@link idempotencyHeaders} gave
+ * without a key: a `400` from an endpoint that declares `Idempotency-Key`, to
+ * a request that carried none (`key` is what {@link idempotencyHeaders} gave
  * it), whose error document names the header as a `source` — the package's
  * own `400` for a missing required key (`docs/idempotency.md` §2). The kit
  * keys only an endpoint whose headers schema plainly requires the header, so
  * one that requires it some other way (through a union, say) reads as
- * optional and is sent none. Any other 4xx is an answer to the write.
+ * optional and is sent none. Any other 4xx is an answer to the write — the
+ * package's `KeyInProgress` (409) and `KeyMismatch` (422) name the header too,
+ * but neither is what a request without a key can draw.
  *
  * @internal
  */
@@ -104,8 +106,7 @@ export const refusedForMissingKey = (
   key: Readonly<Record<string, string>>,
   observation: Observation,
 ): boolean =>
-  observation.status >= 400 &&
-  observation.status < 500 &&
+  observation.status === 400 &&
   endpoint.idempotencyKey !== "absent" &&
   !Object.hasOwn(key, IDEMPOTENCY_HEADER) &&
   errorObjectsOf(observation.body).some((error) => {
