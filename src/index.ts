@@ -233,6 +233,10 @@ export { MEDIA_TYPE } from "./internal/media.js";
 // Each type below is canonical in its namespace; the root export exists only
 // so declaration emit can always name it, and a name that would be ambiguous
 // at the root carries its namespace as a prefix.
+// Every alias is type-only: a class or value keeps its runtime form under its
+// namespace (`ApiError.BadRequest`, …). Once each module is a public subpath
+// (#385), declaration emit can name these through it, and the root aliases
+// will be deprecated.
 // `test/declaration-emit.test.ts` pins the set: drop one and an export of
 // `test/emitted/declaration-emit*.types.ts` stops emitting (or, for a
 // middleware, is inlined into every endpoint's type).
@@ -241,6 +245,9 @@ export type {
   /**
    * `ApiError.Wire`, at the package root so declaration emit can name it: the
    * endpoint error schema of an `ApiError` class.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
    *
    * @since 0.17.0
    * @category models
@@ -251,6 +258,10 @@ export type {
    * it: the `SchemaErrors` middleware's error, in every client method's error
    * channel.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `ApiError.BadRequest`.
+   *
    * @since 0.17.0
    * @category errors
    */
@@ -258,6 +269,10 @@ export type {
   /**
    * `ApiError.Conflict`, at the package root so declaration emit can name it:
    * the error `Group.flat` declares on its `create` and `update` endpoints.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `ApiError.Conflict`.
    *
    * @since 0.17.0
    * @category errors
@@ -268,6 +283,10 @@ export type {
    * it: a `ContentNegotiation` middleware error, in every client method's
    * error channel.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `ApiError.NotAcceptable`.
+   *
    * @since 0.17.0
    * @category errors
    */
@@ -276,6 +295,10 @@ export type {
    * `ApiError.UnsupportedMediaType`, at the package root so declaration emit
    * can name it: a `ContentNegotiation` middleware error, in every client
    * method's error channel.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `ApiError.UnsupportedMediaType`.
    *
    * @since 0.17.0
    * @category errors
@@ -288,6 +311,10 @@ export type {
    * `Atomic.Operations`, at the package root so declaration emit can name it:
    * the payload of `Endpoint.operations`.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the value, use `Atomic.Operations`.
+   *
    * @since 0.17.0
    * @category models
    */
@@ -295,6 +322,10 @@ export type {
   /**
    * `Atomic.Result`, at the package root so declaration emit can name it: one
    * result object of `Endpoint.operations`' success document.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the value, use `Atomic.Result`.
    *
    * @since 0.17.0
    * @category models
@@ -307,6 +338,13 @@ export type {
    * `Document.CollectionDocument`, at the package root so declaration emit can
    * name it: the collection document of `Group.flat`'s list endpoint.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the value, use `Document.CollectionDocument`.
+   * This is the document schema `Document.CollectionDocument` — not
+   * `Assemble.CollectionDocument` or `Client.CollectionDocument`, which are
+   * different types with the same name.
+   *
    * @since 0.17.0
    * @category models
    */
@@ -315,6 +353,13 @@ export type {
    * `Document.DataDocument`, at the package root so declaration emit can name
    * it: the single-resource document of `Group.flat`'s other endpoints.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the value, use `Document.DataDocument`.
+   * This is the document schema `Document.DataDocument` — not an `Assemble.*`
+   * or `Client.*` document type (`Assemble.ResourceDocument`,
+   * `Client.ResourceDocument`).
+   *
    * @since 0.17.0
    * @category models
    */
@@ -322,6 +367,9 @@ export type {
   /**
    * `Document.WireSchema`, at the package root so declaration emit can name
    * it: the wire form of a document `Group.flat` serves.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
    *
    * @since 0.17.0
    * @category models
@@ -334,6 +382,9 @@ export type {
    * `Endpoint.IncludedResources`, at the package root so declaration emit can
    * name it.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   *
    * @since 0.17.0
    * @category type-level
    */
@@ -341,6 +392,9 @@ export type {
   /**
    * `Endpoint.ReachableIncluded`, at the package root so declaration emit can
    * name it.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
    *
    * @since 0.17.0
    * @category schemas
@@ -350,6 +404,9 @@ export type {
    * `Endpoint.SparseResource`, at the package root so declaration emit can
    * name it.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   *
    * @since 0.17.0
    * @category schemas
    */
@@ -357,6 +414,9 @@ export type {
   /**
    * `Endpoint.SparseUnion`, at the package root so declaration emit can name
    * it.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
    *
    * @since 0.17.0
    * @category schemas
@@ -370,6 +430,10 @@ export type {
    * it: the request headers of a write endpoint that accepts an
    * `idempotency-key`.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the value, use `Idempotency.Headers`.
+   *
    * @since 0.17.0
    * @category schemas
    */
@@ -378,6 +442,10 @@ export type {
    * `Idempotency.KeyInProgress`, at the package root so declaration emit can
    * name it: an idempotency middleware error, in the error channel of a client
    * method whose endpoint accepts an `idempotency-key`.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `Idempotency.KeyInProgress`.
    *
    * @since 0.17.0
    * @category errors
@@ -388,6 +456,10 @@ export type {
    * name it: an idempotency middleware error, in the error channel of a client
    * method whose endpoint accepts an `idempotency-key`.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `Idempotency.KeyMismatch`.
+   *
    * @since 0.17.0
    * @category errors
    */
@@ -395,6 +467,10 @@ export type {
   /**
    * `Idempotency.Middleware`, at the package root so declaration emit can name
    * it: the middleware of a write endpoint declared with `idempotency: true`.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `Idempotency.Middleware`.
    *
    * @since 0.17.0
    * @category services
@@ -407,6 +483,10 @@ export type {
    * `Middleware.ContentNegotiation`, at the package root so declaration emit
    * can name it: the middleware on every endpoint.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `Middleware.ContentNegotiation`.
+   *
    * @since 0.17.0
    * @category services
    */
@@ -415,6 +495,10 @@ export type {
    * `Middleware.CreatedLocation`, at the package root so declaration emit can
    * name it: the middleware on every `create` endpoint.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `Middleware.CreatedLocation`.
+   *
    * @since 0.17.0
    * @category services
    */
@@ -422,6 +506,10 @@ export type {
   /**
    * `Middleware.SchemaErrors`, at the package root so declaration emit can
    * name it: the middleware on every endpoint.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   * It names only the type: for the class, use `Middleware.SchemaErrors`.
    *
    * @since 0.17.0
    * @category services
@@ -434,6 +522,9 @@ export type {
    * `Query.BracketedKeys`, at the package root so declaration emit can name
    * it: the flat list query `Group.flat` builds.
    *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
+   *
    * @since 0.17.0
    * @category models
    */
@@ -441,6 +532,9 @@ export type {
   /**
    * `Query.QuerySchema`, at the package root so declaration emit can name it:
    * the query schema of every read endpoint.
+   *
+   * Type-only alias, kept at the root for declaration emit (#348). It will be
+   * deprecated once the package publishes a subpath export per module (#385).
    *
    * @since 0.17.0
    * @category models
