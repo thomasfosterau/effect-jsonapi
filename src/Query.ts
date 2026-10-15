@@ -48,15 +48,7 @@
  * @since 0.1.0
  */
 import type { SchemaAST, Types } from "effect";
-import {
-  Array as Arr,
-  Effect,
-  Option,
-  Record as Rec,
-  Schema,
-  SchemaIssue,
-  SchemaTransformation,
-} from "effect";
+import { Effect, Record as Rec, Schema, SchemaIssue, SchemaTransformation } from "effect";
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
@@ -80,19 +72,19 @@ import {
   operatorCheck,
   prepare,
 } from "./internal/filter.js";
+import type { IncludeEnabled, IncludedResources } from "./internal/includeGraph.js";
+import { includedResources, includePathsFor } from "./internal/includeGraph.js";
 import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
 import type {
   Any,
   AttributeKeys,
   Filterable,
   FilterableKeys,
-  IncludableTargets,
   IncludeDepth,
   IncludePath,
   IncludePathsTo,
-  ResolveIncludePath,
 } from "./Resource.js";
-import { attributeKeys, directTargets, filterable, includePaths } from "./Resource.js";
+import { attributeKeys, filterable } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -660,22 +652,6 @@ export interface Include<
   never,
   never
 > {}
-
-// The paths an `include` schema legalises, at runtime. A declared
-// `Include.Surface` and an explicit `paths` allow-list are the same shape here
-// — both carry the whole dotted paths to legalise — so both take the first
-// branch and neither is ever widened back to a graph walk.
-const includePathsFor = (
-  resources: ReadonlyArray<Any>,
-  options: IncludeOptions<Any> | AnySurface | undefined,
-): ReadonlyArray<string> =>
-  options?.paths !== undefined
-    ? dedupe(options.paths as ReadonlyArray<string>)
-    : dedupe(
-        resources.flatMap((r) =>
-          includePaths(r, (options as IncludeOptions<Any> | undefined)?.depth ?? 2),
-        ),
-      );
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
@@ -1483,37 +1459,6 @@ export interface Options<R extends Any> {
   readonly filter?: FilterOption | undefined;
 }
 
-// Whether an `include` option turns the parameter on: `true`, or an
-// `IncludeOptions` object. Everything else (`false`, absent) leaves it off.
-type IncludeEnabled<I> = [I] extends [true] ? true : [I] extends [object] ? true : false;
-
-// Whether an `include` option is a declared `Include.Surface`. Its paths are
-// then the whole of what the endpoint's `included` union carries
-// (`Include.Surface.included`), so they alone bound the fieldsets.
-type DeclaresSurface<I> = [I] extends [
-  { readonly "~@thomasfosterau/effect-jsonapi/include": "surface" },
-]
-  ? true
-  : false;
-
-// The direct targets `fields: true` declares beside the include paths' walk:
-// each member's non-`paginated` relationship targets, the default `included`
-// union (`Resource.DefaultIncluded`), which a server MAY include by default —
-// none under a declared surface, whose own `included` union replaces that
-// default. A `paginated` relationship's target never appears in `included`.
-type DefaultFieldsetTargets<R extends Any, I> =
-  DeclaresSurface<I> extends true
-    ? never
-    : R extends Any
-      ? IncludableTargets<R["relationships"]>
-      : never;
-
-// The resource definitions each of `R`'s members reaches along `Paths`: every
-// resource on the way down a path, its leaf included. The paths are the whole
-// endpoint's, so on a heterogeneous endpoint each member walks every path, and
-// one it has no relationship for reaches nothing.
-type ReachedBy<R extends Any, Paths> = R extends Any ? ResolveIncludePath<R, Paths> : never;
-
 /**
  * Resource definitions whose sparse fieldsets appear in `?fields[TYPE]=`:
  * every type the endpoint's response can carry, and no other.
@@ -1539,45 +1484,7 @@ type ReachedBy<R extends Any, Paths> = R extends Any ? ResolveIncludePath<R, Pat
  * @since 0.1.0 (`I` since 0.17.0)
  * @category type-level
  */
-export type FieldsetResources<R extends Any, I = false> =
-  | R
-  | DefaultFieldsetTargets<R, I>
-  | (IncludeEnabled<I> extends true ? ReachedBy<R, IncludePathsOf<R, I>> : never);
-
-// The resource definitions `resource` reaches along an include path's
-// segments: every resource on the way down, its leaf included, stopping at the
-// first segment that names none of the current resource's relationships. The
-// runtime mirror of `ResolveIncludePath`.
-const reachedBy = (resource: Any, segments: ReadonlyArray<string>): ReadonlyArray<Any> =>
-  Arr.matchLeft(segments, {
-    onEmpty: (): ReadonlyArray<Any> => [],
-    onNonEmpty: (segment, rest) =>
-      Option.match(Rec.get(resource.relationships, segment), {
-        onNone: (): ReadonlyArray<Any> => [],
-        onSome: (descriptor) => {
-          const target = descriptor.ref();
-          return [target, ...reachedBy(target, rest)];
-        },
-      }),
-  });
-
-// The resource definitions `fields: true` declares a sparse fieldset for —
-// the runtime mirror of `FieldsetResources`: the resources, their
-// non-`paginated` direct targets unless `include` is a declared `surface`,
-// and every resource the endpoint's legal include `paths` reach (none while
-// `include` is off).
-const fieldsetResources = (
-  resources: ReadonlyArray<Any>,
-  surface: boolean,
-  paths: ReadonlyArray<string>,
-): ReadonlyArray<Any> =>
-  dedupe([
-    ...resources,
-    ...(surface ? [] : resources.flatMap(directTargets)),
-    ...paths.flatMap((path) =>
-      resources.flatMap((resource) => reachedBy(resource, path.split("."))),
-    ),
-  ]);
+export type FieldsetResources<R extends Any, I = false> = R | IncludedResources<R, I>;
 
 /**
  * The nested (decoded) struct fields of a query schema.
@@ -1754,7 +1661,12 @@ export const schema = <R extends Any, const O extends Options<R>>(
 
   if (options.fields === true) {
     const fieldsetFields: Record<string, Schema.Top> = {};
-    for (const target of fieldsetResources(resources, isSurface(include), includable)) {
+    // The resources, then every type their response can carry in `included`:
+    // the runtime mirror of `FieldsetResources`.
+    for (const target of dedupe([
+      ...resources,
+      ...includedResources(resources, isSurface(include), includable),
+    ])) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target));
       flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable);
     }
