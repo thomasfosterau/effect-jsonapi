@@ -5,7 +5,17 @@ import * as Exit from "effect/Exit";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
 import { HttpClient, HttpClientResponse, HttpServerError, HttpServerRequest } from "effect/http";
-import { answeredAsDeployed, type Context, runner } from "./core.js";
+import {
+  answeredAsDeployed,
+  type Context,
+  finding,
+  type Observation,
+  pass,
+  type Rule,
+  runner,
+  skip,
+  undecidedByRedirects,
+} from "./core.js";
 import { budgeted } from "./crawl.js";
 
 const request = HttpServerRequest.fromWeb(new Request("http://in-process.test/articles/1/moved"));
@@ -206,5 +216,94 @@ describe("budgeted (each redirect is a request)", () => {
     expect(budget.spent()).toBe(2);
     expect(await valueOf(budget.fetch(at("/0")))).toEqual(Option.none());
     expect(sent).toHaveLength(2);
+  });
+});
+
+describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
+  const rule: Rule = {
+    id: "spec/test/rule",
+    tier: "spec",
+    section: "Test",
+    reference: "https://jsonapi.org/format/1.1/",
+    level: "MUST",
+    requirement: "A test rule.",
+  };
+
+  /** An answer the kit read: a 200 to `GET url`. */
+  const read = (url: string): Observation => ({
+    probe: { method: "GET", url, headers: {}, body: undefined },
+    status: 200,
+    headers: {},
+    contentType: undefined,
+    text: "",
+    body: undefined,
+    transportError: undefined,
+    redirects: [],
+    unfollowed: Option.none(),
+  });
+
+  /** `GET url`, answered by a `302` off the origin the kit did not follow. */
+  const redirected = (url: string): Observation => ({
+    ...read(url),
+    status: 0,
+    transportError: "redirected",
+    unfollowed: Option.some({
+      status: 302,
+      location: `https://elsewhere.test${url}`,
+      reason: "offsite",
+      why: "off the origin",
+    }),
+  });
+
+  const named = (url: string) =>
+    `GET ${url} answered a 302 redirect to https://elsewhere.test${url}, which the kit does not follow: off the origin`;
+
+  it("skips a rule that passed on the answers it read, with no own note to keep", () => {
+    expect(undecidedByRedirects(pass(rule, 2), [read("/a"), redirected("/b")])).toEqual(
+      skip(
+        rule,
+        `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow (${named("/b")}), and a rule is not passed on the answers it did read alone`,
+      ),
+    );
+  });
+
+  it("keeps the rule's own note when every request was redirected", () => {
+    expect(undecidedByRedirects(pass(rule, 1, "its note"), [redirected("/b")])).toEqual(
+      skip(
+        rule,
+        `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named("/b")}); the rule's own note: its note`,
+      ),
+    );
+  });
+
+  it("keeps a finding that names no probe, beside a redirected request", () => {
+    const loose = finding(rule, {
+      detail: "a finding on no one probe",
+      expected: "x",
+      observed: "y",
+      probe: undefined,
+    });
+    const failed = { _tag: "Failed", rule, probes: 2, findings: [loose] } as const;
+    expect(undecidedByRedirects(failed, [read("/a"), redirected("/b")])).toEqual(failed);
+  });
+
+  it("names a redirect once, however many identical requests it answered", () => {
+    expect(undecidedByRedirects(pass(rule, 2), [redirected("/b"), redirected("/b")])).toEqual(
+      skip(
+        rule,
+        `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (${named("/b")})`,
+      ),
+    );
+  });
+
+  it("names the redirects in the reason of a rule that skipped on its own", () => {
+    expect(
+      undecidedByRedirects(skip(rule, "nothing to grade"), [read("/a"), redirected("/b")]),
+    ).toEqual(
+      skip(
+        rule,
+        `nothing to grade; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow (${named("/b")})`,
+      ),
+    );
   });
 });

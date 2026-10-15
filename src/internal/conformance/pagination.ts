@@ -868,9 +868,6 @@ const declaresSize = (endpoint: Discovered): boolean =>
  */
 export const linksEnumerateCollection: RuleImpl = {
   rule,
-  // A page a redirect the kit does not follow answers leaves its walk
-  // unfinished, naming the redirect, not dropped from the rule.
-  ownsRedirects: true,
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = probeable(
@@ -898,7 +895,9 @@ export const linksEnumerateCollection: RuleImpl = {
 /**
  * Any finding fails the rule; otherwise it passes when at least one collection
  * was walked to a verdict, noting the ones that were not, and skips naming
- * each when none was.
+ * each when none was. A redirect the kit did not follow, on any request the
+ * walk sent, makes `runRule` skip a pass all the same, naming it
+ * (`undecidedByRedirects` in `./core.ts`).
  */
 const outcomeOf = (
   assessments: ReadonlyArray<Assessment>,

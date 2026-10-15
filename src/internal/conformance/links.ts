@@ -684,7 +684,9 @@ const listedFindings = (rule: Rule, result: Crawl): ReadonlyArray<Finding> =>
  * Any finding fails the rule, budget or not. Otherwise a crawl the budget
  * could not finish — a read endpoint it could not search, or a link it could
  * not follow — is not passed; nor is one that decided no link. One that
- * decided some links passes, noting each it could not decide.
+ * decided some links passes, noting each it could not decide — unless a
+ * redirect the kit did not follow answered a request it sent, which
+ * `runRule` turns into a skip naming it (`undecidedByRedirects` in `./core.ts`).
  */
 const outcomeOf = (
   rule: Rule,
@@ -730,9 +732,6 @@ const dereferencing = (
   collect: (from: Target, body: Observation["body"]) => ReadonlyArray<Found>,
 ): RuleImpl => ({
   rule: judging.rule,
-  // A link a redirect the kit does not follow answers is left not decided,
-  // naming the redirect (`judge`), not dropped from the rule.
-  ownsRedirects: true,
   run: (ctx) =>
     Effect.gen(function* () {
       const { rule } = judging;
