@@ -34,6 +34,12 @@ import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
 
 const Revision = Resource.make("revisions", { attributes: { editedAt: Schema.String } });
+const Archive = Resource.make("archives", { attributes: { label: Schema.String } });
+// Paginated: no path crosses `employer` here, at any hop.
+const Writer = Resource.make("writers", {
+  attributes: { name: Schema.String },
+  relationships: { employer: Relationship.paginated(() => Archive) },
+});
 const Company = Resource.make("companies", { attributes: { name: Schema.String } });
 const Person = Resource.make("people", {
   attributes: { name: Schema.String, email: Schema.String },
@@ -83,6 +89,13 @@ const wire = {
   },
   companies: { type: "companies", id: "2", attributes: { name: "Acme" } },
   revisions: { type: "revisions", id: "3", attributes: { editedAt: "2026-01-01" } },
+  writers: {
+    type: "writers",
+    id: "4",
+    attributes: { name: "Grace" },
+    relationships: { employer: { links: { related: "/writers/4/employer" } } },
+  },
+  archives: { type: "archives", id: "6", attributes: { label: "Old" } },
 } as const;
 type WireType = keyof typeof wire;
 const types: ReadonlyArray<WireType> = Rec.keys(wire);
@@ -147,6 +160,19 @@ describe("the default `included` union reaches every legal include path (#320)",
     ).toEqual(["people", "companies"]);
   });
 
+  it("a to-one `related` walks the target's graph", () => {
+    // `parent` is a `Comment`, whose `author.employer` reaches `companies`.
+    const Reply = Resource.make("replies", {
+      attributes: { body: Schema.String },
+      relationships: { parent: Relationship.one(() => Comment) },
+    });
+    expect(
+      admitted(Endpoint.related(Reply, "parent", { include: true }), wire.comments, false),
+    ).toEqual(["people", "companies"]);
+    // Negative control: without `include`, only the target's direct targets.
+    expect(admitted(Endpoint.related(Reply, "parent"), wire.comments, false)).toEqual(["people"]);
+  });
+
   it("`collection` walks every member's graph", () => {
     // Article reaches `comments`, `comments.author`; Person reaches `employer`.
     expect(
@@ -173,6 +199,97 @@ describe("the default `included` union reaches every legal include path (#320)",
       "people",
     ]);
     expect(admitted(Endpoint.polymorphic(AnyNode), primary, false)).toEqual(["comments"]);
+    // The depth-2 path comes from a member other than the first.
+    const EditorFirst = Resource.family(Node, [Editor, Author]);
+    expect(admitted(Endpoint.polymorphic(EditorFirst, { include: true }), primary, false)).toEqual([
+      "comments",
+      "people",
+    ]);
+  });
+
+  describe("a target one member reaches only through a paginated relationship", () => {
+    // `posts.author` is a to-one `people`, so `author` and `author.employer`
+    // are legal paths; `drafts.author` is a paginated `revisions`, which no
+    // path may cross, so walking those paths from `drafts` reaches nothing.
+    const Entry = Resource.make("entries", { attributes: { title: Schema.String } });
+    const Post = Resource.extend(Entry, "posts", {
+      inheritId: true,
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const Draft = Resource.extend(Entry, "drafts", {
+      inheritId: true,
+      relationships: { author: Relationship.paginated(() => Revision) },
+    });
+    const post = {
+      type: "posts",
+      id: "1",
+      attributes: { title: "T" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+
+    it("is not admitted by `collection`", () => {
+      expect(
+        admitted(
+          Endpoint.collection([Post, Draft], { name: "entries", path: "/entries", include: true }),
+          post,
+          true,
+        ),
+      ).toEqual(["people", "companies"]);
+    });
+
+    it("is not admitted by `polymorphic`", () => {
+      const postFirst = Resource.family(Entry, [Post, Draft]);
+      const draftFirst = Resource.family(Entry, [Draft, Post]);
+      expect(admitted(Endpoint.polymorphic(postFirst, { include: true }), post, false)).toEqual([
+        "people",
+        "companies",
+      ]);
+      expect(admitted(Endpoint.polymorphic(draftFirst, { include: true }), post, false)).toEqual([
+        "people",
+        "companies",
+      ]);
+    });
+  });
+
+  describe("a target one member reaches only through a paginated relationship at the second hop", () => {
+    // `posts.author` is a to-one `people` and `drafts.author` a to-one
+    // `writers`, so `author.employer` is a legal path: from `posts` it reaches
+    // `companies`, but `writers.employer` is a paginated `archives`, which no
+    // path may cross at any hop.
+    const Entry = Resource.make("entries", { attributes: { title: Schema.String } });
+    const Post = Resource.extend(Entry, "posts", {
+      inheritId: true,
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const Draft = Resource.extend(Entry, "drafts", {
+      inheritId: true,
+      relationships: { author: Relationship.one(() => Writer) },
+    });
+    const post = {
+      type: "posts",
+      id: "1",
+      attributes: { title: "T" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+
+    it("is not admitted by `collection`", () => {
+      expect(
+        admitted(
+          Endpoint.collection([Post, Draft], { name: "entries", path: "/entries", include: true }),
+          post,
+          true,
+        ),
+      ).toEqual(["people", "companies", "writers"]);
+    });
+
+    it("is not admitted by `polymorphic`", () => {
+      const family = Resource.family(Entry, [Post, Draft]);
+      expect(admitted(Endpoint.polymorphic(family, { include: true }), post, false)).toEqual([
+        "people",
+        "companies",
+        "writers",
+      ]);
+    });
   });
 
   it("`Endpoint.resource` derives the same union for its `get` and `list`", () => {

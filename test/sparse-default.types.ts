@@ -162,6 +162,33 @@ export const node = Endpoint.polymorphic(AnyNode, { fields: true });
 assertType<Equals<AttributesOf<DataOf<typeof node>>, { readonly name?: string }>>(true);
 assertType<SuccessOf<typeof node>>(Handlers.data(editor, { onResource: project }));
 
+// A type one member reaches only through a paginated relationship (#320):
+// `posts.author` is a to-one `people`, `drafts.author` a paginated
+// `revisions`, which no include path may cross. `revisions` is no
+// `fields[TYPE]` type, so it is neither partial nor an `included` member.
+const Revision = Resource.make("revisions", { attributes: { editedAt: Schema.String } });
+const Entry = Resource.make("entries", { attributes: { title: Schema.String } });
+const Post = Resource.extend(Entry, "posts", {
+  inheritId: true,
+  relationships: { author: Relationship.one(() => Person) },
+});
+const Draft = Resource.extend(Entry, "drafts", {
+  inheritId: true,
+  relationships: { author: Relationship.paginated(() => Revision) },
+});
+export const entries = Endpoint.polymorphic(Resource.family(Entry, [Post, Draft]), {
+  include: true,
+  fields: true,
+});
+assertType<Equals<IncludedOf<typeof entries>["type"], "people" | "companies">>(true);
+assertType<
+  Equals<
+    AttributesOf<Extract<IncludedOf<typeof entries>, { readonly type: "people" }>>,
+    { readonly name?: string; readonly email?: string }
+  >
+>(true);
+assertType<Equals<AttributesOf<DataOf<typeof entries>>, { readonly title?: string }>>(true);
+
 // `Endpoint.resource` / `Group.resource` default `fields` to `true`.
 const group = Group.resource(Article);
 type GroupEndpoint<Name extends string> = Extract<

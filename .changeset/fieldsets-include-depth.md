@@ -10,7 +10,7 @@ What each configuration declares:
 - `include: true`, `{ depth }` or `{ paths }`: the same, plus every resource on the way down each legal include path, its leaf included. That is two hops under `include: true`, the `depth` a `Query.IncludeOptions` names, or exactly the listed `paths`; `comments.author.employer` declares `comments`, `people` and `companies`.
 - A declared `Include.Surface`: exactly the resource and the types the surface's paths reach, which is its `included` union. A direct target the surface leaves out is not declared.
 
-On a heterogeneous endpoint, every member is declared, and each member walks every path.
+On a heterogeneous endpoint, every member is declared, and each member walks every path, stopping at any of its own `paginated` relationships.
 
 **This narrows what 0.16.x accepted.** Two kinds of type that 0.16.x declared are now undeclared:
 

@@ -18,6 +18,7 @@ import {
   Endpoint,
   Handlers,
   Include,
+  Query,
   Relationship,
   Resource,
 } from "@thomasfosterau/effect-jsonapi";
@@ -148,6 +149,96 @@ const Editor = Resource.extend(Node, "editors", { inheritId: true });
 const AnyNode = Resource.family(Node, [Author, Editor]);
 export const node = Endpoint.polymorphic(AnyNode, { include: true });
 assertType<Equals<IncludedOf<typeof node>, typeof Comment.Type | typeof Person.Type>>(true);
+// The depth-2 path comes from a member other than the first.
+export const editorFirst = Endpoint.polymorphic(Resource.family(Node, [Editor, Author]), {
+  include: true,
+});
+assertType<Equals<IncludedOf<typeof editorFirst>, typeof Comment.Type | typeof Person.Type>>(true);
+
+// A to-one `related` walks its target's graph too: `parent` is a `Comment`,
+// whose `author.employer` reaches `Company` beyond the direct `Person`.
+const Reply = Resource.make("replies", {
+  attributes: { body: Schema.String },
+  relationships: { parent: Relationship.one(() => Comment) },
+});
+export const relatedOne = Endpoint.related(Reply, "parent", { include: true });
+assertType<Equals<IncludedOf<typeof relatedOne>, typeof Person.Type | typeof Company.Type>>(true);
+// Negative control: without `include`, only the target's direct targets.
+export const plainRelatedOne = Endpoint.related(Reply, "parent");
+assertType<Equals<IncludedOf<typeof plainRelatedOne>, typeof Person.Type>>(true);
+
+// ---------------------------------------------------------------------------
+// A target one member reaches only through a paginated relationship
+// ---------------------------------------------------------------------------
+
+// `posts.author` is a to-one `people`, so `author` and `author.employer` are
+// legal paths; `drafts.author` is a paginated `revisions`, which no path may
+// cross, so walking those paths from `drafts` reaches nothing.
+const Entry = Resource.make("entries", { attributes: { title: Schema.String } });
+const Post = Resource.extend(Entry, "posts", {
+  inheritId: true,
+  relationships: { author: Relationship.one(() => Person) },
+});
+const Draft = Resource.extend(Entry, "drafts", {
+  inheritId: true,
+  relationships: { author: Relationship.paginated(() => Revision) },
+});
+export const entries = Endpoint.polymorphic(Resource.family(Entry, [Post, Draft]), {
+  include: true,
+});
+assertType<Equals<IncludedOf<typeof entries>, typeof Person.Type | typeof Company.Type>>(true);
+assertType<
+  Equals<
+    Query.FieldsetResources<typeof Post | typeof Draft, true>["type"],
+    "posts" | "drafts" | "people" | "companies"
+  >
+>(true);
+// #337: `collection` still widens its `included` type with every member's
+// `TargetsOf`, paginated `Revision` included, though the runtime document
+// rejects a `revisions` member. Fixing #337 changes this pin.
+export const entryCollection = Endpoint.collection([Post, Draft], {
+  name: "entries",
+  path: "/entries",
+  include: true,
+});
+assertType<
+  Equals<
+    IncludedOf<typeof entryCollection>,
+    typeof Person.Type | typeof Company.Type | typeof Revision.Type
+  >
+>(true);
+
+// The same, at the second hop: `drafts.author` is a to-one `writers`, so
+// `author.employer` is a legal path, but `writers.employer` is a paginated
+// `archives`, which no path may cross at any hop.
+const Archive = Resource.make("archives", { attributes: { label: Schema.String } });
+const Writer = Resource.make("writers", {
+  attributes: { name: Schema.String },
+  relationships: { employer: Relationship.paginated(() => Archive) },
+});
+const SecondPost = Resource.extend(Entry, "posts", {
+  inheritId: true,
+  relationships: { author: Relationship.one(() => Person) },
+});
+const SecondDraft = Resource.extend(Entry, "drafts", {
+  inheritId: true,
+  relationships: { author: Relationship.one(() => Writer) },
+});
+export const secondHop = Endpoint.polymorphic(Resource.family(Entry, [SecondPost, SecondDraft]), {
+  include: true,
+});
+assertType<
+  Equals<
+    IncludedOf<typeof secondHop>,
+    typeof Person.Type | typeof Company.Type | typeof Writer.Type
+  >
+>(true);
+assertType<
+  Equals<
+    Query.FieldsetResources<typeof SecondPost | typeof SecondDraft, true>["type"],
+    "posts" | "drafts" | "people" | "companies" | "writers"
+  >
+>(true);
 
 // ---------------------------------------------------------------------------
 // No include path turned on: the document is exactly what it was
