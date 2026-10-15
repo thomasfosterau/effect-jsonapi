@@ -956,6 +956,19 @@ Handlers return linkage documents with `Handlers.linkage`, and build the relatio
   )))
 ```
 
+`Handlers.paginatedRelationship(type, id, name)` builds a `Relationship.paginated` relationship object: `{ links: { self, related } }` with `self` = `/<type>/<id>/relationships/<name>` and `related` = `/<type>/<id>/<name>`. A relationship `self` link promises that the server answers it, so write it only when the API declares that relationship endpoint (`Endpoint.getRelationship`). The `self` option controls it: omitted, it is the default path above; a string replaces it verbatim; `false` leaves it out, and the value's type then has no `self`. `related` is always written. The option touches only the relationship object: the relationship endpoint's own `first`/`next`/`prev`/`last` links come from its handler's `Handlers.offsetPaginationLinks` (or sibling) call, from the path that handler serves.
+
+```ts
+Handlers.paginatedRelationship("articles", id, "comments");
+// → { links: { self: "/articles/1/relationships/comments", related: "/articles/1/comments" } }
+Handlers.paginatedRelationship("articles", id, "comments", { self: false });
+// → { links: { related: "/articles/1/comments" } } — no relationship endpoint declared
+Handlers.paginatedRelationship("articles", id, "comments", {
+  self: "/v2/articles/1/relationships/comments",
+});
+// → { links: { self: "/v2/articles/1/relationships/comments", related: "/articles/1/comments" } }
+```
+
 ### Heterogeneous endpoints (search, feeds)
 
 `Endpoint.collection` builds collection endpoints whose `data` mixes several resource types, discriminated by their `type` tags — the natural fit for search results, feeds and timelines. A polymorphic collection has no single owning resource, so `name` and `path` are required:
