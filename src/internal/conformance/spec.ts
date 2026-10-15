@@ -39,6 +39,7 @@ import {
   errorObjectsOf,
   finding,
   type Finding,
+  HOP_CAP,
   identity,
   isRecord,
   jsonApiAccept,
@@ -1447,7 +1448,9 @@ const probeFirstUsable = (
             if (probe.unanswered === "undecided" && unanswered(observation)) {
               return skip(
                 impl,
-                `not decided: ${sentQuery(observation)} on ${path} answered ${statusOf(observation)}, and a server error, a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter`,
+                // A redirect the kit did not follow is no server error or lost
+                // response: it is named, and `runRule` says why it decides nothing.
+                `not decided: ${sentQuery(observation)} on ${path} answered ${statusOf(observation)}${Option.isSome(observation.unfollowed) ? "" : ", and a server error, a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter"}`,
               );
             }
             return settleRefusal(impl, passedOver.length + 2, {
@@ -2357,6 +2360,26 @@ const atomicLidResolution: RuleImpl = {
 // ---------------------------------------------------------------------------
 
 /**
+ * What a caller does about the redirects that answered `redirected`, each
+ * remedy once: a chain on the base URL's origin past {@link HOP_CAP} is not
+ * cured by another `baseUrl`, nor is a transport that followed a redirect
+ * itself.
+ */
+const remedies = (redirected: ReadonlyArray<Observation>): string =>
+  Arr.dedupe(
+    redirected.map(({ unfollowed }) => {
+      const reason = Option.getOrUndefined(unfollowed)?.reason;
+      if (reason === "cap") {
+        return `shorten the redirect chain to at most ${HOP_CAP} hops, which the kit follows on the base URL's origin`;
+      }
+      if (reason === "transport") {
+        return "hand the kit a client that does not follow redirects itself";
+      }
+      return "point `baseUrl` at the URL that serves the api";
+    }),
+  ).join("; ");
+
+/**
  * The one finding for the read endpoints a redirect the kit does not follow
  * answered, out of `probed`, or none when no endpoint was.
  */
@@ -2377,7 +2400,7 @@ const redirectedFinding = (
       });
       return [
         finding(impl, {
-          detail: `${which} read endpoint${probed === 1 ? "" : "s"} the kit probed answered with a redirect it does not follow, so the rules that probe ${them} have no answer to decide on — point \`baseUrl\` at the URL that serves the api`,
+          detail: `${which} read endpoint${probed === 1 ? "" : "s"} the kit probed answered with a redirect it does not follow, so the rules that probe ${them} have no answer to decide on — ${remedies(redirected)}`,
           expected:
             "an answer from the base URL's origin, directly or through redirects that stay on it",
           observed: `${first.probe.url}: ${describe(first)}${more}`,

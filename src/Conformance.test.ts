@@ -198,6 +198,45 @@ const withoutQuery = <R extends { readonly path: string }>(request: R): R => ({
 const offsite = (path: string) =>
   `a 302 redirect to https://elsewhere.test${path}, which the kit does not follow: https://elsewhere.test is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`;
 
+/**
+ * A transport that follows each redirect itself (`HttpClient.followRedirects`)
+ * in front of `canned`: each request `moved` picks is answered with a `302` to
+ * the same path on `https://elsewhere.test`, which the transport then requests,
+ * and whose answer — a 200 with an empty document — is all the kit is handed.
+ */
+const followingOffsite =
+  (moved: (request: HttpClientRequest.HttpClientRequest, url: URL) => boolean) =>
+  (canned: HttpClient.HttpClient) =>
+    HttpClient.followRedirects(
+      HttpClient.make((request, url) => {
+        if (url.origin === "https://elsewhere.test") {
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              new Response('{"meta":{}}', {
+                headers: { "content-type": MEDIA_TYPE },
+              }),
+            ),
+          );
+        }
+        return moved(request, url)
+          ? Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                new Response(null, {
+                  status: 302,
+                  headers: { location: `https://elsewhere.test${url.pathname}${url.search}` },
+                }),
+              ),
+            )
+          : canned.execute(request);
+      }),
+    );
+
+/** A redirect the transport followed to `https://elsewhere.test` + `path`, as a note names it. */
+const followed = (path: string) =>
+  `a redirect the transport followed itself, ending at https://elsewhere.test${path}, whose answer the kit does not read: https://elsewhere.test is another origin than the one the request was sent to, http://fixture.test — the transport has sent the request there already, so hand the kit a client that does not follow redirects`;
+
 /** The families of query parameter JSON:API defines. */
 const FAMILIES = ["include", "sort", "page", "filter", "fields"];
 
@@ -1540,6 +1579,40 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
     expect(probed).toEqual(PROBES.map(([, , url]) => url));
   });
 
+  it("decides none on a probe a transport followed off the origin itself", async () => {
+    // Every baseline is answered; every probe is followed to another origin.
+    const report = await verifyFamily(
+      familyServe(),
+      undefined,
+      followingOffsite((_, url) =>
+        PROBES.some(([, , probe]) => probe === decodeURIComponent(`${url.pathname}${url.search}`)),
+      ),
+    );
+    expect(failed(report)).toEqual([]);
+    expect(Arr.map(PROBES, ([id]) => outcomeFor(report, id))).toEqual(
+      Arr.map(PROBES, ([, , url]) =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining(
+            // The URL the transport ended at is named as it sent it, brackets encoded.
+            `1 of 2 requests the rule sent were answered by a redirect the kit does not follow (GET ${url} answered ${followed(url.replaceAll("[", "%5B").replaceAll("]", "%5D"))})`,
+          ),
+        }),
+      ),
+    );
+    // A redirect is no lost response, so the rule's own reason does not say
+    // that a lost response says nothing.
+    expect(
+      Arr.filter(PROBES, ([id]) => {
+        const outcome = outcomeFor(report, id);
+        return (
+          Predicate.isTagged(outcome, "Skipped") &&
+          outcome.reason.includes("a lost response says nothing")
+        );
+      }),
+    ).toEqual([]);
+  });
+
   it.each(PROBES)("fails %s alone when the server ignores `%s`", async (id, parameter, url) => {
     const report = await verifyFamily(familyServe((key) => key === parameter));
     expect(failed(report)).toEqual([id]);
@@ -2257,6 +2330,37 @@ describe("Conformance: the write fixture", () => {
     },
   );
 
+  it.each([
+    [
+      "a same-origin chain past the hop cap",
+      redirectingAll(307, (path) => `/loop${path}`).client,
+      "shorten the redirect chain to at most 5 hops, which the kit follows on the base URL's origin",
+      "/articles/1: a 307 redirect to http://fixture.test/loop/loop/loop/loop/loop/loop/articles/1, which the kit does not follow: it would be redirect 6 in a row, past the kit's cap of 5",
+    ],
+    [
+      "a transport that follows each redirect off the origin itself",
+      followingOffsite(() => true),
+      "hand the kit a client that does not follow redirects itself",
+      `/articles/1: ${followed("/articles/1")}`,
+    ],
+  ])(
+    "tells the caller what to change for %s, not to move `baseUrl`, and decides nothing else",
+    async (_, client, remedy, observed) => {
+      const { report } = await run(undefined, undefined, { client });
+      expect(outcomeFor(report, "spec/target/reachable")).toMatchObject({
+        _tag: "Failed",
+        findings: [
+          {
+            detail: `every read endpoint the kit probed answered with a redirect it does not follow, so the rules that probe it have no answer to decide on — ${remedy}`,
+            observed,
+          },
+        ],
+      });
+      expect(failed(report)).toEqual(["spec/target/reachable"]);
+      expect(Conformance.summarise(report).passed).toBe(0);
+    },
+  );
+
   /**
    * A transport in front of the server that answers each request `moved`
    * picks with a `302` to the same path on another origin, and passes the rest
@@ -2334,6 +2438,92 @@ describe("Conformance: the write fixture", () => {
       rule: expect.anything(),
       reason: `no provoked error object carried a \`source\` member; 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${offsite("/articles/1?unknown=1")})`,
     });
+  });
+
+  /** Each rule's verdict, by id. */
+  const tags = (report: Conformance.Report) =>
+    report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`);
+
+  it.each([
+    [
+      "only `?unknown=1`",
+      (_: HttpClientRequest.HttpClientRequest, url: URL) => url.searchParams.has("unknown"),
+    ],
+    [
+      "only the DELETE",
+      (request: HttpClientRequest.HttpClientRequest) => request.method === "DELETE",
+    ],
+    // Every probe that carries a query — the unsupported-family and bracketed
+    // probes among them — while each baseline is answered.
+    [
+      "every request with a query",
+      (_: HttpClientRequest.HttpClientRequest, url: URL) => url.search !== "",
+    ],
+  ])(
+    "decides nothing on a request a transport followed off the origin itself, when it redirects %s",
+    async (_, moved) => {
+      const kit = await run(undefined, undefined, { client: redirectingSome(moved) });
+      const transport = await run(undefined, undefined, { client: followingOffsite(moved) });
+      // No rule fails on an answer from the other origin — no "was not
+      // rejected", no "got no response" — and none passes on the rest of its
+      // requests: every rule ends as it does when the kit sees the redirect.
+      expect(failed(transport.report)).toEqual([]);
+      expect(tags(transport.report)).toEqual(tags(kit.report));
+    },
+  );
+
+  it("names a redirect the transport followed off the origin in the rule it leaves undecided", async () => {
+    const unknown = await run(undefined, undefined, {
+      client: followingOffsite((_, url) => url.searchParams.has("unknown")),
+    });
+    expect(outcomeFor(unknown.report, "spec/query/unknown-query-parameter")).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
+    });
+    const errors = [
+      "spec/errors/error-document-shape",
+      "spec/errors/error-member-types",
+      "spec/errors/error-status-matches-response",
+    ];
+    expect(Arr.map(errors, (id) => outcomeFor(unknown.report, id))).toEqual(
+      Arr.map(errors, () =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining(
+            `1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
+          ),
+        }),
+      ),
+    );
+    const deletes = await run(undefined, undefined, {
+      client: followingOffsite((request) => request.method === "DELETE"),
+    });
+    expect(outcomeFor(deletes.report, "spec/status/delete-response")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringMatching(
+        /^not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow \(DELETE \/articles\/\d+ answered a redirect the transport followed itself, ending at https:\/\/elsewhere\.test\/articles\/\d+, whose answer the kit does not read: .*\), and a rule is not passed on the answers it did read alone$/,
+      ),
+    });
+    // The unsupported-family and bracketed probes: each rule's baseline was
+    // answered, its probes were not, so none is passed on the baseline alone.
+    const queries = await run(undefined, undefined, {
+      client: followingOffsite((_, url) => url.search !== ""),
+    });
+    const probing = [
+      "spec/query/include-unsupported-endpoint",
+      "spec/query/fields-unsupported-endpoint",
+      "spec/query/page-unsupported-endpoint",
+      "spec/query/filter-unsupported-endpoint",
+    ];
+    expect(Arr.map(probing, (id) => outcomeFor(queries.report, id))).toEqual(
+      Arr.map(probing, () =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining("answered a redirect the transport followed itself"),
+        }),
+      ),
+    );
   });
 
   it("runs every write rule against a conformant server, on targets it created", async () => {
@@ -5198,7 +5388,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     );
   });
 
-  it("does not read an answer a transport fetched from another origin all the same", async () => {
+  it("does not read, or pass on the rest, an answer a transport fetched from another origin all the same", async () => {
     // A transport that follows redirects on its own (`HttpClient.followRedirects`,
     // say) reports where its answer came from.
     const report = await run(linked(), (client) =>
@@ -5219,9 +5409,11 @@ describe("Conformance: `self` and `related` links dereference", () => {
           : client.execute(request),
       ),
     );
-    expect(outcomeFor(report, SELF)).toMatchObject({
-      _tag: "Passed",
-      note: "1 link not decided: the `self` link of articles:2 (in /articles, at /data/1) got no response (the transport followed a redirect to another origin, https://elsewhere.test, whose answer the kit does not read) — a server error, a rate limit, a request timeout or a lost response says nothing of the links",
+    // Not read, and so not decided — never a pass on the links the kit did read.
+    expect(outcomeFor(report, SELF)).toEqual({
+      _tag: "Skipped",
+      rule: expect.anything(),
+      reason: `not decided: 1 of 3 requests the rule sent were answered by a redirect the kit does not follow (GET /articles/2 answered ${followed("/articles/2")}), and a rule is not passed on the answers it did read alone; the rule's own note: 1 link not decided: the \`self\` link of articles:2 (in /articles, at /data/1) answered ${followed("/articles/2")}`,
     });
   });
 

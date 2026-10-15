@@ -956,14 +956,17 @@ export const verify = Effect.fnUntraced(function* <
  * checks each hop before requesting it, so it never sends a request to another
  * origin on a server's say-so: a redirect it does not follow leaves the
  * request with no answer to read, and `spec/target/reachable` reports a read
- * endpoint that answers with one — point `baseUrl` at the URL that serves. For
- * that, the kit provides `FetchHttpClient.RequestInit` with
- * `redirect: "manual"` for its own requests, over the rest of the
- * `RequestInit` the run's context holds. A `RequestInit` given only to the
- * client's layer (`FetchHttpClient.layer.pipe(Layer.provide(…))`) is replaced
- * for the kit's requests, so give it to the run instead. A client that follows
- * redirects by other means (`HttpClient.followRedirects`) still sends the
- * request: the kit does not read an answer that came from another origin, but
+ * endpoint that answers with one — point `baseUrl` at the URL that serves, or
+ * shorten a chain on its origin longer than the cap. To keep the transport
+ * from following a redirect itself, the kit provides
+ * `FetchHttpClient.RequestInit` with `redirect: "manual"` for its own
+ * requests, over the rest of the `RequestInit` the run's context holds. A
+ * `RequestInit` given only to the client's layer
+ * (`FetchHttpClient.layer.pipe(Layer.provide(…))`) is replaced for the kit's
+ * requests, so give it to the run instead. A client that follows redirects by
+ * other means (`HttpClient.followRedirects`) still sends the request: the kit
+ * does not read an answer that came from another origin, and a rule that sent
+ * the request is not decided by it, as for any redirect off the origin, but
  * the request has been made, so pass a client that does not follow redirects.
  * There is no per-request timeout: a server that holds a response open holds
  * the run.
