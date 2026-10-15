@@ -211,6 +211,16 @@ assertType<Registry.FamilyFor<H>>({ group: "people", handlers: hidingHandlers })
 // @ts-expect-error — `create` / `update` may answer a document `G` does not declare
 assertType<Registry.FamilyFor<G>>({ group: "people", handlers: hidingHandlers });
 
+// A write result's `version` is `unknown`: an operation answering a `version`
+// of another type (a bigint row version) still type-checks.
+ResourceHandlers.make({
+  segment: "people",
+  listQuery,
+  linkBase: Effect.succeed("https://example.test"),
+  ops: { ...hidingOps, create: () => Effect.succeed({ id: Person.Id.make("1"), version: 1n }) },
+  hiddenWrite: { type: "people", when: () => true },
+});
+
 // The rule's `type` is the resource's own.
 ResourceHandlers.make({
   segment: "people",

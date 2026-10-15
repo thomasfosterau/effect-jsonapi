@@ -87,6 +87,7 @@ import * as FlatQuery from "./FlatQuery.js";
 import * as Idempotency from "./Idempotency.js";
 import { isSurface } from "./Include.js";
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
+import { closedStruct, defaultMaxUndeclaredMemberErrors } from "./internal/schemaExt.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
@@ -3811,6 +3812,19 @@ export const ResourceDocument = <
  * optional members of a resource object (JSON:API 1.1 §Resource Objects).
  * Annotated with the JSON:API media type.
  *
+ * The identifier is **closed**: a resource object carrying any member the
+ * identifier doesn't declare (`attributes`, `relationships`, `links`, …) is
+ * rejected, decoding and encoding alike, rather than stripped down to its
+ * `type` and `id`. So inside {@link WriteDocument} a full document that fails
+ * {@link ResourceDocument} (an attribute its schema rejects) fails the union
+ * too — a defect on the server (a 500), a decode failure on the client —
+ * instead of going out, or coming in, as this identifier document.
+ *
+ * This is the **schema**; `ResourceHandlers.CommittedDocument` is the
+ * **value** type a handler answers with, which this schema encodes — the same
+ * split as this module's {@link ResourceDocument} and
+ * `Assemble.ResourceDocument`.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -3828,34 +3842,51 @@ export const ResourceDocument = <
  * @since 0.17.0
  * @category constructors
  */
-export const CommittedDocument = <I extends Schema.Top>(resource: {
-  readonly identifier: I;
-}): DataDocument<I> =>
-  // SAFETY: `asJsonApi` only annotates the schema; its type is unchanged.
-  asJsonApi(DataDocument(resource.identifier)) as DataDocument<I>;
+export const CommittedDocument = <F extends Schema.Struct.Fields>(resource: {
+  readonly identifier: { readonly fields: F };
+}): DataDocument<Schema.Struct<F>> =>
+  asJsonApi(
+    DataDocument(closedStruct(resource.identifier.fields, defaultMaxUndeclaredMemberErrors)),
+  );
 
 /**
  * The `success:` document of a flat `create` / `update` that may answer a
  * hidden write: {@link ResourceDocument} or {@link CommittedDocument}, in
  * that order — a document carrying the full resource decodes as the first,
- * one whose resource carries no `attributes` as the second. What
+ * one whose resource object is exactly an identifier (`type`, `id`, `meta?`)
+ * as the second. A document that fails the first and carries a member the
+ * identifier doesn't declare fails both, so an invalid full document is
+ * never answered, or accepted, as the identifier document. What
  * `Group.flat({ …, hiddenWrites: true })` declares.
  *
  * @since 0.17.0
  * @category constructors
  */
 export const WriteDocument = <
-  S extends Schema.Top & { readonly identifier: Schema.Top },
+  S extends Schema.Top & StructIdentified,
   Included extends Schema.Top = typeof Schema.Never,
 >(
   resource: S,
   options?: FlatDocumentOptions<Included>,
 ): WriteDocument<S, Included> =>
-  // SAFETY: the members are `ResourceDocument`'s and `CommittedDocument`'s
-  // own return types; `asJsonApi` only annotates the union.
   asJsonApi(
-    Schema.Union([ResourceDocument(resource, options), CommittedDocument(resource)]),
-  ) as WriteDocument<S, Included>;
+    Schema.Union<WriteDocumentMembers<S, Included>>([
+      ResourceDocument(resource, options),
+      CommittedDocument(resource),
+    ]),
+  );
+
+/** A resource definition whose identifier is a struct, as `Resource.make`'s is. */
+type StructIdentified = { readonly identifier: { readonly fields: Schema.Struct.Fields } };
+
+/** The members of {@link WriteDocument}, in order. */
+type WriteDocumentMembers<
+  S extends Schema.Top & StructIdentified,
+  Included extends Schema.Top,
+> = readonly [
+  DataDocument<WireSchema<S>, WireSchema<Included>>,
+  DataDocument<Schema.Struct<S["identifier"]["fields"]>>,
+];
 
 /**
  * The schema {@link WriteDocument} builds.
@@ -3864,11 +3895,9 @@ export const WriteDocument = <
  * @category models
  */
 export interface WriteDocument<
-  S extends Schema.Top & { readonly identifier: Schema.Top },
+  S extends Schema.Top & StructIdentified,
   Included extends Schema.Top = typeof Schema.Never,
-> extends Schema.Union<
-  readonly [DataDocument<WireSchema<S>, WireSchema<Included>>, DataDocument<S["identifier"]>]
-> {}
+> extends Schema.Union<WriteDocumentMembers<S, Included>> {}
 
 /**
  * The `success:` document of a §7.4 related-resource fetch of a **to-one**

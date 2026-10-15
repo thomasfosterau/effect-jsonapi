@@ -35,7 +35,7 @@
  *
  * @since 0.16.0
  */
-import { Cause, Effect, Exit, Option, Ref } from "effect";
+import { Array as Arr, Cause, Effect, Exit, Option, Predicate, Ref } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -79,8 +79,14 @@ export interface ReadOnlyOps<TList, TResource, TId extends string, E, R> {
  */
 export interface WriteResult<TId extends string> {
   readonly id: TId;
-  /** The committed version, echoed as `data.meta.version` when the re-read is hidden. */
-  readonly version?: string | number | undefined;
+  /**
+   * The committed version, echoed as `data.meta.version` when the re-read is
+   * hidden. Any type is accepted, so an operation that already answered a
+   * `version` of its own keeps compiling; only a string or a finite number
+   * reaches the wire as is, a `bigint` as its decimal string, and anything
+   * else is left out of `meta`.
+   */
+  readonly version?: unknown;
 }
 
 /**
@@ -248,7 +254,12 @@ export interface Config<
   HType extends TResource["type"] = never,
 > extends ReadOnlyConfig<TQuery, TResource, TId, V, E, R, RV, RL, RC, Targets> {
   readonly ops: Ops<NoInfer<TQuery>, TCreate, TUpdate, TResource, TId, E, R, RW>;
-  /** The transaction seam every write runs inside. Omit for none. */
+  /**
+   * The transaction seam every write runs inside. Omit for none: each
+   * operation is then its own (autocommitted) write, and an interrupt that
+   * lands after it commits but before it returns its result is seen as a
+   * write that never succeeded, so it evicts nothing (see {@link make}).
+   */
   readonly transact?: Transact<Tx, ET, RT> | undefined;
   /**
    * Which failures of the post-write re-read mean the committed resource is
@@ -256,6 +267,7 @@ export interface Config<
    * than the failure. Omit to fail the write with the re-read's error, as a
    * group without `Group.flat`'s `hiddenWrites` declares.
    */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
   readonly hiddenWrite?: HiddenWrite<NoInfer<E>, HType> | undefined;
 }
 
@@ -280,7 +292,9 @@ export interface HiddenWrite<E, TType extends string = string> {
   /**
    * Whether a re-read failure means "hidden" (typically the operation's
    * not-found error). Only a plain failure is asked: a defect or an
-   * interruption always propagates, and so does a failure this rejects.
+   * interruption always propagates, and so does a failure this rejects. A
+   * cause carrying several failures is hidden only when this accepts every
+   * one of them.
    */
   readonly when: (error: E) => boolean;
 }
@@ -289,11 +303,17 @@ export interface HiddenWrite<E, TType extends string = string> {
  * The success document of a committed `create` / `update` whose resource is
  * hidden from its writer ({@link HiddenWrite}): the resource object reduced
  * to its `type` and `id`, with `meta.version` when the operation reported
- * one. A resource object's `attributes` and `relationships` are optional
+ * one ({@link WriteResult.version}). A resource object's `attributes` and `relationships` are optional
  * members (JSON:API 1.1 §Resource Objects), so this is still the created or
  * updated resource as primary data — the same members a sparse fieldset
  * that names no fields leaves. It carries no `links.self`, so a `201` built
  * from it has no `Location` (a SHOULD).
+ *
+ * This is the **value** a handler answers with; `Endpoint.CommittedDocument`
+ * is the **schema** that encodes it on the wire (and that
+ * `Endpoint.WriteDocument` / `Group.flat({ …, hiddenWrites: true })`
+ * declare) — the same split as `Assemble.ResourceDocument` and
+ * `Endpoint.ResourceDocument`.
  *
  * @since 0.17.0
  * @category models
@@ -579,6 +599,13 @@ export const readOnly = <
  * the cache. With {@link Config.hiddenWrite}, a re-read failure it names is
  * answered with the {@link CommittedDocument} instead (after the eviction).
  *
+ * "Once the operation has succeeded" is when it *returns*. Inside a
+ * {@link Config.transact} that is before the commit, so the window is closed;
+ * without one, the operation autocommits, and an interrupt landing after its
+ * commit but before it returns (or before its result is recorded) leaves a
+ * committed write that evicts nothing. Supply a `transact` where that window
+ * matters.
+ *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
@@ -672,9 +699,7 @@ export const make = <
   const { ops, segment, cache, capabilities } = config;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
   const transact = (config.transact ?? identityTransact) as Transact<Tx, ET, RT>;
-  // SAFETY: `HType` only narrows `type` to a literal for the return type; the
-  // rule's runtime shape is the same.
-  const hidden = config.hiddenWrite as HiddenWrite<E> | undefined;
+  const hidden = config.hiddenWrite;
   const evict = (id: TId) => (cache === undefined ? Effect.void : cache.delete(id));
 
   /**
@@ -684,7 +709,9 @@ export const make = <
    * have committed. The eviction runs under the caller's mask. `written` is
    * set only once the operation has succeeded, so a write it refuses (a
    * gate, a precondition) never evicts, and a forbidden request can't bust
-   * the cache.
+   * the cache. Without a `transact` the operation commits before it returns,
+   * so an interrupt between the two is not seen here (documented on
+   * {@link make}).
    */
   const commit = <A>(
     restore: <AX, EX, RX>(effect: Effect.Effect<AX, EX, RX>) => Effect.Effect<AX, EX, RX>,
@@ -795,18 +822,35 @@ type Committed<HType extends string, TId extends string> = [HType] extends [neve
   ? never
   : CommittedDocument<HType, TId>;
 
-/** Whether a re-read's cause is a plain failure the hidden-write rule names. */
+/**
+ * Whether a re-read's cause is plain failures only, every one of which the
+ * hidden-write rule names: a defect, an interruption or a single failure it
+ * rejects keeps the whole cause propagating.
+ */
 const isHidden = <E>(cause: Cause.Cause<E>, when: (error: E) => boolean): boolean =>
-  !Cause.hasDies(cause) &&
-  !Cause.hasInterrupts(cause) &&
-  Option.match(Cause.findErrorOption(cause), { onNone: () => false, onSome: when });
+  Arr.isReadonlyArrayNonEmpty(cause.reasons) &&
+  Arr.every(cause.reasons, (reason) => Cause.isFailReason(reason) && when(reason.error));
+
+/**
+ * The `meta.version` a write result's `version` becomes: a string or a finite
+ * number as is, a `bigint` as its decimal string, anything else none.
+ */
+const wireVersion = ({ version }: WriteResult<string>): Option.Option<string | number> =>
+  Predicate.isString(version) || (Predicate.isNumber(version) && Number.isFinite(version))
+    ? Option.some(version)
+    : Predicate.isBigInt(version)
+      ? Option.some(version.toString())
+      : Option.none();
 
 /** The {@link CommittedDocument} a hidden write answers. */
 const committedDocument = <TId extends string>(
   type: string,
-  { id, version }: WriteResult<TId>,
+  result: WriteResult<TId>,
 ): CommittedDocument<string, TId> => ({
-  data: version === undefined ? { type, id } : { type, id, meta: { version } },
+  data: Option.match(wireVersion(result), {
+    onNone: () => ({ type, id: result.id }),
+    onSome: (version) => ({ type, id: result.id, meta: { version } }),
+  }),
   jsonapi: Assemble.JSONAPI_MEMBER,
 });
 

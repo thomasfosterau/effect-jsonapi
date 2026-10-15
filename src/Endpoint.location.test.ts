@@ -149,6 +149,20 @@ describe("Endpoint.create: the 201's Location header", () => {
     expect(fromJson(response.body)).toEqual(committed);
   });
 
+  // An invalid full document is a server defect (the 500 every response
+  // that fails to encode gets), never the identifier document with its
+  // attributes stripped.
+  it("answers a full document that fails to encode under WriteDocument with a 500, not the identifier", async () => {
+    const api = HttpApi.make("blog").add(
+      Group.make(Article, Endpoint.create(Article, { success: Endpoint.WriteDocument(Article) })),
+    );
+    const invalid = { data: { ...created, attributes: { title: "", body: "World" } } };
+    const response = await server({ api, handle: () => Effect.succeed(invalid) })();
+    expect(response.status).toBe(500);
+    expect(response.location).toBeNull();
+    expect(fromJson(response.body)).not.toHaveProperty("data");
+  });
+
   it("leaves a create answering with another status untouched", async () => {
     const response = await postOnce(
       () =>

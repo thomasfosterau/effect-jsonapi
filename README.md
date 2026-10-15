@@ -1667,6 +1667,8 @@ Every write runs its operation inside `transact`, re-reads the row as the writer
 A committed write the writer can no longer read would otherwise answer 404, and a client retrying a "failed" create duplicates it. `hiddenWrite` names the re-read failures that mean "hidden", and the handler answers those with the resource's identifier instead: `201` / `200` with `{ data: { type, id, meta: { version } } }` and no attributes (attributes and relationships are optional members of a resource object), `version` coming from the operation's write result when it reports one. The group must declare that document, with `hiddenWrites: true`; without it the writes declare the full document alone, and `Registry.FamilyFor` rejects a handler set that could answer anything else:
 
 ```ts
+import { Predicate } from "effect";
+
 const { group } = Group.flat({
   resource: Person,
   list: ListPeople,
@@ -1678,11 +1680,13 @@ const { group } = Group.flat({
 
 ResourceHandlers.make({
   // …as above, with `create` / `update` answering `{ id, version? }`
-  hiddenWrite: { type: "people", when: (error) => error._tag === "NotFound" },
+  hiddenWrite: { type: "people", when: (error) => Predicate.isTagged(error, "NotFound") },
 });
 ```
 
-The identifier document carries no `links.self`, so its `201` has no `Location`.
+The identifier document carries no `links.self`, so its `201` has no `Location`. Its resource object is closed: a full document whose attributes fail the resource's schema is not answered as the identifier document instead (it is a 500, as any response that fails to encode is), and a client decodes it as a failure, not as an identifier. A re-read cause is "hidden" only when every failure in it is one `when` accepts. `version` may be of any type: a string or a finite number is echoed as is, a `bigint` as its decimal string, and anything else is left out of `meta`.
+
+Without a `transact`, each operation is its own autocommitted write: an interrupt that lands after it commits but before it returns is seen as a write that never succeeded, and evicts nothing. Supply a `transact` where that window matters.
 
 ## Query parameters
 
