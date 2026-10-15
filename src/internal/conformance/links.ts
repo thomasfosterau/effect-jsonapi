@@ -10,10 +10,14 @@
  * relationship's `related` must answer resource data at all (a MUST) and
  * should answer the resources its linkage names (graded SHOULD, since the
  * spec says so only in prose without a keyword); a relationship's `self` must
- * answer linkage matching the relationship object's own (a MUST); and a
- * document's top-level `self` must answer a document of the same kind — the
- * same resource, `null`, or a collection, which is compared resource for
- * resource only when neither document is a page.
+ * answer resource linkage — identifier objects only, as many as the
+ * relationship holds (a MUST) — and should answer the identifiers the
+ * relationship object names (a SHOULD); and a document's top-level `self` must
+ * answer resource data (a MUST) and should answer a document of the same
+ * kind — the same resource, `null`, or a collection, which is compared
+ * resource for resource only when neither document is a page (a SHOULD). Each
+ * SHOULD leaves a link its MUST fails to that rule rather than reporting it
+ * twice.
  *
  * The crawl is the pagination walk's (`./crawl.ts`): a link resolves against
  * the document that carries it, one that leads to another origin is never
@@ -98,8 +102,32 @@ const SOURCE_ROLES: ReadonlyArray<Role> = ["collection", "resource", "related"];
  */
 const DOCUMENT_ROLES: ReadonlyArray<Role> = [...SOURCE_ROLES, "relationship"];
 
+/** The endpoints a rule collects its links from, and how its skip reason names them. */
+interface Searched {
+  readonly roles: ReadonlyArray<Role>;
+  readonly named: string;
+}
+
+/** The read endpoints answering resource objects, which carry `self` and `related` links. */
+const RESOURCE_ENDPOINTS: Searched = {
+  roles: SOURCE_ROLES,
+  named: "JSON:API endpoint answering resource objects",
+};
+
+/** Every read endpoint, each answering a document that may carry a top-level `self`. */
+const READ_ENDPOINTS: Searched = {
+  roles: DOCUMENT_ROLES,
+  named: "JSON:API read endpoint answering a document",
+};
+
 /** The id of the rule that holds a `related` link to answering at all. */
 const RELATED_DEREFERENCES = "spec/links/related-dereferences";
+
+/** The id of the rule that holds a relationship's `self` link to answering resource linkage at all. */
+const RELATIONSHIP_SELF_DEREFERENCES = "spec/links/relationship-self-dereferences";
+
+/** The id of the rule that holds a top-level `self` link to answering resource data at all. */
+const TOP_LEVEL_SELF_DEREFERENCES = "spec/links/top-level-self-dereferences";
 
 // ---------------------------------------------------------------------------
 // What a link claims
@@ -125,10 +153,13 @@ interface Member {
  * the kit cannot hold an answer to: a resource, or linkage, without a string
  * `type` and `id`. Like an answer it cannot identify, it leaves the link not
  * decided, on either rule, rather than weakening or skewing the comparison.
+ * `Linkage` is a relationship `self` link's MUST: resource linkage of any
+ * identity, as many identifiers as the relationship holds.
  */
 type Claim =
   | { readonly _tag: "Resource"; readonly member: Member }
   | { readonly _tag: "ResourceData" }
+  | { readonly _tag: "Linkage"; readonly cardinality: Cardinality }
   | { readonly _tag: "ToOne"; readonly member: Member }
   | { readonly _tag: "Empty" }
   | {
@@ -146,6 +177,13 @@ type Claim =
     }
   | { readonly _tag: "Unidentified"; readonly why: string };
 const Claim = Data.taggedEnum<Claim>();
+
+/**
+ * How many identifiers a relationship holds, as its linkage shows: one (a
+ * resource identifier or `null`), many (an array of them), or — for a
+ * relationship without linkage, or with linkage of neither shape — not shown.
+ */
+type Cardinality = "one" | "many" | "unshown";
 
 /**
  * What carries a found link, which decides how findings word what it answers:
@@ -286,15 +324,30 @@ const relatedLinks = (linked: boolean) =>
       : Option.some(Claim.ResourceData()),
   );
 
+/** How many identifiers a relationship holds, as its linkage shows. */
+const cardinalityOf = (relationship: JsonObject): Cardinality => {
+  if (!("data" in relationship)) return "unshown";
+  const data = relationship["data"];
+  if (Array.isArray(data)) return "many";
+  return data === null || isRecord(data) ? "one" : "unshown";
+};
+
 /**
- * Every relationship's own `self` link in a document: one that carries
- * linkage claims what it names; one without claims resource linkage of any
- * identity (§Fetching Relationships: the answer's primary data "**MUST** match
- * the appropriate value for resource linkage").
+ * Every relationship's own `self` link in a document. With `linked`, only the
+ * relationships that carry linkage, each claiming the identifiers it names;
+ * otherwise every relationship, each claiming resource linkage of any
+ * identity, as many identifiers as its linkage shows it holds (§Fetching
+ * Relationships: the answer's primary data "**MUST** match the appropriate
+ * value for resource linkage").
  */
-const relationshipSelfLinks = relationshipLinks("self", (relationship) =>
-  Option.some("data" in relationship ? claimOf(relationship) : Claim.ResourceData()),
-);
+const relationshipSelfLinks = (linked: boolean) =>
+  relationshipLinks("self", (relationship) =>
+    linked
+      ? "data" in relationship
+        ? Option.some(claimOf(relationship))
+        : Option.none()
+      : Option.some(Claim.Linkage({ cardinality: cardinalityOf(relationship) })),
+  );
 
 /** `true` when a document carries a `next` or `prev` link: it is one page of a collection. */
 // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
@@ -340,22 +393,27 @@ const documentClaim = (document: JsonObject): Claim => {
       });
 };
 
-/** A document's top-level `self` link, with what it claims. */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-const topLevelSelfLinks = (from: Target, body: unknown): ReadonlyArray<Found> =>
-  isRecord(body)
-    ? [
-        {
-          where: `the top-level \`self\` link of ${from.url}`,
-          of: from.url,
-          name: "self",
-          basis: "document",
-          link: linkIn(body["links"], "self"),
-          from,
-          claim: documentClaim(body),
-        },
-      ]
-    : [];
+/**
+ * A document's top-level `self` link. With `matching`, claiming a document of
+ * the same kind; otherwise claiming resource data of any identity.
+ */
+const topLevelSelfLinks =
+  (matching: boolean) =>
+  // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
+  (from: Target, body: unknown): ReadonlyArray<Found> =>
+    isRecord(body)
+      ? [
+          {
+            where: `the top-level \`self\` link of ${from.url}`,
+            of: from.url,
+            name: "self",
+            basis: "document",
+            link: linkIn(body["links"], "self"),
+            from,
+            claim: matching ? documentClaim(body) : Claim.ResourceData(),
+          },
+        ]
+      : [];
 
 // ---------------------------------------------------------------------------
 // Following one link
@@ -411,6 +469,77 @@ const isResourceData = (observation: Observation): boolean => {
   );
 };
 
+/** The members a resource identifier object may carry (§Resource Identifier Objects). */
+const IDENTIFIER_MEMBERS: ReadonlyArray<string> = ["type", "id", "lid", "meta"];
+
+/**
+ * Why a JSON value is no resource identifier object — an object with a string
+ * `type`, a string `id` or `lid`, and nothing but those and `meta` — or none
+ * when it is one. A full resource object, with `attributes`, `relationships`
+ * or `links`, is not.
+ */
+// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
+const notAnIdentifier = (value: unknown): Option.Option<string> => {
+  if (!isRecord(value)) return Option.some(`is ${quote(value)}, not an object`);
+  if (!Predicate.isString(value["type"])) return Option.some("has no string `type`");
+  if (!Predicate.isString(value["id"]) && !Predicate.isString(value["lid"])) {
+    return Option.some("has neither a string `id` nor a string `lid`");
+  }
+  return Arr.match(
+    Rec.keys(value).filter((key) => !IDENTIFIER_MEMBERS.includes(key)),
+    {
+      onEmpty: () => Option.none(),
+      onNonEmpty: (extra) =>
+        Option.some(
+          `carries ${listed(extra.map((key) => `\`${quote(key)}\``))}, which a resource identifier object does not`,
+        ),
+    },
+  );
+};
+
+/**
+ * How many identifiers a 2xx answer's primary data holds when it is resource
+ * linkage — one for a resource identifier object or `null`, many for an array
+ * of them — or, when it is not, what it holds instead, as a finding observes it.
+ */
+const answeredCardinality = (observation: Observation): Result.Result<"one" | "many", string> => {
+  const body = observation.body;
+  if (!isRecord(body) || !("data" in body)) return Result.fail(describe(observation));
+  const data = body["data"];
+  if (data === null) return Result.succeed("one");
+  if (Array.isArray(data)) {
+    const first = Arr.findFirst(data, (item, index) =>
+      Option.map(notAnIdentifier(item), (why) => `/data/${index} ${why}`),
+    );
+    return Option.match(first, {
+      onNone: () => Result.succeed("many"),
+      onSome: Result.fail,
+    });
+  }
+  return isRecord(data)
+    ? Option.match(notAnIdentifier(data), {
+        onNone: () => Result.succeed("one"),
+        onSome: (why) => Result.fail(`/data ${why}`),
+      })
+    : Result.fail(`\`data: ${quote(data)}\``);
+};
+
+/** A cardinality as a finding names it. */
+const HOLDS: Readonly<
+  Record<"one" | "many", { readonly answer: string; readonly expected: string }>
+> = {
+  one: {
+    answer: "to-one linkage (`null` or a resource identifier)",
+    expected:
+      "`null` or a resource identifier as primary data, as the relationship's to-one linkage is",
+  },
+  many: {
+    answer: "to-many linkage (an array of resource identifiers)",
+    expected:
+      "an array of resource identifiers as primary data, as the relationship's to-many linkage is",
+  },
+};
+
 /** `true` when the related collection a response answers carries a `next` link: it is one page. */
 const pagedAnswer = (observation: Observation): boolean =>
   isRecord(observation.body) && Link.$is("Href")(linkIn(observation.body["links"], "next"));
@@ -452,7 +581,7 @@ const brokenOrDeferred = (
     onNone: () => broken(judging.rule, found, observation, args),
     onSome: (rule) =>
       Verdict.Undecided({
-        why: `${found.where} ${args.detail}, which \`${rule}\` reports — there is no answer to compare with its linkage`,
+        why: `${found.where} ${args.detail}, which \`${rule}\` reports — there is no answer to compare with ${found.basis === "document" ? "the document carrying it" : "its linkage"}`,
       }),
   });
 
@@ -575,24 +704,80 @@ const judgeMany = (
     },
   });
 
-/** What a link of each basis must answer at all, as findings name it. */
-const ANSWERS: Readonly<Record<Basis, { readonly what: string; readonly expected: string }>> = {
+/**
+ * What a link of each basis must answer at all, as findings name it: `what`
+ * after "answers no", `named` after "a 2xx response with".
+ */
+const ANSWERS: Readonly<
+  Record<Basis, { readonly what: string; readonly named: string; readonly expected: string }>
+> = {
   resource: {
     what: "resource data",
+    named: "resource data",
     expected: "a resource object, an array of them or `null` as primary data",
   },
   related: {
     what: "related resource data",
+    named: "the related resource data",
     expected: "a resource object, an array of them or `null` as primary data",
   },
   relationship: {
     what: "resource linkage",
+    named: "the relationship's linkage",
     expected: "`null`, a resource identifier or an array of them as primary data",
   },
   document: {
     what: "resource data",
+    named: "resource data",
     expected: "a resource object, an array of them or `null` as primary data",
   },
+};
+
+/** How many identifiers a claim on a relationship's `self` link says the relationship holds. */
+const cardinalityClaimed = (claim: Claim): Cardinality =>
+  Claim.$match(claim, {
+    Linkage: ({ cardinality }) => cardinality,
+    ToOne: (): Cardinality => "one",
+    Empty: (): Cardinality => "one",
+    ToMany: (): Cardinality => "many",
+    Resource: (): Cardinality => "unshown",
+    ResourceData: (): Cardinality => "unshown",
+    Collection: (): Cardinality => "unshown",
+    Unidentified: (): Cardinality => "unshown",
+  });
+
+/**
+ * A relationship `self` link's 2xx answer held to being resource linkage —
+ * identifier objects only — of the cardinality the relationship's own linkage
+ * shows: a finding (or, for the rule that defers, the link left to the rule
+ * that reports it), or none when it is.
+ */
+const improperLinkage = (
+  judging: Judging,
+  found: Found,
+  observation: Observation,
+): Option.Option<Verdict> => {
+  const claimed = cardinalityClaimed(found.claim);
+  return Result.match(answeredCardinality(observation), {
+    onFailure: (observed) =>
+      Option.some(
+        brokenOrDeferred(judging, found, Option.some(observation), {
+          detail: `answers no ${ANSWERS.relationship.what} as primary data`,
+          expected: ANSWERS.relationship.expected,
+          observed,
+        }),
+      ),
+    onSuccess: (answered) =>
+      claimed === "unshown" || claimed === answered
+        ? Option.none()
+        : Option.some(
+            brokenOrDeferred(judging, found, Option.some(observation), {
+              detail: `answers ${HOLDS[answered].answer} where the relationship is to-${claimed}`,
+              expected: HOLDS[claimed].expected,
+              observed: primaryOf(observation),
+            }),
+          ),
+  });
 };
 
 /**
@@ -637,8 +822,10 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
           expected: `${member.label} as primary data`,
           observed: primaryOf(observation),
         });
-  const resourceData = isResourceData(observation);
-  if (!resourceData && !Claim.$is("Resource")(found.claim)) {
+  if (found.basis === "relationship") {
+    const improper = improperLinkage(judging, found, observation);
+    if (Option.isSome(improper)) return improper.value;
+  } else if (!isResourceData(observation) && !Claim.$is("Resource")(found.claim)) {
     return brokenOrDeferred(judging, found, Option.some(observation), {
       detail: `answers no ${ANSWERS[found.basis].what} as primary data`,
       expected: ANSWERS[found.basis].expected,
@@ -648,6 +835,8 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
   return Claim.$match(found.claim, {
     Resource: ({ member }) => one(member, "answers a different resource as primary data"),
     ResourceData: () => Verdict.Held(),
+    // `improperLinkage` has held the answer to all this claim asks.
+    Linkage: () => Verdict.Held(),
     ToOne: ({ member }) =>
       one(member, "answers a different resource from the one its linkage names"),
     Empty: () =>
@@ -697,7 +886,8 @@ const judge = (judging: Judging, found: Found, observation: Observation): Verdic
             ? "a 2xx response with the relationship's linkage as primary data"
             : "a 2xx response with the related resources as primary data",
         Collection: () => "a 2xx response with a resource collection as primary data",
-        ResourceData: () => `a 2xx response with ${ANSWERS[found.basis].what} as primary data`,
+        ResourceData: () => `a 2xx response with ${ANSWERS[found.basis].named} as primary data`,
+        Linkage: () => `a 2xx response with ${ANSWERS.relationship.named} as primary data`,
         Unidentified: () => "a 2xx response",
       }),
       observed: describe(observation),
@@ -789,7 +979,7 @@ const unsearched = ({ observation, target }: Source): boolean =>
   Option.isSome(target) && Option.isNone(observation);
 
 /** A source as a skip reason names it: its URL, and its status when it did not answer 2xx. */
-const searched = ({ url, observation }: Source): string =>
+const searchedAs = ({ url, observation }: Source): string =>
   Option.match(observation, {
     onNone: () => `${url}: not requested`,
     onSome: (answer) => (succeeded(answer) ? url : `${url}: ${statusOf(answer)}`),
@@ -865,6 +1055,7 @@ const claimKey = (claim: Claim): string =>
   Claim.$match(claim, {
     Resource: ({ member }) => `resource ${member.key}`,
     ResourceData: () => "data",
+    Linkage: ({ cardinality }) => `linkage ${cardinality}`,
     ToOne: ({ member }) => `one ${member.key}`,
     Empty: () => "empty",
     ToMany: ({ members, paged }) => `many ${paged} ${members.map(({ key }) => key).join(" ")}`,
@@ -970,13 +1161,13 @@ const dereferencing = (
   judging: Judging,
   what: string,
   collect: (from: Target, body: Observation["body"]) => ReadonlyArray<Found>,
-  roles: ReadonlyArray<Role> = SOURCE_ROLES,
+  searched: Searched = RESOURCE_ENDPOINTS,
 ): RuleImpl => ({
   rule: judging.rule,
   run: (ctx) =>
     Effect.gen(function* () {
       const { rule } = judging;
-      const { resolved, unresolved } = probeable(ctx, roles);
+      const { resolved, unresolved } = probeable(ctx, searched.roles);
       const io = budgeted(ctx, REQUEST_BUDGET);
       const fetched = yield* sources(
         io,
@@ -995,8 +1186,8 @@ const dereferencing = (
         ),
       );
       const none = Arr.isReadonlyArrayEmpty(fetched)
-        ? noProbeReason("JSON:API endpoint answering resource objects", unresolved)
-        : `no ${what} (searched ${fetched.map(searched).join(", ")})`;
+        ? noProbeReason(searched.named, unresolved)
+        : `no ${what} (searched ${fetched.map(searchedAs).join(", ")})`;
       const result = yield* crawl(judging, io, ctx.options.baseUrl, found);
       return outcomeOf(rule, result, fetched, io.spent(), none, unresolved);
     }),
@@ -1077,48 +1268,94 @@ export const relatedMatchesLinkage: RuleImpl = dereferencing(
 );
 
 /**
- * A relationship's own `self` link, followed: it must answer linkage matching
- * the relationship object's.
+ * A relationship's own `self` link, followed: it must answer resource
+ * linkage, identifier objects only, as many as the relationship holds.
  *
  * @internal
  */
 export const relationshipSelfDereferences: RuleImpl = dereferencing(
   {
     rule: {
-      id: "spec/links/relationship-self-dereferences",
+      id: RELATIONSHIP_SELF_DEREFERENCES,
       tier: "spec",
       section: "Fetching Relationships",
       reference: `${SPEC}/#fetching-relationships`,
       level: "MUST",
       requirement:
-        "A server MUST support fetching relationship data for every relationship URL provided as a `self` link in a relationship's `links` object, and the primary data in the response MUST match the appropriate value for resource linkage: `null`, a resource identifier or an array of them — and, when the relationship object carries linkage, the same identifiers (a page of them, or a superset of a paginated linkage, when either side carries a `next` link).",
+        "A server MUST support fetching relationship data for every relationship URL provided as a `self` link in a relationship's `links` object, and the primary data in the response MUST match the appropriate value for resource linkage: `null` or a resource identifier object for a to-one relationship, an array of them for a to-many one — identifier objects only (`type`, `id` or `lid`, and `meta`), never full resource objects.",
     },
     defersTo: Option.none(),
   },
   "relationship in what the read endpoints answered carries a `self` link",
-  relationshipSelfLinks,
+  relationshipSelfLinks(false),
 );
 
 /**
- * A document's top-level `self` link, followed: it must answer a document of
- * the same kind.
+ * A relationship's own `self` link, followed: it should answer the
+ * identifiers the relationship object's linkage names.
+ *
+ * @internal
+ */
+export const relationshipSelfMatchesLinkage: RuleImpl = dereferencing(
+  {
+    rule: {
+      id: "spec/links/relationship-self-matches-linkage",
+      tier: "spec",
+      section: "Relationships",
+      reference: `${SPEC}/#document-resource-object-relationships`,
+      level: "SHOULD",
+      requirement:
+        'When a relationship carries both a `self` link and resource linkage, fetching the link SHOULD answer the identifiers the linkage names: the relationship link "returns the linkage for the related resources as its primary data" — a page of them when the answer is paginated, and a superset of a paginated linkage. The kit grades this SHOULD because the specification states it as definition, without a keyword.',
+    },
+    defersTo: Option.some(RELATIONSHIP_SELF_DEREFERENCES),
+  },
+  "relationship in what the read endpoints answered carries both a `self` link and resource linkage",
+  relationshipSelfLinks(true),
+);
+
+/**
+ * A document's top-level `self` link, followed: it must answer resource data.
  *
  * @internal
  */
 export const topLevelSelfDereferences: RuleImpl = dereferencing(
   {
     rule: {
-      id: "spec/links/top-level-self-dereferences",
+      id: TOP_LEVEL_SELF_DEREFERENCES,
       tier: "spec",
       section: "Fetching Resources",
       reference: `${SPEC}/#fetching-resources`,
       level: "MUST",
       requirement:
-        'A server MUST support fetching resource data for every URL provided as a `self` link in the top-level links object, which is "the link that generated the current response document": a `GET` to it answers 2xx with a document of the same kind — the same resource (`type` and `id`) for a single resource, `null` for `null`, and a collection for a collection, holding the same resources (in any order) when neither document carries a `next` or `prev` link.',
+        "A server MUST support fetching resource data for every URL provided as a `self` link in the top-level links object: a `GET` to it answers 2xx with a resource object, an array of them or `null` as primary data.",
     },
     defersTo: Option.none(),
   },
   "document a read endpoint answered carries a top-level `self` link",
-  topLevelSelfLinks,
-  DOCUMENT_ROLES,
+  topLevelSelfLinks(false),
+  READ_ENDPOINTS,
+);
+
+/**
+ * A document's top-level `self` link, followed: it should answer a document
+ * of the same kind.
+ *
+ * @internal
+ */
+export const topLevelSelfMatchesDocument: RuleImpl = dereferencing(
+  {
+    rule: {
+      id: "spec/links/top-level-self-matches-document",
+      tier: "spec",
+      section: "Document Top Level",
+      reference: `${SPEC}/#document-top-level`,
+      level: "SHOULD",
+      requirement:
+        'A top-level `self` link is "the link that generated the current response document", so fetching it SHOULD answer a document of the same kind — the same resource (`type` and `id`) for a single resource, `null` for `null`, and a collection for a collection, holding the same resources (in any order) when neither document carries a `next` or `prev` link. The kit grades this SHOULD because the specification states it as definition, without a keyword.',
+    },
+    defersTo: Option.some(TOP_LEVEL_SELF_DEREFERENCES),
+  },
+  "document a read endpoint answered carries a top-level `self` link",
+  topLevelSelfLinks(true),
+  READ_ENDPOINTS,
 );

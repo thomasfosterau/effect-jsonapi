@@ -9,7 +9,9 @@
  * - `issues` can be created and updated (closing an issue is a state update)
  *   but never deleted — just like on GitHub. Issue triage happens through
  *   relationship endpoints: assignment (`relationships/assignee`), labelling
- *   (`relationships/labels`) and a paginated comment feed (`/issues/:id/comments`)
+ *   (`relationships/labels`) and a paginated comment feed (`/issues/:id/comments`,
+ *   whose identifiers `relationships/comments` serves — the `comments`
+ *   relationship's `self` link)
  * - `pulls` is read-only
  * - `search` is a heterogeneous endpoint across repositories, issues and
  *   users, like GitHub's global search
