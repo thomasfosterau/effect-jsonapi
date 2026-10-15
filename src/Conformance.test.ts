@@ -26,6 +26,7 @@ import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from
 import { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { TestClock } from "effect/testing";
+import * as ApiError from "./ApiError.js";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
@@ -7722,6 +7723,15 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       body: { errors: [{ status: `${status}`, source: { header: "idempotency-key" } }] },
     });
 
+    /**
+     * The package's own answer with `error`, at the status its document
+     * carries; both errors name the header as their source.
+     */
+    const keyError = (error: Idempotency.KeyInProgress | Idempotency.KeyMismatch): Canned => {
+      const body = ApiError.toDocument(error);
+      return { status: Number(body.errors[0]?.status), body };
+    };
+
     it("leave a delete refused for the missing key undecided where the endpoint declares the header", async () => {
       // `idempotency: true` reads as optional, as a key required through a
       // union does, so the kit sends none — and a 4xx naming the header as its
@@ -7749,12 +7759,16 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       // Each case but one names the header as the error's source, so each
       // fails on its own condition: an endpoint declaring no key, a delete
       // that did carry the key its endpoint requires, a 5xx and a 3xx, which
-      // no missing key is, and a 4xx that does not name the header.
+      // no missing key is, the package's own `KeyInProgress` (409) and
+      // `KeyMismatch` (422), which a missing key is not either, and a 4xx
+      // that does not name the header.
       const cases = [
         { idempotency: false, answer: missingKey() },
         { idempotency: "required", answer: missingKey() },
         { idempotency: true, answer: missingKey(500) },
         { idempotency: true, answer: missingKey(303) },
+        { idempotency: true, answer: keyError(new Idempotency.KeyInProgress()) },
+        { idempotency: true, answer: keyError(new Idempotency.KeyMismatch()) },
         { idempotency: true, answer: { status: 400, body: { errors: [{ status: "400" }] } } },
         {
           idempotency: true,
