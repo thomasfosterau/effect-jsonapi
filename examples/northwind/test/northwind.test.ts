@@ -659,13 +659,15 @@ describe("northwind example: heterogeneous search", () => {
     const types = [...new Set(document.data.map((result) => result.type))].sort();
     expect(types).toEqual(["customers", "products", "suppliers"]);
 
+    // The endpoint declares `fields`, so a client reads each attribute as
+    // optional (#322).
     for (const result of document.data) {
       if (result.type === "products") {
-        expectTypeOf(result.attributes.unitPrice).toEqualTypeOf<number>();
+        expectTypeOf(result.attributes.unitPrice).toEqualTypeOf<number | undefined>();
       } else if (result.type === "customers") {
-        expectTypeOf(result.attributes.companyName).toEqualTypeOf<string>();
+        expectTypeOf(result.attributes.companyName).toEqualTypeOf<string | undefined>();
       } else {
-        expectTypeOf(result.attributes.country).toEqualTypeOf<string>();
+        expectTypeOf(result.attributes.country).toEqualTypeOf<string | undefined>();
       }
     }
   });

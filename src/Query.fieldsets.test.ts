@@ -275,10 +275,9 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
       get,
       // `include` off: the resource and its non-paginated direct targets.
       Endpoint.get(Article, { name: "getShallow", path: "/shallow/:id", fields: true }),
-      // A declared surface, whose handler projects the fieldsets. A projected
-      // resource's attributes are partial, which the default document (every
-      // required attribute present) does not admit (#322), hence the open `success`.
-      Endpoint.list(Article, { include: surface, fields: true, success: Schema.Unknown }),
+      // A declared surface, whose handler projects the fieldsets: the default
+      // document of an endpoint declaring `fields` admits partial attributes (#322).
+      Endpoint.list(Article, { include: surface, fields: true }),
     ),
   );
 

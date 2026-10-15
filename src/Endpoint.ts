@@ -99,6 +99,14 @@ import type {
 } from "./internal/includeGraph.js";
 import { includedResources, includePathsFor } from "./internal/includeGraph.js";
 import type {
+  IncludeArgument,
+  ResourceStruct,
+  SparseMember,
+  SparseResource,
+  SparseUnion,
+} from "./internal/sparse.js";
+import { fieldsetTypes, sparseMember, sparseResource, sparseUnion } from "./internal/sparse.js";
+import type {
   Any,
   AttributeKeys,
   DefaultIncluded,
@@ -206,9 +214,6 @@ interface ReachableIncluded<R extends Any, Include> extends Schema.Union<
 // What a read endpoint's `include` option is at runtime: a boolean, a
 // `Query.IncludeOptions`, or a declared `Include.Surface` (whose `paths` it
 // shares).
-type IncludeArgument =
-  | boolean
-  | { readonly paths?: ReadonlyArray<string>; readonly depth?: number };
 
 // The runtime mirror of `ReachableIncluded`: `None` when the `include` option
 // is off or a declared surface — which keep the union they had.
@@ -228,9 +233,31 @@ const reachableIncluded = (
       )
     : Option.none();
 
+// The wire types `?fields[TYPE]=` can name on an endpoint over `R` with the
+// `include` option `Include`: the types its default document makes partial
+// when it declares `fields` (#322).
+type FieldsetTypes<R extends Any, Include> = Query.FieldsetResources<R, Include>["type"];
+
+// The members of a read endpoint's default `included` union (`IncludedOf`): a
+// declared surface's own, else `IncludedResources` — the direct targets and,
+// when `include` is on, every resource a legal path reaches.
+type IncludedMembers<R extends Any, Include> = Include extends {
+  readonly included: { readonly members: ReadonlyArray<infer M> };
+}
+  ? M
+  : IncludedResources<R, Include>;
+
+// `IncludedOf` with every member whose type a fieldset names made partial.
+type SparseIncluded<R extends Any, Include> = SparseUnion<
+  IncludedMembers<R, Include>,
+  FieldsetTypes<R, Include>
+>;
+
 // The success document the single-resource endpoints (`get`, `create`,
 // `update`) bind by default — the resource's own `document()` at the effective
-// document `meta`. The default their `success` option replaces.
+// document `meta`. The default their `success` option replaces. When the
+// endpoint declares `fields` (only `get` can), its resource objects — primary
+// and `included` alike — admit any subset of their attributes (#322).
 type DefaultDocument<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
@@ -239,11 +266,18 @@ type DefaultDocument<
   IdSchema extends Schema.Codec<any, string>,
   DocMeta extends Schema.Top,
   Include = false,
-> = DataDocument<
-  Resource<Type, Attributes, Rels, Meta, IdSchema>,
-  IncludedOf<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
-  DocMeta
->;
+  Fields = false,
+> = [Fields] extends [true]
+  ? DataDocument<
+      SparseResource<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
+      SparseIncluded<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
+      DocMeta
+    >
+  : DataDocument<
+      Resource<Type, Attributes, Rels, Meta, IdSchema>,
+      IncludedOf<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
+      DocMeta
+    >;
 
 // The collection counterpart, for `list` — the resource's `collection()`.
 type DefaultCollection<
@@ -254,11 +288,18 @@ type DefaultCollection<
   IdSchema extends Schema.Codec<any, string>,
   DocMeta extends Schema.Top,
   Include = false,
-> = CollectionDocument<
-  Resource<Type, Attributes, Rels, Meta, IdSchema>,
-  IncludedOf<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
-  DocMeta
->;
+  Fields = false,
+> = [Fields] extends [true]
+  ? CollectionDocument<
+      SparseResource<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
+      SparseIncluded<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
+      DocMeta
+    >
+  : CollectionDocument<
+      Resource<Type, Attributes, Rels, Meta, IdSchema>,
+      IncludedOf<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
+      DocMeta
+    >;
 
 // The document options a read endpoint's default document is built with: the
 // `meta` override, plus the `included` union when the `include` option is a
@@ -280,6 +321,41 @@ const documentOptions = (
   if (Option.isSome(reachable)) out.included = reachable.value;
   return out;
 };
+
+// The default document of `get` (`document()`) or `list` (`collection()`).
+// When the endpoint declares `fields`, the resource and every `included`
+// member whose type a fieldset names become partial (#322); otherwise it is
+// the resource's own document, exactly as before.
+const defaultDocument = (
+  resource: DocumentSource,
+  kind: "document" | "collection",
+  options?: {
+    readonly meta?: Schema.Top;
+    readonly include?: IncludeArgument;
+    readonly fields?: boolean;
+  },
+): Schema.Top => {
+  const document = documentOptions(resource, options);
+  if (options?.fields !== true) {
+    return kind === "document" ? resource.document(document) : resource.collection(document);
+  }
+  const types = fieldsetTypes([resource], options.include);
+  const sparse = {
+    included: sparseUnion(document.included ?? Schema.Union(directTargets(resource)), types),
+    meta: document.meta ?? resource.fields.meta.schema,
+  };
+  return kind === "document"
+    ? DataDocument(sparseResource(resource), sparse)
+    : CollectionDocument(sparseResource(resource), sparse);
+};
+
+// What `get` / `list` read of their resource at runtime: its document
+// constructors, and the `meta` schema those default to.
+interface DocumentSource extends ResourceStruct {
+  readonly fields: ResourceStruct["fields"] & { readonly meta: Schema.optionalKey<Schema.Top> };
+  document(options: { readonly meta?: Schema.Top; readonly included?: Schema.Top }): Schema.Top;
+  collection(options: { readonly meta?: Schema.Top; readonly included?: Schema.Top }): Schema.Top;
+}
 
 // ---------------------------------------------------------------------------
 // get — GET /<type>/:id
@@ -423,7 +499,8 @@ export const get = <
     Meta,
     IdSchema,
     DocMeta,
-    Include
+    Include,
+    Fields
   >,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -435,7 +512,14 @@ export const get = <
      * endpoint's `included` union.
      */
     readonly include?: Include;
-    /** Enable `?fields[TYPE]=` sparse fieldsets. */
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets. The default success document
+     * then admits any subset of the attributes of every resource type a
+     * fieldset can name, primary and `included` alike, so a handler can answer
+     * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
+     * decodes those attributes as optional. Pass the resource's own
+     * `document()` / `collection()` as `success` to keep strict attributes.
+     */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
     readonly meta?: DocMeta;
@@ -477,10 +561,7 @@ export const get = <
           },
         )) as QuerySchema,
       success: asJsonApi(
-        (options?.success ??
-          resource.document(
-            documentOptions(resource, options) as { readonly meta?: DocMeta },
-          )) as Success,
+        (options?.success ?? defaultDocument(resource, "document", options)) as Success,
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -639,7 +720,8 @@ export const list = <
     Meta,
     IdSchema,
     DocMeta,
-    Include
+    Include,
+    Fields
   >,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -651,7 +733,14 @@ export const list = <
      * endpoint's `included` union.
      */
     readonly include?: Include;
-    /** Enable `?fields[TYPE]=` sparse fieldsets. */
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets. The default success document
+     * then admits any subset of the attributes of every resource type a
+     * fieldset can name, primary and `included` alike, so a handler can answer
+     * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
+     * decodes those attributes as optional. Pass the resource's own
+     * `document()` / `collection()` as `success` to keep strict attributes.
+     */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for all attributes, or an array of sortable attribute names. */
     readonly sort?: Sort;
@@ -702,10 +791,7 @@ export const list = <
           },
         )) as QuerySchema,
       success: asJsonApi(
-        (options?.success ??
-          resource.collection(
-            documentOptions(resource, options) as { readonly meta?: DocMeta },
-          )) as Success,
+        (options?.success ?? defaultDocument(resource, "collection", options)) as Success,
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -1222,6 +1308,100 @@ interface MembersReachableIncluded<
   DefaultMembers extends Any,
 > extends Schema.Union<ReadonlyArray<DefaultMembers | IncludedResources<Members, Include>>> {}
 
+// The members of `MembersIncludedOf`'s union.
+type MembersIncludedMembers<Members extends Any, Include, DefaultMembers extends Any> =
+  IncludeEnabled<Include> extends true
+    ? DeclaresSurface<Include> extends true
+      ? DefaultMembers
+      : DefaultMembers | IncludedResources<Members, Include>
+    : DefaultMembers;
+
+// The success document of a heterogeneous endpoint (`collection`,
+// `polymorphic`) over `Members`: its `Default` document, or — when the
+// endpoint declares `fields` — the same document with every member of `data`
+// and `included` whose type a fieldset names made partial (#322).
+type MembersDocument<
+  Kind extends "document" | "collection",
+  Members extends Any,
+  Data extends Schema.Top,
+  Include,
+  Fields,
+  Default extends Schema.Top,
+  DefaultMembers extends Any,
+  DocMeta extends Schema.Top,
+> = [Fields] extends [true]
+  ? Kind extends "document"
+    ? DataDocument<
+        SparseUnion<Members, FieldsetTypes<Members, Include>>,
+        SparseUnion<
+          MembersIncludedMembers<Members, Include, DefaultMembers>,
+          FieldsetTypes<Members, Include>
+        >,
+        DocMeta
+      >
+    : CollectionDocument<
+        SparseUnion<Members, FieldsetTypes<Members, Include>>,
+        SparseUnion<
+          MembersIncludedMembers<Members, Include, DefaultMembers>,
+          FieldsetTypes<Members, Include>
+        >,
+        DocMeta
+      >
+  : Kind extends "document"
+    ? DataDocument<Data, MembersIncludedOf<Members, Include, Default, DefaultMembers>, DocMeta>
+    : CollectionDocument<
+        Data,
+        MembersIncludedOf<Members, Include, Default, DefaultMembers>,
+        DocMeta
+      >;
+
+// The `data` and `included` members of a heterogeneous endpoint's document.
+interface DocumentParts {
+  readonly data: Schema.Top;
+  readonly included: Schema.Top;
+}
+
+// The runtime `data` and `included` of a heterogeneous endpoint's document:
+// as given, or with every member whose type a fieldset names made partial
+// when the endpoint declares `fields`.
+const membersDocumentParts = (
+  members: ReadonlyArray<Any>,
+  options: { readonly include?: IncludeArgument; readonly fields?: boolean },
+  data: Schema.Top,
+  included: Schema.Top,
+): DocumentParts => {
+  if (options.fields !== true) return { data, included };
+  const types = fieldsetTypes(members, options.include);
+  return {
+    data: Schema.Union(members.map((member) => sparseMember(member, types))),
+    included: sparseUnion(included, types),
+  };
+};
+
+// The runtime document of `collection`. The cast at its use is sound: every
+// direct target of every member of `Resources` is, by construction, a member
+// of `TargetsOf<...>`, every resource an include path reaches one of
+// `IncludedResources`, and `membersDocumentParts` makes partial exactly the
+// members `MembersDocument` does.
+const collectionDocument = (
+  resources: ReadonlyArray<Any>,
+  options: {
+    readonly include?: IncludeArgument;
+    readonly fields?: boolean;
+    readonly meta?: Schema.Top;
+  },
+): Schema.Top => {
+  const { data, included } = membersDocumentParts(
+    resources,
+    options,
+    Schema.Union(resources),
+    Option.getOrElse(reachableIncluded(resources, options.include), () =>
+      Schema.Union(dedupe(resources.flatMap((resource) => directTargets(resource)))),
+    ),
+  );
+  return CollectionDocument(data, { included, meta: options.meta ?? AnyMeta });
+};
+
 /**
  * A heterogeneous collection endpoint: `data` is a mixed array of several
  * resource types, discriminated by their `type` tags. The natural fit for
@@ -1295,7 +1475,11 @@ export const collection = <
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets for all resources, their
      * non-`paginated` targets (unless `include` is a declared
-     * `Include.Surface`) and every type an `include` path reaches.
+     * `Include.Surface`) and every type an `include` path reaches. The
+     * document's resource objects of those types then admit any subset of
+     * their attributes, so a handler can answer with
+     * `Handlers.project(query.fields)` — and a client decodes those
+     * attributes as optional.
      */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for every attribute of every resource, or an explicit list. */
@@ -1321,20 +1505,16 @@ export const collection = <
       },
     ),
     success: asJsonApi(
-      CollectionDocument(Schema.Union(resources), {
-        // The cast is sound: every direct target of every member of
-        // `Resources` is, by construction, a member of `TargetsOf<...>`, and
-        // every resource an include path reaches one of `IncludedResources`.
-        included: Option.getOrElse(reachableIncluded(resources, options.include), () =>
-          Schema.Union(dedupe(resources.flatMap((resource) => directTargets(resource)))),
-        ) as unknown as MembersIncludedOf<
-          Resources[number],
-          Include,
-          CollectionIncluded<Resources>,
-          TargetsOf<Resources[number]>
-        >,
-        meta: (options.meta ?? AnyMeta) as DocMeta,
-      }),
+      collectionDocument(resources, options) as unknown as MembersDocument<
+        "collection",
+        Resources[number],
+        Schema.Union<Resources>,
+        Include,
+        Fields,
+        CollectionIncluded<Resources>,
+        TargetsOf<Resources[number]>,
+        DocMeta
+      >,
     ),
     // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
     error: wires(options.errors),
@@ -1345,6 +1525,38 @@ export const collection = <
 // ---------------------------------------------------------------------------
 // polymorphic — GET /<family>/:id (single resource, any family member)
 // ---------------------------------------------------------------------------
+
+// The runtime document of `polymorphic`: the family's own `document()`, its
+// default `included` union unless `include` reaches further — with every
+// member whose type a fieldset names made partial when the endpoint declares
+// `fields`. The cast at its use is sound as `collectionDocument`'s is.
+const polymorphicDocument = (
+  family: Family<string, ReadonlyArray<Any>, any>,
+  options?: {
+    readonly include?: IncludeArgument;
+    readonly fields?: boolean;
+    readonly meta?: Schema.Top;
+  },
+): Schema.Top => {
+  const reachable = reachableIncluded(family.members, options?.include);
+  if (options?.fields !== true) {
+    return family.document({
+      ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+      // The family's own default union unless `include` reaches further.
+      ...Option.match(reachable, {
+        onNone: () => ({}),
+        onSome: (included) => ({ included }),
+      }),
+    });
+  }
+  const { data, included } = membersDocumentParts(
+    family.members,
+    options,
+    family,
+    Option.getOrElse(reachable, () => Schema.Union(dedupe(family.members.flatMap(directTargets)))),
+  );
+  return DataDocument(data, { included, meta: options.meta ?? AnyMeta });
+};
 
 /**
  * `GET /<family>/:id` — fetch a single resource that may be any member of a
@@ -1397,7 +1609,11 @@ export const polymorphic = <
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets for all members, their
      * non-`paginated` targets (unless `include` is a declared
-     * `Include.Surface`) and every type an `include` path reaches.
+     * `Include.Surface`) and every type an `include` path reaches. The
+     * document's resource objects of those types then admit any subset of
+     * their attributes, so a handler can answer with
+     * `Handlers.project(query.fields)` — and a client decodes those
+     * attributes as optional.
      */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
@@ -1422,22 +1638,16 @@ export const polymorphic = <
         },
       ),
       success: asJsonApi(
-        family.document({
-          ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-          // The family's own default union unless `include` reaches further.
-          ...Option.match(reachableIncluded(family.members, options?.include), {
-            onNone: () => ({}),
-            onSome: (included) => ({ included }),
-          }),
-        } as {
-          readonly meta?: DocMeta;
-          readonly included?: MembersIncludedOf<
-            Members[number],
-            Include,
-            FamilyDefaultIncluded<Members>,
-            IncludedResources<Members[number], false>
-          >;
-        }),
+        polymorphicDocument(family, options) as unknown as MembersDocument<
+          "document",
+          Members[number],
+          Schema.Union<Members>,
+          Include,
+          Fields,
+          FamilyDefaultIncluded<Members>,
+          IncludedResources<Members[number], false>,
+          DocMeta
+        >,
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -1510,7 +1720,11 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  *     empty-linkage `data: null` for a to-one related URL
  *   - to-many relationships → a collection document of the target
  *
- * @since 0.1.0
+ * When `Fields` is `true` (the endpoint declares `fields`), the target and
+ * every `included` member whose type a fieldset names admit any subset of
+ * their attributes, so a projected answer encodes (§Sparse Fieldsets).
+ *
+ * @since 0.1.0 (`Fields` since 0.17.0)
  * @category type-level
  */
 export type RelatedSuccess<
@@ -1518,11 +1732,24 @@ export type RelatedSuccess<
   Name extends string,
   DocMeta extends Schema.Top,
   Include = false,
+  Fields = false,
 > =
   DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
-    ? DataDocument<Schema.NullOr<T>, IncludedOf<T, Include>, DocMeta>
+    ? [Fields] extends [true]
+      ? DataDocument<
+          Schema.NullOr<AsSchema<SparseMember<T, FieldsetTypes<T, Include>>>>,
+          SparseIncluded<T, Include>,
+          DocMeta
+        >
+      : DataDocument<Schema.NullOr<T>, IncludedOf<T, Include>, DocMeta>
     : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
-      ? CollectionDocument<T, IncludedOf<T, Include>, DocMeta>
+      ? [Fields] extends [true]
+        ? CollectionDocument<
+            AsSchema<SparseMember<T, FieldsetTypes<T, Include>>>,
+            SparseIncluded<T, Include>,
+            DocMeta
+          >
+        : CollectionDocument<T, IncludedOf<T, Include>, DocMeta>
       : never;
 
 const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
@@ -1640,7 +1867,11 @@ export const related = <
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets for the target, its
      * non-`paginated` targets (unless `include` is a declared
-     * `Include.Surface`) and every type an `include` path reaches.
+     * `Include.Surface`) and every type an `include` path reaches. The
+     * document's resource objects of those types then admit any subset of
+     * their attributes, so a handler can answer with
+     * `Handlers.project(query.fields)` — and a client decodes those
+     * attributes as optional.
      */
     readonly fields?: Fields;
     /** Enable `?sort=` over the target's attributes (to-many relationships). */
@@ -1666,14 +1897,19 @@ export const related = <
         Schema.Union(directTargets(target)),
       );
   const docMeta = (options?.meta ?? AnyMeta) as DocMeta;
+  // Declaring `fields` makes the target and every `included` member whose type
+  // a fieldset names partial (#322).
+  const types = options?.fields === true ? fieldsetTypes([target], options.include) : undefined;
+  const data = types === undefined ? target : sparseMember(target, types);
+  const includedUnion = types === undefined ? included : sparseUnion(included, types);
   // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly — a
   // nullable single-resource document for to-one descriptors (`data: null` is
   // the empty-linkage case), a collection document otherwise. `included` keys
   // off the target's relationship graph, independent of the `data` wrapper.
   const success = (Relationship.isToOne(descriptor)
-    ? DataDocument(Schema.NullOr(target), { included, meta: docMeta })
-    : CollectionDocument(target, { included, meta: docMeta })) as unknown as AsSchema<
-    RelatedSuccess<R, Name, DocMeta, Include>
+    ? DataDocument(Schema.NullOr(data), { included: includedUnion, meta: docMeta })
+    : CollectionDocument(data, { included: includedUnion, meta: docMeta })) as unknown as AsSchema<
+    RelatedSuccess<R, Name, DocMeta, Include, Fields>
   >;
 
   return HttpApiEndpoint.get(
@@ -2599,7 +2835,8 @@ type GeneratedGet<
               Meta,
               IdSchema,
               EffMeta<C, GMeta, Meta>,
-              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
+              ListFields<C, GFields>
             >
           >
         >
@@ -2669,7 +2906,8 @@ type GeneratedList<
               Meta,
               IdSchema,
               EffMeta<C, GMeta, Meta>,
-              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>
+              ListInclude<C, Resource<Type, Attributes, Rels, Meta, IdSchema>, GInclude>,
+              ListFields<C, GFields>
             >
           >
         >
@@ -3121,7 +3359,11 @@ export interface ResourceOptions<
    * that `include` is on.
    */
   readonly include?: Include;
-  /** Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`. */
+  /**
+   * Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`, which makes
+   * the attributes of the read endpoints' default documents optional (see
+   * {@link get}); pass `false` to keep them strict.
+   */
   readonly fields?: Fields;
   /** Enable `?sort=`: `true` for all attributes, an explicit list, or `false` to disable. Defaults to `true`. */
   readonly sort?: Sort;

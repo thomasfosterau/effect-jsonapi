@@ -702,14 +702,15 @@ describe("github example: heterogeneous search", () => {
     const types = [...new Set(document.data.map((result) => result.type))].sort();
     expect(types).toEqual(["issues", "repositories", "users"]);
 
-    // the union is discriminated by the `type` tag
+    // the union is discriminated by the `type` tag; the endpoint declares
+    // `fields`, so a client reads each attribute as optional (#322)
     for (const result of document.data) {
       if (result.type === "repositories") {
-        expectTypeOf(result.attributes.stargazerCount).toEqualTypeOf<number>();
+        expectTypeOf(result.attributes.stargazerCount).toEqualTypeOf<number | undefined>();
       } else if (result.type === "issues") {
-        expectTypeOf(result.attributes.state).toEqualTypeOf<"open" | "closed">();
+        expectTypeOf(result.attributes.state).toEqualTypeOf<"open" | "closed" | undefined>();
       } else {
-        expectTypeOf(result.attributes.login).toEqualTypeOf<string>();
+        expectTypeOf(result.attributes.login).toEqualTypeOf<string | undefined>();
       }
     }
   });

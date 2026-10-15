@@ -90,7 +90,7 @@ const shallowDocument = Handlers.data(article, { included: [comment] });
 // `include: true` — every type the depth-2 graph reaches
 // ---------------------------------------------------------------------------
 
-export const get = Endpoint.get(Article, { include: true, fields: true });
+export const get = Endpoint.get(Article, { include: true });
 export const list = Endpoint.list(Article, { include: true });
 
 assertType<Equals<IncludedOf<typeof get>, typeof Comment.Type | typeof Person.Type>>(true);
@@ -157,7 +157,7 @@ assertType<Equals<IncludedOf<typeof node>, typeof Comment.Type | typeof Person.T
 // what the default was before #320.
 export const explicit = Endpoint.get(Article, { success: Article.document() });
 export const plain = Endpoint.get(Article);
-export const off = Endpoint.get(Article, { include: false, fields: true });
+export const off = Endpoint.get(Article, { include: false });
 assertType<Equals<HttpApiEndpoint.Success<typeof plain>, HttpApiEndpoint.Success<typeof explicit>>>(
   true,
 );
@@ -171,7 +171,7 @@ assertType<SuccessOf<typeof plain>>(deepDocument);
 assertType<SuccessOf<typeof plain>>(shallowDocument);
 
 export const explicitList = Endpoint.list(Article, { success: Article.collection() });
-export const plainList = Endpoint.list(Article, { fields: true });
+export const plainList = Endpoint.list(Article);
 assertType<
   Equals<HttpApiEndpoint.Success<typeof plainList>, HttpApiEndpoint.Success<typeof explicitList>>
 >(true);

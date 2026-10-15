@@ -1358,6 +1358,29 @@ The same option is on `Handlers.collection`, on `Handlers.linkage` (where it rea
 
 `Handlers.project` also has a data-first form, `Handlers.project(resource, fields)`, for projecting one resource directly. Two behaviours make it safe to run over a whole document: a type with **no requested set** (absent, or an empty `?fields[TYPE]=`) is returned unchanged — the spec's default of "every field", not "no field" — and only `attributes` is projected, so `relationships`, `links` and `meta` survive and a resource identifier (no attributes at all) passes through untouched.
 
+#### Sparse fieldsets and the default document
+
+An endpoint that declares `fields` binds, by default, a document whose resource objects admit **any subset of their attributes**: the primary data and every `included` member of a type a `fields[TYPE]` can name — the resource, its non-`paginated` direct targets (unless `include` is a declared `Include.Surface`) and every type a legal include path reaches, the set `Query.FieldsetResources` computes. Every attribute becomes an optional key; one that is already optional stays as declared, and `type`, `id`, `relationships`, `links` and `meta` are untouched. That is what lets a handler answer with `Handlers.project(query.fields)` with no cast, and what lets the answer to `?fields[articles]=title` omit `body`, as §Sparse Fieldsets requires ("an endpoint **MUST NOT** include additional [fields]"). It holds for `get`, `list`, `related`, `collection` and `polymorphic`, and for the `get`, `list` and related endpoints `Endpoint.resource` / `Group.resource` generate, which declare `fields` by default. An endpoint without `fields` keeps exactly the document it had.
+
+```ts
+const articles = Group.make(Article, Endpoint.get(Article, { include: true, fields: true }));
+
+HttpApiBuilder.group(Api, "articles", (handlers) =>
+  handlers.handle("get", ({ params, query }) =>
+    loadArticle(params.id).pipe(
+      Effect.map((article) =>
+        // GET /articles/1?fields[articles]=title → { data: { …, attributes: { title: "…" } } }
+        Handlers.data(article, { included, onResource: Handlers.project(query.fields) }),
+      ),
+    ),
+  ),
+);
+```
+
+**What a client sees.** An endpoint has one success schema, which is both what the handler encodes and what `HttpApiClient` decodes into, so on an endpoint declaring `fields` the client reads those attributes as optional: `doc.data.attributes.title` is `string | undefined`, whether or not the request asked for a fieldset. A complete resource decodes as before; a projected one decodes instead of failing.
+
+**Keeping strict attributes.** When every caller wants every attribute, either leave `fields` off — `fields: false`, which `Group.resource` / `Endpoint.resource` take at the top level or per endpoint — so `?fields[TYPE]=` is a 400 rather than an answer the client cannot trim, or keep `fields` and pass the resource's own document as `success` (`success: Article.document()`, `Article.collection()` for `list`). The latter answers a request for a fieldset with every attribute, so the handler must not project, and the response then includes fields the client excluded.
+
 `Handlers.withMeta` merges the computed members over whatever `meta` the resource already carries, and emits **no** `meta` member when the merged result is empty: to the spec an empty `meta` object is a present-but-empty meta, which says something different from saying nothing.
 
 #### The effect stays in the type
@@ -2005,7 +2028,7 @@ Relationship and resource-identifier `meta` currently accept free-form records (
 ## Limitations
 
 - **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling, pagination links (following `next` must enumerate the collection), resource `self` and relationship `related` links (each followed must answer resource data, a `self` the resource it names, and a `related` should answer the resources its linkage names) and the filter grammar profile. Filter _evaluation_ semantics, sort-ordering correctness, the write rules beyond the success responses (conflicts, client-generated ids, relationship mutation), atomic processing and relationship / top-level `self` links are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](./docs/conformance.md).
-- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed to your handler, and the builders project it when you ask them to — `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })` ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is projected behind your back; the builders don't post-process responses against request state on their own. Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is built from the resource's attributes, so a relationship name cannot be requested.
+- **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed to your handler, and the builders project it when you ask them to — `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })` ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is projected behind your back; the builders don't post-process responses against request state on their own. The default document of an endpoint declaring `fields` admits the projected answer, so its clients read those attributes as optional ([sparse fieldsets and the default document](#sparse-fieldsets-and-the-default-document)). Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is built from the resource's attributes, so a relationship name cannot be requested.
 - **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works, `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }` raises it one hop, and the runtime validation matches the same set. Declaring the surface explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because the derivation then recurses over the declaration rather than the graph.
 - **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided via `Client.narrowIncluded`.
 - **Relationship and identifier `meta` are untyped** (free-form records); resource and document meta are typed via options.

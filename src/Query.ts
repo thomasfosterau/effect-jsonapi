@@ -52,7 +52,7 @@ import { Effect, Record as Rec, Schema, SchemaIssue, SchemaTransformation } from
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
-import { type AnySurface, isSurface, type SurfaceFor } from "./Include.js";
+import type { AnySurface, SurfaceFor } from "./Include.js";
 import type { Pair as CanonicalPair } from "./internal/canonical.js";
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js";
 import {
@@ -73,7 +73,8 @@ import {
   prepare,
 } from "./internal/filter.js";
 import type { IncludeEnabled, IncludedResources } from "./internal/includeGraph.js";
-import { includedResources, includePathsFor } from "./internal/includeGraph.js";
+import { includePathsFor } from "./internal/includeGraph.js";
+import { fieldsetResources } from "./internal/sparse.js";
 import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
 import type {
   Any,
@@ -1662,11 +1663,9 @@ export const schema = <R extends Any, const O extends Options<R>>(
   if (options.fields === true) {
     const fieldsetFields: Record<string, Schema.Top> = {};
     // The resources, then every type their response can carry in `included`:
-    // the runtime mirror of `FieldsetResources`.
-    for (const target of dedupe([
-      ...resources,
-      ...includedResources(resources, isSurface(include), includable),
-    ])) {
+    // the runtime mirror of `FieldsetResources`, which the default document
+    // of an endpoint declaring `fields` makes partial over (#322).
+    for (const target of fieldsetResources(resources, includable, include)) {
       fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target));
       flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable);
     }
