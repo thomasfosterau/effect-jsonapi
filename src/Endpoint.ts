@@ -76,7 +76,9 @@
  *
  * @since 0.1.0
  */
-import { Schema } from "effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { HttpApiEndpoint, HttpApiSchema } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument, wire } from "./Document.js";
@@ -91,10 +93,17 @@ import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
 import type {
+  DeclaresSurface,
+  IncludedResources,
+  IncludeEnabled,
+} from "./internal/includeGraph.js";
+import { includedResources, includePathsFor } from "./internal/includeGraph.js";
+import type {
   Any,
   AttributeKeys,
   DefaultIncluded,
   Family,
+  FamilyDefaultIncluded,
   Id,
   Parameter,
   RelationshipName,
@@ -173,16 +182,51 @@ const queryConfig = (options?: {
 
 // The `included` union a read endpoint's default document carries: the union a
 // declared `Include.Surface` derives, so the paths the endpoint advertises and
-// the resources its document admits come from one declaration — else the
-// relationship graph's own default. A boolean or `Query.IncludeOptions`
-// carries no union, and falls back to the graph.
-type IncludedOf<Rels extends Relationships, Include> = Include extends {
+// the resources its document admits come from one declaration; else, when the
+// `include` option turns the parameter on, every resource its legal paths
+// reach beside the direct targets (#320), so each advertised path can be
+// answered; else the relationship graph's own default.
+type IncludedOf<R extends Any, Include> = Include extends {
   readonly included: infer U;
 }
   ? U extends Schema.Top
     ? U
-    : DefaultIncluded<Rels>
-  : DefaultIncluded<Rels>;
+    : DefaultIncluded<R["relationships"]>
+  : IncludeEnabled<Include> extends true
+    ? ReachableIncluded<R, Include>
+    : DefaultIncluded<R["relationships"]>;
+
+// The `included` union of a read endpoint whose `include` option is `true` or
+// a `Query.IncludeOptions`: the direct targets and every resource a legal
+// include path reaches.
+interface ReachableIncluded<R extends Any, Include> extends Schema.Union<
+  ReadonlyArray<IncludedResources<R, Include>>
+> {}
+
+// What a read endpoint's `include` option is at runtime: a boolean, a
+// `Query.IncludeOptions`, or a declared `Include.Surface` (whose `paths` it
+// shares).
+type IncludeArgument =
+  | boolean
+  | { readonly paths?: ReadonlyArray<string>; readonly depth?: number };
+
+// The runtime mirror of `ReachableIncluded`: `None` when the `include` option
+// is off or a declared surface — which keep the union they had.
+const reachableIncluded = (
+  resources: ReadonlyArray<Any>,
+  include?: IncludeArgument,
+): Option.Option<Schema.Top> =>
+  include === true || (Predicate.isObject(include) && !isSurface(include))
+    ? Option.some(
+        Schema.Union(
+          includedResources(
+            resources,
+            false,
+            include === true ? includePathsFor(resources) : includePathsFor(resources, include),
+          ),
+        ),
+      )
+    : Option.none();
 
 // The success document the single-resource endpoints (`get`, `create`,
 // `update`) bind by default — the resource's own `document()` at the effective
@@ -197,7 +241,7 @@ type DefaultDocument<
   Include = false,
 > = DataDocument<
   Resource<Type, Attributes, Rels, Meta, IdSchema>,
-  IncludedOf<Rels, Include>,
+  IncludedOf<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
   DocMeta
 >;
 
@@ -212,24 +256,28 @@ type DefaultCollection<
   Include = false,
 > = CollectionDocument<
   Resource<Type, Attributes, Rels, Meta, IdSchema>,
-  IncludedOf<Rels, Include>,
+  IncludedOf<Resource<Type, Attributes, Rels, Meta, IdSchema>, Include>,
   DocMeta
 >;
 
 // The document options a read endpoint's default document is built with: the
 // `meta` override, plus the `included` union when the `include` option is a
-// declared surface. Absent keys stay absent so each default stands.
+// declared surface or turns the parameter on (`IncludedOf`). Absent keys stay
+// absent so each default stands.
 const documentOptions = (
+  resource: Any,
   options:
     | {
         readonly meta?: Schema.Top;
-        readonly include?: unknown;
+        readonly include?: IncludeArgument;
       }
     | undefined,
 ): { readonly meta?: Schema.Top; readonly included?: Schema.Top } => {
   const out: { meta?: Schema.Top; included?: Schema.Top } = {};
   if (options?.meta !== undefined) out.meta = options.meta;
   if (isSurface(options?.include)) out.included = options.include.included;
+  const reachable = reachableIncluded([resource], options?.include);
+  if (Option.isSome(reachable)) out.included = reachable.value;
   return out;
 };
 
@@ -265,7 +313,10 @@ type DefaultGetQuery<
  * Success is a 200 single-resource document whose primary `data` is the
  * resource itself (non-null — a missing resource is a `404`, not
  * `200 { data: null }`); the compound `included` union is derived from the
- * resource's relationships — or, when `include` is a declared
+ * resource's relationships — its non-`paginated` targets and, when `include`
+ * is `true` or a `Query.IncludeOptions`, every resource a legal include path
+ * reaches (`comments.author` admits the `people` behind each comment), so each
+ * advertised path can be answered — or, when `include` is a declared
  * `Include.Surface`, from that same declaration, so the paths this endpoint
  * advertises and the resources its document admits cannot drift apart.
  *
@@ -427,7 +478,9 @@ export const get = <
         )) as QuerySchema,
       success: asJsonApi(
         (options?.success ??
-          resource.document(documentOptions(options) as { readonly meta?: DocMeta })) as Success,
+          resource.document(
+            documentOptions(resource, options) as { readonly meta?: DocMeta },
+          )) as Success,
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -469,8 +522,9 @@ type DefaultListQuery<
 /**
  * `GET /<type>` — list a collection of resources.
  *
- * Success is a 200 collection document (strict array `data`). Enable `sort`,
- * `page` and `filter` for the spec's collection query parameters.
+ * Success is a 200 collection document (strict array `data`), whose
+ * `included` union is derived as {@link get}'s is. Enable `sort`, `page` and
+ * `filter` for the spec's collection query parameters.
  *
  * Those options compose the whole query schema — a flat, bracket-keyed string
  * record on the wire that decodes to the spec's nested shape (`page: { offset,
@@ -649,7 +703,9 @@ export const list = <
         )) as QuerySchema,
       success: asJsonApi(
         (options?.success ??
-          resource.collection(documentOptions(options) as { readonly meta?: DocMeta })) as Success,
+          resource.collection(
+            documentOptions(resource, options) as { readonly meta?: DocMeta },
+          )) as Success,
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -1144,6 +1200,28 @@ export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extend
   ReadonlyArray<TargetsOf<Resources[number]>>
 > {}
 
+// The `included` union of a heterogeneous collection or a polymorphic
+// endpoint: its `Default` union, whose members are `DefaultMembers` — widened,
+// when the `include` option is `true` or a `Query.IncludeOptions`, by every
+// resource a legal include path reaches from any of `Members` (#320).
+type MembersIncludedOf<
+  Members extends Any,
+  Include,
+  Default extends Schema.Top,
+  DefaultMembers extends Any,
+> =
+  IncludeEnabled<Include> extends true
+    ? DeclaresSurface<Include> extends true
+      ? Default
+      : MembersReachableIncluded<Members, Include, DefaultMembers>
+    : Default;
+
+interface MembersReachableIncluded<
+  Members extends Any,
+  Include,
+  DefaultMembers extends Any,
+> extends Schema.Union<ReadonlyArray<DefaultMembers | IncludedResources<Members, Include>>> {}
+
 /**
  * A heterogeneous collection endpoint: `data` is a mixed array of several
  * resource types, discriminated by their `type` tags. The natural fit for
@@ -1154,7 +1232,8 @@ export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extend
  *
  * Success is a 200 collection document whose `data` member is the union of
  * the given resources and whose `included` union spans all of their
- * relationship targets.
+ * relationship targets and, when `include` is `true` or a
+ * `Query.IncludeOptions`, every resource a legal include path reaches.
  *
  * @example
  * ```ts
@@ -1244,10 +1323,16 @@ export const collection = <
     success: asJsonApi(
       CollectionDocument(Schema.Union(resources), {
         // The cast is sound: every direct target of every member of
-        // `Resources` is, by construction, a member of `TargetsOf<...>`.
-        included: Schema.Union(
-          dedupe(resources.flatMap((resource) => directTargets(resource))),
-        ) as unknown as CollectionIncluded<Resources>,
+        // `Resources` is, by construction, a member of `TargetsOf<...>`, and
+        // every resource an include path reaches one of `IncludedResources`.
+        included: Option.getOrElse(reachableIncluded(resources, options.include), () =>
+          Schema.Union(dedupe(resources.flatMap((resource) => directTargets(resource)))),
+        ) as unknown as MembersIncludedOf<
+          Resources[number],
+          Include,
+          CollectionIncluded<Resources>,
+          TargetsOf<Resources[number]>
+        >,
         meta: (options.meta ?? AnyMeta) as DocMeta,
       }),
     ),
@@ -1268,8 +1353,9 @@ export const collection = <
  *
  * Success is a 200 single-resource document whose primary `data` is the family's
  * member union (discriminated by `type`) and whose `included` spans every
- * member's targets. The `:id` param is the family's shared id, and `?include=` /
- * `?fields[TYPE]=` span all members' graphs.
+ * member's targets and, when `include` is `true` or a `Query.IncludeOptions`,
+ * every resource a legal include path reaches. The `:id` param is the family's
+ * shared id, and `?include=` / `?fields[TYPE]=` span all members' graphs.
  *
  * For the collection case (`GET /nodes`) use {@link collection} with
  * `family.members`.
@@ -1336,11 +1422,22 @@ export const polymorphic = <
         },
       ),
       success: asJsonApi(
-        family.document(
-          (options?.meta !== undefined ? { meta: options.meta } : {}) as {
-            readonly meta?: DocMeta;
-          },
-        ),
+        family.document({
+          ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+          // The family's own default union unless `include` reaches further.
+          ...Option.match(reachableIncluded(family.members, options?.include), {
+            onNone: () => ({}),
+            onSome: (included) => ({ included }),
+          }),
+        } as {
+          readonly meta?: DocMeta;
+          readonly included?: MembersIncludedOf<
+            Members[number],
+            Include,
+            FamilyDefaultIncluded<Members>,
+            IncludedResources<Members[number], false>
+          >;
+        }),
       ),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
       error: wires(options?.errors),
@@ -1423,9 +1520,9 @@ export type RelatedSuccess<
   Include = false,
 > =
   DescriptorOf<R, Name> extends Relationship.ToOne<infer T extends Any>
-    ? DataDocument<Schema.NullOr<T>, IncludedOf<T["relationships"], Include>, DocMeta>
+    ? DataDocument<Schema.NullOr<T>, IncludedOf<T, Include>, DocMeta>
     : DescriptorOf<R, Name> extends Relationship.ToMany<infer T extends Any>
-      ? CollectionDocument<T, IncludedOf<T["relationships"], Include>, DocMeta>
+      ? CollectionDocument<T, IncludedOf<T, Include>, DocMeta>
       : never;
 
 const capitalize = (value: string): string => value.charAt(0).toUpperCase() + value.slice(1);
@@ -1459,7 +1556,8 @@ const linkageData = (descriptor: Relationship.Descriptor, target: Any): Schema.T
  * relationships success is a single-resource document of the target; for
  * to-many relationships it is a collection document, with the full set of
  * collection query parameters (`include`, `fields`, `sort`, `page`, `filter`)
- * available.
+ * available. The `included` union is derived from the *target's* graph as
+ * {@link get} derives it from the resource's.
  *
  * For `paginated` relationships this *is* the collection their required
  * `links.related` member points at — enable `page` here.
@@ -1560,10 +1658,13 @@ export const related = <
   const target = descriptor.ref();
   // A declared surface over the *target* derives the union its document
   // carries, exactly as it does for `get` / `list`; otherwise the target's own
-  // relationship graph does.
+  // relationship graph does — every resource its legal include paths reach
+  // when `include` is on (#320).
   const included = isSurface(options?.include)
     ? options.include.included
-    : Schema.Union(directTargets(target));
+    : Option.getOrElse(reachableIncluded([target], options?.include), () =>
+        Schema.Union(directTargets(target)),
+      );
   const docMeta = (options?.meta ?? AnyMeta) as DocMeta;
   // The cast is sound: the runtime schema mirrors `RelatedSuccess` exactly — a
   // nullable single-resource document for to-one descriptors (`data: null` is

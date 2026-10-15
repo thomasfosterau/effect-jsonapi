@@ -403,10 +403,12 @@ describe("endpoint documents", () => {
 
   it("leaves a `related` endpoint without a surface on its target's graph", () => {
     const decode = successOf(Endpoint.related(Article, "comments", { include: true }));
-    // Comment's own graph reaches Person, but not Company.
+    // Comment's own graph reaches Person and, through `author.company`,
+    // Company (#320) — but not Tag, which only Article's graph reaches.
     expect(() => decode({ data: [comment], included: [person] })).not.toThrow();
     const company = { type: "companies", id: "co1", attributes: { name: "Acme" } };
-    expect(() => decode({ data: [comment], included: [company] })).toThrow();
+    expect(() => decode({ data: [comment], included: [company] })).not.toThrow();
+    expect(() => decode({ data: [comment], included: [tag] })).toThrow();
   });
 });
 

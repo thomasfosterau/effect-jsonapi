@@ -280,19 +280,23 @@ assertType<Equals<GetIncluded, IncludedOf<typeof listArticles>>>(true);
 assertType<Equals<AdvertisedBy<typeof getArticle>, Paths>>(true);
 assertType<Equals<AdvertisedBy<typeof listArticles>, Paths>>(true);
 
-// Without a surface the document keeps the relationship graph's default union
-// — every non-`paginated` target, so `Revision` is absent from both.
+// Without a surface the document admits every non-`paginated` target and every
+// resource a legal depth-2 path reaches (#320) — `author.company` brings
+// `Company` in — while `Revision` stays absent.
 export const getByGraph = Endpoint.get(Article, { include: true });
 type GraphIncluded = IncludedOf<typeof getByGraph>;
 type GraphIncludedExact = Equals<
   GraphIncluded,
+  typeof Person.Type | typeof Comment.Type | typeof Tag.Type | typeof Company.Type
+>;
+type GraphIncludedDirectOnly = Equals<
+  GraphIncluded,
   typeof Person.Type | typeof Comment.Type | typeof Tag.Type
 >;
-type GraphIncludedNarrowed = Equals<GraphIncluded, typeof Person.Type | typeof Comment.Type>;
 
 assertType<GraphIncludedExact>(true);
-// @ts-expect-error -- negative control: `include: true` does not narrow the union
-assertType<GraphIncludedNarrowed>(true);
+// @ts-expect-error -- negative control: `include: true` reaches past the direct targets
+assertType<GraphIncludedDirectOnly>(true);
 
 // A `related` endpoint takes a surface over its *target*.
 export const commentSurface = Include.make(Comment, {

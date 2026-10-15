@@ -976,7 +976,7 @@ for (const result of doc.data) {
 }
 ```
 
-The `included` union spans every searched resource's relationship targets, and query features (`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
+The `included` union spans every searched resource's relationship targets (and, with `include` on, every resource a legal include path reaches), and query features (`fields[TYPE]`, `include`, `sort`) are derived across **all** of the resources in the union.
 
 ### Atomic operations
 
@@ -1790,6 +1790,8 @@ const include = Query.Include(Article, { paths: ["author"] });
 // typeof include.Type === ReadonlyArray<"author">
 ```
 
+Whatever bound the option sets, the default success document admits in `included` every resource the legal paths reach — the leaf of each path and every resource on the way down — beside the non-`paginated` direct targets, so every advertised path can be answered: under `include: true`, `comments.author` admits the `people` behind each comment.
+
 The option is available wherever `include` is — `Endpoint.get` / `list` / `related` / `collection`, and `Group.resource` both top-level and per endpoint:
 
 ```ts
@@ -1803,7 +1805,7 @@ A top-level constraint applies to `get` and `list`. The relationship endpoints' 
 
 ### Declaring the include surface once
 
-An allow-list constrains _which_ paths are advertised, but says nothing about the `included` union the success document declares — and `HttpApiBuilder` strips a resolved `included` the document's schema doesn't admit, so a walk that runs correctly can still reach the client empty. Those are two declarations over two inputs, and they drift.
+An allow-list constrains _which_ paths are advertised, and the default document admits what they reach — but beside every direct target, so the `included` union is still wider than the paths, and the walk a handler runs to resolve them is declared somewhere else again. Those are separate declarations over separate inputs, and they drift.
 
 `Include.make` is one nested declaration all three artefacts project from — the accepted-path whitelist, the `included` union, and the advertised parameter:
 
