@@ -252,9 +252,10 @@ describe("github example: listing", () => {
     expect(document.data.map((issue) => issue.attributes.title)).toEqual([
       bugIssue.attributes.title,
     ]);
-    // the closed attribute set decodes to its literal type
+    // the closed attribute set decodes to its literal type; the endpoint
+    // declares `fields`, so a client reads it as optional (#322)
     for (const issue of document.data) {
-      expectTypeOf(issue.attributes.state).toEqualTypeOf<"open" | "closed">();
+      expectTypeOf(issue.attributes.state).toEqualTypeOf<"open" | "closed" | undefined>();
       expect(issue.attributes.state).toBe("open");
     }
   });

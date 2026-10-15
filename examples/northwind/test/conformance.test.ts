@@ -1,11 +1,11 @@
 /**
  * The conformance kit, run against the northwind example.
  *
- * This is an acceptance gate for the kit as much as for the example. It does
- * **not** assert a clean run: the kit finds real, filed defects here, and
- * pinning the exact set is what keeps both honest — a new failure means a
- * regression in the example, and a disappearing one means a fixed bug whose
- * entry should come off this list.
+ * This is an acceptance gate for the kit as much as for the example. Rather
+ * than assert a clean run, it pins the exact set of rules the example breaks —
+ * none today — which is what keeps both honest: a new failure means a
+ * regression in the example (or a defect to file and pin here), and a
+ * disappearing one means a fixed bug whose entry should come off this list.
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Predicate } from "effect";
@@ -28,19 +28,12 @@ import {
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to.
+ * Remove an entry when its issue is fixed; the test will tell you to. Empty
+ * since #169: the handlers project `?fields[TYPE]=` with
+ * `onResource: Handlers.project(query.fields)` and stamp
+ * `jsonapi: Document.v1_1` on every document.
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
-  // #112 landed the mechanism — `onResource: Handlers.project(query.fields)` —
-  // but this example's handlers have not adopted it, so `?fields[TYPE]=` still
-  // returns every attribute. An example gap now, not a library one.
-  ["spec/query/sparse-fieldsets-primary", "#112"],
-  ["spec/query/sparse-fieldsets-included", "#112"],
-  // #103 landed the `jsonapi` option on the document builders, but this
-  // example's handlers do not pass it, so no document advertises the version
-  // it implements. An example gap now, not a library one.
-  ["profile/document/jsonapi-member", "#103"],
-];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 
 /**
  * One id per resource type, each taken from a record the example's store is

@@ -34,9 +34,10 @@ export const articles = Group.make(
     fields: true,
     errors: [ArticleNotFound],
   }),
-  // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
+  // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9&fields[articles]=title
   Endpoint.list(Article, {
     include: true,
+    fields: true,
     sort: ["createdAt", "title"],
     page: Pagination,
     filter: { author: Schema.optionalKey(Schema.String) },
@@ -55,8 +56,10 @@ export const articles = Group.make(
     errors: [ArticleNotFound],
   }),
   // --- Related resource endpoints --------------------------------------------
-  // GET /articles/:id/author — the article's author, as a full resource
+  // GET /articles/:id/author?fields[people]=firstName — the article's author,
+  // as a full resource
   Endpoint.related(Article, "author", {
+    fields: true,
     errors: [ArticleNotFound],
   }),
   // GET /articles/:id/comments?page[offset]=0&page[limit]=10&include=author —
@@ -64,6 +67,7 @@ export const articles = Group.make(
   // points at
   Endpoint.related(Article, "comments", {
     include: true,
+    fields: true,
     page: Pagination,
     meta: PageMeta,
     errors: [ArticleNotFound],

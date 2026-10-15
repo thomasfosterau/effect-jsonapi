@@ -4,17 +4,21 @@
  *
  * Handlers receive fully-decoded, typed requests:
  *   - `params.id` is the resource's branded id
- *   - `query.include` / `query.sort` / `query.page` / `query.filter` are typed
+ *   - `query.include` / `query.fields` / `query.sort` / `query.page` /
+ *     `query.filter` are typed
  *   - `payload.data.attributes` is the typed create/update payload
  *   - relationship endpoints receive typed linkage payloads
  *
  * and return document values (`Handlers.data` / `Handlers.collection` /
  * `Handlers.linkage`), which are validated against the endpoint's document
- * schema on the way out.
+ * schema on the way out. Every document advertises the JSON:API version it
+ * implements (`jsonapi: Document.v1_1`), and every read that declares `fields`
+ * answers `?fields[TYPE]=` by projecting each resource it carries — primary
+ * data and `included` alike — with `onResource: Handlers.project(query.fields)`.
  */
 import { Effect, Layer, Match } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
-import { Atomic, Handlers, Lid, Middleware } from "@thomasfosterau/effect-jsonapi";
+import { Atomic, Document, Handlers, Lid, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "./api.js";
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js";
 import { Article, Comment, Person, Tag } from "./resources.js";
@@ -157,6 +161,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             included:
               query.include === undefined ? undefined : resolveIncluded(article, query.include),
             self: `/articles/${article.id}`,
+            onResource: Handlers.project(query.fields),
+            jsonapi: Document.v1_1,
           }),
         ),
       ),
@@ -194,6 +200,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
               : page.flatMap((article) => resolveIncluded(article, query.include)),
           meta: { total },
           links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total),
+          onResource: Handlers.project(query.fields),
+          jsonapi: Document.v1_1,
         }),
       );
     })
@@ -222,7 +230,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       // The created resource carries its own `self` link: the 201's `Location`
       // header is copied from it, so the two match.
       const self = `/articles/${article.id}`;
-      return Effect.succeed(Handlers.data({ ...article, links: { self } }, { self }));
+      return Effect.succeed(
+        Handlers.data({ ...article, links: { self } }, { self, jsonapi: Document.v1_1 }),
+      );
     })
     .handle("update", ({ params, payload }) =>
       loadArticle(params.id).pipe(
@@ -238,7 +248,10 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             },
           });
           store.articles.set(updated.id, updated);
-          return Handlers.data(updated, { self: `/articles/${updated.id}` });
+          return Handlers.data(updated, {
+            self: `/articles/${updated.id}`,
+            jsonapi: Document.v1_1,
+          });
         }),
       ),
     )
@@ -251,12 +264,14 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       ),
     )
     // --- Related resource endpoints -----------------------------------------
-    .handle("author", ({ params }) =>
+    .handle("author", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
           const author = store.people.get(article.relationships!.author.data.id) ?? null;
           return Handlers.data(author, {
             self: Handlers.relatedLink("articles", article.id, "author"),
+            onResource: Handlers.project(query.fields),
+            jsonapi: Document.v1_1,
           });
         }),
       ),
@@ -282,6 +297,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
                   : [],
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
+            onResource: Handlers.project(query.fields),
+            jsonapi: Document.v1_1,
           });
         }),
       ),
@@ -298,6 +315,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             self: Handlers.relationshipLink("articles", article.id, "comments"),
             related: Handlers.relatedLink("articles", article.id, "comments"),
             meta: { total },
+            jsonapi: Document.v1_1,
           });
         }),
       ),
@@ -313,6 +331,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           return Handlers.linkage(payload.data, {
             self: Handlers.relationshipLink("articles", article.id, "author"),
             related: Handlers.relatedLink("articles", article.id, "author"),
+            jsonapi: Document.v1_1,
           });
         }),
       ),
@@ -330,6 +349,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             {
               self: Handlers.relationshipLink("articles", article.id, "comments"),
               related: Handlers.relatedLink("articles", article.id, "comments"),
+              jsonapi: Document.v1_1,
             },
           );
         }),
@@ -384,6 +404,8 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
               ),
         meta: { total },
         links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
+        onResource: Handlers.project(query.fields),
+        jsonapi: Document.v1_1,
       }),
     );
   }),

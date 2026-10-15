@@ -84,6 +84,28 @@ describe("blog example: fetching", () => {
     expect(types).toEqual(["people", "tags"]);
   });
 
+  it("projects ?fields[TYPE]= on primary data and `included`, and advertises JSON:API 1.1", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.get({
+          params: { id: Article.Id.make("1") },
+          query: { include: ["author"], fields: { articles: ["title"], people: ["lastName"] } },
+        });
+      }),
+    );
+
+    // `onResource: Handlers.project(query.fields)` applies each fieldset to
+    // every resource of that type, wherever it sits in the document.
+    expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
+    expect(document.included?.map((resource) => resource.attributes)).toEqual([
+      { lastName: sampleAuthor.attributes.lastName },
+    ]);
+    // Only `attributes` is projected: the relationships are untouched.
+    expect(document.data.relationships?.author.data).toEqual(Person.ref(sampleAuthor.id));
+    expect(document.jsonapi).toEqual({ version: "1.1" });
+  });
+
   it("paginated relationships appear as links, never as inline data or includes", async () => {
     const document = await run(
       Effect.gen(function* () {

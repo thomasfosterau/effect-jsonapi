@@ -52,12 +52,14 @@ export const SearchPagination = Query.Page.offset({ maxLimit: 100 });
 
 export const users = Group.make(
   User,
-  // GET /users/:id
+  // GET /users/:id?fields[users]=login,name
   Endpoint.get(User, {
+    fields: true,
     errors: [UserNotFound],
   }),
   // GET /users?sort=login&page[number]=1&page[size]=30
   Endpoint.list(User, {
+    fields: true,
     sort: ["login", "createdAt"],
     page: Pagination,
     meta: PageMeta,
@@ -75,6 +77,7 @@ export const repositories = Group.make(
   // GET /repositories?sort=-stargazerCount&filter[language]=TypeScript&page[number]=1&page[size]=30
   Endpoint.list(Repository, {
     include: true,
+    fields: true,
     sort: ["stargazerCount", "name", "createdAt"],
     page: Pagination,
     filter: {
@@ -98,6 +101,7 @@ export const repositories = Group.make(
   }),
   // GET /repositories/:id/owner — the owning user, as a full resource
   Endpoint.related(Repository, "owner", {
+    fields: true,
     errors: [RepositoryNotFound],
   }),
 );
@@ -113,6 +117,7 @@ export const issues = Group.make(
   // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt
   Endpoint.list(Issue, {
     include: true,
+    fields: true,
     sort: ["number", "createdAt"],
     page: Pagination,
     filter: {
@@ -136,6 +141,7 @@ export const issues = Group.make(
   // points at
   Endpoint.related(Issue, "comments", {
     include: true,
+    fields: true,
     page: Pagination,
     meta: PageMeta,
     errors: [IssueNotFound],
@@ -169,11 +175,13 @@ export const pulls = Group.make(
   // GET /pulls/:id?include=author,reviewers,repository
   Endpoint.get(PullRequest, {
     include: true,
+    fields: true,
     errors: [PullRequestNotFound],
   }),
   // GET /pulls?filter[state]=open
   Endpoint.list(PullRequest, {
     include: true,
+    fields: true,
     sort: ["number", "createdAt"],
     page: Pagination,
     filter: {

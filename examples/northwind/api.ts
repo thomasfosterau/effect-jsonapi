@@ -65,10 +65,12 @@ export const categories = Group.make(
   Category,
   // GET /categories/:id
   Endpoint.get(Category, {
+    fields: true,
     errors: [CategoryNotFound],
   }),
   // GET /categories?sort=name&page[offset]=0&page[limit]=10
   Endpoint.list(Category, {
+    fields: true,
     sort: ["name"],
     page: Pagination,
     meta: PageMeta,
@@ -79,10 +81,12 @@ export const suppliers = Group.make(
   Supplier,
   // GET /suppliers/:id
   Endpoint.get(Supplier, {
+    fields: true,
     errors: [SupplierNotFound],
   }),
   // GET /suppliers?filter[country]=UK&sort=companyName
   Endpoint.list(Supplier, {
+    fields: true,
     sort: ["companyName", "country"],
     page: Pagination,
     filter: {
@@ -96,10 +100,12 @@ export const shippers = Group.make(
   Shipper,
   // GET /shippers/:id
   Endpoint.get(Shipper, {
+    fields: true,
     errors: [ShipperNotFound],
   }),
   // GET /shippers
   Endpoint.list(Shipper, {
+    fields: true,
     sort: ["companyName"],
     page: Pagination,
     meta: PageMeta,
@@ -110,10 +116,12 @@ export const territories = Group.make(
   Territory,
   // GET /territories/:id
   Endpoint.get(Territory, {
+    fields: true,
     errors: [TerritoryNotFound],
   }),
   // GET /territories?filter[region]=Eastern
   Endpoint.list(Territory, {
+    fields: true,
     sort: ["description", "region"],
     page: Pagination,
     filter: {
@@ -127,10 +135,12 @@ export const customers = Group.make(
   Customer,
   // GET /customers/:id
   Endpoint.get(Customer, {
+    fields: true,
     errors: [CustomerNotFound],
   }),
   // GET /customers?filter[country]=Germany&sort=companyName
   Endpoint.list(Customer, {
+    fields: true,
     sort: ["companyName", "country"],
     page: Pagination,
     filter: {
@@ -154,6 +164,7 @@ export const products = Group.make(
   // lookups via filter[category] / filter[supplier].
   Endpoint.list(Product, {
     include: true,
+    fields: true,
     sort: ["name", "unitPrice", "unitsInStock"],
     page: Pagination,
     filter: {
@@ -179,6 +190,7 @@ export const products = Group.make(
   }),
   // GET /products/:id/supplier — the supplying company, as a full resource
   Endpoint.related(Product, "supplier", {
+    fields: true,
     errors: [ProductNotFound],
   }),
   // PATCH /products/:id/relationships/category — reassign the category
@@ -196,11 +208,13 @@ export const employees = Group.make(
   // GET /employees/:id?include=territories
   Endpoint.get(Employee, {
     include: true,
+    fields: true,
     errors: [EmployeeNotFound],
   }),
   // GET /employees?filter[manager]=2 — an employee's direct reports
   Endpoint.list(Employee, {
     include: true,
+    fields: true,
     sort: ["lastName", "hireDate"],
     page: Pagination,
     filter: {
@@ -238,6 +252,7 @@ export const orders = Group.make(
   // GET /orders?filter[customer]=1&filter[shipped]=false&sort=-orderDate
   Endpoint.list(Order, {
     include: true,
+    fields: true,
     sort: ["orderDate", "requiredDate", "freight"],
     page: Pagination,
     filter: {
@@ -262,6 +277,7 @@ export const orders = Group.make(
   // points at, with the line item's product brought in as a compound document
   Endpoint.related(Order, "lineItems", {
     include: true,
+    fields: true,
     page: Pagination,
     meta: PageMeta,
     errors: [OrderNotFound],
