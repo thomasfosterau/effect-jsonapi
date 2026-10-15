@@ -12,7 +12,9 @@
  * an opaque transformation. `wireProperties` recovers it, where it can show
  * it, by running that transformation on probes, so the support check reads
  * the property a parameter actually decodes into and a rejected value's
- * `source.parameter` names the parameter the request sent (`queryLeaves`).
+ * `source.parameter` names the parameter the request sent (`wireLeaves`).
+ * The same mapping names a renamed body member, header or path parameter
+ * in `source` as the request sent it (#316).
  *
  * @internal
  */
@@ -304,13 +306,13 @@ const wireNameOf = (ast: SchemaAST.AST): ((key: PropertyKey) => Option.Option<st
 };
 
 /**
- * One formatted leaf of a query issue: its message, the path it sits at in
- * the decoded value, and that path with each property named as the request
- * sent it.
+ * One formatted leaf of a request part's issue (a query, a body, headers,
+ * path parameters): its message, the path it sits at in the decoded value,
+ * and that path with each property named as the request sent it.
  *
  * @internal
  */
-export interface QueryLeaf {
+export interface WireLeaf {
   readonly message: string;
   readonly path: ReadonlyArray<PropertyKey>;
   readonly wire: ReadonlyArray<PropertyKey>;
@@ -326,7 +328,7 @@ interface At {
 
 // A node the formatter does not walk through, formatted alone, its leaves'
 // paths prefixed with where it sits.
-const formatted = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<QueryLeaf> =>
+const formatted = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<WireLeaf> =>
   Arr.map(format(issue).issues, (leaf) => {
     const below = Arr.map(leaf.path ?? [], (segment) =>
       Predicate.isPropertyKey(segment) ? segment : segment.key,
@@ -353,7 +355,7 @@ const walksThrough = (filter: SchemaIssue.Filter): boolean =>
 // and its encoded side's AST when the wire value was rejected before any
 // rename, under wire names. A check met anywhere else is `formatted` alone,
 // as the formatter would render it, in the names the issue reports.
-const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<QueryLeaf> =>
+const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<WireLeaf> =>
   Match.value(issue).pipe(
     Match.tag("Pointer", (pointer) =>
       leavesOf(pointer.issue, {
@@ -364,7 +366,7 @@ const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<QueryLeaf> =>
     Match.tag("Encoding", (encoding) => leavesOf(encoding.issue, at)),
     Match.tag("Composite", (composite) => {
       const wireName = wireNameOf(composite.ast);
-      const enter = (child: SchemaIssue.Issue): ReadonlyArray<QueryLeaf> =>
+      const enter = (child: SchemaIssue.Issue): ReadonlyArray<WireLeaf> =>
         Match.value(child).pipe(
           Match.tag("Pointer", (pointer) => {
             const [key, ...rest] = pointer.path;
@@ -391,16 +393,18 @@ const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<QueryLeaf> =>
   );
 
 /**
- * The formatted leaves of a query's decode failure, as
+ * The formatted leaves of a request part's decode failure, as
  * `SchemaIssue.makeFormatterStandardSchemaV1` gives them, each with its path
  * in wire names too: a property a struct's encoding renames
  * (`Schema.encodeKeys`, `Query.bracketKeys`) is reported under its decoded
- * name when its decoded side rejected it, which names no parameter the
- * request carries. Each place a leaf's path enters a struct's property takes
+ * name when its decoded side rejected it, which names no query parameter,
+ * body member, header or path parameter the request carries (#305, #316).
+ * Each place a leaf's path enters a struct's property, at any depth, takes
  * the wire name `wireProperties` settles for it, read off the issue's own
- * schema; one it does not settle keeps its reported name.
+ * schema; one it does not settle keeps its reported name, so a leaf whose
+ * path enters no renamed struct is the formatter's own.
  *
  * @internal
  */
-export const queryLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<QueryLeaf> =>
+export const wireLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<WireLeaf> =>
   leavesOf(issue, { path: [], wire: [] });

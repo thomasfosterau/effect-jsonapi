@@ -97,7 +97,7 @@ import {
 } from "./ApiError.js";
 import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
-import { declaredNames, declaresName, queryLeaves } from "./internal/declaredQuery.js";
+import { declaredNames, declaresName, wireLeaves } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { withCreatedLocation } from "./internal/responseBody.js";
@@ -418,7 +418,14 @@ const sourceOf = (
  * `Query.bracketPageKeys`, `Query.flatList`) is rejected under its decoded
  * name once decoded, and `source.parameter` carries its wire name instead:
  * `include` for a property `paths` sent as `include`, `page[limit]` for a
- * bracketed `limit`.
+ * bracketed `limit`. The same holds for a body member, at any depth, a
+ * header and a path parameter: with `Schema.encodeKeys({ count: "itemCount" })`
+ * a rejected `count` is `source.pointer` `/itemCount`, and with
+ * `Schema.encodeKeys({ trace: "x-trace" })` a rejected header is
+ * `source.header` `x-trace`. A key the schema does not rename keeps its own
+ * name. To read a renamed struct's wire names, its transformation's decode
+ * runs on probe values once per schema, as it does for a query, so a decode
+ * with side effects has them run then.
  *
  * Where the schema that rejected the value publishes what it *would* have
  * accepted, the error object carries it as `meta`: a rejected `?include=` path
@@ -460,16 +467,9 @@ export const schemaErrorDocument = (
 ): typeof WireDocument.Type => {
   const issue = SchemaIssue.isIssue(error) ? error : error.issue;
   // Each leaf's path in decoded names, and as the request spelled it: a
-  // query property renamed on the wire (#305) is named by its wire name.
-  const leaves =
-    part === "Query"
-      ? queryLeaves(issue)
-      : SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues.map((leaf) => {
-          const path = (leaf.path ?? []).map((segment) =>
-            typeof segment === "object" ? segment.key : segment,
-          );
-          return { message: leaf.message, path, wire: path };
-        });
+  // query parameter (#305), body member, header or path parameter (#316)
+  // renamed on the wire is named by its wire name.
+  const leaves = wireLeaves(issue);
   // Error `meta` a schema publishes for its own rejections — the include
   // whitelist, the sortable fields — indexed once per failure and looked up
   // per leaf by the path the leaf sits at.
