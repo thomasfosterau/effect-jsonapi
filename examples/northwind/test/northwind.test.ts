@@ -418,6 +418,8 @@ describe("northwind example: writing", () => {
     expect(document.data?.attributes.discontinued).toBe(true);
     // other attributes are untouched
     expect(document.data?.attributes.name).toBe("Chang");
+    // a write response advertises JSON:API 1.1 too, not only the reads
+    expect(document.jsonapi?.version).toBe("1.1");
   });
 
   it("opens an order against a customer and employee (201)", async () => {

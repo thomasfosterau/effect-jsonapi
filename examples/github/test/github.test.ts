@@ -255,6 +255,7 @@ describe("github example: listing", () => {
     // the closed attribute set decodes to its literal type; the endpoint
     // declares `fields`, so a client reads it as optional (#322)
     for (const issue of document.data) {
+      // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
       expectTypeOf(issue.attributes.state).toEqualTypeOf<"open" | "closed" | undefined>();
       expect(issue.attributes.state).toBe("open");
     }
@@ -443,6 +444,8 @@ describe("github example: writing", () => {
     expect(document.data?.attributes.state).toBe("closed");
     // other attributes are untouched
     expect(document.data?.attributes.title).toBe(bugIssue.attributes.title);
+    // a write response advertises JSON:API 1.1 too, not only the reads
+    expect(document.jsonapi?.version).toBe("1.1");
   });
 
   it("403s with a typed error when updating a locked issue", async () => {
@@ -707,10 +710,13 @@ describe("github example: heterogeneous search", () => {
     // `fields`, so a client reads each attribute as optional (#322)
     for (const result of document.data) {
       if (result.type === "repositories") {
+        // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
         expectTypeOf(result.attributes.stargazerCount).toEqualTypeOf<number | undefined>();
       } else if (result.type === "issues") {
+        // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
         expectTypeOf(result.attributes.state).toEqualTypeOf<"open" | "closed" | undefined>();
       } else {
+        // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
         expectTypeOf(result.attributes.login).toEqualTypeOf<string | undefined>();
       }
     }

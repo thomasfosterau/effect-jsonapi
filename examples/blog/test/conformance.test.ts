@@ -18,7 +18,8 @@ import { BlogLive, discardArticle } from "../handlers.js";
  * Remove an entry when its issue is fixed; the test will tell you to. Empty
  * since #169: the handlers project `?fields[TYPE]=` with
  * `onResource: Handlers.project(query.fields)` and stamp
- * `jsonapi: Document.v1_1` on every document.
+ * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` /
+ * `linkage` document (the `Atomic.results` answer carries none).
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 

@@ -11,8 +11,9 @@
  *
  * and return document values (`Handlers.data` / `Handlers.collection` /
  * `Handlers.linkage`), which are validated against the endpoint's document
- * schema on the way out. Every document advertises the JSON:API version it
- * implements (`jsonapi: Document.v1_1`), and every read that declares `fields`
+ * schema on the way out. Each of those documents advertises the JSON:API
+ * version it implements (`jsonapi: Document.v1_1`); the `ApiError` error
+ * documents carry no `jsonapi` member. Every read that declares `fields`
  * answers `?fields[TYPE]=` by projecting each resource it carries — primary
  * data and `included` alike — with `onResource: Handlers.project(query.fields)`.
  */

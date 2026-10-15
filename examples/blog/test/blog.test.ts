@@ -293,6 +293,8 @@ describe("blog example: writing", () => {
 
     expect(document.data?.attributes.body).toBe("Updated body");
     expect(document.data?.attributes.title).toBe(sampleArticle.attributes.title);
+    // a write response advertises JSON:API 1.1 too, not only the reads
+    expect(document.jsonapi?.version).toBe("1.1");
   });
 });
 
