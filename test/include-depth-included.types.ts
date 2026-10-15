@@ -460,6 +460,15 @@ export const surfaceSearch = Endpoint.collection([Article, Person], {
 // instead. When #336 is fixed this pin flips, and the docs' caveat goes.
 assertType<Equals<(typeof surfaceSearchUnion)["Type"], IncludedOf<typeof surfaceSearch>>>(false);
 assertType<Equals<IncludedOf<typeof surfaceSearch>, IncludedOf<typeof plainSearch>>>(true);
+// The same divergence on `polymorphic`, under a surface over one member.
+const nodeSurface = Include.make(Author, {
+  comments: Include.nested(Comment, { author: Person }),
+});
+export const surfaceNode = Endpoint.polymorphic(AnyNode, { include: nodeSurface });
+const surfaceNodeUnion = Include.included(AnyNode.members, { include: nodeSurface });
+assertType<Equals<typeof surfaceNodeUnion, (typeof nodeSurface)["included"]>>(true);
+assertType<Equals<(typeof surfaceNodeUnion)["Type"], IncludedOf<typeof surfaceNode>>>(false);
+assertType<Equals<IncludedOf<typeof surfaceNode>, IncludedOf<typeof plainNode>>>(true);
 
 // ---------------------------------------------------------------------------
 // A widened `include: boolean`
@@ -496,6 +505,25 @@ const flagNodeUnion = Include.included(AnyNode.members, { include: flag });
 assertType<Equals<(typeof flagNodeUnion)["Type"], IncludedOf<typeof flagNode>>>(true);
 // Its public name.
 assertType<Include.MembersReachable<typeof Article | typeof Person, boolean>>(flagSearchUnion);
+
+// An `include` that may be a surface or not is typed as either union, as the
+// runtime returns one or the other: the surface's own, and the members' union
+// for the rest of the option, undistributed over a widened `boolean` (#382).
+declare const which: boolean;
+const mixedSearchUnion = Include.included([Article, Person], {
+  include: which ? articleSurface : true,
+});
+assertType<
+  Equals<typeof mixedSearchUnion, (typeof articleSurface)["included"] | typeof searchUnion>
+>(true);
+// Negative control: not the direct targets alone.
+assertType<Equals<(typeof mixedSearchUnion)["Type"], (typeof plainSearchUnion)["Type"]>>(false);
+const mixedFlagSearchUnion = Include.included([Article, Person], {
+  include: which ? articleSurface : flag,
+});
+assertType<
+  Equals<typeof mixedFlagSearchUnion, (typeof articleSurface)["included"] | typeof flagSearchUnion>
+>(true);
 
 // The use it exists for: a wire-variant `success` keeps the default's union.
 const WireArticle = Schema.Struct({ ...Article.fields });

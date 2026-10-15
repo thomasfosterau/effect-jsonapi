@@ -157,6 +157,32 @@ export default defineConfig({
           "effect/avoid-ts-ignore": "off",
         },
       },
+      // The schema tier: every module `src/schema.ts` reaches. That entry point
+      // resolves `effect` and nothing else, and test/entry-points.test.ts keys
+      // the externals it walks by specifier, so an `effect/Schema`-style
+      // subpath import here fails it. The barrel is the only import these
+      // files can use, so `no-barrel-imports` is not debt in them. A module
+      // that joins the tier joins this list.
+      {
+        files: [
+          "src/schema.ts",
+          "src/Document.ts",
+          "src/Filter.ts",
+          "src/FlatQuery.ts",
+          "src/Include.ts",
+          "src/Relationship.ts",
+          "src/Resource.ts",
+          "src/Sort.ts",
+          "src/internal/filter.ts",
+          "src/internal/includeGraph.ts",
+          "src/internal/media.ts",
+          "src/internal/operators.ts",
+          "src/internal/schemaExt.ts",
+        ],
+        rules: {
+          "effect/no-barrel-imports": "off",
+        },
+      },
       // Build/test configs, the docgen runner and the module-hook fixture are
       // evaluated by Vite / Vitest / Node in bare Node, before any Effect
       // runtime exists — there is no `Config` provider to read from and no
