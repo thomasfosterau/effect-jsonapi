@@ -3,8 +3,9 @@
  *
  * A `Resource.family`'s `type` is its name, never a wire type: a response
  * carries the family's members, each under its own type. So `fields: true`
- * declares `fields[TYPE]` for each member of every family the response can
- * carry (beside the family name, which stays declared), and the default
+ * replaces every family the response can carry by its members (recursively,
+ * for a family nested in another), declares `fields[TYPE]` for each, and
+ * declares no `fields[<family name>]` (owner decision on #350); the default
  * document of an endpoint declaring `fields` makes those members partial
  * (#322). The runtime half is `src/Query.fieldsets.test.ts` (whose
  * `expectFieldsets` also pins the runtime key set against the type's) and
@@ -60,13 +61,13 @@ type WireFieldsets<Q extends { readonly Encoded: object }> = Extract<
 // ---------------------------------------------------------------------------
 
 const held = Query.schema(Holder, { fields: true });
-assertType<Equals<FieldsetTypes<typeof held>, "holders" | "nodes" | "editors" | "reviewers">>(true);
+assertType<Equals<FieldsetTypes<typeof held>, "holders" | "editors" | "reviewers">>(true);
 assertType<
-  Equals<
-    WireFieldsets<typeof held>,
-    "fields[holders]" | "fields[nodes]" | "fields[editors]" | "fields[reviewers]"
-  >
+  Equals<WireFieldsets<typeof held>, "fields[holders]" | "fields[editors]" | "fields[reviewers]">
 >(true);
+// The family's name is no fieldset type.
+// @ts-expect-error -- `nodes` is the family's name, not a type a response carries
+assertType<FieldsOf<typeof held>>({ nodes: ["name"] });
 
 // Each member's fieldset is its own attributes, inherited ones included.
 assertType<FieldsOf<typeof held>>({ editors: ["name", "level"], reviewers: ["name", "score"] });
@@ -83,9 +84,58 @@ assertType<Equals<FieldsetTypes<typeof shallow>, "boards" | "holders">>(true);
 assertType<FieldsOf<typeof shallow>>({ editors: ["level"] });
 assertType<FieldsOf<typeof shallow>>({ holders: ["label"] });
 const deep = Query.schema(Board, { include: true, fields: true });
-assertType<
-  Equals<FieldsetTypes<typeof deep>, "boards" | "holders" | "nodes" | "editors" | "reviewers">
->(true);
+assertType<Equals<FieldsetTypes<typeof deep>, "boards" | "holders" | "editors" | "reviewers">>(
+  true,
+);
+
+// A name-only family: its members, never its name.
+const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
+const Video = Resource.make("videos", { attributes: { length: Schema.Number } });
+const Media = Resource.family("media", [Photo, Video]);
+const Gallery = Resource.make("galleries", {
+  attributes: { title: Schema.String },
+  relationships: { items: Relationship.many(() => Media) },
+});
+const gallery = Query.schema(Gallery, { fields: true });
+assertType<Equals<FieldsetTypes<typeof gallery>, "galleries" | "photos" | "videos">>(true);
+assertType<FieldsOf<typeof gallery>>({ photos: ["url"], videos: ["length"] });
+// @ts-expect-error -- `media` is the family's name
+assertType<FieldsOf<typeof gallery>>({ media: ["url"] });
+
+// A family as the primary resource: its members.
+const primary = Query.schema(AnyNode, { fields: true });
+assertType<Equals<FieldsetTypes<typeof primary>, "editors" | "reviewers">>(true);
+// (A name-only family as the primary resource is pinned at runtime only: its
+// synthesised `relationships` are typed as the open `Relationships` record, so
+// its direct targets, and with them its fieldset keys, widen to `string`.)
+
+// A base-anchored family's name is its base's real type. The base reached in
+// its own right is declared as itself, over its own attributes; reached only
+// as the family (`held`, above), it is not.
+const Pair = Resource.make("pairs", {
+  attributes: { label: Schema.String },
+  relationships: {
+    node: Relationship.one(() => AnyNode),
+    base: Relationship.one(() => Node),
+  },
+});
+const pair = Query.schema(Pair, { fields: true });
+assertType<Equals<FieldsetTypes<typeof pair>, "pairs" | "nodes" | "editors" | "reviewers">>(true);
+assertType<Equals<NonNullable<FieldsOf<typeof pair>["nodes"]>, ReadonlyArray<"name">>>(true);
+
+// A family nested in another: the inner family's members are declared, and
+// neither family's name is.
+const Other = Resource.make("others", { attributes: { rank: Schema.String } });
+const Outer = Resource.family("outer", [AnyNode, Other]);
+const Nest = Resource.make("nests", {
+  attributes: { label: Schema.String },
+  relationships: { o: Relationship.one(() => Outer) },
+});
+const nest = Query.schema(Nest, { fields: true });
+assertType<Equals<FieldsetTypes<typeof nest>, "nests" | "editors" | "reviewers" | "others">>(true);
+assertType<FieldsOf<typeof nest>>({ editors: ["level"], reviewers: ["score"], others: ["rank"] });
+// @ts-expect-error -- `outer` is a family's name
+assertType<FieldsOf<typeof nest>>({ outer: ["name"] });
 
 // ---------------------------------------------------------------------------
 // The members are partial under the default document of `fields: true`
@@ -118,6 +168,48 @@ assertType<
   Equals<
     AttributesOf<Extract<DataOf<typeof related>, { readonly type: "editors" }>>,
     { readonly name?: string; readonly level?: string }
+  >
+>(true);
+
+// The members of a nested family are partial too, the inner family's
+// included: the type and the runtime walk agree (#350).
+export const nested = Endpoint.related(Nest, "o", { fields: true });
+assertType<Equals<NonNullable<DataOf<typeof nested>>["type"], "editors" | "reviewers" | "others">>(
+  true,
+);
+assertType<
+  Equals<
+    AttributesOf<Extract<DataOf<typeof nested>, { readonly type: "editors" }>>,
+    { readonly name?: string; readonly level?: string }
+  >
+>(true);
+assertType<
+  Equals<
+    AttributesOf<Extract<DataOf<typeof nested>, { readonly type: "others" }>>,
+    { readonly rank?: string }
+  >
+>(true);
+export const nestedIncluded = Endpoint.get(Nest, { fields: true });
+assertType<
+  Equals<
+    AttributesOf<Extract<IncludedOf<typeof nestedIncluded>, { readonly type: "reviewers" }>>,
+    { readonly name?: string; readonly score?: string }
+  >
+>(true);
+
+// `fields: false` keeps a family target strict.
+export const relatedStrict = Endpoint.related(Holder, "node", { fields: false });
+assertType<
+  Equals<
+    AttributesOf<Extract<DataOf<typeof relatedStrict>, { readonly type: "editors" }>>,
+    { readonly name: string; readonly level: string }
+  >
+>(true);
+export const nestedStrict = Endpoint.related(Nest, "o", { fields: false });
+assertType<
+  Equals<
+    AttributesOf<Extract<DataOf<typeof nestedStrict>, { readonly type: "editors" }>>,
+    { readonly name: string; readonly level: string }
   >
 >(true);
 

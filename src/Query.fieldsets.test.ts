@@ -311,7 +311,9 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
 
 describe("Query.schema `fields: true` — a family's member types (#350)", () => {
   // `nodes` is a family name, never a wire type: what the wire carries for a
-  // relationship targeting the family are `editors` and `reviewers`.
+  // relationship targeting the family are `editors` and `reviewers`. So the
+  // family is replaced by its members, and `fields[nodes]` is not declared
+  // (owner decision on #350): the #261 middleware answers it with a 400.
   const Node = Resource.make("nodes", { attributes: { name: Schema.String } });
   const Editor = Resource.extend(Node, "editors", {
     inheritId: true,
@@ -335,16 +337,9 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     },
   });
 
-  it("declares each member type of a family-valued relationship's target", () => {
-    // The family name stays declared beside its members (the alias question
-    // is the owner's on #350).
+  it("declares each member type of a family-valued relationship's target, not the family", () => {
     const query = Query.schema(Holder, { fields: true });
-    expectFieldsets(query, [
-      "fields[editors]",
-      "fields[holders]",
-      "fields[nodes]",
-      "fields[reviewers]",
-    ]);
+    expectFieldsets(query, ["fields[editors]", "fields[holders]", "fields[reviewers]"]);
     // Each member's fieldset is its own attributes, inherited ones included.
     expect(
       Schema.decodeUnknownSync(query)({
@@ -361,7 +356,6 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
       "fields[boards]",
       "fields[editors]",
       "fields[holders]",
-      "fields[nodes]",
       "fields[reviewers]",
     ]);
   });
@@ -374,7 +368,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     expectFieldsets(Query.schema(Archive, { include: true, fields: true }), ["fields[archives]"]);
   });
 
-  it("declares the members of a name-only family", () => {
+  it("declares the members of a name-only family, not its name", () => {
     const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
     const Video = Resource.make("videos", { attributes: { url: Schema.String } });
     const Gallery = Resource.make("galleries", {
@@ -383,9 +377,69 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     });
     expectFieldsets(Query.schema(Gallery, { fields: true }), [
       "fields[galleries]",
-      "fields[media]",
       "fields[photos]",
       "fields[videos]",
+    ]);
+  });
+
+  it("declares the members of a family that is the primary resource", () => {
+    expectFieldsets(Query.schema(AnyNode, { fields: true }), [
+      "fields[editors]",
+      "fields[reviewers]",
+    ]);
+  });
+
+  // A base-anchored family's name is its base's real type. The family itself
+  // declares nothing, but the base reached in its own right is declared as
+  // itself, over its own attributes.
+  it("keeps a real type that shares a base-anchored family's name", () => {
+    const Pair = Resource.make("pairs", {
+      attributes: { label: Schema.String },
+      relationships: {
+        node: Relationship.one(() => AnyNode),
+        base: Relationship.one(() => Node),
+      },
+    });
+    const query = Query.schema(Pair, { fields: true });
+    expectFieldsets(query, [
+      "fields[editors]",
+      "fields[nodes]",
+      "fields[pairs]",
+      "fields[reviewers]",
+    ]);
+    expect(Schema.decodeUnknownSync(query)({ "fields[nodes]": "name" })).toEqual({
+      fields: { nodes: ["name"] },
+    });
+    // `level` is an `editors` attribute, not a `nodes` one.
+    expect(() => Schema.decodeUnknownSync(query)({ "fields[nodes]": "level" })).toThrow();
+  });
+
+  // A family can be a member of another family: the inner family's members
+  // are what the wire carries, so they are declared, and neither family is.
+  it("declares the members of a nested family, recursively", () => {
+    const Other = Resource.make("others", { attributes: { rank: Schema.String } });
+    const Outer = Resource.family("outer", [AnyNode, Other]);
+    const Nest = Resource.make("nests", {
+      attributes: { label: Schema.String },
+      relationships: { o: Relationship.one(() => Outer) },
+    });
+    const query = Query.schema(Nest, { fields: true });
+    expectFieldsets(query, [
+      "fields[editors]",
+      "fields[nests]",
+      "fields[others]",
+      "fields[reviewers]",
+    ]);
+    expect(
+      Schema.decodeUnknownSync(query)({ "fields[editors]": "level", "fields[others]": "rank" }),
+    ).toEqual({ fields: { editors: ["level"], others: ["rank"] } });
+    // The outer family as the primary resource. (A name-only family's
+    // synthesised relationships are typed as the open record, so its type
+    // declares any key: the runtime keys are compared directly.)
+    expect(declared(Query.schema(Outer, { fields: true }))).toEqual([
+      "fields[editors]",
+      "fields[others]",
+      "fields[reviewers]",
     ]);
   });
 });

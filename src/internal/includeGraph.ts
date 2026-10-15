@@ -73,26 +73,28 @@ export type IncludedResources<R extends Any, I> =
   | (IncludeEnabled<I> extends true ? ReachedBy<R, IncludePathsOf<R, I>> : never);
 
 /**
- * The member resource definitions of every `Resource.family` in `R`;
- * nothing for a plain resource definition. A family's `type` is its name,
- * never a wire type: the resource objects a response carries for it are its
- * members', so a sparse fieldset that is to reach them names a member type
- * (#350).
+ * `R` with every `Resource.family` in it replaced by its members, and a
+ * member that is itself a family by that family's members in turn. A
+ * family's `type` is its name, never a wire type: the resource objects a
+ * response carries for it are its members', so a sparse fieldset names a
+ * member type, and the family itself names none (#350). A plain resource
+ * definition stays as it is, including one whose `type` is a family's name
+ * (the base of a base-anchored family, reached in its own right).
  *
  * Distributes over unions of resource definitions.
  */
-export type FamilyMembers<R> = R extends {
+export type ExpandFamilies<R> = R extends {
   readonly members: ReadonlyArray<infer M extends Any>;
 }
-  ? M
-  : never;
+  ? ExpandFamilies<M>
+  : R;
 
 /**
- * The runtime mirror of `R | FamilyMembers<R>`: each resource, followed by
- * the members of each family among them, each once.
+ * The runtime {@link ExpandFamilies}: each resource, a family replaced by its
+ * members (recursively, for a family among them), each once.
  */
-export const withFamilyMembers = (resources: ReadonlyArray<Any>): ReadonlyArray<Any> =>
-  dedupe(resources.flatMap((r) => (isFamily(r) ? [r, ...r.members] : [r])));
+export const expandFamilies = (resources: ReadonlyArray<Any>): ReadonlyArray<Any> =>
+  dedupe(resources.flatMap((r) => (isFamily(r) ? expandFamilies(r.members) : [r])));
 
 /**
  * The include paths an `include` option legalises, at runtime. A declared
