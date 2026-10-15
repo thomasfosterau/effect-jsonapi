@@ -2732,6 +2732,64 @@ describe("Conformance: the write fixture", () => {
     expect(tags(transport.report)).toEqual(tags(direct.report));
   });
 
+  /**
+   * A client that rewrites every request it is handed from the run's
+   * `http://fixture.test` onto `http://127.0.0.1:4010` with
+   * `HttpClient.mapRequest` — a `baseUrl` mapped onto a local port — in front
+   * of `canned`. `sent` is every URL it sent on.
+   */
+  const rewritingOrigin = () => {
+    const sent: Array<string> = [];
+    return {
+      sent,
+      rewrite: (client: HttpClient.HttpClient) =>
+        HttpClient.mapRequest(client, (request) =>
+          HttpClientRequest.setUrl(
+            request,
+            request.url.replace("http://fixture.test", "http://127.0.0.1:4010"),
+          ),
+        ),
+      client: (canned: HttpClient.HttpClient) =>
+        HttpClient.make((request, url) => {
+          sent.push(url.href);
+          return canned.execute(request);
+        }),
+    };
+  };
+
+  it("reads a client that rewrites every request onto another origin as the server it sends to (#359)", async () => {
+    const direct = await run();
+    const rewriting = rewritingOrigin();
+    const { report } = await run(undefined, undefined, {
+      client: (canned) => rewriting.rewrite(rewriting.client(canned)),
+    });
+    expect(rewriting.sent.length).toBeGreaterThan(0);
+    expect(rewriting.sent.every((url) => url.startsWith("http://127.0.0.1:4010/"))).toBe(true);
+    expect(outcomeFor(report, "spec/target/reachable")._tag).toBe("Passed");
+    expect(failed(report)).toEqual([]);
+    expect(verdicts(report)).toEqual(verdicts(direct.report));
+  });
+
+  it("still decides nothing on a client that rewrites every request onto another origin and follows each redirect off it itself", async () => {
+    const rewriting = rewritingOrigin();
+    const { report } = await run(undefined, undefined, {
+      client: (canned) => rewriting.rewrite(followingOffsite(() => true)(canned)),
+    });
+    expect(outcomeFor(report, "spec/target/reachable")).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: expect.stringContaining(
+            "hand the kit a client that does not follow redirects itself",
+          ),
+          observed: `/articles/1: a redirect the transport followed itself, ending at https://elsewhere.test/articles/1 with a 200, whose answer the kit does not read: https://elsewhere.test is another origin than the one the request was sent to, http://127.0.0.1:4010, and the transport has already tried the request there`,
+        },
+      ],
+    });
+    expect(failed(report)).toEqual(["spec/target/reachable"]);
+    expect(Conformance.summarise(report).passed).toBe(0);
+  });
+
   it("names a redirect the transport followed off the origin in the rule it leaves undecided", async () => {
     const unknown = await run(undefined, undefined, {
       client: followingOffsite((_, url) => url.searchParams.has("unknown")),
