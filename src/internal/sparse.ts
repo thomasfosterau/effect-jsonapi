@@ -17,9 +17,10 @@
  * carries are its members, each under its own type. So it becomes the union of
  * its members (a member that is itself a family in turn), and each member is
  * made partial when its type is one `types` names, as any other resource is,
- * and kept strict otherwise. The family's own name is never a key here:
- * `Query.FieldsetResources` replaces a family by its members, recursively,
- * and declares no `fields[<family name>]` (#350).
+ * and kept strict otherwise. A family's name is never looked up in `types`:
+ * `sparseMember` replaces a family by its members unconditionally, as
+ * `Query.FieldsetResources` does, recursively, declaring no
+ * `fields[<family name>]` (#350).
  *
  * @internal
  */

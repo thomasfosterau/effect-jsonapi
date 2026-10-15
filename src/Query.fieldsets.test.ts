@@ -435,7 +435,8 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     ).toEqual({ fields: { editors: ["level"], others: ["rank"] } });
     // The outer family as the primary resource. (A name-only family's
     // synthesised relationships are typed as the open record, so its type
-    // declares any key: the runtime keys are compared directly.)
+    // declares any key: the runtime keys are compared directly. #363 tracks
+    // that widening; fixing it should tighten this to an exact type pin.)
     expect(declared(Query.schema(Outer, { fields: true }))).toEqual([
       "fields[editors]",
       "fields[others]",

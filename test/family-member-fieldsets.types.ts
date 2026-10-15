@@ -107,7 +107,8 @@ const primary = Query.schema(AnyNode, { fields: true });
 assertType<Equals<FieldsetTypes<typeof primary>, "editors" | "reviewers">>(true);
 // (A name-only family as the primary resource is pinned at runtime only: its
 // synthesised `relationships` are typed as the open `Relationships` record, so
-// its direct targets, and with them its fieldset keys, widen to `string`.)
+// its direct targets, and with them its fieldset keys, widen to `string`.
+// #363 tracks that widening; fixing it should add the exact pin here.)
 
 // A base-anchored family's name is its base's real type. The base reached in
 // its own right is declared as itself, over its own attributes; reached only
