@@ -2171,26 +2171,56 @@ const deleteResponse: RuleImpl = {
               onSuccess: (id) =>
                 idempotencyHeaders(target.endpoint).pipe(
                   Effect.flatMap((key) =>
-                    ctx.request({
-                      method: target.endpoint.method,
-                      url: pathFor(target.endpoint, id),
-                      headers: { ...jsonApiAccept, ...key },
-                    }),
+                    ctx
+                      .request({
+                        method: target.endpoint.method,
+                        url: pathFor(target.endpoint, id),
+                        headers: { ...jsonApiAccept, ...key },
+                      })
+                      .pipe(
+                        // A completed deletion is the disposal; anything else still owes a cleanup.
+                        Effect.tap((observation) =>
+                          Effect.sync(() => {
+                            if (observation.status === 200 || observation.status === 204)
+                              created.entry.disposal = "deleted";
+                          }),
+                        ),
+                        Effect.map((observation) =>
+                          Option.getOrElse(unkeyedRefusal(target, key, observation), () =>
+                            decided(2, judgeDelete(observation)),
+                          ),
+                        ),
+                      ),
                   ),
-                  // A completed deletion is the disposal; anything else still owes a cleanup.
-                  Effect.tap((observation) =>
-                    Effect.sync(() => {
-                      if (observation.status === 200 || observation.status === 204)
-                        created.entry.disposal = "deleted";
-                    }),
-                  ),
-                  Effect.map((observation) => decided(2, judgeDelete(observation))),
                 ),
             }),
           ),
         ),
     ),
 };
+
+/**
+ * A 4xx to a delete the kit sent no key with, from an endpoint that declares
+ * `Idempotency-Key`, decides nothing: the kit keys only a write to an endpoint
+ * whose headers schema plainly requires the header, so one that requires it
+ * some other way (through a union, say) reads as optional, and its 4xx may be
+ * the refusal of a write without a key rather than an answer to the delete.
+ */
+const unkeyedRefusal = (
+  target: Target,
+  key: Readonly<Record<string, string>>,
+  observation: Observation,
+): Option.Option<Verdict> =>
+  observation.status >= 400 &&
+  observation.status < 500 &&
+  target.endpoint.idempotencyKey !== "absent" &&
+  Rec.isEmptyReadonlyRecord(key)
+    ? Option.some(
+        undecided(
+          `deleting the "${target.key}" resource the kit had just created answered ${observation.status} from ${target.endpoint.path}, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key and the refusal may be for the missing key (${describe(observation)})`,
+        ),
+      )
+    : Option.none();
 
 /** The top-level members a 200 DELETE may carry: `meta`, and the members every document may. */
 const metaOnly = (member: string): boolean =>
@@ -2229,6 +2259,9 @@ const judgeDelete = (observation: Observation): ReadonlyArray<Finding> => {
 // Atomic operations extension
 // ---------------------------------------------------------------------------
 
+/** The request headers every atomic operations request sends, before any `Idempotency-Key`. */
+const atomicHeaders = { accept: atomicMediaType, "content-type": atomicMediaType };
+
 const operationsEndpoint = (ctx: Context) =>
   ctx.endpoints.find((endpoint) => endpoint.role === "operations");
 
@@ -2244,10 +2277,13 @@ const atomicMalformedRejected: RuleImpl = {
       const endpoint = operationsEndpoint(ctx);
       if (endpoint === undefined)
         return skip(atomicMalformedRejected.rule, "no atomic operations endpoint");
+      // Keyed when the endpoint requires a key, so its 4xx is about the
+      // malformed document, not the refusal of a write without one.
+      const key = yield* idempotencyHeaders(endpoint);
       const observation = yield* ctx.request({
         method: endpoint.method,
         url: endpoint.path,
-        headers: { accept: atomicMediaType, "content-type": atomicMediaType },
+        headers: { ...atomicHeaders, ...key },
         body: { "atomic:operations": "not an array" },
       });
       const findings =
@@ -2279,12 +2315,16 @@ const atomicResponseExt: RuleImpl = {
     if (endpoint === undefined)
       return Effect.succeed(skip(atomicResponseExt.rule, "no atomic operations endpoint"));
     const send = (payload: Payload) =>
-      ctx.request({
-        method: endpoint.method,
-        url: endpoint.path,
-        headers: { accept: atomicMediaType, "content-type": atomicMediaType },
-        body: { "atomic:operations": [{ op: "add", data: payload }] },
-      });
+      idempotencyHeaders(endpoint).pipe(
+        Effect.flatMap((key) =>
+          ctx.request({
+            method: endpoint.method,
+            url: endpoint.path,
+            headers: { ...atomicHeaders, ...key },
+            body: { "atomic:operations": [{ op: "add", data: payload }] },
+          }),
+        ),
+      );
     return overTargets(
       ctx,
       atomicResponseExt.rule,

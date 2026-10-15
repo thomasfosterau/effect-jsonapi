@@ -119,14 +119,17 @@ describe("blog: JSON:API conformance", () => {
       "spec/links/top-level-self-dereferences",
       "spec/links/top-level-self-matches-document",
     ];
-    expect(
-      ids.map((id) => `${id}: ${report.outcomes.find((outcome) => outcome.rule.id === id)?._tag}`),
-    ).toEqual([
+    const outcomeOf = (id: string) => report.outcomes.find((outcome) => outcome.rule.id === id);
+    expect(ids.map((id) => `${id}: ${outcomeOf(id)?._tag}`)).toEqual([
       "spec/links/relationship-self-dereferences: Passed",
       "spec/links/relationship-self-matches-linkage: Skipped",
       "spec/links/top-level-self-dereferences: Passed",
       "spec/links/top-level-self-matches-document: Passed",
     ]);
+    // Skipped for want of linkage, not for want of a link to follow.
+    expect(outcomeOf("spec/links/relationship-self-matches-linkage")).toMatchObject({
+      reason: expect.stringContaining("carries both a `self` link and resource linkage"),
+    });
   });
 
   it("ran the write rules against targets it created, and left nothing behind", () => {

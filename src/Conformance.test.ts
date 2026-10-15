@@ -2508,6 +2508,20 @@ describe("Conformance: the filter grammar profile", () => {
     expect(failed(report)).toContain("profile/filter/advertises-profile-uri");
   });
 
+  it("finds the profile in a space-separated `profile` list", async () => {
+    const report = await verifyGrammar(
+      (request) => ({
+        ...grammarServe(request),
+        contentType: `${MEDIA_TYPE};profile="${Idempotency.PROFILE_URI} ${Filter.PROFILE_URI}"`,
+      }),
+      { only: ["profile/filter/advertises-profile-uri"] },
+    );
+    expect(outcomeFor(report, "profile/filter/advertises-profile-uri")).toMatchObject({
+      _tag: "Passed",
+      probes: 1,
+    });
+  });
+
   it("detects an operator outside the closed core being accepted", async () => {
     const report = await verifyGrammar((request) =>
       request.path.includes("definitelyNotAnOperator")
@@ -6574,9 +6588,22 @@ describe("Conformance: `self` and `related` links dereference", () => {
       await run(at("/articles/2/relationships/tags", notFound)),
       RELATIONSHIP_SELF,
     );
+    // The MUST holds the answer to being resource linkage, not to naming the
+    // relationship's own identifiers, and says so whether the relationship
+    // carries linkage (`tags`) or only links (`comments`).
     expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
-      "a 2xx response with the relationship's linkage as primary data",
+      "a 2xx response with resource linkage as primary data",
     );
+    const linksOnly = outcomeFor(
+      await run(at("/articles/2/relationships/comments", notFound)),
+      RELATIONSHIP_SELF,
+    );
+    expect(Predicate.isTagged(linksOnly, "Failed") && linksOnly.findings).toEqual([
+      expect.objectContaining({
+        detail: expect.stringContaining("articles:2's `comments`"),
+        expected: "a 2xx response with resource linkage as primary data",
+      }),
+    ]);
     // The SHOULD leaves it to the MUST rather than reporting it twice.
     expect(
       outcomeFor(await run(at("/articles/2/relationships/tags", notFound)), RELATIONSHIP_MATCHES),
@@ -6649,14 +6676,34 @@ describe("Conformance: `self` and `related` links dereference", () => {
     ]);
   });
 
-  it("holds a relationship `self` to identifiers with a `type` and an `id` or `lid`, and `meta` at most", async () => {
+  it("holds a relationship `self` to identifiers with a `type` and an `id`, and `lid` and `meta` at most", async () => {
     expect(
       await relationshipFailures(
         at("/articles/2/relationships/tags", { body: { data: [{ type: "tags" }] } }),
       ),
     ).toEqual([
-      "the `self` link of articles:2's `tags` (in /articles, at /data/1) answers no resource linkage as primary data | /data/0 has neither a string `id` nor a string `lid`",
+      "the `self` link of articles:2's `tags` (in /articles, at /data/1) answers no resource linkage as primary data | /data/0 has no string `id`",
     ]);
+    // A `lid` stands for a resource not yet assigned an `id`; what a
+    // relationship's `self` answers is stored, so it names each by `id`. The
+    // SHOULD leaves the link to the MUST.
+    const lidOnly = await run(
+      at("/articles/2/relationships/tags", {
+        body: {
+          data: [
+            { type: "tags", id: "1" },
+            { type: "tags", lid: "local-2" },
+          ],
+        },
+      }),
+    );
+    expect(findingsOf(outcomeFor(lidOnly, RELATIONSHIP_SELF))).toEqual([
+      "the `self` link of articles:2's `tags` (in /articles, at /data/1) answers no resource linkage as primary data | /data/1 has a `lid` but no string `id`",
+    ]);
+    expect(outcomeFor(lidOnly, RELATIONSHIP_MATCHES)).toMatchObject({
+      _tag: "Passed",
+      note: "1 link not decided: the `self` link of articles:2's `tags` (in /articles, at /data/1) answers no resource linkage as primary data, which `spec/links/relationship-self-dereferences` reports — there is no answer to compare with its linkage",
+    });
     expect(
       await relationshipFailures(
         at("/articles/2/relationships/tags", { body: { data: [{ id: "1" }, "x"] } }),
@@ -6671,14 +6718,16 @@ describe("Conformance: `self` and `related` links dereference", () => {
     ).toEqual([
       "the `self` link of articles:1's `author` (in /articles/1, at /data) answers no resource linkage as primary data | `data: people:9`",
     ]);
-    // `meta` is an identifier's own member, and a `lid` names one as well as
-    // an `id` does — though the SHOULD, comparing by `id`, cannot decide it.
+    // `meta` is an identifier's own member, and a `lid` may stand beside the
+    // `id`. An @-member, which §Member Names has a processor ignore, and an
+    // extension member (`ns:member`) are not the base specification's to
+    // judge, so neither is a member that does not belong.
     const report = await run(
       at("/articles/2/relationships/tags", {
         body: {
           data: [
-            { type: "tags", id: "1", meta: { primary: true } },
-            { type: "tags", lid: "local-2" },
+            { type: "tags", id: "1", meta: { primary: true }, "@foo": "bar" },
+            { type: "tags", id: "2", lid: "local-2", "version:id": "3" },
           ],
         },
       }),
@@ -6689,7 +6738,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     });
     expect(outcomeFor(report, RELATIONSHIP_MATCHES)).toMatchObject({
       _tag: "Passed",
-      note: "1 link not decided: the `self` link of articles:2's `tags` (in /articles, at /data/1) answers 1 item the kit cannot identify (a string `type` and `id`)",
+      note: undefined,
     });
   });
 
@@ -7475,7 +7524,8 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
 
     it("judges only the update when the create endpoint does not declare the header", async () => {
       const report = await runUpdates(false, updatableServer("neither", "document", []));
-      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 1 });
+      // Both requests count, as when the create is judged too.
+      expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 2 });
     });
 
     it("does not decide on an update the server did not accept", async () => {
@@ -7604,6 +7654,129 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
         "Passed",
       ]);
       expect(seen.every((line) => line.endsWith("(no key)"))).toBe(true);
+    });
+
+    it("leave a delete refused without a key undecided where the endpoint declares the header", async () => {
+      // `idempotency: true` reads as optional, as a key required through a
+      // union does, so the kit sends none — and a 4xx may be that refusal.
+      const seen: Array<string> = [];
+      const serve = keyedServer(false, seen);
+      const report = await verifyOver(keyedApi(true))(
+        (request) =>
+          request.method === "DELETE" && !request.headers.has("idempotency-key")
+            ? { status: 400, body: { errors: [{ status: "400" }] } }
+            : serve(request),
+        { ...options, only: ["spec/status/delete-response"] },
+      );
+      expect(outcomeFor(report, "spec/status/delete-response")).toEqual(
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining(
+            "which declares `Idempotency-Key` without plainly requiring it, so the kit sent no key",
+          ),
+        }),
+      );
+    });
+
+    it("still fail a refused delete the missing key cannot explain", async () => {
+      // A 4xx from an endpoint declaring no key, a 4xx to a delete that did
+      // carry the key its endpoint requires, and a 5xx, which no missing key is.
+      const cases = [
+        { idempotency: false, status: 400 },
+        { idempotency: "required", status: 400 },
+        { idempotency: true, status: 500 },
+      ] as const;
+      const outcomes = await Promise.all(
+        cases.map(async ({ idempotency, status }) => {
+          const serve = keyedServer(idempotency === "required", []);
+          const report = await verifyOver(keyedApi(idempotency))(
+            (request) =>
+              request.method === "DELETE"
+                ? { status, body: { errors: [{ status: `${status}` }] } }
+                : serve(request),
+            { ...options, only: ["spec/status/delete-response"] },
+          );
+          return outcomeFor(report, "spec/status/delete-response")._tag;
+        }),
+      );
+      expect(outcomes).toEqual(["Failed", "Failed", "Failed"]);
+    });
+
+    describe("through the atomic operations endpoint", () => {
+      const atomicApi = HttpApi.make("atomic")
+        .add(Group.make(Article, Endpoint.get(Article)))
+        .add(Group.make("operations", Endpoint.operations([Article], { idempotency: "required" })));
+
+      const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
+
+      const decodeOperations = Schema.decodeUnknownOption(
+        Schema.Struct({ "atomic:operations": Schema.Array(Schema.Unknown) }),
+      );
+
+      /**
+       * An operations endpoint that refuses a request without a key, as an
+       * `idempotency: "required"` one does, and otherwise applies every `add`
+       * — and, unless `rejects`, answers a document that is no operations
+       * document 200 too. `seen` records whether each request carried a key.
+       */
+      const atomicServer =
+        (seen: Array<string>, rejects: boolean) =>
+        (request: CannedRequest): Canned => {
+          if (request.method !== "POST") return conformantServe(request);
+          const key = request.headers.get("idempotency-key");
+          seen.push(key === null ? "(no key)" : "key");
+          if (key === null) return { status: 400, body: { errors: [{ status: "400" }] } };
+          return Option.match(decodeOperations(request.body), {
+            onNone: (): Canned =>
+              rejects
+                ? { status: 400, body: { errors: [{ status: "400" }] } }
+                : { contentType: atomicType, body: { "atomic:results": [] } },
+            onSome: (document): Canned => ({
+              contentType: atomicType,
+              body: {
+                "atomic:results": document["atomic:operations"].map((_, index) => ({
+                  data: { type: "articles", id: `${100 + index}`, attributes: {} },
+                })),
+              },
+            }),
+          });
+        };
+
+      const atomicOptions = (only: string): Conformance.Options => ({
+        only: [only],
+        mutating: true,
+        writes: { articles: fixture },
+      });
+
+      it("key the `add` sent to an endpoint that requires one", async () => {
+        const seen: Array<string> = [];
+        const report = await verifyOver(atomicApi)(
+          atomicServer(seen, true),
+          atomicOptions("spec/atomic/response-ext-parameter"),
+        );
+        expect(outcomeFor(report, "spec/atomic/response-ext-parameter")).toMatchObject({
+          _tag: "Passed",
+          probes: 1,
+        });
+        expect(seen).toEqual(["key"]);
+      });
+
+      it("key the malformed document, so a 4xx is never the missing key's", async () => {
+        const seen: Array<string> = [];
+        const report = await verifyOver(atomicApi)(
+          atomicServer(seen, false),
+          atomicOptions("spec/atomic/malformed-operations-rejected"),
+        );
+        expect(outcomeFor(report, "spec/atomic/malformed-operations-rejected")._tag).toBe("Failed");
+        expect(seen).toEqual(["key"]);
+        const rejected = await verifyOver(atomicApi)(
+          atomicServer([], true),
+          atomicOptions("spec/atomic/malformed-operations-rejected"),
+        );
+        expect(outcomeFor(rejected, "spec/atomic/malformed-operations-rejected")._tag).toBe(
+          "Passed",
+        );
+      });
     });
   });
 

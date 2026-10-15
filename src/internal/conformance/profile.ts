@@ -406,20 +406,26 @@ const mediaTypeProfiles = (observation: Observation): ReadonlyArray<string> =>
 const declaresKey = (endpoint: Discovered): boolean => endpoint.idempotencyKey !== "absent";
 
 /**
- * What a write's 2xx answer says of the profile. Either place naming it
- * passes — a media type can, even on an answer with no body — and only then is
- * an empty body a reason not to decide: with no document there is no
- * `jsonapi` member that could have named it.
+ * What a write's 2xx answer says of the profile, over the `requests` it took
+ * to get it. Either place naming it passes — a media type can, even on an
+ * answer with no body — and only then is an empty body a reason not to
+ * decide: with no document there is no `jsonapi` member that could have named
+ * it.
  */
-const advertisedOn = (rule: Rule, write: string, observation: Observation): Verdict => {
+const advertisedOn = (
+  rule: Rule,
+  write: string,
+  observation: Observation,
+  requests = 1,
+): Verdict => {
   const named = [...documentProfiles(observation), ...mediaTypeProfiles(observation)];
-  if (named.includes(IDEMPOTENCY_PROFILE_URI)) return decided(1, []);
+  if (named.includes(IDEMPOTENCY_PROFILE_URI)) return decided(requests, []);
   if (observation.text === "")
     return undecided(
       `${write} answered ${observation.status} with no document, and its media type does not name the profile, so no \`jsonapi\` member could`,
     );
   const jsonapi = isRecord(observation.body) ? observation.body["jsonapi"] : undefined;
-  return decided(1, [
+  return decided(requests, [
     finding(rule, {
       detail: `the ${observation.status} ${write}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
       expected: `\`jsonapi.profile\` or the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
@@ -436,9 +442,11 @@ const creating = (target: WriteTarget): string =>
 
 /**
  * The endpoints the rule probes: each create and update endpoint declaring
- * `Idempotency-Key`. A type with both is probed once — the update's own create
- * is judged along with it — so the rule makes at most one create and one
- * update per type.
+ * `Idempotency-Key`. A create endpoint whose type has such an update endpoint
+ * is not probed on its own — the update's own create is judged along with it.
+ * Each update endpoint is probed, so a type with several (a `PATCH` and a
+ * `PUT`, say) gets one create and one update through each, as the spec tier's
+ * update rule gives it.
  */
 const idempotentTargets = (ctx: Context): Targets => {
   const creates = targets(ctx, "create", declaresKey);
@@ -469,14 +477,17 @@ const probeCreate = (ctx: Context, rule: Rule, target: WriteTarget) =>
 /**
  * One create and one update of what it made, through an update endpoint
  * declaring the header: the update's answer is judged, and the create's too
- * when its endpoint declares the header.
+ * when its endpoint declares the header. Either way the probe counts both
+ * requests, as the spec tier's update rule does: the update's verdict counts
+ * the create as well when the create is not judged on its own.
  */
 const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
   withCreated(ctx, rule, target, viaCreateEndpoint(ctx, target), (created) =>
     Result.match(accepted(target, created), {
       onFailure: (reason) => Effect.succeed([undecided(reason)]),
       onSuccess: (made) => {
-        const onCreate = declaresKey(target.createEndpoint)
+        const judgesCreate = declaresKey(target.createEndpoint);
+        const onCreate = judgesCreate
           ? [advertisedOn(rule, creating(target), made.observation)]
           : [];
         return Result.match(Result.all({ id: ownId(made), patch: buildUpdate(target) }), {
@@ -498,6 +509,7 @@ const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
                       rule,
                       `updating ${made.payload.type}:${id} through ${target.endpoint.path}`,
                       observation,
+                      judgesCreate ? 1 : 2,
                     )
                   : undecided(
                       `the server did not accept writes["${target.key}"].update on the resource the kit had just created (${describe(observation)})`,
@@ -515,7 +527,8 @@ const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
  * shows it — the kit cannot read an endpoint's answer to a write without
  * making one — so the rule runs, on the `writes` fixture under
  * `mutating: true`, one create per create endpoint declaring the header and
- * one create plus one update per update endpoint declaring it. Delete
+ * one create plus one update per update endpoint declaring it (a create
+ * endpoint is not probed again for a type an update endpoint covers). Delete
  * endpoints (usually a 204, with no document) and the atomic endpoint are not
  * probed. A key is sent only to an endpoint that requires one.
  */

@@ -80,6 +80,23 @@ describe("discover (the Idempotency-Key header)", () => {
         // another case declares the same header.
         post("mixed", Schema.Struct({ "Idempotency-Key": Schema.String })),
         post("upper", Schema.Struct({ "IDEMPOTENCY-KEY": Schema.optionalKey(Schema.String) })),
+        // Beside another header, only the key's own property decides: another
+        // header being required does not make the key so, nor another being
+        // optional make a required key optional.
+        post(
+          "beside-required",
+          Schema.Struct({
+            "x-trace": Schema.String,
+            "idempotency-key": Schema.optionalKey(Schema.String),
+          }),
+        ),
+        post(
+          "beside-optional",
+          Schema.Struct({
+            "x-trace": Schema.optionalKey(Schema.String),
+            "idempotency-key": Schema.String,
+          }),
+        ),
       ),
     ),
   );
@@ -92,6 +109,8 @@ describe("discover (the Idempotency-Key header)", () => {
       "required: required",
       "mixed: required",
       "upper: optional",
+      "beside-required: optional",
+      "beside-optional: required",
     ]);
   });
 });

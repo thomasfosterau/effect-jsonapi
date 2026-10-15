@@ -473,20 +473,33 @@ const isResourceData = (observation: Observation): boolean => {
 const IDENTIFIER_MEMBERS: ReadonlyArray<string> = ["type", "id", "lid", "meta"];
 
 /**
- * Why a JSON value is no resource identifier object — an object with a string
- * `type`, a string `id` or `lid`, and nothing but those and `meta` — or none
- * when it is one. A full resource object, with `attributes`, `relationships`
- * or `links`, is not.
+ * Whether a member name is one an identifier may carry whatever the base
+ * specification defines: an @-member, which §Member Names has a processor
+ * ignore, or an extension member (`ns:member`), which an applied extension
+ * defines.
+ */
+const ignoredMember = (key: string): boolean => key.startsWith("@") || key.includes(":");
+
+/**
+ * Why a JSON value is no resource identifier object a server answers with —
+ * an object with a string `type` and a string `id`, and nothing but those,
+ * `lid` and `meta` (and @-members and extension members, which are not the
+ * base specification's to judge) — or none when it is one. A full resource
+ * object, with `attributes`, `relationships` or `links`, is not; nor is one
+ * naming its resource by `lid` alone, since a `lid` stands for a resource not
+ * yet assigned an `id`, and what a relationship's `self` answers is stored.
  */
 // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
 const notAnIdentifier = (value: unknown): Option.Option<string> => {
   if (!isRecord(value)) return Option.some(`is ${quote(value)}, not an object`);
   if (!Predicate.isString(value["type"])) return Option.some("has no string `type`");
-  if (!Predicate.isString(value["id"]) && !Predicate.isString(value["lid"])) {
-    return Option.some("has neither a string `id` nor a string `lid`");
+  if (!Predicate.isString(value["id"])) {
+    return Option.some(
+      Predicate.isString(value["lid"]) ? "has a `lid` but no string `id`" : "has no string `id`",
+    );
   }
   return Arr.match(
-    Rec.keys(value).filter((key) => !IDENTIFIER_MEMBERS.includes(key)),
+    Rec.keys(value).filter((key) => !IDENTIFIER_MEMBERS.includes(key) && !ignoredMember(key)),
     {
       onEmpty: () => Option.none(),
       onNonEmpty: (extra) =>
@@ -723,7 +736,7 @@ const ANSWERS: Readonly<
   },
   relationship: {
     what: "resource linkage",
-    named: "the relationship's linkage",
+    named: "resource linkage",
     expected: "`null`, a resource identifier or an array of them as primary data",
   },
   document: {
@@ -1282,7 +1295,7 @@ export const relationshipSelfDereferences: RuleImpl = dereferencing(
       reference: `${SPEC}/#fetching-relationships`,
       level: "MUST",
       requirement:
-        "A server MUST support fetching relationship data for every relationship URL provided as a `self` link in a relationship's `links` object, and the primary data in the response MUST match the appropriate value for resource linkage: `null` or a resource identifier object for a to-one relationship, an array of them for a to-many one — identifier objects only (`type`, `id` or `lid`, and `meta`), never full resource objects.",
+        "A server MUST support fetching relationship data for every relationship URL provided as a `self` link in a relationship's `links` object, and the primary data in the response MUST match the appropriate value for resource linkage: `null` or a resource identifier object for a to-one relationship, an array of them for a to-many one — identifier objects only (a string `type` and `id`, and at most `lid` and `meta` beside them), never full resource objects.",
     },
     defersTo: Option.none(),
   },
