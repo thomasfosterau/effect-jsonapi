@@ -1108,6 +1108,22 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         }),
       ),
     )
+    // GET /orders/:id/relationships/lineItems — the line-item feed's identifiers
+    .handle("lineItemsRelationship", ({ params, query }) =>
+      loadOrder(params.id).pipe(
+        Effect.map((order) => {
+          const all = itemsFor(order.id).map((item) => OrderItem.ref(item.id));
+          const { limit, offset, page, total } = paginate(all, query.page);
+          const path = Handlers.relationshipLink("orders", order.id, "lineItems");
+          return Handlers.linkage(page, {
+            related: Handlers.relatedLink("orders", order.id, "lineItems"),
+            meta: { total },
+            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
+            jsonapi: Document.v1_1,
+          });
+        }),
+      ),
+    )
     // GET /orders/:id/relationships/shipper — the shipper identifier (or null)
     .handle("shipperRelationship", ({ params }) =>
       loadOrder(params.id).pipe(

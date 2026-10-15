@@ -1,6 +1,7 @@
 /**
- * The link dereferencing rules: a resource object's `self` link, and a
- * relationship's `related` link, each followed and held to what it claims.
+ * The link dereferencing rules: a resource object's `self` link, a
+ * relationship's `related` and `self` links, and a document's top-level
+ * `self` link, each followed and held to what it claims.
  *
  * Nothing in the type system ties a link *string* to the route that serves
  * it, so a link is the part of a JSON:API server most likely to drift quietly.
@@ -8,7 +9,11 @@
  * each: a resource's `self` must answer that resource as primary data; a
  * relationship's `related` must answer resource data at all (a MUST) and
  * should answer the resources its linkage names (graded SHOULD, since the
- * spec says so only in prose without a keyword).
+ * spec says so only in prose without a keyword); a relationship's `self` must
+ * answer linkage matching the relationship object's own (a MUST); and a
+ * document's top-level `self` must answer a document of the same kind — the
+ * same resource, `null`, or a collection, which is compared resource for
+ * resource only when neither document is a page.
  *
  * The crawl is the pagination walk's (`./crawl.ts`): a link resolves against
  * the document that carries it, one that leads to another origin is never
@@ -86,6 +91,13 @@ const FINDING_LIMIT = 10;
  */
 const SOURCE_ROLES: ReadonlyArray<Role> = ["collection", "resource", "related"];
 
+/**
+ * The roles whose answers a top-level `self` link is collected from: every
+ * read endpoint, a relationship endpoint included — its document carries a
+ * top-level `self` (the relationship link) though its identifiers carry none.
+ */
+const DOCUMENT_ROLES: ReadonlyArray<Role> = [...SOURCE_ROLES, "relationship"];
+
 /** The id of the rule that holds a `related` link to answering at all. */
 const RELATED_DEREFERENCES = "spec/links/related-dereferences";
 
@@ -125,8 +137,22 @@ type Claim =
       /** `true` when the relationship carries a `next` link: its linkage is one page. */
       readonly paged: boolean;
     }
+  | {
+      /** A top-level `self` link's: the collection the document carrying it lists. */
+      readonly _tag: "Collection";
+      readonly members: ReadonlyArray<Member>;
+      /** `true` when the document carries a `next` or `prev` link: it is one page. */
+      readonly paged: boolean;
+    }
   | { readonly _tag: "Unidentified"; readonly why: string };
 const Claim = Data.taggedEnum<Claim>();
+
+/**
+ * What carries a found link, which decides how findings word what it answers:
+ * a resource object's `self`, a relationship's `related` or `self`, or a
+ * document's top-level `self`.
+ */
+type Basis = "resource" | "related" | "relationship" | "document";
 
 /** A link the kit found: which, where, and what following it must answer. */
 interface Found {
@@ -136,6 +162,7 @@ interface Found {
   readonly of: string;
   /** Which member of the links object: `self` or `related`. */
   readonly name: "self" | "related";
+  readonly basis: Basis;
   readonly link: Link;
   readonly from: Target;
   readonly claim: Claim;
@@ -203,6 +230,7 @@ const selfLinks = (from: Target, body: unknown): ReadonlyArray<Found> =>
     where: `the \`self\` link of ${label} (in ${from.url}, at ${pointer})`,
     of: label,
     name: "self" as const,
+    basis: "resource" as const,
     link: linkIn(resource["links"], "self"),
     from,
     claim: Option.match(memberOf(resource), {
@@ -215,33 +243,119 @@ const selfLinks = (from: Target, body: unknown): ReadonlyArray<Found> =>
   }));
 
 /**
- * Every relationship's `related` link in a document, with what it claims.
- * `claim` sees only relationships that carry linkage (a `data` member) when
- * `linked` is set; otherwise every relationship, each claiming resource data.
+ * Every relationship's `name` link in a document, with what `claim` says it
+ * claims — or none, for a relationship whose link the rule does not follow.
  */
-const relatedLinks =
-  (linked: boolean) =>
+const relationshipLinks =
+  (name: "self" | "related", claim: (relationship: JsonObject) => Option.Option<Claim>) =>
   // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
   (from: Target, body: unknown): ReadonlyArray<Found> =>
     Arr.flatMap(carriersIn(body), ({ pointer, resource, label }) => {
       const relationships = resource["relationships"];
       if (!isRecord(relationships)) return [];
-      return Arr.filterMap(Rec.keys(relationships), (name) => {
-        const relationship = relationships[name];
-        if (!isRecord(relationship) || (linked && !("data" in relationship))) {
-          return Result.fail(undefined);
-        }
-        const of = `${label}'s \`${quote(name)}\``;
-        return Result.succeed({
-          where: `the \`related\` link of ${of} (in ${from.url}, at ${pointer})`,
-          of,
-          name: "related" as const,
-          link: linkIn(relationship["links"], "related"),
-          from,
-          claim: linked ? claimOf(relationship) : Claim.ResourceData(),
-        });
+      return Arr.filterMap(Rec.keys(relationships), (key) => {
+        const relationship = relationships[key];
+        if (!isRecord(relationship)) return Result.fail(undefined);
+        const of = `${label}'s \`${quote(key)}\``;
+        return Result.map(
+          Result.fromOption(claim(relationship), () => undefined),
+          (claimed): Found => ({
+            where: `the \`${name}\` link of ${of} (in ${from.url}, at ${pointer})`,
+            of,
+            name,
+            basis: name === "self" ? "relationship" : "related",
+            link: linkIn(relationship["links"], name),
+            from,
+            claim: claimed,
+          }),
+        );
       });
     });
+
+/**
+ * Every relationship's `related` link in a document. With `linked`, only the
+ * relationships that carry linkage (a `data` member), each claiming what it
+ * names; otherwise every relationship, each claiming resource data.
+ */
+const relatedLinks = (linked: boolean) =>
+  relationshipLinks("related", (relationship) =>
+    linked
+      ? "data" in relationship
+        ? Option.some(claimOf(relationship))
+        : Option.none()
+      : Option.some(Claim.ResourceData()),
+  );
+
+/**
+ * Every relationship's own `self` link in a document: one that carries
+ * linkage claims what it names; one without claims resource linkage of any
+ * identity (§Fetching Relationships: the answer's primary data "**MUST** match
+ * the appropriate value for resource linkage").
+ */
+const relationshipSelfLinks = relationshipLinks("self", (relationship) =>
+  Option.some("data" in relationship ? claimOf(relationship) : Claim.ResourceData()),
+);
+
+/** `true` when a document carries a `next` or `prev` link: it is one page of a collection. */
+// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
+const pagedDocument = (body: unknown): boolean =>
+  isRecord(body) &&
+  (Link.$is("Href")(linkIn(body["links"], "next")) ||
+    Link.$is("Href")(linkIn(body["links"], "prev")));
+
+/**
+ * What a document's top-level `self` link claims: a document of the same
+ * kind. A single resource claims that resource; `null`, `null`; a collection,
+ * the same resources when the document is no page, and a collection of any
+ * when it is one (the comparison is `judgeCollection`'s).
+ */
+const documentClaim = (document: JsonObject): Claim => {
+  if (!("data" in document)) {
+    return Claim.Unidentified({
+      why: "— the document carrying it has no primary data to hold the answer to",
+    });
+  }
+  const data = document["data"];
+  const unidentified = (count: number) =>
+    Claim.Unidentified({
+      why: `— the document carrying it holds ${counted(count, "item")} without ${NO_IDENTITY}, so there is nothing to hold the answer to`,
+    });
+  if (data === null) return Claim.Empty();
+  if (Array.isArray(data)) {
+    const paged = pagedDocument(document);
+    return Result.match(membersOf(data), {
+      // A page is held only to answering a collection, so what it lists is not compared.
+      onFailure: (count) =>
+        paged ? Claim.Collection({ members: [], paged }) : unidentified(count),
+      onSuccess: (members) => Claim.Collection({ members, paged }),
+    });
+  }
+  return isRecord(data)
+    ? Option.match(memberOf(data), {
+        onNone: () => unidentified(1),
+        onSome: (member) => Claim.Resource({ member }),
+      })
+    : Claim.Unidentified({
+        why: "— its primary data is neither `null`, a resource object nor an array of them, so there is nothing to hold the answer to",
+      });
+};
+
+/** A document's top-level `self` link, with what it claims. */
+// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
+const topLevelSelfLinks = (from: Target, body: unknown): ReadonlyArray<Found> =>
+  isRecord(body)
+    ? [
+        {
+          where: `the top-level \`self\` link of ${from.url}`,
+          of: from.url,
+          name: "self",
+          basis: "document",
+          link: linkIn(body["links"], "self"),
+          from,
+          claim: documentClaim(body),
+        },
+      ]
+    : [];
 
 // ---------------------------------------------------------------------------
 // Following one link
@@ -342,30 +456,106 @@ const brokenOrDeferred = (
       }),
   });
 
+/** How a set comparison names the side the link's claim comes from. */
+interface Side {
+  readonly names: string;
+  readonly doesNotName: string;
+  readonly notIn: string;
+}
+
+const LINKAGE: Side = {
+  names: "its linkage names",
+  doesNotName: "its linkage does not name",
+  notIn: "not in the linkage",
+};
+
+const DOCUMENT: Side = {
+  names: "the document carrying it lists",
+  doesNotName: "the document carrying it does not list",
+  notIn: "not in the document",
+};
+
+/** What a set comparison expects: the claimed resources, by name. */
+const expectedMembers = (side: Side, members: ReadonlyArray<Member>): string =>
+  `the resources ${side.names}, ${Arr.match(members, {
+    onEmpty: () => "none",
+    onNonEmpty: (named) => listed(named.map(({ label }) => label)),
+  })}`;
+
+/**
+ * The resources an answer lists held against those claimed: with `missing`,
+ * every claimed one must be answered; with `extra`, every answered one claimed.
+ */
+const compareMembers = (
+  rule: Rule,
+  found: Found,
+  observation: Observation,
+  args: {
+    readonly side: Side;
+    readonly claimed: ReadonlyArray<Member>;
+    readonly answered: ReadonlyArray<Member>;
+    readonly missing: boolean;
+    readonly extra: boolean;
+  },
+): Verdict => {
+  const { side, claimed, answered } = args;
+  const expected = expectedMembers(side, claimed);
+  const missing = args.missing ? outside(claimed, keysOf(answered)) : [];
+  if (Arr.isReadonlyArrayNonEmpty(missing)) {
+    return broken(rule, found, Option.some(observation), {
+      detail: `answers without ${counted(missing.length, "resource")} ${side.names}`,
+      expected,
+      observed: `missing: ${listed(missing)}`,
+    });
+  }
+  const extra = args.extra ? outside(answered, keysOf(claimed)) : [];
+  return Arr.isReadonlyArrayNonEmpty(extra)
+    ? broken(rule, found, Option.some(observation), {
+        detail: `answers ${counted(extra.length, "resource")} ${side.doesNotName}`,
+        expected,
+        observed: `${side.notIn}: ${listed(extra)}`,
+      })
+    : Verdict.Held();
+};
+
+/** An answer listing items without a string `type` and `id`, which the kit does not compare. */
+const unidentifiedAnswer = (found: Found, count: number): Verdict =>
+  Verdict.Undecided({
+    why: `${found.where} answers ${counted(count, "item")} the kit cannot identify (${NO_IDENTITY})`,
+  });
+
+/**
+ * The resources a collection answer lists, or — when the answer is no
+ * collection, or lists an item the kit cannot identify — the verdict on it.
+ */
+const answeredMembers = (
+  rule: Rule,
+  found: Found,
+  observation: Observation,
+  expected: string,
+): Result.Result<ReadonlyArray<Member>, Verdict> => {
+  const data = dataOf(observation);
+  if (!Array.isArray(data)) {
+    return Result.fail(
+      broken(rule, found, Option.some(observation), {
+        detail: "answers no resource collection as primary data",
+        expected,
+        observed: primaryOf(observation),
+      }),
+    );
+  }
+  return Result.mapError(membersOf(data), (count) => unidentifiedAnswer(found, count));
+};
+
 /** A to-many claim held against a 2xx answer of resource data. */
 const judgeMany = (
   rule: Rule,
   found: Found,
   observation: Observation,
   claim: { readonly members: ReadonlyArray<Member>; readonly paged: boolean },
-): Verdict => {
-  const data = dataOf(observation);
-  const expected = `the resources its linkage names, ${Arr.match(claim.members, {
-    onEmpty: () => "none",
-    onNonEmpty: (members) => listed(members.map(({ label }) => label)),
-  })}`;
-  if (!Array.isArray(data)) {
-    return broken(rule, found, Option.some(observation), {
-      detail: "answers no resource collection as primary data",
-      expected,
-      observed: primaryOf(observation),
-    });
-  }
-  return Result.match(membersOf(data), {
-    onFailure: (count) =>
-      Verdict.Undecided({
-        why: `${found.where} answers ${counted(count, "item")} the kit cannot identify (${NO_IDENTITY})`,
-      }),
+): Verdict =>
+  Result.match(answeredMembers(rule, found, observation, expectedMembers(LINKAGE, claim.members)), {
+    onFailure: (verdict) => verdict,
     onSuccess: (answered) => {
       const page = pagedAnswer(observation);
       if (page && claim.paged) {
@@ -375,23 +565,63 @@ const judgeMany = (
       }
       // A page of the related collection need not list all the linkage
       // names; a page of linkage need not name all the collection lists.
-      const missing = page ? [] : outside(claim.members, keysOf(answered));
-      const extra = claim.paged ? [] : outside(answered, keysOf(claim.members));
-      if (Arr.isReadonlyArrayNonEmpty(missing)) {
-        return broken(rule, found, Option.some(observation), {
-          detail: `answers without ${counted(missing.length, "resource")} its linkage names`,
-          expected,
-          observed: `missing: ${listed(missing)}`,
-        });
-      }
-      return Arr.isReadonlyArrayNonEmpty(extra)
-        ? broken(rule, found, Option.some(observation), {
-            detail: `answers ${counted(extra.length, "resource")} its linkage does not name`,
-            expected,
-            observed: `not in the linkage: ${listed(extra)}`,
-          })
-        : Verdict.Held();
+      return compareMembers(rule, found, observation, {
+        side: LINKAGE,
+        claimed: claim.members,
+        answered,
+        missing: !page,
+        extra: !claim.paged,
+      });
     },
+  });
+
+/** What a link of each basis must answer at all, as findings name it. */
+const ANSWERS: Readonly<Record<Basis, { readonly what: string; readonly expected: string }>> = {
+  resource: {
+    what: "resource data",
+    expected: "a resource object, an array of them or `null` as primary data",
+  },
+  related: {
+    what: "related resource data",
+    expected: "a resource object, an array of them or `null` as primary data",
+  },
+  relationship: {
+    what: "resource linkage",
+    expected: "`null`, a resource identifier or an array of them as primary data",
+  },
+  document: {
+    what: "resource data",
+    expected: "a resource object, an array of them or `null` as primary data",
+  },
+};
+
+/**
+ * A top-level `self` link's collection claim held against a 2xx answer of
+ * resource data: a collection at all, and — when neither document is a page —
+ * the same resources, in any order.
+ */
+const judgeCollection = (
+  rule: Rule,
+  found: Found,
+  observation: Observation,
+  claim: { readonly members: ReadonlyArray<Member>; readonly paged: boolean },
+): Verdict => {
+  // A page — either side — can differ from the other in which resources it
+  // lists, so only that it answers a collection is held.
+  if (Array.isArray(dataOf(observation)) && (claim.paged || pagedDocument(observation.body))) {
+    return Verdict.Held();
+  }
+  const expected = "a resource collection as primary data, as the document carrying it has";
+  return Result.match(answeredMembers(rule, found, observation, expected), {
+    onFailure: (verdict) => verdict,
+    onSuccess: (answered) =>
+      compareMembers(rule, found, observation, {
+        side: DOCUMENT,
+        claimed: claim.members,
+        answered,
+        missing: true,
+        extra: true,
+      }),
   });
 };
 
@@ -410,8 +640,8 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
   const resourceData = isResourceData(observation);
   if (!resourceData && !Claim.$is("Resource")(found.claim)) {
     return brokenOrDeferred(judging, found, Option.some(observation), {
-      detail: "answers no related resource data as primary data",
-      expected: "a resource object, an array of them or `null` as primary data",
+      detail: `answers no ${ANSWERS[found.basis].what} as primary data`,
+      expected: ANSWERS[found.basis].expected,
       observed: describe(observation),
     });
   }
@@ -424,11 +654,15 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
       data === null
         ? Verdict.Held()
         : broken(rule, found, Option.some(observation), {
-            detail: "answers a resource where its linkage is `null`",
+            detail:
+              found.basis === "document"
+                ? "answers a resource where the document carrying it has `null`"
+                : "answers a resource where its linkage is `null`",
             expected: "`null` as primary data",
             observed: primaryOf(observation),
           }),
     ToMany: (claim) => judgeMany(rule, found, observation, claim),
+    Collection: (claim) => judgeCollection(rule, found, observation, claim),
     // Never reached: `resolve` decides an unidentified claim before any request.
     Unidentified: ({ why }) => Verdict.Undecided({ why: `${found.where} ${why}` }),
   });
@@ -458,8 +692,12 @@ const judge = (judging: Judging, found: Found, observation: Observation): Verdic
         Resource: ({ member }) => `a 2xx response with ${member.label} as primary data`,
         ToOne: ({ member }) => `a 2xx response with ${member.label} as primary data`,
         Empty: () => "a 2xx response with `null` as primary data",
-        ToMany: () => "a 2xx response with the related resources as primary data",
-        ResourceData: () => "a 2xx response with the related resource data as primary data",
+        ToMany: () =>
+          found.basis === "relationship"
+            ? "a 2xx response with the relationship's linkage as primary data"
+            : "a 2xx response with the related resources as primary data",
+        Collection: () => "a 2xx response with a resource collection as primary data",
+        ResourceData: () => `a 2xx response with ${ANSWERS[found.basis].what} as primary data`,
         Unidentified: () => "a 2xx response",
       }),
       observed: describe(observation),
@@ -630,6 +868,8 @@ const claimKey = (claim: Claim): string =>
     ToOne: ({ member }) => `one ${member.key}`,
     Empty: () => "empty",
     ToMany: ({ members, paged }) => `many ${paged} ${members.map(({ key }) => key).join(" ")}`,
+    Collection: ({ members, paged }) =>
+      `collection ${paged} ${members.map(({ key }) => key).join(" ")}`,
     Unidentified: ({ why }) => `unidentified ${why}`,
   });
 
@@ -730,12 +970,13 @@ const dereferencing = (
   judging: Judging,
   what: string,
   collect: (from: Target, body: Observation["body"]) => ReadonlyArray<Found>,
+  roles: ReadonlyArray<Role> = SOURCE_ROLES,
 ): RuleImpl => ({
   rule: judging.rule,
   run: (ctx) =>
     Effect.gen(function* () {
       const { rule } = judging;
-      const { resolved, unresolved } = probeable(ctx, SOURCE_ROLES);
+      const { resolved, unresolved } = probeable(ctx, roles);
       const io = budgeted(ctx, REQUEST_BUDGET);
       const fetched = yield* sources(
         io,
@@ -833,4 +1074,51 @@ export const relatedMatchesLinkage: RuleImpl = dereferencing(
   },
   "relationship in what the read endpoints answered carries both a `related` link and resource linkage",
   relatedLinks(true),
+);
+
+/**
+ * A relationship's own `self` link, followed: it must answer linkage matching
+ * the relationship object's.
+ *
+ * @internal
+ */
+export const relationshipSelfDereferences: RuleImpl = dereferencing(
+  {
+    rule: {
+      id: "spec/links/relationship-self-dereferences",
+      tier: "spec",
+      section: "Fetching Relationships",
+      reference: `${SPEC}/#fetching-relationships`,
+      level: "MUST",
+      requirement:
+        "A server MUST support fetching relationship data for every relationship URL provided as a `self` link in a relationship's `links` object, and the primary data in the response MUST match the appropriate value for resource linkage: `null`, a resource identifier or an array of them — and, when the relationship object carries linkage, the same identifiers (a page of them, or a superset of a paginated linkage, when either side carries a `next` link).",
+    },
+    defersTo: Option.none(),
+  },
+  "relationship in what the read endpoints answered carries a `self` link",
+  relationshipSelfLinks,
+);
+
+/**
+ * A document's top-level `self` link, followed: it must answer a document of
+ * the same kind.
+ *
+ * @internal
+ */
+export const topLevelSelfDereferences: RuleImpl = dereferencing(
+  {
+    rule: {
+      id: "spec/links/top-level-self-dereferences",
+      tier: "spec",
+      section: "Fetching Resources",
+      reference: `${SPEC}/#fetching-resources`,
+      level: "MUST",
+      requirement:
+        'A server MUST support fetching resource data for every URL provided as a `self` link in the top-level links object, which is "the link that generated the current response document": a `GET` to it answers 2xx with a document of the same kind — the same resource (`type` and `id`) for a single resource, `null` for `null`, and a collection for a collection, holding the same resources (in any order) when neither document carries a `next` or `prev` link.',
+    },
+    defersTo: Option.none(),
+  },
+  "document a read endpoint answered carries a top-level `self` link",
+  topLevelSelfLinks,
+  DOCUMENT_ROLES,
 );

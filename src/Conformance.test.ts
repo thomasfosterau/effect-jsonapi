@@ -5358,6 +5358,8 @@ describe("Conformance: `self` and `related` links dereference", () => {
   const SELF = "spec/links/resource-self-dereferences";
   const RELATED = "spec/links/related-dereferences";
   const MATCHES = "spec/links/related-matches-linkage";
+  const RELATIONSHIP_SELF = "spec/links/relationship-self-dereferences";
+  const TOP_SELF = "spec/links/top-level-self-dereferences";
 
   type Json = Schema.Json;
 
@@ -5378,18 +5380,26 @@ describe("Conformance: `self` and `related` links dereference", () => {
       attributes: { title: `article ${id}`, body: "" },
       relationships: {
         author: site.author?.(id) ?? {
-          links: { related: `/articles/${id}/author` },
+          links: {
+            self: `/articles/${id}/relationships/author`,
+            related: `/articles/${id}/author`,
+          },
           data: { type: "people", id: "9" },
         },
         tags: site.tags?.(id) ?? {
-          links: { related: `/articles/${id}/tags` },
+          links: { self: `/articles/${id}/relationships/tags`, related: `/articles/${id}/tags` },
           data: [
             { type: "tags", id: "1" },
             { type: "tags", id: "2" },
           ],
         },
         // Paginated: links only, no linkage.
-        comments: site.comments?.(id) ?? { links: { related: `/articles/${id}/comments` } },
+        comments: site.comments?.(id) ?? {
+          links: {
+            self: `/articles/${id}/relationships/comments`,
+            related: `/articles/${id}/comments`,
+          },
+        },
       },
       links: { self: site.self?.(id) ?? `/articles/${id}` },
     });
@@ -5402,9 +5412,43 @@ describe("Conformance: `self` and `related` links dereference", () => {
     body: { errors: [{ status: "404", title: "Not Found" }] },
   };
 
+  /** `/articles/:id`, `/articles/:id/<name>` and `/articles/:id/relationships/<name>`. */
+  const ARTICLE_ROUTE = /^\/articles\/([^/]+)(\/relationships)?(?:\/([a-z]+))?$/;
+
+  /** What `/articles/:id/relationships/<name>` answers: the linkage every article carries. */
+  const linkageAnswer = (name: string): Canned =>
+    Match.value(name).pipe(
+      Match.when("author", (): Canned => ({ body: { data: { type: "people", id: "9" } } })),
+      Match.when("tags", (): Canned => ({
+        body: {
+          data: [
+            { type: "tags", id: "1" },
+            { type: "tags", id: "2" },
+          ],
+        },
+      })),
+      Match.when("comments", (): Canned => ({ body: { data: [{ type: "comments", id: "5" }] } })),
+      Match.orElse(() => notFound),
+    );
+
+  /** What `/articles/:id` (`name` empty) and `/articles/:id/<name>` answer. */
+  const articleAnswer = (article: Json, id: string, name: string): Canned =>
+    Match.value(name).pipe(
+      Match.when("", (): Canned => ({
+        body: { data: article, links: { self: `/articles/${id}` } },
+      })),
+      Match.when("author", (): Canned => ({ body: { data: person("9") } })),
+      Match.when("tags", (): Canned => ({ body: { data: [tag("1"), tag("2")] } })),
+      Match.when("comments", (): Canned => ({
+        body: { data: [comment("5")], links: { next: null } },
+      })),
+      Match.orElse(() => notFound),
+    );
+
   /**
    * A server whose every link resolves to what it names: `/articles`, each
-   * article, its author, its two tags and its (paginated) comments.
+   * article, its author, its two tags and its (paginated) comments, each
+   * relationship's linkage, and each document's own top-level `self`.
    */
   const linked =
     (site: Site = {}) =>
@@ -5412,19 +5456,14 @@ describe("Conformance: `self` and `related` links dereference", () => {
       const ids = site.ids ?? ["1", "2"];
       const article = articleOf(site);
       const path = withoutQuery(request).path;
-      if (path === "/articles") return { body: { data: ids.map(article) } };
-      const match = /^\/articles\/([^/]+)(?:\/([a-z]+))?$/.exec(path);
-      const id = match?.[1];
-      if (id === undefined || !ids.includes(id)) return notFound;
-      return Match.value(match?.[2]).pipe(
-        Match.when(undefined, (): Canned => ({ body: { data: article(id) } })),
-        Match.when("author", (): Canned => ({ body: { data: person("9") } })),
-        Match.when("tags", (): Canned => ({ body: { data: [tag("1"), tag("2")] } })),
-        Match.when("comments", (): Canned => ({
-          body: { data: [comment("5")], links: { next: null } },
-        })),
-        Match.orElse(() => notFound),
-      );
+      if (path === "/articles") {
+        return { body: { data: ids.map(article), links: { self: "/articles" } } };
+      }
+      const [, id = "", relationships, name = ""] = ARTICLE_ROUTE.exec(path) ?? [];
+      if (!ids.includes(id)) return notFound;
+      return relationships === undefined
+        ? articleAnswer(article(id), id, name)
+        : linkageAnswer(name);
     };
 
   /** `serve`, with the answer at `path` replaced. */
@@ -5451,7 +5490,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
   const run = (
     serve: (request: CannedRequest) => Canned,
     client?: (canned: HttpClient.HttpClient) => HttpClient.HttpClient,
-  ) => verifyCanned(serve, { only: [SELF, RELATED, MATCHES] }, client);
+  ) => verifyCanned(serve, { only: [SELF, RELATED, MATCHES, RELATIONSHIP_SELF, TOP_SELF] }, client);
 
   const findingsOf = (outcome: Conformance.Outcome): ReadonlyArray<string> => {
     expect(outcome._tag).toBe("Failed");
@@ -6350,15 +6389,391 @@ describe("Conformance: `self` and `related` links dereference", () => {
       section: "Related Resource Links",
       reference: "https://jsonapi.org/format/1.1/#document-resource-object-related-resource-links",
     });
+    expect(Conformance.rules.find(({ id }) => id === RELATIONSHIP_SELF)).toMatchObject({
+      tier: "spec",
+      level: "MUST",
+      section: "Fetching Relationships",
+      reference: "https://jsonapi.org/format/1.1/#fetching-relationships",
+    });
+    expect(Conformance.rules.find(({ id }) => id === TOP_SELF)).toMatchObject({
+      tier: "spec",
+      level: "MUST",
+      section: "Fetching Resources",
+      reference: "https://jsonapi.org/format/1.1/#fetching-resources",
+    });
     expect(
       Conformance.rules.map(({ id }) => id).filter((id) => id.startsWith("spec/links/")),
-    ).toEqual([SELF, RELATED, MATCHES]);
+    ).toEqual([SELF, RELATED, MATCHES, RELATIONSHIP_SELF, TOP_SELF]);
     expect(Conformance.gaps.map(({ area }) => area)).not.toContain("Link dereferenceability");
-    // What it does not follow yet is declared, narrower, in its place.
+    // The narrower gap #168 declared in its place is closed too (#309).
+    expect(Conformance.gaps.map(({ area }) => area)).not.toContain(
+      "Relationship and top-level `self` links",
+    );
+    expect(Conformance.gaps.flatMap(({ tracking }) => tracking)).not.toContain("#309");
+  });
+
+  it('leaves every link rule out under `skip: ["spec/links/"]`', async () => {
+    const server = recording(linked());
+    const report = await verifyCanned(server.serve, { skip: ["spec/links/"] }, server.client);
+    expect(report.outcomes.filter(({ rule }) => rule.id.startsWith("spec/links/"))).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // A relationship's own `self` link (#309)
+  // -------------------------------------------------------------------------
+
+  /** The relationship-`self` rule's findings against `serve`. */
+  const relationshipFailures = (serve: (request: CannedRequest) => Canned) =>
+    failureOf(RELATIONSHIP_SELF, serve);
+
+  it("follows every relationship's `self` link, once each, and passes", async () => {
+    const server = recording(linked());
+    const report = await verifyCanned(server.serve, { only: [RELATIONSHIP_SELF] }, server.client);
+    const outcome = outcomeFor(report, RELATIONSHIP_SELF);
+    expect(outcome).toMatchObject({ _tag: "Passed", note: undefined, probes: 8 });
+    expect(server.paths()).toEqual([
+      "/articles/1",
+      "/articles",
+      "/articles/1/relationships/author",
+      "/articles/1/relationships/tags",
+      "/articles/1/relationships/comments",
+      "/articles/2/relationships/author",
+      "/articles/2/relationships/tags",
+      "/articles/2/relationships/comments",
+    ]);
+  });
+
+  it("detects a relationship `self` whose linkage omits an identifier the relationship names", async () => {
     expect(
-      Conformance.gaps.find(({ area }) => area === "Relationship and top-level `self` links")
-        ?.tracking,
-    ).toEqual(["#309"]);
+      await relationshipFailures(
+        at("/articles/2/relationships/tags", { body: { data: [{ type: "tags", id: "1" }] } }),
+      ),
+    ).toEqual([
+      "the `self` link of articles:2's `tags` (in /articles, at /data/1) answers without 1 resource its linkage names | missing: tags:2",
+    ]);
+  });
+
+  it("detects a relationship `self` whose linkage names an identifier the relationship does not", async () => {
+    expect(
+      await relationshipFailures(
+        at("/articles/2/relationships/tags", {
+          body: {
+            data: [
+              { type: "tags", id: "1" },
+              { type: "tags", id: "2" },
+              { type: "tags", id: "3" },
+            ],
+          },
+        }),
+      ),
+    ).toEqual([
+      "the `self` link of articles:2's `tags` (in /articles, at /data/1) answers 1 resource its linkage does not name | not in the linkage: tags:3",
+    ]);
+  });
+
+  it("detects a to-one relationship `self` whose linkage is a different identifier", async () => {
+    expect(
+      await relationshipFailures(
+        at("/articles/1/relationships/author", { body: { data: { type: "people", id: "10" } } }),
+      ),
+    ).toEqual([
+      "the `self` link of articles:1's `author` (in /articles/1, at /data) answers a different resource from the one its linkage names | people:10",
+    ]);
+  });
+
+  it("detects a relationship `self` that answers no resource linkage, linkage or not", async () => {
+    // With linkage to compare (`tags`), and without (the links-only `comments`).
+    const tags = await relationshipFailures(
+      at("/articles/2/relationships/tags", { body: { meta: { total: 2 } } }),
+    );
+    expect(tags).toHaveLength(1);
+    expect(tags[0]).toMatch(
+      /^the `self` link of articles:2's `tags` \(in \/articles, at \/data\/1\) answers no resource linkage as primary data \| 200 /,
+    );
+    const outcome = outcomeFor(
+      await run(at("/articles/2/relationships/comments", { body: { data: ["x"] } })),
+      RELATIONSHIP_SELF,
+    );
+    expect(outcome).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail:
+            "the `self` link of articles:2's `comments` (in /articles, at /data/1) answers no resource linkage as primary data",
+          expected: "`null`, a resource identifier or an array of them as primary data",
+        },
+      ],
+    });
+  });
+
+  it("detects a relationship `self` that leads to a 404", async () => {
+    const found = await relationshipFailures(at("/articles/2/relationships/tags", notFound));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(
+      /^the `self` link of articles:2's `tags` \(in \/articles, at \/data\/1\) answered 404 \| 404 /,
+    );
+    const outcome = outcomeFor(
+      await run(at("/articles/2/relationships/tags", notFound)),
+      RELATIONSHIP_SELF,
+    );
+    expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
+      "a 2xx response with the relationship's linkage as primary data",
+    );
+  });
+
+  it("holds a page of linkage, either side, as a subset — as `related-matches-linkage` does", async () => {
+    const paged = (data: ReadonlyArray<Json>): Canned => ({
+      body: { data, links: { next: "/articles/2/relationships/tags?page[offset]=1" } },
+    });
+    expect(
+      await noteOf(
+        RELATIONSHIP_SELF,
+        at("/articles/2/relationships/tags", paged([{ type: "tags", id: "1" }])),
+      ),
+    ).toBeUndefined();
+    expect(
+      await relationshipFailures(
+        at("/articles/2/relationships/tags", paged([{ type: "tags", id: "3" }])),
+      ),
+    ).toEqual([
+      "the `self` link of articles:2's `tags` (in /articles, at /data/1) answers 1 resource its linkage does not name | not in the linkage: tags:3",
+    ]);
+  });
+
+  it("never follows a relationship `self` to another origin, and says it did not", async () => {
+    const server = recording(
+      linked({
+        ids: ["1"],
+        author: () => ({
+          links: { self: "https://elsewhere.test/articles/1/relationships/author" },
+          data: { type: "people", id: "9" },
+        }),
+      }),
+    );
+    const report = await verifyCanned(server.serve, { only: [RELATIONSHIP_SELF] }, server.client);
+    expect(outcomeFor(report, RELATIONSHIP_SELF)).toMatchObject({
+      _tag: "Passed",
+      note: "1 link not decided: the `self` link of articles:1's `author` (in /articles/1, at /data) leads to another origin, https://elsewhere.test, which the kit does not follow",
+    });
+    expect(server.urls.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
+  });
+
+  it("does not hold a 503 against a relationship `self`", async () => {
+    expect(await noteOf(RELATIONSHIP_SELF, at("/articles/2/relationships/tags", unavailable))).toBe(
+      "1 link not decided: the `self` link of articles:2's `tags` (in /articles, at /data/1) got 503 — a server error, a rate limit, a request timeout or a lost response says nothing of the links",
+    );
+  });
+
+  it("skips, naming the budget, a relationship crawl the budget cannot finish", async () => {
+    const ids = Arr.makeBy(250, (n) => `${n + 1}`);
+    const server = recording(linked({ ids }));
+    const report = await verifyCanned(server.serve, { only: [RELATIONSHIP_SELF] }, server.client);
+    expect(server.urls).toHaveLength(200);
+    expect(outcomeFor(report, RELATIONSHIP_SELF)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "the rule's budget of 200 requests ran out with 198 of 750 links followed — a partial crawl is not passed",
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // A document's top-level `self` link (#309)
+  // -------------------------------------------------------------------------
+
+  /**
+   * `linked()`, with the document at `path` carrying `self` as its top-level
+   * `self` (its only top-level link, as on every document `linked()` answers).
+   */
+  const selfAt =
+    (path: string, self: Json, serve: (request: CannedRequest) => Canned = linked()) =>
+    (request: CannedRequest): Canned => {
+      const answer = serve(request);
+      if (withoutQuery(request).path !== path || !Predicate.isObject(answer.body)) return answer;
+      return { ...answer, body: { ...answer.body, links: { self } } };
+    };
+
+  it("follows every document's top-level `self` link, and passes", async () => {
+    const server = recording(selfAt("/articles", "/articles?sort=title"));
+    const report = await verifyCanned(server.serve, { only: [TOP_SELF] }, server.client);
+    // `/articles/1`'s own `self` is the URL it was fetched by, so it costs no request.
+    expect(outcomeFor(report, TOP_SELF)).toMatchObject({
+      _tag: "Passed",
+      note: undefined,
+      probes: 3,
+    });
+    expect(server.paths()).toEqual(["/articles/1", "/articles", "/articles"]);
+  });
+
+  it("detects a top-level `self` that leads to a different resource", async () => {
+    expect(await failureOf(TOP_SELF, selfAt("/articles/1", "/articles/2"))).toEqual([
+      "the top-level `self` link of /articles/1 answers a different resource as primary data | articles:2",
+    ]);
+  });
+
+  it("detects a top-level `self` of a collection that answers no collection", async () => {
+    expect(await failureOf(TOP_SELF, selfAt("/articles", "/articles/1"))).toEqual([
+      "the top-level `self` link of /articles answers no resource collection as primary data | articles:1",
+    ]);
+  });
+
+  it("detects a top-level `self` that leads to a 404", async () => {
+    const found = await failureOf(TOP_SELF, selfAt("/articles/1", "/articles/one"));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatch(/^the top-level `self` link of \/articles\/1 answered 404 \| 404 /);
+  });
+
+  it("detects a top-level `self` of `null` that answers a resource", async () => {
+    const serve = at("/articles/1", { body: { data: null, links: { self: "/articles/2" } } });
+    expect(await failureOf(TOP_SELF, serve)).toEqual([
+      "the top-level `self` link of /articles/1 answers a resource where the document carrying it has `null` | articles:2",
+    ]);
+  });
+
+  it("holds a whole collection's `self` to the same resources, in any order", async () => {
+    const article = articleOf({});
+    const everything = (data: ReadonlyArray<Json>, links?: Json) =>
+      at(
+        "/everything",
+        { body: links === undefined ? { data } : { data, links } },
+        selfAt("/articles", "/everything"),
+      );
+    expect(await noteOf(TOP_SELF, everything([article("2"), article("1")]))).toBeUndefined();
+    expect(await failureOf(TOP_SELF, everything([article("1")]))).toEqual([
+      "the top-level `self` link of /articles answers without 1 resource the document carrying it lists | missing: articles:2",
+    ]);
+    expect(
+      await failureOf(TOP_SELF, everything([article("1"), article("2"), article("3")])),
+    ).toEqual([
+      "the top-level `self` link of /articles answers 1 resource the document carrying it does not list | not in the document: articles:3",
+    ]);
+  });
+
+  it("holds a page, either document's, only to answering a collection", async () => {
+    const article = articleOf({});
+    // The answer is a page: it need not list what the document does.
+    expect(
+      await noteOf(
+        TOP_SELF,
+        at(
+          "/everything",
+          { body: { data: [article("3")], links: { next: "/everything?page[offset]=1" } } },
+          selfAt("/articles", "/everything"),
+        ),
+      ),
+    ).toBeUndefined();
+    // The document carrying the link is a page (`prev`): likewise.
+    expect(
+      await noteOf(
+        TOP_SELF,
+        at(
+          "/everything",
+          { body: { data: [article("3")] } },
+          at("/articles", {
+            body: {
+              data: [article("1"), article("2")],
+              links: { self: "/everything", prev: "/articles?page[offset]=0" },
+            },
+          }),
+        ),
+      ),
+    ).toBeUndefined();
+    // But a page is still a collection.
+    expect(
+      await failureOf(
+        TOP_SELF,
+        at(
+          "/everything",
+          { body: { data: article("3") } },
+          at("/articles", {
+            body: { data: [article("1")], links: { self: "/everything", next: "/articles?p=2" } },
+          }),
+        ),
+      ),
+    ).toEqual([
+      "the top-level `self` link of /articles answers no resource collection as primary data | articles:3",
+    ]);
+  });
+
+  it("never follows a top-level `self` to another origin, and says it did not", async () => {
+    const server = recording(selfAt("/articles", "https://elsewhere.test/articles"));
+    const report = await verifyCanned(server.serve, { only: [TOP_SELF] }, server.client);
+    expect(outcomeFor(report, TOP_SELF)).toMatchObject({
+      _tag: "Passed",
+      note: "1 link not decided: the top-level `self` link of /articles leads to another origin, https://elsewhere.test, which the kit does not follow",
+    });
+    expect(server.urls.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
+  });
+
+  it("detects a top-level `self` that is not a link, and does not hold a 503 against one", async () => {
+    expect(await failureOf(TOP_SELF, selfAt("/articles", { toString: 1 }))).toEqual([
+      'the top-level `self` link of /articles is not a link the kit can follow | self: {"toString":1}',
+    ]);
+    expect(
+      await noteOf(TOP_SELF, at("/elsewhere", unavailable, selfAt("/articles", "/elsewhere"))),
+    ).toBe(
+      "1 link not decided: the top-level `self` link of /articles got 503 — a server error, a rate limit, a request timeout or a lost response says nothing of the links",
+    );
+  });
+
+  it("skips, saying what it searched, when no document carries a top-level `self`", async () => {
+    expect(await skipReasonOf(TOP_SELF, conformantServe)).toBe(
+      "no document a read endpoint answered carries a top-level `self` link (searched /articles/1, /articles)",
+    );
+  });
+
+  it("follows a relationship endpoint's top-level `self` too, holding it to the same linkage", async () => {
+    const reads = HttpApi.make("reads").add(
+      Group.make(Article, Endpoint.get(Article), Endpoint.getRelationship(Article, "author")),
+    );
+    const linkageAt =
+      (answer: Json) =>
+      (request: CannedRequest): Canned =>
+        Match.value(request.path).pipe(
+          Match.when("/articles/1", (): Canned => ({
+            body: { data: { type: "articles", id: "1" } },
+          })),
+          Match.when("/articles/1/relationships/author", (): Canned => ({
+            body: {
+              data: { type: "people", id: "9" },
+              links: { self: "/articles/1/relationships/author?canonical=1" },
+            },
+          })),
+          Match.when("/articles/1/relationships/author?canonical=1", (): Canned => ({
+            body: { data: answer },
+          })),
+          Match.orElse(() => notFound),
+        );
+    const passed = await verifyOver(reads)(linkageAt({ type: "people", id: "9" }), {
+      only: [TOP_SELF],
+    });
+    expect(outcomeFor(passed, TOP_SELF)).toMatchObject({ _tag: "Passed", probes: 3 });
+    const report = await verifyOver(reads)(linkageAt({ type: "people", id: "10" }), {
+      only: [TOP_SELF],
+    });
+    expect(findingsOf(outcomeFor(report, TOP_SELF))).toEqual([
+      "the top-level `self` link of /articles/1/relationships/author answers a different resource as primary data | people:10",
+    ]);
+  });
+
+  it("skips the top-level `self` rule, naming the budget, when it cannot search every read endpoint", async () => {
+    const many = Arr.makeBy(201, (n) => Resource.make(`r${n}`, { attributes: {} }));
+    const wide = HttpApi.make("wide").add(
+      ...Arr.map(many, (resource) => Group.make(resource, Endpoint.list(resource))),
+    );
+    const seen: Array<string> = [];
+    const report = await verifyOver(wide)(
+      (request) => {
+        seen.push(request.path);
+        return { body: { data: [], links: { self: request.path } } };
+      },
+      { only: [TOP_SELF] },
+    );
+    expect(seen).toHaveLength(200);
+    expect(outcomeFor(report, TOP_SELF)).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "the rule's budget of 200 requests ran out with 200 of 201 read endpoints searched for links — a partial crawl is not passed",
+    });
   });
 });
 

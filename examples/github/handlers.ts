@@ -716,6 +716,22 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       ),
     )
     // --- Relationship (linkage) endpoints ------------------------------------
+    // GET /issues/:id/relationships/comments — the comment feed's identifiers
+    .handle("commentsRelationship", ({ params, query }) =>
+      loadIssue(params.id).pipe(
+        Effect.map((issue) => {
+          const all = commentsFor(issue.id).map((comment) => IssueComment.ref(comment.id));
+          const { number, page, size, total } = paginate(all, query.page);
+          const path = Handlers.relationshipLink("issues", issue.id, "comments");
+          return Handlers.linkage(page, {
+            related: Handlers.relatedLink("issues", issue.id, "comments"),
+            meta: { total },
+            links: Handlers.numberPaginationLinks(path, { number, size }, total),
+            jsonapi: Document.v1_1,
+          });
+        }),
+      ),
+    )
     // GET /issues/:id/relationships/labels
     .handle("labelsRelationship", ({ params }) =>
       loadIssue(params.id).pipe(

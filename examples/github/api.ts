@@ -141,6 +141,13 @@ export const issues = Group.make(
     errors: [IssueNotFound],
   }),
   // --- Relationship (linkage) endpoints: issue triage -------------------------
+  // GET /issues/:id/relationships/comments?page[number]=1&page[size]=30 —
+  // comment identifiers, paginated: what the `comments` relationship's `self`
+  // link points at
+  Endpoint.getRelationship(Issue, "comments", {
+    page: Pagination,
+    errors: [IssueNotFound],
+  }),
   // GET /issues/:id/relationships/labels — label identifiers
   Endpoint.getRelationship(Issue, "labels", {
     errors: [IssueNotFound],

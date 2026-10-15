@@ -266,7 +266,14 @@ export const orders = Group.make(
     meta: PageMeta,
     errors: [OrderNotFound],
   }),
-  // --- Relationship (linkage) endpoint ----------------------------------------
+  // --- Relationship (linkage) endpoints ---------------------------------------
+  // GET /orders/:id/relationships/lineItems?page[offset]=0&page[limit]=10 —
+  // line-item identifiers, paginated: what the `lineItems` relationship's
+  // `self` link points at
+  Endpoint.getRelationship(Order, "lineItems", {
+    page: Pagination,
+    errors: [OrderNotFound],
+  }),
   // GET /orders/:id/relationships/shipper — the shipper identifier (or null)
   Endpoint.getRelationship(Order, "shipper", {
     errors: [OrderNotFound],
