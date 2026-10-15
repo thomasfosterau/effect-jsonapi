@@ -39,6 +39,102 @@
     "./schema": {
       "types": "./dist/schema.d.ts",
       "default": "./dist/schema.js"
+    },
+    "./ApiError": {
+      "types": "./dist/ApiError.d.ts",
+      "default": "./dist/ApiError.js"
+    },
+    "./Assemble": {
+      "types": "./dist/Assemble.d.ts",
+      "default": "./dist/Assemble.js"
+    },
+    "./Atomic": {
+      "types": "./dist/Atomic.d.ts",
+      "default": "./dist/Atomic.js"
+    },
+    "./Client": {
+      "types": "./dist/Client.d.ts",
+      "default": "./dist/Client.js"
+    },
+    "./Conformance": {
+      "types": "./dist/Conformance.d.ts",
+      "default": "./dist/Conformance.js"
+    },
+    "./Document": {
+      "types": "./dist/Document.d.ts",
+      "default": "./dist/Document.js"
+    },
+    "./Endpoint": {
+      "types": "./dist/Endpoint.d.ts",
+      "default": "./dist/Endpoint.js"
+    },
+    "./Filter": {
+      "types": "./dist/Filter.d.ts",
+      "default": "./dist/Filter.js"
+    },
+    "./FlatQuery": {
+      "types": "./dist/FlatQuery.d.ts",
+      "default": "./dist/FlatQuery.js"
+    },
+    "./Group": {
+      "types": "./dist/Group.d.ts",
+      "default": "./dist/Group.js"
+    },
+    "./Handlers": {
+      "types": "./dist/Handlers.d.ts",
+      "default": "./dist/Handlers.js"
+    },
+    "./Idempotency": {
+      "types": "./dist/Idempotency.d.ts",
+      "default": "./dist/Idempotency.js"
+    },
+    "./Include": {
+      "types": "./dist/Include.d.ts",
+      "default": "./dist/Include.js"
+    },
+    "./Lid": {
+      "types": "./dist/Lid.d.ts",
+      "default": "./dist/Lid.js"
+    },
+    "./MediaType": {
+      "types": "./dist/MediaType.d.ts",
+      "default": "./dist/MediaType.js"
+    },
+    "./Middleware": {
+      "types": "./dist/Middleware.d.ts",
+      "default": "./dist/Middleware.js"
+    },
+    "./Negotiation": {
+      "types": "./dist/Negotiation.d.ts",
+      "default": "./dist/Negotiation.js"
+    },
+    "./Query": {
+      "types": "./dist/Query.d.ts",
+      "default": "./dist/Query.js"
+    },
+    "./Registry": {
+      "types": "./dist/Registry.d.ts",
+      "default": "./dist/Registry.js"
+    },
+    "./Relationship": {
+      "types": "./dist/Relationship.d.ts",
+      "default": "./dist/Relationship.js"
+    },
+    "./Resource": {
+      "types": "./dist/Resource.d.ts",
+      "default": "./dist/Resource.js"
+    },
+    "./ResourceHandlers": {
+      "types": "./dist/ResourceHandlers.d.ts",
+      "default": "./dist/ResourceHandlers.js"
+    },
+    "./ServerErrors": {
+      "types": "./dist/ServerErrors.d.ts",
+      "default": "./dist/ServerErrors.js"
+    },
+    "./Sort": {
+      "types": "./dist/Sort.d.ts",
+      "default": "./dist/Sort.js"
     }
   },
   "publishConfig": {

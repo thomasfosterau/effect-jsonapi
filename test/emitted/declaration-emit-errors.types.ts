@@ -2,7 +2,8 @@
  * An application error declared in a module of its own, as an app's
  * `errors.ts` would: `declaration-emit-group.types.ts` attaches it to
  * generated endpoints without importing `ApiError`, so the `ApiError.Wire`
- * its endpoints' types carry must be nameable from the package root (#348).
+ * its endpoints' types carry must be nameable without it: through the
+ * `./ApiError` subpath (#385), or the deprecated root alias (#348).
  */
 import { ApiError } from "@thomasfosterau/effect-jsonapi";
 

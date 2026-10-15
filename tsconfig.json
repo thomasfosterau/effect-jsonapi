@@ -10,7 +10,8 @@
     // it asserts the EMITTED declarations through tsconfig.dist.json.
     "paths": {
       "@thomasfosterau/effect-jsonapi": ["./src/index.ts"],
-      "@thomasfosterau/effect-jsonapi/schema": ["./src/schema.ts"]
+      "@thomasfosterau/effect-jsonapi/schema": ["./src/schema.ts"],
+      "@thomasfosterau/effect-jsonapi/*": ["./src/*.ts"]
     }
   },
   "include": ["src", "test", "scripts", "vite.config.ts"],
