@@ -138,24 +138,27 @@ describe("github: JSON:API conformance", () => {
 
   it("follows every relationship's and document's `self` link to a verdict", () => {
     // #309: the relationship `self` link `Handlers.paginatedRelationship`
-    // writes for an issue's comments (`/issues/:id/relationships/comments`) is served by a declared
-    // `Endpoint.getRelationship`, so both MUSTs pass rather than skip. That
-    // relationship is links-only, so the relationship SHOULD has no linkage to
-    // compare and skips.
+    // writes for an issue's comments (`/issues/:id/relationships/comments`)
+    // is served by a declared `Endpoint.getRelationship`, so both MUSTs pass
+    // rather than skip. That relationship is links-only, so the relationship
+    // SHOULD has no linkage to compare and skips.
     const ids = [
       "spec/links/relationship-self-dereferences",
       "spec/links/relationship-self-matches-linkage",
       "spec/links/top-level-self-dereferences",
       "spec/links/top-level-self-matches-document",
     ];
-    expect(
-      ids.map((id) => `${id}: ${report.outcomes.find((outcome) => outcome.rule.id === id)?._tag}`),
-    ).toEqual([
+    const outcomeOf = (id: string) => report.outcomes.find((outcome) => outcome.rule.id === id);
+    expect(ids.map((id) => `${id}: ${outcomeOf(id)?._tag}`)).toEqual([
       "spec/links/relationship-self-dereferences: Passed",
       "spec/links/relationship-self-matches-linkage: Skipped",
       "spec/links/top-level-self-dereferences: Passed",
       "spec/links/top-level-self-matches-document: Passed",
     ]);
+    // Skipped for want of linkage, not for want of a link to follow.
+    expect(outcomeOf("spec/links/relationship-self-matches-linkage")).toMatchObject({
+      reason: expect.stringContaining("carries both a `self` link and resource linkage"),
+    });
   });
 
   it("ran the write rules against targets it created, and left nothing behind", () => {
