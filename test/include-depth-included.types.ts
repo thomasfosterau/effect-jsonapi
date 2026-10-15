@@ -514,10 +514,12 @@ const author = Author.make({
   relationships: { comments: { data: [{ type: "comments", id: comment.id }] } },
 });
 assertType<SuccessOf<typeof flagNode>>(Handlers.data(author, { included: [comment, person] }));
-// The same under `fields: true`, for the strict members only: the sparse
-// fieldset types (`Query.FieldsetResources`) do not distribute over a widened
-// `boolean`, so a depth-2 member trimmed by `fields[people]` is not admitted
-// as it is under `include: true` (#397).
+// The same under `fields: true`. The sparse fieldset types
+// (`Query.FieldsetResources`) do not distribute over a widened `boolean`, so on
+// `flagSparseNode` a depth-2 resource that is neither a member nor a direct
+// target (`people`, trimmed by `fields[people]`) is not admitted as it is under
+// `include: true` (#397). On `flagSparseSearch` `people` is a member, so a
+// sparse person is admitted there.
 export const flagSparseSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",
