@@ -189,31 +189,9 @@ assertType<
 >(true);
 assertType<Equals<AttributesOf<DataOf<typeof entries>>, { readonly title?: string }>>(true);
 
-// A family reached as a relationship target is an `included` member as
-// itself: its `type` is a family name, so its members stay strict.
-const Holder = Resource.make("holders", {
-  attributes: { label: Schema.String },
-  relationships: { node: Relationship.one(() => AnyNode) },
-});
-const holder = Holder.make({
-  id: Holder.Id.make("1"),
-  attributes: { label: "L" },
-  relationships: { node: { data: { type: "editors", id: Editor.Id.make("7") } } },
-});
-export const held = Endpoint.get(Holder, { fields: true });
-assertType<Equals<AttributesOf<DataOf<typeof held>>, { readonly label?: string }>>(true);
-assertType<
-  Equals<
-    AttributesOf<Extract<IncludedOf<typeof held>, { readonly type: "editors" }>>,
-    { readonly name: string }
-  >
->(true);
-assertType<SuccessOf<typeof held>>(
-  // @ts-expect-error -- a projected family member does not fit its strict schema
-  Handlers.data(holder, { included: [editor], onResource: project }),
-);
-// Positive control: the unprojected member fits.
-assertType<SuccessOf<typeof held>>(Handlers.data(holder, { included: [editor] }));
+// A family reached as a relationship target is carried in `included` as its
+// members, each partial under its own type (#350): pinned in
+// `test/family-member-fieldsets.types.ts`.
 
 // `Endpoint.resource` / `Group.resource` default `fields` to `true`.
 const group = Group.resource(Article);

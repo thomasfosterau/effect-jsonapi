@@ -309,6 +309,87 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
   });
 });
 
+describe("Query.schema `fields: true` — a family's member types (#350)", () => {
+  // `nodes` is a family name, never a wire type: what the wire carries for a
+  // relationship targeting the family are `editors` and `reviewers`.
+  const Node = Resource.make("nodes", { attributes: { name: Schema.String } });
+  const Editor = Resource.extend(Node, "editors", {
+    inheritId: true,
+    attributes: { level: Schema.String },
+  });
+  const Reviewer = Resource.extend(Node, "reviewers", {
+    inheritId: true,
+    attributes: { score: Schema.String },
+  });
+  const AnyNode = Resource.family(Node, [Editor, Reviewer]);
+  const Holder = Resource.make("holders", {
+    attributes: { label: Schema.String },
+    relationships: { node: Relationship.one(() => AnyNode) },
+  });
+  const Board = Resource.make("boards", {
+    attributes: { title: Schema.String },
+    relationships: {
+      holders: Relationship.many(() => Holder),
+      // Paginated: never an include path, so its family reaches nothing.
+      archive: Relationship.paginated(() => AnyNode),
+    },
+  });
+
+  it("declares each member type of a family-valued relationship's target", () => {
+    // The family name stays declared beside its members (the alias question
+    // is the owner's on #350).
+    const query = Query.schema(Holder, { fields: true });
+    expectFieldsets(query, [
+      "fields[editors]",
+      "fields[holders]",
+      "fields[nodes]",
+      "fields[reviewers]",
+    ]);
+    // Each member's fieldset is its own attributes, inherited ones included.
+    expect(
+      Schema.decodeUnknownSync(query)({
+        "fields[editors]": "name,level",
+        "fields[reviewers]": "score",
+      }),
+    ).toEqual({ fields: { editors: ["name", "level"], reviewers: ["score"] } });
+    expect(() => Schema.decodeUnknownSync(query)({ "fields[editors]": "score" })).toThrow();
+  });
+
+  it("declares the members of a family an include path reaches, and not before", () => {
+    expectFieldsets(Query.schema(Board, { fields: true }), ["fields[boards]", "fields[holders]"]);
+    expectFieldsets(Query.schema(Board, { include: true, fields: true }), [
+      "fields[boards]",
+      "fields[editors]",
+      "fields[holders]",
+      "fields[nodes]",
+      "fields[reviewers]",
+    ]);
+  });
+
+  it("never declares the members of a family reachable only through a paginated relationship", () => {
+    const Archive = Resource.make("archives", {
+      attributes: { name: Schema.String },
+      relationships: { nodes: Relationship.paginated(() => AnyNode) },
+    });
+    expectFieldsets(Query.schema(Archive, { include: true, fields: true }), ["fields[archives]"]);
+  });
+
+  it("declares the members of a name-only family", () => {
+    const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
+    const Video = Resource.make("videos", { attributes: { url: Schema.String } });
+    const Gallery = Resource.make("galleries", {
+      attributes: { title: Schema.String },
+      relationships: { items: Relationship.many(() => Resource.family("media", [Photo, Video])) },
+    });
+    expectFieldsets(Query.schema(Gallery, { fields: true }), [
+      "fields[galleries]",
+      "fields[media]",
+      "fields[photos]",
+      "fields[videos]",
+    ]);
+  });
+});
+
 describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", () => {
   const surface = Include.make(Article, {
     comments: Include.nested(Comment, { author: Person }),

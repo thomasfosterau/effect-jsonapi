@@ -15,7 +15,7 @@ import * as Option from "effect/Option";
 import * as Rec from "effect/Record";
 import type { IncludePathsOf } from "../Query.js";
 import type { Any, IncludableTargets, ResolveIncludePath } from "../Resource.js";
-import { directTargets, includePaths } from "../Resource.js";
+import { directTargets, includePaths, isFamily } from "../Resource.js";
 
 // Each resource once, by identity, first occurrence first.
 const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> =>
@@ -71,6 +71,28 @@ type ReachedBy<R extends Any, Paths> = ResolveIncludePath<R, Paths>;
 export type IncludedResources<R extends Any, I> =
   | DefaultTargets<R, I>
   | (IncludeEnabled<I> extends true ? ReachedBy<R, IncludePathsOf<R, I>> : never);
+
+/**
+ * The member resource definitions of every `Resource.family` in `R`;
+ * nothing for a plain resource definition. A family's `type` is its name,
+ * never a wire type: the resource objects a response carries for it are its
+ * members', so a sparse fieldset that is to reach them names a member type
+ * (#350).
+ *
+ * Distributes over unions of resource definitions.
+ */
+export type FamilyMembers<R> = R extends {
+  readonly members: ReadonlyArray<infer M extends Any>;
+}
+  ? M
+  : never;
+
+/**
+ * The runtime mirror of `R | FamilyMembers<R>`: each resource, followed by
+ * the members of each family among them, each once.
+ */
+export const withFamilyMembers = (resources: ReadonlyArray<Any>): ReadonlyArray<Any> =>
+  dedupe(resources.flatMap((r) => (isFamily(r) ? [r, ...r.members] : [r])));
 
 /**
  * The include paths an `include` option legalises, at runtime. A declared

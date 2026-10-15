@@ -53,6 +53,12 @@ const Node = Resource.make("nodes", { attributes: { name: Schema.String, note: S
 const Editor = Resource.extend(Node, "editors", { inheritId: true });
 const Reviewer = Resource.extend(Node, "reviewers", { inheritId: true });
 const AnyNode = Resource.family(Node, [Editor, Reviewer]);
+// A relationship targeting the family: its `included` members are the
+// family's members, each under its own type (#350).
+const Holder = Resource.make("holders", {
+  attributes: { label: Schema.String },
+  relationships: { node: Relationship.one(() => AnyNode) },
+});
 
 // One wire resource object of each type, every attribute present.
 const wire = {
@@ -74,6 +80,12 @@ const wire = {
   tags: { type: "tags", id: "3", attributes: { name: "news", colour: "red" } },
   companies: { type: "companies", id: "2", attributes: { name: "Acme" } },
   editors: { type: "editors", id: "7", attributes: { name: "Eve", note: "lead" } },
+  holders: {
+    type: "holders",
+    id: "1",
+    attributes: { label: "L" },
+    relationships: { node: { data: { type: "editors", id: "7" } } },
+  },
 } as const;
 
 // A wire resource object with only the named attributes.
@@ -194,35 +206,51 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     expect(admitsPartial(endpoint, draft, false, [wire.companies])).toBe(true);
   });
 
-  describe("a family reached as a relationship target keeps its own schema", () => {
-    // `holders.node` targets the `nodes` family: the family is the `included`
-    // member, and its `type` is a family name, so its members stay strict.
-    const Holder = Resource.make("holders", {
-      attributes: { label: Schema.String },
-      relationships: { node: Relationship.one(() => AnyNode) },
-    });
-    const holder = {
-      type: "holders",
-      id: "1",
-      attributes: {},
-      relationships: { node: { data: { type: "editors", id: "7" } } },
-    };
+  describe("a family reached as a relationship target is partial through its members (#350)", () => {
+    // `holders.node` targets the `nodes` family. `nodes` is a family name,
+    // never a wire type: the `included` members are `editors` and
+    // `reviewers`, which `fields: true` declares, so they are partial.
+    const holder = only(wire.holders);
+    const reviewer = { type: "reviewers", id: "8", attributes: { name: "Rue", note: "second" } };
 
     it.each([
       ["get", Endpoint.get(Holder, { fields: true }), false],
       ["get with `include`", Endpoint.get(Holder, { include: true, fields: true }), false],
       ["list", Endpoint.list(Holder, { fields: true }), true],
     ] as const)("%s", (_, endpoint, many) => {
-      // Positive control: the primary resource is partial, a whole member decodes.
-      expect(admitsPartial(endpoint, holder, many, [wire.editors])).toBe(true);
-      // The family member is not made partial…
-      expect(admitsPartial(endpoint, holder, many, [only(wire.editors, "name")])).toBe(false);
+      // Whole members still decode.
+      expect(admitsPartial(endpoint, holder, many, [wire.editors, reviewer])).toBe(true);
+      // Every member is partial…
+      expect(
+        admitsPartial(endpoint, holder, many, [only(wire.editors, "name"), only(reviewer)]),
+      ).toBe(true);
       // …and still decodes as itself, `type` and `id` intact.
       const decoded = Schema.decodeUnknownSync(successOf(endpoint))({
         data: many ? [holder] : holder,
-        included: [wire.editors],
+        included: [only(wire.editors, "note")],
       });
-      expect(decoded).toMatchObject({ included: [{ type: "editors", id: "7" }] });
+      expect(decoded).toMatchObject({
+        included: [{ type: "editors", id: "7", attributes: { note: "lead" } }],
+      });
+      // A type outside the family is still no member.
+      expect(admitsPartial(endpoint, holder, many, [only(wire.tags)])).toBe(false);
+    });
+
+    it("`related` makes the family target partial", () => {
+      const endpoint = Endpoint.related(Holder, "node", { fields: true });
+      expect(admitsPartial(endpoint, only(wire.editors, "note"), false)).toBe(true);
+      expect(admitsPartial(endpoint, only(reviewer), false)).toBe(true);
+      expect(decodes(endpoint, { data: null })).toBe(true);
+    });
+
+    it("without `fields` the members stay strict", () => {
+      expect(admitsPartial(Endpoint.get(Holder), wire.holders, false, [wire.editors])).toBe(true);
+      expect(
+        admitsPartial(Endpoint.get(Holder), wire.holders, false, [only(wire.editors, "name")]),
+      ).toBe(false);
+      expect(admitsPartial(Endpoint.related(Holder, "node"), only(wire.editors), false)).toBe(
+        false,
+      );
     });
   });
 
@@ -438,7 +466,14 @@ describe("a projected answer over HTTP (#322)", () => {
         Endpoint.collection([Article, Person], { name: "search", path: "/search", fields: true }),
       ),
     )
-    .add(Group.make(AnyNode, Endpoint.polymorphic(AnyNode, { fields: true })));
+    .add(Group.make(AnyNode, Endpoint.polymorphic(AnyNode, { fields: true })))
+    .add(
+      Group.make(
+        Holder,
+        Endpoint.get(Holder, { include: true, fields: true }),
+        Endpoint.related(Holder, "node", { fields: true }),
+      ),
+    );
 
   const company = Company.make({ id: Company.Id.make("2"), attributes: { name: "Acme" } });
   const person = Person.make({
@@ -505,8 +540,28 @@ describe("a projected answer over HTTP (#322)", () => {
     ),
   );
 
+  const holder = Holder.make({
+    id: Holder.Id.make("1"),
+    attributes: { label: "L" },
+    relationships: { node: { data: { type: "editors", id: Editor.Id.make("7") } } },
+  });
+  const HoldersLive = HttpApiBuilder.group(Api, "holders", (handlers) =>
+    handlers
+      .handle("get", ({ query }) =>
+        Effect.succeed(
+          Handlers.data(holder, {
+            included: [editor],
+            onResource: Handlers.project(query.fields),
+          }),
+        ),
+      )
+      .handle("node", ({ query }) =>
+        Effect.succeed(Handlers.data(editor, { onResource: Handlers.project(query.fields) })),
+      ),
+  );
+
   const appLayer = HttpApiBuilder.layer(Api).pipe(
-    Layer.provide([ArticlesLive, SearchLive, NodesLive]),
+    Layer.provide([ArticlesLive, SearchLive, NodesLive, HoldersLive]),
     Layer.provide(Middleware.layer),
     Layer.provide(platformLayer),
   );
@@ -550,6 +605,19 @@ describe("a projected answer over HTTP (#322)", () => {
       { data: [only(wire.articles, "body"), only(wire.people, "name")] },
     ],
     ["/nodes/7?fields[editors]=note", { data: only(wire.editors, "note") }],
+    // A family-valued relationship's members are trimmed by their own types (#350).
+    [
+      "/holders/1?fields[editors]=note",
+      { data: wire.holders, included: [only(wire.editors, "note")] },
+    ],
+    [
+      "/holders/1?include=node&fields[holders]=label&fields[editors]=name&fields[reviewers]=note",
+      { data: wire.holders, included: [only(wire.editors, "name")] },
+    ],
+    ["/holders/1/node?fields[editors]=name", { data: only(wire.editors, "name") }],
+    // The family name is still declared, and names no resource object, so it
+    // trims nothing (the alias question on #350 is the owner's).
+    ["/holders/1?fields[nodes]=name", { data: wire.holders, included: [wire.editors] }],
   ])("answers 200 omitting the excluded attributes: %s", async (url, expected) => {
     const response = await serve(url);
     expect(response.status).toBe(200);
