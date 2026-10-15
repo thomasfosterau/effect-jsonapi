@@ -88,25 +88,30 @@ export const idempotencyHeaders = (
     : Effect.succeed({});
 
 /**
- * Whether `observation` is an endpoint's refusal of a write the kit sent it
- * without a key: a `400` from an endpoint that declares `Idempotency-Key`, to
- * a request that carried none (`key` is what {@link idempotencyHeaders} gave
- * it), whose error document names the header as a `source` — the package's
- * own `400` for a missing required key (`docs/idempotency.md` §2). The kit
- * keys only an endpoint whose headers schema plainly requires the header, so
- * one that requires it some other way (through a union, say) reads as
- * optional and is sent none. Any other 4xx is an answer to the write — the
- * package's `KeyInProgress` (409) and `KeyMismatch` (422) name the header too,
- * but neither is what a request without a key can draw.
+ * Whether `observation` is a 4xx, from an endpoint that declares
+ * `Idempotency-Key`, to a request the kit sent without a key (`key` is what
+ * {@link idempotencyHeaders} gave it), whose error document names the header
+ * as a `source`: a refusal on idempotency grounds, whatever its status. The
+ * kit keys only an endpoint whose headers schema plainly requires the header,
+ * so one that requires it some other way (through a union, say) reads as
+ * optional and is sent none.
+ *
+ * This is the atomic rule's test. That rule judges only whether the server
+ * examined the operations document, and a refusal over the key — the
+ * package's own missing-key `400`, `KeyInProgress` (409) or `KeyMismatch`
+ * (422) — says nothing about that, so any of them leaves the rule undecided.
+ * The delete rule judges the answer itself and uses the narrower
+ * {@link refusedForMissingKey}.
  *
  * @internal
  */
-export const refusedForMissingKey = (
+export const refusedOnKeyGrounds = (
   endpoint: Discovered,
   key: Readonly<Record<string, string>>,
   observation: Observation,
 ): boolean =>
-  observation.status === 400 &&
+  observation.status >= 400 &&
+  observation.status < 500 &&
   endpoint.idempotencyKey !== "absent" &&
   !Object.hasOwn(key, IDEMPOTENCY_HEADER) &&
   errorObjectsOf(observation.body).some((error) => {
@@ -117,6 +122,26 @@ export const refusedForMissingKey = (
       source["header"].toLowerCase() === IDEMPOTENCY_HEADER
     );
   });
+
+/**
+ * Whether `observation` is an endpoint's refusal of a write the kit sent it
+ * without a key: a {@link refusedOnKeyGrounds} refusal whose status is `400`,
+ * the package's own `400` for a missing required key
+ * (`docs/idempotency.md` §2).
+ *
+ * This is the delete rule's test, and it is deliberately narrower than the
+ * atomic rule's. The delete rule judges the answer itself, so any other 4xx
+ * is an answer to the delete and is judged: the package's `KeyInProgress`
+ * (409) and `KeyMismatch` (422) name the header too, but neither is what a
+ * request without a key can draw.
+ *
+ * @internal
+ */
+export const refusedForMissingKey = (
+  endpoint: Discovered,
+  key: Readonly<Record<string, string>>,
+  observation: Observation,
+): boolean => observation.status === 400 && refusedOnKeyGrounds(endpoint, key, observation);
 
 // ---------------------------------------------------------------------------
 // Targets

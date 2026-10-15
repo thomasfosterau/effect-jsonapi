@@ -84,6 +84,7 @@ import {
   pathFor,
   primaryIdentity,
   refusedForMissingKey,
+  refusedOnKeyGrounds,
   type WriteTarget as Target,
   targets,
   undecided,
@@ -2282,9 +2283,11 @@ const atomicMalformedRejected: RuleImpl = {
         headers: { ...atomicHeaders, ...key },
         body: { "atomic:operations": "not an array" },
       });
-      // Sent no key, the endpoint may refuse it for that alone, which says
-      // nothing of the document.
-      if (refusedForMissingKey(endpoint, key, observation))
+      // Sent no key, the endpoint may refuse it over the key — for missing it,
+      // or with a 409 or 422 — which says nothing of whether the document was
+      // examined. Any such 4xx leaves the rule undecided; the delete rule,
+      // which judges the answer itself, sets aside only the missing-key 400.
+      if (refusedOnKeyGrounds(endpoint, key, observation))
         return skip(
           atomicMalformedRejected.rule,
           `the malformed document answered ${observation.status} from ${endpoint.path}, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key, and the error names that header as its source (${describe(observation)})`,
