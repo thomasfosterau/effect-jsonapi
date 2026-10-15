@@ -2,7 +2,7 @@
  * This package's own profile rules — what a server must do *beyond* JSON:API
  * v1.1 to implement the conventions this library bakes in.
  *
- * Two groups:
+ * Three groups:
  *
  *   - **The filter grammar profile** (`docs/filter-grammar.md`, published at
  *     `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
@@ -10,6 +10,10 @@
  *     normative today and mechanically checkable over the wire. Its
  *     *evaluation* semantics are not — they need an oracle over known data —
  *     and are declared as a coverage gap rather than silently omitted.
+ *   - **The Idempotency-Key profile** (`docs/idempotency.md`, published at
+ *     `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
+ *     the 2xx a create probe gets from the `writes` fixture; what a *retried*
+ *     write does is declared as a coverage gap.
  *   - **Library conventions** that the spec leaves optional but this package
  *     takes a position on: advertising `jsonapi`, and accepting the
  *     repeated-key spelling of every comma-separated query family.
@@ -20,8 +24,13 @@
  * @since 0.15.0
  * @internal
  */
-import { Effect } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { PROFILE_URI } from "../../Filter.js";
+import { HEADER, PROFILE_URI as IDEMPOTENCY_PROFILE_URI } from "../../Idempotency.js";
 import {
   type Context,
   coverageNote,
@@ -32,6 +41,7 @@ import {
   isRecord,
   jsonApiAccept,
   noProbeReason,
+  type Observation,
   parseMediaType,
   probeable,
   type Rule,
@@ -41,6 +51,20 @@ import {
   sourceParametersOf,
   withQuery,
 } from "./core.js";
+import {
+  decided,
+  onAccepted,
+  overTargets,
+  primaryIdentity,
+  targets,
+  undecided,
+  type Verdict,
+  type Via,
+  withCreated,
+  type WriteTarget,
+  writeHeaders,
+} from "./write.js";
+import { quote } from "./crawl.js";
 
 const GRAMMAR =
   "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md";
@@ -327,6 +351,128 @@ const spellingEquivalence: RuleImpl = {
 };
 
 // ---------------------------------------------------------------------------
+// The Idempotency-Key profile
+// ---------------------------------------------------------------------------
+
+const IDEMPOTENCY =
+  "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/idempotency.md";
+
+const idempotencyRule = (
+  id: string,
+  section: string,
+  anchor: string,
+  level: Rule["level"],
+  requirement: string,
+): Rule => ({
+  id,
+  tier: "profile",
+  section: `idempotency/v1 ${section}`,
+  reference: `${IDEMPOTENCY}#${anchor}`,
+  level,
+  requirement,
+});
+
+/**
+ * Creates through the target's create endpoint as `viaCreateEndpoint` does,
+ * carrying a fresh `Idempotency-Key`: an endpoint declaring
+ * `idempotency: "required"` refuses a create without one, and a key never sent
+ * before can only ever be a first attempt, never a replay.
+ */
+const viaIdempotentCreate = (ctx: Context, target: WriteTarget): Via => ({
+  send: (payload) =>
+    Effect.sync(() => `conformance-${globalThis.crypto.randomUUID()}`).pipe(
+      Effect.flatMap((key) =>
+        ctx.request({
+          method: "POST",
+          url: target.createPath,
+          headers: { ...writeHeaders, [HEADER]: key },
+          body: { data: payload },
+        }),
+      ),
+    ),
+  identify: primaryIdentity,
+});
+
+const decodeJsonApiProfile = Schema.decodeUnknownOption(
+  Schema.Struct({
+    jsonapi: Schema.Struct({ profile: Schema.Array(Schema.Unknown) }),
+  }),
+);
+
+/** The profile URIs an answer's top-level `jsonapi.profile` names. */
+const documentProfiles = (observation: Observation): ReadonlyArray<string> =>
+  Option.match(decodeJsonApiProfile(observation.body), {
+    onNone: () => [],
+    onSome: ({ jsonapi }) => Arr.filter(jsonapi.profile, Predicate.isString),
+  });
+
+/** The profile URIs an answer's `Content-Type` names in its `profile` parameter (space-separated). */
+const mediaTypeProfiles = (observation: Observation): ReadonlyArray<string> =>
+  Option.match(Option.fromUndefinedOr(observation.contentType), {
+    onNone: () => [],
+    onSome: (header) =>
+      parseMediaType(header)
+        .parameters.filter(([name]) => name === "profile")
+        .flatMap(([, value]) => value.split(" ")),
+  });
+
+/** What a create's 2xx answer says of the profile: a document naming it in either place passes. */
+const advertisedOn = (rule: Rule, target: WriteTarget, observation: Observation): Verdict => {
+  if (observation.text === "")
+    return undecided(
+      `creating a "${target.key}" resource answered ${observation.status} with no document, so neither a \`jsonapi\` member nor a media type could name the profile`,
+    );
+  const named = [...documentProfiles(observation), ...mediaTypeProfiles(observation)];
+  if (named.includes(IDEMPOTENCY_PROFILE_URI)) return decided(1, []);
+  const jsonapi = isRecord(observation.body) ? observation.body["jsonapi"] : undefined;
+  return decided(1, [
+    finding(rule, {
+      detail: `the ${observation.status} creating a "${target.key}" resource through ${target.endpoint.path}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
+      expected: `\`jsonapi.profile\` or the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
+      observed: `jsonapi: ${jsonapi === undefined ? "(none)" : quote(jsonapi)} · Content-Type: ${
+        observation.contentType === undefined ? "(none)" : quote(observation.contentType)
+      }`,
+      probe: observation.probe,
+    }),
+  ]);
+};
+
+/**
+ * `docs/idempotency.md` §1: a server advertises the profile in `jsonapi.profile`
+ * and MAY also name it on the media type, so either place passes. Only a write
+ * shows it — the kit cannot read an endpoint's answer to a create without
+ * making one — so the rule runs one create per endpoint declaring the header,
+ * on the `writes` fixture, under `mutating: true`.
+ */
+const advertisesIdempotencyProfile: RuleImpl = {
+  creates: true,
+  rule: idempotencyRule(
+    "profile/idempotency/advertises-profile-uri",
+    "§1 What the profile is, and is not",
+    "1-what-the-profile-is-and-is-not",
+    "SHOULD",
+    `A server implementing the Idempotency-Key profile SHOULD advertise it: the 2xx response to a create on an endpoint that accepts the \`Idempotency-Key\` header names \`${IDEMPOTENCY_PROFILE_URI}\` in the top-level \`jsonapi.profile\` member (\`Idempotency.jsonapi\`) or in the \`profile\` parameter of its media type.`,
+  ),
+  run: (ctx) =>
+    overTargets(
+      ctx,
+      advertisesIdempotencyProfile.rule,
+      targets(ctx, "create", (endpoint) => endpoint.idempotencyKey),
+      "create endpoint declaring the `Idempotency-Key` header",
+      (target) =>
+        withCreated(
+          ctx,
+          advertisesIdempotencyProfile.rule,
+          target,
+          viaIdempotentCreate(ctx, target),
+          onAccepted(target, ({ observation }) =>
+            Effect.succeed(advertisedOn(advertisesIdempotencyProfile.rule, target, observation)),
+          ),
+        ),
+    ),
+};
+
+// ---------------------------------------------------------------------------
 // Library conventions
 // ---------------------------------------------------------------------------
 
@@ -487,6 +633,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   advertisesProfile,
   rejections,
   spellingEquivalence,
+  advertisesIdempotencyProfile,
   jsonApiMember,
   repeatedKeySpelling,
 ];
