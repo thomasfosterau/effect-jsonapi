@@ -138,6 +138,17 @@ describe("Endpoint.create: the 201's Location header", () => {
     expect(fromJson(response.body)).toEqual({ data: created });
   });
 
+  it("answers a hidden write's committed identifier document with a 201 and no Location", async () => {
+    const api = HttpApi.make("blog").add(
+      Group.make(Article, Endpoint.create(Article, { success: Endpoint.WriteDocument(Article) })),
+    );
+    const committed = { data: { type: "articles", id: "1", meta: { version: 1 } } };
+    const response = await server({ api, handle: () => Effect.succeed(committed) })();
+    expect(response.status).toBe(201);
+    expect(response.location).toBeNull();
+    expect(fromJson(response.body)).toEqual(committed);
+  });
+
   it("leaves a create answering with another status untouched", async () => {
     const response = await postOnce(
       () =>

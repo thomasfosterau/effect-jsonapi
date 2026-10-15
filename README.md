@@ -1662,6 +1662,28 @@ const { handler } = Registry.webHandler(Api, [peopleFamily, contestsFamily], {
 // (request: Request, context: Context<User | Database | …>) => Promise<Response>
 ```
 
+Every write runs its operation inside `transact`, re-reads the row as the writer and writes it through the cache. The commit and the cache step can't be separated by an interrupt, and a failed re-read evicts the cached entry before its failure propagates, so a write that hides the row from its own writer (a public row made private by a writer who can't read private rows) can't leave the old public resource in the cache.
+
+A committed write the writer can no longer read would otherwise answer 404, and a client retrying a "failed" create duplicates it. `hiddenWrite` names the re-read failures that mean "hidden", and the handler answers those with the resource's identifier instead: `201` / `200` with `{ data: { type, id, meta: { version } } }` and no attributes (attributes and relationships are optional members of a resource object), `version` coming from the operation's write result when it reports one. The group must declare that document, with `hiddenWrites: true`; without it the writes declare the full document alone, and `Registry.FamilyFor` rejects a handler set that could answer anything else:
+
+```ts
+const { group } = Group.flat({
+  resource: Person,
+  list: ListPeople,
+  create,
+  update,
+  hiddenWrites: true,
+});
+// POST /people → 201 { data: Person } | { data: { type: "people", id, meta?: { version } } }
+
+ResourceHandlers.make({
+  // …as above, with `create` / `update` answering `{ id, version? }`
+  hiddenWrite: { type: "people", when: (error) => error._tag === "NotFound" },
+});
+```
+
+The identifier document carries no `links.self`, so its `201` has no `Location`.
+
 ## Query parameters
 
 | Family | Wire form | Decoded form |
