@@ -173,6 +173,56 @@ describe("the default `included` union reaches every legal include path (#320)",
       "people",
     ]);
     expect(admitted(Endpoint.polymorphic(AnyNode), primary, false)).toEqual(["comments"]);
+    // The depth-2 path comes from a member other than the first.
+    const EditorFirst = Resource.family(Node, [Editor, Author]);
+    expect(admitted(Endpoint.polymorphic(EditorFirst, { include: true }), primary, false)).toEqual([
+      "comments",
+      "people",
+    ]);
+  });
+
+  describe("a target one member reaches only through a paginated relationship", () => {
+    // `posts.author` is a to-one `people`, so `author` and `author.employer`
+    // are legal paths; `drafts.author` is a paginated `revisions`, which no
+    // path may cross, so walking those paths from `drafts` reaches nothing.
+    const Entry = Resource.make("entries", { attributes: { title: Schema.String } });
+    const Post = Resource.extend(Entry, "posts", {
+      inheritId: true,
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const Draft = Resource.extend(Entry, "drafts", {
+      inheritId: true,
+      relationships: { author: Relationship.paginated(() => Revision) },
+    });
+    const post = {
+      type: "posts",
+      id: "1",
+      attributes: { title: "T" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    };
+
+    it("is not admitted by `collection`", () => {
+      expect(
+        admitted(
+          Endpoint.collection([Post, Draft], { name: "entries", path: "/entries", include: true }),
+          post,
+          true,
+        ),
+      ).toEqual(["people", "companies"]);
+    });
+
+    it("is not admitted by `polymorphic`", () => {
+      const postFirst = Resource.family(Entry, [Post, Draft]);
+      const draftFirst = Resource.family(Entry, [Draft, Post]);
+      expect(admitted(Endpoint.polymorphic(postFirst, { include: true }), post, false)).toEqual([
+        "people",
+        "companies",
+      ]);
+      expect(admitted(Endpoint.polymorphic(draftFirst, { include: true }), post, false)).toEqual([
+        "people",
+        "companies",
+      ]);
+    });
   });
 
   it("`Endpoint.resource` derives the same union for its `get` and `list`", () => {

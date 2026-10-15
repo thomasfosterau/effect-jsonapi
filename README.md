@@ -699,6 +699,8 @@ const articles = Group.resource(Article, {
 
 Pass `success` to supply that schema. It defaults to today's `document()` / `collection()`, so existing endpoints are unchanged; only the response moves — path, params, query parameters, request payload, errors and middleware stay exactly as they were. Any schema works, exactly as with `payload`: the document envelope is untouched, so `Handlers.offsetPaginationLinks` and the rest of the handler helpers still apply.
 
+With `include` on (`true` or a `Query.IncludeOptions`), the default document's `included` covers every type a legal include path reaches, not only the resource's direct targets (see [Constraining the advertised include paths](#constraining-the-advertised-include-paths)). A hand-written `success` replaces that union with whatever its own `included` admits, and `Document.DataDocument` / `CollectionDocument` admit nothing in `included` unless you pass the union. So an override on an endpoint that advertises `comments.author` must list `Comment` and `Person` itself, or the response for that path fails to encode ([#342](https://github.com/thomasfosterau/effect-jsonapi/issues/342) tracks a public helper that builds the union).
+
 ```ts
 // The wire variant: the resource, with its link members narrowed to plain strings
 const WireArticle = Schema.Struct({

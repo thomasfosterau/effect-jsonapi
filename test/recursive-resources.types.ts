@@ -19,6 +19,7 @@
  * broke.
  */
 import { Effect, Schema } from "effect";
+import type { HttpApiEndpoint } from "effect/http-api";
 import {
   Atomic,
   Document,
@@ -228,6 +229,22 @@ assertType<ReadonlyArray<string> | undefined>(decodedQuery.include);
 // Endpoints derive their path and success document from the resource.
 const getArticle = Endpoint.get(Article);
 const listArticles = Endpoint.list(Article, { include: true });
+
+// Whether two types are identical, not merely mutually assignable.
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+// The `included` member type of an endpoint's success document.
+type IncludedOf<E> =
+  HttpApiEndpoint.Success<E> extends { readonly Type: { readonly included?: infer I } }
+    ? NonNullable<I> extends ReadonlyArray<infer M>
+      ? M
+      : never
+    : never;
+// The walk stays bounded on the cycle: the depth-2 paths reach `comments` and
+// `articles` (via `editor` and `comments.article`) and nothing else.
+assertType<Equals<IncludedOf<typeof listArticles>, Article["Type"] | Comment["Type"]>>(true);
+// Negative control: `Comment` alone is not the union.
+assertType<Equals<IncludedOf<typeof listArticles>, Comment["Type"]>>(false);
 const getComment = Endpoint.get(Comment);
 const articleGroup = Group.resource(Article);
 

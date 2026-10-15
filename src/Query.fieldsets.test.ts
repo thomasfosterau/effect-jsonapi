@@ -250,6 +250,26 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
     ]);
   });
 
+  it("never declares a target one member reaches only through a paginated relationship", () => {
+    // `posts.author` is a to-one `people`, so `author` and `author.employer`
+    // are legal paths; `drafts.author` is a paginated `revisions`, which no
+    // path may cross, so walking those paths from `drafts` reaches nothing.
+    const Post = Resource.make("posts", {
+      attributes: { title: Schema.String },
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    const Draft = Resource.make("drafts", {
+      attributes: { title: Schema.String },
+      relationships: { author: Relationship.paginated(() => Revision) },
+    });
+    expectFieldsets(Query.schema([Post, Draft], { include: true, fields: true }), [
+      "fields[companies]",
+      "fields[drafts]",
+      "fields[people]",
+      "fields[posts]",
+    ]);
+  });
+
   it("stays bounded on a self-referencing graph", () => {
     const Order = Resource.make("orders", {
       attributes: { shipped: Schema.Boolean },

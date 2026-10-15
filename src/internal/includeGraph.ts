@@ -14,7 +14,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Rec from "effect/Record";
 import type { IncludePathsOf } from "../Query.js";
-import type { Any, IncludableTargets, ResolveIncludePath } from "../Resource.js";
+import type { Any, IncludableKeys, IncludableTargets, Target } from "../Resource.js";
 import { directTargets, includePaths } from "../Resource.js";
 
 // Each resource once, by identity, first occurrence first.
@@ -50,11 +50,28 @@ type DefaultTargets<R extends Any, I> =
       ? IncludableTargets<R["relationships"]>
       : never;
 
-// The resource definitions each of `R`'s members reaches along `Paths`: every
-// resource on the way down a path, its leaf included. The paths are the whole
-// endpoint's, so on a heterogeneous endpoint each member walks every path, and
-// one it has no relationship for reaches nothing.
-type ReachedBy<R extends Any, Paths> = R extends Any ? ResolveIncludePath<R, Paths> : never;
+// The target of `R`'s relationship `Key` when an include path may cross it:
+// `never` for a `paginated` relationship (whose data is never inlined) and for
+// a key `R` does not declare.
+type IncludableTarget<R extends Any, Key> = Key extends IncludableKeys<R> ? Target<R, Key> : never;
+
+// The resource definitions `R` reaches along one include path: every resource
+// on the way down, its leaf included, stopping at the first segment that is
+// not one of the current resource's includable relationships. Unlike the
+// public `ResolveIncludePath`, it never crosses a `paginated` relationship —
+// on a heterogeneous endpoint a path legal for one member (`author`, a to-one
+// there) can name another member's paginated relationship.
+type ResolveIncludable<R extends Any, Path> = R extends Any
+  ? Path extends `${infer Head}.${infer Rest}`
+    ? IncludableTarget<R, Head> | ResolveIncludable<IncludableTarget<R, Head>, Rest>
+    : IncludableTarget<R, Path>
+  : never;
+
+// The resource definitions each of `R`'s members reaches along `Paths`. The
+// paths are the whole endpoint's, so on a heterogeneous endpoint each member
+// walks every path, and one it has no includable relationship for reaches
+// nothing.
+type ReachedBy<R extends Any, Paths> = ResolveIncludable<R, Paths>;
 
 /**
  * The resource definitions a response of an endpoint over `R` with the
@@ -87,8 +104,8 @@ export const includePathsFor = (
 
 // The resource definitions `resource` reaches along an include path's
 // segments: every resource on the way down, its leaf included, stopping at the
-// first segment that names none of the current resource's relationships. The
-// runtime mirror of `ResolveIncludePath`.
+// first segment that names none of the current resource's relationships or
+// names a `paginated` one. The runtime mirror of `ReachedBy`.
 const reachedBy = (resource: Any, segments: ReadonlyArray<string>): ReadonlyArray<Any> =>
   Arr.matchLeft(segments, {
     onEmpty: (): ReadonlyArray<Any> => [],
@@ -96,6 +113,7 @@ const reachedBy = (resource: Any, segments: ReadonlyArray<string>): ReadonlyArra
       Option.match(Rec.get(resource.relationships, segment), {
         onNone: (): ReadonlyArray<Any> => [],
         onSome: (descriptor) => {
+          if (descriptor.kind === "paginated") return [];
           const target = descriptor.ref();
           return [target, ...reachedBy(target, rest)];
         },
