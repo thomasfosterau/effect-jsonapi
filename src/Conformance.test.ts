@@ -2732,6 +2732,137 @@ describe("Conformance: the write fixture", () => {
     expect(tags(transport.report)).toEqual(tags(direct.report));
   });
 
+  /**
+   * A client that rewrites every request it is handed from the run's
+   * `http://fixture.test` onto `http://127.0.0.1:4010` with
+   * `HttpClient.mapRequest` — a `baseUrl` mapped onto a local port — in front
+   * of `canned`. `sent` is every URL it sent on, `foreign` every URL it was
+   * handed to rewrite that is not on the run's origin — a request the kit built
+   * from one the client had already rewritten, which a rewrite that is not
+   * idempotent would rewrite twice.
+   */
+  const rewritingOrigin = () => {
+    const sent: Array<string> = [];
+    const foreign: Array<string> = [];
+    return {
+      sent,
+      foreign,
+      rewrite: (client: HttpClient.HttpClient) =>
+        HttpClient.mapRequest(client, (request) => {
+          if (!request.url.startsWith("http://fixture.test/")) foreign.push(request.url);
+          return HttpClientRequest.setUrl(
+            request,
+            request.url.replace("http://fixture.test", "http://127.0.0.1:4010"),
+          );
+        }),
+      client: (canned: HttpClient.HttpClient) =>
+        HttpClient.make((request, url) => {
+          sent.push(url.href);
+          return canned.execute(request);
+        }),
+    };
+  };
+
+  it("reads a client that rewrites every request onto another origin as the server it sends to (#359)", async () => {
+    const direct = await run();
+    const rewriting = rewritingOrigin();
+    const { report } = await run(undefined, undefined, {
+      client: (canned) => rewriting.rewrite(rewriting.client(canned)),
+    });
+    expect(rewriting.sent.length).toBeGreaterThan(0);
+    expect(rewriting.sent.every((url) => url.startsWith("http://127.0.0.1:4010/"))).toBe(true);
+    expect(outcomeFor(report, "spec/target/reachable")._tag).toBe("Passed");
+    expect(failed(report)).toEqual([]);
+    expect(verdicts(report)).toEqual(verdicts(direct.report));
+  });
+
+  it("still decides nothing on a client that rewrites every request onto another origin and follows each redirect off it itself", async () => {
+    const rewriting = rewritingOrigin();
+    const { report } = await run(undefined, undefined, {
+      client: (canned) => rewriting.rewrite(followingOffsite(() => true)(canned)),
+    });
+    expect(outcomeFor(report, "spec/target/reachable")).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: expect.stringContaining(
+            "hand the kit a client that does not follow redirects itself",
+          ),
+          observed: `/articles/1: a redirect the transport followed itself, ending at https://elsewhere.test/articles/1 with a 200, whose answer the kit does not read: https://elsewhere.test is another origin than the one the request was sent to, http://127.0.0.1:4010, and the transport has already tried the request there`,
+        },
+      ],
+    });
+    expect(failed(report)).toEqual(["spec/target/reachable"]);
+    expect(Conformance.summarise(report).passed).toBe(0);
+  });
+
+  it("prepares each request once, as the client's own `execute` does", async () => {
+    const rewriting = rewritingOrigin();
+    let taps = 0;
+    const { report } = await run(undefined, undefined, {
+      client: (canned) =>
+        HttpClient.tapRequest(rewriting.rewrite(rewriting.client(canned)), () =>
+          Effect.sync(() => {
+            taps += 1;
+          }),
+        ),
+    });
+    expect(rewriting.sent.length).toBeGreaterThan(0);
+    expect(taps).toBe(rewriting.sent.length);
+    expect(rewriting.foreign).toEqual([]);
+    expect(failed(report)).toEqual([]);
+  });
+
+  it("follows an absolute `Location` on the origin a rewriting client sends to, through the client again", async () => {
+    const direct = await run();
+    const rewriting = rewritingOrigin();
+    const redirected = redirectingAll(308, (path) => `http://127.0.0.1:4010/live${path}`);
+    const { report } = await run(undefined, undefined, {
+      client: (canned) => rewriting.rewrite(redirected.client(canned)),
+    });
+    expect(redirected.sent.some((url) => url.startsWith("http://127.0.0.1:4010/live/"))).toBe(true);
+    expect(redirected.sent.every((url) => url.startsWith("http://127.0.0.1:4010/"))).toBe(true);
+    // Each hop is a request the kit built on its own origin, rewritten once.
+    expect(rewriting.foreign).toEqual([]);
+    expect(verdicts(report)).toEqual(verdicts(direct.report));
+  });
+
+  /** A failure of the client's own request preparation, as a token refresh fails. */
+  const unprepared = (request: HttpClientRequest.HttpClientRequest) =>
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({ request, description: "no token" }),
+    });
+
+  it("reads a client whose request preparation fails as unreachable, not as a crash", async () => {
+    const { report } = await run(undefined, undefined, {
+      client: (canned) =>
+        HttpClient.mapRequestEffect(canned, (request) => Effect.fail(unprepared(request))),
+    });
+    expect(outcomeFor(report, "spec/target/reachable")._tag).toBe("Failed");
+    expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual([]);
+  });
+
+  it("lets a client retry a request whose preparation failed, as its own `execute` does", async () => {
+    const direct = await run();
+    const failedOnce = new WeakSet<HttpClientRequest.HttpClientRequest>();
+    let refused = 0;
+    const { report } = await run(undefined, undefined, {
+      client: (canned) =>
+        HttpClient.retry(
+          HttpClient.mapRequestEffect(canned, (request) => {
+            if (failedOnce.has(request)) return Effect.succeed(request);
+            failedOnce.add(request);
+            refused += 1;
+            return Effect.fail(unprepared(request));
+          }),
+          { times: 1 },
+        ),
+    });
+    expect(refused).toBeGreaterThan(0);
+    expect(failed(report)).toEqual([]);
+    expect(verdicts(report)).toEqual(verdicts(direct.report));
+  });
+
   it("names a redirect the transport followed off the origin in the rule it leaves undecided", async () => {
     const unknown = await run(undefined, undefined, {
       client: followingOffsite((_, url) => url.searchParams.has("unknown")),
