@@ -187,10 +187,19 @@ export default defineConfig({
       // evaluated by Vite / Vitest / Node in bare Node, before any Effect
       // runtime exists — there is no `Config` provider to read from and no
       // `FileSystem` or `ChildProcess` service to call, so `process.env` and
-      // `node:*` are the only things that work there.
+      // `node:*` are the only things that work there. The two artifact tests
+      // drive the built package from outside, the same way: a module graph
+      // walk, and a consumer project compiled by `tsc` in a temp directory.
       {
-        files: ["**/vite.config.ts", "scripts/**", "test/fixtures/**", "test/entry-points.test.ts"],
+        files: [
+          "**/vite.config.ts",
+          "scripts/**",
+          "test/fixtures/**",
+          "test/entry-points.test.ts",
+          "test/declaration-emit.test.ts",
+        ],
         rules: {
+          "effect/use-temp-file-scoped": "off",
           "effect/avoid-node-imports": "off",
           "effect/avoid-sync-fs": "off",
           "effect/avoid-process-env": "off",

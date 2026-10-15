@@ -204,10 +204,17 @@ type IncludedOf<R extends Any, Include> = Include extends {
     ? ReachableIncluded<R, Include>
     : DefaultIncluded<R["relationships"]>;
 
-// The `included` union of a read endpoint whose `include` option is `true` or
-// a `Query.IncludeOptions`: the direct targets and every resource a legal
-// include path reaches.
-interface ReachableIncluded<R extends Any, Include> extends Schema.Union<
+/**
+ * The `included` union of a read endpoint over `R` whose `include` option is
+ * `true` or a `Query.IncludeOptions`: the direct targets and every resource a
+ * legal include path reaches (#320). The default success document of `get`,
+ * `list` and `related` carries it, so it is part of their inferred types —
+ * and exported so a consumer that emits declarations can name it (#348).
+ *
+ * @since 0.17.0
+ * @category schemas
+ */
+export interface ReachableIncluded<R extends Any, Include> extends Schema.Union<
   ReadonlyArray<IncludedResources<R, Include>>
 > {}
 
@@ -1264,6 +1271,41 @@ const deleteEndpoint = <
     options?.idempotency,
   );
 
+export type {
+  /**
+   * The resource definitions a response of an endpoint over `R` with the
+   * `include` option `I` can carry in `included`: the non-`paginated` direct
+   * targets and, when `I` turns `include` on, every resource a legal include
+   * path reaches. The `included` union of a read endpoint that declares
+   * `fields` is computed over it, so it is part of that endpoint's inferred
+   * type and exported for declaration emit (#348).
+   *
+   * @since 0.17.0
+   * @category type-level
+   */
+  IncludedResources,
+  /**
+   * The resource object of `R` with every attribute optional: what the default
+   * success document of a read endpoint that declares `fields` admits for each
+   * resource type a fieldset can name (#322). Part of those endpoints'
+   * inferred types, so exported for declaration emit (#348).
+   *
+   * @since 0.17.0
+   * @category schemas
+   */
+  SparseResource,
+  /**
+   * A `Schema.Union` of the sparse forms of `Members`: a family's members, or
+   * the resources of a heterogeneous endpoint, each a {@link SparseResource}
+   * when a fieldset can name its type. Part of the inferred types of
+   * endpoints that declare `fields`, so exported for declaration emit (#348).
+   *
+   * @since 0.17.0
+   * @category schemas
+   */
+  SparseUnion,
+};
+
 export {
   /**
    * `DELETE /<type>/:id` — delete a resource. See {@link deleteEndpoint}.
@@ -1309,7 +1351,17 @@ type MembersIncludedOf<
       : MembersReachableIncluded<Members, Include, DefaultMembers>
     : Default;
 
-interface MembersReachableIncluded<
+/**
+ * The `included` union of a heterogeneous endpoint (`collection`,
+ * `polymorphic`) whose `include` option is `true` or a `Query.IncludeOptions`:
+ * its default members widened by every resource a legal include path reaches
+ * from any of `Members` (#320). Exported, like {@link ReachableIncluded}, so a
+ * consumer that emits declarations can name it (#348).
+ *
+ * @since 0.17.0
+ * @category schemas
+ */
+export interface MembersReachableIncluded<
   Members extends Any,
   Include,
   DefaultMembers extends Any,
