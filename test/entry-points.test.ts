@@ -10,8 +10,11 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as Arr from "effect/Array";
+import * as Order from "effect/Order";
 import ts from "typescript";
 import { describe, expect, it } from "vite-plus/test";
+import config from "../vite.config.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = path.join(ROOT, "src");
@@ -227,6 +230,31 @@ describe("schema-only entry point", () => {
 
   it("reaches exactly the modules assigned to the schema tier", () => {
     expect(schema.modules).toEqual([...SCHEMA_TIER].sort());
+  });
+
+  /**
+   * The lint exemption follows the tier. `vite.config.ts` turns
+   * `effect/no-barrel-imports` off for exactly the modules this entry point
+   * reaches, because the plain `effect` barrel is the only import they may
+   * use. A module that leaves the tier must lose the exemption, and one that
+   * joins it must gain it, so the override's `files` are pinned to
+   * `SCHEMA_TIER` (which includes `schema.ts` itself). Every override that
+   * names the rule counts, whatever severity it spells (`"off"`, `["off"]`,
+   * `0`, `"allow"`), so a second exemption cannot slip past by spelling "off"
+   * differently.
+   */
+  it("exempts exactly the schema tier from `no-barrel-imports`", () => {
+    const overrides = (config.lint?.overrides ?? []).filter(
+      (override) => override.rules !== undefined && "effect/no-barrel-imports" in override.rules,
+    );
+    expect(overrides).toHaveLength(1);
+    expect(overrides[0]?.rules?.["effect/no-barrel-imports"]).toEqual("off");
+    expect(Arr.sort(overrides[0]?.files ?? [], Order.String)).toEqual(
+      Arr.sort(
+        SCHEMA_TIER.map((module) => `src/${module}`),
+        Order.String,
+      ),
+    );
   });
 
   it("reaches none of the HTTP-tier modules", () => {

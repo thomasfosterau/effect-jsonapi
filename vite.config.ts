@@ -162,7 +162,8 @@ export default defineConfig({
       // the externals it walks by specifier, so an `effect/Schema`-style
       // subpath import here fails it. The barrel is the only import these
       // files can use, so `no-barrel-imports` is not debt in them. A module
-      // that joins the tier joins this list.
+      // that joins the tier joins this list, and one that leaves it leaves:
+      // test/entry-points.test.ts pins these `files` to its `SCHEMA_TIER`.
       {
         files: [
           "src/schema.ts",

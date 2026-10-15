@@ -621,7 +621,8 @@ type IncludeInput =
 // default documents build theirs: a surface's own union, else the direct
 // targets and every resource the legal paths reach (none while `include` is
 // off). A surface is told from a `Query.IncludeOptions` by its tag, which the
-// options type never carries.
+// options type never carries. The tag check mirrors `isSurface`, inlined so
+// `include` narrows within `IncludeInput` instead of widening from `unknown`.
 const endpointIncluded = (resources: ReadonlyArray<Any>, include: IncludeInput): Schema.Top => {
   if (include === false) return Schema.Union(includedResources(resources, false, []));
   if (include === true) {
@@ -735,11 +736,17 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * @category accessors
  */
 export function included<const S extends AnySpec>(spec: S): Included<S>;
-// The resource form before the members form: TypeScript 6 (the editor's
-// language service, and most consumers' checker) lists the failing overloads
-// in declaration order, so a bad `paths` / `depth` on a resource — likeliest
-// meant for this form — leads with this form's error. TypeScript 7 reports
-// the last overload's error alone, at the failing property.
+// Keep the resource form before the members form; the order is deliberate,
+// not untidy. TypeScript 6 (the JS compiler: the language service editors
+// load, and `tsc6` here) lists the failing overloads in declaration order, so
+// a bad `paths` / `depth` on a resource (likeliest meant for this form) leads
+// with this form's error, naming the bad path. The cost falls on TypeScript 7, the
+// checker of record (`vp run check`): it reports only the last overload's
+// error, so the same bad option reads as the members form's argument error
+// on the resource (`Resource<…>` is missing the properties of
+// `readonly Any[]`). That is accepted because editors run TypeScript 6. The
+// rejections are pinned by "The overloads cannot be confused" in
+// test/include-depth-included.types.ts.
 export function included<R extends Any, const I extends EndpointInclude<R>>(
   resource: R,
   options: { readonly include: I },
