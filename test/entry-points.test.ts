@@ -314,11 +314,15 @@ describe("package exports map", () => {
 });
 
 /**
- * `tsc` emits one file per module and rewrites no specifiers, so the source
- * graph above is the built graph. This re-checks it on the artifact anyway,
- * because that is what actually ships. CI builds before it tests; a bare
- * `pnpm test` may not have, so the assertion is reported as skipped rather
- * than silently passing when `dist/` is absent.
+ * `dist/` is not the source graph: `vp pack` (tsdown) bundles it into one ESM
+ * file per entry point (`index.js`, `schema.js`), code the two share split out
+ * into hashed chunks, plus bundled declarations. A clean source graph does not
+ * prove the bundler kept the schema entry's imports clean, so this re-checks
+ * the property on the artifact, because that is what actually ships. The cases
+ * read `dist/`, so they need `vp run build` first; CI builds before it runs
+ * `vp run -r test:unit`, but a local test run may not have, so each case is
+ * `it.skipIf(!hasDist)` and reported as skipped rather than silently passing
+ * when `dist/` is absent.
  */
 describe("built artifact", () => {
   const built = path.join(DIST, "schema.js");
