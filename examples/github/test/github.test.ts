@@ -708,13 +708,10 @@ describe("github example: heterogeneous search", () => {
     // `fields`, so a client reads each attribute as optional (#322)
     for (const result of document.data) {
       if (result.type === "repositories") {
-        // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
         expectTypeOf(result.attributes.stargazerCount).toEqualTypeOf<number | undefined>();
       } else if (result.type === "issues") {
-        // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
         expectTypeOf(result.attributes.state).toEqualTypeOf<"open" | "closed" | undefined>();
       } else {
-        // oxlint-disable-next-line effect/prefer-option-over-null -- pins the library's own client type: an attribute of an endpoint that declares `fields` decodes as optional (#322)
         expectTypeOf(result.attributes.login).toEqualTypeOf<string | undefined>();
       }
     }
