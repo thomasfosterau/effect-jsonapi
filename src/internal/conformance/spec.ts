@@ -28,7 +28,7 @@ import {
 import { declaresName } from "../declaredQuery.js";
 import * as Linkage from "../linkage.js";
 import { MEDIA_TYPE } from "../media.js";
-import { counted, listed, unanswered } from "./crawl.js";
+import { counted, listed } from "./crawl.js";
 import { relatedDereferences, relatedMatchesLinkage, resourceSelfDereferences } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import {
@@ -1330,10 +1330,7 @@ const settleRefusal = (
   if (observation.status !== 400) {
     return settle(impl, probes, [
       finding(impl, {
-        detail:
-          observation.transportError === undefined
-            ? `${sent} on ${where}, which does not declare \`${parameter}\`, was not rejected`
-            : `${sent} on ${where} got no response`,
+        detail: `${sent} on ${where}, which does not declare \`${parameter}\`, was not rejected`,
         expected: "400 Bad Request",
         observed: describe(observation),
         probe: observation.probe,
@@ -1390,13 +1387,22 @@ interface UsableProbe {
   ) => Result.Result<readonly [parameter: string, value: string], string>;
   /** The skip reason's head when every target is passed over. */
   readonly none: string;
-  /**
-   * What a probe that says nothing — no response, a server error, a rate
-   * limit or a request timeout (`unanswered`) — settles: a finding, as the
-   * `include` and `sort` rules of #278 have it, or the rule not decided.
-   */
-  readonly unanswered: "finding" | "undecided";
 }
+
+/**
+ * `true` when a probe's answer says nothing of whether the server refuses the
+ * parameter, and every refusal rule is left not decided on it: no response (a
+ * lost one, or one the run's `requestTimeout` cut short), a rate limit (`429`)
+ * or a request timeout (`408`). A server error is not one: a server that
+ * answers 5xx to a parameter it does not support mishandled it, and the rule
+ * fails (#352). The link and pagination rules draw the line elsewhere:
+ * `crawl.ts`'s `unanswered` counts a server error among the answers that say
+ * nothing of the links.
+ */
+const saysNothingOfRefusal = (observation: Observation): boolean =>
+  observation.transportError !== undefined ||
+  observation.status === 408 ||
+  observation.status === 429;
 
 /**
  * Probes `?<parameter>=<value>` on the first of `targets` whose baseline
@@ -1445,12 +1451,12 @@ const probeFirstUsable = (
               headers: jsonApiAccept,
               requests: REFUSAL_BUDGET - afterBaseline,
             });
-            if (probe.unanswered === "undecided" && unanswered(observation)) {
+            if (saysNothingOfRefusal(observation)) {
               return skip(
                 impl,
-                // A redirect the kit did not follow is no server error or lost
-                // response: it is named, and `runRule` says why it decides nothing.
-                `not decided: ${sentQuery(observation)} on ${path} answered ${statusOf(observation)}${Option.isSome(observation.unfollowed) ? "" : ", and a server error, a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter"}`,
+                // A redirect the kit did not follow is no lost response: it is
+                // named, and `runRule` says why it decides nothing.
+                `not decided: ${sentQuery(observation)} on ${path} answered ${statusOf(observation)}${Option.isSome(observation.unfollowed) ? "" : ", and a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter"}`,
               );
             }
             return settleRefusal(impl, passedOver.length + 2, {
@@ -1475,7 +1481,6 @@ interface Refusal {
   readonly what: string;
   readonly queryFrom: UsableProbe["queryFrom"];
   readonly none: string;
-  readonly unanswered: UsableProbe["unanswered"];
 }
 
 /** A rule that sends a candidate endpoint a parameter it does not declare, and expects 400. */
@@ -1494,7 +1499,6 @@ const refusalRule = (refusal: Refusal): RuleImpl => ({
       targets: candidates.resolved,
       queryFrom: refusal.queryFrom,
       none: refusal.none,
-      unanswered: refusal.unanswered,
     });
   },
 });
@@ -1534,7 +1538,6 @@ const includeUnsupportedEndpoint: RuleImpl = refusalRule({
     ]),
   ),
   none: "no read endpoint without `include` answered its baseline request with 2xx",
-  unanswered: "finding",
 });
 
 const sortUnsupportedEndpoint: RuleImpl = refusalRule({
@@ -1564,7 +1567,6 @@ const sortUnsupportedEndpoint: RuleImpl = refusalRule({
       : Result.fail(`${baseline.status}, not a resource collection`);
   },
   none: "no list or related endpoint without `sort` answered with a resource collection as primary data",
-  unanswered: "finding",
 });
 
 /**
@@ -1632,7 +1634,6 @@ const fieldsUnsupportedEndpoint: RuleImpl = refusalRule({
     );
   }),
   none: "no read endpoint answered its baseline request with 2xx showing a type it does not declare `fields[TYPE]` for",
-  unanswered: "undecided",
 });
 
 const pageUnsupportedEndpoint: RuleImpl = refusalRule({
@@ -1647,7 +1648,6 @@ const pageUnsupportedEndpoint: RuleImpl = refusalRule({
   what: "read endpoint without `page`",
   queryFrom: onSucceeded(() => Result.succeed(["page[limit]", "1"])),
   none: "no read endpoint without `page` answered its baseline request with 2xx",
-  unanswered: "undecided",
 });
 
 const filterUnsupportedEndpoint: RuleImpl = refusalRule({
@@ -1669,7 +1669,6 @@ const filterUnsupportedEndpoint: RuleImpl = refusalRule({
     ]),
   ),
   none: "no read endpoint without `filter` answered its baseline request with 2xx",
-  unanswered: "undecided",
 });
 
 /**
@@ -1723,7 +1722,6 @@ const undeclaredMember = (family: "page" | "filter", applied: string): RuleImpl 
       }),
     ),
     none: `no read endpoint declaring \`${family}[…]\` members by name answered its baseline request with 2xx`,
-    unanswered: "undecided",
   });
 
 const pageUndeclaredMember: RuleImpl = undeclaredMember(
@@ -1758,7 +1756,6 @@ const bracketed = (
     what: `read endpoint declaring \`${family}\``,
     queryFrom: onSucceeded((baseline) => Result.succeed([`${family}[]`, value(baseline)])),
     none: `no read endpoint declaring \`${family}\` answered its baseline request with 2xx`,
-    unanswered: "undecided",
   });
 
 // The value is one the bare parameter would act on, so a server that reads

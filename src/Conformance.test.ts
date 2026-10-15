@@ -1636,6 +1636,9 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     });
   });
 
+  // #352: a probe that got no response says nothing of whether the server
+  // refuses the parameter, so neither rule is decided on it — and neither is
+  // failed as "not rejected".
   it("says a probe that got no response got none, not that it was not rejected", async () => {
     const report = await verifyUndeclared(undeclaredServe, { only: [INCLUDE, SORT] }, (client) =>
       HttpClient.make((request) =>
@@ -1648,20 +1651,60 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
           : client.execute(request),
       ),
     );
-    const noResponse = (sent: string) => ({
+    const SAYS_NOTHING =
+      ", and a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter";
+    // The transport's own words, between the parentheses, are not pinned.
+    expect(
+      [outcomeFor(report, INCLUDE), outcomeFor(report, SORT)].map((outcome) =>
+        Predicate.isTagged(outcome, "Skipped")
+          ? outcome.reason.replace(/no response \(.*\),/, "no response (…),")
+          : outcome._tag,
+      ),
+    ).toEqual([
+      `not decided: \`?include=author\` on /articles/1 answered no response (…)${SAYS_NOTHING}`,
+      `not decided: \`?sort=title\` on /articles answered no response (…)${SAYS_NOTHING}`,
+    ]);
+  });
+
+  it.each([429, 408])("does not decide either on a probe answered %i", async (status) => {
+    const report = await verifyUndeclared((request) =>
+      queryOf(request).size > 0
+        ? { status, body: { errors: [{ status: `${status}` }] } }
+        : undeclaredServe(request),
+    );
+    const undecided = (sent: string) => ({
+      _tag: "Skipped",
+      reason: `not decided: ${sent} answered ${status}, and a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter`,
+    });
+    expect(outcomeFor(report, INCLUDE)).toMatchObject(
+      undecided("`?include=author` on /articles/1"),
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject(undecided("`?sort=title` on /articles"));
+  });
+
+  it.each([500, 503])("fails both on a probe answered %i", async (status) => {
+    const report = await verifyUndeclared((request) =>
+      queryOf(request).size > 0
+        ? { status, body: { errors: [{ status: `${status}` }] } }
+        : undeclaredServe(request),
+    );
+    const mishandled = (sent: string, parameter: string, url: string) => ({
       _tag: "Failed",
       findings: [
         {
-          detail: `${sent} got no response`,
+          detail: `${sent}, which does not declare \`${parameter}\`, was not rejected`,
           expected: "400 Bad Request",
-          observed: expect.stringMatching(/^no response \(/),
+          observed: expect.stringMatching(new RegExp(`^${status} `)),
+          probe: { url },
         },
       ],
     });
     expect(outcomeFor(report, INCLUDE)).toMatchObject(
-      noResponse("`?include=author` on /articles/1"),
+      mishandled("`?include=author` on /articles/1", "include", "/articles/1?include=author"),
     );
-    expect(outcomeFor(report, SORT)).toMatchObject(noResponse("`?sort=title` on /articles"));
+    expect(outcomeFor(report, SORT)).toMatchObject(
+      mishandled("`?sort=title` on /articles", "sort", "/articles?sort=title"),
+    );
   });
 
   it("passes a 400 that carries no error objects, and says that is what it carried", async () => {
@@ -1980,7 +2023,7 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
     });
   });
 
-  it.each([503, 429, 408])("does not decide on a probe answered %i", async (status) => {
+  it.each([429, 408])("does not decide on a probe answered %i", async (status) => {
     const report = await verifyFamily((request) =>
       queryOf(request).size > 0
         ? { status, body: { errors: [{ status: `${status}` }] } }
@@ -1990,8 +2033,35 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
       Arr.map(PROBES, ([id, , url]) => ({
         _tag: "Skipped",
         rule: expect.objectContaining({ id }),
-        reason: `not decided: \`${url.slice(url.indexOf("?"))}\` on ${url.split("?")[0]} answered ${status}, and a server error, a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter`,
+        reason: `not decided: \`${url.slice(url.indexOf("?"))}\` on ${url.split("?")[0]} answered ${status}, and a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter`,
       })),
+    );
+  });
+
+  // #352: a server that answers 5xx to a parameter it does not support
+  // mishandled it.
+  it.each([500, 503])("fails each on a probe answered %i", async (status) => {
+    const report = await verifyFamily((request) =>
+      queryOf(request).size > 0
+        ? { status, body: { errors: [{ status: `${status}` }] } }
+        : familyServe()(request),
+    );
+    expect(failed(report)).toEqual(expect.arrayContaining(PROBES.map(([id]) => id)));
+    expect(Arr.map(PROBES, ([id]) => outcomeFor(report, id))).toEqual(
+      Arr.map(PROBES, ([id, parameter, url]) =>
+        expect.objectContaining({
+          _tag: "Failed",
+          rule: expect.objectContaining({ id }),
+          findings: [
+            expect.objectContaining({
+              detail: `\`${url.slice(url.indexOf("?"))}\` on ${url.split("?")[0]}, which does not declare \`${parameter}\`, was not rejected`,
+              expected: "400 Bad Request",
+              observed: expect.stringMatching(new RegExp(`^${status} `)),
+              probe: expect.objectContaining({ url }),
+            }),
+          ],
+        }),
+      ),
     );
   });
 
@@ -2011,7 +2081,9 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
       Arr.map(ALL, () =>
         expect.objectContaining({
           _tag: "Skipped",
-          reason: expect.stringMatching(/^not decided: .* answered no response \(/),
+          reason: expect.stringMatching(
+            /^not decided: .* answered no response \(.*\), and a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter$/,
+          ),
         }),
       ),
     );
@@ -2830,14 +2902,15 @@ describe("Conformance: the write fixture", () => {
       ),
     });
     // Only the requests that carry a query leave: the baseline was answered,
-    // the `include` probe was not.
+    // the `include` probe was not. The rule itself decides nothing on an
+    // answer it could not read (#352), and says so; `runRule` names the redirect.
     const queries = await run(undefined, undefined, {
       client: redirectingSome((_, url) => url.search !== ""),
     });
     expect(outcomeFor(queries.report, "spec/query/include-unsupported-endpoint")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `not decided: 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?include=author answered ${offsite("/articles/1?include=author")}), and a rule is not passed on the answers it did read alone`,
+      reason: `not decided: \`?include=author\` on /articles/1 answered ${offsite("/articles/1?include=author")}; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?include=author answered ${offsite("/articles/1?include=author")})`,
     });
   });
 
