@@ -1639,7 +1639,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
   // #352: a probe that got no response says nothing of whether the server
   // refuses the parameter, so neither rule is decided on it — and neither is
   // failed as "not rejected".
-  it("says a probe that got no response got none, not that it was not rejected", async () => {
+  it("does not decide either on a probe that got no response", async () => {
     const report = await verifyUndeclared(undeclaredServe, { only: [INCLUDE, SORT] }, (client) =>
       HttpClient.make((request) =>
         /[?&](include|sort)=/.test(request.url)
@@ -1704,6 +1704,33 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     );
     expect(outcomeFor(report, SORT)).toMatchObject(
       mishandled("`?sort=title` on /articles", "sort", "/articles?sort=title"),
+    );
+  });
+
+  // A `3xx` the kit reads as the answer itself — one with no `Location`, or a
+  // `304` — is an answer, not silence, so it fails both as before #352.
+  it.each([
+    ["a 302 with no `Location`", 302],
+    ["a 304", 304],
+  ])("fails both on a probe answered %s, the answer itself", async (_, status) => {
+    const report = await verifyUndeclared((request) =>
+      queryOf(request).size > 0 ? { status } : undeclaredServe(request),
+    );
+    const notRejected = (sent: string, parameter: string) => ({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: `${sent}, which does not declare \`${parameter}\`, was not rejected`,
+          expected: "400 Bad Request",
+          observed: expect.stringMatching(new RegExp(`^${status}\\b`)),
+        },
+      ],
+    });
+    expect(outcomeFor(report, INCLUDE)).toMatchObject(
+      notRejected("`?include=author` on /articles/1", "include"),
+    );
+    expect(outcomeFor(report, SORT)).toMatchObject(
+      notRejected("`?sort=title` on /articles", "sort"),
     );
   });
 
@@ -3189,6 +3216,141 @@ describe("Conformance: the write fixture", () => {
     });
     expect(outcomeFor(report, "spec/target/reachable")._tag).toBe("Failed");
     expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual([]);
+  });
+
+  /** A transport that fails every request it is handed, as a refused connection does. */
+  const refusing = HttpClient.make((request) =>
+    Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description: "refused" }),
+      }),
+    ),
+  );
+
+  /** `spec/target/reachable`'s first finding's `observed`, or `""` when it has none. */
+  const reachableObserved = (report: Conformance.Report): string => {
+    const outcome = outcomeFor(report, "spec/target/reachable");
+    return Predicate.isTagged(outcome, "Failed") ? (outcome.findings[0]?.observed ?? "") : "";
+  };
+
+  it("does not read a preparation that fails after the client's rewrite as a redirect the transport followed", async () => {
+    const rewriting = rewritingOrigin();
+    const { report } = await run(undefined, undefined, {
+      client: (canned) =>
+        HttpClient.mapRequestEffect(rewriting.rewrite(canned), (request) =>
+          Effect.fail(unprepared(request)),
+        ),
+    });
+    expect(reachableObserved(report)).toContain("no token");
+    expect(reachableObserved(report)).not.toContain("followed itself");
+  });
+
+  it("reads each attempt of a client's own `retry` as prepared afresh, not as the last one that prepared", async () => {
+    const rewriting = rewritingOrigin();
+    // Attempt 1 is prepared and refused by the transport; attempt 2's
+    // preparation fails, so it sent nothing.
+    const preparedOnce = new WeakSet<HttpClientRequest.HttpClientRequest>();
+    let refusedPreparations = 0;
+    const { report } = await run(undefined, undefined, {
+      client: () =>
+        HttpClient.retry(
+          rewriting.rewrite(
+            HttpClient.mapRequestEffect(refusing, (request) => {
+              if (!preparedOnce.has(request)) {
+                preparedOnce.add(request);
+                return Effect.succeed(request);
+              }
+              refusedPreparations += 1;
+              return Effect.fail(unprepared(request));
+            }),
+          ),
+          { times: 1 },
+        ),
+    });
+    expect(refusedPreparations).toBeGreaterThan(0);
+    expect(reachableObserved(report)).toContain("no token");
+    expect(reachableObserved(report)).not.toContain("followed itself");
+  });
+
+  it("builds the client's preprocessing once per request, as its own `execute` does, however often it retries", async () => {
+    let mapped = 0;
+    let sent = 0;
+    await run(undefined, undefined, {
+      client: () =>
+        HttpClient.retry(
+          HttpClient.mapRequestInput(
+            HttpClient.make((request) => {
+              sent += 1;
+              return refusing.execute(request);
+            }),
+            (request) => {
+              mapped += 1;
+              return request;
+            },
+          ),
+          { times: 1 },
+        ),
+    });
+    expect(mapped).toBeGreaterThan(0);
+    expect(sent).toBe(2 * mapped);
+  });
+
+  // The rewritten origin is a scheme, host and port, not a host alone.
+  it.each([
+    ["another port", "http://127.0.0.1:4011"],
+    ["https", "https://127.0.0.1:4010"],
+  ])(
+    "does not follow a `Location` on the host a rewriting client sends to over %s",
+    async (_, origin) => {
+      const rewriting = rewritingOrigin();
+      const redirected = redirectingAll(308, (path) => `${origin}/live${path}`);
+      const { report } = await run(undefined, undefined, {
+        client: (canned) => rewriting.rewrite(redirected.client(canned)),
+      });
+      expect(redirected.sent.length).toBeGreaterThan(0);
+      expect(redirected.sent.filter((url) => url.includes("/live/"))).toEqual([]);
+      expect(reachableObserved(report)).toBe(
+        `/articles/1: a 308 redirect to ${origin}/live/articles/1, which the kit does not follow: ${origin} is another origin than the base URL's, http://fixture.test — the kit follows a redirect only within the base URL's origin, and a change of scheme or port is a change of origin`,
+      );
+      expect(failed(report)).toEqual(["spec/target/reachable"]);
+    },
+  );
+
+  it("does not read a `Location` with no origin as a path on the kit's, when the client rewrites onto a URL with none", async () => {
+    const redirected = redirectingAll(308, (path) => `x-local://127.0.0.1:4010/live${path}`);
+    const { report } = await run(undefined, undefined, {
+      client: (canned) =>
+        HttpClient.mapRequest(
+          redirected.client(
+            HttpClient.mapRequest(canned, (request) =>
+              HttpClientRequest.setUrl(
+                request,
+                request.url.replace("x-local://127.0.0.1:4010", "http://fixture.test"),
+              ),
+            ),
+          ),
+          (request) =>
+            HttpClientRequest.setUrl(
+              request,
+              request.url.replace("http://fixture.test", "x-local://127.0.0.1:4010"),
+            ),
+        ),
+    });
+    expect(redirected.sent.length).toBeGreaterThan(0);
+    expect(redirected.sent.filter((url) => url.includes("/live/"))).toEqual([]);
+    expect(reachableObserved(report)).toContain("a `x-local:` URL has no origin");
+  });
+
+  it("names a hop it refuses on a rewriting client's origin by the `Location` the server sent", async () => {
+    const rewriting = rewritingOrigin();
+    // Every request redirects to itself, past the hop cap.
+    const redirected = redirectingAll(308, (path) => `http://127.0.0.1:4010${path}`);
+    const { report } = await run(undefined, undefined, {
+      client: (canned) => rewriting.rewrite(redirected.client(canned)),
+    });
+    expect(reachableObserved(report)).toMatch(
+      /^\/articles\/1: a 308 redirect to http:\/\/127\.0\.0\.1:4010\/articles\/1, which the kit does not follow: it would be redirect 6 in a row/,
+    );
   });
 
   // The timeout wraps the client's whole `execute`, so a `retry` runs within it
