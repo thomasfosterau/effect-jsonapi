@@ -547,14 +547,40 @@ export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>
  * reaches (#320). For a declared surface that is exactly the resources the
  * surface declares, its own {@link Included} union.
  *
- * What {@link included} returns for a resource (or the members of a
- * heterogeneous endpoint) and an endpoint `include` option.
+ * Distributes over a widened `include`, as `Endpoint.get` / `list` /
+ * `related` do: under `include: boolean` it admits what either value admits,
+ * since the endpoint built from that value may have turned `include` on.
+ *
+ * What {@link included} returns for a resource and an endpoint `include`
+ * option. {@link MembersReachable} is the members form's.
  *
  * @since 0.17.0
  * @category models
  */
 export interface Reachable<R extends Any, I> extends Schema.Union<
-  ReadonlyArray<IncludedResources<R, I>>
+  ReadonlyArray<I extends unknown ? IncludedResources<R, I> : never>
+> {}
+
+/**
+ * The `included` union of a heterogeneous endpoint (`Endpoint.collection` /
+ * `polymorphic`) over `Members` with the `include` option `I`, as
+ * {@link Reachable} is for one resource: the members' non-`paginated` direct
+ * targets and, when `I` turns `include` on, every resource a legal include
+ * path reaches from any member.
+ *
+ * Unlike {@link Reachable} it does not distribute over a widened `include`,
+ * because `collection` and `polymorphic` don't: under `include: boolean` their
+ * default document's type admits the direct targets alone, and so does this.
+ *
+ * A declared {@link Surface} gives the surface's own `included` (see
+ * {@link included}), which `collection` and `polymorphic` do not bind yet
+ * (#336).
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface MembersReachable<Members extends Any, I> extends Schema.Union<
+  ReadonlyArray<IncludedResources<Members, I>>
 > {}
 
 // A `Query.IncludeOptions` over `R`, and an endpoint's `include` option over
@@ -580,16 +606,15 @@ type IncludeInput =
 // `include` binds by default — the runtime `Reachable`, built as `Endpoint`'s
 // default documents build theirs: a surface's own union, else the direct
 // targets and every resource the legal paths reach (none while `include` is
-// off).
+// off). A surface is told from a `Query.IncludeOptions` by its tag, which the
+// options type never carries.
 const endpointIncluded = (resources: ReadonlyArray<Any>, include: IncludeInput): Schema.Top => {
-  if (isSurface(include)) return include.included;
-  const paths =
-    include === false
-      ? []
-      : include === true
-        ? includePathsFor(resources)
-        : includePathsFor(resources, include);
-  return Schema.Union(includedResources(resources, false, paths));
+  if (include === false) return Schema.Union(includedResources(resources, false, []));
+  if (include === true) {
+    return Schema.Union(includedResources(resources, false, includePathsFor(resources)));
+  }
+  if (TAG in include) return include.included;
+  return Schema.Union(includedResources(resources, false, includePathsFor(resources, include)));
 };
 
 // Whether `included`'s first argument is the members of a heterogeneous
@@ -614,16 +639,35 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * document of `Endpoint.get` / `list` over `Article` with that `include`
  * option admits in `included` — the non-`paginated` direct targets and, when
  * `include` is `true` or a `Query.IncludeOptions`, every resource a legal
- * include path reaches; a declared {@link Surface}'s own `included`. Pass a
- * `related` endpoint's *target*, or the array of a `collection` endpoint's
- * resources (`family.members` for a `polymorphic` endpoint over `family`) with
- * a boolean or `Query.IncludeOptions`, for theirs. This is the union an
- * endpoint that overrides `success` with a wire variant must declare, so that
- * every path it advertises can still be encoded.
+ * include path reaches; a declared {@link Surface}'s own `included`. A widened
+ * `include: boolean` gives what either value admits, as the endpoints do
+ * ({@link Reachable}). Pass a `related` endpoint's *target* for its union; a
+ * `Resource.family` passed itself is a `related` endpoint's target too, and
+ * gives the union of a `related` endpoint over that family, which walks the
+ * family's own graph.
  *
- * The two forms are told apart by the first argument: a declaration is a
- * plain record of relationship keys, a resource a schema, and members an
- * array; only the second form takes the `{ include }` options.
+ * **From the members of a heterogeneous endpoint** —
+ * `Include.included([Article, Person], { include: true })`: the array of a
+ * `collection` endpoint's resources, or `family.members` for a `polymorphic`
+ * endpoint over `family`, gives the union of their default documents, over
+ * every member's direct targets and paths ({@link MembersReachable}). A
+ * widened `include: boolean` gives the direct targets alone, as those
+ * endpoints' types do. A declared surface gives the surface's own `included`;
+ * until #336 is fixed, `collection` and `polymorphic` ignore that union and
+ * bind their members' direct targets instead, so for a surface this answer
+ * differs from what those endpoints accept.
+ *
+ * The resource and members forms give the union of an endpoint that does not
+ * declare `fields`. With `fields: true` the default document's `included`
+ * members admit any subset of their attributes, while this union's members
+ * stay strict: it is the union a strict `success` override declares. That is
+ * the use it exists for: an endpoint that overrides `success` with a wire
+ * variant declares it, so that every path it advertises can still be
+ * encoded.
+ *
+ * The forms are told apart by the first argument: a declaration is a plain
+ * record of relationship keys, a resource a schema, and members an array;
+ * only the resource and members forms take the `{ include }` options.
  *
  * @example
  * ```ts
@@ -658,6 +702,10 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * const reachable = Include.included(Article, { include: true })
  * reachable.members.length // 2 — Person and Comment
  *
+ * // From the members of `Endpoint.collection([Article, Person], …)`
+ * const search = Include.included([Article, Person], { include: true })
+ * search.members.length // 2 — Person and Comment
+ *
  * // …which a wire-variant `success` reuses instead of listing the types by hand
  * const WireArticle = Schema.Struct({ ...Article.fields })
  * const get = Endpoint.get(Article, {
@@ -666,34 +714,30 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * })
  * ```
  *
- * @since 0.15.0 (the resource form since 0.17.0)
+ * @since 0.15.0 (the resource and members forms since 0.17.0)
  * @category accessors
  */
 export function included<const S extends AnySpec>(spec: S): Included<S>;
+export function included<
+  const Resources extends ReadonlyArray<Any>,
+  const I extends EndpointInclude<Resources[number]>,
+>(
+  resources: Resources,
+  options: { readonly include: I },
+): [I] extends [{ readonly included: infer Declared }]
+  ? Declared
+  : MembersReachable<Resources[number], I>;
+// The resource form last: an overload failure is reported against the last
+// overload, and a bad `paths` / `depth` is likeliest meant for this one.
 export function included<R extends Any, const I extends EndpointInclude<R>>(
   resource: R,
   options: { readonly include: I },
 ): Reachable<R, I>;
-export function included<
-  const Resources extends ReadonlyArray<Any>,
-  const I extends boolean | GraphOptions<Resources[number]>,
->(resources: Resources, options: { readonly include: I }): Reachable<Resources[number], I>;
 export function included(
   source: AnySpec | Any | ReadonlyArray<Any>,
   options?: { readonly include: IncludeInput },
 ): Schema.Top {
-  if (isMembers(source)) {
-    // The members form mirrors `collection` / `polymorphic`, whose default
-    // document does not take a declared surface's union (#336); refused here
-    // rather than answered with a union no endpoint binds.
-    if (isSurface(options?.include)) {
-      throw new Error(
-        "Include.included: a declared surface describes one resource's paths; " +
-          "pass that resource, not an array of resources",
-      );
-    }
-    return endpointIncluded(source, options?.include ?? false);
-  }
+  if (isMembers(source)) return endpointIncluded(source, options?.include ?? false);
   if (Schema.isSchema(source)) return endpointIncluded([source], options?.include ?? false);
   const seen = new Set<Any>();
   const members: Array<Any> = [];

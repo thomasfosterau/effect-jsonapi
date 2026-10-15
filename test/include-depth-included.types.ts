@@ -10,8 +10,8 @@
  * document it had. The runtime half is `src/Endpoint.included.test.ts`.
  *
  * `Include.included(resource, { include })` returns that union (#342), so an
- * endpoint that overrides `success` can declare it; the last section pins it
- * to every endpoint's default here.
+ * endpoint that overrides `success` can declare it; the last sections pin it
+ * to every endpoint's default here, a widened `include: boolean` included.
  *
  * This file is type-checked by `tsconfig.json`; the `@ts-expect-error`
  * annotations are the assertions, each paired with a positive control.
@@ -414,7 +414,7 @@ assertType<Equals<(typeof secondHopUnion)["Type"], IncludedOf<typeof secondHop>>
 // constraint is spelled out, `Query` being outside the schema tier.
 export const forward = <const I extends Query.IncludeOption<typeof Article>>(include: I) =>
   Include.included(Article, { include });
-export const forwardMembers = <const I extends boolean | Query.IncludeOptions<typeof Article>>(
+export const forwardMembers = <const I extends Query.IncludeOption<typeof Article | typeof Person>>(
   include: I,
 ) => Include.included([Article, Person], { include });
 
@@ -431,8 +431,71 @@ Include.included({ comments: Comment }, { include: true });
 Include.included(Article, { include: { paths: ["author"] } });
 // @ts-expect-error -- another resource's surface
 Include.included(Comment, { include: articleSurface });
-// @ts-expect-error -- a surface describes one resource; `collection` ignores it (#336)
-Include.included([Article, Person], { include: articleSurface });
+// @ts-expect-error -- a surface over none of the members
+Include.included([Comment, Person], { include: articleSurface });
+
+// The members form under a declared surface: the surface's own union, which
+// `collection` and `polymorphic` do not bind yet (#336).
+const surfaceSearchUnion = Include.included([Article, Person], { include: articleSurface });
+assertType<Equals<typeof surfaceSearchUnion, (typeof articleSurface)["included"]>>(true);
+assertType<Equals<(typeof surfaceSearchUnion)["Type"], typeof Comment.Type | typeof Person.Type>>(
+  true,
+);
+// Exactly the surface's union, not what its paths reach from every member: a
+// `Board`'s own `comments` reaches `companies`, which the surface never names.
+const Board = Resource.make("boards", {
+  attributes: { name: Schema.String },
+  relationships: { comments: Relationship.many(() => Company) },
+});
+const boardSurfaceUnion = Include.included([Article, Board], { include: articleSurface });
+assertType<Equals<(typeof boardSurfaceUnion)["Type"], typeof Comment.Type | typeof Person.Type>>(
+  true,
+);
+export const surfaceSearch = Endpoint.collection([Article, Person], {
+  name: "search",
+  path: "/search",
+  include: articleSurface,
+});
+// The divergence #336 tracks: the endpoint binds its members' direct targets
+// instead. When #336 is fixed this pin flips, and the docs' caveat goes.
+assertType<Equals<(typeof surfaceSearchUnion)["Type"], IncludedOf<typeof surfaceSearch>>>(false);
+assertType<Equals<IncludedOf<typeof surfaceSearch>, IncludedOf<typeof plainSearch>>>(true);
+
+// ---------------------------------------------------------------------------
+// A widened `include: boolean`
+// ---------------------------------------------------------------------------
+
+// The endpoint built from a `boolean` may have turned `include` on, so
+// `get` / `list` / `related` admit what either value admits, and so does the
+// resource form.
+declare const flag: boolean;
+export const flagGet = Endpoint.get(Article, { include: flag });
+export const flagList = Endpoint.list(Article, { include: flag });
+export const flagRelated = Endpoint.related(Article, "comments", { include: flag });
+const flagUnion = Include.included(Article, { include: flag });
+assertType<Equals<(typeof flagUnion)["Type"], IncludedOf<typeof flagGet>>>(true);
+assertType<Equals<(typeof flagUnion)["Type"], IncludedOf<typeof flagList>>>(true);
+assertType<Equals<(typeof flagUnion)["Type"], (typeof onUnion)["Type"]>>(true);
+const flagCommentUnion = Include.included(Comment, { include: flag });
+assertType<Equals<(typeof flagCommentUnion)["Type"], IncludedOf<typeof flagRelated>>>(true);
+// Negative control: not only the direct targets, which `include: false` gives.
+assertType<Equals<(typeof flagUnion)["Type"], (typeof offUnion)["Type"]>>(false);
+
+// `collection` and `polymorphic` do not distribute: their type admits the
+// direct targets alone, and the members form matches them.
+export const flagSearch = Endpoint.collection([Article, Person], {
+  name: "search",
+  path: "/search",
+  include: flag,
+});
+export const flagNode = Endpoint.polymorphic(AnyNode, { include: flag });
+const flagSearchUnion = Include.included([Article, Person], { include: flag });
+assertType<Equals<(typeof flagSearchUnion)["Type"], IncludedOf<typeof flagSearch>>>(true);
+assertType<Equals<(typeof flagSearchUnion)["Type"], (typeof plainSearchUnion)["Type"]>>(true);
+const flagNodeUnion = Include.included(AnyNode.members, { include: flag });
+assertType<Equals<(typeof flagNodeUnion)["Type"], IncludedOf<typeof flagNode>>>(true);
+// Its public name.
+assertType<Include.MembersReachable<typeof Article | typeof Person, boolean>>(flagSearchUnion);
 
 // The use it exists for: a wire-variant `success` keeps the default's union.
 const WireArticle = Schema.Struct({ ...Article.fields });

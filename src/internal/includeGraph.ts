@@ -14,6 +14,7 @@
 // and the schema-only entry point resolves `effect` alone
 // (`test/entry-points.test.ts`). For the same reason nothing here imports
 // `Query`, which is HTTP-tier.
+// oxlint-disable-next-line effect/no-barrel-imports -- the schema-only entry point resolves `effect` alone, so its subpath modules are out of reach here
 import { Array as Arr, Option, Record as Rec } from "effect";
 import type {
   Any,
