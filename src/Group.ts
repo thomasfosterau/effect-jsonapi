@@ -35,6 +35,7 @@ import type { NonEmptyReadonlyArray } from "effect/Array";
 import type { HttpApiEndpoint } from "effect/http-api";
 import { HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
+import type { DataDocument } from "./Document.js";
 import type * as Idempotency from "./Idempotency.js";
 import type { AnySurface } from "./Include.js";
 import * as Query from "./Query.js";
@@ -291,11 +292,23 @@ export interface FlatOptions<
   Surface extends AnySurface | undefined,
   Create extends Schema.Top,
   Update extends Schema.Top,
+  Hidden extends boolean = false,
 > extends FlatReadOnlyOptions<R, List, Filters, Surface> {
   /** The flat `Create<X>` command input (attributes plus relationship ids) — not the JSON:API envelope. */
   readonly create: Create;
   /** The flat `Update<X>` command input, keyed by the required `id`. */
   readonly update: Update;
+  /**
+   * `true` when a committed write can be hidden from its own writer: `create`
+   * and `update` then declare `Endpoint.WriteDocument`, which also admits the
+   * `Endpoint.CommittedDocument` (the resource's identifier with
+   * `meta.version`, no attributes) that `ResourceHandlers.make`'s
+   * `hiddenWrite` answers. Off by default: the writes declare the full
+   * resource document alone, and a typed client's success is unchanged.
+   *
+   * @since 0.17.0
+   */
+  readonly hiddenWrites?: Hidden | undefined;
 }
 
 const SHARED_FLAT_OPTIONS = {
@@ -396,7 +409,9 @@ export const flatReadOnly = <
  * definition, with the flat `Create<X>` / `Update<X>` command inputs as the
  * write payloads (registered under {@link FLAT_PAYLOAD_MEDIA_TYPE}),
  * `create` answering 201, `update` declaring the 409 (`ApiError.Conflict`)
- * an id mismatch answers, `delete` answering 204 with no body.
+ * an id mismatch answers, `delete` answering 204 with no body. With
+ * `hiddenWrites: true`, `create` / `update` also admit the committed write's
+ * identifier document (`Endpoint.WriteDocument`).
  *
  * Returns `{ group, listQuery }` — see {@link flatReadOnly} for why.
  *
@@ -435,6 +450,7 @@ export const flat = <
   Update extends Schema.Top,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
   Surface extends AnySurface | undefined = undefined,
+  const Hidden extends boolean = false,
 >(
   options: FlatOptions<
     Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -442,11 +458,29 @@ export const flat = <
     Filters,
     Surface,
     Create,
-    Update
+    Update,
+    Hidden
   >,
 ) => {
   const { collection, document, listQuery } = flatWire(options);
-  const write = { payloadMediaType: FLAT_PAYLOAD_MEDIA_TYPE, success: document } as const;
+  type Document = typeof document;
+  // Only the writes widen: `get` keeps the full document, so a hidden
+  // resource stays a 404 there.
+  // SAFETY: `Hidden` is the literal type of `options.hiddenWrites`, so the
+  // branch taken is the one the conditional type names.
+  const success = (
+    options.hiddenWrites === true
+      ? Endpoint.WriteDocument(options.resource, { included: options.include?.included })
+      : document
+  ) as Hidden extends true
+    ? Schema.Union<
+        readonly [
+          Document,
+          DataDocument<Parameter<Type, Attributes, Rels, Meta, IdSchema>["identifier"]>,
+        ]
+      >
+    : Document;
+  const write = { payloadMediaType: FLAT_PAYLOAD_MEDIA_TYPE, success } as const;
   return {
     group: resource(options.resource, {
       ...SHARED_FLAT_OPTIONS,

@@ -3803,6 +3803,74 @@ export const ResourceDocument = <
   ) as DataDocument<WireSchema<S>, WireSchema<Included>>;
 
 /**
+ * The `success:` document of a committed flat `create` / `update` whose
+ * resource is hidden from its writer (`ResourceHandlers.HiddenWrite`): a
+ * data document whose primary data is the resource reduced to its
+ * identifier — `type`, `id` and an optional `meta` (`meta.version`, when
+ * the write reported one) — with no `attributes` or `relationships`, both
+ * optional members of a resource object (JSON:API 1.1 §Resource Objects).
+ * Annotated with the JSON:API media type.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Endpoint, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
+ *
+ * const committed = Schema.decodeUnknownSync(Endpoint.CommittedDocument(Article))({
+ *   data: { type: "articles", id: "1", meta: { version: 2 } }
+ * })
+ * console.log(committed.data.meta)
+ * // → { version: 2 }
+ * ```
+ *
+ * @since 0.17.0
+ * @category constructors
+ */
+export const CommittedDocument = <I extends Schema.Top>(resource: {
+  readonly identifier: I;
+}): DataDocument<I> =>
+  // SAFETY: `asJsonApi` only annotates the schema; its type is unchanged.
+  asJsonApi(DataDocument(resource.identifier)) as DataDocument<I>;
+
+/**
+ * The `success:` document of a flat `create` / `update` that may answer a
+ * hidden write: {@link ResourceDocument} or {@link CommittedDocument}, in
+ * that order — a document carrying the full resource decodes as the first,
+ * one whose resource carries no `attributes` as the second. What
+ * `Group.flat({ …, hiddenWrites: true })` declares.
+ *
+ * @since 0.17.0
+ * @category constructors
+ */
+export const WriteDocument = <
+  S extends Schema.Top & { readonly identifier: Schema.Top },
+  Included extends Schema.Top = typeof Schema.Never,
+>(
+  resource: S,
+  options?: FlatDocumentOptions<Included>,
+): WriteDocument<S, Included> =>
+  // SAFETY: the members are `ResourceDocument`'s and `CommittedDocument`'s
+  // own return types; `asJsonApi` only annotates the union.
+  asJsonApi(
+    Schema.Union([ResourceDocument(resource, options), CommittedDocument(resource)]),
+  ) as WriteDocument<S, Included>;
+
+/**
+ * The schema {@link WriteDocument} builds.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface WriteDocument<
+  S extends Schema.Top & { readonly identifier: Schema.Top },
+  Included extends Schema.Top = typeof Schema.Never,
+> extends Schema.Union<
+  readonly [DataDocument<WireSchema<S>, WireSchema<Included>>, DataDocument<S["identifier"]>]
+> {}
+
+/**
  * The `success:` document of a §7.4 related-resource fetch of a **to-one**
  * relationship: {@link ResourceDocument} whose `data` may be `null` (empty
  * linkage).

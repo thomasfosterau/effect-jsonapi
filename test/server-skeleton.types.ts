@@ -156,3 +156,67 @@ assertType<Registry.FamilyFor<G>>({
     },
   }),
 });
+
+// ── Hidden writes (Group.flat `hiddenWrites`, ResourceHandlers `hiddenWrite`) ──
+
+class NotFound extends Schema.TaggedError<NotFound>()("NotFound", { id: Schema.String }) {}
+const hidingOps = {
+  list: () => Effect.succeed({ items: [], totalCount: 0 }),
+  get: (id: PersonId): Effect.Effect<typeof Person.Type, NotFound> =>
+    Effect.succeed(Person.make({ id, attributes: { name: "Ada" } })),
+  create: (_input: { readonly name: string }) =>
+    Effect.succeed({ id: Person.Id.make("1"), version: 1 }),
+  update: (input: { readonly id: PersonId }) => Effect.succeed({ id: input.id, version: "v2" }),
+  delete: () => Effect.void,
+};
+const hidingHandlers = ResourceHandlers.make({
+  segment: "people",
+  listQuery,
+  linkBase: Effect.succeed("https://example.test"),
+  ops: hidingOps,
+  // The rule's error is the operations' own, inferred.
+  hiddenWrite: {
+    type: "people",
+    when: (error) => {
+      assertType<NotFound>(error);
+      return error instanceof NotFound;
+    },
+  },
+});
+
+// Without the option, a write's success is the full document alone, as before.
+declare const created: Registry.EndpointSuccess<G, "create">;
+assertType<string>(created.data.attributes.name);
+
+// With it, `create` / `update` also admit the committed identifier document…
+const hiding = Group.flat({
+  resource: Person,
+  list: ListPeople,
+  create: Schema.Struct({ name: Schema.NonEmptyString }),
+  update: Schema.Struct({ id: Schema.String, name: Schema.optionalKey(Schema.NonEmptyString) }),
+  hiddenWrites: true,
+});
+type H = typeof hiding.group;
+declare const hiddenCreated: Registry.EndpointSuccess<H, "create">;
+assertType<"people">(hiddenCreated.data.type);
+// @ts-expect-error — the success may carry no attributes; narrow on `"attributes" in data` first
+assertType<string>(hiddenCreated.data.attributes.name);
+// …while `get` keeps the full document: a hidden resource is still a 404 there.
+declare const hiddenGot: Registry.EndpointSuccess<H, "get">;
+assertType<string>(hiddenGot.data.attributes.name);
+
+// A handler set answering hidden writes satisfies the group that declares them…
+assertType<Registry.FamilyFor<H>>({ group: "people", handlers: hidingHandlers });
+// …and not one that doesn't, whose writes would fail to encode the identifier document.
+// @ts-expect-error — `create` / `update` may answer a document `G` does not declare
+assertType<Registry.FamilyFor<G>>({ group: "people", handlers: hidingHandlers });
+
+// The rule's `type` is the resource's own.
+ResourceHandlers.make({
+  segment: "people",
+  listQuery,
+  linkBase: Effect.succeed("https://example.test"),
+  ops: hidingOps,
+  // @ts-expect-error — the committed document names the resource's type
+  hiddenWrite: { type: "persons", when: () => true },
+});

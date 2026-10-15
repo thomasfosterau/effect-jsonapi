@@ -25,13 +25,17 @@
  *   `update` / `delete` supply it here, which makes that structural rather
  *   than conventional;
  * - **the cache** ({@link Cache}) — read-through on `get`, write-through on
- *   `create` / `update`, eviction on `delete`;
+ *   `create` / `update`, eviction on `delete` and on a write whose re-read
+ *   fails;
  * - **the include walk** ({@link IncludeConfig}) — the family's whitelist
- *   and the loader registry, resolved batched on `get` *and* `list`.
+ *   and the loader registry, resolved batched on `get` *and* `list`;
+ * - **the hidden write** ({@link HiddenWrite}) — which re-read failures mean
+ *   the committed resource is hidden from its writer, answered with the
+ *   {@link CommittedDocument} instead of the failure.
  *
  * @since 0.16.0
  */
-import { Effect } from "effect";
+import { Cause, Effect, Exit, Option, Ref } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -65,6 +69,21 @@ export interface ReadOnlyOps<TList, TResource, TId extends string, E, R> {
 }
 
 /**
+ * What a `create` / `update` operation answers: the written row's id and,
+ * optionally, the version the write committed. The handlers re-read the row
+ * by `id`; `version` reaches the wire only in the {@link CommittedDocument}
+ * a hidden write answers with.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface WriteResult<TId extends string> {
+  readonly id: TId;
+  /** The committed version, echoed as `data.meta.version` when the re-read is hidden. */
+  readonly version?: string | number | undefined;
+}
+
+/**
  * The Effect-native operations a resource's full CRUD surface is built over.
  * The writes carry `RW` — the read services plus the ambient transaction
  * {@link Config.transact} supplies.
@@ -82,8 +101,8 @@ export interface Ops<
   R,
   RW,
 > extends ReadOnlyOps<TList, TResource, TId, E, R> {
-  readonly create: (input: TCreate) => Effect.Effect<{ readonly id: TId }, E, RW>;
-  readonly update: (input: TUpdate) => Effect.Effect<{ readonly id: TId }, E, RW>;
+  readonly create: (input: TCreate) => Effect.Effect<WriteResult<TId>, E, RW>;
+  readonly update: (input: TUpdate) => Effect.Effect<WriteResult<TId>, E, RW>;
   readonly delete: (id: TId) => Effect.Effect<unknown, E, RW>;
 }
 
@@ -226,10 +245,66 @@ export interface Config<
   Tx,
   ET,
   RT,
+  HType extends TResource["type"] = never,
 > extends ReadOnlyConfig<TQuery, TResource, TId, V, E, R, RV, RL, RC, Targets> {
   readonly ops: Ops<NoInfer<TQuery>, TCreate, TUpdate, TResource, TId, E, R, RW>;
   /** The transaction seam every write runs inside. Omit for none. */
   readonly transact?: Transact<Tx, ET, RT> | undefined;
+  /**
+   * Which failures of the post-write re-read mean the committed resource is
+   * hidden from its writer, answered with a {@link CommittedDocument} rather
+   * than the failure. Omit to fail the write with the re-read's error, as a
+   * group without `Group.flat`'s `hiddenWrites` declares.
+   */
+  readonly hiddenWrite?: HiddenWrite<NoInfer<E>, HType> | undefined;
+}
+
+/**
+ * Declares when a committed `create` / `update` is **hidden** from its own
+ * writer: the write committed, but the re-read the handler runs as that
+ * writer fails (a read scope or visibility rule the write itself tripped).
+ * Answering that failure — a 404 for a write that committed — invites a
+ * retry that duplicates a create, so the handler answers the
+ * {@link CommittedDocument} instead: `201` / `200` with the resource's
+ * identifier and the committed `version`, and no attributes.
+ *
+ * Pair it with `Group.flat({ …, hiddenWrites: true })`, whose `create` /
+ * `update` success then admits that document.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface HiddenWrite<E, TType extends string = string> {
+  /** The resource type the {@link CommittedDocument}'s `data.type` names. */
+  readonly type: TType;
+  /**
+   * Whether a re-read failure means "hidden" (typically the operation's
+   * not-found error). Only a plain failure is asked: a defect or an
+   * interruption always propagates, and so does a failure this rejects.
+   */
+  readonly when: (error: E) => boolean;
+}
+
+/**
+ * The success document of a committed `create` / `update` whose resource is
+ * hidden from its writer ({@link HiddenWrite}): the resource object reduced
+ * to its `type` and `id`, with `meta.version` when the operation reported
+ * one. A resource object's `attributes` and `relationships` are optional
+ * members (JSON:API 1.1 §Resource Objects), so this is still the created or
+ * updated resource as primary data — the same members a sparse fieldset
+ * that names no fields leaves. It carries no `links.self`, so a `201` built
+ * from it has no `Location` (a SHOULD).
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface CommittedDocument<TType extends string = string, TId extends string = string> {
+  readonly data: {
+    readonly type: TType;
+    readonly id: TId;
+    readonly meta?: { readonly version: string | number };
+  };
+  readonly jsonapi: typeof Assemble.JSONAPI_MEMBER;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,7 +363,9 @@ export type ReadOnlyHandlers<
 };
 
 /**
- * The five handlers {@link make} builds.
+ * The five handlers {@link make} builds. `Committed` is what a
+ * {@link Config.hiddenWrite} adds to `create` / `update`'s success — the
+ * {@link CommittedDocument} — and `never` without one.
  *
  * @since 0.16.0
  * @category models
@@ -309,11 +386,12 @@ export type CrudHandlers<
   Tx,
   ET,
   RT,
+  Committed = never,
 > = ReadOnlyHandlers<TResource, TId, TQuery, E, R, RV, RL, RC, Targets> & {
   readonly create: (request: {
     readonly payload: TCreate;
   }) => Effect.Effect<
-    Assemble.ResourceDocument<TResource>,
+    Assemble.ResourceDocument<TResource> | Committed,
     E | ET,
     R | RV | RC | RT | Exclude<RW, Tx>
   >;
@@ -321,7 +399,7 @@ export type CrudHandlers<
     readonly params: { readonly id: TId };
     readonly payload: TUpdate;
   }) => Effect.Effect<
-    Assemble.ResourceDocument<TResource>,
+    Assemble.ResourceDocument<TResource> | Committed,
     E | ET | ApiError.Conflict,
     R | RV | RC | RT | Exclude<RW, Tx>
   >;
@@ -493,6 +571,14 @@ export const readOnly = <
  * ({@link assertIdMatchesPath}) before touching the operation; `delete`
  * evicts the cache entry and answers nothing (the endpoint's 204).
  *
+ * A write's commit and its cache step are not separable by an interrupt:
+ * once the operation has succeeded, a later failure of the transaction (an
+ * interruption included) evicts the entry, since the write may have
+ * committed, and so does any failure of the re-read, whose cause then
+ * propagates unchanged. A write the operation itself refuses never touches
+ * the cache. With {@link Config.hiddenWrite}, a re-read failure it names is
+ * answered with the {@link CommittedDocument} instead (after the eviction).
+ *
  * @example
  * ```ts
  * import { Effect, Schema } from "effect"
@@ -544,6 +630,7 @@ export const make = <
   Tx = never,
   ET = never,
   RT = never,
+  HType extends TResource["type"] = never,
 >(
   config: Config<
     TQuery,
@@ -561,7 +648,8 @@ export const make = <
     Targets,
     Tx,
     ET,
-    RT
+    RT,
+    HType
   >,
 ): CrudHandlers<
   TCreate,
@@ -578,29 +666,76 @@ export const make = <
   Targets,
   Tx,
   ET,
-  RT
+  RT,
+  Committed<NoInfer<HType>, TId>
 > => {
   const { ops, segment, cache, capabilities } = config;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
   const transact = (config.transact ?? identityTransact) as Transact<Tx, ET, RT>;
+  // SAFETY: `HType` only narrows `type` to a literal for the return type; the
+  // rule's runtime shape is the same.
+  const hidden = config.hiddenWrite as HiddenWrite<E> | undefined;
+  const evict = (id: TId) => (cache === undefined ? Effect.void : cache.delete(id));
 
-  /** Re-fetch, write through, assemble — the mutation tail. */
-  const writeThroughAndAssemble = Effect.fn(`api.${segment}.writeThrough`)(function* (id: TId) {
-    const resource = yield* ops.get(id);
-    if (cache !== undefined) yield* cache.set(id, resource);
-    return yield* Assemble.resource(resource, {
-      ...(capabilities === undefined ? {} : { capabilities }),
-      viewer: yield* viewer,
-    });
-  });
+  /**
+   * Runs a write in its transaction, interruptibly (`restore`), and evicts
+   * `idOf`'s entry when the transaction fails *after* the operation
+   * succeeded — the commit itself, or an interruption — since the write may
+   * have committed. The eviction runs under the caller's mask. `written` is
+   * set only once the operation has succeeded, so a write it refuses (a
+   * gate, a precondition) never evicts, and a forbidden request can't bust
+   * the cache.
+   */
+  const commit = <A>(
+    restore: <AX, EX, RX>(effect: Effect.Effect<AX, EX, RX>) => Effect.Effect<AX, EX, RX>,
+    write: Effect.Effect<A, E, RW>,
+    idOf: (result: A) => TId,
+  ) =>
+    Effect.flatMap(Ref.make(Option.none<TId>()), (written) =>
+      restore(
+        transact(Effect.tap(write, (result) => Ref.set(written, Option.some(idOf(result))))),
+      ).pipe(
+        Effect.onError(() =>
+          Effect.flatMap(
+            Ref.get(written),
+            Option.match({ onNone: () => Effect.void, onSome: evict }),
+          ),
+        ),
+      ),
+    );
+
+  /**
+   * Commit, re-read, write through, assemble — the mutation, with no
+   * interrupt gap between the commit and the cache step that follows it.
+   * The write and the re-read stay interruptible; everything between and
+   * after them runs to completion.
+   */
+  const commitAndWriteThrough = (write: Effect.Effect<WriteResult<TId>, E, RW>) =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const result = yield* commit(restore, write, ({ id }) => id);
+        const reread = yield* Effect.exit(restore(ops.get(result.id)));
+        if (Exit.isFailure(reread)) {
+          // Whatever the re-read's failure, the cached entry may now be stale.
+          yield* evict(result.id);
+          if (hidden !== undefined && isHidden(reread.cause, hidden.when))
+            return committedDocument(hidden.type, result);
+          return yield* Effect.failCause(reread.cause);
+        }
+        if (cache !== undefined) yield* cache.set(result.id, reread.value);
+        return yield* Assemble.resource(reread.value, {
+          ...(capabilities === undefined ? {} : { capabilities }),
+          viewer: yield* viewer,
+        });
+      }),
+    );
 
   const create = Effect.fn(`api.${segment}.create`)(function* ({
     payload,
   }: {
     readonly payload: TCreate;
   }) {
-    const { id } = yield* transact(ops.create(payload));
-    return yield* writeThroughAndAssemble(id);
+    return yield* commitAndWriteThrough(ops.create(payload));
   });
 
   const update = Effect.fn(`api.${segment}.update`)(function* ({
@@ -611,20 +746,23 @@ export const make = <
     readonly payload: TUpdate;
   }) {
     yield* assertIdMatchesPath(params.id, payload.id);
-    const { id } = yield* transact(ops.update(payload));
-    return yield* writeThroughAndAssemble(id);
+    return yield* commitAndWriteThrough(ops.update(payload));
   });
 
   // A hard delete has no tombstone to return: the endpoint answers 204 with
   // no body, so the handler resolves to nothing once the row is gone and the
-  // cache entry evicted.
+  // cache entry evicted — with no interrupt gap between the two.
   const remove = Effect.fn(`api.${segment}.delete`)(function* ({
     params,
   }: {
     readonly params: { readonly id: TId };
   }) {
-    yield* transact(ops.delete(params.id));
-    if (cache !== undefined) yield* cache.delete(params.id);
+    yield* Effect.uninterruptibleMask((restore) =>
+      Effect.andThen(
+        commit(restore, ops.delete(params.id), () => params.id),
+        evict(params.id),
+      ),
+    );
   });
 
   return {
@@ -647,9 +785,30 @@ export const make = <
     Targets,
     Tx,
     ET,
-    RT
+    RT,
+    Committed<HType, TId>
   >;
 };
+
+/** What a hidden-write rule naming `HType` adds to a write's success: nothing without one. */
+type Committed<HType extends string, TId extends string> = [HType] extends [never]
+  ? never
+  : CommittedDocument<HType, TId>;
+
+/** Whether a re-read's cause is a plain failure the hidden-write rule names. */
+const isHidden = <E>(cause: Cause.Cause<E>, when: (error: E) => boolean): boolean =>
+  !Cause.hasDies(cause) &&
+  !Cause.hasInterrupts(cause) &&
+  Option.match(Cause.findErrorOption(cause), { onNone: () => false, onSome: when });
+
+/** The {@link CommittedDocument} a hidden write answers. */
+const committedDocument = <TId extends string>(
+  type: string,
+  { id, version }: WriteResult<TId>,
+): CommittedDocument<string, TId> => ({
+  data: version === undefined ? { type, id } : { type, id, meta: { version } },
+  jsonapi: Assemble.JSONAPI_MEMBER,
+});
 
 // ---------------------------------------------------------------------------
 // §7.4 related-resource fetch

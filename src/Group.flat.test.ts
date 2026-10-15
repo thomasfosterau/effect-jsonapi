@@ -7,7 +7,7 @@
  * consuming application's contract snapshot pins.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Schema } from "effect";
+import { Exit, Schema } from "effect";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -96,6 +96,45 @@ describe("Group.flat", () => {
   it("keeps the family's branded id as the `:id` path param", () => {
     expect(Widget.Id).toBe(WidgetId);
   });
+});
+
+describe("Group.flat: hiddenWrites", () => {
+  const options = { resource: Widget, create: Create, update: Update, list: ListWidgets };
+  const hiding = Group.flat({ ...options, hiddenWrites: true }).group;
+  const plain = Group.flat(options).group;
+  // SAFETY: every endpoint of a flat group declares exactly one success schema.
+  const successOf = (group: GroupLike, name: string) =>
+    [
+      ...(group.endpoints[name] as { readonly success: ReadonlySet<Schema.Codec<unknown>> })
+        .success,
+    ][0]!;
+  const encode = (group: GroupLike, name: string) =>
+    Schema.encodeUnknownExit(successOf(group, name));
+
+  const id = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+  const committed = { data: { type: "widgets", id, meta: { version: 3 } } };
+  const full = { data: { type: "widgets", id, attributes: { name: "Sprocket" } } };
+
+  it.each(["create", "update"])("lets %s answer the committed identifier document", (name) => {
+    expect(encode(hiding, name)(committed)).toEqual(Exit.succeed(committed));
+    expect(decode(successOf(hiding, name))(committed)).toEqual(committed);
+  });
+
+  it.each(["create", "update"])("still lets %s answer, and decode, the full document", (name) => {
+    expect(encode(hiding, name)(full)).toEqual(Exit.succeed(full));
+    expect(decode(successOf(hiding, name))(full)).toEqual(full);
+  });
+
+  it("leaves get declaring the full document alone", () => {
+    expect(Exit.isFailure(encode(hiding, "get")(committed))).toBe(true);
+  });
+
+  it.each(["create", "update", "get"])(
+    "leaves %s of a group without the option declaring the full document alone",
+    (name) => {
+      expect(Exit.isFailure(encode(plain, name)(committed))).toBe(true);
+    },
+  );
 });
 
 describe("Group.flatReadOnly", () => {
@@ -234,5 +273,19 @@ describe("the wire contract", () => {
         "POST /widgets -> 201, 400, 406, 415",
       ].toSorted(),
     );
+  });
+
+  it("is unchanged in its statuses by hiddenWrites", () => {
+    const api = (hiddenWrites: boolean) =>
+      HttpApi.make("contract").add(
+        Group.flat({
+          resource: Widget,
+          list: ListWidgets,
+          create: Create,
+          update: Update,
+          hiddenWrites,
+        }).group,
+      );
+    expect(render(api(true))).toEqual(render(api(false)));
   });
 });
