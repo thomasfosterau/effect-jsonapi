@@ -13,11 +13,14 @@ import {
   HttpServerError,
   HttpServerRequest,
 } from "effect/http";
+import * as Schema from "effect/Schema";
+import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { TestClock } from "effect/testing";
 import {
   answeredAsDeployed,
   type Context,
   DEFAULT_REQUEST_TIMEOUT,
+  discover,
   finding,
   type Observation,
   pass,
@@ -60,6 +63,36 @@ describe("answeredAsDeployed (the in-process transport)", () => {
       Exit.isSuccess(exits) &&
         exits.value.map((exit) => Exit.isFailure(exit) && Cause.hasDies(exit.cause)),
     ).toEqual([true, true]);
+  });
+});
+
+describe("discover (the Idempotency-Key header)", () => {
+  const post = (name: string, headers?: Schema.Top) =>
+    HttpApiEndpoint.post(name, `/${name}`, { headers, success: Schema.Unknown });
+  const declared = discover(
+    HttpApi.make("headers").add(
+      HttpApiGroup.make("writes").add(
+        post("none"),
+        post("other", Schema.Struct({ "x-trace": Schema.String })),
+        post("optional", Schema.Struct({ "idempotency-key": Schema.optionalKey(Schema.String) })),
+        post("required", Schema.Struct({ "idempotency-key": Schema.String })),
+        // HTTP header names are case-insensitive, so a schema spelling it in
+        // another case declares the same header.
+        post("mixed", Schema.Struct({ "Idempotency-Key": Schema.String })),
+        post("upper", Schema.Struct({ "IDEMPOTENCY-KEY": Schema.optionalKey(Schema.String) })),
+      ),
+    ),
+  );
+
+  it("tells a required key from an optional one, matching the name case-insensitively", () => {
+    expect(declared.map(({ name, idempotencyKey }) => `${name}: ${idempotencyKey}`)).toEqual([
+      "none: absent",
+      "other: absent",
+      "optional: optional",
+      "required: required",
+      "mixed: required",
+      "upper: optional",
+    ]);
   });
 });
 

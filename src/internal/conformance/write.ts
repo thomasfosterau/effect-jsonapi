@@ -38,6 +38,7 @@ import {
   Result,
   Schema,
 } from "effect";
+import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { MEDIA_TYPE } from "../media.js";
 import {
   type Context,
@@ -66,6 +67,24 @@ export const writeHeaders = {
   "content-type": MEDIA_TYPE,
 };
 
+/**
+ * The `Idempotency-Key` a write to `endpoint` carries: a fresh one when the
+ * endpoint requires it (`idempotency: "required"`), which refuses a write
+ * without one, and none otherwise — an endpoint where the key is optional
+ * processes an unkeyed write normally. A key never sent before can only ever
+ * be a first attempt, never a replay.
+ *
+ * @internal
+ */
+export const idempotencyHeaders = (
+  endpoint: Discovered,
+): Effect.Effect<Readonly<Record<string, string>>> =>
+  endpoint.idempotencyKey === "required"
+    ? Effect.sync(() => ({
+        [IDEMPOTENCY_HEADER]: `conformance-${globalThis.crypto.randomUUID()}`,
+      }))
+    : Effect.succeed({});
+
 // ---------------------------------------------------------------------------
 // Targets
 // ---------------------------------------------------------------------------
@@ -87,6 +106,8 @@ export interface WriteTarget {
   readonly update: Option.Option<() => Patch>;
   readonly cleanup: Option.Option<(id: string) => Effect.Effect<unknown, unknown>>;
   readonly createPath: string;
+  /** The endpoint `createPath` resolves — the one the kit creates through. */
+  readonly createEndpoint: Discovered;
   readonly endpoint: Discovered;
 }
 
@@ -166,7 +187,7 @@ const usable = (
       );
     const resolution = resolvePath(create, ctx.options);
     if (Predicate.isTagged(resolution, "Unresolved")) return yield* Result.fail(resolution.reason);
-    return { key, ...fixture, createPath: resolution.path, endpoint };
+    return { key, ...fixture, createPath: resolution.path, createEndpoint: create, endpoint };
   });
 
 /**
@@ -208,6 +229,7 @@ export const atomicTargets = (ctx: Context, operations: Discovered): Targets => 
         key,
         ...fields,
         createPath: operations.path,
+        createEndpoint: operations,
         endpoint: operations,
       })),
     ),
@@ -556,18 +578,23 @@ export const withCreated = <A>(
 
 /**
  * Creates through the target's own create endpoint — `POST /<type>` with the
- * fixture's payload as primary data.
+ * fixture's payload as primary data, and a fresh `Idempotency-Key` when that
+ * endpoint requires one (see {@link idempotencyHeaders}).
  *
  * @internal
  */
 export const viaCreateEndpoint = (ctx: Context, target: WriteTarget): Via => ({
   send: (payload) =>
-    ctx.request({
-      method: "POST",
-      url: target.createPath,
-      headers: writeHeaders,
-      body: { data: payload },
-    }),
+    idempotencyHeaders(target.createEndpoint).pipe(
+      Effect.flatMap((key) =>
+        ctx.request({
+          method: "POST",
+          url: target.createPath,
+          headers: { ...writeHeaders, ...key },
+          body: { data: payload },
+        }),
+      ),
+    ),
   identify: primaryIdentity,
 });
 
@@ -677,12 +704,27 @@ export const overTargets = (
   what: string,
   probe: (target: WriteTarget) => Effect.Effect<Verdict>,
 ): Effect.Effect<Outcome> =>
+  overTargetsAll(ctx, rule, found, what, (target) => Effect.map(probe(target), Arr.of));
+
+/**
+ * {@link overTargets}, for a probe that reaches more than one verdict per
+ * target — one per request it judges.
+ *
+ * @internal
+ */
+export const overTargetsAll = (
+  ctx: Context,
+  rule: Rule,
+  found: Targets,
+  what: string,
+  probe: (target: WriteTarget) => Effect.Effect<ReadonlyArray<Verdict>>,
+): Effect.Effect<Outcome> =>
   Effect.gen(function* () {
     if (!ctx.options.mutating) return skip(rule, MUTATING_SKIP);
     if (found.candidates === 0) return skip(rule, `no ${what} in this api`);
     // One target at a time: each creates and disposes of server state, and a
     // concurrent create could trip a uniqueness rule the fixture relies on.
-    const verdicts = yield* Effect.forEach(found.targets, probe, { concurrency: 1 });
+    const verdicts = Arr.flatten(yield* Effect.forEach(found.targets, probe, { concurrency: 1 }));
     const [settled, undecidedFor] = Arr.partition(verdicts, decision);
     const reasons = [...found.missing, ...undecidedFor];
     const note = Arr.match(reasons, {

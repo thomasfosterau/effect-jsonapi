@@ -21,9 +21,10 @@
  * against a deployed server.
  *
  * **Two tiers, separately runnable.** The `spec` tier is JSON:API v1.1 alone.
- * The `profile` tier is this package's filter grammar profile and the
- * conventions the library takes a position on where the spec declines to — so a
- * consumer can run the first without adopting the second ({@link Options.tiers}).
+ * The `profile` tier is this package's own profiles — the filter grammar and
+ * the Idempotency-Key profile — and the conventions the library takes a
+ * position on where the spec declines to, so a consumer can run the first
+ * without adopting the second ({@link Options.tiers}).
  *
  * **The report states what it did not check.** Every rule that could not run
  * reports why, and {@link gaps} declares the areas the kit does not cover at
@@ -119,8 +120,9 @@ import * as WriteFixtures from "./internal/conformance/write.js";
 
 /**
  * Which body of requirements a rule comes from: `"spec"` is JSON:API v1.1
- * itself, `"profile"` is this package's filter grammar profile and the
- * conventions it adds where the spec declines to have an opinion.
+ * itself, `"profile"` is this package's own profiles (the filter grammar and the
+ * Idempotency-Key profile) and the conventions it adds where the spec declines
+ * to have an opinion.
  *
  * The two are separately runnable so a consumer can hold themselves to the spec
  * without adopting the profile.
@@ -655,7 +657,7 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "The Idempotency-Key profile",
     reason:
-      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`). The profile tier checks its advertisement (§1): given a `writes` fixture and `mutating: true`, a create on an endpoint declaring `Idempotency-Key` must answer with the profile URI in `jsonapi.profile` or on its media type. What a *retried* write does is not checked: replay of the recorded response, the fingerprint mismatch conflict, the in-flight case and the scope of a key. Each needs the kit to resend a request it has already sent, byte for byte, which neither the write fixture (#162) nor the kit yet provides.",
+      "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`). The profile tier checks its advertisement (§1): given a `writes` fixture and `mutating: true`, a create or an update on an endpoint declaring `Idempotency-Key` must answer with the profile URI in `jsonapi.profile` or on its media type. Delete endpoints (usually a 204, with no document to name it in) and the atomic operations endpoint are not checked. What a *retried* write does is not checked either: replay of the recorded response, the fingerprint mismatch conflict, the in-flight case and the scope of a key. Each needs the kit to resend a request it has already sent, byte for byte, which neither the write fixture (#162) nor the kit yet provides.",
     tracking: ["#123", "#162", "#165"],
   },
   {

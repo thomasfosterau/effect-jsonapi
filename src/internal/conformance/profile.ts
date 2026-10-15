@@ -12,8 +12,9 @@
  *     and are declared as a coverage gap rather than silently omitted.
  *   - **The Idempotency-Key profile** (`docs/idempotency.md`, published at
  *     `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
- *     the 2xx a create probe gets from the `writes` fixture; what a *retried*
- *     write does is declared as a coverage gap.
+ *     the 2xx a create or update probe gets from the `writes` fixture; delete
+ *     and atomic writes, and what a *retried* write does, are declared as a
+ *     coverage gap.
  *   - **Library conventions** that the spec leaves optional but this package
  *     takes a position on: advertising `jsonapi`, and accepting the
  *     repeated-key spelling of every comma-separated query family.
@@ -28,9 +29,10 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { PROFILE_URI } from "../../Filter.js";
-import { HEADER, PROFILE_URI as IDEMPOTENCY_PROFILE_URI } from "../../Idempotency.js";
+import { PROFILE_URI as IDEMPOTENCY_PROFILE_URI } from "../../Idempotency.js";
 import {
   type Context,
   coverageNote,
@@ -52,14 +54,19 @@ import {
   withQuery,
 } from "./core.js";
 import {
+  accepted,
+  buildUpdate,
   decided,
+  idempotencyHeaders,
   onAccepted,
-  overTargets,
-  primaryIdentity,
+  overTargetsAll,
+  ownId,
+  pathFor,
+  type Targets,
   targets,
   undecided,
   type Verdict,
-  type Via,
+  viaCreateEndpoint,
   withCreated,
   type WriteTarget,
   writeHeaders,
@@ -372,27 +379,6 @@ const idempotencyRule = (
   requirement,
 });
 
-/**
- * Creates through the target's create endpoint as `viaCreateEndpoint` does,
- * carrying a fresh `Idempotency-Key`: an endpoint declaring
- * `idempotency: "required"` refuses a create without one, and a key never sent
- * before can only ever be a first attempt, never a replay.
- */
-const viaIdempotentCreate = (ctx: Context, target: WriteTarget): Via => ({
-  send: (payload) =>
-    Effect.sync(() => `conformance-${globalThis.crypto.randomUUID()}`).pipe(
-      Effect.flatMap((key) =>
-        ctx.request({
-          method: "POST",
-          url: target.createPath,
-          headers: { ...writeHeaders, [HEADER]: key },
-          body: { data: payload },
-        }),
-      ),
-    ),
-  identify: primaryIdentity,
-});
-
 const decodeJsonApiProfile = Schema.decodeUnknownOption(
   Schema.Struct({
     jsonapi: Schema.Struct({ profile: Schema.Array(Schema.Unknown) }),
@@ -416,18 +402,26 @@ const mediaTypeProfiles = (observation: Observation): ReadonlyArray<string> =>
         .flatMap(([, value]) => value.split(" ")),
   });
 
-/** What a create's 2xx answer says of the profile: a document naming it in either place passes. */
-const advertisedOn = (rule: Rule, target: WriteTarget, observation: Observation): Verdict => {
-  if (observation.text === "")
-    return undecided(
-      `creating a "${target.key}" resource answered ${observation.status} with no document, so neither a \`jsonapi\` member nor a media type could name the profile`,
-    );
+/** Whether an endpoint's headers declare `Idempotency-Key`, required or optional. */
+const declaresKey = (endpoint: Discovered): boolean => endpoint.idempotencyKey !== "absent";
+
+/**
+ * What a write's 2xx answer says of the profile. Either place naming it
+ * passes — a media type can, even on an answer with no body — and only then is
+ * an empty body a reason not to decide: with no document there is no
+ * `jsonapi` member that could have named it.
+ */
+const advertisedOn = (rule: Rule, write: string, observation: Observation): Verdict => {
   const named = [...documentProfiles(observation), ...mediaTypeProfiles(observation)];
   if (named.includes(IDEMPOTENCY_PROFILE_URI)) return decided(1, []);
+  if (observation.text === "")
+    return undecided(
+      `${write} answered ${observation.status} with no document, and its media type does not name the profile, so no \`jsonapi\` member could`,
+    );
   const jsonapi = isRecord(observation.body) ? observation.body["jsonapi"] : undefined;
   return decided(1, [
     finding(rule, {
-      detail: `the ${observation.status} creating a "${target.key}" resource through ${target.endpoint.path}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
+      detail: `the ${observation.status} ${write}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
       expected: `\`jsonapi.profile\` or the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
       observed: `jsonapi: ${jsonapi === undefined ? "(none)" : quote(jsonapi)} · Content-Type: ${
         observation.contentType === undefined ? "(none)" : quote(observation.contentType)
@@ -437,12 +431,93 @@ const advertisedOn = (rule: Rule, target: WriteTarget, observation: Observation)
   ]);
 };
 
+const creating = (target: WriteTarget): string =>
+  `creating a "${target.key}" resource through ${target.createEndpoint.path}`;
+
+/**
+ * The endpoints the rule probes: each create and update endpoint declaring
+ * `Idempotency-Key`. A type with both is probed once — the update's own create
+ * is judged along with it — so the rule makes at most one create and one
+ * update per type.
+ */
+const idempotentTargets = (ctx: Context): Targets => {
+  const creates = targets(ctx, "create", declaresKey);
+  const updates = targets(ctx, "update", declaresKey);
+  const updated = Arr.map(updates.targets, (target) => target.key);
+  return {
+    targets: [
+      ...creates.targets.filter((target) => !Arr.contains(updated, target.key)),
+      ...updates.targets,
+    ],
+    missing: [...creates.missing, ...updates.missing],
+    candidates: creates.candidates + updates.candidates,
+  };
+};
+
+/** One create through an endpoint declaring the header, judged on its answer. */
+const probeCreate = (ctx: Context, rule: Rule, target: WriteTarget) =>
+  withCreated(
+    ctx,
+    rule,
+    target,
+    viaCreateEndpoint(ctx, target),
+    onAccepted(target, ({ observation }) =>
+      Effect.succeed(advertisedOn(rule, creating(target), observation)),
+    ),
+  ).pipe(Effect.map(Arr.of));
+
+/**
+ * One create and one update of what it made, through an update endpoint
+ * declaring the header: the update's answer is judged, and the create's too
+ * when its endpoint declares the header.
+ */
+const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
+  withCreated(ctx, rule, target, viaCreateEndpoint(ctx, target), (created) =>
+    Result.match(accepted(target, created), {
+      onFailure: (reason) => Effect.succeed([undecided(reason)]),
+      onSuccess: (made) => {
+        const onCreate = declaresKey(target.createEndpoint)
+          ? [advertisedOn(rule, creating(target), made.observation)]
+          : [];
+        return Result.match(Result.all({ id: ownId(made), patch: buildUpdate(target) }), {
+          onFailure: (reason) => Effect.succeed([...onCreate, undecided(reason)]),
+          onSuccess: ({ id, patch }) =>
+            idempotencyHeaders(target.endpoint).pipe(
+              Effect.flatMap((key) =>
+                ctx.request({
+                  method: target.endpoint.method,
+                  url: pathFor(target.endpoint, id),
+                  headers: { ...writeHeaders, ...key },
+                  body: { data: { ...patch, type: made.payload.type, id } },
+                }),
+              ),
+              Effect.map((observation) => [
+                ...onCreate,
+                observation.status >= 200 && observation.status < 300
+                  ? advertisedOn(
+                      rule,
+                      `updating ${made.payload.type}:${id} through ${target.endpoint.path}`,
+                      observation,
+                    )
+                  : undecided(
+                      `the server did not accept writes["${target.key}"].update on the resource the kit had just created (${describe(observation)})`,
+                    ),
+              ]),
+            ),
+        });
+      },
+    }),
+  );
+
 /**
  * `docs/idempotency.md` §1: a server advertises the profile in `jsonapi.profile`
  * and MAY also name it on the media type, so either place passes. Only a write
- * shows it — the kit cannot read an endpoint's answer to a create without
- * making one — so the rule runs one create per endpoint declaring the header,
- * on the `writes` fixture, under `mutating: true`.
+ * shows it — the kit cannot read an endpoint's answer to a write without
+ * making one — so the rule runs, on the `writes` fixture under
+ * `mutating: true`, one create per create endpoint declaring the header and
+ * one create plus one update per update endpoint declaring it. Delete
+ * endpoints (usually a 204, with no document) and the atomic endpoint are not
+ * probed. A key is sent only to an endpoint that requires one.
  */
 const advertisesIdempotencyProfile: RuleImpl = {
   creates: true,
@@ -451,24 +526,18 @@ const advertisesIdempotencyProfile: RuleImpl = {
     "§1 What the profile is, and is not",
     "1-what-the-profile-is-and-is-not",
     "SHOULD",
-    `A server implementing the Idempotency-Key profile SHOULD advertise it: the 2xx response to a create on an endpoint that accepts the \`Idempotency-Key\` header names \`${IDEMPOTENCY_PROFILE_URI}\` in the top-level \`jsonapi.profile\` member (\`Idempotency.jsonapi\`) or in the \`profile\` parameter of its media type.`,
+    `A server implementing the Idempotency-Key profile SHOULD advertise it: the 2xx response to a create or an update on an endpoint that accepts the \`Idempotency-Key\` header names \`${IDEMPOTENCY_PROFILE_URI}\` in the top-level \`jsonapi.profile\` member (\`Idempotency.jsonapi\`) or in the \`profile\` parameter of its media type.`,
   ),
   run: (ctx) =>
-    overTargets(
+    overTargetsAll(
       ctx,
       advertisesIdempotencyProfile.rule,
-      targets(ctx, "create", (endpoint) => endpoint.idempotencyKey),
-      "create endpoint declaring the `Idempotency-Key` header",
+      idempotentTargets(ctx),
+      "create or update endpoint declaring the `Idempotency-Key` header",
       (target) =>
-        withCreated(
-          ctx,
-          advertisesIdempotencyProfile.rule,
-          target,
-          viaIdempotentCreate(ctx, target),
-          onAccepted(target, ({ observation }) =>
-            Effect.succeed(advertisedOn(advertisesIdempotencyProfile.rule, target, observation)),
-          ),
-        ),
+        target.endpoint.role === "update"
+          ? probeUpdate(ctx, advertisesIdempotencyProfile.rule, target)
+          : probeCreate(ctx, advertisesIdempotencyProfile.rule, target),
     ),
 };
 
