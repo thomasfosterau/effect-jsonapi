@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import type { SchemaErrors } from "./Middleware.js";
@@ -38,6 +40,12 @@ const Headers = Schema.Struct({
   span: Schema.optionalKey(Schema.FiniteFromString),
 }).pipe(Schema.encodeKeys({ trace: "x-trace" }));
 
+// A renamed member holding an array, so the rejected value's pointer runs
+// on past the renamed key through an index.
+const List = Schema.Struct({
+  items: Schema.Array(Schema.Struct({ count: Schema.FiniteFromString })),
+}).pipe(Schema.encodeKeys({ items: "things" }));
+
 const Params = Schema.Struct({ id: Schema.FiniteFromString }).pipe(
   Schema.encodeKeys({ id: "itemId" }),
 );
@@ -52,6 +60,12 @@ const Api = HttpApi.make("wire").add(
       }).middleware(Middleware.SchemaErrors),
     )
     .add(
+      HttpApiEndpoint.post("list", "/lists", {
+        payload: List,
+        success: Schema.String,
+      }).middleware(Middleware.SchemaErrors),
+    )
+    .add(
       HttpApiEndpoint.get("get", "/items/:itemId", {
         params: Params,
         success: Schema.String,
@@ -60,7 +74,10 @@ const Api = HttpApi.make("wire").add(
 );
 
 const ItemsLive = HttpApiBuilder.group(Api, "items", (handlers) =>
-  handlers.handle("create", () => Effect.succeed("ok")).handle("get", () => Effect.succeed("ok")),
+  handlers
+    .handle("create", () => Effect.succeed("ok"))
+    .handle("list", () => Effect.succeed("ok"))
+    .handle("get", () => Effect.succeed("ok")),
 );
 
 const request = async (
@@ -90,6 +107,9 @@ const post = (body: typeof WireBody.Type, headers: Record<string, string> = {}) 
     headers: { "content-type": "application/json", ...headers },
     body: encodeBody(body),
   });
+
+// The list body as the request spells it: the wire side of `List`.
+const encodeList = Schema.encodeSync(Schema.fromJsonString(Schema.toEncoded(List)));
 
 const valid: typeof WireBody.Type = { itemCount: "1", data: { "item-size": "2" } };
 
@@ -121,6 +141,16 @@ describe("a 400 for a key renamed on the wire names it as the request sent it (#
     expect(await post({ ...valid, itemCount: "11" })).toEqual(
       rejected("too big", { pointer: "/itemCount" }),
     );
+  });
+
+  it("points through a renamed member into an array element by its wire name", async () => {
+    expect(
+      await request("/lists", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: encodeList({ things: [{ count: "1" }, { count: "x" }] }),
+      }),
+    ).toEqual(rejected("Expected a finite number", { pointer: "/things/1/count" }));
   });
 
   it("names a renamed header by its wire name", async () => {
@@ -177,5 +207,31 @@ describe("Middleware.schemaErrorDocument on a renamed body or header (#316)", ()
         failure(Schema.decodeUnknownResult(Payload)({ data: { itemCount: "x" } })),
       ).errors[0]?.source,
     ).toEqual({ pointer: "/data/itemCount" });
+  });
+
+  it("keeps the wire name of a renamed parent above a pointer a transformation reports", () => {
+    // A transformation that rejects its value at a path of its own, below
+    // the property it decodes.
+    const Deep = Schema.String.pipe(
+      Schema.decodeTo(
+        Schema.String,
+        SchemaTransformation.transformEffect<string, string>({
+          decode: () =>
+            Effect.fail(
+              new SchemaIssue.Pointer(["deep"], new SchemaIssue.InvalidValue({ message: "no" })),
+            ),
+          encode: Effect.succeed,
+        }),
+      ),
+    );
+    const Payload = Schema.Struct({ outer: Schema.Struct({ v: Deep }) }).pipe(
+      Schema.encodeKeys({ outer: "o" }),
+    );
+    expect(
+      Middleware.schemaErrorDocument(
+        "Payload",
+        failure(Schema.decodeUnknownResult(Payload)({ o: { v: "x" } })),
+      ).errors[0]?.source,
+    ).toEqual({ pointer: "/o/v/deep" });
   });
 });

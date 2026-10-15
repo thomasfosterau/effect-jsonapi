@@ -423,7 +423,9 @@ const sourceOf = (
  * a rejected `count` is `source.pointer` `/itemCount`, and with
  * `Schema.encodeKeys({ trace: "x-trace" })` a rejected header is
  * `source.header` `x-trace`. A key the schema does not rename keeps its own
- * name.
+ * name. To read a renamed struct's wire names, its transformation's decode
+ * runs on probe values once per schema, as it does for a query, so a decode
+ * with side effects has them run then.
  *
  * Where the schema that rejected the value publishes what it *would* have
  * accepted, the error object carries it as `meta`: a rejected `?include=` path
