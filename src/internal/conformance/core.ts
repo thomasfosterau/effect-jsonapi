@@ -10,6 +10,7 @@
 import {
   Array as Arr,
   Cause,
+  Duration,
   Effect,
   Formatter,
   MutableHashSet,
@@ -430,6 +431,11 @@ export interface ResolvedOptions {
   readonly extensions: ReadonlyArray<string>;
   readonly mutating: boolean;
   readonly writes: Readonly<Record<string, Fixture>>;
+  /**
+   * The longest the kit waits for one request's answer, resolved by
+   * {@link requestTimeoutOf}; none when the run turned it off.
+   */
+  readonly requestTimeout: Option.Option<Duration.Duration>;
 }
 
 // ---------------------------------------------------------------------------
@@ -749,6 +755,82 @@ const hopOf = (
   });
 };
 
+/** What one request came to: the probe's observation, or a redirect hop to take. */
+type Step =
+  | { readonly _tag: "Answered"; readonly observation: Observation }
+  | { readonly _tag: "Hop"; readonly next: { readonly method: string; readonly url: string } };
+
+const answered = (observation: Observation): Step => ({ _tag: "Answered", observation });
+
+/**
+ * The note a request `requestTimeout` cut short is named by, in
+ * `transportError`.
+ *
+ * @internal
+ */
+export const timedOutNote = (timeout: Duration.Duration): string =>
+  `no answer within ${Duration.format(timeout)}, the run's \`requestTimeout\``;
+
+/**
+ * How long the kit waits for one request when the run does not say:
+ * thirty seconds (owner decision on #302).
+ *
+ * @internal
+ */
+export const DEFAULT_REQUEST_TIMEOUT: Duration.Duration = Duration.seconds(30);
+
+/**
+ * `Options.requestTimeout` resolved: {@link DEFAULT_REQUEST_TIMEOUT} when
+ * unset, none (no timeout) for `"Infinity"` or `Duration.infinity`, and the
+ * duration given otherwise. A duration that is not positive — zero, negative,
+ * `NaN` (which `Duration` reads as zero) — or that is not a duration at all
+ * would cut every request short before it was sent, so it is a defect in the
+ * caller's options, not a run to report.
+ *
+ * @internal
+ */
+export const requestTimeoutOf = (
+  given: Option.Option<Duration.Input>,
+): Effect.Effect<Option.Option<Duration.Duration>> => {
+  if (Option.isNone(given)) return Effect.succeed(Option.some(DEFAULT_REQUEST_TIMEOUT));
+  const input = given.value;
+  const timeout = Duration.fromInput(input);
+  if (Option.isSome(timeout) && Duration.isPositive(timeout.value)) {
+    return Effect.succeed(Duration.isFinite(timeout.value) ? timeout : Option.none());
+  }
+  return Effect.die(
+    new RangeError(
+      `Conformance: \`requestTimeout\` must be a positive duration \`Duration\` can read, or "Infinity" for no timeout; got ${Formatter.format(input)}`,
+    ),
+  );
+};
+
+/**
+ * `request`, one request and the reading of its answer, bounded by `timeout`
+ * when there is one. A request still unanswered then is interrupted — over
+ * `fetch`, aborted — and read as a lost response: `status: 0`, with
+ * {@link timedOutNote} in `transportError` and no redirect in `unfollowed`, so
+ * a rule reads it as it reads any transport error (not as a redirect the kit
+ * did not follow). It covers the whole of the client's `execute`, so a
+ * client's own `retry` runs within it, and the answer's body, so a server
+ * that sends its headers and holds the body open is cut short too. Each
+ * redirect hop is a request of its own, with a timeout of its own.
+ */
+const timed = (
+  request: Effect.Effect<Step, never, Scope.Scope>,
+  probe: Probe,
+  redirects: ReadonlyArray<string>,
+  timeout: Option.Option<Duration.Duration>,
+): Effect.Effect<Step, never, Scope.Scope> =>
+  Option.match(timeout, {
+    onNone: () => request,
+    onSome: (bound) =>
+      Effect.map(
+        Effect.timeoutOption(request, bound),
+        Option.getOrElse(() => answered(unread(probe, timedOutNote(bound), redirects))),
+      ),
+  });
+
 /**
  * Builds the probe runner over an `HttpClient`. A transport failure becomes an
  * `Observation` with `status: 0` rather than an error, so one unreachable
@@ -780,10 +862,21 @@ const hopOf = (
  * (see {@link transportFollowed}). A failure of `preprocess` itself, with no
  * request sent, is read as any other transport error.
  *
+ * With a `requestTimeout` (none when the run turned it off), each request —
+ * the first and each hop — has that long to be answered and read, the
+ * client's `execute` and the body both, and one that is not reads as a lost
+ * response naming the timeout (see {@link timed}).
+ * The timeout wraps the client's `postprocess` from outside, so the request
+ * still runs through the client exactly as its `execute` runs it.
+ *
  * @internal
  */
 export const runner =
-  (client: HttpClient.HttpClient, baseUrl: string): Context["request"] =>
+  (
+    client: HttpClient.HttpClient,
+    baseUrl: string,
+    requestTimeout: Option.Option<Duration.Duration>,
+  ): Context["request"] =>
   (probe) => {
     const method = probe.method ?? "GET";
     const headers = probe.headers ?? jsonApiAccept;
@@ -793,11 +886,15 @@ export const runner =
     const record: Probe = { method, url: probe.url, headers, body: probe.body };
     const origin = new URL(URL.canParse(baseUrl) ? baseUrl : first).origin;
     const allowed = probe.requests ?? HOP_CAP + 1;
-    /** Sends one request, then the hop its redirect leads to, if the kit takes it. */
-    const send = (
+    /**
+     * Sends one request and reads its answer: the observation, or the hop its
+     * redirect leads to when the kit takes it. One request, so what
+     * `requestTimeout` bounds (see {@link timed}).
+     */
+    const step = (
       sent: { readonly method: string; readonly url: string },
       redirects: ReadonlyArray<string>,
-    ): Effect.Effect<Observation, never, Scope.Scope> =>
+    ): Effect.Effect<Step, never, Scope.Scope> =>
       Effect.gen(function* () {
         const request = clientRequest(sent.url, { ...record, method: sent.method });
         // The request as the client sends it: what its own `preprocess` — where
@@ -825,7 +922,7 @@ export const runner =
         );
         // A `preprocess` that failed sent nothing, so no redirect was followed.
         if (Option.isNone(prepared) && Result.isFailure(result)) {
-          return unread(record, String(result.failure), redirects);
+          return answered(unread(record, String(result.failure), redirects));
         }
         const sentAs = Option.getOrElse(prepared, () => request);
         // Where the transport ended: the request behind its failure or its
@@ -846,27 +943,42 @@ export const runner =
         const sentTo = urlOf(sentAs);
         const followed = transportFollowed({ method: sentAs.method, url: sentTo }, ended);
         if (Option.isSome(followed)) {
-          return unread(record, unfollowedNote(followed.value), redirects, followed);
+          return answered(unread(record, unfollowedNote(followed.value), redirects, followed));
         }
-        if (Result.isFailure(result)) return unread(record, String(result.failure), redirects);
+        if (Result.isFailure(result)) {
+          return answered(unread(record, String(result.failure), redirects));
+        }
         const response = result.success;
         const location = response.headers["location"];
         // An empty `Location` names nothing to follow, as a missing one does.
         if (!REDIRECTS.includes(response.status) || location === undefined || location === "") {
-          return yield* answerOf(record, response, redirects);
+          return answered(yield* answerOf(record, response, redirects));
         }
         const hop = hopOf({ status: response.status, location }, { ...sent, sentTo }, origin, {
           hops: redirects.length,
           allowed,
         });
-        return yield* Result.match(hop, {
-          onFailure: (unfollowed) =>
-            Effect.succeed(
+        return Result.match(hop, {
+          onFailure: (unfollowed): Step =>
+            answered(
               unread(record, unfollowedNote(unfollowed), redirects, Option.some(unfollowed)),
             ),
-          onSuccess: (next) => send(next, [...redirects, next.url]),
+          onSuccess: (next): Step => ({ _tag: "Hop", next }),
         });
       });
+    /**
+     * Sends one request, then the hop its redirect leads to, if the kit takes
+     * it, each under its own `requestTimeout`.
+     */
+    const send = (
+      sent: { readonly method: string; readonly url: string },
+      redirects: ReadonlyArray<string>,
+    ): Effect.Effect<Observation, never, Scope.Scope> =>
+      Effect.flatMap(timed(step(sent, redirects), record, redirects, requestTimeout), (taken) =>
+        Predicate.isTagged(taken, "Answered")
+          ? Effect.succeed(taken.observation)
+          : send(taken.next, [...redirects, taken.next.url]),
+      );
     return send({ method, url: first }, []).pipe(Effect.scoped, Effect.orDie);
   };
 

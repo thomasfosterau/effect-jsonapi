@@ -90,6 +90,7 @@
 import {
   Array as Arr,
   Data,
+  Duration,
   Effect,
   Layer,
   MutableHashSet,
@@ -757,33 +758,73 @@ export interface Options {
   readonly tiers?: ReadonlyArray<Tier> | undefined;
   /**
    * Run only these rule ids. A prefix matches every rule beneath it, so
-   * `["spec/content-negotiation"]` selects that whole section.
+   * `["spec/content-negotiation"]` selects that whole section. A rule it does
+   * not select is left out of the run and out of the report.
    */
   readonly only?: ReadonlyArray<string> | undefined;
+  /**
+   * Leave out these rule ids — the complement of `only`, matched the same
+   * way: a prefix (a plain string prefix of the id) matches every rule
+   * beneath it, so `["spec/links/"]` leaves out the link crawl and
+   * `["spec/pagination/links-enumerate-collection"]` the pagination walk. It
+   * applies after `tiers` and `only`, so it removes rules from what they
+   * select, and a rule both name is left out. A rule it leaves out is left out
+   * of the run and out of the report, as one `only` does not select is.
+   *
+   * @since 0.17.0
+   */
+  readonly skip?: ReadonlyArray<string> | undefined;
+  /**
+   * The longest the kit waits for one request to be answered and its body
+   * read, as any `Duration.Input` (`"5 seconds"`, `Duration.seconds(5)`, a
+   * number of milliseconds). A request still unanswered then is interrupted —
+   * over `fetch`, aborted — and reads as a lost response: no status, with a
+   * transport error naming the timeout, which every rule treats as it treats
+   * any transport failure. Each redirect hop the kit follows is a request with
+   * a timeout of its own; a client's own `retry` runs within one.
+   *
+   * Defaults to thirty seconds, for `verify` and `verifyWith` alike.
+   * `"Infinity"` (or `Duration.infinity`) turns it off: the kit then waits as
+   * long as the transport does, so a server that holds a response open holds
+   * the run. A duration that is not positive — zero, negative or `NaN` — or
+   * one `Duration` cannot read (e.g. `"1e3 seconds"`) is a defect: the run
+   * dies before it sends a request.
+   *
+   * @since 0.17.0
+   */
+  readonly requestTimeout?: Duration.Input | undefined;
   /** A name for the report's header. Defaults to the `HttpApi`'s identifier. */
   readonly target?: string | undefined;
 }
 
 const DEFAULT_ABSENT_ID = "conformance-absent-id-0000";
 
-const resolveOptions = (baseUrl: string, options: Options | undefined): Core.ResolvedOptions => ({
+const resolveOptions = (
+  baseUrl: string,
+  options: Options,
+  requestTimeout: Option.Option<Duration.Duration>,
+): Core.ResolvedOptions => ({
   baseUrl,
-  ids: options?.ids ?? {},
-  paths: options?.paths ?? {},
-  absentId: options?.absentId ?? DEFAULT_ABSENT_ID,
-  extensions: options?.extensions ?? [],
-  mutating: options?.mutating ?? false,
-  writes: options?.writes ?? {},
+  ids: options.ids ?? {},
+  paths: options.paths ?? {},
+  absentId: options.absentId ?? DEFAULT_ABSENT_ID,
+  extensions: options.extensions ?? [],
+  mutating: options.mutating ?? false,
+  writes: options.writes ?? {},
+  requestTimeout,
 });
 
 const selected = (options: Options | undefined): ReadonlyArray<Core.RuleImpl> => {
   const tiers = options?.tiers;
   const only = options?.only;
+  const skip = options?.skip ?? [];
+  const matches = (prefixes: ReadonlyArray<string>, id: string): boolean =>
+    prefixes.some((prefix) => id.startsWith(prefix));
   return implementations.filter((implementation) => {
-    if (tiers !== undefined && !tiers.includes(implementation.rule.tier)) return false;
-    if (only !== undefined && !only.some((prefix) => implementation.rule.id.startsWith(prefix)))
-      return false;
-    return true;
+    const { id, tier } = implementation.rule;
+    if (tiers !== undefined && !tiers.includes(tier)) return false;
+    if (only !== undefined && !matches(only, id)) return false;
+    return !matches(skip, id);
   });
 };
 
@@ -801,12 +842,19 @@ const execute = (
   options: Options | undefined,
 ): Effect.Effect<Report> =>
   Effect.gen(function* () {
-    const resolved = resolveOptions(baseUrl, options);
+    const resolved = resolveOptions(
+      baseUrl,
+      options ?? {},
+      yield* Core.requestTimeoutOf(Option.fromUndefinedOr(options?.requestTimeout)),
+    );
     const observed = MutableHashSet.empty<string>();
     const ctx: Core.Context = {
       endpoints: Core.discover(api),
       options: resolved,
-      request: Core.observing(Core.runner(client, resolved.baseUrl), observed),
+      request: Core.observing(
+        Core.runner(client, resolved.baseUrl, resolved.requestTimeout),
+        observed,
+      ),
       writes: [],
       observed,
     };
@@ -852,6 +900,9 @@ const execute = (
  * in-memory `HttpClient` over the real router, so requests go through request
  * decoding, routing, middleware, the handler and response encoding, and the
  * rules observe raw statuses, media types and bodies. No port is bound.
+ * Each request has {@link Options.requestTimeout} (thirty seconds unless the
+ * run says otherwise) to be answered; a request it cuts short reads as a lost
+ * response.
  *
  * Use {@link verifyWith} to run the identical rules against a deployed server.
  *
@@ -978,8 +1029,9 @@ export const verify = Effect.fnUntraced(function* <
  * runs each request through it as its `execute` does, so its `retry` still
  * re-prepares a request, and a `Location` on the origin it sends to is
  * followed as one on the base URL's.
- * There is no per-request timeout: a server that holds a response open holds
- * the run.
+ * Each request has {@link Options.requestTimeout} (thirty seconds unless the
+ * run says otherwise) to be answered; a request it cuts short reads as a lost
+ * response.
  *
  * @example
  * ```ts
@@ -1000,7 +1052,11 @@ export const verify = Effect.fnUntraced(function* <
  *   return yield* Conformance.verifyWith(api, {
  *     client,
  *     baseUrl: "https://api.example.com",
- *     ids: { articles: "1" }
+ *     ids: { articles: "1" },
+ *     // a live server: give up on a request after ten seconds, not thirty…
+ *     requestTimeout: "10 seconds",
+ *     // …and leave out the rules that walk its collections and crawl its links
+ *     skip: ["spec/pagination/links-enumerate-collection", "spec/links/"]
  *   })
  * }).pipe(Effect.provide(FetchHttpClient.layer))
  *

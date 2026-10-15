@@ -1,19 +1,25 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
 import { HttpClient, HttpClientResponse, HttpServerError, HttpServerRequest } from "effect/http";
+import { TestClock } from "effect/testing";
 import {
   answeredAsDeployed,
   type Context,
+  DEFAULT_REQUEST_TIMEOUT,
   finding,
   type Observation,
   pass,
   type Rule,
+  requestTimeoutOf,
   runner,
   skip,
+  timedOutNote,
   undecidedByRedirects,
 } from "./core.js";
 import { budgeted } from "./crawl.js";
@@ -91,7 +97,7 @@ const served = (answer: (path: string) => readonly [status: number, location?: s
       );
     }),
   );
-  return { sent, request: runner(client, "http://origin.test") };
+  return { sent, request: runner(client, "http://origin.test", Option.none()) };
 };
 
 /** `/n` redirects (`status`) to `/n+1` until `/end`, which answers 200. */
@@ -180,6 +186,238 @@ describe("runner (redirects)", () => {
   });
 });
 
+/**
+ * What a {@link slow} client answers a path with: a status (and `Location`)
+ * after `after`, or never; `held` sends the headers and then holds the body
+ * open.
+ */
+interface Slow {
+  readonly after: Duration.Input | "never";
+  readonly status?: number;
+  readonly location?: string;
+  readonly held?: boolean;
+}
+
+/**
+ * A runner with a one-second `requestTimeout` over a client that answers each
+ * path as `answer` says. `sent` is every path requested, `interrupted` how
+ * many requests were cut short.
+ */
+const slow = (answer: (path: string) => Slow, timeout = Option.some(Duration.seconds(1))) => {
+  const sent: Array<string> = [];
+  let interrupted = 0;
+  const client = HttpClient.make((request, url) => {
+    sent.push(url.pathname);
+    const { after, status = 200, location, held = false } = answer(url.pathname);
+    const respond = Effect.sync(() =>
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(held ? new ReadableStream() : status === 200 ? '{"data":null}' : null, {
+          status,
+          headers: location === undefined ? {} : { location },
+        }),
+      ),
+    );
+    return (after === "never" ? Effect.never : Effect.delay(respond, after)).pipe(
+      Effect.onInterrupt(() =>
+        Effect.sync(() => {
+          interrupted += 1;
+        }),
+      ),
+    );
+  });
+  return {
+    sent,
+    interrupted: () => interrupted,
+    request: runner(client, "http://origin.test", timeout),
+  };
+};
+
+/**
+ * Runs `probe` under the test clock, advancing it by each of `steps` in turn;
+ * `settled` says, after each step, whether the probe had its observation yet.
+ */
+const clocked = (probe: Effect.Effect<Observation>, steps: ReadonlyArray<Duration.Input>) =>
+  valueOf(
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(probe);
+      const settled = yield* Effect.forEach(
+        steps,
+        (step) => Effect.map(TestClock.adjust(step), () => fiber.pollUnsafe() !== undefined),
+        { concurrency: 1 },
+      );
+      return { settled, observation: yield* Fiber.join(fiber) };
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+describe("runner (requestTimeout)", () => {
+  it("reads a request still unanswered at the timeout as a lost response naming it", async () => {
+    const target = slow(() => ({ after: "never" }));
+    const { settled, observation } = await clocked(target.request({ url: "/0" }), [
+      "999 millis",
+      "1 millis",
+    ]);
+    expect(settled).toEqual([false, true]);
+    expect(observation.status).toBe(0);
+    expect(observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+    expect(observation.transportError).toBe("no answer within 1s, the run's `requestTimeout`");
+    // A transport error, not a redirect the kit did not follow.
+    expect(observation.unfollowed).toEqual(Option.none());
+    expect(target.interrupted()).toBe(1);
+  });
+
+  it("reads an answer within the timeout as before", async () => {
+    const target = slow(() => ({ after: "999 millis" }));
+    const { observation } = await clocked(target.request({ url: "/0" }), ["999 millis"]);
+    expect(observation.status).toBe(200);
+    expect(observation.transportError).toBeUndefined();
+    expect(target.interrupted()).toBe(0);
+  });
+
+  it("cuts short an answer whose body is held open", async () => {
+    const target = slow(() => ({ after: 0, held: true }));
+    const { settled, observation } = await clocked(target.request({ url: "/0" }), [
+      "999 millis",
+      "1 millis",
+    ]);
+    expect(settled).toEqual([false, true]);
+    expect(observation.status).toBe(0);
+    expect(observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+  });
+
+  it("gives each redirect hop a timeout of its own, and names the hop it cut short", async () => {
+    // Each hop takes 600ms, so the chain takes 1.2s, past one timeout but
+    // within each hop's.
+    const within = slow((path) =>
+      path === "/0"
+        ? { after: "600 millis", status: 308, location: "/1" }
+        : { after: "600 millis" },
+    );
+    const answered = await clocked(within.request({ url: "/0" }), ["600 millis", "600 millis"]);
+    expect(answered.observation.status).toBe(200);
+    expect(answered.observation.redirects).toEqual(["http://origin.test/1"]);
+    // A hop that never answers is cut short a second after it is requested,
+    // and counts as a request (in `redirects`), as any hop the kit sent does.
+    const held = slow((path) =>
+      path === "/0" ? { after: "600 millis", status: 308, location: "/1" } : { after: "never" },
+    );
+    const lost = await clocked(held.request({ url: "/0" }), [
+      "600 millis",
+      "999 millis",
+      "1 millis",
+    ]);
+    expect(lost.settled).toEqual([false, false, true]);
+    expect(lost.observation.status).toBe(0);
+    expect(lost.observation.redirects).toEqual(["http://origin.test/1"]);
+    expect(lost.observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+    expect(lost.observation.unfollowed).toEqual(Option.none());
+    expect(held.sent).toEqual(["/0", "/1"]);
+  });
+
+  it("waits thirty seconds by default", async () => {
+    const target = slow(() => ({ after: "never" }), await valueOf(requestTimeoutOf(Option.none())));
+    const { settled, observation } = await clocked(target.request({ url: "/0" }), [
+      "29999 millis",
+      "1 millis",
+    ]);
+    expect(settled).toEqual([false, true]);
+    expect(observation.status).toBe(0);
+    expect(observation.transportError).toBe("no answer within 30s, the run's `requestTimeout`");
+    expect(target.interrupted()).toBe(1);
+  });
+
+  it("runs a client's own `retry` within the timeout, not each attempt under one", async () => {
+    // The first attempt never answers and the second would at once: were the
+    // timeout inside the retry, failing the first attempt, the second would
+    // answer 200. It bounds the client's whole `execute`, so the run reads a
+    // lost response after one attempt, interrupted.
+    let attempts = 0;
+    let interrupted = 0;
+    const client = HttpClient.retry(
+      HttpClient.make((request) => {
+        attempts += 1;
+        return attempts === 1
+          ? Effect.never.pipe(
+              Effect.onInterrupt(() =>
+                Effect.sync(() => {
+                  interrupted += 1;
+                }),
+              ),
+            )
+          : Effect.succeed(HttpClientResponse.fromWeb(request, new Response('{"data":null}')));
+      }),
+      { times: 1 },
+    );
+    const request = runner(client, "http://origin.test", Option.some(Duration.seconds(1)));
+    const { settled, observation } = await clocked(request({ url: "/0" }), [
+      "999 millis",
+      "1 millis",
+    ]);
+    expect(settled).toEqual([false, true]);
+    expect(observation.status).toBe(0);
+    expect(observation.transportError).toBe(timedOutNote(Duration.seconds(1)));
+    expect(attempts).toBe(1);
+    expect(interrupted).toBe(1);
+  });
+
+  it("waits as long as the transport does when the run turns it off", async () => {
+    const target = slow(
+      () => ({ after: "1 hour" }),
+      await valueOf(requestTimeoutOf(Option.some("Infinity"))),
+    );
+    const { settled, observation } = await clocked(target.request({ url: "/0" }), [
+      "59 minutes",
+      "1 minute",
+    ]);
+    expect(settled).toEqual([false, true]);
+    expect(observation.status).toBe(200);
+  });
+});
+
+describe("requestTimeoutOf", () => {
+  it("defaults to thirty seconds and keeps a positive duration", async () => {
+    expect(await valueOf(requestTimeoutOf(Option.none()))).toEqual(
+      Option.some(Duration.seconds(30)),
+    );
+    expect(DEFAULT_REQUEST_TIMEOUT).toEqual(Duration.seconds(30));
+    expect(await valueOf(requestTimeoutOf(Option.some("5 seconds")))).toEqual(
+      Option.some(Duration.seconds(5)),
+    );
+    expect(await valueOf(requestTimeoutOf(Option.some(1)))).toEqual(
+      Option.some(Duration.millis(1)),
+    );
+  });
+
+  it.each(["Infinity", Duration.infinity] as const)("reads %s as no timeout", async (off) => {
+    expect(await valueOf(requestTimeoutOf(Option.some(off)))).toEqual(Option.none());
+  });
+
+  it.each([
+    [0, "0"],
+    [-1, "-1"],
+    [Number.NaN, "NaN"],
+    ["-5 seconds", '"-5 seconds"'],
+    ["-Infinity", '"-Infinity"'],
+    // The type admits these, but `Duration` cannot read them.
+    ["1e3 seconds", '"1e3 seconds"'],
+    [".5 seconds", '".5 seconds"'],
+    [Duration.zero, null],
+  ] as const)(
+    "dies on a duration that is not positive, or not readable: %s",
+    async (input, named) => {
+      const exit = await valueOf(Effect.exit(requestTimeoutOf(Option.some(input))));
+      const cause = Exit.isFailure(exit) ? Option.some(exit.cause) : Option.none();
+      expect(Option.map(cause, Cause.hasDies)).toEqual(Option.some(true));
+      const message = Option.match(cause, {
+        onNone: () => "",
+        onSome: (c) => String(Cause.squash(c)),
+      });
+      expect(message).toContain("`requestTimeout` must be a positive duration");
+      expect(named === null || message.endsWith(`got ${named}`)).toBe(true);
+    },
+  );
+});
+
 describe("budgeted (each redirect is a request)", () => {
   const io = (budget: number, answer: (path: string) => readonly [number, string?]) => {
     const target = served(answer);
@@ -193,6 +431,7 @@ describe("budgeted (each redirect is a request)", () => {
         extensions: [],
         mutating: false,
         writes: {},
+        requestTimeout: Option.none(),
       },
       writes: [],
       observed: MutableHashSet.empty(),
