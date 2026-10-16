@@ -250,8 +250,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `ApiError.Wire`, or import `Wire` from
-   * `@thomasfosterau/effect-jsonapi/ApiError`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/ApiError` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -266,8 +266,8 @@ export type {
    * It names only the type: for the class, use `ApiError.BadRequest`.
    *
    * @deprecated Use `ApiError.BadRequest`, or import `BadRequest` from
-   * `@thomasfosterau/effect-jsonapi/ApiError`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/ApiError` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category errors
    */
@@ -281,8 +281,8 @@ export type {
    * It names only the type: for the class, use `ApiError.Conflict`.
    *
    * @deprecated Use `ApiError.Conflict`, or import `Conflict` from
-   * `@thomasfosterau/effect-jsonapi/ApiError`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/ApiError` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category errors
    */
@@ -297,8 +297,8 @@ export type {
    * It names only the type: for the class, use `ApiError.NotAcceptable`.
    *
    * @deprecated Use `ApiError.NotAcceptable`, or import `NotAcceptable` from
-   * `@thomasfosterau/effect-jsonapi/ApiError`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/ApiError` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category errors
    */
@@ -313,8 +313,8 @@ export type {
    * It names only the type: for the class, use `ApiError.UnsupportedMediaType`.
    *
    * @deprecated Use `ApiError.UnsupportedMediaType`, or import `UnsupportedMediaType` from
-   * `@thomasfosterau/effect-jsonapi/ApiError`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/ApiError` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category errors
    */
@@ -331,8 +331,8 @@ export type {
    * It names only the type: for the value, use `Atomic.Operations`.
    *
    * @deprecated Use `Atomic.Operations`, or import `Operations` from
-   * `@thomasfosterau/effect-jsonapi/Atomic`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Atomic` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -346,8 +346,8 @@ export type {
    * It names only the type: for the value, use `Atomic.Result`.
    *
    * @deprecated Use `Atomic.Result`, or import `Result` from
-   * `@thomasfosterau/effect-jsonapi/Atomic`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Atomic` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -367,8 +367,8 @@ export type {
    * different types with the same name.
    *
    * @deprecated Use `Document.CollectionDocument`, or import `CollectionDocument` from
-   * `@thomasfosterau/effect-jsonapi/Document`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Document` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -385,8 +385,8 @@ export type {
    * `Client.ResourceDocument`).
    *
    * @deprecated Use `Document.DataDocument`, or import `DataDocument` from
-   * `@thomasfosterau/effect-jsonapi/Document`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Document` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -399,8 +399,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Document.WireSchema`, or import `WireSchema` from
-   * `@thomasfosterau/effect-jsonapi/Document`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Document` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -416,8 +416,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Endpoint.IncludedResources`, or import `IncludedResources` from
-   * `@thomasfosterau/effect-jsonapi/Endpoint`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category type-level
    */
@@ -430,8 +430,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Endpoint.ReachableIncluded`, or import `ReachableIncluded` from
-   * `@thomasfosterau/effect-jsonapi/Endpoint`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category schemas
    */
@@ -444,8 +444,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Endpoint.SparseResource`, or import `SparseResource` from
-   * `@thomasfosterau/effect-jsonapi/Endpoint`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category schemas
    */
@@ -458,8 +458,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Endpoint.SparseUnion`, or import `SparseUnion` from
-   * `@thomasfosterau/effect-jsonapi/Endpoint`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Endpoint` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category schemas
    */
@@ -477,8 +477,8 @@ export type {
    * It names only the type: for the value, use `Idempotency.Headers`.
    *
    * @deprecated Use `Idempotency.Headers`, or import `Headers` from
-   * `@thomasfosterau/effect-jsonapi/Idempotency`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Idempotency` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category schemas
    */
@@ -493,8 +493,8 @@ export type {
    * It names only the type: for the class, use `Idempotency.KeyInProgress`.
    *
    * @deprecated Use `Idempotency.KeyInProgress`, or import `KeyInProgress` from
-   * `@thomasfosterau/effect-jsonapi/Idempotency`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Idempotency` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category errors
    */
@@ -509,8 +509,8 @@ export type {
    * It names only the type: for the class, use `Idempotency.KeyMismatch`.
    *
    * @deprecated Use `Idempotency.KeyMismatch`, or import `KeyMismatch` from
-   * `@thomasfosterau/effect-jsonapi/Idempotency`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Idempotency` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category errors
    */
@@ -524,8 +524,8 @@ export type {
    * It names only the type: for the class, use `Idempotency.Middleware`.
    *
    * @deprecated Use `Idempotency.Middleware`, or import `Middleware` from
-   * `@thomasfosterau/effect-jsonapi/Idempotency`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Idempotency` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category services
    */
@@ -542,8 +542,8 @@ export type {
    * It names only the type: for the class, use `Middleware.ContentNegotiation`.
    *
    * @deprecated Use `Middleware.ContentNegotiation`, or import `ContentNegotiation` from
-   * `@thomasfosterau/effect-jsonapi/Middleware`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Middleware` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category services
    */
@@ -557,8 +557,8 @@ export type {
    * It names only the type: for the class, use `Middleware.CreatedLocation`.
    *
    * @deprecated Use `Middleware.CreatedLocation`, or import `CreatedLocation` from
-   * `@thomasfosterau/effect-jsonapi/Middleware`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Middleware` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category services
    */
@@ -572,8 +572,8 @@ export type {
    * It names only the type: for the class, use `Middleware.SchemaErrors`.
    *
    * @deprecated Use `Middleware.SchemaErrors`, or import `SchemaErrors` from
-   * `@thomasfosterau/effect-jsonapi/Middleware`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Middleware` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category services
    */
@@ -589,8 +589,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Query.BracketedKeys`, or import `BracketedKeys` from
-   * `@thomasfosterau/effect-jsonapi/Query`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Query` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
@@ -603,8 +603,8 @@ export type {
    * superseded by the module's subpath export (#385).
    *
    * @deprecated Use `Query.QuerySchema`, or import `QuerySchema` from
-   * `@thomasfosterau/effect-jsonapi/Query`: declaration emit names it
-   * through that subpath.
+   * `@thomasfosterau/effect-jsonapi/Query` instead; once this alias is removed,
+   * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category models
    */
