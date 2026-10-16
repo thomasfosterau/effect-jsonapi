@@ -73,7 +73,7 @@ Public API documentation follows the same JSDoc conventions as the `effect` pack
 
 - Add tests for new behaviour. Unit tests live alongside their source files (e.g. `src/Resource.test.ts`) (imports follow [AGENTS.md → Conventions](AGENTS.md#conventions)); each worked example is a standalone workspace package under `examples/` that carries its own end-to-end tests (e.g. `examples/northwind/test/`). `vp run -r test:unit` runs them all across the workspace.
 - Type-level expectations are asserted in `test/*.types.ts` files, not at runtime; see [AGENTS.md](AGENTS.md#type-level-tests-testtypests).
-- `test/entry-points.test.ts` walks the real import graph of both entry points, in `src/` and in `dist/`, to prove the schema-only subpath resolves `effect` and nothing else.
+- `test/entry-points.test.ts` walks the real import graph of every entry point (the root, `./schema` and each module subpath such as `./Resource`), in `src/` and in `dist/`. It proves that the schema tier (`./schema` and the schema-tier module subpaths) resolves `effect` alone, never its HTTP surface, that no entry point resolves any package but `effect`, and that each module subpath is the same module as the root's namespace of that name.
 
 ## Changesets
 

@@ -1,14 +1,14 @@
 # AGENTS.md
 
-`CLAUDE.md` is a symlink to this file. `@thomasfosterau/effect-jsonapi` is a publishable library (entry points `.` and `./schema`), consumed by the website, gardeneria and preferenceflow apps. Its toolchain is the programme's library standard (checklist: [CONTRIBUTING.md](CONTRIBUTING.md#library-template-programme-standard)), with deviations listed at the top of `pnpm-workspace.yaml`. A `gardeneria #NNN` citation in a copied comment names an issue in that app, not this tracker.
+`CLAUDE.md` is a symlink to this file. `@thomasfosterau/effect-jsonapi` is a publishable library (entry points `.`, `./schema` and one subpath per module, `./Resource`, `./Endpoint`, …), consumed by the website, gardeneria and preferenceflow apps. Its toolchain is the programme's library standard (checklist: [CONTRIBUTING.md](CONTRIBUTING.md#library-template-programme-standard)), with deviations listed at the top of `pnpm-workspace.yaml`. A `gardeneria #NNN` citation in a copied comment names an issue in that app, not this tracker.
 
 ## Common pitfalls
 
 - **Versions live only in the `pnpm-workspace.yaml` catalog** (`catalogMode: strict`; peer ranges under `catalogs.peers`). After editing it, run `pnpm install` and commit `pnpm-lock.yaml` — a stale lockfile fails CI with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
 - **`@effect/tsgo`, `@typescript/native` and `vite-plus` bump as a set** — read the comment on `@effect/tsgo` in `pnpm-workspace.yaml` first; an unsupported pairing fails `pnpm install` (the `prepare` script's `effect-tsgo patch` hard-errors).
-- **The type checker of record is TypeScript 7** (`tsc`, the native compiler, via `vp run check`). It anchors a failed overload at the _properties_ that fail against the last overload rather than at the one the TS6 checker elaborated, which is why the `@ts-expect-error` markers on effect's `ErrorNoStream` guard in `src/Endpoint.ts` sit on `params:` / `query:` lines as well as `error:`. TS6 (`tsc6`, the JS compiler) is only what the JS-API consumers — `scripts/docgen-class-examples.ts`, the tsdown declaration bundler, the editor language service — load. `@effect/docgen` is not one of them: it parses with a compiler bundled in its own dependencies (see [below](#vp-run-docgen-executes-your-examples)).
+- **The type checker of record is TypeScript 7** (`tsc`, the native compiler, via `vp run check`). It anchors a failed overload at the _properties_ that fail against the last overload rather than at the one the TS6 checker elaborated, which is why the `@ts-expect-error` markers on effect's `ErrorNoStream` guard in `src/Endpoint.ts` sit on `params:` / `query:` lines as well as `error:`. TS6 (`tsc6`, the JS compiler) is only what the JS-API consumers — `scripts/docgen-class-examples.ts`, the editor language service — load. `@effect/docgen` is not one of them: it parses with a compiler bundled in its own dependencies (see [below](#vp-run-docgen-executes-your-examples)).
 - **`vp lint` runs the full Effect preset with a staged rollout.** The `warn` tier in `vite.config.ts` is debt, not headroom: fix any new site, and when a rule's count reaches zero flip it to `error` and delete its line. `@ts-expect-error` is the assertion mechanism of `test/*.types.ts` and stays allowed there.
-- **`dist/` is bundled, not transpiled.** `vp pack` (tsdown) emits one ESM bundle per entry point (`.`, `./schema`) plus bundled declarations. `test/entry-points.test.ts` walks the built graph, and `test/emitted/requirements.types.ts` type-checks against the emitted `.d.ts` — both because what consumers see is not what `src/` resolves to.
+- **`dist/` JavaScript is bundled; its declarations are not.** `vp pack` (tsdown) emits one ESM entry per export (`.`, `./schema` and each module subpath) with shared code in hashed chunks; `tsc -p tsconfig.build.json` then writes one `.d.ts` per source module, because a consumer's declaration emit cannot name a type in a bundled chunk (#385). `test/entry-points.test.ts` walks the built graph, `test/emitted/*.types.ts` type-check against the emitted `.d.ts`, and `test/declaration-emit.test.ts` compiles a consumer through `node_modules` — all because what consumers see is not what `src/` resolves to.
 
 ## Conventions
 
@@ -86,7 +86,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `pnpm install` — dependencies, the Vite+ git hooks (pre-commit runs `vp staged`: format + lint on staged files) and, through the root `prepare` script, the Effect-patched `tsc` / `oxlint` binaries. There is **no pre-push hook** — run the gates yourself.
 - `vp check` — format + lint (Oxfmt + Oxlint). `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
-- `vp run build` — `vp pack` → `dist/`.
+- `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
 - `vp run docgen` — type-check and execute every JSDoc `@example` (class-property examples excepted, #288); generate the API docs under `docs/`.
 - `fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
