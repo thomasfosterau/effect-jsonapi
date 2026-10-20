@@ -87,7 +87,7 @@ catalog:
   # oxlint-tsgolint 7.0.2001, both in @effect/tsgo 0.47.2's components table,
   # and keeps vitest 4.1.11 (1.0.0 carries oxlint 1.85.0 but moves vitest to
   # 5.x, a separate upgrade).
-  vite-plus: 0.3.3
+  vite-plus: 1.1.0
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vitest: 4.1.11
 
