@@ -38,7 +38,7 @@ catalog:
   # (native TS7 under `vp run`), and runs them under `tsx`, hence that entry
   # below. It prepends `import * as assert from 'assert'` to an example that
   # uses `assert.`.
-  "@effect/docgen": ^0.5.2
+  "@effect/docgen": ^4.0.5
   "@effect/language-service": ^0.87.3
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
   # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
@@ -64,7 +64,7 @@ catalog:
   # lockstep, so the gates run against the newest `effect` release. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
   # verified separately.
-  effect: 4.0.0
+  effect: 4.0.5
   effect-solutions: ^0.5.3
   fallow: 3.33.1
   # The runtime `@effect/docgen` executes examples under.
