@@ -105,10 +105,49 @@ assertType<FieldsOf<typeof gallery>>({ media: ["url"] });
 // A family as the primary resource: its members.
 const primary = Query.schema(AnyNode, { fields: true });
 assertType<Equals<FieldsetTypes<typeof primary>, "editors" | "reviewers">>(true);
-// (A name-only family as the primary resource is pinned at runtime only: its
-// synthesised `relationships` are typed as the open `Relationships` record, so
-// its direct targets, and with them its fieldset keys, widen to `string`.
-// #363 tracks that widening; fixing it should add the exact pin here.)
+// A name-only family as the primary resource: its members, and no open
+// `string` key (#363). Its synthesised `relationships` are typed as the by-key
+// intersection the runtime computes, so its direct targets are exact.
+const media = Query.schema(Media, { fields: true });
+assertType<Equals<FieldsetTypes<typeof media>, "photos" | "videos">>(true);
+assertType<Equals<WireFieldsets<typeof media>, "fields[photos]" | "fields[videos]">>(true);
+assertType<FieldsOf<typeof media>>({ photos: ["url"], videos: ["length"] });
+// @ts-expect-error -- a misspelt member type is no fieldset type
+assertType<FieldsOf<typeof media>>({ phtos: ["url"] });
+// @ts-expect-error -- `media` is the family's name
+assertType<FieldsOf<typeof media>>({ media: ["url"] });
+
+// A related endpoint to a name-only family (#363): its members only.
+type QueryOf<E> = HttpApiEndpoint.Query<E>;
+export const galleryItems = Endpoint.related(Gallery, "items", { fields: true });
+assertType<Equals<FieldsetTypes<QueryOf<typeof galleryItems>>, "photos" | "videos">>(true);
+assertType<FieldsOf<QueryOf<typeof galleryItems>>>({ photos: ["url"] });
+// @ts-expect-error -- a misspelt member type is no fieldset type
+assertType<FieldsOf<QueryOf<typeof galleryItems>>>({ phtos: ["url"] });
+
+// The synthesised relationships are those every member shares with the same
+// kind and target type, as at runtime (whose fieldset keys
+// `src/Query.fieldsets.test.ts` pins against these): `tags` differs in kind.
+const Owner = Resource.make("owners", { attributes: { name: Schema.String } });
+const Tag = Resource.make("tags", { attributes: { label: Schema.String } });
+const Song = Resource.make("songs", {
+  attributes: { title: Schema.String },
+  relationships: {
+    owner: Relationship.one(() => Owner),
+    tags: Relationship.many(() => Tag),
+  },
+});
+const Clip = Resource.make("clips", {
+  attributes: { duration: Schema.Number },
+  relationships: {
+    owner: Relationship.one(() => Owner),
+    tags: Relationship.optional(() => Tag),
+  },
+});
+const Track = Resource.family("tracks", [Song, Clip]);
+assertType<Equals<keyof (typeof Track)["relationships"], "owner">>(true);
+// Positive control: a member's own relationships are unaffected.
+assertType<Equals<keyof (typeof Clip)["relationships"], "owner" | "tags">>(true);
 
 // A base-anchored family's name is its base's real type. The base reached in
 // its own right is declared as itself, over its own attributes; reached only

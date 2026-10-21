@@ -2047,8 +2047,9 @@ type RelationshipFilterDeclarationOf<D> = D extends {
   : false;
 
 // The relationship keys declared filterable. A resource whose relationship
-// names are not statically known (`Relationships` itself, as on a name-only
-// family) declares none.
+// names are not statically known (`Relationships` itself) declares none; a
+// name-only family's synthesised to-one relationships are typed `filter: false`
+// (`FamilyRelationships`).
 type FilterableRelationshipKeys<R extends Any> =
   string extends RelationshipName<R>
     ? never
@@ -3373,6 +3374,68 @@ export interface FamilyDefaultIncluded<Members extends ReadonlyArray<Any>> exten
   ReadonlyArray<FamilyIncludableTargets<Members>>
 > {}
 
+// Whether every member in `Rest` declares the relationship `K` with the same
+// `kind` and the same target `type` as `D` — the runtime test
+// `intersectRelationships` applies to each of the first member's keys.
+type SharesRelationship<Rest extends ReadonlyArray<Any>, K, D> = Rest extends readonly [
+  infer Next extends Any,
+  ...infer Tail extends ReadonlyArray<Any>,
+]
+  ? K extends keyof Next["relationships"]
+    ? Next["relationships"][K] extends { readonly kind: infer Kind; readonly ref: () => infer T }
+      ? D extends { readonly kind: infer DKind; readonly ref: () => infer DT }
+        ? [Kind, DKind] extends [DKind, Kind]
+          ? T extends Any
+            ? DT extends Any
+              ? [T["type"], DT["type"]] extends [DT["type"], T["type"]]
+                ? SharesRelationship<Tail, K, D>
+                : false
+              : false
+            : false
+          : false
+        : false
+      : false
+    : false
+  : true;
+
+// A to-one descriptor with its `filter` declaration dropped; any other as is.
+type Unfiltered<D> =
+  D extends Relationship.One<infer T>
+    ? Relationship.One<T, false>
+    : D extends Relationship.Optional<infer T>
+      ? Relationship.Optional<T, false>
+      : D;
+
+/**
+ * The relationships a name-only {@link family} synthesises from its members:
+ * the first member's relationships, keeping a key only when every other member
+ * declares it with the same kind and the same target type — the by-key
+ * intersection the runtime computes. A kept to-one relationship is typed as
+ * not filterable (`filter: false`), since nothing is filterable through a
+ * name-only family ({@link filterable} reports none). Over a member list that
+ * is not a tuple (so has no first member to read), the open
+ * {@link Relationships} record.
+ *
+ * @since 0.17.0
+ * @category type-level
+ */
+export type FamilyRelationships<Members extends ReadonlyArray<Any>> = Members extends readonly [
+  infer First extends Any,
+  ...infer Rest extends ReadonlyArray<Any>,
+]
+  ? AsRelationships<{
+      readonly [
+        K in keyof First["relationships"] as SharesRelationship<
+          Rest,
+          K,
+          First["relationships"][K]
+        > extends true
+          ? K
+          : never
+      ]: Unfiltered<First["relationships"][K]>;
+    }>
+  : Relationships;
+
 /**
  * A polymorphic resource family: a synthetic supertype over a set of member
  * resource definitions.
@@ -3408,7 +3471,7 @@ export interface Family<
   /** The linkage schema: a union of the members' identifiers. */
   readonly identifier: FamilyIdentifier<Members>;
   /** The shared relationships: the base's, or the by-key intersection of the members'. */
-  readonly relationships: Base extends Any ? Base["relationships"] : Relationships;
+  readonly relationships: Base extends Any ? Base["relationships"] : FamilyRelationships<Members>;
   /**
    * The base's `maxUndeclaredMemberErrors`, for a family anchored on a base;
    * `undefined` on a name-only family, whose atomic operations use the default.
