@@ -362,6 +362,40 @@ describe("Query.schema", () => {
       Schema.decodeUnknownSync(entries)({ "fields[articles]": "title" }).fields?.articles,
     ).toEqual(["title"]);
   });
+
+  describe("definitions sharing a wire type share one fields[TYPE] vocabulary (#362)", () => {
+    const Photo = Resource("photos", { attributes: { width: Schema.Number } });
+    const PhotoCard = Resource("photos", { attributes: { caption: Schema.String } });
+    const coverFirst = Resource("g2", {
+      attributes: { t: Schema.String },
+      relationships: {
+        cover: Relationship.one(() => Photo),
+        thumb: Relationship.one(() => PhotoCard),
+      },
+    });
+    const thumbFirst = Resource("g2", {
+      attributes: { t: Schema.String },
+      relationships: {
+        thumb: Relationship.one(() => PhotoCard),
+        cover: Relationship.one(() => Photo),
+      },
+    });
+
+    it.each([
+      ["cover before thumb", coverFirst],
+      ["thumb before cover", thumbFirst],
+    ])("accepts the union of their attributes (%s)", (_, Gallery) => {
+      const query = Query.schema(Gallery, { fields: true });
+      const decode = (value: string) =>
+        Schema.decodeUnknownSync(query)({ "fields[photos]": value }).fields?.photos;
+      expect(decode("width")).toEqual(["width"]);
+      expect(decode("caption")).toEqual(["caption"]);
+      expect(decode("width,caption")).toEqual(["width", "caption"]);
+      expect(() => Schema.decodeUnknownSync(query)({ "fields[photos]": "t" })).toThrow();
+      type Photos = NonNullable<NonNullable<(typeof query)["Type"]["fields"]>["photos"]>;
+      expectTypeOf<Photos[number]>().toEqualTypeOf<"width" | "caption">();
+    });
+  });
 });
 
 describe("Query.Page", () => {

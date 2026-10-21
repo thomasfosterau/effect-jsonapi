@@ -48,7 +48,14 @@
  * @since 0.1.0
  */
 import type { SchemaAST, Types } from "effect";
-import { Effect, Record as Rec, Schema, SchemaIssue, SchemaTransformation } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Record as Rec,
+  Schema,
+  SchemaIssue,
+  SchemaTransformation,
+} from "effect";
 import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
@@ -1075,9 +1082,17 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @since 0.1.0
  * @category constructors
  */
-export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> => {
-  const fields = attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>;
-  return repeatable(
+export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
+  fieldsetOf(resource.type, attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>);
+
+// The fieldset schema of the wire type `type` over the vocabulary `fields`.
+// `Query.schema` builds one per wire type from the attributes of every
+// definition sharing it (#362); `Fieldset` from one definition's.
+const fieldsetOf = <Field extends string>(
+  type: string,
+  fields: ReadonlyArray<Field>,
+): Fieldset<Field> =>
+  repeatable(
     CommaSeparated(
       // The fieldset's fields ride on the literal schema as the `fields`
       // vocabulary of this resource type, so `Middleware`'s support check
@@ -1086,13 +1101,12 @@ export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>>
       // than "Expected never".
       Schema.Literals(fields).annotate(
         vocabularyAnnotations(
-          { family: "fields", type: resource.type, values: fields },
-          `This endpoint supports no sparse fieldset for type "${resource.type}".`,
+          { family: "fields", type, values: fields },
+          `This endpoint supports no sparse fieldset for type "${type}".`,
         ),
       ),
     ),
-  ) as Fieldset<AttributeKeys<R>>;
-};
+  ) as Fieldset<Field>;
 
 /**
  * The decoded `sort` schema: a list of `{ field, direction }` terms. Accepts
@@ -1668,14 +1682,23 @@ export const schema = <R extends Any, const O extends Options<R>>(
   }
 
   if (options.fields === true) {
-    const fieldsetFields: Record<string, Schema.Top> = {};
     // The resources, then every type their response can carry in `included`:
     // the runtime mirror of `FieldsetResources`, which the default document
-    // of an endpoint declaring `fields` makes partial over (#322).
-    for (const target of fieldsetResources(resources, includable, include)) {
-      fieldsetFields[target.type] = Schema.optionalKey(Fieldset(target));
-      flatFields[`fields[${target.type}]`] = Schema.optionalKey(Repeatable);
-    }
+    // of an endpoint declaring `fields` makes partial over (#322). Definitions
+    // sharing a wire type share its `fields[TYPE]`, whose vocabulary is the
+    // union of their attributes, as `NestedFields` types it (#362).
+    const fieldsetFields = Rec.map(
+      Arr.groupBy(fieldsetResources(resources, includable, include), (target) => target.type),
+      (targets, type) =>
+        Schema.optionalKey(fieldsetOf(type, dedupe(targets.flatMap((t) => attributeKeys(t))))),
+    );
+    Object.assign(
+      flatFields,
+      Rec.mapEntries(fieldsetFields, (_, type) => [
+        `fields[${type}]`,
+        Schema.optionalKey(Repeatable),
+      ]),
+    );
     nestedFields.fields = Schema.optionalKey(Schema.Struct(fieldsetFields));
   }
 
