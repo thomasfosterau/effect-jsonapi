@@ -9,10 +9,11 @@
  *         type parameters other than `ext` / `profile` (or unsupported
  *         extension URIs) → 415 Unsupported Media Type
  *       - an `Accept` header in which every instance of the JSON:API media
- *         type carries such parameters, is weighted `q=0`, or carries a
- *         malformed `q` → 406 Not Acceptable (the `q` weight itself is not a
- *         media type parameter, per RFC 9110 §12.4.2, so it never counts
- *         against the whitelist)
+ *         type carries such parameters or is weighted `q=0` → 406 Not
+ *         Acceptable (the `q` weight itself is not a media type parameter,
+ *         per RFC 9110 §12.4.2, so it never counts against the whitelist; a
+ *         malformed `q` counts as the default weight, so it never causes a
+ *         406 on its own)
  *   - {@link SchemaErrors} — converts request validation failures (malformed
  *     query parameters, payloads, path parameters) into spec-compliant
  *     JSON:API 400 error documents instead of the default HttpApi error shape:
@@ -238,7 +239,9 @@ export const contentTypeIsAcceptable = (
  * skipped rather than treated as acceptable; any non-zero weight is treated
  * the same as an entry with no weight at all. A `q` outside the RFC 9110
  * `qvalue` grammar (`0` to `1`, at most three decimals — e.g. `q=`, `q=2`,
- * `q=abc`) is malformed, and the entry is skipped like a refusal.
+ * `q=abc`) is malformed and counts as the default weight `1`: the client
+ * named the type, so a malformed weight is never a refusal and never causes
+ * a 406 on its own. `Negotiation` reads a malformed `q` the same way.
  *
  * @since 0.1.0
  * @category utils
@@ -254,8 +257,8 @@ export const acceptIsAcceptable = (
     const { base, parameters, weight } = parseMediaType(entry);
     if (base === "*/*" || base === "application/*") return true;
     if (base !== MEDIA_TYPE) continue;
-    // An unparseable `q` is a refusal here, not a default weight.
-    if ((weight ?? 0) <= 0) continue;
+    // A malformed `q` is the default weight, not a refusal (as in `Negotiation`).
+    if ((weight ?? 1) <= 0) continue;
     if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true;
   }
   return false;

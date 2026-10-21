@@ -155,7 +155,7 @@ describe("negotiate — reads (Accept)", () => {
     expect(negotiate(get("/contests", `${MEDIA_TYPE};q=abc`)).dispatch).toBe(true);
   });
 
-  it.each(["", "0x0", "-1", "1e-9"])(
+  it.each(["", "0x0", "-1", "1e-9", "2", ".5"])(
     "treats q=%s, outside the RFC 9110 qvalue grammar, as unparseable — never as a q=0 refusal",
     (q) => {
       expect(negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`)).dispatch).toBe(true);
@@ -267,11 +267,14 @@ describe("onExplicitRefusal", () => {
   // #234's reproduction: a `q` outside the RFC 9110 qvalue grammar is
   // malformed (the default weight), never the explicit `q=0` refusal this
   // option answers with a 406.
-  it.each(["", "0x0", "-1"])("dispatches a lone JSON:API range weighted `q=%s`", (q) => {
-    const verdict = refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`));
-    expect(verdict.error).toBeUndefined();
-    expect(verdict).toEqual({ representation: MEDIA_TYPE, dispatch: true });
-  });
+  it.each(["", "0x0", "-1", "abc", "2", ".5"])(
+    "dispatches a lone JSON:API range weighted `q=%s`",
+    (q) => {
+      const verdict = refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`));
+      expect(verdict.error).toBeUndefined();
+      expect(verdict).toEqual({ representation: MEDIA_TYPE, dispatch: true });
+    },
+  );
 
   it.each(["0", "0.000"])("still 406s a lone JSON:API range weighted `q=%s`", (q) => {
     expect(refusing.negotiate(get("/contests", `${MEDIA_TYPE};q=${q}`)).error).toBe(
