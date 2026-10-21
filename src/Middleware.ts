@@ -32,7 +32,9 @@
  *     `include[…]` / `sort[…]`, which the specification does not define
  *     (§Inclusion of Related Resources; §Sorting on a collection endpoint;
  *     the general §Implementation-Specific Query Parameters rule otherwise;
- *     see {@link checkQueryParameters}).
+ *     see {@link checkQueryParameters}). On the way out it re-checks full
+ *     linkage (§Compound Documents) on the document the endpoint encoded,
+ *     answering a violation with a JSON:API 500 (see {@link SchemaErrorsLive}).
  *   - {@link CreatedLocation} — JSON:API §Creating Resources: a 201 create
  *     answers with a `Location` header copied from the created resource's
  *     `self` link.
@@ -100,7 +102,7 @@ import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
-import { withCreatedLocation } from "./internal/responseBody.js";
+import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
 import { wireLeaves } from "./internal/wireNames.js";
 import {
   admitsNoValue,
@@ -633,6 +635,38 @@ export interface QueryParameterOptions {
 }
 
 /**
+ * Options for {@link schemaErrorsLayer}: the reserved-query-parameter options
+ * plus the switch for the full-linkage check it runs on every encoded success.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface SchemaErrorsOptions extends QueryParameterOptions {
+  /**
+   * `false` skips the full-linkage check on the **encoded** response, which is
+   * on by default (#250). The document builders (`Handlers.data`,
+   * `Handlers.collection`, and the `Assemble` builders over them) check full
+   * linkage on the document value they return, but they do not know the
+   * endpoint's schema, and encoding through it drops every relationship the
+   * resource does not declare: an `included` member reached only through one
+   * passes the builders, then arrives on the wire unreachable from the
+   * primary data. So the middleware re-runs the same reachability walk — the
+   * one the conformance kit's `spec/document/full-linkage` rule makes — over
+   * every 2xx document the endpoint encoded with an `included` member, and
+   * answers a violation as it answers a response its schema rejects: a
+   * defect, reported at `Error` severity, that the client receives as the
+   * opaque JSON:API 500 of `ServerErrors.SERVER_ERROR`.
+   *
+   * A builder's own `checkLinkage: false` cannot reach this check — the
+   * encoded document carries no trace of the value it came from — so a
+   * handler that deliberately emits unlinked members turns it off here, for
+   * every endpoint the layer serves. Only the encoded document decides, so
+   * the check also covers a document built without the builders.
+   */
+  readonly checkLinkage?: boolean | undefined;
+}
+
+/**
  * An `allowedQueryParameters` entry that is not a family base name made only
  * of the letters a-z, or that names a family the specification defines
  * (`include`, `fields`, `sort`, `page`, `filter`) or a bracketed name of one
@@ -936,7 +970,8 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
  * rejects reserved all-lowercase query parameters the endpoint does not
  * process, the specification's own families included (see
  * {@link checkQueryParameters}). A failure to encode the
- * handler's response is left a server error (see {@link SchemaErrorsLive}).
+ * handler's response is left a server error, and so is an encoded document
+ * that breaks full linkage (see {@link SchemaErrorsLive}).
  *
  * @since 0.1.0
  * @category services
@@ -1009,7 +1044,9 @@ type ResponsePart = Extract<HttpApiError.HttpApiSchemaError["kind"], "Body" | "R
 const isResponsePart = (kind: HttpApiError.HttpApiSchemaError["kind"]): kind is ResponsePart =>
   kind === "Body" || kind === "ResponseHeaders";
 
-// The defect a response-encoding failure dies with. It cannot stay the
+// The defect a response-encoding failure dies with — and a wire full-linkage
+// violation, the other way a handler's response can fail its endpoint's
+// encoding (#250), with no `HttpApiSchemaError` behind it. It cannot stay the
 // `HttpApiSchemaError` itself: that error is `Respondable` as an empty 400, and
 // HttpApi turns a failure of it into a defect the router answers with exactly
 // that 400. This one answers with the opaque JSON:API 500 `ServerErrors.respond`
@@ -1046,6 +1083,27 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
       )
     : badRequestResponse(error.kind, schemaErrorDocument(error.kind, error.cause));
 
+// The encoded success as it stands, or the defect a full-linkage violation in
+// it dies with. The message is the builders' (`Handlers.buildIncluded`), with
+// what the builders could not see: that it is the encoded document that
+// breaks the rule, most often through a relationship the schema drops.
+const checkWireLinkage = (response: HttpServerResponse.HttpServerResponse) =>
+  Arr.match(unlinkedOnWire(response), {
+    onEmpty: () => Effect.succeed(response),
+    onNonEmpty: (orphans) =>
+      Effect.die(
+        new ResponseEncodeError({
+          message:
+            `JSON:API full linkage violation: included ${orphans.length === 1 ? "resource" : "resources"} ` +
+            `${orphans.map((label) => `"${label}"`).join(", ")} ` +
+            `${orphans.length === 1 ? "is" : "are"} not reachable from the primary data through resource linkage ` +
+            `in the document as encoded against its endpoint's schema, which drops any relationship the ` +
+            `resource does not declare (https://jsonapi.org/format/1.1/#document-compound-documents)`,
+          cause: undefined,
+        }),
+      ),
+  });
+
 /**
  * Creates the live {@link SchemaErrors} implementation, optionally accepting
  * extra all-lowercase query parameters (see
@@ -1080,8 +1138,11 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * `fields`, `sort`, `page`, `filter`) or a bracketed name of one
  * (`page[size]`, `include[]`).
  *
+ * Then every 2xx document the endpoint encoded is checked for full linkage,
+ * unless `checkLinkage` is `false` ({@link SchemaErrorsOptions.checkLinkage}).
+ *
  * {@link SchemaErrorsLive} is `schemaErrorsLayer()`; {@link layerWith} takes
- * the same option. A host that negotiates content itself composes this with
+ * the same options. A host that negotiates content itself composes this with
  * {@link ContentNegotiationPassthrough} and {@link CreatedLocationLive}, as the
  * example does.
  *
@@ -1107,9 +1168,10 @@ const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
  * @since 0.17.0
  * @category constructors
  */
-export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<SchemaErrors> => {
+export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<SchemaErrors> => {
   // Checked here, so a misspelt entry fails when the layer is built.
   const allowedQueryParameters = allowedBaseNames(options);
+  const checkLinkage = options?.checkLinkage !== false;
   return Layer.succeed(
     SchemaErrors,
     // Untraced: the middleware's span surface is `Span.schemaError` alone.
@@ -1124,10 +1186,14 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
         );
         if (Option.isSome(rejected)) return yield* badRequestResponse("Query", rejected.value);
       }
-      return yield* Effect.catch(httpEffect, (error) =>
-        HttpApiError.HttpApiSchemaError.is(error)
-          ? transformSchemaError(error)
-          : Effect.fail(error),
+      // The linkage check reads the encoded success only: a defect it dies
+      // with passes `catch`, which sees failures alone.
+      return yield* Effect.catch(
+        checkLinkage ? Effect.flatMap(httpEffect, checkWireLinkage) : httpEffect,
+        (error) =>
+          HttpApiError.HttpApiSchemaError.is(error)
+            ? transformSchemaError(error)
+            : Effect.fail(error),
       );
     }),
   );
@@ -1227,6 +1293,15 @@ export const schemaErrorsLayer = (options?: QueryParameterOptions): Layer.Layer<
  * bug, not a bad request: it stays a defect, which the request's error
  * reporting sees at `Error` severity and the client receives as the opaque
  * JSON:API 500 of `ServerErrors.SERVER_ERROR`.
+ *
+ * So is a 2xx document that, **as encoded**, breaks full linkage: an
+ * `included` member its primary data cannot reach through resource linkage
+ * (§Compound Documents). The document builders check the value they build,
+ * but encoding drops any relationship the endpoint's schema does not declare,
+ * so a member linked only through one passes them and is caught here (#250).
+ * The walk is the conformance kit's `spec/document/full-linkage` rule's, over
+ * the bytes the client receives; {@link schemaErrorsLayer} turns it off
+ * ({@link SchemaErrorsOptions.checkLinkage}).
  *
  * @since 0.1.0
  * @category layers
@@ -1384,7 +1459,8 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  * Like {@link layer}, with options — content-negotiation options, required
  * when the api uses JSON:API extensions, and the query-parameter options of
  * {@link schemaErrorsLayer} (`allowedQueryParameters`, for a host that must
- * accept its own all-lowercase parameters; since 0.17.0).
+ * accept its own all-lowercase parameters, and `checkLinkage`, which turns
+ * off the full-linkage check on the encoded response; since 0.17.0).
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
  * `allowedQueryParameters` entry that is not a family base name made only of
@@ -1410,6 +1486,6 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  * @category layers
  */
 export const layerWith = (
-  options: NegotiationOptions & QueryParameterOptions,
+  options: NegotiationOptions & SchemaErrorsOptions,
 ): Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocation> =>
   Layer.mergeAll(contentNegotiationLayer(options), schemaErrorsLayer(options), CreatedLocationLive);

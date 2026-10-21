@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import { unlinkedIncluded } from "./spec.js";
+import { unlinkedIncluded } from "../linkage.js";
 
 /** A resource identifier object, which a resource object extends. */
 const ref = (type: string, id: string) => ({ type, id });
