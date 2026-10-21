@@ -43,21 +43,22 @@ catalog:
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
   # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
   # with an Effect-patched build matched by gitHead, so this pins in lockstep
-  # with `@typescript/native` below (0.47.2 ships against typescript 7.0.2).
+  # with `@typescript/native` below (0.49.0 ships against typescript 7.0.2).
   #
   # The root `prepare` script runs `effect-tsgo patch --typescript --oxlint`,
   # so this ALSO pins in lockstep with the `oxlint` that `vite-plus` pulls in
   # (see that entry). Each @effect/tsgo release ships artifacts for an explicit
   # set of component versions and hard-errors
   # (UnsupportedTargetPackageVersionError) on anything else, failing
-  # `pnpm install` itself rather than a later task: 0.47.2 supports typescript
-  # 7.0.2 / 7.1.0-dev.20260929.1, oxlint 1.82.0-1.86.0 and oxlint-tsgolint
-  # 7.0.2001 / 7.0.2003. 0.47.0 is also the first release with the
-  # `unstableApiUsage` rule that tsconfig.base.json lowers to "suggestion"
-  # (#205). Read the
+  # `pnpm install` itself rather than a later task: 0.49.0 supports typescript
+  # 7.0.2 / 7.1.0-dev.20261005.1, oxlint 1.82.0-1.87.0 (no 1.84.0) and
+  # oxlint-tsgolint 7.0.2001 / 7.0.2003 — the first release to support the
+  # oxlint 1.87.0 that vite-plus 1.1.0 carries (#406). 0.47.0 is also the
+  # first release with the `unstableApiUsage` rule that tsconfig.base.json
+  # lowers to "suggestion" (#205). Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.47.2
+  "@effect/tsgo": 0.49.0
   "@mpsuesser/oxlint-plugin-effect": ^0.5.0
   "@types/node": ^26.4.1
   # Deliberately tracks the `latest` dist-tag, ahead of the applications'
@@ -83,13 +84,13 @@ catalog:
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `vitest: "catalog:"` override forces
-  # every resolution to the catalog singleton. 0.3.3 carries oxlint 1.83.0 and
-  # oxlint-tsgolint 7.0.2001, both in @effect/tsgo 0.47.2's components table,
-  # and keeps vitest 4.1.11 (1.0.0 carries oxlint 1.85.0 but moves vitest to
-  # 5.x, a separate upgrade).
-  vite-plus: 0.3.3
-  vite: npm:@voidzero-dev/vite-plus-core@0.3.3
-  vitest: 4.1.11
+  # every resolution to the catalog singleton. 1.1.0 carries oxlint 1.87.0 and
+  # oxlint-tsgolint 7.0.2003, both in @effect/tsgo 0.49.0's components table,
+  # and pins vitest 5.0.3. It is the first release outside GHSA-587h-7wmj-h5pm
+  # (launch-editor, `vite-plus <=1.0.0`; #406).
+  vite-plus: 1.1.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.1.0
+  vitest: 5.0.3
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
@@ -123,15 +124,18 @@ overrides:
   # @effect/docgen > @effect/markdown-toc > gray-matter and effect-solutions >
   # gray-matter (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh —
   # patched in 3.15.2); `shell-quote` via @changesets/cli > launch-editor
-  # (GHSA-pqg4-j6r4-53mv — patched in 1.11.0; the locked launch-editor
-  # 2.14.1 declares `^1.8.4` (2.14.2 raises it to `^1.10.0`), which admits the
-  # fix, but the floor is what moves the locked 1.10.0 and keeps it from
-  # coming back). Scoped to the affected major so a consumer of another
+  # (GHSA-pqg4-j6r4-53mv — patched in 1.11.0; launch-editor 2.14.2 declares
+  # `^1.10.0`, which admits the fix, but the floor is what moves the locked
+  # 1.10.0 and keeps it from coming back); `launch-editor` itself via
+  # @changesets/cli (GHSA-587h-7wmj-h5pm — patched in 2.14.2; @changesets/cli
+  # 3.0.3 declares `^2.14.1`, which admits the fix, but the floor is what
+  # moves the locked 2.14.1). Scoped to the affected major so a consumer of another
   # major elsewhere in the tree keeps its own range. Drop each once its
   # dependent's own range floor excludes the vulnerable versions.
   "brace-expansion@2": ">=2.1.4"
   "js-yaml@3": ">=3.15.2"
   "shell-quote@1": ">=1.11.0"
+  "launch-editor@2": ">=2.14.2"
   # `@mpsuesser/oxlint-plugin-effect` (^0.5.0) declares a peer on an `effect`
   # beta and ships no rc.118 build, so the singleton override above would force
   # it onto rc.118. Pin the plugin's own `effect` to the beta it was built
