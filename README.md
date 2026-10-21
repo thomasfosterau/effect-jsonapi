@@ -1003,8 +1003,7 @@ const Api = HttpApi.make("blog").add(articles).add(search);
 
 // Handlers return mixed collections; clients discriminate on `type`:
 for (const result of doc.data) {
-  if (result.type === "articles")
-    result.attributes.title; // Article
+  if (result.type === "articles") result.attributes.title; // Article
   else result.attributes.firstName; // Person
 }
 ```

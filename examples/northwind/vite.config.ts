@@ -35,14 +35,18 @@ export default defineConfig({
     tasks: {
       check: {
         command: "tsc -p tsconfig.json",
-        input: cacheInputs,
-        output: [],
+        cache: {
+          input: cacheInputs,
+          output: [],
+        },
       },
       "test:unit": {
         command: "vp test run",
-        env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"],
-        input: cacheInputs,
-        output: [],
+        cache: {
+          env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"],
+          input: cacheInputs,
+          output: [],
+        },
       },
     },
   },
