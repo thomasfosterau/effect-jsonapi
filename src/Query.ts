@@ -1485,13 +1485,16 @@ export interface Options<R extends Any> {
  * such a relationship is never an include path, so its target never appears
  * in `included`.
  *
- * Distributes over unions of resource definitions.
+ * Distributes over unions of resource definitions, and over a widened `I`:
+ * under `include: boolean` (or a surface-or-`true` union) it is what either
+ * value declares, since the endpoint built from that value may have turned
+ * `include` on (#397).
  *
  * @since 0.1.0 (`I` and family members since 0.17.0)
  * @category type-level
  */
 export type FieldsetResources<R extends Any, I = false> = ExpandFamilies<
-  R | IncludedResources<R, I>
+  R | (I extends unknown ? IncludedResources<R, I> : never)
 >;
 
 /**
