@@ -728,13 +728,21 @@ describe("Conformance: discovery and selection", () => {
 
   const ids = (report: Conformance.Report) => report.outcomes.map((outcome) => outcome.rule.id);
 
+  // Matching by path segment (#367): the id itself, or ids continuing it with `/`.
+  const underPrefix = (prefix: string) => (id: string) =>
+    id === prefix || id.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`);
+
   it("leaves out the skipped rule ids, matching on prefix as `only` does", async () => {
     const all = ids(await verifyCanned(conformantServe));
-    const skip = ["spec/pagination/links-enumerate-collection", "spec/links/", "spec/content-neg"];
+    const skip = [
+      "spec/pagination/links-enumerate-collection",
+      "spec/links/",
+      "spec/content-negotiation",
+    ];
     const report = await verifyCanned(conformantServe, { skip });
-    const left = all.filter((id) => !skip.some((prefix) => id.startsWith(prefix)));
+    const left = all.filter((id) => !skip.some((prefix) => underPrefix(prefix)(id)));
     // Each prefix leaves something out, and nothing else is.
-    expect(skip.every((prefix) => all.some((id) => id.startsWith(prefix)))).toBe(true);
+    expect(skip.every((prefix) => all.some(underPrefix(prefix)))).toBe(true);
     expect(left.length).toBeLessThan(all.length - 5);
     expect(ids(report)).toEqual(left);
     // A skipped rule is absent from the report, as one `only` did not select
@@ -748,13 +756,16 @@ describe("Conformance: discovery and selection", () => {
     const selected = ids(
       await verifyCanned(conformantServe, { only: ["spec/content-negotiation"] }),
     );
-    const weight = "spec/content-negotiation/accept-weight";
+    const weight = [
+      "spec/content-negotiation/accept-weight-is-not-a-parameter",
+      "spec/content-negotiation/accept-weight-zero-refuses",
+    ];
     const report = await verifyCanned(conformantServe, {
       only: ["spec/content-negotiation"],
-      skip: [weight],
+      skip: weight,
     });
-    expect(selected.filter((id) => id.startsWith(weight)).length).toBeGreaterThan(1);
-    expect(ids(report)).toEqual(selected.filter((id) => !id.startsWith(weight)));
+    expect(selected.filter((id) => weight.includes(id))).toEqual(weight);
+    expect(ids(report)).toEqual(selected.filter((id) => !weight.includes(id)));
     // A rule both name is left out; `skip` naming everything leaves nothing.
     const both = await verifyCanned(conformantServe, {
       only: ["spec/document/top-level-members"],
@@ -765,6 +776,42 @@ describe("Conformance: discovery and selection", () => {
     expect(profile.outcomes.length).toBeGreaterThan(0);
     const spec = await verifyCanned(conformantServe, { tiers: ["spec"], skip: ["spec/"] });
     expect(spec.outcomes).toEqual([]);
+  });
+
+  it("matches `only` and `skip` prefixes by path segment, never past one", async () => {
+    const all = ids(await verifyCanned(conformantServe));
+    const location = "spec/status/create-location";
+    const matchesSelf = "spec/status/create-location-matches-self";
+    expect(all).toContain(location);
+    expect(all).toContain(matchesSelf);
+
+    // A complete rule id names that rule alone, though another id continues it.
+    expect(ids(await verifyCanned(conformantServe, { only: [location] }))).toEqual([location]);
+    const skipped = ids(await verifyCanned(conformantServe, { skip: [location] }));
+    expect(skipped).not.toContain(location);
+    expect(skipped).toContain(matchesSelf);
+    expect(skipped).toEqual(all.filter((id) => id !== location));
+
+    // A section matches with or without its trailing `/`; a partial segment
+    // matches nothing.
+    const section = all.filter((id) => id.startsWith("spec/content-negotiation/"));
+    expect(section.length).toBeGreaterThan(3);
+    const rest = all.filter((id) => !section.includes(id));
+    const prefixes = ["spec/content-negotiation", "spec/content-negotiation/"];
+    const selections = await Promise.all(
+      prefixes.map(async (prefix) => [
+        ids(await verifyCanned(conformantServe, { only: [prefix] })),
+        ids(await verifyCanned(conformantServe, { skip: [prefix] })),
+      ]),
+    );
+    expect(selections).toEqual([
+      [section, rest],
+      [section, rest],
+    ]);
+    expect((await verifyCanned(conformantServe, { only: ["spec/content-neg"] })).outcomes).toEqual(
+      [],
+    );
+    expect(ids(await verifyCanned(conformantServe, { skip: ["spec/content-neg"] }))).toEqual(all);
   });
 
   it("records the transport it drove", async () => {
@@ -7194,7 +7241,12 @@ describe("Conformance: in-process", () => {
     // `q` is an Accept-header weight, not a media type parameter (RFC 9110
     // §12.4.2). The kit reported this against the shipped middleware before
     // #101 was fixed; it now guards the fix against regressing.
-    const report = await run({ only: ["spec/content-negotiation/accept-weight"] });
+    const report = await run({
+      only: [
+        "spec/content-negotiation/accept-weight-is-not-a-parameter",
+        "spec/content-negotiation/accept-weight-zero-refuses",
+      ],
+    });
     const weight = outcomeFor(report, "spec/content-negotiation/accept-weight-is-not-a-parameter");
     expect(weight._tag).toBe("Passed");
     // `q=0` is still a refusal, so the fix did not simply stop reading weights.
