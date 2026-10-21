@@ -2,7 +2,7 @@
 
 Design note for `Conformance` — the executable specification a server is driven through to prove it implements JSON:API v1.1, and this package's profile. Tracks [#120](https://github.com/thomasfosterau/effect-jsonapi/issues/120) (epic [#115](https://github.com/thomasfosterau/effect-jsonapi/issues/115)).
 
-**Status:** v1 implemented, plus the write fixture ([#162](https://github.com/thomasfosterau/effect-jsonapi/issues/162)). 61 rules (54 `spec`, 7 `profile`), five declared coverage gaps; `Conformance.rules` and `Conformance.gaps` are the live lists.
+**Status:** v1 implemented, plus the write fixture ([#162](https://github.com/thomasfosterau/effect-jsonapi/issues/162)). 62 rules (55 `spec`, 7 `profile`), five declared coverage gaps; `Conformance.rules` and `Conformance.gaps` are the live lists.
 
 ## 0. Why it exists
 
@@ -143,13 +143,13 @@ Conformance.verifyWith(api, {
 
 ## 3. What v1 covers
 
-61 rules. Every one carries a stable id, an RFC 2119 level, a section and a URL.
+62 rules. Every one carries a stable id, an RFC 2119 level, a section and a URL.
 
 **Content negotiation (§Content Negotiation, §Extensions, §Profiles)** — the response media type and its permitted parameters; 415 on a parameterised request `Content-Type` (probed without `mutating: true`, so it sends the create endpoint — or failing that an update or relationship endpoint — a body `{}` that nothing can apply); 406 when every `Accept` instance is parameterised; an unsupported `ext` URI; an unrecognised `profile` ignored rather than rejected; and the two RFC 9110 §12.4.2 weight rules — a non-zero `q` is not a media type parameter, `q=0` is a refusal. The kit reported the first of those against the shipped middleware before [#101](https://github.com/thomasfosterau/effect-jsonapi/issues/101) was fixed; it now guards the fix against regressing.
 
-**Document structure (§Document Structure, §Compound Documents, §Resource Objects)** — at least one of `data` / `errors` / `meta`; `data` and `errors` never together; `included` only alongside `data`; full linkage, computed transitively from the primary data through included resources' linkage; no duplicate `(type, id)` anywhere in the document; `type` and `id` present and strings; the `jsonapi` object's member types.
+**Document structure (§Document Structure, §Compound Documents, §Resource Objects)** — at least one of `data` / `errors` / `meta`; `data` and `errors` never together; `included` only alongside `data`; full linkage, computed transitively from the primary data through included resources' linkage; no duplicate `(type, id)` anywhere in the document; an `included` array, `[]` when nothing is included, in every 2xx answer to a request carrying `include` (`spec/document/included-on-include`, §Fetching Includes); `type` and `id` present and strings; the `jsonapi` object's member types.
 
-The document rules probe **compound** documents, not just bare ones: for each endpoint declaring `include`, the kit reads the includable relationship names off a baseline response (only those carrying inline `data` — a paginated relationship is links-only and including it is a legitimate 400) and re-probes with them. Without that, full linkage and duplicate detection would pass over documents that never carry `included`, which is a pass that proves nothing.
+The document rules probe **compound** documents, not just bare ones: for each endpoint declaring `include`, the kit reads the includable relationship names off a baseline response (only those carrying inline `data` — a paginated relationship is links-only and including it is a legitimate 400) and re-probes with them. Without that, full linkage and duplicate detection would pass over documents that never carry `included`, which is a pass that proves nothing. `spec/document/included-on-include` reads those compound probes and sends one more to every endpoint declaring `include`: a bare `?include=`, which supplies `include` but asks for nothing, so its `included` must be the empty array. Presence is the signal — an `include` with an empty value is still supplied ([#256](https://github.com/thomasfosterau/effect-jsonapi/issues/256)) — and a response to a request without `include` is never checked for the key. The rule reports `Skipped` when no such request drew a 2xx.
 
 **Error objects (§Errors, §Error Objects)** — the `{ errors: [...] }` shape; member types; `source` discrimination (`pointer` / `parameter` / `header` only, `pointer` a real JSON Pointer); and `status` agreeing with the response status.
 
