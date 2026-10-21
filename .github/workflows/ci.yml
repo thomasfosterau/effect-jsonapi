@@ -54,10 +54,11 @@ jobs:
           restore-keys: |
             vp-task-v1-${{ runner.os }}-
 
-      # First, so the `check` graph's `build` dependency is a task-cache hit
-      # and `typecheck:dist` (test/emitted/*) and test/entry-points.test.ts
-      # read a fresh `dist/`. docgen does not: its import rewrite sends package
-      # imports to src/, so the examples compile and run against the sources.
+      # First, so the `build` dependency of the `check` graph and of `docgen`
+      # is a task-cache hit, and `typecheck:dist` (test/emitted/*),
+      # test/entry-points.test.ts and docgen's examples (which import the
+      # package by name, resolved through `exports` to `dist/`) read a fresh
+      # `dist/`.
       - name: Build
         run: vp run build
 

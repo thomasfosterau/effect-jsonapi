@@ -7,7 +7,6 @@
     "test/**/*.test.ts",
     "test/**/*.types.ts",
     "test/fixtures/*.mjs",
-    "scripts/*.ts",
     "examples/*/**/*.ts",
     "**/vite.config.ts"
   ],
