@@ -310,8 +310,9 @@ const isIdempotencyHeader = (name: PropertyKey): boolean =>
  * How an endpoint's headers schema declares the `Idempotency-Key` request
  * header. Header names are matched case-insensitively, as HTTP matches them; a
  * headers schema whose names cannot be enumerated declares nothing this can
- * see. The header is `"required"` only when a struct's own property for it is
- * not optional; one declared any other way (through a union, say) reads as
+ * see. The header is `"required"` when a struct's own property for it is not
+ * optional, or when every member of a union (or a suspended schema's target)
+ * requires it so; one any member declares optionally, or not at all, reads as
  * `"optional"`, so the kit sends no key it cannot tell the endpoint insists on.
  */
 const idempotencyKeyOf = (schema: Option.Option<{ readonly ast: SchemaAST.AST }>): IdempotencyKey =>
@@ -320,16 +321,25 @@ const idempotencyKeyOf = (schema: Option.Option<{ readonly ast: SchemaAST.AST }>
     onSome: ({ ast }): IdempotencyKey => {
       if (!Option.exists(declaredNames(ast), (names) => names.some(isIdempotencyHeader)))
         return "absent";
-      const encoded = SchemaAST.toEncoded(ast);
-      const required =
-        SchemaAST.isObjects(encoded) &&
-        encoded.propertySignatures.some(
-          (signature) =>
-            isIdempotencyHeader(signature.name) && !SchemaAST.isOptional(signature.type),
-        );
-      return required ? "required" : "optional";
+      return requiresIdempotencyKey(ast) ? "required" : "optional";
     },
   });
+
+/**
+ * Whether every request a headers schema's encoded side accepts carries the
+ * `Idempotency-Key` header: a struct's own property for it is not optional, a
+ * union's every member requires it, a suspended schema's target does.
+ */
+const requiresIdempotencyKey = (ast: SchemaAST.AST): boolean => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isObjects(encoded))
+    return encoded.propertySignatures.some(
+      (signature) => isIdempotencyHeader(signature.name) && !SchemaAST.isOptional(signature.type),
+    );
+  if (SchemaAST.isUnion(encoded)) return encoded.types.every(requiresIdempotencyKey);
+  if (SchemaAST.isSuspend(encoded)) return requiresIdempotencyKey(encoded.thunk());
+  return false;
+};
 
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
