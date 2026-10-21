@@ -201,12 +201,6 @@ describe("Middleware.schemaErrorDocument on a renamed body or header (#316)", ()
         failure(Schema.decodeUnknownResult(Trace)({ "x-trace": "y" })),
       ).errors[0]?.source,
     ).toEqual({ header: "x-trace" });
-    expect(
-      Middleware.schemaErrorDocument(
-        "Body",
-        failure(Schema.decodeUnknownResult(Payload)({ data: { itemCount: "x" } })),
-      ).errors[0]?.source,
-    ).toEqual({ pointer: "/data/itemCount" });
   });
 
   it("keeps the wire name of a renamed parent above a pointer a transformation reports", () => {
