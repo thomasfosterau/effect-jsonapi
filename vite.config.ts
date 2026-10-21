@@ -253,8 +253,10 @@ export default defineConfig({
       },
       typecheck: {
         command: "tsc -p tsconfig.json",
-        input: cacheInputs,
-        output: [],
+        cache: {
+          input: cacheInputs,
+          output: [],
+        },
       },
       // The other type-level tests resolve the package to ./src; this one
       // resolves it to the built ./dist/index.d.ts, which is what consumers
@@ -262,22 +264,28 @@ export default defineConfig({
       "typecheck:dist": {
         command: "tsc -p tsconfig.dist.json",
         dependsOn: ["build"],
-        input: [...cacheInputs, "dist/**"],
-        output: [],
+        cache: {
+          input: [...cacheInputs, "dist/**"],
+          output: [],
+        },
       },
       // Emits `dist/`: the JavaScript with `vp pack` (see the `pack` block
       // below), then one declaration file per source module with `tsc`
       // (tsconfig.build.json, which says why the declarations are not bundled).
       build: {
         command: "vp pack && tsc -p tsconfig.build.json",
-        input: cacheInputs,
-        output: ["dist/**"],
+        cache: {
+          input: cacheInputs,
+          output: ["dist/**"],
+        },
       },
       "test:unit": {
         command: "vp test run",
-        env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"],
-        input: cacheInputs,
-        output: [],
+        cache: {
+          env: ["VITEST_MAX_WORKERS", "NODE_OPTIONS"],
+          input: cacheInputs,
+          output: [],
+        },
       },
       // Type-checks AND executes every JSDoc `@example`, and generates the API
       // docs under docs/. Not part of `check`: it is a separate CI step, so a
