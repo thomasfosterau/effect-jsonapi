@@ -24,6 +24,7 @@ import {
   exotic,
   gumbo,
   janet,
+  konbu,
   margaret,
   nancy,
   NorthwindLive,
@@ -31,6 +32,7 @@ import {
   order10249,
   seafood,
   speedy,
+  tokyo,
   united,
   westboro,
 } from "../handlers.js";
@@ -158,6 +160,49 @@ describe("northwind example: fetching", () => {
       "territories",
       "territories",
     ]);
+  });
+
+  it("resolves the depth-2 path employee.territories on an order (#338)", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.orders.get({
+          params: { id: order10248.id },
+          query: { include: ["employee.territories"] },
+        });
+      }),
+    );
+
+    // The salesperson (the path's first hop) and both of Nancy's territories
+    // (its last) — not the employee alone.
+    expect(document.included?.map((resource) => `${resource.type}:${resource.id}`)).toEqual([
+      `employees:${nancy.id}`,
+      `territories:${westboro.id}`,
+      `territories:${boston.id}`,
+    ]);
+  });
+
+  it("resolves depth-2 paths across a page of orders, contributing each resource once (#338)", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.orders.list({
+          query: {
+            include: ["customer", "employee.territories"],
+            sort: [{ field: "orderDate", direction: "asc" }],
+          },
+        });
+      }),
+    );
+
+    // Three orders, three salespeople; only Nancy (10248) and Andrew (10250)
+    // have territories.
+    const keys = document.included?.map((resource) => `${resource.type}:${resource.id}`) ?? [];
+    expect(keys.filter((key) => key.startsWith("territories:")).sort()).toEqual(
+      [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"].sort(),
+    );
+    expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("404s with a typed error for unknown products", async () => {
@@ -537,6 +582,30 @@ describe("northwind example: related & relationship endpoints", () => {
     expect(document.meta?.total).toBe(2);
     // each line item's product is brought into the compound document
     expect(document.included?.map((resource) => resource.type)).toEqual(["products", "products"]);
+  });
+
+  it("resolves the depth-2 path product.category,product.supplier on the line-item feed (#338)", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.orders.lineItems({
+          params: { id: order10248.id },
+          query: { include: ["product.category", "product.supplier"] },
+        });
+      }),
+    );
+
+    // Each path's intermediate product is included alongside its last hop, in
+    // walk order: the products first, then their categories, then their
+    // suppliers.
+    expect(document.included?.map((resource) => `${resource.type}:${resource.id}`)).toEqual([
+      `products:${chai.id}`,
+      `products:${konbu.id}`,
+      `categories:${beverages.id}`,
+      `categories:${seafood.id}`,
+      `suppliers:${exotic.id}`,
+      `suppliers:${tokyo.id}`,
+    ]);
   });
 
   it("reassigns a product's category through the relationship endpoint", async () => {

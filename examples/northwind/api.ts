@@ -229,7 +229,7 @@ export const employees = Group.make(
 
 export const orders = Group.make(
   Order,
-  // GET /orders/:id?include=customer,employee,shipper
+  // GET /orders/:id?include=customer,employee.territories,shipper
   Endpoint.get(Order, {
     include: true,
     fields: true,
@@ -257,9 +257,10 @@ export const orders = Group.make(
     errors: [OrderNotFound],
   }),
   // --- Related resource endpoint ----------------------------------------------
-  // GET /orders/:id/lineItems?page[offset]=0&page[limit]=10&include=product —
+  // GET /orders/:id/lineItems?page[offset]=0&page[limit]=10&include=product.category —
   // the paginated line-item feed the `lineItems` relationship's related link
-  // points at, with the line item's product brought in as a compound document
+  // points at, with the line item's product (and, a hop further, its category
+  // or supplier) brought in as a compound document
   Endpoint.related(Order, "lineItems", {
     include: true,
     page: Pagination,
