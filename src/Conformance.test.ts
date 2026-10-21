@@ -6803,6 +6803,83 @@ describe("Conformance: `self` and `related` links dereference", () => {
     ).toBeUndefined();
   });
 
+  it("holds a links-only relationship's `self` to the cardinality its relationship endpoint declares", async () => {
+    const Comment = Resource.make("comments", { attributes: { body: Schema.String } });
+    const Paged = Resource.make("articles", {
+      attributes: { title: Schema.NonEmptyString, body: Schema.String },
+      relationships: {
+        author: Relationship.one(() => Person),
+        comments: Relationship.paginated(() => Comment),
+      },
+    });
+    const declaring = (...relationships: ReadonlyArray<"author" | "comments">) =>
+      verifyOver(
+        HttpApi.make("declared").add(
+          Group.make(
+            Paged,
+            Endpoint.get(Paged),
+            Endpoint.list(Paged),
+            ...relationships.map((name) => Endpoint.getRelationship(Paged, name)),
+          ),
+        ),
+      );
+    // `author` links-only too, beside the paginated `comments`.
+    const linksOnlyAuthor = (id: string) => ({
+      links: { self: `/articles/${id}/relationships/author` },
+    });
+    const wrong = at(
+      "/articles/2/relationships/comments",
+      { body: { data: { type: "comments", id: "5" } } },
+      at(
+        "/articles/1/relationships/author",
+        { body: { data: [{ type: "people", id: "9" }] } },
+        linked({ author: linksOnlyAuthor }),
+      ),
+    );
+    const outcomeOver = async (
+      verify: ReturnType<typeof declaring>,
+      serve: (request: CannedRequest) => Canned,
+    ) => outcomeFor(await verify(serve, { only: [RELATIONSHIP_SELF] }), RELATIONSHIP_SELF);
+
+    // Answering what the endpoints declare — an array for the paginated
+    // `comments`, one identifier for `author` — passes.
+    expect(
+      await outcomeOver(declaring("author", "comments"), linked({ author: linksOnlyAuthor })),
+    ).toMatchObject({ _tag: "Passed", note: undefined });
+    const authorFinding =
+      'the `self` link of articles:1\'s `author` (in /articles/1, at /data) answers to-many linkage (an array of resource identifiers) where the relationship is to-one, as the relationship endpoint `articles.authorRelationship` (`GET /articles/:id/relationships/author`) declares | `data: [{"type":"people","id":"9"}]`';
+    const outcome = await outcomeOver(declaring("author", "comments"), wrong);
+    expect(findingsOf(outcome)).toEqual([
+      authorFinding,
+      "the `self` link of articles:2's `comments` (in /articles, at /data/1) answers to-one linkage (`null` or a resource identifier) where the relationship is to-many, as the relationship endpoint `articles.commentsRelationship` (`GET /articles/:id/relationships/comments`) declares | comments:5",
+    ]);
+    expect(
+      Predicate.isTagged(outcome, "Failed") && outcome.findings.map(({ expected }) => expected),
+    ).toEqual([
+      "`null` or a resource identifier as primary data, as the success schema of `articles.authorRelationship` (`GET /articles/:id/relationships/author`), the relationship endpoint the link resolves to, declares",
+      "an array of resource identifiers as primary data, as the success schema of `articles.commentsRelationship` (`GET /articles/:id/relationships/comments`), the relationship endpoint the link resolves to, declares",
+    ]);
+
+    // A link to no declared relationship endpoint shows no cardinality, so
+    // either shape holds: here `comments`, with only `author` declared.
+    expect(findingsOf(await outcomeOver(declaring("author"), wrong))).toEqual([authorFinding]);
+    // Nor does an endpoint whose success schema says nothing of `data`.
+    const unknown = verifyOver(
+      HttpApi.make("hand-built").add(
+        Group.make(Paged, Endpoint.get(Paged), Endpoint.list(Paged)),
+        HttpApiGroup.make("linkage").add(
+          HttpApiEndpoint.get("author", "/articles/:id/relationships/author", {
+            success: Schema.Unknown,
+          }),
+          HttpApiEndpoint.get("comments", "/articles/:id/relationships/comments", {
+            success: Schema.Unknown,
+          }),
+        ),
+      ),
+    );
+    expect(await outcomeOver(unknown, wrong)).toMatchObject({ _tag: "Passed", note: undefined });
+  });
+
   it("skips the relationship SHOULD when no relationship carries linkage to compare", async () => {
     const linksOnly = (relation: string) => (id: string) => ({
       links: { self: `/articles/${id}/relationships/${relation}` },

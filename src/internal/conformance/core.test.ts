@@ -16,6 +16,10 @@ import {
 import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { TestClock } from "effect/testing";
+import * as Endpoint from "../../Endpoint.js";
+import * as Group from "../../Group.js";
+import * as Relationship from "../../Relationship.js";
+import * as Resource from "../../Resource.js";
 import {
   answeredAsDeployed,
   type Context,
@@ -631,5 +635,53 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
         `nothing to grade; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (${named("/b")})`,
       ),
     );
+  });
+});
+
+describe("discover (a relationship endpoint's declared cardinality)", () => {
+  const Person = Resource.make("people", { attributes: { name: Schema.String } });
+  const Article = Resource.make("articles", {
+    attributes: { title: Schema.String },
+    relationships: {
+      author: Relationship.one(() => Person),
+      editor: Relationship.optional(() => Person),
+      tags: Relationship.many(() => Person),
+      comments: Relationship.paginated(() => Person),
+    },
+  });
+
+  it("reads one or many off the success schema, and nothing off one it cannot read", () => {
+    const declared = discover(
+      HttpApi.make("relationships")
+        .add(
+          Group.make(
+            Article,
+            Endpoint.get(Article),
+            Endpoint.getRelationship(Article, "author"),
+            Endpoint.getRelationship(Article, "editor"),
+            Endpoint.getRelationship(Article, "tags"),
+            Endpoint.getRelationship(Article, "comments"),
+          ),
+        )
+        .add(
+          HttpApiGroup.make("hand-built").add(
+            HttpApiEndpoint.get("unknown", "/people/:id/relationships/friends", {
+              success: Schema.Unknown,
+            }),
+            HttpApiEndpoint.get("no-data", "/people/:id/relationships/pets", {
+              success: Schema.Struct({ meta: Schema.Unknown }),
+            }),
+          ),
+        ),
+    );
+    expect(declared.map(({ name, role, linkage }) => `${name} ${role}: ${linkage}`)).toEqual([
+      "get resource: unshown",
+      "authorRelationship relationship: one",
+      "editorRelationship relationship: one",
+      "tagsRelationship relationship: many",
+      "commentsRelationship relationship: many",
+      "unknown relationship: unshown",
+      "no-data relationship: unshown",
+    ]);
   });
 });
