@@ -868,6 +868,14 @@ export const list = <
  * Resources → 409 Conflict), by the attached `Middleware.SchemaErrors`; a
  * `type` that is missing or not a string is the 400 of any malformed payload.
  *
+ * The default payload does not support client-generated ids: a `data.id` is
+ * answered with 403 Forbidden, `source.pointer` `/data/id`, and the handler
+ * never runs (§Client-Generated IDs). To support them, pass a `payload` whose
+ * resource object declares an `id` — `createPayload`'s own fields plus one,
+ * `Schema.Struct({ data: Schema.Struct({ ...Article.createPayload.fields.data.fields,
+ * id: Schema.optionalKey(Schema.String) }) })` — and the handler receives it;
+ * answering a duplicate with 409 is then the handler's to do.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"

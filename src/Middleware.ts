@@ -25,7 +25,9 @@
  *     reports every offending key together. A create or update whose
  *     resource object names a `type` the endpoint does not serve is the
  *     exception, answered with 409 Conflict naming `/data/type`
- *     (§Creating Resources; §Updating Resources). It also rejects, with a 400
+ *     (§Creating Resources; §Updating Resources), as is a client-generated
+ *     `data.id` on a `createPayload`, answered with 403 Forbidden naming
+ *     `/data/id` (§Client-Generated IDs). It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z, names an extension's parameter (`ext:param`) or is not a legal
  *     member name (`foo!`, `page.limit`), and that neither the specification
@@ -102,6 +104,7 @@ import { HttpApiError, HttpApiMiddleware } from "effect/http-api";
 import {
   BadRequest,
   Conflict,
+  Forbidden,
   NotAcceptable,
   toDocument,
   UnsupportedMediaType,
@@ -112,6 +115,7 @@ import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
+import { CLIENT_ID_UNSUPPORTED, isRefusedClientId } from "./internal/refusedClientId.js";
 import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
 import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
 import { wireLeaves } from "./internal/wireNames.js";
@@ -1176,34 +1180,56 @@ const badRequestResponse = (part: RequestPart, document: typeof WireDocument.Typ
     Effect.withSpan(Span.schemaError),
   );
 
-// The 409 a create or update answers a resource object of another `type`
-// with (§Creating Resources → 409 Conflict: "A server MUST return 409 Conflict
-// when processing a POST request in which the resource object's type is not
-// among the type(s) that constitute the collection represented by the
-// endpoint"; §Updating Resources → 409 Conflict likewise for a PATCH), under
-// the same span as the 400 it replaces.
-const conflictResponse = (type: string, served: ReadonlyArray<string>) =>
+// A payload refusal other than the 400: one error object naming the member
+// at `pointer`, under the same span as the 400 it replaces.
+const payloadRefusal = (
+  error: {
+    readonly status: number;
+    readonly code: string;
+    readonly title?: string | undefined;
+  },
+  detail: string,
+  pointer: string,
+) =>
   Effect.succeed(
     HttpServerResponse.jsonUnsafe(
       {
         errors: [
           {
-            status: String(Conflict.status),
-            code: Conflict.code,
-            title: Conflict.title,
-            detail:
-              `Resource object type "${type}" is not served by this endpoint ` +
-              `(expected ${served.map((name) => `"${name}"`).join(" or ")})`,
-            source: { pointer: "/data/type" },
+            status: String(error.status),
+            code: error.code,
+            title: error.title,
+            detail,
+            source: { pointer },
           },
         ],
       },
-      { status: Conflict.status, contentType: MEDIA_TYPE },
+      { status: error.status, contentType: MEDIA_TYPE },
     ),
   ).pipe(
     Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": "Payload" })),
     Effect.withSpan(Span.schemaError),
   );
+
+// The 409 a create or update answers a resource object of another `type`
+// with (§Creating Resources → 409 Conflict: "A server MUST return 409 Conflict
+// when processing a POST request in which the resource object's type is not
+// among the type(s) that constitute the collection represented by the
+// endpoint"; §Updating Resources → 409 Conflict likewise for a PATCH).
+const conflictResponse = (type: string, served: ReadonlyArray<string>) =>
+  payloadRefusal(
+    Conflict,
+    `Resource object type "${type}" is not served by this endpoint ` +
+      `(expected ${served.map((name) => `"${name}"`).join(" or ")})`,
+    "/data/type",
+  );
+
+// The 403 a create answers a client-generated id with when its payload does
+// not support one (§Client-Generated IDs: "A server MUST return 403 Forbidden
+// in response to an unsupported request to create a resource with a
+// client-generated ID"). `Resource.createPayload` reports the id at
+// `/data/id` with the issue `isRefusedClientId` recognises (#450).
+const clientIdResponse = payloadRefusal(Forbidden, CLIENT_ID_UNSUPPORTED, "/data/id");
 
 // A payload rejected at `/data/type` on an endpoint that declares the types it
 // serves (`Endpoint.create` / `Endpoint.update`), whose body sent a string
@@ -1242,10 +1268,13 @@ const transformSchemaError = (
   }
   const badRequest = badRequestResponse(kind, schemaErrorDocument(kind, error.cause));
   if (kind !== "Payload") return badRequest;
+  const refused = wireLeaves(error.cause.issue).some(isRefusedClientId)
+    ? clientIdResponse
+    : badRequest;
   return Effect.flatMap(payloadConflict(endpoint, error.cause), (conflict) =>
     Option.isSome(conflict)
       ? conflictResponse(conflict.value.type, conflict.value.served)
-      : badRequest,
+      : refused,
   );
 };
 
@@ -1376,7 +1405,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * `filter` family), each with a `detail` and a `source` naming the offending
  * parameter, header or body member.
  *
- * One payload failure is not a 400: on `Endpoint.create` and
+ * Two payload failures are not a 400. On `Endpoint.create` and
  * `Endpoint.update`, a resource object whose `data.type` is a string naming a
  * type the endpoint does not serve (`{ "data": { "type": "people", … } }` to
  * `POST /articles`) is answered with JSON:API's 409 Conflict, an
@@ -1389,6 +1418,17 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * 400. The 409 is not declared among the endpoint's errors, so a derived
  * client fails with the raw `HttpClientError` carrying the response, or an
  * `ErrorResponse` under `Client.make`'s `decodeErrors`.
+ *
+ * And a client-generated `data.id` that `Resource.createPayload` rejects
+ * (`{ "data": { "type": "articles", "id": "client-1", … } }` to
+ * `POST /articles`) is answered with 403 Forbidden, an
+ * `ApiError.Forbidden`-shaped error object whose `source.pointer` is
+ * `/data/id` (§Client-Generated IDs: a server MUST answer 403 to an
+ * unsupported request to create a resource with a client-generated id), on
+ * any endpoint whose payload is `createPayload`. The handler never runs. A
+ * `type` or member that fails beside the id is reported instead, with the 409
+ * or 400 it earns; a payload of the endpoint's own that declares `data.id`
+ * supports client ids, and is not touched (#450).
  *
  * It also answers a query parameter whose family base name is made only of
  * a-z, and which the endpoint neither declares nor the specification defines

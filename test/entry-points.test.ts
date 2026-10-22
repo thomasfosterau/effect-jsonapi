@@ -44,6 +44,9 @@ const SCHEMA_TIER = [
   "internal/includeGraph.ts",
   "internal/media.ts",
   "internal/operators.ts",
+  // `Resource.createPayload` refuses a client-generated `data.id` with the
+  // issue `Middleware.SchemaErrorsLive` answers 403 (#450); pure schema.
+  "internal/refusedClientId.ts",
   "internal/schemaExt.ts",
   "schema.ts",
 ];
