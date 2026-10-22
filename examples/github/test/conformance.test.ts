@@ -24,14 +24,10 @@ import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
  * document. The write rules have been clean since #428, which answers a
  * resource object of another `type` with 409, but for one: `Endpoint.create`
  * drops a client-generated id and answers 201 under an id of its own, where
- * JSON:API wants a 403 (#450). And `profile/sort/across-pages` fails: the
- * handlers' pagination links carry no `{ query }`, so `next` drops `sort`
- * (#447).
+ * JSON:API wants a 403 (#450).
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
   ["spec/status/create-client-id-unsupported", "#450"],
-  // The handlers' pagination links carry no `{ query }`, so `next` drops `sort`.
-  ["profile/sort/across-pages", "#447"],
 ];
 
 const IDS = {
