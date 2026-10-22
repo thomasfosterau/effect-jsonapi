@@ -11,6 +11,7 @@ import {
   CommentNotFound,
   OperationFailed,
   PersonNotFound,
+  TagNotFound,
   TitleTaken,
 } from "./errors.js";
 import { Article, Comment, Person } from "./resources.js";
@@ -157,7 +158,7 @@ export const operations = Group.make(
   "operations",
   // POST /operations with an atomic:operations document
   Endpoint.operations([Article, Comment], {
-    errors: [OperationFailed],
+    errors: [OperationFailed, PersonNotFound, CommentNotFound, TagNotFound],
   }),
 );
 

@@ -10,7 +10,7 @@ import { Cause, Effect, Exit, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { ApiError, Atomic, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
-import { OperationFailed } from "../errors.js";
+import { CommentNotFound, OperationFailed, PersonNotFound, TagNotFound } from "../errors.js";
 import {
   ArticlesLive,
   OperationsLive,
@@ -356,6 +356,191 @@ describe("atomic operations: all-or-nothing", () => {
     expect(error).toBeInstanceOf(OperationFailed);
     expect((error as OperationFailed).reason).toMatch(/never-declared/);
     expect((error as OperationFailed).operation).toBe(0);
+  });
+});
+
+describe("atomic operations: linkage to an absent resource", () => {
+  it("an author op naming an unknown person 404s and rolls back the whole request", async () => {
+    const { exit, articles, author } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const exit = yield* Effect.exit(
+          client.operations.operations({
+            payload: Atomic.request(
+              // this one would succeed...
+              Atomic.add(Article, {
+                attributes: {
+                  title: "Orphaned by a 404",
+                  body: "",
+                  createdAt: sampleArticle.attributes.createdAt,
+                },
+                relationships: { author: { data: Person.ref(sampleAuthor.id) } },
+              }),
+              // ...but this one names a person the store does not hold
+              Atomic.updateRelationship(
+                Article,
+                sampleArticle.id,
+                "author",
+                Person.ref("does-not-exist"),
+              ),
+            ),
+          }),
+        );
+        const list = yield* client.articles.list({ query: {} });
+        const after = yield* client.articles.get({ params: { id: sampleArticle.id }, query: {} });
+        return {
+          exit,
+          articles: list.data.map((article) => article.attributes.title),
+          author: after.data?.relationships?.author.data.id,
+        };
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof PersonNotFound);
+    expect(error.id).toBe("does-not-exist");
+    // the pointer locates the linkage inside the failing operation
+    expect(error.pointer).toBe("/atomic:operations/1/data");
+    // all-or-nothing: neither operation was committed
+    expect(articles).not.toContain("Orphaned by a 404");
+    expect(author).toBe(sampleAuthor.id);
+  });
+
+  it("a resource op linking an unknown author 404s, pointing at its relationship", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.operations.operations({
+          payload: Atomic.request(
+            Atomic.add(Comment, {
+              attributes: { body: "Who wrote this?" },
+              relationships: { author: { data: Person.ref("does-not-exist") } },
+            }),
+          ),
+        });
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof PersonNotFound);
+    expect(error.pointer).toBe("/atomic:operations/0/data/relationships/author/data");
+  });
+
+  it("a tags op naming an unknown tag 404s at that identifier and rolls back", async () => {
+    const { exit, tags } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const exit = yield* Effect.exit(
+          client.operations.operations({
+            payload: Atomic.request(
+              // this one would succeed (clearing the tags)...
+              Atomic.updateRelationship(Article, sampleArticle.id, "tags", []),
+              // ...but this one names a tag the store does not hold
+              Atomic.addToRelationship(Article, sampleArticle.id, "tags", [
+                Tag.ref(sampleTag.id),
+                Tag.ref("does-not-exist"),
+              ]),
+            ),
+          }),
+        );
+        const after = yield* client.articles.get({ params: { id: sampleArticle.id }, query: {} });
+        return { exit, tags: after.data?.relationships?.tags.data };
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof TagNotFound);
+    expect(error.id).toBe("does-not-exist");
+    expect(error.pointer).toBe("/atomic:operations/1/data/1");
+    // all-or-nothing: the clearing operation was not committed either
+    expect(tags).toEqual([Tag.ref(sampleTag.id)]);
+  });
+
+  it("an article add linking an unknown tag 404s at its relationship", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.operations.operations({
+          payload: Atomic.request(
+            Atomic.add(Article, {
+              attributes: {
+                title: "Tagged with nothing",
+                body: "",
+                createdAt: sampleArticle.attributes.createdAt,
+              },
+              relationships: {
+                author: { data: Person.ref(sampleAuthor.id) },
+                tags: { data: [Tag.ref("does-not-exist")] },
+              },
+            }),
+          ),
+        });
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof TagNotFound);
+    expect(error.pointer).toBe("/atomic:operations/0/data/relationships/tags/data/0");
+  });
+
+  it("a comments op naming an unknown comment 404s and links none of its batch", async () => {
+    const { exit, linked } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const before = yield* client.articles.commentsRelationship({
+          params: { id: sampleArticle.id },
+          query: {},
+        });
+        const exit = yield* Effect.exit(
+          client.operations.operations({
+            payload: Atomic.request(
+              // a comment created earlier in the same request is linkable...
+              Atomic.add(Comment, {
+                lid: "fresh",
+                attributes: { body: "Created in this request" },
+                relationships: { author: { data: Person.ref(sampleAuthor.id) } },
+              }),
+              // ...but the unknown one fails the whole request
+              Atomic.addToRelationship(Article, sampleArticle.id, "comments", [
+                Comment.lidRef("fresh"),
+                Comment.ref("does-not-exist"),
+              ]),
+            ),
+          }),
+        );
+        const after = yield* client.articles.commentsRelationship({
+          params: { id: sampleArticle.id },
+          query: {},
+        });
+        return {
+          exit,
+          linked: {
+            before: before.data.map((ref) => ref.id),
+            after: after.data.map((ref) => ref.id),
+          },
+        };
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof CommentNotFound);
+    expect(error.id).toBe("does-not-exist");
+    expect(error.pointer).toBe("/atomic:operations/1/data/1");
+    expect(linked.after).toEqual(linked.before);
+  });
+
+  it("the 404's error document carries the pointer as source.pointer", () => {
+    const encoded = Schema.encodeSync(PersonNotFound.wire)(
+      new PersonNotFound({ id: "does-not-exist", pointer: "/atomic:operations/1/data" }),
+    );
+    expect(encoded.errors[0]?.status).toBe("404");
+    expect(encoded.errors[0]?.code).toBe("person_not_found");
+    expect(encoded.errors[0]?.source).toEqual({ pointer: "/atomic:operations/1/data" });
   });
 });
 

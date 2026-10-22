@@ -13,20 +13,38 @@ export class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNo
   detail: (e) => `Article ${e.id} not found`,
 }) {}
 
+/**
+ * A write naming a person the store does not hold. `pointer`, when set, is the
+ * JSON pointer to the offending linkage in the request document (e.g. inside
+ * `atomic:operations`) and becomes the error's `source.pointer`.
+ */
 export class PersonNotFound extends ApiError.make<PersonNotFound>()("PersonNotFound", {
   status: 404,
   code: "person_not_found",
   title: "Person not found",
-  fields: { id: Schema.String },
+  fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
   detail: (e) => `Person ${e.id} not found`,
+  source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
 }) {}
 
+/** A write naming a comment the store does not hold; `pointer` as on {@link PersonNotFound}. */
 export class CommentNotFound extends ApiError.make<CommentNotFound>()("CommentNotFound", {
   status: 404,
   code: "comment_not_found",
   title: "Comment not found",
-  fields: { id: Schema.String },
+  fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
   detail: (e) => `Comment ${e.id} not found`,
+  source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
+}) {}
+
+/** A write naming a tag the store does not hold; `pointer` as on {@link PersonNotFound}. */
+export class TagNotFound extends ApiError.make<TagNotFound>()("TagNotFound", {
+  status: 404,
+  code: "tag_not_found",
+  title: "Tag not found",
+  fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
+  detail: (e) => `Tag ${e.id} not found`,
+  source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
 }) {}
 
 export class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {

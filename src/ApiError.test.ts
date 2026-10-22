@@ -204,6 +204,27 @@ describe("ApiError.make source", () => {
     expect(wire.errors[0]?.source).toBeUndefined();
   });
 
+  it("leaves an absent optional field out of meta and round-trips it", () => {
+    class MaybePointed extends ApiError.make<MaybePointed>()("MaybePointed", {
+      status: 404,
+      fields: { id: Schema.String, pointer: Schema.optionalKey(Schema.String) },
+      source: (e) => (e.pointer === undefined ? undefined : { pointer: e.pointer }),
+    }) {}
+
+    const bare = Schema.encodeSync(MaybePointed.wire)(new MaybePointed({ id: "1" }));
+    expect(bare.errors[0]?.meta).toEqual({ id: "1" });
+    expect(bare.errors[0]?.source).toBeUndefined();
+    expect(Schema.decodeUnknownSync(MaybePointed.wire)(bare)).toEqual(
+      new MaybePointed({ id: "1" }),
+    );
+
+    const pointed = Schema.encodeSync(MaybePointed.wire)(
+      new MaybePointed({ id: "1", pointer: "/data" }),
+    );
+    expect(pointed.errors[0]?.meta).toEqual({ id: "1", pointer: "/data" });
+    expect(pointed.errors[0]?.source).toEqual({ pointer: "/data" });
+  });
+
   it("round-trips a field name containing a literal / through source.pointer and back", () => {
     class WeirdFieldTaken extends ApiError.make<WeirdFieldTaken>()("WeirdFieldTaken", {
       status: 409,
