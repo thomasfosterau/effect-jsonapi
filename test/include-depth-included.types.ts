@@ -6,8 +6,9 @@
  * admits in `included` every resource its legal include paths reach, beside
  * the non-`paginated` direct targets — so a handler can return the resources
  * an advertised depth-2 path such as `comments.author` brings in. An endpoint
- * with `include` off, or with a declared `Include.Surface`, keeps exactly the
- * document it had. The runtime half is `src/Endpoint.included.test.ts`.
+ * with `include` off keeps exactly the document it had; one with a declared
+ * `Include.Surface` binds the surface's own union (on `collection` and
+ * `polymorphic` too, #336). The runtime half is `src/Endpoint.included.test.ts`.
  *
  * `Include.included(resource, { include })` returns that union (#342), so an
  * endpoint that overrides `success` can declare it; the last sections pin it
@@ -437,7 +438,7 @@ Include.included(Comment, { include: articleSurface });
 Include.included([Comment, Person], { include: articleSurface });
 
 // The members form under a declared surface: the surface's own union, which
-// `collection` and `polymorphic` do not bind yet (#336).
+// `collection` and `polymorphic` bind (#336).
 const surfaceSearchUnion = Include.included([Article, Person], { include: articleSurface });
 assertType<Equals<typeof surfaceSearchUnion, (typeof articleSurface)["included"]>>(true);
 assertType<Equals<(typeof surfaceSearchUnion)["Type"], typeof Comment.Type | typeof Person.Type>>(
@@ -458,19 +459,28 @@ export const surfaceSearch = Endpoint.collection([Article, Person], {
   path: "/search",
   include: articleSurface,
 });
-// The divergence #336 tracks: the endpoint binds its members' direct targets
-// instead. When #336 is fixed this pin flips, and the docs' caveat goes.
-assertType<Equals<(typeof surfaceSearchUnion)["Type"], IncludedOf<typeof surfaceSearch>>>(false);
-assertType<Equals<IncludedOf<typeof surfaceSearch>, IncludedOf<typeof plainSearch>>>(true);
-// The same divergence on `polymorphic`, under a surface over one member.
+// The endpoint binds exactly the surface's union (#336), narrowed to what it
+// names: not the members' direct targets (`Person.employer`'s `companies`).
+assertType<Equals<(typeof surfaceSearchUnion)["Type"], IncludedOf<typeof surfaceSearch>>>(true);
+assertType<Equals<IncludedOf<typeof surfaceSearch>, IncludedOf<typeof plainSearch>>>(false);
+const company = Company.make({ id: Company.Id.make("2"), attributes: { name: "Acme" } });
+// @ts-expect-error -- `companies` is a direct target the surface never names
+assertType<IncludedOf<typeof surfaceSearch>>(company);
+// Positive control: the members' direct targets admit it without a surface.
+assertType<IncludedOf<typeof plainSearch>>(company);
+// A handler returning the depth-2 `people` the surface advertises type-checks.
+assertType<SuccessOf<typeof surfaceSearch>>(
+  Handlers.collection([article], { included: [comment, person] }),
+);
+// The same on `polymorphic`, under a surface over one member.
 const nodeSurface = Include.make(Author, {
   comments: Include.nested(Comment, { author: Person }),
 });
 export const surfaceNode = Endpoint.polymorphic(AnyNode, { include: nodeSurface });
 const surfaceNodeUnion = Include.included(AnyNode.members, { include: nodeSurface });
 assertType<Equals<typeof surfaceNodeUnion, (typeof nodeSurface)["included"]>>(true);
-assertType<Equals<(typeof surfaceNodeUnion)["Type"], IncludedOf<typeof surfaceNode>>>(false);
-assertType<Equals<IncludedOf<typeof surfaceNode>, IncludedOf<typeof plainNode>>>(true);
+assertType<Equals<(typeof surfaceNodeUnion)["Type"], IncludedOf<typeof surfaceNode>>>(true);
+assertType<Equals<IncludedOf<typeof surfaceNode>, IncludedOf<typeof plainNode>>>(false);
 
 // ---------------------------------------------------------------------------
 // A widened `include: boolean`
@@ -584,9 +594,10 @@ assertType<
   >
 >(false);
 
-// The endpoints under such an `include`: the surface half binds the members'
-// direct targets (#336) and the `true` half the full walk, so the union is
-// `include: true`'s and a handler returning depth-2 `people` type-checks.
+// The endpoints under such an `include`: the surface half binds the surface's
+// own union (#336) and the `true` half the full walk, so the union is either
+// (here `include: true`'s, which covers the surface's) and a handler returning
+// depth-2 `people` type-checks.
 export const mixedSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",

@@ -2,8 +2,7 @@
  * `Include.included`'s resource form (#342): `Include.included(resource,
  * { include })`, or `Include.included(members, { include })` for a
  * `collection` / `polymorphic` endpoint, builds the `included` union the
- * matching endpoint's default document binds (bar a declared surface on the
- * members form, which those endpoints ignore until #336) — so a wire-variant `success`
+ * matching endpoint's default document binds — so a wire-variant `success`
  * can reuse it rather than list every reachable type by hand, and a type the
  * endpoint's include paths reach is never missing from it (a missing one is a
  * `ResponseEncodeError` on the path that reaches it, #320).
@@ -189,17 +188,19 @@ describe("Include.included(resource, { include }) is the default document's unio
       comments: Include.nested(Comment, { author: Person }),
     });
     expect(Include.included(AnyNode.members, { include: nodeSurface })).toBe(nodeSurface.included);
-    // Which `collection` and `polymorphic` do not bind yet (#336): their
-    // documents keep the members' direct targets. When #336 is fixed these
-    // flip, and the docs' caveat goes.
+    // Which `collection` and `polymorphic` bind, as `get` / `list` / `related`
+    // do (#336): exactly the surface's union, narrowed to what it names —
+    // `Company`, a direct target of `Person.employer`, is dropped.
     const [success] = Endpoint.collection([Article, Person], {
       name: "search",
       path: "/search",
       include: surface,
     }).success;
-    expectSameMembers(membersOf(includedOf(success)), [Comment, AnyNode, Company]);
+    expect(includedOf(success)).toBe(surface.included);
+    expectSameMembers(membersOf(includedOf(success)), [Comment, Person]);
     const [nodeSuccess] = Endpoint.polymorphic(AnyNode, { include: nodeSurface }).success;
-    expectSameMembers(membersOf(includedOf(nodeSuccess)), [Comment, Company]);
+    expect(includedOf(nodeSuccess)).toBe(nodeSurface.included);
+    expectSameMembers(membersOf(includedOf(nodeSuccess)), [Comment, Person]);
   });
 
   it("an `include` that may be a surface or not: the union for the value it holds", () => {

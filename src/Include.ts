@@ -574,8 +574,7 @@ export interface Reachable<R extends Any, I> extends Schema.Union<
  * turned `include` on.
  *
  * A declared {@link Surface} gives the surface's own `included` (see
- * {@link included}), which `collection` and `polymorphic` do not bind yet
- * (#336).
+ * {@link included}), which `collection` and `polymorphic` bind.
  *
  * @since 0.17.0
  * @category models
@@ -666,11 +665,9 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  * every member's direct targets and paths ({@link MembersReachable}). A
  * widened `include: boolean` gives what either value admits, as those
  * endpoints do (#382). A declared surface gives the surface's own
- * `included`, and an `include` that may be a surface or not
- * (`which ? surface : true`) is typed as either union. Until #336 is fixed,
- * `collection` and `polymorphic` ignore a surface's union and bind their
- * members' direct targets instead, so for a surface this answer differs from
- * what those endpoints accept.
+ * `included`, as `collection` and `polymorphic` bind it, and an `include`
+ * that may be a surface or not (`which ? surface : true`) is typed as either
+ * union.
  *
  * The resource and members forms give the union of an endpoint that does not
  * declare `fields`. With `fields: true` the default document's `included`
