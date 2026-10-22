@@ -7,9 +7,10 @@
  *   - **The filter grammar profile** (`docs/filter-grammar.md`, published at
  *     `Filter.PROFILE_URI`). Its §2 surface syntax, §3 canonical encoding, §4
  *     closed operator core, §5 advertisement and §7 error pointers are all
- *     normative today and mechanically checkable over the wire. Its
- *     *evaluation* semantics are not — they need an oracle over known data —
- *     and are declared as a coverage gap rather than silently omitted.
+ *     normative today and mechanically checkable over the wire. Its §6
+ *     *evaluation* semantics are checked by `./evaluation.ts`, with the kit's
+ *     own oracle (`./semantics.ts`) over the collection the server serves
+ *     unfiltered.
  *   - **The Idempotency-Key profile** (`docs/idempotency.md`, published at
  *     `Idempotency.PROFILE_URI`). Only its advertisement (§1) is checked, on
  *     the 2xx a create or update probe gets from the `writes` fixture; delete
@@ -70,6 +71,7 @@ import {
   type WriteTarget,
 } from "./write.js";
 import { quote } from "./crawl.js";
+import { evaluation } from "./evaluation.js";
 
 const GRAMMAR =
   "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md";
@@ -705,6 +707,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   advertisesProfile,
   rejections,
   spellingEquivalence,
+  evaluation,
   advertisesIdempotencyProfile,
   jsonApiMember,
   repeatedKeySpelling,
