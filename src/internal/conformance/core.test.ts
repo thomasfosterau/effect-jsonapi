@@ -97,6 +97,40 @@ describe("discover (the Idempotency-Key header)", () => {
             "idempotency-key": Schema.String,
           }),
         ),
+        // A union requires the key only when every member does; a member
+        // declaring it optionally, or not at all, accepts a request without it.
+        post(
+          "union-required",
+          Schema.Union([
+            Schema.Struct({ "idempotency-key": Schema.String, "x-tenant": Schema.String }),
+            Schema.Struct({ "idempotency-key": Schema.String, authorization: Schema.String }),
+          ]),
+        ),
+        post(
+          "union-optional",
+          Schema.Union([
+            Schema.Struct({ "idempotency-key": Schema.String, "x-tenant": Schema.String }),
+            Schema.Struct({
+              "idempotency-key": Schema.optionalKey(Schema.String),
+              authorization: Schema.String,
+            }),
+          ]),
+        ),
+        post(
+          "union-omitted",
+          Schema.Union([
+            Schema.Struct({ "idempotency-key": Schema.String, "x-tenant": Schema.String }),
+            Schema.Struct({ authorization: Schema.String }),
+          ]),
+        ),
+        // A suspended member is read through to its target.
+        post(
+          "union-suspended",
+          Schema.Union([
+            Schema.Struct({ "idempotency-key": Schema.String }),
+            Schema.suspend(() => Schema.Struct({ "Idempotency-Key": Schema.String })),
+          ]),
+        ),
       ),
     ),
   );
@@ -111,6 +145,10 @@ describe("discover (the Idempotency-Key header)", () => {
       "upper: optional",
       "beside-required: optional",
       "beside-optional: required",
+      "union-required: required",
+      "union-optional: optional",
+      "union-omitted: optional",
+      "union-suspended: required",
     ]);
   });
 });
