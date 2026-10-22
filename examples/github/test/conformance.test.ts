@@ -105,6 +105,19 @@ describe("github: JSON:API conformance", () => {
     ).toEqual([]);
   });
 
+  it("sampled only resources the example holds: every sample read answered 200", () => {
+    // An `ids` entry the example does not hold fails no rule: its `/:type/:id`
+    // read answers 404, and every rule that resolves it sees less of the api
+    // (#301). `report.samples` records each such read with its status (#319).
+    // Keyed by type, so a sample that did not resolve shows up under its type.
+    // `labels` and `issueComments` have no `GET /:type/:id` endpoint, so their
+    // samples key relationship and related reads only, and record no read.
+    expect(
+      Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+      Conformance.format(report),
+    ).toEqual({ users: 200, repositories: 200, issues: 200, pulls: 200 });
+  });
+
   it("breaks exactly the rules that are already filed", () => {
     const failing = report.outcomes
       .filter((outcome) => outcome._tag === "Failed")

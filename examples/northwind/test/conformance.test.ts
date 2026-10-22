@@ -186,25 +186,16 @@ describe("northwind: JSON:API conformance", () => {
     expect(resolved).toEqual(IDS);
   });
 
-  it("sampled only resources the example holds: nothing it read answered 404", () => {
+  it("sampled only resources the example holds: every sample read answered 200", () => {
     // A second line of defence behind the direct guard above, over what the kit
-    // itself read. An absent sample surfaces only in the notes of rules that
-    // passed and the reasons of rules that skipped, so this matches `404` in
-    // the kit's wording and checks nothing once that wording changes. It also
-    // leans on one rule for every type but orders: today only the skip reason
-    // of `spec/links/resource-self-dereferences` (no read endpoint carries a
-    // resource `links.self`) lists a 404 per sampled `/:type/:id`. Once a read
-    // endpoint carries `links.self`, that rule stops skipping, and an absent
-    // territory, say, would pass here unnoticed.
-    const remarks = report.outcomes.flatMap((outcome) => {
-      if (Predicate.isTagged(outcome, "Passed") && outcome.note !== undefined) {
-        return [`${outcome.rule.id}: ${outcome.note}`];
-      }
-      return Predicate.isTagged(outcome, "Skipped")
-        ? [`${outcome.rule.id}: ${outcome.reason}`]
-        : [];
-    });
-    expect(remarks.filter((remark) => /\b404\b/.test(remark))).toEqual([]);
+    // itself read: `report.samples` records every `/:type/:id` read the `ids`
+    // resolve, with its status, as data rather than in a note's wording (#319).
+    // Keyed by type, so a sample that did not resolve shows up under its type,
+    // and a type the kit resolved no read for is missing.
+    expect(
+      Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+      Conformance.format(report),
+    ).toEqual(Object.fromEntries(Object.keys(IDS).map((type) => [type, 200])));
   });
 
   it("breaks exactly the rules that are already filed", () => {

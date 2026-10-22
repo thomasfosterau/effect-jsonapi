@@ -12,6 +12,7 @@
  */
 import { Array as Arr, Predicate, Result } from "effect";
 import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
+import { resolved, type SampleRecord } from "./samples.js";
 
 /** @internal */
 export interface Summary {
@@ -202,6 +203,41 @@ const renderWrites = (writes: ReadonlyArray<WriteRecord>): ReadonlyArray<string>
     },
   });
 
+/** A sample's answer as the report names it: its status, or that none came. */
+const answer = (sample: SampleRecord): string =>
+  sample.status === 0 ? "no answer" : String(sample.status);
+
+/**
+ * The `ids` samples that did not resolve, as one line naming each and what it
+ * answered. Nothing at all when every sample resolved, so a run whose fixture
+ * holds has the report it always had.
+ */
+const renderSamples = (
+  recorded: ReadonlyArray<SampleRecord> | undefined,
+  width: number,
+): ReadonlyArray<string> => {
+  const samples = recorded ?? [];
+  return Arr.match(
+    Arr.filter(samples, (sample) => !resolved(sample)),
+    {
+      onEmpty: () => [],
+      onNonEmpty: (unresolved) => [
+        "SAMPLES",
+        ...Arr.map(
+          wrap(
+            `${unresolved.length} of ${samples.length} \`ids\` sample${samples.length === 1 ? "" : "s"} answered non-2xx, so every rule that reads ${unresolved.length === 1 ? "it" : "them"} saw less of the api: ${unresolved
+              .map((sample) => `${sample.type}:${sample.id} (GET ${sample.url}: ${answer(sample)})`)
+              .join(", ")}`,
+            width - 2,
+          ),
+          (line) => `  ${line}`,
+        ),
+        "",
+      ],
+    },
+  );
+};
+
 /**
  * Renders the whole report. Within each tier the rules that died come first —
  * the run could not decide them, so the report is incomplete there — then
@@ -218,6 +254,7 @@ export const format = (
     readonly outcomes: ReadonlyArray<Outcome>;
     readonly gaps: ReadonlyArray<Gap>;
     readonly writes?: ReadonlyArray<WriteRecord> | undefined;
+    readonly samples?: ReadonlyArray<SampleRecord> | undefined;
   },
   options?: { readonly width?: number | undefined },
 ): string => {
@@ -246,6 +283,7 @@ export const format = (
     }
   }
 
+  out.push(...renderSamples(report.samples, width));
   out.push(...renderWrites(report.writes ?? []));
 
   out.push("NOT COVERED BY THIS KIT");
