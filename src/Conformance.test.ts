@@ -10103,6 +10103,12 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     readonly noContent?: boolean;
     /** Overwrite a resource on a create under an id it already holds, rather than 409. */
     readonly overwrites?: boolean;
+    /**
+     * What the 403 refusing a client id names as `source.pointer`: the
+     * resource object's id (the default), the resource object itself, or
+     * nothing.
+     */
+    readonly pointer?: "id" | "resource" | "none";
     /** Relationship writes of these methods answer 204 and change nothing (but still 404 an absent resource). */
     readonly ignores?: ReadonlyArray<string>;
     /** Relationship writes of these methods answer 403. */
@@ -10144,6 +10150,16 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     status: code,
     body: { errors: [{ status: `${code}` }] },
   });
+  /** The 403 refusing a client id, naming the pointer `named` picks, or none. */
+  const forbidden = (named: NonNullable<Breakage["pointer"]>): Canned =>
+    named === "none"
+      ? refused(403)
+      : {
+          status: 403,
+          body: {
+            errors: [{ status: "403", source: { pointer: named === "id" ? "/data/id" : "/data" } }],
+          },
+        };
 
   const sameIdentifier = (item: Identifier) => (other: Identifier) =>
     other.type === item.type && other.id === item.id;
@@ -10184,7 +10200,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       Option.match(decodeBody(request.body), {
         onNone: () => refused(400),
         onSome: ({ data }) => {
-          if (refusesId(data.id)) return refused(403);
+          if (refusesId(data.id)) return forbidden(breakage.pointer ?? "id");
           const id = honours(data.id) ? data.id : `${next++}`;
           if (posts.has(id) && breakage.overwrites !== true) return refused(409);
           const post: Stored = { title: data.attributes?.title ?? "", author: null, tags: [] };
@@ -10417,6 +10433,25 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     ]);
     expect(posts.size).toBe(0);
     expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
+  });
+
+  it.each([
+    [
+      "names the resource object, not its id",
+      "resource",
+      'names `source.pointer` "/data", not the resource\'s id',
+    ],
+    ["names no pointer", "none", "names no `source.pointer`"],
+  ] as const)("detects a 403 to a create under a client id that %s", async (_, pointer, detail) => {
+    const unsupported = { supported: false, id: () => `client-${++sequence}` };
+    const { report } = await run({ clientIds: "unsupported", pointer }, unsupported);
+    expect(failed(report)).toEqual(["spec/status/create-client-id-unsupported"]);
+    expect(findingsOf(report, "spec/status/create-client-id-unsupported")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringContaining(detail),
+        expected: "403 Forbidden with an error object whose `source.pointer` is /data/id",
+      }),
+    ]);
   });
 
   it("never makes up a client id: without `clientId` every client id rule skips naming it", async () => {
