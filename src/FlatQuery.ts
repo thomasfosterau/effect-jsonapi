@@ -42,7 +42,7 @@ export const PageOffset: Schema.Number = Schema.Number.check(
 /**
  * The decoded type of a {@link PageOffset}: a non-negative integer.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type PageOffset = typeof PageOffset.Type;
@@ -307,7 +307,7 @@ export const Uuid: Schema.String = Schema.String.check(Schema.isUUID());
 /**
  * The decoded type of a {@link Uuid}: a UUID string.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type Uuid = typeof Uuid.Type;

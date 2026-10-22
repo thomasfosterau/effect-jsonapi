@@ -38,7 +38,7 @@ export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown);
 /**
  * The decoded type of an {@link AnyMeta} free-form metadata object.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type AnyMeta = typeof AnyMeta.Type;
@@ -68,7 +68,7 @@ export const Url = Schema.Union([Schema.URLFromString, Schema.String]);
 /**
  * The decoded type of a {@link Url}: an absolute `URL`, or a relative URI-reference `string`.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type Url = typeof Url.Type;
@@ -92,7 +92,7 @@ export const LinkObject = Schema.Struct({
 /**
  * The decoded type of a {@link LinkObject}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type LinkObject = typeof LinkObject.Type;
@@ -160,7 +160,7 @@ export const ResourceLinks = Schema.Struct({
 /**
  * The decoded type of a resource object's {@link ResourceLinks}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type ResourceLinks = typeof ResourceLinks.Type;
@@ -179,7 +179,7 @@ export const RelationshipLinks = Schema.Struct({
 /**
  * The decoded type of a relationship object's {@link RelationshipLinks}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type RelationshipLinks = typeof RelationshipLinks.Type;
@@ -197,7 +197,7 @@ export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
 /**
  * The decoded type of {@link RelationshipLinksOpen}: relationship links plus profile-defined members.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type RelationshipLinksOpen = typeof RelationshipLinksOpen.Type;
@@ -222,7 +222,7 @@ export const PaginatedRelationshipLinks = Schema.Struct({
 /**
  * The decoded type of a paginated relationship's {@link PaginatedRelationshipLinks}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type PaginatedRelationshipLinks = typeof PaginatedRelationshipLinks.Type;
@@ -247,7 +247,7 @@ export const TopLevelLinks = Schema.Struct({
 /**
  * The decoded type of a document's {@link TopLevelLinks}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type TopLevelLinks = typeof TopLevelLinks.Type;
@@ -272,7 +272,7 @@ export const JsonApiObject = Schema.Struct({
 /**
  * The decoded type of the top-level {@link JsonApiObject}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type JsonApiObject = typeof JsonApiObject.Type;
@@ -305,7 +305,7 @@ export const ErrorSource = Schema.Union([
 /**
  * The decoded type of an error's {@link ErrorSource}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type ErrorSource = typeof ErrorSource.Type;
@@ -490,7 +490,7 @@ export const ErrorObject = Schema.Struct({
 /**
  * The decoded type of a JSON:API {@link ErrorObject}.
  *
- * @since 0.17.0
+ * @since 0.18.0
  * @category models
  */
 export type ErrorObject = typeof ErrorObject.Type;
