@@ -22,8 +22,8 @@
  */
 import { Effect, Layer, Match } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
-import { Atomic, Document, Handlers, Lid, Middleware } from "@thomasfosterau/effect-jsonapi";
-import { Api } from "./api.js";
+import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
+import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
 import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js";
 import { Article, Comment, Person, Tag } from "./resources.js";
 
@@ -203,7 +203,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
               ? undefined
               : page.flatMap((article) => resolveIncluded(article, query.include)),
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/articles", { offset, limit }, total, {
+            query: Query.canonicalPairs(ArticlesQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -298,7 +300,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
                     })
                   : [],
             meta: { total },
-            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
+            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total, {
+              query: Query.canonicalPairs(ArticleCommentsQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           });
         }),
@@ -404,7 +408,9 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
                 result.type === "articles" ? resolveIncluded(result, query.include) : [],
               ),
         meta: { total },
-        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
+        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total, {
+          query: Query.canonicalPairs(SearchQuery)(query),
+        }),
         onResource: Handlers.project(query.fields),
         jsonapi: Document.v1_1,
       }),

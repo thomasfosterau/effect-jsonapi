@@ -4,10 +4,10 @@
  * in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Result, Schema } from "effect";
+import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
-import { Api } from "../api.js";
+import { Api, SearchQuery } from "../api.js";
 import { ArticleNotFound, TitleTaken } from "../errors.js";
 import {
   ArticlesLive,
@@ -188,7 +188,7 @@ describe("blog example: listing", () => {
 
     expect(document.data.length).toBeGreaterThan(0);
     expect(document.meta?.total).toBeGreaterThan(0);
-    expect(document.links?.first).toBe("/articles?page[offset]=0&page[limit]=10");
+    expect(document.links?.first).toBe("/articles?sort=-createdAt&page[offset]=0&page[limit]=10");
   });
 
   it("filters by author", async () => {
@@ -504,6 +504,37 @@ describe("blog example: heterogeneous search", () => {
     expect(document.meta?.total).toBe(1);
   });
 
+  it("keeps the request's `include`, `fields` and `filter` on `next` (#447)", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.search.search({
+          query: {
+            include: ["author"],
+            fields: { articles: ["title"] },
+            filter: { q: "e" },
+            page: { offset: 0, limit: 1 },
+          },
+        });
+      }),
+    );
+
+    const next = document.links?.next;
+    assert(Predicate.isString(next));
+    expect(next).toBe(
+      "/search?include=author&fields[articles]=title&filter[q]=e&page[offset]=1&page[limit]=1",
+    );
+    // `next` is the same query on the next page, decoded through the schema
+    // the endpoint decodes.
+    const search = Rec.fromEntries(new URL(next, "https://example.test").searchParams);
+    expect(Schema.decodeUnknownSync(SearchQuery)(search)).toEqual({
+      include: ["author"],
+      fields: { articles: ["title"] },
+      filter: { q: "e" },
+      page: { offset: 1, limit: 1 },
+    });
+  });
+
   it("paginates heterogeneous results with links", async () => {
     const document = await run(
       Effect.gen(function* () {
@@ -516,7 +547,7 @@ describe("blog example: heterogeneous search", () => {
 
     expect(document.data).toHaveLength(1);
     expect(document.meta?.total).toBeGreaterThan(1);
-    expect(document.links?.next).toBe("/search?page[offset]=1&page[limit]=1");
+    expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=1&page[limit]=1");
   });
 
   it("supports include across the searched resources' graphs", async () => {

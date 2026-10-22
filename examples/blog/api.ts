@@ -31,6 +31,43 @@ export type PageMeta = typeof PageMeta.Type;
  */
 export const Pagination = Query.Page.offset({ maxLimit: 100 });
 
+// ---------------------------------------------------------------------------
+// Paginated query schemas
+// ---------------------------------------------------------------------------
+//
+// Each paginated endpoint's query schema is built once, here, and shared with
+// its handler, which spells the pagination links from it:
+// `Handlers.offsetPaginationLinks(path, page, total, { query:
+// Query.canonicalPairs(ArticlesQuery)(query) })`. A link's query and the query
+// the endpoint decodes then come from one schema, so `next` is the same
+// `sort` / `filter` / `include` / `fields` on the next page. A list endpoint
+// takes the schema as its `query`; the related and search endpoints take no
+// `query` override, so they are handed the same options object the schema is
+// built from and derive the identical schema.
+
+const articlesQueryOptions = {
+  include: true,
+  sort: ["createdAt", "title"],
+  page: Pagination,
+  filter: { author: Schema.optionalKey(Schema.String) },
+} as const;
+/** The query `GET /articles` decodes. */
+export const ArticlesQuery = Query.schema(Article, articlesQueryOptions);
+
+const articleCommentsQueryOptions = { include: true, page: Pagination } as const;
+/** The query `GET /articles/:id/comments` decodes. */
+export const ArticleCommentsQuery = Query.schema(Comment, articleCommentsQueryOptions);
+
+const searchResources = [Article, Person] as const;
+const searchQueryOptions = {
+  filter: { q: Schema.String },
+  include: true,
+  fields: true,
+  page: Pagination,
+} as const;
+/** The query `GET /search` decodes. */
+export const SearchQuery = Query.schema(searchResources, searchQueryOptions);
+
 export const articles = Group.make(
   Article,
   // GET /articles/:id?include=author,tags&fields[articles]=title
@@ -41,10 +78,8 @@ export const articles = Group.make(
   }),
   // GET /articles?sort=-createdAt&page[offset]=0&page[limit]=10&filter[author]=9
   Endpoint.list(Article, {
-    include: true,
-    sort: ["createdAt", "title"],
-    page: Pagination,
-    filter: { author: Schema.optionalKey(Schema.String) },
+    ...articlesQueryOptions,
+    query: ArticlesQuery,
     meta: PageMeta,
   }),
   // POST /articles (payload may carry a client-generated lid; author is required)
@@ -68,8 +103,7 @@ export const articles = Group.make(
   // the paginated comment collection that `relationships.comments.links.related`
   // points at
   Endpoint.related(Article, "comments", {
-    include: true,
-    page: Pagination,
+    ...articleCommentsQueryOptions,
     meta: PageMeta,
     errors: [ArticleNotFound],
   }),
@@ -100,13 +134,10 @@ export const articles = Group.make(
 export const search = Group.make(
   "search",
   // GET /search?filter[q]=bikeshed&include=author&page[offset]=0&page[limit]=10
-  Endpoint.collection([Article, Person], {
+  Endpoint.collection(searchResources, {
+    ...searchQueryOptions,
     name: "search",
     path: "/search",
-    filter: { q: Schema.String },
-    include: true,
-    fields: true,
-    page: Pagination,
     meta: PageMeta,
   }),
 );
