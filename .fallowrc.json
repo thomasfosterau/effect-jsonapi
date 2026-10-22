@@ -13,7 +13,6 @@
   "ignorePatterns": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "docs/**"],
   "ignoreDependencies": [
     "@types/node",
-    "effect-solutions",
     "@effect/docgen",
     "@effect/tsgo",
     "@effect/language-service",
@@ -24,7 +23,8 @@
     "vitest",
     "vite-plus",
     "@changesets/cli",
-    "fallow"
+    "fallow",
+    "@vitest/coverage-istanbul"
   ],
   "ignoreExports": [
     {
@@ -60,6 +60,9 @@
       "exports": ["parseMediaType"]
     }
   ],
+  "health": {
+    "coverage": "coverage/coverage-final.json"
+  },
   "rules": {
     "unused-files": "error",
     "unused-exports": "warn",

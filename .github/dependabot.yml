@@ -1,15 +1,30 @@
-# Dependabot version-update configuration (the library standard's, via
-# effect-drizzle-ext, whose catalog this workspace mirrors).
+# Dependabot version updates. The `npm` entry at `/` reads the pnpm workspace
+# (the library and every `examples/*` app) and its catalogs.
 #
-# `groups` collect dependencies that MUST move together: the Effect 4 release
-# line is a lockstep-versioned singleton set; the vitest toolchain is pinned to
-# vite-plus's exact versions; the TypeScript 6/7 pair and @effect/tsgo pin to
-# each other by gitHead (see pnpm-workspace.yaml) and can only be bumped as a
-# set, so their *version* updates are ignored while SECURITY updates stay
-# enabled (the ignore is scoped to the `version-update:semver-*` update types;
-# a bare `dependency-name` ignore would block security updates too).
+# `groups` collect the dependencies that MUST move together, so no lockstep
+# set can drift one package at a time. Dependabot puts a dependency in the
+# FIRST group that matches it, so the groups run specific → general and use
+# `exclude-patterns` where a broader pattern would steal a member:
 #
-# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge`.
+# - `toolchain` — `vite-plus` pins the `oxlint`, `oxfmt` and `vitest` it carries
+#   (and `vite` is its aliased core); `@effect/tsgo` patches the native `tsc`
+#   (`@typescript/native`, by gitHead) and that `oxlint`, and hard-errors in
+#   `pnpm install` on an unsupported pairing; `typescript` is the TS6 half of
+#   the 6/7 split; `@vitest/coverage-istanbul` must equal vite-plus's vitest;
+#   the Effect lint plugin is wired into the same `vp lint`. Read the comment
+#   on `@effect/tsgo` in pnpm-workspace.yaml before merging one of these PRs.
+# - `effect` — the Effect release line is a lockstep-versioned singleton set.
+# - `docgen` — `@effect/docgen` executes the examples under `tsx`, a peer.
+# - `changesets`, `fallow` — each moves as one unit.
+# - `minor-and-patch` — every other minor/patch update in one PR; majors
+#   outside the sets above stay individual.
+#
+# Not bumpable here: the transitive floors under `overrides` in
+# pnpm-workspace.yaml (`brace-expansion`, `js-yaml`, `launch-editor`,
+# `shell-quote`) — raise or drop them by hand (AGENTS.md → Common pitfalls).
+#
+# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
+# first-party packages exempt as `minimumReleaseAgeExclude` exempts them.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -22,64 +37,58 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore"
-      prefix-development: "chore"
     cooldown:
       default-days: 1
       exclude:
         - "@thomasfosterau/*"
     groups:
+      toolchain:
+        applies-to: version-updates
+        patterns:
+          - "vite-plus"
+          - "vite"
+          - "@voidzero-dev/*"
+          - "vitest"
+          - "@vitest/*"
+          - "oxlint"
+          - "oxfmt"
+          - "oxlint-tsgolint"
+          - "@effect/tsgo"
+          - "@typescript/native"
+          - "typescript"
+          - "@typescript/typescript6"
+          - "@mpsuesser/oxlint-plugin-effect"
+        update-types: ["major", "minor", "patch"]
       effect:
+        applies-to: version-updates
         patterns:
           - "effect"
+          - "@effect/*"
+        exclude-patterns:
+          - "@effect/tsgo"
           - "@effect/docgen"
-          - "@effect/language-service"
-      vitest-toolchain:
+        update-types: ["major", "minor", "patch"]
+      docgen:
+        applies-to: version-updates
         patterns:
-          - "vitest"
-          - "vite-plus"
-    ignore:
-      - dependency-name: "@effect/tsgo"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "typescript"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "@typescript/native"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vite"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vitest"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
-      - dependency-name: "vite-plus"
-        update-types:
-          [
-            "version-update:semver-major",
-            "version-update:semver-minor",
-            "version-update:semver-patch",
-          ]
+          - "@effect/docgen"
+          - "tsx"
+        update-types: ["major", "minor", "patch"]
+      changesets:
+        applies-to: version-updates
+        patterns:
+          - "@changesets/*"
+        update-types: ["major", "minor", "patch"]
+      fallow:
+        applies-to: version-updates
+        patterns:
+          - "fallow"
+        update-types: ["major", "minor", "patch"]
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -89,5 +98,10 @@ updates:
     labels:
       - "dependencies"
     commit-message:
-      prefix: "ci"
-      include: "scope"
+      prefix: "chore"
+    cooldown:
+      default-days: 1
+    groups:
+      github-actions:
+        patterns:
+          - "*"

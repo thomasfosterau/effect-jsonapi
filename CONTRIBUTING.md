@@ -38,6 +38,7 @@ Every command on its own; the ordered pre-push run is [AGENTS.md → Verificatio
 | `vp run build` | `vp pack` (tsdown): one ESM entry per `package.json` export (the root, `./schema` and every module subpath) with shared code split into chunks, then `tsc -p tsconfig.build.json`: one declaration file per source module, into `dist/`. |
 | `vp run docgen` | Type-check & run every JSDoc `@example`; generate API docs under `docs/`. |
 | `pnpm changeset` | Add a changeset (see below). |
+| `vp run test:coverage` | The root suite under one Istanbul map (`coverage/coverage-final.json`) that `fallow audit` reads for per-function CRAP scores. Run it before the audit. |
 | `vp run fallow:audit` | Change-set review (dead code, complexity, duplication). The agent hooks run it before every commit; it is not a CI gate. |
 
 `vp` resolves from `node_modules/.bin` after install; `vp exec <bin>` runs any other local bin (use it instead of `npx`).

@@ -65,12 +65,15 @@ catalog:
   "@effect/tsgo": 0.55.0
   "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@types/node": ^26.4.1
+  # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
+  # bundles (see `vitest` below); vite-plus refuses to run coverage on a
+  # mismatch, so it moves with the vite-plus set.
+  "@vitest/coverage-istanbul": 5.0.5
   # Deliberately tracks the `latest` dist-tag, ahead of the applications'
   # lockstep, so the gates run against the newest `effect` release. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
   # verified separately.
   effect: 4.0.5
-  effect-solutions: ^0.5.3
   fallow: 3.34.1
   # The runtime `@effect/docgen` executes examples under (a peer of docgen 4.x,
   # `>=4.19.3 <5.0.0`).
@@ -125,9 +128,9 @@ overrides:
   # Advisory floors for transitive dependencies of the dev toolchain, which
   # `pnpm audit --audit-level high` (CI's last step) gates. None is reached
   # by the published package: `js-yaml` 3.x via
-  # @effect/docgen > @effect/markdown-toc > gray-matter 3 (`^3.10.0`) and
-  # effect-solutions > gray-matter 4 (`^3.13.1`) (GHSA-52cp-r559-cp3m,
-  # GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh — patched in 3.15.2);
+  # @effect/docgen > @effect/markdown-toc > gray-matter 3 (`^3.10.0`)
+  # (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh — patched
+  # in 3.15.2);
   # `shell-quote` via @changesets/cli > launch-editor (GHSA-pqg4-j6r4-53mv —
   # patched in 1.11.0; the locked launch-editor 2.14.2 declares `^1.10.0`,
   # which still admits the vulnerable 1.10.x); `launch-editor` itself via
