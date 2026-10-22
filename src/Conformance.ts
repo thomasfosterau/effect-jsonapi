@@ -111,6 +111,7 @@ import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Core from "./internal/conformance/core.js";
 import * as ProfileRules from "./internal/conformance/profile.js";
 import * as ReportFormat from "./internal/conformance/report.js";
+import * as Samples from "./internal/conformance/samples.js";
 import * as SortRules from "./internal/conformance/sort.js";
 import * as SpecRules from "./internal/conformance/spec.js";
 import * as WriteFixtures from "./internal/conformance/write.js";
@@ -439,6 +440,45 @@ export interface WriteFixture extends Core.Fixture {}
 export interface Write extends Core.WriteRecord {}
 
 /**
+ * One `ids` sample's read, as {@link Report.samples} carries it: the type and
+ * id, the URL the sample resolved the type's `GET /:type/:id` endpoint to, and
+ * the status that URL answered — `0` when no answer was obtained (the
+ * transport failed, or a redirect was left unfollowed).
+ *
+ * Every sample the run read is recorded, whether or not it resolved. The
+ * status is the one the run's first plain read of the URL answered (a `GET`
+ * with the JSON:API `Accept` and no query). A sample no selected rule read is
+ * left out rather than read for the purpose, so a run narrowed by `only`,
+ * `skip` or `tiers` sends only its rules' requests. A sample that did not
+ * resolve is not a {@link Gap} and fails no rule — {@link format} names it,
+ * and a fixture test can assert on it.
+ *
+ * @example
+ * ```ts
+ * import { Conformance } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const unresolved = (report: Conformance.Report): ReadonlyArray<Conformance.Sample> =>
+ *   (report.samples ?? []).filter((sample) => sample.status < 200 || sample.status >= 300)
+ *
+ * unresolved({
+ *   target: "blog",
+ *   version: "1.1",
+ *   transport: "in-process",
+ *   outcomes: [],
+ *   gaps: [],
+ *   samples: [
+ *     { type: "articles", id: "1", url: "/articles/1", status: 200 },
+ *     { type: "people", id: "404", url: "/people/404", status: 404 }
+ *   ]
+ * }).length // 1
+ * ```
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export interface Sample extends Samples.SampleRecord {}
+
+/**
  * The result of a run: every rule's outcome, the declared coverage gaps, and
  * what was driven.
  *
@@ -476,6 +516,15 @@ export interface Report {
    * @since 0.17.0
    */
   readonly writes?: ReadonlyArray<Write> | undefined;
+  /**
+   * Every `/:type/:id` read the `ids` samples resolve that the run made, in
+   * discovery order, with the status it answered. A non-`2xx` one is a sample the server does
+   * not hold: it fails no rule, but every rule that reads it saw less of the
+   * api than the run suggests. Absent from a report built by hand.
+   *
+   * @since 0.17.0
+   */
+  readonly samples?: ReadonlyArray<Sample> | undefined;
 }
 
 /**
@@ -856,13 +905,18 @@ const execute = (
     );
     const observed = MutableHashSet.empty<string>();
     const writes: Core.Context["writes"] = [];
+    const endpoints = Core.discover(api);
+    const ledger = Samples.ledger(endpoints, resolved);
     const ctx: Core.Context = {
-      endpoints: Core.discover(api),
+      endpoints,
       options: resolved,
-      request: Core.observing(
-        Core.runner(client, resolved.baseUrl, resolved.requestTimeout),
-        observed,
-        writes,
+      request: Samples.recording(
+        Core.observing(
+          Core.runner(client, resolved.baseUrl, resolved.requestTimeout),
+          observed,
+          writes,
+        ),
+        ledger,
       ),
       writes,
       observed,
@@ -896,6 +950,7 @@ const execute = (
       outcomes,
       gaps,
       writes: WriteFixtures.snapshot(ctx),
+      samples: Samples.snapshot(ledger),
     };
   });
 
@@ -1093,9 +1148,10 @@ export const verifyWith = <ApiId extends string, Groups extends HttpApiGroup.Con
  * Renders a report as text: each tier's rules that died first (marked `DIED`,
  * with the defect's message), then its failures with the rule, its citation and
  * the request that decided it, then the rules that passed, then the rules that
- * did not run and why, then the declared coverage gaps and a summary line. The
- * count of rules that died appears in the tier and summary lines only when one
- * did.
+ * did not run and why, then the `ids` samples that answered non-`2xx` (only when
+ * one did, from {@link Report.samples}), then the declared coverage gaps and a
+ * summary line. The count of rules that died appears in the tier and summary
+ * lines only when one did.
  *
  * The three "not checked" kinds stay distinct on purpose. A rule can be absent
  * because this api has no endpoint of that shape, because the caller withheld a

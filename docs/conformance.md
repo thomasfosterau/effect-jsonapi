@@ -67,6 +67,8 @@ SKIP  spec/document/top-level-members
 
 A rule that probed _some_ endpoints but not others passes with a note saying how many it never reached, so partial coverage never reads as full coverage.
 
+**A sample the server does not hold fails no rule**, but every rule that reads it sees less of the api than the run suggests ([#301](https://github.com/thomasfosterau/effect-jsonapi/issues/301)). So `Report.samples` records every `/:type/:id` read the `ids` resolve — `{ type, id, url, status }`, in discovery order — with the status the run's first plain read of that URL answered (a `GET` with the JSON:API `Accept`, no query; `0` for no answer). A sample no selected rule read is left out rather than read for the purpose, so a run narrowed by `only` / `skip` / `tiers` sends only its rules' requests; a full run reads every one. `format` names the non-2xx ones under `SAMPLES`, and prints nothing there when every sample resolved. An unresolved sample is not a gap, is not counted by `summarise` (which counts outcomes, as it does not count `writes`) and does not fail `assert`; a fixture test asserts on `report.samples` instead of matching a note's wording ([#319](https://github.com/thomasfosterau/effect-jsonapi/issues/319)).
+
 ### 1.4 The write fixture
 
 `ids` cannot drive a write: the kit cannot synthesise a payload a server will accept (attributes carry domain constraints, required to-one relationships point at resources that must already exist, and a payload rejected with a 422 proves nothing about the 201 rules), and it cannot undo what it created. So the write rules take a second, opt-in contract, keyed by resource type like `ids`:
