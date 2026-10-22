@@ -4513,8 +4513,8 @@ describe("Conformance: the write fixture", () => {
   );
 
   brokenWrite(
-    // What `Endpoint.create` answers today: it decodes `data.type` against a
-    // literal, so a foreign type is a 400 (#428).
+    // What `Endpoint.create` answered before #428: a foreign type failed its
+    // `data.type` literal, a 400.
     "a create of a type the endpoint does not serve answered 400, not 409",
     "spec/status/create-conflict-type",
     (canned, request) =>

@@ -16,18 +16,15 @@ import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to. One
- * entry, #428: `Endpoint.create` answers a resource object of another `type`
- * with 400 (it decodes `data.type` against a literal), where JSON:API requires
- * 409. The read rules have been clean since #169: the handlers of the reads
+ * Remove an entry when its issue is fixed; the test will tell you to. None: the
+ * write rules have been clean since #428, which answers a resource object of
+ * another `type` with 409, and the read rules since #169: the handlers of the reads
  * that declare `fields` (`GET /repositories/:id`, `GET /issues/:id` and
  * `/search`) project `?fields[TYPE]=` with `onResource:
  * Handlers.project(query.fields)` and stamp `jsonapi: Document.v1_1` on every
  * `Handlers.data` / `collection` / `linkage` document.
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
-  ["spec/status/create-conflict-type", "#428"],
-];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 
 const IDS = {
   users: "1",
