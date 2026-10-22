@@ -2,7 +2,8 @@
  * The compound-document reachability walk behind the spec's full-linkage
  * rule: an `included` member is linked when it can be reached from the
  * primary data by following resource linkage, through the primary data's
- * relationships and then through other `included` members'.
+ * relationships (or, in a relationship document, its identifiers) and then
+ * through other `included` members'.
  *
  * It works on string keys, not on resource values, so the document builders
  * (typed values) and a checker over arbitrary JSON can walk the same graph
@@ -18,6 +19,7 @@ import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
 
 /**
  * Every key reachable from `seeds`: the seeds themselves, then the keys
@@ -93,10 +95,44 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
   return out;
 };
 
+/** The members a resource identifier object may carry (§Resource Identifier Objects). */
+const identifierMembers = HashSet.make("type", "id", "lid", "meta");
+
+/**
+ * Whether a primary-data element is a resource identifier object rather than a
+ * resource object: it carries no member an identifier may not (`attributes`,
+ * `relationships`, `links`). A relationship document's primary data is made
+ * of these (#423).
+ */
+const isResourceIdentifier = (value: Parameters<typeof identity>[0]): boolean =>
+  Arr.every(Rec.keys(value), (name) => HashSet.has(identifierMembers, name));
+
+/**
+ * The keys the full-linkage walk starts from: the identifiers each primary
+ * element's relationships name, and — for a primary element that is itself a
+ * resource identifier, as in a relationship document
+ * (`GET /articles/1/relationships/comments?include=comments`) — that
+ * identifier, so the `included` resource it names is linked (#423).
+ */
+const primarySeeds = (
+  primaries: ReadonlyArray<Parameters<typeof identity>[0]>,
+): ReadonlyArray<string> =>
+  Arr.flatMap(primaries, (primary) => {
+    const own = isResourceIdentifier(primary) ? identity(primary) : undefined;
+    return own === undefined ? linkageOf(primary) : [own, ...linkageOf(primary)];
+  });
+
 /**
  * The `included` members of a JSON document that cannot be reached from its
  * primary data through resource linkage, in document order — the violations
  * `spec/document/full-linkage` reports.
+ *
+ * The walk starts from {@link primarySeeds}: the primary data's relationship
+ * linkage and, where the primary data is resource linkage (a relationship
+ * document), the identifiers themselves. A primary element with nothing but
+ * `type`, `id`/`lid` and `meta` reads as an identifier either way; were it a
+ * resource object, an `included` member sharing its identity would be a
+ * duplicate, which `spec/document/no-duplicate-resources` reports.
  *
  * The walk is the builders' ({@link reachable}, shared so the two cannot
  * drift apart); identity and linkage are over arbitrary JSON:
@@ -124,7 +160,7 @@ export const unlinkedIncluded = (document: Readonly<Record<string, unknown>>) =>
       ),
     ),
   );
-  const linked = reachable(Arr.flatMap(primaries, linkageOf), (key) =>
+  const linked = reachable(primarySeeds(primaries), (key) =>
     Option.match(HashMap.get(byIdentity, key), { onNone: () => [], onSome: linkageOf }),
   );
   return Arr.filter(members, (resource) =>

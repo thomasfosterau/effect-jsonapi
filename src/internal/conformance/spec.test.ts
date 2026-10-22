@@ -50,11 +50,43 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
     expect(orphans({ data, included: [ref("people", "9")] })).toEqual([]);
   });
 
-  it("does not count the primary data's own identity as linked", () => {
+  it("does not count a primary resource object's own identity as linked", () => {
     // An included copy of the primary resource is reachable only if something links to it.
-    expect(orphans({ data: ref("articles", "1"), included: [ref("articles", "1")] })).toEqual([
-      "articles:1",
-    ]);
+    const article = { ...ref("articles", "1"), attributes: { title: "Hi" } };
+    expect(orphans({ data: article, included: [ref("articles", "1")] })).toEqual(["articles:1"]);
+  });
+
+  describe("a relationship document's primary identifiers seed the walk (#423)", () => {
+    // `GET /articles/1/relationships/comments?include=comments,comments.author`
+    const comment = (id: string, author: string) => ({
+      ...ref("comments", id),
+      attributes: { body: "…" },
+      relationships: { author: one(ref("people", author)) },
+    });
+
+    it("links the members the identifiers name, and what those members link", () => {
+      const data = [ref("comments", "5"), { ...ref("comments", "6"), meta: { pinned: true } }];
+      const included = [
+        comment("5", "9"),
+        comment("6", "8"),
+        ref("people", "9"),
+        ref("people", "8"),
+      ];
+      expect(orphans({ data, included })).toEqual([]);
+    });
+
+    it("seeds from a to-one relationship document's single identifier", () => {
+      expect(orphans({ data: ref("people", "9"), included: [ref("people", "9")] })).toEqual([]);
+    });
+
+    it("still reports a member no identifier reaches", () => {
+      const included = [comment("5", "9"), ref("people", "9"), ref("people", "7")];
+      expect(orphans({ data: [ref("comments", "5")], included })).toEqual(["people:7"]);
+    });
+
+    it("seeds from `null` linkage nothing", () => {
+      expect(orphans({ data: null, included: [ref("people", "9")] })).toEqual(["people:9"]);
+    });
   });
 
   it("keys members by `lid` when they have no `id`, apart from an `id` of the same value", () => {

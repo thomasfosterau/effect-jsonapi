@@ -629,6 +629,10 @@ const mapResources = <F extends TransformLambda>(
  * of each `included` member it reaches. A member passes only when that walk
  * reaches it. Being referenced is not enough: a cycle of members the primary
  * data no longer reaches, or a member whose only reference is its own, fails.
+ * The kit's walk also starts from a relationship document's primary
+ * identifiers (#423); this one does not need to, since `primary` here is the
+ * resource objects of a data or collection document, against which `included`
+ * is deduplicated — no builder emits a relationship document with `included`.
  *
  * It checks the value it is given, which counts every relationship key a
  * resource carries. Encoding through an endpoint's schema drops a
