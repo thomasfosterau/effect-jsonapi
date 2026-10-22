@@ -630,6 +630,13 @@ const mapResources = <F extends TransformLambda>(
  * reaches it. Being referenced is not enough: a cycle of members the primary
  * data no longer reaches, or a member whose only reference is its own, fails.
  *
+ * It checks the value it is given, which counts every relationship key a
+ * resource carries. Encoding through an endpoint's schema drops a
+ * relationship the resource does not declare, so a member linked only through
+ * one passes here and is unreachable on the wire; `Middleware.SchemaErrorsLive`
+ * re-runs the walk on the encoded document and answers that with a 500
+ * (#250). This option's `checkLinkage: false` does not reach that check.
+ *
  * The transform is keyed off the resource as given, so it must not change a
  * resource's `type` or `id`.
  *

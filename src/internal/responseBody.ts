@@ -1,16 +1,20 @@
 /**
  * Reading back a response the router has already encoded.
  *
- * Two middlewares look at the bytes an endpoint produced rather than at the
- * value its handler returned: `Idempotency.layer` records them for replay, and
+ * Three middlewares look at the bytes an endpoint produced rather than at the
+ * value its handler returned: `Idempotency.layer` records them for replay,
  * `Middleware.CreatedLocationLive` derives a 201's `Location` from the
- * document's `self` link (#236). Both need the same answer to "what text is
- * this body", and both must treat a body they cannot read as "leave it alone".
+ * document's `self` link (#236), and `Middleware.SchemaErrorsLive` re-checks
+ * full linkage on the document as encoded (#250). All need the same answer to
+ * "what text is this body", and all must treat a body they cannot read as
+ * "leave it alone".
  */
+import * as Formatter from "effect/Formatter";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import { isRecord, unlinkedIncluded } from "./linkage.js";
 
 /**
  * The response text of a body whose bytes are already settled — everything the
@@ -90,4 +94,43 @@ export const withCreatedLocation = (
       onSome: (location) => HttpServerResponse.setHeader(response, "location", location),
     }),
   );
+};
+
+// One member of a label: a string as itself, anything else through
+// `Formatter.format`, since parsed JSON can put an object with its own
+// `toString` member there and `String` would throw on it.
+const part = (value: unknown): string =>
+  Predicate.isString(value) ? value : Formatter.format(value);
+
+// A member as `type:id` (or `type:lid`) for the violation message, as the
+// document builders name one.
+const label = (member: {
+  readonly type?: unknown;
+  readonly id?: unknown;
+  readonly lid?: unknown;
+}): string => `${part(member.type)}:${part(member.id ?? member.lid)}`;
+
+/**
+ * The `included` members of a 2xx response's encoded document that its primary
+ * data cannot reach through resource linkage (`Linkage.unlinkedIncluded`, the
+ * walk the conformance kit's `spec/document/full-linkage` rule makes), as
+ * `type:id` labels in document order. Empty for any other status, a body that
+ * cannot be read or is not a JSON object, and a document with no `included`.
+ *
+ * It reads what the wire carries: encoding through the endpoint's schema drops
+ * a relationship the resource does not declare, so a member linked only
+ * through one is reported here although the builders' check passed it.
+ */
+export const unlinkedOnWire = (
+  response: HttpServerResponse.HttpServerResponse,
+): ReadonlyArray<string> => {
+  if (response.status < 200 || response.status >= 300) return [];
+  const text = bodyText(response);
+  // Cheap pre-filter: a document with no `included` member can't violate it,
+  // so most responses are never parsed a second time.
+  if (text === undefined || !text.includes('"included"')) return [];
+  return Option.match(parseJson(text), {
+    onNone: () => [],
+    onSome: (document) => (isRecord(document) ? unlinkedIncluded(document).map(label) : []),
+  });
 };

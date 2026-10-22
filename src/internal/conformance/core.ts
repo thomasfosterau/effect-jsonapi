@@ -32,7 +32,13 @@ import {
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { declaredNames } from "../declaredQuery.js";
+import { idKey, identity, isRecord, linkageOf } from "../linkage.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
+
+// The kit's identity and linkage over arbitrary JSON live beside the shared
+// reachability walk, which the endpoint middleware runs over the encoded
+// document too (#250); the rules keep importing them from here.
+export { idKey, identity, isRecord };
 
 // ---------------------------------------------------------------------------
 // The rule model
@@ -1433,10 +1439,6 @@ export const describe = (observation: Observation): string => {
   return `${observation.status}${type}${excerpt}`;
 };
 
-/** @internal */
-export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> =>
-  typeof u === "object" && u !== null && !Array.isArray(u);
-
 /**
  * Every resource object a document carries, primary and included, paired with
  * the JSON pointer it sits at so a finding can name it.
@@ -1469,29 +1471,6 @@ export const resourcesOf = (
 };
 
 /**
- * The comparable string `identity` gives a resource with this `type` and `id`.
- *
- * @internal
- */
-export const idKey = (type: string, id: string): string => JSON.stringify(["id", type, id]);
-
-/**
- * A resource object's `(type, id)` identity as a comparable string, or
- * `undefined` when it carries no usable identity.
- *
- * @internal
- */
-export const identity = (resource: Readonly<Record<string, unknown>>): string | undefined => {
-  const type = resource["type"];
-  if (typeof type !== "string") return undefined;
-  const id = resource["id"];
-  if (typeof id === "string") return idKey(type, id);
-  const lid = resource["lid"];
-  if (typeof lid === "string") return JSON.stringify(["lid", type, lid]);
-  return undefined;
-};
-
-/**
  * A resource as `type:id` for a finding's `observed`, naming the member
  * `identity` keys it on: its `id` when that is a string, else its `lid` when
  * that is — so a duplicate keyed on `lid` is not named by an `id` the
@@ -1513,31 +1492,6 @@ export const resourceLabel = (resource: {
   return Arr.map([resource.type, member], (value) =>
     Predicate.isString(value) ? value : Formatter.format(value),
   ).join(":");
-};
-
-/**
- * The identities a resource object's `relationships` point at — the edges
- * full-linkage is computed over.
- *
- * @internal
- */
-export const linkageOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArray<string> => {
-  const relationships = resource["relationships"];
-  if (!isRecord(relationships)) return [];
-  const out: Array<string> = [];
-  const take = (value: unknown): void => {
-    if (!isRecord(value)) return;
-    const key = identity(value);
-    if (key !== undefined) out.push(key);
-  };
-  for (const name of Object.keys(relationships)) {
-    const relationship = relationships[name];
-    if (!isRecord(relationship)) continue;
-    const data = relationship["data"];
-    if (Array.isArray(data)) data.forEach(take);
-    else take(data);
-  }
-  return out;
 };
 
 /** Every identity a response's document shows: its resource objects' own, and those their relationships name. */
