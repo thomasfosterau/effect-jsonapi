@@ -10,6 +10,7 @@
  * "leave it alone".
  */
 import * as Formatter from "effect/Formatter";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -24,16 +25,12 @@ import { isRecord, unlinkedIncluded } from "./linkage.js";
  */
 export const bodyText = (response: HttpServerResponse.HttpServerResponse): string | undefined => {
   const body = response.body;
-  switch (body._tag) {
-    case "Empty":
-      return "";
-    case "Uint8Array":
-      return new TextDecoder().decode(body.body);
-    case "Raw":
-      return Predicate.isString(body.body) ? body.body : undefined;
-    default:
-      return undefined;
-  }
+  return Match.value(body).pipe(
+    Match.tag("Empty", () => ""),
+    Match.tag("Uint8Array", (body) => new TextDecoder().decode(body.body)),
+    Match.tag("Raw", (body) => (Predicate.isString(body.body) ? body.body : undefined)),
+    Match.orElse(() => undefined),
+  );
 };
 
 /** A link member, spelled as a URL string or as a link object. */

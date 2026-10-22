@@ -14,6 +14,7 @@ import {
   Effect,
   Formatter,
   HashSet,
+  Match,
   MutableHashSet,
   Option,
   Predicate,
@@ -367,29 +368,21 @@ const requiresIdempotencyKey = (ast: SchemaAST.AST): boolean => {
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
   const literals = segments.filter((segment) => !segment.startsWith(":"));
-  switch (`${method} ${shape}`) {
-    case "GET L":
-      return "collection";
-    case "GET LP":
-      return "resource";
-    case "POST L":
-      return "create";
-    case "PATCH LP":
-    case "PUT LP":
-      return "update";
-    case "DELETE LP":
-      return "delete";
-    case "GET LPL":
-      return "related";
-    case "GET LPLL":
-      return literals[1] === "relationships" ? "relationship" : "unknown";
-    case "PATCH LPLL":
-    case "POST LPLL":
-    case "DELETE LPLL":
-      return literals[1] === "relationships" ? "relationshipWrite" : "unknown";
-    default:
-      return "unknown";
-  }
+  return Match.value(`${method} ${shape}`).pipe(
+    Match.when("GET L", (): Role => "collection"),
+    Match.when("GET LP", (): Role => "resource"),
+    Match.when("POST L", (): Role => "create"),
+    Match.when(Match.is("PATCH LP", "PUT LP"), (): Role => "update"),
+    Match.when("DELETE LP", (): Role => "delete"),
+    Match.when("GET LPL", (): Role => "related"),
+    Match.when("GET LPLL", (): Role =>
+      literals[1] === "relationships" ? "relationship" : "unknown",
+    ),
+    Match.when(Match.is("PATCH LPLL", "POST LPLL", "DELETE LPLL"), (): Role =>
+      literals[1] === "relationships" ? "relationshipWrite" : "unknown",
+    ),
+    Match.orElse((): Role => "unknown"),
+  );
 };
 
 /** The one cardinality every entry shows, or `"unshown"` when they differ or there are none. */

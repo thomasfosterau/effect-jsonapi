@@ -20,6 +20,7 @@
  */
 import type { Schema } from "effect";
 import type { SchemaIssue } from "effect";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import type { Family } from "./vocabulary.js";
 import { vocabularyOf } from "./vocabulary.js";
@@ -57,18 +58,18 @@ interface Found {
 // under them still inherits from an annotated ancestor.
 const astOf = (
   issue: SchemaIssue.Issue,
-): { readonly annotations?: Schema.Annotations.Annotations | undefined } | undefined => {
-  switch (issue._tag) {
-    case "InvalidType":
-    case "UnexpectedKey":
-    case "Composite":
-    case "AnyOf":
-    case "Encoding":
-      return issue.ast;
-    default:
-      return undefined;
-  }
-};
+): { readonly annotations?: Schema.Annotations.Annotations | undefined } | undefined =>
+  Match.value(issue).pipe(
+    Match.tag(
+      "InvalidType",
+      "UnexpectedKey",
+      "Composite",
+      "AnyOf",
+      "Encoding",
+      (issue) => issue.ast,
+    ),
+    Match.orElse(() => undefined),
+  );
 
 const collect = (
   issue: SchemaIssue.Issue,
@@ -77,21 +78,14 @@ const collect = (
 ): void => {
   const meta = errorMetaOf(astOf(issue)?.annotations);
   if (meta !== undefined) found.push({ path, meta });
-  switch (issue._tag) {
-    case "Pointer":
-      collect(issue.issue, [...path, ...issue.path], found);
-      return;
-    case "Filter":
-    case "Encoding":
-      collect(issue.issue, path, found);
-      return;
-    case "Composite":
-    case "AnyOf":
+  Match.value(issue).pipe(
+    Match.tag("Pointer", (issue) => collect(issue.issue, [...path, ...issue.path], found)),
+    Match.tag("Filter", "Encoding", (issue) => collect(issue.issue, path, found)),
+    Match.tag("Composite", "AnyOf", (issue) => {
       for (const child of issue.issues) collect(child, path, found);
-      return;
-    default:
-      return;
-  }
+    }),
+    Match.orElse(() => undefined),
+  );
 };
 
 const isPrefix = (prefix: ReadonlyArray<PropertyKey>, path: ReadonlyArray<PropertyKey>): boolean =>

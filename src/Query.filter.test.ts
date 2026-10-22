@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Effect, Layer, Schema, SchemaGetter, SchemaIssue } from "effect";
+import { Effect, Layer, Match, Schema, SchemaGetter, SchemaIssue } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -912,7 +912,9 @@ const filterGenerator = (seed: number) => {
   const int = (max: number): number => Math.floor(random() * max);
   const pick = <A>(items: ReadonlyArray<A>): A => items[int(items.length)]!;
 
-  const literal: { readonly [K in FilterableKeys<typeof Article>]: () => unknown } = {
+  const literal: {
+    readonly [K in FilterableKeys<typeof Article>]: () => string | number | boolean | Date;
+  } = {
     status: () => pick(["open", "done", "archived"]),
     age: () => int(2001) - 1000 + pick([0, 0.5, 0.25, 0.125]),
     priority: () => int(21) - 10,
@@ -935,21 +937,17 @@ const filterGenerator = (seed: number) => {
       literal[field](),
       ...Array.from({ length: int(4) }, literal[field]),
     ];
-    switch (op) {
-      case "in":
-        return { _tag: "In", field, values: values() };
-      case "nin":
-        return { _tag: "NotIn", field, values: values() };
-      case "isnull":
-        return { _tag: "IsNull", field, negated: random() < 0.5 };
-      default:
-        return {
-          _tag: "Compare",
-          op: op as Filter.CompareOperator,
-          field,
-          value: literal[field](),
-        };
-    }
+    return Match.value(op).pipe(
+      Match.when("in", (): Filter.Node => ({ _tag: "In", field, values: values() })),
+      Match.when("nin", (): Filter.Node => ({ _tag: "NotIn", field, values: values() })),
+      Match.when("isnull", (): Filter.Node => ({ _tag: "IsNull", field, negated: random() < 0.5 })),
+      Match.orElse((op): Filter.Node => ({
+        _tag: "Compare",
+        op: op as Filter.CompareOperator,
+        field,
+        value: literal[field](),
+      })),
+    );
   };
 
   const node = (depth: number): Filter.Node => {

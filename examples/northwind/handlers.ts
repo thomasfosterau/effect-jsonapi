@@ -21,7 +21,7 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import { Effect, Layer } from "effect";
+import { Effect, Iterable, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Handlers, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "./api.js";
@@ -735,10 +735,8 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const name = payload.data.attributes.name;
-        for (const existing of store.products.values()) {
-          if (existing.attributes.name === name)
-            return yield* Effect.fail(new ProductNameTaken({ name }));
-        }
+        if (Iterable.some(store.products.values(), (existing) => existing.attributes.name === name))
+          return yield* Effect.fail(new ProductNameTaken({ name }));
         // `category` and `supplier` are required (`one`) relationships — the
         // payload always carries them, and both targets must exist.
         yield* loadCategory(payload.data.relationships.category.data.id);
@@ -889,7 +887,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       loadEmployee(params.id).pipe(
         Effect.flatMap((employee) =>
           // every territory in the replacement set must exist
-          Effect.forEach(payload.data, (ref) => loadTerritory(ref.id)).pipe(
+          Effect.forEach(payload.data, (ref) => loadTerritory(ref.id), { concurrency: 1 }).pipe(
             Effect.map(() => {
               const updated = Employee.make({
                 ...employee,
@@ -909,7 +907,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
     .handle("addTerritoriesRelationship", ({ params, payload }) =>
       loadEmployee(params.id).pipe(
         Effect.flatMap((employee) =>
-          Effect.forEach(payload.data, (ref) => loadTerritory(ref.id)).pipe(
+          Effect.forEach(payload.data, (ref) => loadTerritory(ref.id), { concurrency: 1 }).pipe(
             Effect.map(() => {
               const existing = employee.relationships?.territories.data ?? [];
               const known = new Set<string>(existing.map((ref) => ref.id));

@@ -647,20 +647,20 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
         ),
       };
       const lids = Lid.make();
-      const entries: Array<ResultEntry> = [];
 
-      const operations = payload["atomic:operations"];
-      for (let index = 0; index < operations.length; index++) {
-        const entry = yield* Effect.try({
-          try: () => applyOperation(draft, lids, operations[index]!),
-          catch: (error) =>
-            new OperationFailed({
-              operation: index,
-              reason: error instanceof Error ? error.message : String(error),
-            }),
-        });
-        entries.push(entry);
-      }
+      const entries: ReadonlyArray<ResultEntry> = yield* Effect.forEach(
+        payload["atomic:operations"],
+        (operation, index) =>
+          Effect.try({
+            try: () => applyOperation(draft, lids, operation),
+            catch: (error) =>
+              new OperationFailed({
+                operation: index,
+                reason: error instanceof Error ? error.message : String(error),
+              }),
+          }),
+        { concurrency: 1 },
+      );
 
       // every operation succeeded — commit the draft
       store.articles = draft.articles;

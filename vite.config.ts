@@ -104,7 +104,6 @@ export default defineConfig({
       // instance (src/ApiError.ts). Narrowing the parameter is a breaking
       // change to a published signature.
       "effect/no-object-parameters": "warn",
-      "effect/prefer-match-over-switch": "warn",
       // `@ts-expect-error` is the assertion mechanism of the type-level tests
       // (see the `*.types.ts` override below, where it is off); in the sources
       // it marks the `ErrorNoStream` guard effect's endpoint constructors
@@ -130,7 +129,6 @@ export default defineConfig({
       "effect/no-length-comparison": "warn",
       "effect/prefer-arr-sort": "warn",
       "effect/avoid-try-catch": "warn",
-      "effect/yield-in-for-loop": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/avoid-expect-in-if": "warn",
       "effect/effect-run-in-body": "warn",

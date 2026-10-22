@@ -372,14 +372,19 @@ const tallyFields = (
 ) =>
   Effect.gen(function* () {
     const tally: Tally = { decided: 0, sawNull: false, findings: [], refused: [], notDecided: [] };
-    for (const field of candidates) {
-      if (enough(tally)) break;
+    // `findFirst` walks `candidates` in order and stops at the first `true`:
+    // the early exit once the tally has enough or the budget is spent.
+    yield* Effect.findFirst(candidates, (field) => {
+      if (enough(tally)) return Effect.succeed(true);
       if (exhausted(budget)) {
         tally.notDecided.push(BUDGET_SPENT);
-        break;
+        return Effect.succeed(true);
       }
-      record(tally, field, yield* decide(ctx, budget, path, field));
-    }
+      return Effect.map(decide(ctx, budget, path, field), (outcome) => {
+        record(tally, field, outcome);
+        return false;
+      });
+    });
     return tally;
   });
 

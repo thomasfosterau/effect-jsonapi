@@ -16,6 +16,7 @@
 import {
   Array as Arr,
   JsonPointer,
+  Match,
   Option,
   Predicate,
   Record as Rec,
@@ -101,29 +102,24 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
     path: ReadonlyArray<PropertyKey>,
     filter: Option.Option<SchemaIssue.Filter>,
   ): void => {
-    switch (current._tag) {
-      case "Pointer":
-        walk(current.issue, [...path, ...current.path], filter);
-        return;
-      case "Composite":
+    Match.value(current).pipe(
+      Match.tag("Pointer", (current) => walk(current.issue, [...path, ...current.path], filter)),
+      Match.tag("Composite", (current) => {
         for (const child of current.issues) walk(child, path, filter);
-        return;
-      case "AnyOf":
+      }),
+      Match.tag("AnyOf", (current) => {
         if (current.issues.length === 0) {
           leaves.push({ path, issue: current, describedBy: current });
           return;
         }
         for (const child of current.issues) walk(child, path, filter);
-        return;
-      case "Filter":
-        walk(current.issue, path, Option.some(current));
-        return;
-      case "Encoding":
-        walk(current.issue, path, filter);
-        return;
-      default:
+      }),
+      Match.tag("Filter", (current) => walk(current.issue, path, Option.some(current))),
+      Match.tag("Encoding", (current) => walk(current.issue, path, filter)),
+      Match.orElse((current) => {
         leaves.push({ path, issue: current, describedBy: describedBy(current, filter) });
-    }
+      }),
+    );
   };
   walk(issue, [], Option.none());
   return leaves;
