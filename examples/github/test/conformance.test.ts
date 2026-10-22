@@ -188,15 +188,19 @@ describe("github: JSON:API conformance", () => {
     // so the filter-profile rules run here rather than only against the kit's
     // canned servers. The evaluation rule decides the empty groups, the
     // ordering operators on `number` (never NULL) and `assignee`, a to-one
-    // relationship empty on two of the three issues — and says why the rest
-    // went undecided: no attribute is ever NULL, and the endpoint declares no
-    // `fields[issues]` (deliberately, #322) to send beside a filter.
+    // relationship empty on two of the three issues; the §6.5 corollaries on
+    // `assignee` and `include=…` beside a filter (#458) — and says why the
+    // rest went undecided: no attribute is ever NULL, and the endpoint
+    // declares no `fields[issues]` (deliberately, #322) to send beside a
+    // filter. Spelling equivalence runs on `title`, the first string
+    // attribute, `number` leading it (#458).
     const outcomeOf = (id: string) => report.outcomes.find((outcome) => outcome.rule.id === id);
     expect(outcomeOf("profile/filter/advertises-profile-uri")?._tag).toBe("Passed");
     expect(outcomeOf("profile/filter/rejections")?._tag).toBe("Passed");
+    expect(outcomeOf("profile/filter/spelling-equivalence")?._tag).toBe("Passed");
     expect(outcomeOf("profile/filter/evaluation")).toMatchObject({
       _tag: "Passed",
-      probes: 12,
+      probes: 20,
       note: expect.stringMatching(
         /^not decided: F-CMP-1, .* on \/issues: no attribute .*; F-EVAL-6 on \/issues: it declares no `fields\[issues\]`/,
       ),

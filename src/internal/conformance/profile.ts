@@ -125,10 +125,15 @@ const NO_GRAMMAR =
 
 /**
  * A field name the target is known to accept in a filter position, learned from
- * the attributes it actually returns. Guessing would make every rejection rule
- * pass for the wrong reason (an undeclared field is also a 400).
+ * the attributes it actually returns: the first attribute of the first resource
+ * whose value `accepts` admits (any, by default). Guessing would make every
+ * rejection rule pass for the wrong reason (an undeclared field is also a 400).
  */
-const learnField = (ctx: Context, path: string) =>
+const learnField = (
+  ctx: Context,
+  path: string,
+  accepts: (value: unknown) => boolean = () => true,
+) =>
   Effect.gen(function* () {
     const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
     const body = observation.body;
@@ -138,11 +143,12 @@ const learnField = (ctx: Context, path: string) =>
     if (first === undefined) return undefined;
     const attributes = first["attributes"];
     if (!isRecord(attributes)) return undefined;
-    const keys = Object.keys(attributes);
-    return Arr.match(keys, {
-      onEmpty: () => undefined,
-      onNonEmpty: ([field]) => ({ field, value: attributes[field] }),
-    });
+    return Option.getOrUndefined(
+      Option.map(
+        Arr.findFirst(Object.keys(attributes), (field) => accepts(attributes[field])),
+        (field) => ({ field, value: attributes[field] }),
+      ),
+    );
   });
 
 // ---------------------------------------------------------------------------
@@ -289,15 +295,19 @@ const spellingEquivalence: RuleImpl = {
     Effect.gen(function* () {
       const target = grammarEndpoints(ctx)[0];
       if (target === undefined) return skip(spellingEquivalence.rule, NO_GRAMMAR);
-      const learned = yield* learnField(ctx, target.path);
-      if (learned === undefined || typeof learned.value !== "string") {
+      // The first string attribute, not the first attribute: a resource that
+      // leads with a number (`number` on an issue) still has one to spell (#458).
+      const learned = yield* learnField(ctx, target.path, Predicate.isString);
+      if (learned === undefined || !Predicate.isString(learned.value)) {
         return skip(
           spellingEquivalence.rule,
           `${target.path} returned no resource with a string attribute to build equivalent filters from`,
         );
       }
       const field = learned.field;
-      const value = learned.value;
+      // §2.3: a comma or backslash in the literal is escaped, or the bare
+      // shorthand reads a list and the scalar positions a malformed literal.
+      const value = learned.value.replace(/[\\,]/g, (c) => `\\${c}`);
       const spellings: ReadonlyArray<readonly [string, ReadonlyArray<readonly [string, string]>]> =
         [
           ["bare shorthand", [[`filter[${field}]`, value]]],
@@ -337,7 +347,7 @@ const spellingEquivalence: RuleImpl = {
             if (observation.status !== 200) {
               findings.push(
                 finding(spellingEquivalence.rule, {
-                  detail: `the ${label} spelling of \`${field} eq ${JSON.stringify(value)}\` was not accepted`,
+                  detail: `the ${label} spelling of \`${field} eq ${JSON.stringify(learned.value)}\` was not accepted`,
                   expected: "200 OK — every spelling decodes to the same tree",
                   observed: describe(observation),
                   probe: observation.probe,
