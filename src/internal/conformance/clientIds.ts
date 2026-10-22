@@ -86,11 +86,14 @@ interface Channel {
   /** Where that document carries the resource, for a finding. */
   readonly carries: string;
   /**
-   * The JSON pointer of the probe's one operation, whose `data/id` a 403's
-   * error object must name; none through the create endpoint, whose 403 is
-   * judged on its status alone.
+   * The JSON pointer of the probe's one operation, within which a refusal
+   * over the `type` points; none through the create endpoint.
    */
   readonly operation: Option.Option<string>;
+  /** The JSON pointer of the id the probe sends, which a 403's error object must name. */
+  readonly idPointer: string;
+  /** What that pointer names, for a finding. */
+  readonly idNames: string;
 }
 
 const throughCreate: Channel = {
@@ -107,6 +110,8 @@ const throughCreate: Channel = {
     `201 Created with a document whose \`data\` is the "${type}" resource "${id}", or 204 No Content`,
   carries: "the resource as primary data",
   operation: Option.none(),
+  idPointer: "/data/id",
+  idNames: "the resource's id",
 };
 
 const decodeFirstResult = Schema.decodeUnknownOption(
@@ -153,6 +158,8 @@ const throughAtomic: Channel = {
     `200 OK with \`atomic:results\` whose first result's \`data\` is the "${type}" resource "${id}", or carries no \`data\`; or 204 No Content`,
   carries: "the resource as its first result's `data`",
   operation: Option.some(OPERATION),
+  idPointer: `${OPERATION}/data/id`,
+  idNames: "the operation's id",
 };
 
 const rule = (channel: Channel, id: string, anchor: string, requirement: string): Rule => ({
@@ -355,19 +362,19 @@ const errorPointers = (observation: Observation): ReadonlyArray<string> =>
   });
 
 /**
- * The 403 to an atomic `add`, judged on its error objects' `source.pointer`s:
- * one must name the operation's id, `<operation>/data/id` (owner decision on
- * #471). None at all, or only others — `/data/id`, say, as a create
- * endpoint's refusal names it, which points at nothing in an atomic document —
- * is a finding.
+ * The 403 refusing a client id, judged on its error objects'
+ * `source.pointer`s: one must name the id sent — `/data/id` through the create
+ * endpoint, `<operation>/data/id` through an atomic `add` (owner decisions on
+ * #471). None at all, or only others — the atomic operation itself, say, or
+ * `/data/id` in an atomic document, where it points at nothing — is a finding.
  */
 const judgePointers = (
+  channel: Channel,
   impl: Rule,
-  operation: string,
   observation: Observation,
   detail: string,
 ): Verdict => {
-  const wanted = `${operation}/data/id`;
+  const wanted = channel.idPointer;
   const pointers = errorPointers(observation);
   if (Arr.contains(pointers, wanted)) return decided(1, []);
   return decided(1, [
@@ -375,7 +382,7 @@ const judgePointers = (
       detail: `the 403 to ${detail} ${Arr.match(pointers, {
         onEmpty: () => "names no `source.pointer`",
         onNonEmpty: (named) =>
-          `names \`source.pointer\` ${named.map((pointer) => `"${pointer}"`).join(", ")}, not the operation's id`,
+          `names \`source.pointer\` ${named.map((pointer) => `"${pointer}"`).join(", ")}, not ${channel.idNames}`,
       })}`,
       expected: `403 Forbidden with an error object whose \`source.pointer\` is ${wanted}`,
       observed: describe(observation),
@@ -403,25 +410,21 @@ const judgeUnsupported = (
   made: string,
 ): Verdict => {
   const detail = `${channel.under(target, id)} — which writes["${target.key}"].clientId declares the server does not support —`;
-  return Option.match(channel.operation, {
-    onNone: () => judgeStatus(impl, target, observation, 403, detail, made),
-    onSome: (operation) => {
-      // The operations endpoint may not take every type with a fixture: a
-      // refusal of the `type` says nothing of the id.
-      if (
-        observation.status !== 403 &&
-        !succeeded(observation) &&
-        Arr.contains(errorPointers(observation), `${operation}/data/type`)
-      )
-        return undecided(
-          `${channel.under(target, id)} was refused over its \`type\` (${describe(observation)}), which says nothing of its id`,
-        );
-      const verdict = judgeStatus(impl, target, observation, 403, detail, made);
-      return observation.status === 403 && Predicate.isTagged(verdict, "Decided")
-        ? judgePointers(impl, operation, observation, channel.under(target, id))
-        : verdict;
-    },
-  });
+  // The operations endpoint may not take every type with a fixture: a
+  // refusal of the `type` says nothing of the id.
+  if (
+    Option.isSome(channel.operation) &&
+    observation.status !== 403 &&
+    !succeeded(observation) &&
+    Arr.contains(errorPointers(observation), `${channel.operation.value}/data/type`)
+  )
+    return undecided(
+      `${channel.under(target, id)} was refused over its \`type\` (${describe(observation)}), which says nothing of its id`,
+    );
+  const verdict = judgeStatus(impl, target, observation, 403, detail, made);
+  return observation.status === 403 && Predicate.isTagged(verdict, "Decided")
+    ? judgePointers(channel, impl, observation, channel.under(target, id))
+    : verdict;
 };
 
 const unsupportedRule = (channel: Channel, impl: Rule): RuleImpl => ({
@@ -482,7 +485,7 @@ const createClientIdUnsupported = unsupportedRule(
     throughCreate,
     "spec/status/create-client-id-unsupported",
     "crud-creating-client-ids",
-    "A server MUST return 403 Forbidden in response to an unsupported request to create a resource with a client-generated ID.",
+    "A server MUST return 403 Forbidden in response to an unsupported request to create a resource with a client-generated ID; its error object's `source.pointer` names the value in the request document that caused it, so the refusal names the resource object's id, `/data/id`.",
   ),
 );
 

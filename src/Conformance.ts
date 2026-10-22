@@ -439,7 +439,8 @@ export interface WriteFixture extends Core.Fixture {}
  *   document; `spec/status/create-conflict-id` creates under an `id` and then
  *   sends the same payload under the same id again, and wants a 409.
  * - **`supported: false`** — `spec/status/create-client-id-unsupported`
- *   creates under an `id` and wants a 403.
+ *   creates under an `id` and wants a 403 with an error object whose
+ *   `source.pointer` names the resource object's id, `/data/id`.
  *
  * Where the api declares an atomic operations endpoint, the same three rules
  * run again as an `add` operation carrying the `id`, one per request:
