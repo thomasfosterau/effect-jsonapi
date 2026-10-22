@@ -220,6 +220,13 @@ describe("github: JSON:API conformance", () => {
       "spec/relationships/update-replaces",
       "spec/relationships/add-appends",
       "spec/relationships/remove-deletes",
+      // #451: what each of those writes, and the `assignee` PATCH, answered.
+      // `update-to-one-null` is not decided: `assignee` has no relationship
+      // GET to read the cleared linkage back through.
+      "spec/relationships/write-response",
+      // #461: the `assignee` and `labels` writes answer 404 for a resource
+      // that does not exist.
+      "spec/relationships/absent-related-404",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

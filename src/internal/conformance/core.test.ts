@@ -723,12 +723,13 @@ describe("discover (a relationship endpoint's declared cardinality)", () => {
     ]);
   });
 
-  it("reads one or many, and the types linked to, off a relationship write's payload", () => {
+  it("reads one or many, whether `null` is admitted, and the types linked to, off a relationship write's payload", () => {
     const Tag = Resource.make("tags", { attributes: { name: Schema.String } });
     const Post = Resource.make("posts", {
       attributes: { title: Schema.String },
       relationships: {
         author: Relationship.optional(() => Person),
+        editor: Relationship.one(() => Person),
         tags: Relationship.many(() => Tag),
       },
     });
@@ -738,6 +739,7 @@ describe("discover (a relationship endpoint's declared cardinality)", () => {
           Group.make(
             Post,
             Endpoint.updateRelationship(Post, "author"),
+            Endpoint.updateRelationship(Post, "editor"),
             Endpoint.updateRelationship(Post, "tags"),
             Endpoint.addRelationship(Post, "tags"),
             Endpoint.removeRelationship(Post, "tags"),
@@ -753,11 +755,12 @@ describe("discover (a relationship endpoint's declared cardinality)", () => {
     );
     expect(
       declared.map(
-        ({ method, path, role, linkage, linkageTypes }) =>
-          `${method} ${path} ${role}: ${linkage} [${linkageTypes.join(", ")}]`,
+        ({ method, path, role, linkage, linkageNullable, linkageTypes }) =>
+          `${method} ${path} ${role}: ${linkage}${linkageNullable ? " or null" : ""} [${linkageTypes.join(", ")}]`,
       ),
     ).toEqual([
-      "PATCH /posts/:id/relationships/author relationshipWrite: one [people]",
+      "PATCH /posts/:id/relationships/author relationshipWrite: one or null [people]",
+      "PATCH /posts/:id/relationships/editor relationshipWrite: one [people]",
       "PATCH /posts/:id/relationships/tags relationshipWrite: many [tags]",
       "POST /posts/:id/relationships/tags relationshipWrite: many [tags]",
       "DELETE /posts/:id/relationships/tags relationshipWrite: many [tags]",

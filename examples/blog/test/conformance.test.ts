@@ -53,10 +53,11 @@ const WRITES: Conformance.Options["writes"] = {
 };
 
 /**
- * The `ids` samples: an article for the read rules, and a comment for the
- * relationship mutation rules to link a created article's `comments` to.
+ * The `ids` samples: an article for the read rules, and a comment and a person
+ * for the relationship mutation rules to link a created article's `comments`
+ * and `author` to.
  */
-const IDS = { articles: "1", comments: "5" };
+const IDS = { articles: "1", comments: "5", people: "9" };
 
 /**
  * The rules that died in a run, each as `id: message`. A rule that dies — a
@@ -183,6 +184,12 @@ describe("blog: JSON:API conformance", () => {
       // relationship GET to read back through, so `update-replaces` skips.
       "spec/relationships/add-appends",
       "spec/relationships/remove-deletes",
+      // #451: what each of those writes, and the `author` PATCH, answered —
+      // the PATCH's 200 linkage judged by what it replaced the linkage with.
+      "spec/relationships/write-response",
+      // #461: the `author` PATCH and `comments` POST answer 404 for a resource
+      // that does not exist.
+      "spec/relationships/absent-related-404",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),
