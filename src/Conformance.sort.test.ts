@@ -12,6 +12,7 @@ import { HttpApi } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
+import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
@@ -79,9 +80,68 @@ interface Sorter {
   readonly refuses?: ReadonlyArray<string>;
   /** When set, `sort` is ignored altogether. */
   readonly ignores?: true;
+  /** When set, every term after the first is ignored (S-MULTI-1). */
+  readonly firstTermOnly?: true;
+  /** When set, the `id` tiebreak follows the first term's direction instead of staying fixed (S-TIE-2). */
+  readonly tiebreakFollowsDirection?: true;
+  /** When set, a page is cut from the unsorted collection and then sorted (S-PAGE-1). */
+  readonly sortsEachPage?: true;
 }
 
 const profileSorter: Sorter = { compare: (left, right) => ascending(left, right) };
+
+interface SortTerm {
+  readonly field: string;
+  readonly sign: number;
+}
+
+/** The request's `sort` terms. */
+const termsOf = (params: URLSearchParams): ReadonlyArray<SortTerm> =>
+  (params.get("sort") ?? "")
+    .split(",")
+    .filter((term) => term !== "")
+    .map((term) =>
+      term.startsWith("-") ? { field: term.slice(1), sign: -1 } : { field: term, sign: 1 },
+    );
+
+/** `sorter`'s order for `terms`, lexicographically, remaining ties broken by `id`. */
+const orderBy =
+  (sorter: Sorter, terms: ReadonlyArray<SortTerm>) =>
+  (list: ReadonlyArray<Wire>): ReadonlyArray<Wire> => {
+    if (sorter.ignores === true) return list;
+    const applied = sorter.firstTermOnly === true ? terms.slice(0, 1) : terms;
+    const tiebreak = sorter.tiebreakFollowsDirection === true ? (terms[0]?.sign ?? 1) : 1;
+    return [...list].sort((a, b) => {
+      for (const { field, sign } of applied) {
+        const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
+        if (order !== 0) return order;
+      }
+      return tiebreak * ascending(a.id, b.id);
+    });
+  };
+
+/**
+ * One page of offset pagination over `tasks` in `order`, `next` carrying the
+ * request's other parameters; `sortsEachPage` cuts the page first and sorts
+ * it after.
+ */
+const paged = (
+  pathname: string,
+  params: URLSearchParams,
+  tasks: ReadonlyArray<Wire>,
+  order: (list: ReadonlyArray<Wire>) => ReadonlyArray<Wire>,
+  sortsEachPage: true | undefined,
+) => {
+  const offset = Number(params.get("page[offset]") ?? "0");
+  const end = offset + Number(params.get("page[limit]"));
+  const next = new URLSearchParams(params);
+  next.set("page[offset]", String(end));
+  return {
+    data:
+      sortsEachPage === true ? order(tasks.slice(offset, end)) : order(tasks).slice(offset, end),
+    links: end < tasks.length ? { next: `${pathname}?${next.toString()}` } : {},
+  };
+};
 
 /** A server ordering `tasks` by `sort` with `sorter`, lexicographically, ties broken by `id`. */
 const serve =
@@ -92,12 +152,7 @@ const serve =
       return { status: 404, body: { errors: [{ status: "404" }] } };
     }
     const params = new URLSearchParams(search);
-    const terms = (params.get("sort") ?? "")
-      .split(",")
-      .filter((term) => term !== "")
-      .map((term) =>
-        term.startsWith("-") ? { field: term.slice(1), sign: -1 } : { field: term, sign: 1 },
-      );
+    const terms = termsOf(params);
     const refused = terms.find(({ field }) => sorter.refuses?.includes(field));
     if (refused !== undefined) {
       return {
@@ -105,23 +160,17 @@ const serve =
         body: { errors: [{ status: "400", source: { parameter: "sort" } }] },
       };
     }
-    const ordered =
-      sorter.ignores === true
-        ? tasks
-        : [...tasks].sort((a, b) => {
-            for (const { field, sign } of terms) {
-              const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
-              if (order !== 0) return order;
-            }
-            return ascending(a.id, b.id);
-          });
-    return { status: 200, body: { data: ordered } };
+    const order = orderBy(sorter, terms);
+    return params.has("page[limit]")
+      ? { status: 200, body: paged(`${pathname}`, params, tasks, order, sorter.sortsEachPage) }
+      : { status: 200, body: { data: order(tasks) } };
   };
 
 /** The paths a run sent, in order. */
 const run = async (
   answer: (path: string) => { readonly status: number; readonly body: unknown },
   target: HttpApi.HttpApi<string, any> = api,
+  rule: string = RULE,
 ) => {
   const sent: Array<string> = [];
   const client = HttpClient.make((request, url) =>
@@ -140,11 +189,11 @@ const run = async (
       client,
       baseUrl: "http://fixture.test",
       ids: { projects: "1" },
-      only: [RULE],
+      only: [rule],
     }),
   );
-  const outcome = report.outcomes.find((candidate) => candidate.rule.id === RULE);
-  if (outcome === undefined) throw new Error(`no outcome for ${RULE}`);
+  const outcome = report.outcomes.find((candidate) => candidate.rule.id === rule);
+  if (outcome === undefined) throw new Error(`no outcome for ${rule}`);
   return { outcome, sent };
 };
 
@@ -353,6 +402,192 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     expect(outcome).toMatchObject({
       _tag: "Skipped",
       reason: "no list or related endpoint in this api declares `sort`",
+    });
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", () => {
+  const MULTI = "profile/sort/multi-field";
+
+  it("is a profile MUST citing §10.4", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === MULTI);
+    expect(rule).toMatchObject({ tier: "profile", level: "MUST" });
+    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#104-several-fields$/);
+  });
+
+  it("passes a server that orders each tie on the first field by the second, both ways", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), api, MULTI);
+    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+    // `due` ties its two NULLs, whose `title`s differ: the pair decided.
+    expect(sent).toEqual([
+      "/tasks",
+      "/tasks?sort=due,title",
+      "/tasks?sort=due,-title",
+      "/projects/1/tasks",
+      "/projects/1/tasks?sort=due,title",
+      "/projects/1/tasks?sort=due,-title",
+    ]);
+  });
+
+  it("fails a server that ignores every term after the first", async () => {
+    const { outcome } = await run(serve({ ...profileSorter, firstTermOnly: true }), api, MULTI);
+    const findings = findingsOf(outcome);
+    // The `id` fallback agrees with one direction of `title` and not the other.
+    expect(findings.map((found) => found.detail)).toEqual([
+      '`?sort=due,title` lists tasks:2 (NULL, "a") before tasks:4 (NULL, "B")',
+      '`?sort=due,title` lists tasks:2 (NULL, "a") before tasks:4 (NULL, "B")',
+    ]);
+    expect(findings[0]).toMatchObject({
+      expected:
+        "primary data ordered by `due` ascending, then `title` ascending, each later field ordering only the resources the fields before it tie on (S-MULTI-1)",
+    });
+    expect(decodeURIComponent(findings[0]?.probe?.url ?? "")).toBe("/tasks?sort=due,title");
+  });
+
+  it("skips a collection where no tie on one attribute shows two values of another", async () => {
+    const distinct = TASKS.map((task, index) => ({
+      ...task,
+      attributes: { title: `t${index}`, rank: index },
+    }));
+    const { outcome } = await run(serve(profileSorter, distinct), api, MULTI);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining(
+        "/tasks: no attribute ties across its 4 resource(s) where another shows two values",
+      ),
+    });
+  });
+
+  it("decides nothing when the server refuses both requests", async () => {
+    const { outcome } = await run(serve({ ...profileSorter, refuses: ["title"] }), api, MULTI);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("refused `?sort=due,title` with a 400"),
+    });
+  });
+});
+
+describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () => {
+  const TIE = "profile/sort/id-tiebreak";
+
+  it("is a profile SHOULD citing §10.5", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === TIE);
+    expect(rule).toMatchObject({ tier: "profile", level: "SHOULD" });
+    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#105-ties-and-stability$/);
+  });
+
+  it("passes a server that breaks ties by ascending `id` on every request", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), api, TIE);
+    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+    expect(sent.slice(0, 3)).toEqual(["/tasks", "/tasks?sort=due", "/tasks?sort=-due"]);
+  });
+
+  it("passes a fixed descending order on `id`, which S-TIE-2 allows", async () => {
+    // The profile sorter with each tied pair of NULL `due`s swapped: a fixed
+    // descending order on `id` wherever `due` ties.
+    const descendingIds = (path: string) => {
+      const data = orderBy(profileSorter, termsOf(new URLSearchParams(path.split("?")[1])))(TASKS);
+      const nulls = data.filter((task) => valueOf(task, "due") === null).reverse();
+      const swapped = data.map((task) =>
+        valueOf(task, "due") === null ? (nulls.shift() ?? task) : task,
+      );
+      return { status: 200, body: { data: swapped } };
+    };
+    const { outcome } = await run(descendingIds, api, TIE);
+    expect(outcome._tag).toBe("Passed");
+  });
+
+  it("fails a server whose tiebreak turns round with the sort direction", async () => {
+    const { outcome } = await run(
+      serve({ ...profileSorter, tiebreakFollowsDirection: true }),
+      api,
+      TIE,
+    );
+    const findings = findingsOf(outcome);
+    expect(findings.map((found) => found.detail)).toEqual([
+      "/tasks: the resources that tie on `due` are not listed in one fixed order on `id` across `?sort=due` and `?sort=-due`",
+      "/projects/1/tasks: the resources that tie on `due` are not listed in one fixed order on `id` across `?sort=due` and `?sort=-due`",
+    ]);
+    expect(findings[0]).toMatchObject({
+      observed:
+        "`?sort=due` lists tasks:2, tasks:4 (`due` NULL); `?sort=-due` lists tasks:4, tasks:2 (`due` NULL)",
+    });
+    expect(findings[0]?.probe?.url).toBe("/tasks?sort=-due");
+  });
+
+  it("skips a collection in which no two resources tie", async () => {
+    const distinct = TASKS.map((task, index) => ({ ...task, attributes: { rank: index } }));
+    const { outcome } = await run(serve(profileSorter, distinct), api, TIE);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining(
+        "/tasks: no attribute ties two of its 4 resource(s), so no tiebreak can be observed",
+      ),
+    });
+  });
+});
+
+describe("Conformance: sort order across pages (filter-grammar §10.6, S-PAGE-1)", () => {
+  const PAGES = "profile/sort/across-pages";
+  const paged = HttpApi.make("paged").add(
+    Group.make(Task, Endpoint.list(Task, { sort: true, page: Query.Page.Offset })),
+  );
+
+  it("is a profile MUST citing §10.6", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === PAGES);
+    expect(rule).toMatchObject({ tier: "profile", level: "MUST" });
+    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#106-with-filter-and-page$/);
+  });
+
+  it("passes a server that sorts the collection before cutting it into pages", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), paged, PAGES);
+    expect(outcome).toMatchObject({ _tag: "Passed", probes: 5, note: undefined });
+    expect(sent).toEqual([
+      "/tasks",
+      "/tasks?sort=due&page[limit]=2",
+      "/tasks?sort=due&page[limit]=2&page[offset]=2",
+      "/tasks?sort=-due&page[limit]=2",
+      "/tasks?sort=-due&page[limit]=2&page[offset]=2",
+    ]);
+  });
+
+  it("fails a server that sorts each page on its own", async () => {
+    const { outcome } = await run(serve({ ...profileSorter, sortsEachPage: true }), paged, PAGES);
+    const findings = findingsOf(outcome);
+    expect(findings.map((found) => found.detail)).toEqual([
+      '`?sort=due&page[limit]=2` and its `next` list tasks:2 (NULL) on page 1 before tasks:3 ("2026-01-01T00:00:00.000Z") on page 2',
+      '`?sort=-due&page[limit]=2` and its `next` list tasks:1 ("2026-01-02T00:00:00.000Z") on page 1 before tasks:4 (NULL) on page 2',
+    ]);
+    expect(findings[0]).toMatchObject({
+      expected:
+        "one ascending order of `due` across the pages, every resource on page 2 after every resource on page 1 (S-PAGE-1)",
+      observed:
+        '`due` page by page: "2026-01-02T00:00:00.000Z", NULL | "2026-01-01T00:00:00.000Z", NULL',
+    });
+    expect(decodeURIComponent(findings[0]?.probe?.url ?? "")).toBe(
+      "/tasks?sort=due&page[limit]=2&page[offset]=2",
+    );
+  });
+
+  it("decides nothing when the server ignores the page size", async () => {
+    const unpaged = (path: string) =>
+      serve(profileSorter)(decodeURIComponent(path).replace(/&page\[limit\]=\d+/, ""));
+    const { outcome } = await run(unpaged, paged, PAGES);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining(
+        "`?sort=due&page[limit]=2` answered 4 resources, ignoring the page size, with no `next`",
+      ),
+    });
+  });
+
+  it("skips an api with no sortable endpoint declaring a page size", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), api, PAGES);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no list or related endpoint in this api declares `sort` and `page[limit]` or `page[size]`",
     });
     expect(sent).toEqual([]);
   });
