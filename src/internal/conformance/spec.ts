@@ -1185,45 +1185,6 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
   };
 };
 
-/**
- * A rule that sends the first read endpoint one query parameter, `name=1`,
- * whose name alone requires a 400, and fails on any other answer.
- */
-const parameterNameRefused = (decides: Rule, name: string, detail: string): RuleImpl => ({
-  rule: decides,
-  run: (ctx) =>
-    Effect.gen(function* () {
-      const target = readable(ctx).resolved[0];
-      if (target === undefined) return skip(decides, noProbeReason("JSON:API read endpoint", []));
-      const url = withQuery(target.path, [[name, "1"]]);
-      const observation = yield* ctx.request({ url, headers: jsonApiAccept });
-      const findings =
-        observation.status === 400
-          ? []
-          : [
-              finding(decides, {
-                detail: `\`?${name}=1\` — ${detail} — was not rejected`,
-                expected: "400 Bad Request",
-                observed: describe(observation),
-                probe: observation.probe,
-              }),
-            ];
-      return settle(decides, 1, findings);
-    }),
-});
-
-const unknownQueryParameter: RuleImpl = parameterNameRefused(
-  rule(
-    "spec/query/unknown-query-parameter",
-    "Query Parameters",
-    "query-parameters-custom",
-    "MUST",
-    "Implementation-specific query parameters MUST contain at least one non a-z character, so a server MUST respond with 400 Bad Request to a query parameter named only with a-z that it does not recognise from the specification.",
-  ),
-  "unknown",
-  "a name with no non a-z character, not reserved by the spec",
-);
-
 const unsupportedInclude: RuleImpl = {
   rule: rule(
     "spec/query/unsupported-include-path",
@@ -1399,6 +1360,8 @@ const settleRefusal = (
     readonly parameter: string;
     readonly where: string;
     readonly observation: Observation;
+    /** What makes the parameter one to refuse, as the finding names it. */
+    readonly why: string;
   },
 ): Outcome => {
   const { parameter, where, observation } = refusal;
@@ -1406,7 +1369,7 @@ const settleRefusal = (
   if (observation.status !== 400) {
     return settle(impl, probes, [
       finding(impl, {
-        detail: `${sent} on ${where}, which does not declare \`${parameter}\`, was not rejected`,
+        detail: `${sent} on ${where}, ${refusal.why}, was not rejected`,
         expected: "400 Bad Request",
         observed: describe(observation),
         probe: observation.probe,
@@ -1463,6 +1426,8 @@ interface UsableProbe {
   ) => Result.Result<readonly [parameter: string, value: string], string>;
   /** The skip reason's head when every target is passed over. */
   readonly none: string;
+  /** What makes `parameter` one to refuse, as a finding names it. */
+  readonly why: (parameter: string) => string;
 }
 
 /**
@@ -1539,6 +1504,7 @@ const probeFirstUsable = (
               parameter: query.success[0],
               where: path,
               observation,
+              why: probe.why(query.success[0]),
             });
           }),
   });
@@ -1559,6 +1525,9 @@ interface Refusal {
   readonly none: string;
 }
 
+/** Why a refusal rule's parameter is one to refuse: the endpoint does not declare it. */
+const undeclared = (parameter: string): string => `which does not declare \`${parameter}\``;
+
 /** A rule that sends a candidate endpoint a parameter it does not declare, and expects 400. */
 const refusalRule = (refusal: Refusal): RuleImpl => ({
   rule: refusal.rule,
@@ -1575,6 +1544,7 @@ const refusalRule = (refusal: Refusal): RuleImpl => ({
       targets: candidates.resolved,
       queryFrom: refusal.queryFrom,
       none: refusal.none,
+      why: undeclared,
     });
   },
 });
@@ -1589,6 +1559,42 @@ const onSucceeded =
   ): UsableProbe["queryFrom"] =>
   (baseline, endpoint) =>
     succeeded(baseline) ? query(baseline, endpoint) : Result.fail(statusOf(baseline));
+
+/**
+ * A rule that sends a read endpoint one query parameter, `name=1`, whose name
+ * alone requires a 400 whatever the endpoint declares. It probes as a refusal
+ * rule does — a baseline first, the 400's `source.parameter` matched, a 429,
+ * 408 or lost response left not decided (#438) — but over every read
+ * endpoint, not only those whose query discovery can enumerate: no endpoint
+ * can declare a name the specification forbids, so what it declares does not
+ * pick the endpoint.
+ */
+const parameterNameRefused = (decides: Rule, name: string, why: string): RuleImpl => ({
+  rule: decides,
+  run: (ctx) => {
+    const { resolved, unresolved } = readable(ctx);
+    if (Arr.isReadonlyArrayEmpty(resolved))
+      return Effect.succeed(skip(decides, noProbeReason("JSON:API read endpoint", unresolved)));
+    return probeFirstUsable(ctx, decides, {
+      targets: resolved,
+      queryFrom: onSucceeded(() => Result.succeed([name, "1"])),
+      none: "no JSON:API read endpoint answered its baseline request with 2xx",
+      why: () => why,
+    });
+  },
+});
+
+const unknownQueryParameter: RuleImpl = parameterNameRefused(
+  rule(
+    "spec/query/unknown-query-parameter",
+    "Query Parameters",
+    "query-parameters-custom",
+    "MUST",
+    "Implementation-specific query parameters MUST contain at least one non a-z character, so a server MUST respond with 400 Bad Request to a query parameter named only with a-z that it does not recognise from the specification.",
+  ),
+  "unknown",
+  "a name with no non a-z character that the specification does not define",
+);
 
 const includeUnsupportedEndpoint: RuleImpl = refusalRule({
   rule: rule(
