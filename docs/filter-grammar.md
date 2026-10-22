@@ -5,9 +5,11 @@ The definition of the `filter` query family, and of the JSON:API **profile** it 
 - the **syntax** — the AST, the operator core, the URL surface, the canonical encoding ([§1](#1-the-ast)–[§4](#4-the-operator-core-is-closed)) — which two implementations must agree on byte for byte;
 - the **semantics** — what a tree means, operator by operator, including NULL ([§6](#6-semantics)) — which two implementations must agree on resource by resource.
 
+The profile also fixes what `?sort=` **orders by** ([§10](#10-sort-order)): the same comparison domain as `filter`, NULL placement, multi-field order and the `id` tiebreak — normative too, and the reason the document is not only about `filter`.
+
 Nothing here defers to another project for its meaning. A third-party implementer needs this document and the JSON:API v1.1 specification, and nothing else.
 
-**Status:** implemented. Tracks [#83](https://github.com/thomasfosterau/effect-jsonapi/issues/83) (epic [#82](https://github.com/thomasfosterau/effect-jsonapi/issues/82)): [#84](https://github.com/thomasfosterau/effect-jsonapi/issues/84) (per-attribute declaration, `Resource.filterable`) and [#86](https://github.com/thomasfosterau/effect-jsonapi/issues/86) (the AST `Filter.Ast`, the codec `Query.Filter` / `filter: true`, the error pointers) are in the package, as is [#85](https://github.com/thomasfosterau/effect-jsonapi/issues/85) (the canonical `self` string, `Query.canonical`). [§6](#6-semantics) is [#116](https://github.com/thomasfosterau/effect-jsonapi/issues/116) (epic [#115](https://github.com/thomasfosterau/effect-jsonapi/issues/115)); the conformance suite that runs it against a server is [#120](https://github.com/thomasfosterau/effect-jsonapi/issues/120).
+**Status:** implemented. Tracks [#83](https://github.com/thomasfosterau/effect-jsonapi/issues/83) (epic [#82](https://github.com/thomasfosterau/effect-jsonapi/issues/82)): [#84](https://github.com/thomasfosterau/effect-jsonapi/issues/84) (per-attribute declaration, `Resource.filterable`) and [#86](https://github.com/thomasfosterau/effect-jsonapi/issues/86) (the AST `Filter.Ast`, the codec `Query.Filter` / `filter: true`, the error pointers) are in the package, as is [#85](https://github.com/thomasfosterau/effect-jsonapi/issues/85) (the canonical `self` string, `Query.canonical`). [§6](#6-semantics) is [#116](https://github.com/thomasfosterau/effect-jsonapi/issues/116) (epic [#115](https://github.com/thomasfosterau/effect-jsonapi/issues/115)); the conformance suite that runs it against a server is [#120](https://github.com/thomasfosterau/effect-jsonapi/issues/120). [§10](#10-sort-order) is [#167](https://github.com/thomasfosterau/effect-jsonapi/issues/167), checked by the conformance kit's `profile/sort/ordering`.
 
 ## 0. Scope and decisions already taken
 
@@ -300,11 +302,13 @@ The grammar is a JSON:API **profile**, not an `ext`: it constrains how a server 
 Content-Type: application/vnd.api+json; profile="https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1"
 ```
 
-- The URI is exported as a constant (`Filter.PROFILE_URI`, also `Query.FILTER_PROFILE_URI`) and is a version of this document. `v1` is this note; an incompatible change is `v2`. What counts as incompatible, now that the profile has semantics: a new or removed operator, a changed canonical rule, a changed truth table, a changed comparison domain, or any change that moves a resource between matching and not matching a filter that was already accepted.
+- The URI is exported as a constant (`Filter.PROFILE_URI`, also `Query.FILTER_PROFILE_URI`) and is a version of this document. `v1` is this note; an incompatible change is `v2`. What counts as incompatible, now that the profile has semantics: a new or removed operator, a changed canonical rule, a changed truth table, a changed comparison domain, any change that moves a resource between matching and not matching a filter that was already accepted, or — since [§10](#10-sort-order) — any change to an `S-ORD-*` or `S-MULTI-*` rule that reorders a collection already sorted under `v1`.
 - Per the spec, unknown profiles in `Accept` are ignored, never rejected; the existing negotiation middleware already does this (`src/Middleware.ts`, the `profile` branch). Nothing about request handling keys off the profile parameter: an endpoint declared with `filter: true` speaks the grammar whether or not the client names it.
 - The URI above is final: `https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`. It must stay stable now that it is published.
 
 **Decision (accepted, #116): adding [§6](#6-semantics) keeps `v1`.** The alternative was to publish the semantics as `v2` on the grounds that a client which negotiated `v1` negotiated a profile with no stated meaning. `v1` is kept, for three reasons: the operator vocabulary, the URL surface and the canonical form — everything a `v1` implementation actually keys off — are unchanged, so no accepted URL changes its parse or its `self` link; §6 records the reading `v1` already asserted (three-valued, Postgres-normative) rather than choosing a new one, so nothing that conformed before stops conforming; and the URI is a published constant whose stability §5 promises. A `v2` here would cost every advertising server a media-type change and buy nothing. From now on, the rule in the first bullet above applies: a change to a truth table is `v2`, not a clarification of `v1`.
+
+**Decision (proposed, #167): adding [§10](#10-sort-order) keeps `v1` too.** §10 lands as a section of this profile (owner direction on #167), not as a second profile URI or as an unnegotiated README convention, so the remaining question is whether it is a new version. It is not, for four reasons. Nothing a `v1` implementation keys off for `filter` changes: no accepted URL changes its parse, its `self` link or the resources it matches. §6.8 of `v1` already named F-ORD-1's order as the one a server was recommended to sort under, so for a server that took the recommendation §10 adds only the NULL and tie rules. The advertisement does not carry the claim anyway: S-SCOPE-1 applies §10 to every collection that supports `sort`, including endpoints that never speak the grammar and so never advertise the URI, so a `v2` would version a sort claim the media type does not make. And a `v2` costs every advertising server a media-type change and every consumer a changed `Filter.PROFILE_URI` constant, for a section most of them did not negotiate. The cost is stated plainly: a server that advertised `v1` and sorted under a locale collation, or with NULLs first, conformed before §10 and does not now — an outcome §6.8's "not required" allowed. That is the trade-off the owner reviews on #167; the alternative is to publish §10 under its own profile URI (`…/profiles/sort-order/v1`) and leave this one untouched. From now on, the last case in the first bullet above applies: a change that reorders an already-sorted collection is `v2`.
 
 ## 6. Semantics
 
@@ -514,8 +518,8 @@ The line between "this filter is malformed" and "this filter matches nothing" is
 
 Stated so an implementer knows where the profile stops, rather than guessing.
 
-- **`sort` ordering, and where NULLs sort.** This profile governs `filter`. `sort` is its own family, and v1 of this profile deliberately does not pin its collation or NULL placement. A server is _recommended_ to sort under F-ORD-1's order, so that `sort=title` and `filter[title][gt]=…` agree, but it is not required to, and a client must not infer one from the other.
-- **Pagination and stability.** Which page a matching resource lands on, and whether a result set is stable across requests, is the `page` family's and the server's business.
+- **`sort` ordering, and where NULLs sort.** §6 governs `filter`. `sort` is its own family, and its order is [§10](#10-sort-order)'s — which reuses this section's comparison domain, so `sort=title` and `filter[title][gt]=…` agree. (Before #167 this bullet left the collation and NULL placement unpinned, and only recommended F-ORD-1's order.)
+- **Pagination and stability.** Which page a matching resource lands on is the `page` family's and the server's business. Whether an order is stable across requests is [S-TIE-1](#105-ties-and-stability)'s, a SHOULD.
 - **Cost.** The profile puts no bound on tree size or nesting; F-ERR-4 says only how to refuse one.
 - **Where filtering happens.** Any implementation strategy conforms as long as F-EVAL-3 holds for every resource.
 
@@ -523,7 +527,7 @@ Stated so an implementer knows where the profile stops, rather than guessing.
 
 **Three-valued, and ours.** Recorded in F-NULL-4. Earlier revisions of this note called the semantics "Postgres-normative" and pointed at another project's ADR for the tables. The choice was reasonable; the citation was not a specification, and a third-party implementer had nowhere to look. §6 is the replacement, and it cites nothing.
 
-**The profile URI stays `v1`.** See [§5](#5-profile-uri).
+**The profile URI stays `v1`**, for §6 and again for §10. See [§5](#5-profile-uri).
 
 **No reference evaluator ships.** Considered, and declined for this version:
 
@@ -551,3 +555,73 @@ Unknown field, undeclared operator and bad literal are three distinct failures w
 ## 9. Reviewed against usage
 
 legation#148's table (23 filter sites across four example apps: 16 `eq`, 2 `in`, ids and one boolean, no NULL filters, no traversal) is fully expressible in bare shorthand, unchanged from what those sites emit today (`filter[status]=open`, `filter[priority]=1,2`). Legation's current encoder drops `ne` / `gt` / `or` / `not` / `eq null` (`packages/jsonapi/src/JsonApiQuery.ts:46-58`); under this grammar all of them have an exact form (`eq null` becomes `isnull=true`), which is what lets L7 delete `safeFilters`.
+
+## 10. Sort order
+
+**Normative.** This section defines what `?sort=` _orders by_: which value of a resource is compared, in what order, where NULL lands, how several fields combine and how ties are broken. JSON:API §Sorting fixes the syntax — a comma-separated list of fields, each ascending unless prefixed with `-` — and leaves the order itself to the server. This is the profile's answer, written so that two servers built on this library, or one built on it and one that is not, list `?sort=name` identically.
+
+It lives in this profile, rather than in a profile of its own, because it is the same ordering model: `sort` reuses [§6.2](#62-comparison-domains)'s comparison domain instead of defining a second one, so `sort=title` and `filter[title][gt]=…` agree about which titles come first ([S-ORD-1](#103-order)). Its rules carry `S-…` identifiers, stable on the same terms as §6's, and each is checkable from the wire.
+
+### 10.1 Scope
+
+**S-SCOPE-1.** §10 applies to every endpoint that answers a **resource collection** as primary data and supports `sort` — a primary collection (`GET /articles`) and a to-many related endpoint (`GET /articles/1/comments`) alike — whether or not that endpoint speaks the filter grammar. A single-resource endpoint has nothing to order; JSON:API's own rule for `sort` there (a 400) is unchanged.
+
+**S-SCOPE-2.** A relationship endpoint (`GET /articles/1/relationships/comments`) answers linkage, whose identifiers carry no attribute to sort on. This package declares no `sort` on one. A server that supports `sort` there must list the identifiers in the order its related endpoint lists the same resources under the same `sort`.
+
+**S-SCOPE-3.** `sort` orders the **primary data** only. The order of `included` is not defined, by JSON:API or by this profile, and a client must not read one into it — as [F-CONS-6](#65-consequences) keeps `filter` off `included`.
+
+**S-SCOPE-4.** The **canonical order** a paginated relationship declares (`Relationship.paginated(ref, { order })`, in the `{ field, direction }` terms `?sort=` decodes into) is an order in this section's sense: each term means exactly what the same term would mean in a `sort`, under every rule below.
+
+### 10.2 The sort key
+
+**S-KEY-1 (the value of a sort field).** A sort field is a declared attribute, or `id`. Its value on one resource is read exactly as [F-EVAL-4](#61-the-evaluation-model) reads a filter field's: the attribute's value in the resource's JSON representation, NULL when the member is JSON `null` **or** absent (F-EVAL-5), read from the **complete** representation whatever `fields[TYPE]` asked for (F-EVAL-6); `id` is the resource's `id`, a JSON string. A dotted path (`author.name`), which JSON:API permits a server to support, is relationship traversal and is not defined by this profile ([§4](#4-the-operator-core-is-closed)).
+
+**S-KEY-2 (fields with no order).** F-ORD-1 orders JSON strings, numbers and booleans, one type at a time. A field whose values in a collection are not all one JSON scalar type besides NULL — a struct, an array, or a union of a string and a number — has no order under this profile. A server may refuse it (a 400, as for any field it does not support) or order it as it likes; a declaration that makes such a field sortable owns what that order means, as [F-ORD-6](#62-comparison-domains) owns an explicit literal codec.
+
+### 10.3 Order
+
+**S-ORD-1 (the domain rule, reused).** `?sort=f` lists the collection in **ascending** order of `f`'s values under [F-ORD-1](#62-comparison-domains): numeric order for a JSON number (`-0` and `0` tie), code-point order for a JSON string, `false` before `true`. Everything §6.2 says of the domain holds for `sort` unchanged — F-ORD-2 (no case folding, no locale or ICU collation, no Unicode normalisation: a store sorting under a locale collation must force binary comparison, `COLLATE "C"` in Postgres, `COLLATE BINARY` in SQLite), F-ORD-3 (a `Date` is its fixed-width ISO-8601 UTC text, so text order is instant order), F-ORD-4 (a literal union sorts alphabetically, not in declaration order) and F-ORD-7 (the order is total on non-NULL values). The consequence the reuse buys: for non-NULL values, a resource listed after another under `sort=f` is never one that `filter[f][lt]=<the other's value>` matches.
+
+**S-ORD-2 (descending).** `?sort=-f` lists the collection in **exactly the reverse** of S-ORD-1's order, NULL placement included.
+
+**S-ORD-3 (NULL).** NULL sorts **after every value** ascending, and so — by S-ORD-2 — **before every value** descending. Every NULL ties with every other NULL. Sorting is two-valued even though [§6.3](#63-truth-tables) is not: a comparison against NULL is UNKNOWN to a filter, but an order must put each resource somewhere, so for ordering only, NULL is one value, greater than every other.
+
+**S-ORD-4 (ties).** Two resources tie on a field when their values are equal under F-ORD-1 (identical code points, numeric equality, the same boolean) or are both NULL. A tie is resolved by the next sort field ([§10.4](#104-several-fields)), and after the last one by [S-TIE-1](#105-ties-and-stability).
+
+### 10.4 Several fields
+
+**S-MULTI-1 (lexicographic).** `?sort=f₁,f₂,…,fₙ` orders by `f₁`; resources that tie on `f₁` (S-ORD-4) are ordered by `f₂`; and so on. Each term carries its own direction, so `?sort=-createdAt,title` is newest first, and alphabetical within one instant.
+
+**S-MULTI-2.** A term only ever breaks ties the terms before it left; it never reorders resources an earlier term already ordered. So a later term naming a field an earlier one named (`sort=a,-a`) changes nothing, in either direction.
+
+### 10.5 Ties and stability
+
+**S-TIE-1 (SHOULD).** A server **SHOULD** break every tie left after the last sort field by `id`, so the order is **total** over the collection and the same on every request. Without it, the relative order of resources that tie on every sort field is unspecified and may differ between two identical requests — which silently breaks offset pagination over that order, repeating a resource on two pages or skipping one.
+
+**S-TIE-2.** The tiebreak is a fixed order on `id`, the same for every request. Ascending code-point order on the `id` string — what `?sort=…,id` means under S-ORD-1 — is the recommended one. A server whose ids are integers written as strings may order them numerically instead, since `"10"` before `"9"` is correct under S-ORD-1 but surprising; either is total, which is what S-TIE-1 asks for.
+
+**S-TIE-3.** When `id` is itself a sort field, the order is already total and S-TIE-1 adds nothing.
+
+### 10.6 With `filter` and `page`
+
+**S-PAGE-1.** The order is a property of the whole collection being fetched — after `filter` has decided its membership ([F-EVAL-3](#61-the-evaluation-model)), before `page` cuts it into pages. Every resource on a page follows every resource on the page before it, so a client walking `next` through `?sort=f` sees one sequence in S-ORD order, not a sorted page at a time.
+
+**S-PAGE-2.** Sorting never changes membership: `?sort=f` and no `sort` at all list the same resources, and a field NULL on every resource is still a field the collection can be sorted by.
+
+### 10.7 What §10 does not define
+
+- **The order without `sort`.** JSON:API lets a server apply a default order when `sort` is absent; this profile does not define one, except a paginated relationship's declared canonical order (S-SCOPE-4).
+- **Which fields are sortable.** That is the endpoint's declaration (`Sort.able`, `Resource.sortable`); a field it does not support is a 400 under JSON:API §Sorting.
+- **Dotted sort paths** (S-KEY-1) and **fields with no order** (S-KEY-2).
+
+### 10.8 Decisions recorded
+
+**One ordering model, not two (#167).** `sort` could have had its own collation. Reusing F-ORD-1 makes `sort` checkable from the wire exactly as it made `filter` checkable — the conformance kit reads each value off the response and needs no fixture — and it means a client never has to know which of two orders a server meant. The cost is F-ORD-2's: a server whose store collates text by locale must force binary comparison for `sort` too, as it already must for `filter`. §6.8 had already _recommended_ this order for `sort`; §10 makes it the rule.
+
+**NULLs last ascending.** SQL leaves NULL placement to `NULLS FIRST` / `NULLS LAST`, and engines disagree by default: Postgres and Oracle put NULLs last ascending, SQLite and MySQL first. The profile picks last, for three reasons: it is the Postgres default, which [§6](#6-semantics)'s semantics are already closest to; with S-ORD-2 it makes NULL a single greatest value, so descending is the exact reverse of ascending with no second rule; and it puts resources with no value at the end of an ascending listing, after the ones a client asked to see ordered. A SQLite or MySQL store says `NULLS LAST` (SQLite 3.30 and later) or sorts on `f IS NULL` first; an IndexedDB index omits records whose key is absent, so a store built on one must merge them back in at the end.
+
+**The `id` tiebreak is a SHOULD.** A MUST would make every server that orders by its storage's row order — and every store where an extra index on `id` is costly — non-conforming over collections in which no two resources ever tie. A SHOULD names the defect, which [#166](https://github.com/thomasfosterau/effect-jsonapi/issues/166)'s pagination walk already observes as an unstable order and reports as not decided rather than failed, and leaves the cost to the server.
+
+**Related endpoints are in, relationship endpoints are defined but not checked.** A to-many related endpoint answers a resource collection and is where `Group.resource` derives `sort`, so it is held to §10 like any primary collection (S-SCOPE-1). A relationship endpoint answers identifiers that carry no field to read an order off; S-SCOPE-2 defines what `sort` there would mean, and nothing in this package declares it.
+
+**A section of this profile, under `v1`.** See [§5](#5-profile-uri).
