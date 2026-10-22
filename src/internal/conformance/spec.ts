@@ -667,6 +667,79 @@ const noDuplicateResources: RuleImpl = {
     })(ctx),
 };
 
+/** Whether a probe's URL supplies `include`, whatever its value — presence is the signal. */
+const suppliesInclude = (url: string): boolean =>
+  new URLSearchParams(url.split("?")[1] ?? "").has("include");
+
+/**
+ * The documents the api answered to a request carrying `include`: the compound
+ * probes `documentProbes` sends, plus a bare `?include=` to every endpoint that
+ * declares `include`. The bare one asks for no related resources at all, so
+ * it is the probe whose `included` must be the empty array, where a compound
+ * probe's has members anyway.
+ */
+const includedOnInclude: RuleImpl = {
+  rule: rule(
+    "spec/document/included-on-include",
+    "Inclusion of Related Resources",
+    "fetching-includes",
+    "MUST",
+    "If an endpoint supports the `include` parameter and a client supplies it, the server's response MUST be a compound document with an `included` key — even if that `included` key holds an empty array.",
+  ),
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const { resolved, unresolved } = readable(ctx);
+      const including = Arr.filter(resolved, ({ endpoint }) =>
+        endpoint.queryKeys.includes("include"),
+      );
+      if (Arr.isReadonlyArrayEmpty(including))
+        return skip(
+          includedOnInclude.rule,
+          noProbeReason("read endpoint declaring `include`", unresolved),
+        );
+      const compound = Arr.filter(yield* documentProbes(ctx), ({ where }) =>
+        suppliesInclude(where),
+      );
+      const empty = yield* Effect.forEach(
+        Arr.filter(including, ({ path }) => !suppliesInclude(path)),
+        ({ path }) => {
+          const url = withQuery(path, [["include", ""]]);
+          return Effect.map(ctx.request({ url, headers: jsonApiAccept }), (observation) => ({
+            where: url,
+            observation,
+          }));
+        },
+        { concurrency: 1 },
+      );
+      const answered = Arr.filter([...compound, ...empty], ({ observation }) =>
+        succeeded(observation),
+      );
+      const findings = Arr.flatMap(answered, ({ observation, where }) => {
+        const body = observation.body;
+        if (isRecord(body) && Array.isArray(body["included"])) return [];
+        return [
+          finding(includedOnInclude.rule, {
+            detail: `${where} answered a request carrying \`include\` with no top-level \`included\` array`,
+            expected: "a top-level `included` array, `[]` when nothing is included",
+            observed: isRecord(body)
+              ? `top-level members: ${Rec.keys(body).join(", ") || "(none)"}`
+              : describe(observation),
+            probe: observation.probe,
+          }),
+        ];
+      });
+      return Arr.match(answered, {
+        onEmpty: () =>
+          skip(
+            includedOnInclude.rule,
+            "no endpoint declaring `include` answered a request carrying it with a 2xx",
+          ),
+        onNonEmpty: (documents) =>
+          settle(includedOnInclude.rule, documents.length, findings, coverageNote(unresolved)),
+      });
+    }),
+};
+
 const resourceIdentification: RuleImpl = {
   rule: rule(
     "spec/document/resource-identification",
@@ -2839,6 +2912,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   includedRequiresData,
   fullLinkage,
   noDuplicateResources,
+  includedOnInclude,
   resourceIdentification,
   jsonApiObject,
   errorDocumentShape,

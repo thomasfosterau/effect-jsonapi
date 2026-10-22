@@ -20,6 +20,7 @@ import {
   MutableHashMap,
   Option,
   Predicate,
+  Record as Rec,
   Schema,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
@@ -278,6 +279,16 @@ const refusesParameter = (key: string): boolean =>
   FAMILIES.includes(key.split("[")[0] ?? key) ? !PROCESSED.includes(key) : /^[a-z]+$/.test(key);
 
 /**
+ * §Fetching Includes: a request that supplies `include`, even empty, gets an
+ * `included` key, `[]` when nothing is included; one without it gets none.
+ */
+const includedMember = <A>(
+  params: URLSearchParams,
+  resources: ReadonlyArray<A>,
+): { readonly included?: ReadonlyArray<A> } =>
+  params.has("include") ? { included: resources } : {};
+
+/**
  * A correct-enough server: negotiates per §5, answers well-formed documents,
  * projects sparse fieldsets, rejects unknown query parameters and absent ids.
  * The baseline every broken fixture below is one deviation from.
@@ -391,7 +402,10 @@ const conformantServe = (request: {
       lastName: author.attributes.lastName,
     }),
   };
-  const included = include.includes("author") ? { included: [personObject] } : {};
+  const included = includedMember(
+    params,
+    Arr.filter([personObject], () => include.includes("author")),
+  );
 
   if (pathname === "/articles")
     return { body: { jsonapi: { version: "1.1" }, data: [articleObject], ...included } };
@@ -1204,6 +1218,56 @@ describe("Conformance: detects a deliberately broken server", () => {
         return included.length === 0 ? body : { ...body, included: [...included, included[0]] };
       }),
   );
+
+  broken(
+    "a response to `?include=` with no `included` key",
+    "spec/document/included-on-include",
+    (canned, request) =>
+      queryOf(request).has("include")
+        ? withData(canned, (body) => Rec.remove(body, "included"))
+        : canned,
+  );
+
+  it("asks a bare `?include=` for an empty `included` array", async () => {
+    // Drops `included` only where it is empty, as a builder that omits `[]` does.
+    const report = await verifyCanned((request) =>
+      withData(conformantServe(request), (body) =>
+        Array.isArray(body["included"]) && Arr.isArrayEmpty(body["included"])
+          ? Rec.remove(body, "included")
+          : body,
+      ),
+    );
+    const outcome = outcomeFor(report, "spec/document/included-on-include");
+    expect(outcome._tag).toBe("Failed");
+    expect(
+      Predicate.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.detail) : [],
+    ).toEqual([
+      "/articles/1?include= answered a request carrying `include` with no top-level `included` array",
+      "/articles?include= answered a request carrying `include` with no top-level `included` array",
+    ]);
+  });
+
+  it("passes `included: []` and does not flag a response to a request without `include`", async () => {
+    // The baseline answers bare requests with no `included` at all; only the four
+    // requests carrying `include` (a compound and a bare `?include=` per endpoint) count.
+    const report = await verifyCanned(conformantServe, {
+      only: ["spec/document/included-on-include"],
+    });
+    expect(outcomeFor(report, "spec/document/included-on-include")).toMatchObject({
+      _tag: "Passed",
+      probes: 4,
+    });
+  });
+
+  it("skips when no endpoint answers a request carrying `include` with a 2xx", async () => {
+    const report = await verifyCanned((request) =>
+      queryOf(request).has("include") ? badRequest() : conformantServe(request),
+    );
+    expect(outcomeFor(report, "spec/document/included-on-include")).toMatchObject({
+      _tag: "Skipped",
+      reason: "no endpoint declaring `include` answered a request carrying it with a 2xx",
+    });
+  });
 
   /** The `observed` of `id`'s findings against a server whose documents carry `included`. */
   const observedWith = async (id: string, included: ReadonlyArray<unknown>) => {
