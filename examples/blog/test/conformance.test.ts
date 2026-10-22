@@ -16,15 +16,19 @@ import { BlogLive, discardArticle } from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to. None: the
- * write rules have been clean since #428, which answers a resource object of
- * another `type` with 409, and the read rules since #169: the handlers of the reads
- * that declare `fields` (`GET /articles/:id` and `/search`) project
- * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
- * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
- * document (the `Atomic.results` answer carries none).
+ * Remove an entry when its issue is fixed; the test will tell you to. The read
+ * rules have been clean since #169: the handlers of the reads that declare
+ * `fields` (`GET /articles/:id` and `/search`) project `?fields[TYPE]=` with
+ * `onResource: Handlers.project(query.fields)` and stamp `jsonapi:
+ * Document.v1_1` on every `Handlers.data` / `collection` / `linkage` document
+ * (the `Atomic.results` answer carries none). The write rules have been clean
+ * since #428, which answers a resource object of another `type` with 409, but
+ * for one: `Endpoint.create` drops a client-generated id and answers 201 under
+ * an id of its own, where JSON:API wants a 403 (#450).
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
+  ["spec/status/create-client-id-unsupported", "#450"],
+];
 
 /**
  * The write fixture: a payload the blog accepts, an update it must apply, and
@@ -45,8 +49,16 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { title: `conformance probe ${++sequence} (updated)` } }),
     cleanup: discardArticle,
+    // The blog mints its own ids, so a client-generated one must be refused (#450).
+    clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
 };
+
+/**
+ * The `ids` samples: an article for the read rules, and a comment for the
+ * relationship mutation rules to link a created article's `comments` to.
+ */
+const IDS = { articles: "1", comments: "5" };
 
 /**
  * The rules that died in a run, each as `id: message`. A rule that dies — a
@@ -60,7 +72,7 @@ const died = (run: Conformance.Report): ReadonlyArray<string> =>
   );
 
 const report = await Effect.runPromise(
-  Conformance.verify(Api, { ids: { articles: "1" }, mutating: true, writes: WRITES }).pipe(
+  Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }).pipe(
     Effect.provide(BlogLive),
     Effect.scoped,
   ) as Effect.Effect<Conformance.Report, never, never>,
@@ -167,6 +179,12 @@ describe("blog: JSON:API conformance", () => {
       "spec/atomic/all-or-nothing",
       "spec/atomic/lid-resolution",
       "spec/atomic/results-order",
+      // #429: a created article's `comments` linked to the `ids` comment and
+      // unlinked again, each read back through
+      // `GET /articles/:id/relationships/comments`. The `author` PATCH has no
+      // relationship GET to read back through, so `update-replaces` skips.
+      "spec/relationships/add-appends",
+      "spec/relationships/remove-deletes",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

@@ -722,4 +722,46 @@ describe("discover (a relationship endpoint's declared cardinality)", () => {
       "no-data relationship: unshown",
     ]);
   });
+
+  it("reads one or many, and the types linked to, off a relationship write's payload", () => {
+    const Tag = Resource.make("tags", { attributes: { name: Schema.String } });
+    const Post = Resource.make("posts", {
+      attributes: { title: Schema.String },
+      relationships: {
+        author: Relationship.optional(() => Person),
+        tags: Relationship.many(() => Tag),
+      },
+    });
+    const declared = discover(
+      HttpApi.make("writes")
+        .add(
+          Group.make(
+            Post,
+            Endpoint.updateRelationship(Post, "author"),
+            Endpoint.updateRelationship(Post, "tags"),
+            Endpoint.addRelationship(Post, "tags"),
+            Endpoint.removeRelationship(Post, "tags"),
+          ),
+        )
+        .add(
+          HttpApiGroup.make("hand-built").add(
+            HttpApiEndpoint.patch("unknown", "/people/:id/relationships/friends", {
+              payload: Schema.Unknown,
+            }),
+          ),
+        ),
+    );
+    expect(
+      declared.map(
+        ({ method, path, role, linkage, linkageTypes }) =>
+          `${method} ${path} ${role}: ${linkage} [${linkageTypes.join(", ")}]`,
+      ),
+    ).toEqual([
+      "PATCH /posts/:id/relationships/author relationshipWrite: one [people]",
+      "PATCH /posts/:id/relationships/tags relationshipWrite: many [tags]",
+      "POST /posts/:id/relationships/tags relationshipWrite: many [tags]",
+      "DELETE /posts/:id/relationships/tags relationshipWrite: many [tags]",
+      "PATCH /people/:id/relationships/friends relationshipWrite: unshown []",
+    ]);
+  });
 });

@@ -39,6 +39,8 @@ import {
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import { atomicRules } from "./atomic.js";
+import { clientIdRules } from "./clientIds.js";
+import { relationshipRules } from "./relationships.js";
 import {
   type Context,
   describe,
@@ -2699,5 +2701,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   createConflictType,
   createReadBack,
   updateReadBack,
+  ...clientIdRules,
+  ...relationshipRules,
   ...atomicRules,
 ];
