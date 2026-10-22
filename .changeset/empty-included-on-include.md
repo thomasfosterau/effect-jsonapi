@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-jsonapi": patch
----
-
-A response to a request carrying `include` now keeps its `included` key when nothing is left to include, as JSON:API 1.1 §Fetching Includes requires ("even if that `included` key holds an empty array"). `Handlers.data` / `Handlers.collection` emit any `included` array they are given — empty, or emptied by the dedupe against the primary data (so `GET /search?include=author` where every author is also a hit answers `included: []`) — and omit the member only for `undefined`; before, an empty result was omitted too. A handler that passes `[]` for a request with no `include` (`query.include?.includes("author") ? [author] : []`) now emits `included: []` there as well: pass `undefined` instead when `query.include` is `undefined`. `Assemble.resource` / `Assemble.collection` / `Assemble.unpaginatedCollection` emit `included: []` whenever the request carried `include` — including when no `targets` registry is wired — and still omit it without `include` unless the caller's own members survive the dedupe.
