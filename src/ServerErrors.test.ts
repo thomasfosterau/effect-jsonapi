@@ -37,7 +37,7 @@ describe("pathToJsonPointer", () => {
 /** Decode through a schema and return the raised issue tree. */
 const issueFor = <S extends Schema.Top>(
   schema: S,
-  input: unknown,
+  input: Schema.Json,
   options?: { readonly errors: "first" | "all" },
 ): SchemaIssue.Issue => {
   const exit = Effect.runSyncExit(
@@ -252,8 +252,8 @@ describe("schemaIssueToErrors", () => {
 });
 
 /** Unwrap the mapping's verdict, failing the test when it declined to map. */
-const mapped = (error: unknown): ServerErrors.JsonapiError => {
-  const result = ServerErrors.fromTaggedError(error);
+const mapped = (cause: unknown): ServerErrors.JsonapiError => {
+  const result = ServerErrors.fromTaggedError(cause);
   if (Option.isNone(result)) throw new Error("expected the seam to map the error");
   expect(result.value).toBeInstanceOf(ServerErrors.JsonapiError);
   return result.value;

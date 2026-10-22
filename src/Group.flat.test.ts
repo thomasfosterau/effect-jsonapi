@@ -250,7 +250,7 @@ describe("the wire contract", () => {
       >
     >;
   }
-  const render = (api: unknown): ReadonlyArray<string> => {
+  const render = (api: HttpApi.Constraint): ReadonlyArray<string> => {
     const spec = OpenApi.fromApi(api as never) as unknown as OpenApiPaths;
     return Object.entries(spec.paths)
       .flatMap(([path, operations]) =>

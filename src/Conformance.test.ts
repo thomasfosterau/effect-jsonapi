@@ -1428,7 +1428,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     (canned) =>
       withData(canned, (body) => {
         const data = body["data"];
-        const bad = (resource: unknown) => ({ ...(resource as object), id: 1 });
+        const bad = <A>(resource: A) => ({ ...(resource as object), id: 1 });
         return { ...body, data: Array.isArray(data) ? data.map(bad) : bad(data) };
       }),
   );

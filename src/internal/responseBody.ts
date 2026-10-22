@@ -96,8 +96,7 @@ export const withCreatedLocation = (
 // One member of a label: a string as itself, anything else through
 // `Formatter.format`, since parsed JSON can put an object with its own
 // `toString` member there and `String` would throw on it.
-const part = (value: unknown): string =>
-  Predicate.isString(value) ? value : Formatter.format(value);
+const part = <A>(value: A): string => (Predicate.isString(value) ? value : Formatter.format(value));
 
 // A member as `type:id` (or `type:lid`) for the violation message, as the
 // document builders name one.

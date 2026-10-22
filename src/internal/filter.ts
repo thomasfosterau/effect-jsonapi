@@ -6,7 +6,7 @@
  * @internal
  */
 import { Array as Arr, Match, Option, Record as Rec, Schema, SchemaIssue } from "effect";
-import type { Node } from "../Filter.js";
+import type { Compare, Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ const declaration = <V>(fields: { readonly [field: string]: V }, field: string) 
  * Encodes one literal of a field to its wire string, before escaping. Throws
  * when the field is unknown or the literal does not encode.
  */
-export type LiteralEncoder = (field: string, value: unknown) => string;
+export type LiteralEncoder = (field: string, value: Compare["value"]) => string;
 
 /**
  * A `LiteralEncoder` over a declaration's literal codecs. A `null` literal is
@@ -196,7 +196,9 @@ export type Decoded =
   | { readonly _tag: "Node"; readonly node: Node }
   | { readonly _tag: "Issues"; readonly issues: ReadonlyArray<SchemaIssue.Issue> };
 
-const pointed = (key: string, message: string, input?: unknown): SchemaIssue.Issue =>
+// The offending value is only carried, as the issue's `actual`; nothing here
+// reads it, so it is a type parameter rather than an unparsed `unknown`.
+const pointed = <A>(key: string, message: string, input?: A): SchemaIssue.Issue =>
   new SchemaIssue.Pointer([key], new SchemaIssue.InvalidValue({ message }, input));
 
 const quote = JSON.stringify;
@@ -223,7 +225,7 @@ export const decodeFilter = (
   input: { readonly [key: string]: unknown },
 ): Decoded => {
   const issues = new Map<string, SchemaIssue.Issue>();
-  const fail = (key: string, message: string, value?: unknown): undefined => {
+  const fail = <A>(key: string, message: string, value?: A): undefined => {
     if (!issues.has(key)) issues.set(key, pointed(key, message, value));
     return undefined;
   };

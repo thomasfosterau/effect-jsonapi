@@ -1236,7 +1236,7 @@ const buildLinks = (options: {
 // `asLinkage` marks `primary` as a relationship document's identifiers, which
 // `included` is seeded from rather than deduplicated against (#423).
 const build = (
-  data: unknown,
+  data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue | null,
   primary: ReadonlyArray<ResourceValue>,
   options:
     | {

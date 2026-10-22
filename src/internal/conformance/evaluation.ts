@@ -58,6 +58,7 @@ import {
   type Finding,
   identity,
   isRecord,
+  type Body,
   type Observation,
   parseMediaType,
   probeable,
@@ -142,7 +143,7 @@ interface Position {
 }
 
 /** The resources a document carries under `member`'s pointer prefix. */
-const locatedUnder = (body: unknown, prefix: string): ReadonlyArray<ResourceObject> =>
+const locatedUnder = (body: Body, prefix: string): ReadonlyArray<ResourceObject> =>
   Arr.filterMap(resourcesOf(body), ({ pointer, resource }) =>
     pointer.startsWith(prefix) ? Result.succeed(resource) : Result.failVoid,
   );

@@ -132,6 +132,14 @@ export interface Gap {
 // Observations
 // ---------------------------------------------------------------------------
 
+/**
+ * A response's parsed JSON body, or `undefined` when it was empty or not JSON:
+ * what every rule reads a document from.
+ *
+ * @internal
+ */
+export type Body = Schema.Json | undefined;
+
 /** @internal */
 export interface Observation {
   readonly probe: Probe;
@@ -141,7 +149,7 @@ export interface Observation {
   readonly contentType: string | undefined;
   readonly text: string;
   /** The parsed JSON body, or `undefined` when the body was empty or not JSON. */
-  readonly body: unknown;
+  readonly body: Body;
   readonly transportError: string | undefined;
   /**
    * Each redirect the kit followed to reach this answer, as the absolute URL
@@ -749,7 +757,7 @@ export interface Context {
 }
 
 /** A response body as JSON, or `None` when it is not JSON. */
-const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 
 const headerRecord = (
   headers: Readonly<Record<string, string | undefined>>,
@@ -1234,7 +1242,7 @@ const answerOf = (
     const textResult = yield* Effect.result(response.text);
     const text = Result.isSuccess(textResult) ? textResult.success : "";
     const headersOut = headerRecord(response.headers);
-    const body: unknown = text === "" ? undefined : Option.getOrUndefined(parseJson(text));
+    const body: Body = text === "" ? undefined : Option.getOrUndefined(parseJson(text));
     return {
       probe,
       status: response.status,
@@ -1581,7 +1589,7 @@ const locatedIn = (
  *
  * @internal
  */
-export const resourcesOf = (body: unknown): ReadonlyArray<Located> =>
+export const resourcesOf = (body: Body): ReadonlyArray<Located> =>
   isRecord(body) ? [...locatedIn(body, "data"), ...locatedIn(body, "included")] : [];
 
 /**
@@ -1593,7 +1601,7 @@ export const resourcesOf = (body: unknown): ReadonlyArray<Located> =>
  *
  * @internal
  */
-export const resourceObjectsOf = (body: unknown): ReadonlyArray<Located> => {
+export const resourceObjectsOf = (body: Body): ReadonlyArray<Located> => {
   if (!isRecord(body)) return [];
   const primary = locatedIn(body, "data");
   const included = locatedIn(body, "included");
@@ -1681,7 +1689,7 @@ export const observing =
     );
 
 /** @internal */
-export const errorObjectsOf = (body: unknown): ReadonlyArray<Readonly<Record<string, unknown>>> => {
+export const errorObjectsOf = (body: Body): ReadonlyArray<Readonly<Record<string, unknown>>> => {
   if (!isRecord(body)) return [];
   const errors = body["errors"];
   if (!Array.isArray(errors)) return [];

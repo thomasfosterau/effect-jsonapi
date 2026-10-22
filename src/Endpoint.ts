@@ -3886,12 +3886,12 @@ export const resource = <
 
   // The resource's base meta schema, for resolving `meta` functions.
   const baseMeta = (resource.fields.meta as { readonly schema: Schema.Top }).schema;
-  const resolveMeta = (value: unknown): Schema.Top | undefined =>
-    value === undefined
-      ? undefined
-      : typeof value === "function"
-        ? (value as (base: Schema.Top) => Schema.Top)(baseMeta)
-        : (value as Schema.Top);
+  const resolveMeta = (value: MetaOption<Schema.Top>): Schema.Top =>
+    typeof value === "function"
+      ? // SAFETY: a callable `meta` is read as `MetaOption`'s
+        // `(base) => Schema.Top` member.
+        (value as (base: Schema.Top) => Schema.Top)(baseMeta)
+      : value;
 
   // Emit + captured config for a CRUD op.
   const opConfig = (
@@ -3915,8 +3915,11 @@ export const resource = <
     if ("name" in config) out.name = config.name;
     if ("path" in config) out.path = config.path;
     if (withMeta) {
-      const meta = resolveMeta(pick(config, "meta", gMeta));
-      if (meta !== undefined) out.meta = meta;
+      const meta = pick(config, "meta", gMeta);
+      // SAFETY: `config` is the op's captured config object, whose `meta` is
+      // typed `MetaOption` by its config interface (`GetConfig`, …); the
+      // global `meta` is one too.
+      if (meta !== undefined) out.meta = resolveMeta(meta as MetaOption<Schema.Top>);
     }
     return out;
   };

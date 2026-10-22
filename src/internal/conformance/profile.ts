@@ -132,7 +132,7 @@ const NO_GRAMMAR =
 const learnField = (
   ctx: Context,
   path: string,
-  accepts: (value: unknown) => boolean = () => true,
+  accepts: Predicate.Predicate<unknown> = () => true,
 ) =>
   Effect.gen(function* () {
     const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });

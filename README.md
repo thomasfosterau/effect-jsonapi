@@ -1546,7 +1546,7 @@ const message =
   );
 ```
 
-The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response — a supported entry point, not an internal of the cause-based one — so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/examples/blog/client.ts).
+The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response. `body` is the raw text, an already-parsed `Schema.Json` value or a `Client.ErrorDocument` you already hold, such as `ApiError.toDocument(error)`. It is a supported entry point, not an internal of the cause-based one, so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/examples/blog/client.ts).
 
 ### The client helpers: error responses, hydration, page cursors
 

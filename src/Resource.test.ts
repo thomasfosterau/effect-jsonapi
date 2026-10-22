@@ -360,7 +360,7 @@ describe("Resource relationships", () => {
   });
 
   it("many accepts an empty array but not null", () => {
-    const decode = (data: unknown) =>
+    const decode = (data: Schema.Json) =>
       Schema.decodeUnknownSync(Article)({
         type: "articles",
         id: "1",
@@ -1074,7 +1074,7 @@ describe("Resource.updatePayload tri-state semantics", () => {
       note: Schema.NullOr(Schema.String),
     },
   });
-  const decode = (attributes: unknown) =>
+  const decode = <A>(attributes: A) =>
     Schema.decodeUnknownSync(Widget.updatePayload)({
       data: { type: "widgets", id: "1", attributes },
     });

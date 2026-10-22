@@ -1458,7 +1458,11 @@ describe("Endpoint.delete success override", () => {
 
   // The 204 default and a document success differ only in the response, so the
   // assertions are on the wire: status and content type.
-  const request = async (api: unknown, live: Layer.Layer<any, any, any>, url: string) => {
+  const request = async (
+    api: HttpApi.Constraint,
+    live: Layer.Layer<any, any, any>,
+    url: string,
+  ) => {
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
       Layer.provide(Middleware.layer),
@@ -2120,11 +2124,11 @@ describe("Endpoint.create / Endpoint.update status override", () => {
   // A status is invisible in the decoded schema, so the assertions are on the
   // wire — what a real web handler actually answers.
   const request = async (
-    api: unknown,
+    api: HttpApi.Constraint,
     live: Layer.Layer<any, any, any>,
     method: string,
     url: string,
-    body: unknown,
+    body: Schema.Json,
   ) => {
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
@@ -2283,7 +2287,11 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
   // The router matches a request's `Content-Type` against the payload's
   // registration and answers 415 on a mismatch, so the only honest assertion is
   // a real request at each label.
-  const post = async (api: unknown, live: Layer.Layer<any, any, any>, contentType: string) => {
+  const post = async (
+    api: HttpApi.Constraint,
+    live: Layer.Layer<any, any, any>,
+    contentType: string,
+  ) => {
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
       // the host negotiated §6 upstream; the package's own §5 check would

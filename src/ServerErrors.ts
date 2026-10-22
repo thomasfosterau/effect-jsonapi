@@ -322,22 +322,13 @@ const decodeValidationIssue = Schema.decodeUnknownOption(ValidationIssue);
 const pathSegment = (segment: string | number | { readonly key: unknown }): PropertyKey =>
   Predicate.isObject(segment) ? String(segment.key) : segment;
 
-const validationIssueToError = (issue: unknown): ErrorObject => {
-  const base = { status: "400", code: "validation", title: "Validation failed" } as const;
-  return Option.match(decodeValidationIssue(issue), {
-    onNone: () => ({
-      ...base,
-      detail: SchemaIssue.isIssue(issue) ? formatIssue(issue) : String(issue),
-    }),
-    onSome: (decoded) => {
-      if (Predicate.isString(decoded)) return { ...base, detail: decoded };
-      const pointer = pathToJsonPointer([
-        ...ATTRIBUTES_PREFIX,
-        ...(decoded.path ?? []).map(pathSegment),
-      ]);
-      return { ...base, detail: decoded.message, source: { pointer } };
-    },
-  });
+const VALIDATION = { status: "400", code: "validation", title: "Validation failed" } as const;
+
+/** A decoded {@link ValidationIssue} as its error object. */
+const validationIssueToError = (issue: typeof ValidationIssue.Type): ErrorObject => {
+  if (Predicate.isString(issue)) return { ...VALIDATION, detail: issue };
+  const pointer = pathToJsonPointer([...ATTRIBUTES_PREFIX, ...(issue.path ?? []).map(pathSegment)]);
+  return { ...VALIDATION, detail: issue.message, source: { pointer } };
 };
 
 /** What an `ApiError.make` class carries statically: the wire schema and the status. */
@@ -362,7 +353,8 @@ const apiErrorToJsonapi = (error: { readonly constructor: ApiErrorConstructor })
   });
 
 /**
- * Maps a tagged failure to its {@link JsonapiError}, per the contract code
+ * Maps a tagged failure (the `cause` a handler failed with) to its
+ * {@link JsonapiError}, per the contract code
  * taxonomy:
  *
  * | Failure                          | Status | `code`               |
@@ -406,7 +398,7 @@ const apiErrorToJsonapi = (error: { readonly constructor: ApiErrorConstructor })
  * @since 0.16.0
  * @category utils
  */
-export const fromTaggedError: (error: unknown) => Option.Option<JsonapiError> =
+export const fromTaggedError: (cause: unknown) => Option.Option<JsonapiError> =
   Match.type<unknown>().pipe(
     Match.when(Match.instanceOf(JsonapiError), (error) => Option.some(error)),
     Match.when(Match.instanceOf(Unauthorized), (error) =>
@@ -465,7 +457,20 @@ export const fromTaggedError: (error: unknown) => Option.Option<JsonapiError> =
     ),
     Match.when(Match.instanceOf(ValidationFailure), (error) =>
       Option.some(
-        new JsonapiError({ status: 400, errors: error.issues.map(validationIssueToError) }),
+        new JsonapiError({
+          status: 400,
+          // Each issue is decoded here, at the seam; one that is not a
+          // `ValidationIssue` keeps only its message, with no pointer.
+          errors: error.issues.map((issue) =>
+            Option.match(decodeValidationIssue(issue), {
+              onNone: () => ({
+                ...VALIDATION,
+                detail: SchemaIssue.isIssue(issue) ? formatIssue(issue) : String(issue),
+              }),
+              onSome: validationIssueToError,
+            }),
+          ),
+        }),
       ),
     ),
     // A redirect has no JSON:API rendering of its own: at this seam it is the

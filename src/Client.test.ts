@@ -340,7 +340,9 @@ describe("Client.decodeErrorDocument", () => {
       ["a number", 502],
       ["a function", () => {}],
     ])("%s", (_name, body) => {
-      expect(Option.isNone(decodeErrorDocument(body))).toBe(true);
+      // Outside the declared input: what an untyped (JavaScript) caller can
+      // still hand it. It must degrade, not throw.
+      expect(Option.isNone(decodeErrorDocument(body as never))).toBe(true);
     });
 
     it("a hostile value whose own accessors throw", () => {

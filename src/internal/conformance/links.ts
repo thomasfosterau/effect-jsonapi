@@ -47,6 +47,7 @@ import {
   identity,
   isRecord,
   noProbeReason,
+  type Body,
   type Observation,
   type Outcome,
   pass,
@@ -253,8 +254,7 @@ const claimOf = (relationship: JsonObject): Claim => {
 };
 
 /** A document's resource objects, each named and with where it sits. */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-const carriersIn = (body: unknown) =>
+const carriersIn = (body: Body) =>
   Arr.map(resourcesOf(body), ({ pointer, resource }) => ({
     pointer,
     resource,
@@ -262,8 +262,7 @@ const carriersIn = (body: unknown) =>
   }));
 
 /** Every resource object's `self` link in a document. */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-const selfLinks = (from: Target, body: unknown): ReadonlyArray<Found> =>
+const selfLinks = (from: Target, body: Body): ReadonlyArray<Found> =>
   Arr.map(carriersIn(body), ({ pointer, resource, label }) => ({
     where: `the \`self\` link of ${label} (in ${from.url}, at ${pointer})`,
     of: label,
@@ -289,8 +288,7 @@ const relationshipLinks =
     name: "self" | "related",
     claim: (relationship: JsonObject, from: Target, ctx: Context) => Option.Option<Claim>,
   ) =>
-  // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-  (from: Target, body: unknown, ctx: Context): ReadonlyArray<Found> =>
+  (from: Target, body: Body, ctx: Context): ReadonlyArray<Found> =>
     Arr.flatMap(carriersIn(body), ({ pointer, resource, label }) => {
       const relationships = resource["relationships"];
       if (!isRecord(relationships)) return [];
