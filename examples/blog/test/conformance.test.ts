@@ -22,13 +22,11 @@ import { BlogLive, discardArticle } from "../handlers.js";
  * `onResource: Handlers.project(query.fields)` and stamp `jsonapi:
  * Document.v1_1` on every `Handlers.data` / `collection` / `linkage` document
  * (the `Atomic.results` answer carries none). The write rules have been clean
- * since #428, which answers a resource object of another `type` with 409, but
- * for one: `Endpoint.create` drops a client-generated id and answers 201 under
- * an id of its own, where JSON:API wants a 403 (#450).
+ * since #428, which answers a resource object of another `type` with 409, and
+ * #450, which answers a client-generated id `Endpoint.create` does not
+ * support with 403.
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
-  ["spec/status/create-client-id-unsupported", "#450"],
-];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 
 /**
  * The write fixture: a payload the blog accepts, an update it must apply, and

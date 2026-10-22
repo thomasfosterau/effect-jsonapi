@@ -171,19 +171,29 @@ describe("Resource.createPayload", () => {
     expect(decoded.data.lid).toBe("temp-1");
   });
 
-  it("rejects a payload with a server-assigned id", () => {
+  it("rejects a payload with a client-generated id at /data/id, rather than dropping it (#450)", () => {
+    const result = Schema.decodeUnknownResult(Article.createPayload)({
+      data: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+      },
+    });
+    expect(issuesOf(result)).toEqual([
+      { path: ["data", "id"], message: "Client-generated ids are not supported by this endpoint" },
+    ]);
+  });
+
+  it("refuses to encode a resource object carrying an id", () => {
     expect(() =>
-      Schema.decodeUnknownSync(Article.createPayload)(
-        {
-          data: {
-            type: "articles",
-            id: "1",
-            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
-          },
+      Schema.encodeUnknownSync(Article.createPayload)({
+        data: {
+          type: "articles",
+          id: "1",
+          attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01") },
         },
-        { onExcessProperty: "error" },
-      ),
-    ).toThrow();
+      }),
+    ).toThrow("Client-generated ids are not supported by this endpoint");
   });
 
   it("does not expose an id key in the payload type", () => {

@@ -170,6 +170,7 @@ export default defineConfig({
           "src/internal/includeGraph.ts",
           "src/internal/media.ts",
           "src/internal/operators.ts",
+          "src/internal/refusedClientId.ts",
           "src/internal/schemaExt.ts",
         ],
         rules: {

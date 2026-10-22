@@ -10,7 +10,7 @@
  *   - `localIdentifier` — the `{ type, lid }` schema for resources the client
  *     is creating (no server-assigned id yet); `lidRef(lid)` makes values
  *   - `createPayload` — `{ data: { type, lid?, attributes, relationships } }`
- *     (required `one` relationships must be present)
+ *     (required `one` relationships must be present; a `data.id` is rejected)
  *   - `updatePayload` — `{ data: { type, id, attributes? (partial), relationships? } }`
  *   - `document(...)` / `collection(...)` — top-level document schemas whose
  *     `included` union is derived from the relationship graph
@@ -58,6 +58,7 @@ import {
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js";
 import * as Filter from "./Filter.js";
 import { resolveOperators } from "./internal/operators.js";
+import { refusingClientId } from "./internal/refusedClientId.js";
 import {
   closedStruct,
   defaultMaxUndeclaredMemberErrors,
@@ -1019,8 +1020,10 @@ export type UpdateRelationshipFields<Rels extends Relationships> = {
 
 /**
  * The request body schema for creating a resource: the client supplies
- * attributes (and relationships and optionally a local id `lid`) but never a
- * server-assigned `id`.
+ * attributes (and relationships and optionally a local id `lid`) but never an
+ * `id`. A client-generated `data.id` is rejected at `/data/id`, which
+ * `Middleware.SchemaErrorsLive` answers with 403 Forbidden (§Client-Generated
+ * IDs, #450).
  *
  * Required (`one`) relationships must be present; `paginated` relationships
  * cannot appear.
@@ -1221,11 +1224,14 @@ export interface Resource<
   readonly maxUndeclaredMemberErrors: number;
   /**
    * Request body schema for creating this resource (no `id`, optional `lid`,
-   * required `one` relationships). Its `attributes` and `relationships`
-   * members reject, when decoding and when encoding, every member they don't
-   * declare: the first `maxUndeclaredMemberErrors` each as an "Expected no
-   * excess property" issue at that member, any more as one issue at the
-   * `attributes` / `relationships` member saying how many.
+   * required `one` relationships). A client-generated `data.id` is rejected
+   * at `/data/id`, when decoding and when encoding, rather than dropped:
+   * `Middleware.SchemaErrorsLive` answers it with 403 Forbidden (#450). Its
+   * `attributes` and `relationships` members reject, when decoding and when
+   * encoding, every member they don't declare: the first
+   * `maxUndeclaredMemberErrors` each as an "Expected no excess property"
+   * issue at that member, any more as one issue at the `attributes` /
+   * `relationships` member saying how many.
    */
   readonly createPayload: CreatePayload<Type, Attributes, Rels>;
   /**
@@ -2879,15 +2885,20 @@ export const make = <
     maxUndeclaredMemberErrors,
   );
 
+  // A `data.id` is a client-generated id, which this payload does not
+  // support: rejected at `/data/id` rather than dropped, and answered 403 by
+  // `Middleware.SchemaErrorsLive` (#450).
   const createPayload = Schema.Struct({
-    data: Schema.Struct({
-      type: Schema.tag(type),
-      lid: Schema.optionalKey(Schema.String),
-      attributes: createAttributes,
-      relationships: hasRequiredRelationship
-        ? createRelationshipsStruct
-        : Schema.optionalKey(createRelationshipsStruct),
-    }),
+    data: refusingClientId(
+      Schema.Struct({
+        type: Schema.tag(type),
+        lid: Schema.optionalKey(Schema.String),
+        attributes: createAttributes,
+        relationships: hasRequiredRelationship
+          ? createRelationshipsStruct
+          : Schema.optionalKey(createRelationshipsStruct),
+      }),
+    ),
   }) as unknown as CreatePayload<Type, Attributes, Rels>;
 
   // Update payload relationships: every non-`paginated` relationship, optional.
