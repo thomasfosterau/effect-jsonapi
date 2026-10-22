@@ -23,7 +23,9 @@
  * `Content-Type` carries a disallowed parameter is `415`. A read that
  * explicitly refuses JSON:API (`q=0`) and names nothing else acceptable falls
  * through by default; `onExplicitRefusal: "notAcceptable"` answers it `406`
- * instead ({@link NOT_ACCEPTABLE_REFUSED}). The rules are
+ * instead ({@link NOT_ACCEPTABLE_REFUSED}). A malformed `q` (outside the
+ * RFC 9110 `qvalue` grammar) is never that refusal: it counts as the default
+ * weight `1`. The rules are
  * `Middleware`'s (the same parser); what this module adds is the *winning*
  * comparison against the other media types and the path test, which a
  * §5-only check has no need of.
@@ -319,10 +321,10 @@ interface AcceptEntry {
 const ALLOWED_PARAMETERS: ReadonlySet<string> = new Set(["ext", "profile"]);
 
 /**
- * The entries of an `Accept` header. An unparseable `q` is the default
- * weight here (the client named the type; a malformed weight is not a
- * refusal), where `Middleware`'s §5 check treats it as one — the parser
- * reports the distinction and each caller decides.
+ * The entries of an `Accept` header. A malformed `q` is the default
+ * weight (the client named the type; a malformed weight is not a refusal),
+ * as in `Middleware`'s §5 check, so the same header gets the same verdict
+ * under either deployment shape.
  */
 const acceptEntries = (header: string | null): ReadonlyArray<AcceptEntry> =>
   (header ?? "")

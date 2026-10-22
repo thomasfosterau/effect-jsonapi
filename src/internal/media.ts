@@ -116,10 +116,10 @@ const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
  *
  * `weight` defaults to `1` (RFC 9110 §12.4.2) when the entry carries no `q`,
  * and is `undefined` when the entry carries a malformed `q` — one outside the
- * `qvalue` grammar (`0` to `1`, at most three decimals). The two callers
- * disagree on what a malformed weight means (the §5 middleware treats it as a
- * refusal, a host's representation negotiation as the default weight), so the
- * parser reports it rather than deciding.
+ * `qvalue` grammar (`0` to `1`, at most three decimals). Both callers (the
+ * §5 middleware and a host's representation negotiation) read a malformed
+ * weight as the default `1` — never a refusal — but the parser reports it
+ * rather than deciding, so a `q=0` refusal stays distinguishable from it.
  *
  * @internal
  */
