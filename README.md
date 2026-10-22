@@ -1986,6 +1986,7 @@ const query2 = ListArticles2.pipe(
 | Resource objects have `type` and `id`; ids are not interchangeable across types | `Resource` always emits the type tag and a per-type branded id |
 | Create requests may omit `id` and send `lid` | `createPayload` derivation |
 | Update requests require `id`, attributes are partial | `updatePayload` derivation |
+| 409 Conflict for a create or update whose resource object's `type` the endpoint does not serve | `Endpoint.create` / `Endpoint.update` declare the type they serve, and `Middleware.SchemaErrorsLive` answers a string `data.type` naming another with a 409 whose `source.pointer` is `/data/type`; a `type` missing or not a string stays a 400 ([#428](https://github.com/thomasfosterau/effect-jsonapi/issues/428)). An update's `data.id` that differs from `:id` is the handler's 409 (`ResourceHandlers.make` answers it) |
 | Relationships hold at least one of `data` / `links` / `meta` | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related` |
 | Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
 | Related resource endpoints (`related` links) | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many |

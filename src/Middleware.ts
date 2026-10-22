@@ -22,7 +22,10 @@
  *     `pointer` (`/data/attributes/title`) or `header`. HttpApi decodes each
  *     request part with the default parse options (`errors: "first"`), so a
  *     part yields one error object — except the `filter` family, whose codec
- *     reports every offending key together. It also rejects, with a 400
+ *     reports every offending key together. A create or update whose
+ *     resource object names a `type` the endpoint does not serve is the
+ *     exception, answered with 409 Conflict naming `/data/type`
+ *     (§Creating Resources; §Updating Resources). It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z and that neither the specification defines nor the endpoint
  *     declares (JSON:API 1.1 §Query Parameters), and a parameter of one of
@@ -77,6 +80,7 @@
  */
 import {
   Array as Arr,
+  Context,
   Effect,
   ErrorReporter,
   Layer,
@@ -93,6 +97,7 @@ import type { HttpApiEndpoint } from "effect/http-api";
 import { HttpApiError, HttpApiMiddleware } from "effect/http-api";
 import {
   BadRequest,
+  Conflict,
   NotAcceptable,
   toDocument,
   UnsupportedMediaType,
@@ -103,6 +108,7 @@ import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
+import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
 import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
 import { wireLeaves } from "./internal/wireNames.js";
 import {
@@ -1076,15 +1082,78 @@ const badRequestResponse = (part: RequestPart, document: typeof WireDocument.Typ
     Effect.withSpan(Span.schemaError),
   );
 
-const transformSchemaError = (error: HttpApiError.HttpApiSchemaError) =>
-  isResponsePart(error.kind)
-    ? Effect.die(
-        new ResponseEncodeError({
-          message: `The handler's response failed to encode against its endpoint's schema (${error.kind})`,
-          cause: error,
-        }),
-      )
-    : badRequestResponse(error.kind, schemaErrorDocument(error.kind, error.cause));
+// The 409 a create or update answers a resource object of another `type`
+// with (§Creating Resources → 409 Conflict: "A server MUST return 409 Conflict
+// when processing a POST request in which the resource object's type is not
+// among the type(s) that constitute the collection represented by the
+// endpoint"; §Updating Resources → 409 Conflict likewise for a PATCH), under
+// the same span as the 400 it replaces.
+const conflictResponse = (type: string, served: ReadonlyArray<string>) =>
+  Effect.succeed(
+    HttpServerResponse.jsonUnsafe(
+      {
+        errors: [
+          {
+            status: String(Conflict.status),
+            code: Conflict.code,
+            title: Conflict.title,
+            detail:
+              `Resource object type "${type}" is not served by this endpoint ` +
+              `(expected ${served.map((name) => `"${name}"`).join(" or ")})`,
+            source: { pointer: "/data/type" },
+          },
+        ],
+      },
+      { status: Conflict.status, contentType: MEDIA_TYPE },
+    ),
+  ).pipe(
+    Effect.tap(() => Effect.annotateCurrentSpan({ "jsonapi.request_part": "Payload" })),
+    Effect.withSpan(Span.schemaError),
+  );
+
+// A payload rejected at `/data/type` on an endpoint that declares the types it
+// serves (`Endpoint.create` / `Endpoint.update`), whose body sent a string
+// `type` none of them names: the `type` of the resource object that conflicts.
+// Any other failure — a `type` missing or not a string, a body that is not
+// JSON — is a malformed document, the 400.
+const payloadConflict = Effect.fnUntraced(function* (
+  endpoint: HttpApiEndpoint.Top,
+  error: Schema.SchemaError,
+) {
+  const served = Context.getOption(endpoint.annotations, ServedTypes);
+  if (Option.isNone(served) || !wireLeaves(error.issue).some((leaf) => isTypePath(leaf.wire))) {
+    return Option.none<{ readonly type: string; readonly served: ReadonlyArray<string> }>();
+  }
+  const request = yield* HttpServerRequest;
+  // The body HttpApi decoded, cached on the request, so this reads no stream.
+  const body = yield* Effect.option(request.text);
+  return Option.map(
+    Option.flatMap(body, (text) => conflictingType(text, served.value)),
+    (type) => ({ type, served: served.value }),
+  );
+});
+
+const transformSchemaError = (
+  endpoint: HttpApiEndpoint.Top,
+  error: HttpApiError.HttpApiSchemaError,
+) => {
+  const { kind } = error;
+  if (isResponsePart(kind)) {
+    return Effect.die(
+      new ResponseEncodeError({
+        message: `The handler's response failed to encode against its endpoint's schema (${kind})`,
+        cause: error,
+      }),
+    );
+  }
+  const badRequest = badRequestResponse(kind, schemaErrorDocument(kind, error.cause));
+  if (kind !== "Payload") return badRequest;
+  return Effect.flatMap(payloadConflict(endpoint, error.cause), (conflict) =>
+    Option.isSome(conflict)
+      ? conflictResponse(conflict.value.type, conflict.value.served)
+      : badRequest,
+  );
+};
 
 // The encoded success as it stands, or the defect a full-linkage violation in
 // it dies with. The message is the builders' (`Handlers.buildIncluded`), with
@@ -1195,7 +1264,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
         checkLinkage ? Effect.flatMap(httpEffect, checkWireLinkage) : httpEffect,
         (error) =>
           HttpApiError.HttpApiSchemaError.is(error)
-            ? transformSchemaError(error)
+            ? transformSchemaError(endpoint, error)
             : Effect.fail(error),
       );
     }),
@@ -1209,6 +1278,20 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * request part under HttpApi's `errors: "first"`, every offending key for the
  * `filter` family), each with a `detail` and a `source` naming the offending
  * parameter, header or body member.
+ *
+ * One payload failure is not a 400: on `Endpoint.create` and
+ * `Endpoint.update`, a resource object whose `data.type` is a string naming a
+ * type the endpoint does not serve (`{ "data": { "type": "people", … } }` to
+ * `POST /articles`) is answered with JSON:API's 409 Conflict, an
+ * `ApiError.Conflict`-shaped error object whose `source.pointer` is
+ * `/data/type` (§Creating Resources → 409 Conflict; §Updating Resources →
+ * 409 Conflict). A `type` that is missing or not a string stays the 400, as
+ * does every other malformed member. It applies only where the payload's
+ * failure is at `/data/type`, so a flat command-input payload
+ * (`resource.createInput`) and a relationship endpoint's linkage keep their
+ * 400. The 409 is not declared among the endpoint's errors, so a derived
+ * client fails with the raw `HttpClientError` carrying the response, or an
+ * `ErrorResponse` under `Client.make`'s `decodeErrors`.
  *
  * It also answers a query parameter whose family base name is made only of
  * a-z, and which the endpoint neither declares nor the specification defines

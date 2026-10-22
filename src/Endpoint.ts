@@ -89,6 +89,7 @@ import { isSurface } from "./Include.js";
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
 import { closedStruct, defaultMaxUndeclaredMemberErrors } from "./internal/schemaExt.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { ServedTypes } from "./internal/servedTypes.js";
 import { ContentNegotiation, CreatedLocation, SchemaErrors } from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
@@ -862,6 +863,11 @@ export const list = <
  * and a create answering another `status` is left untouched. The middleware
  * sits inside `Idempotency.Middleware`, so a replay keeps the header.
  *
+ * A resource object whose `data.type` names a type other than the resource's
+ * is answered with 409 Conflict, `source.pointer` `/data/type` (§Creating
+ * Resources → 409 Conflict), by the attached `Middleware.SchemaErrors`; a
+ * `type` that is missing or not a string is the 400 of any malformed payload.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -1004,7 +1010,9 @@ export const create = <
       .middleware(SchemaErrors)
       // Before `Idempotency.applied`, so inside its middleware: the recorded
       // 201 carries `Location`, and a replay returns it.
-      .middleware(CreatedLocation),
+      .middleware(CreatedLocation)
+      // `SchemaErrors` answers a `data.type` of another type with 409 (#428).
+      .annotate(ServedTypes, [resource.type]),
     options?.idempotency,
   );
 
@@ -1035,6 +1043,12 @@ export const create = <
  * Pass `payloadMediaType` to register the request body under a media type other
  * than `application/vnd.api+json`, for a host that enforces §6 itself and hands
  * the router a relabelled request — see {@link create}.
+ *
+ * A resource object whose `data.type` names a type other than the resource's
+ * is answered with 409 Conflict naming `/data/type` (§Updating Resources → 409
+ * Conflict), as {@link create} describes. A `data.id` that differs from `:id`
+ * is the handler's to refuse with `ApiError.Conflict`, as
+ * `ResourceHandlers.make` does.
  *
  * @example
  * ```ts
@@ -1151,7 +1165,9 @@ export const update = <
       },
     )
       .middleware(ContentNegotiation)
-      .middleware(SchemaErrors),
+      .middleware(SchemaErrors)
+      // `SchemaErrors` answers a `data.type` of another type with 409 (#428).
+      .annotate(ServedTypes, [resource.type]),
     options?.idempotency,
   );
 
