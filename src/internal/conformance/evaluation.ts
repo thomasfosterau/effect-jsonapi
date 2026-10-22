@@ -15,13 +15,18 @@
  * The happy path proves little: a server evaluating two-valued passes it. The
  * trees the rule sends are the ones that tell three-valued from two-valued
  * evaluation, so each needs an attribute that is NULL on some resources of the
- * sample and not on others — `ne` over NULL (F-CMP-1), `gte` in the domain
- * of the field's JSON type (F-CMP-2, F-ORD-1), `nin` over NULL (F-IN-2 /
- * F-IN-3), `isnull` (F-ISNULL-1 / F-ISNULL-2), excluded middle (F-CONS-1) —
- * plus the empty groups (F-AND-2), which need no field at all. A sample that
- * cannot discriminate says so rather than passing. A filter the server refuses
- * (a 400: the attribute may not be filterable, or not with that operator)
- * decides nothing here; the profile's rejection rules judge refusals.
+ * sample and not on others — `ne` over NULL (F-CMP-1), `lt` / `lte` / `gt` /
+ * `gte` in the domain of the field's JSON type (F-CMP-2, F-ORD-1), `nin` over
+ * NULL (F-IN-2 / F-IN-3), `isnull` (F-ISNULL-1 / F-ISNULL-2), excluded middle
+ * (F-CONS-1) — plus the empty groups (F-AND-2), which need no field at all.
+ * Beside them (#433): the ordering operators on an attribute the sample never
+ * shows NULL, with a pivot that splits it (F-CMP-2, F-ORD-1) and `isnull=true`
+ * as the constant F-ISNULL-4 makes it; a to-one relationship field, valued by
+ * the related id its linkage shows (F-EVAL-4, F-ORD-5); and a filter beside a
+ * sparse fieldset that leaves the filtered field out (F-EVAL-6). A sample that
+ * cannot discriminate one of these says so rather than passing. A filter the
+ * server refuses (a 400: the field may not be filterable, or not with that
+ * operator) decides nothing here; the profile's rejection rules judge refusals.
  *
  * @since 0.17.0
  * @internal
@@ -32,6 +37,7 @@ import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as Order from "effect/Order";
 import * as Predicate from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
@@ -39,6 +45,7 @@ import type * as Filter from "../../Filter.js";
 import { PROFILE_URI } from "../../Filter.js";
 import {
   type Context,
+  type Discovered,
   finding,
   type Finding,
   identity,
@@ -68,7 +75,7 @@ import {
   stepTo,
   type Target,
 } from "./crawl.js";
-import { isJson, type Json, matches, NULL, type Null, type Row } from "./semantics.js";
+import { compare, isJson, type Json, matches, NULL, type Null, type Row } from "./semantics.js";
 
 const rule: Rule = {
   id: "profile/filter/evaluation",
@@ -78,7 +85,7 @@ const rule: Rule = {
     "https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md#6-semantics",
   level: "MUST",
   requirement:
-    "A filtered collection MUST hold exactly the resources whose filter tree evaluates to TRUE under §6, read from each resource's JSON representation: every comparison against NULL is UNKNOWN (F-CMP-1), `nin` is the negation of `in` (F-IN-2, F-IN-3), `isnull` is total (F-ISNULL-1, F-ISNULL-2), `Or(x, Not(x))` misses the NULLs (F-CONS-1), `And([])` matches every resource and `Or([])` none (F-AND-2), and FALSE and UNKNOWN both exclude (F-EVAL-3).",
+    "A filtered collection MUST hold exactly the resources whose filter tree evaluates to TRUE under §6, read from each resource's complete JSON representation whatever sparse fieldset the request names (F-EVAL-6), a to-one relationship valued by its related id (F-EVAL-4, F-ORD-5): every comparison against NULL is UNKNOWN (F-CMP-1), `lt` / `lte` / `gt` / `gte` order a value in the domain of its JSON type (F-CMP-2, F-ORD-1), `nin` is the negation of `in` (F-IN-2, F-IN-3), `isnull` is total (F-ISNULL-1, F-ISNULL-2, F-ISNULL-4), `Or(x, Not(x))` misses the NULLs (F-CONS-1), `And([])` matches every resource and `Or([])` none (F-AND-2), and FALSE and UNKNOWN both exclude (F-EVAL-3).",
 };
 
 /** The pages one walk of a collection may fetch before it is left undecided. */
@@ -87,7 +94,7 @@ const PAGE_BUDGET = 20;
 /** The requests one run of the rule may make, over every collection it judges. */
 const REQUEST_BUDGET = 200;
 
-/** The attributes tried per collection before its NULL cases are left undecided. */
+/** The fields one family of trees tries, per collection, before it is left undecided. */
 const FIELD_CAP = 3;
 
 /** A resource object a document carries, as the kit reads it. */
@@ -227,30 +234,66 @@ const walk = (io: Io, baseUrl: string, url: string): Effect.Effect<Walked> => {
 /** A resource of the unfiltered collection, as the oracle reads it. */
 interface Candidate {
   readonly key: string;
+  readonly type: string;
   readonly label: string;
+  /** Its attributes, and the to-one relationships whose linkage it shows. */
   readonly row: Row;
   /** Every attribute member it carries. */
   readonly members: ReadonlyArray<string>;
   /** The members whose value is neither a JSON scalar nor `null` (§2.3: not filterable). */
   readonly composite: ReadonlyArray<string>;
+  /** The relationships whose `data` is a resource identifier or `null`: to-one linkage. */
+  readonly toOne: ReadonlyArray<string>;
 }
 
-/** A resource's attributes as §6.1 F-EVAL-4 reads them: `null` is NULL. */
+/**
+ * A relationship's value as §6.1 F-EVAL-4 reads it — the related id, a JSON
+ * string, or NULL for empty linkage (`data: null`) — or none when the
+ * relationship shows no to-one linkage (links only, or a to-many array), so the
+ * kit cannot know its value.
+ */
+const linkageOf = (relationship: ResourceObject): Option.Option<Json | Null> => {
+  if (!("data" in relationship)) return Option.none();
+  const data = relationship["data"];
+  if (data === null) return Option.some(NULL);
+  return isRecord(data) && Predicate.isString(data["id"]) ? Option.some(data["id"]) : Option.none();
+};
+
+/**
+ * A resource's attributes as §6.1 F-EVAL-4 reads them, `null` as NULL, beside
+ * its to-one relationships, each valued by the related id. A relationship
+ * named like an attribute (which JSON:API forbids) is left out.
+ */
 const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
   Option.map(Option.fromUndefinedOr(identity(resource)), (key) => {
     const attributes = isRecord(resource["attributes"]) ? resource["attributes"] : {};
+    const relationships = Rec.filterMap(
+      isRecord(resource["relationships"]) ? resource["relationships"] : {},
+      (relationship, name): Result.Result<Json | Null, void> =>
+        name in attributes || !isRecord(relationship)
+          ? Result.failVoid
+          : Option.match(linkageOf(relationship), {
+              onNone: () => Result.failVoid,
+              onSome: Result.succeed,
+            }),
+    );
     return {
       key,
+      type: Predicate.isString(resource["type"]) ? resource["type"] : "",
       label: resourceLabel(resource),
-      row: Rec.filterMap(attributes, (value): Result.Result<Json | Null, void> =>
-        value === null
-          ? Result.succeed(NULL)
-          : isJson(value)
-            ? Result.succeed(value)
-            : Result.failVoid,
-      ),
+      row: {
+        ...Rec.filterMap(attributes, (value): Result.Result<Json | Null, void> =>
+          value === null
+            ? Result.succeed(NULL)
+            : isJson(value)
+              ? Result.succeed(value)
+              : Result.failVoid,
+        ),
+        ...relationships,
+      },
       members: Rec.keys(attributes),
       composite: Rec.keys(Rec.filter(attributes, (value) => value !== null && !isJson(value))),
+      toOne: Rec.keys(relationships),
     };
   });
 
@@ -268,82 +311,190 @@ const spell = (value: Json): Option.Option<string> => {
 };
 
 /**
- * An attribute the sample can discriminate three-valued evaluation on: NULL
- * (or absent, F-EVAL-5) on at least one candidate and a JSON scalar on another,
- * every non-NULL value of one JSON type — the domain F-ORD-1 compares in,
- * inferred from what the server answered — and up to two literals to filter
- * by, each one the sample carries.
+ * A field the sample can discriminate on: every non-NULL value of one JSON
+ * type — the domain F-ORD-1 compares in, inferred from what the server
+ * answered — up to two literals to filter by, each one the sample carries, and
+ * a pivot among them that splits the sample for the ordering operators.
+ *
+ * - An attribute that is `nullable` is NULL (or absent, F-EVAL-5) on at least
+ *   one candidate and a JSON scalar on another: the three-valued cases.
+ * - An attribute that is not is a JSON scalar on every candidate, with two or
+ *   more distinct values: the ordering operators' two-valued cases (F-CMP-2).
+ * - A relationship is a to-one relationship every candidate shows linkage for
+ *   (F-EVAL-4), with two or more distinct ids unless it is `nullable`.
  */
 interface Discriminating {
   readonly field: string;
+  readonly nullable: boolean;
   readonly literals: Arr.NonEmptyReadonlyArray<Json>;
+  readonly pivot: Json;
 }
 
 /** The JSON type of a non-NULL value: F-ORD-1's domain. */
 const domainOf = (value: Json): string =>
   Predicate.isString(value) ? "string" : Predicate.isNumber(value) ? "number" : "boolean";
 
-const discriminatingOn =
-  (candidates: ReadonlyArray<Candidate>) =>
-  (field: string): Option.Option<Discriminating> => {
-    if (Arr.some(candidates, ({ composite }) => Arr.contains(composite, field)))
-      return Option.none();
-    const present = Arr.filterMap(candidates, ({ row }) => {
-      const value = row[field];
-      return value === undefined || value === NULL ? Result.failVoid : Result.succeed(value);
-    });
-    const domains = Arr.dedupe(Arr.map(present, domainOf));
-    const literals = Arr.take(
-      Arr.filter(Arr.dedupe(present), (value) => Option.isSome(spell(value))),
-      2,
-    );
-    return Arr.length(present) < Arr.length(candidates) &&
-      Arr.length(domains) === 1 &&
-      Arr.isReadonlyArrayNonEmpty(literals)
-      ? Option.some({ field, literals })
-      : Option.none();
-  };
+/** F-ORD-1's order on two values of one JSON type. */
+const jsonOrder: Order.Order<Json> = (a, b) => {
+  const order = compare(a, b);
+  return order < 0 ? -1 : order > 0 ? 1 : 0;
+};
 
-const discriminating = (candidates: ReadonlyArray<Candidate>): ReadonlyArray<Discriminating> =>
+/** A field's non-NULL values across the candidates. */
+const presentIn = (candidates: ReadonlyArray<Candidate>, field: string): ReadonlyArray<Json> =>
+  Arr.filterMap(candidates, ({ row }) => {
+    const value = row[field];
+    return value === undefined || value === NULL ? Result.failVoid : Result.succeed(value);
+  });
+
+/**
+ * The field as {@link Discriminating}, or none when its values do
+ * not discriminate: of more than one JSON type, or none the kit can spell, or
+ * never NULL with fewer than two distinct values.
+ */
+const discriminatingOf = (
+  candidates: ReadonlyArray<Candidate>,
+  field: string,
+): Option.Option<Discriminating> => {
+  const present = presentIn(candidates, field);
+  const spellable = Arr.filter(Arr.dedupe(present), (value) => Option.isSome(spell(value)));
+  const nullable = Arr.length(present) < Arr.length(candidates);
+  if (
+    Arr.length(Arr.dedupe(Arr.map(present, domainOf))) !== 1 ||
+    !Arr.isReadonlyArrayNonEmpty(spellable) ||
+    (!nullable && Arr.length(spellable) < 2)
+  )
+    return Option.none();
+  // F-ORD-1's order; `compare` cannot throw, the values sharing one JSON type.
+  const ordered = Arr.sort(spellable, jsonOrder);
+  return Option.some({
+    field,
+    nullable,
+    literals: [Arr.headNonEmpty(spellable), ...Arr.take(Arr.tailNonEmpty(spellable), 1)],
+    pivot: ordered[Math.floor(Arr.length(ordered) / 2)] ?? Arr.headNonEmpty(spellable),
+  });
+};
+
+/** Every attribute member some candidate carries, never one composite on any (§2.3). */
+const attributeFields = (candidates: ReadonlyArray<Candidate>): ReadonlyArray<Discriminating> =>
   Arr.getSomes(
     Arr.map(
-      Arr.dedupe(Arr.flatMap(candidates, ({ members }) => members)),
-      discriminatingOn(candidates),
+      Arr.filter(
+        Arr.dedupe(Arr.flatMap(candidates, ({ members }) => members)),
+        (field) => !Arr.some(candidates, ({ composite }) => Arr.contains(composite, field)),
+      ),
+      (field) => discriminatingOf(candidates, field),
     ),
   );
+
+/**
+ * Every to-one relationship each candidate shows linkage for (F-EVAL-4), those
+ * with empty linkage on some candidates first: they decide the NULL cases too.
+ */
+const relationshipFields = (
+  candidates: ReadonlyArray<Candidate>,
+): ReadonlyArray<Discriminating> => {
+  const fields = Arr.getSomes(
+    Arr.map(
+      Arr.filter(Arr.dedupe(Arr.flatMap(candidates, ({ toOne }) => toOne)), (field) =>
+        Arr.every(candidates, ({ toOne }) => Arr.contains(toOne, field)),
+      ),
+      (field) => discriminatingOf(candidates, field),
+    ),
+  );
+  return [
+    ...Arr.filter(fields, (field) => field.nullable),
+    ...Arr.filter(fields, (field) => !field.nullable),
+  ];
+};
 
 // ---------------------------------------------------------------------------
 // The trees, and their wire spelling
 // ---------------------------------------------------------------------------
 
+/** A sparse fieldset sent beside the filter: `fields[type]=names` (F-EVAL-6). */
+interface Fieldset {
+  readonly type: string;
+  readonly names: string;
+}
+
 interface Probe {
   /** The §6 rules the tree discriminates. */
   readonly rules: string;
   readonly node: Tree;
+  readonly fieldset: Option.Option<Fieldset>;
 }
 
-const fieldProbes = ({ field, literals }: Discriminating): ReadonlyArray<Probe> => {
+const probe = (rules: string, node: Tree): Probe => ({ rules, node, fieldset: Option.none() });
+
+/** The NULL cases over an attribute NULL on some candidates and not on others. */
+const nullableProbes = ({ field, literals, pivot }: Discriminating): ReadonlyArray<Probe> => {
   const value = Arr.headNonEmpty(literals);
   const eq: Tree = { _tag: "Compare", op: "eq", field, value };
+  const ordering = "F-CMP-1 / F-CMP-2 / F-ORD-1";
   return [
-    { rules: "F-CMP-1", node: { _tag: "Compare", op: "ne", field, value } },
-    { rules: "F-CMP-1 / F-CMP-2 / F-ORD-1", node: { _tag: "Compare", op: "gte", field, value } },
-    {
-      rules: "F-IN-2 / F-IN-3",
-      node: { _tag: "NotIn", field, values: [value, ...Arr.tailNonEmpty(literals)] },
-    },
-    { rules: "F-ISNULL-1 / F-ISNULL-2", node: { _tag: "IsNull", field, negated: true } },
-    { rules: "F-ISNULL-1 / F-ISNULL-2", node: { _tag: "IsNull", field, negated: false } },
-    { rules: "F-CONS-1", node: { _tag: "Or", members: [eq, { _tag: "Not", member: eq }] } },
+    probe("F-CMP-1", { _tag: "Compare", op: "ne", field, value }),
+    probe(ordering, { _tag: "Compare", op: "gte", field, value }),
+    probe(ordering, { _tag: "Compare", op: "lt", field, value: pivot }),
+    probe(ordering, { _tag: "Compare", op: "lte", field, value: pivot }),
+    probe(ordering, { _tag: "Compare", op: "gt", field, value: pivot }),
+    probe("F-IN-2 / F-IN-3", { _tag: "NotIn", field, values: literals }),
+    probe("F-ISNULL-1 / F-ISNULL-2", { _tag: "IsNull", field, negated: true }),
+    probe("F-ISNULL-1 / F-ISNULL-2", { _tag: "IsNull", field, negated: false }),
+    probe("F-CONS-1", { _tag: "Or", members: [eq, { _tag: "Not", member: eq }] }),
+  ];
+};
+
+/**
+ * The ordering operators over an attribute never NULL in the sample, each at
+ * a pivot that splits it, and `isnull=true`, which F-ISNULL-4 makes a constant.
+ */
+const totalProbes = ({ field, pivot }: Discriminating): ReadonlyArray<Probe> => {
+  const ordering = "F-CMP-2 / F-ORD-1";
+  return [
+    probe(ordering, { _tag: "Compare", op: "lt", field, value: pivot }),
+    probe(ordering, { _tag: "Compare", op: "lte", field, value: pivot }),
+    probe(ordering, { _tag: "Compare", op: "gt", field, value: pivot }),
+    probe(ordering, { _tag: "Compare", op: "gte", field, value: pivot }),
+    probe("F-ISNULL-4", { _tag: "IsNull", field, negated: false }),
+  ];
+};
+
+/**
+ * Equality and membership over a to-one relationship, valued by the related
+ * id (F-ORD-5 admits no ordering operator on one), and its NULL cases when its
+ * linkage is empty on some candidates.
+ */
+const relationshipProbes = ({
+  field,
+  nullable,
+  literals,
+}: Discriminating): ReadonlyArray<Probe> => {
+  const value = Arr.headNonEmpty(literals);
+  const valued = "F-EVAL-4 / F-ORD-5";
+  return [
+    probe(valued, { _tag: "Compare", op: "eq", field, value }),
+    probe(nullable ? `${valued} / F-CMP-1` : valued, { _tag: "Compare", op: "ne", field, value }),
+    probe(nullable ? `${valued} / F-IN-2 / F-IN-3` : valued, {
+      _tag: "NotIn",
+      field,
+      values: literals,
+    }),
+    ...(nullable
+      ? [
+          probe(`${valued} / F-ISNULL-1`, { _tag: "IsNull", field, negated: false }),
+          probe(`${valued} / F-ISNULL-1`, { _tag: "IsNull", field, negated: true }),
+        ]
+      : []),
   ];
 };
 
 const groupProbes: ReadonlyArray<Probe> = [
-  { rules: "F-AND-2", node: { _tag: "And", members: [] } },
-  { rules: "F-AND-2", node: { _tag: "Or", members: [] } },
+  probe("F-AND-2", { _tag: "And", members: [] }),
+  probe("F-AND-2", { _tag: "Or", members: [] }),
 ];
 
-/** A literal on the wire; `discriminating` kept only literals `spell` can spell. */
+/** A literal on the wire; `discriminatingOf` kept only literals `spell` can spell. */
 const wire = (value: Json): string => Option.getOrElse(spell(value), () => String(value));
 
 /** A condition: the field it reads, and its operator and value as the wire spells them. */
@@ -461,6 +612,19 @@ const show = (node: Tree): string =>
     Not: ({ member }) => `Not(${show(member)})`,
   });
 
+/** A probe as a finding names it: its tree, and the fieldset sent beside it. */
+const described = ({ node, fieldset }: Probe): string =>
+  Option.match(fieldset, {
+    onNone: () => show(node),
+    onSome: ({ type, names }) => `${show(node)} with fields[${type}]=${names}`,
+  });
+
+/** A probe's query: its tree's `filter[…]` pairs, then its fieldset's. */
+const queryOf = ({ node, fieldset }: Probe): Pairs => [
+  ...pairsOf(node),
+  ...Arr.fromOption(Option.map(fieldset, ({ type, names }) => [`fields[${type}]`, names] as const)),
+];
+
 /** The fields a tree reads. */
 const fieldsOf = (node: Tree): ReadonlyArray<string> =>
   Option.match(conditionOf(node), {
@@ -539,7 +703,7 @@ const compared = (
   if (Arr.isReadonlyArrayEmpty(included) && Arr.isReadonlyArrayEmpty(excluded)) return [];
   return [
     finding(rule, {
-      detail: `${probe.rules}: ${show(probe.node)} on ${path} answered the wrong resources`,
+      detail: `${probe.rules}: ${described(probe)} on ${path} answered the wrong resources`,
       expected: `${counted(Arr.length(expected), "resource")} of the ${counted(Arr.length(candidates), "resource")} the collection serves unfiltered: ${named(Arr.map(expected, ({ label }) => label))}`,
       observed: `wrongly included: ${named(included)}; wrongly excluded: ${named(excluded)}`,
       probe: first.probe,
@@ -555,12 +719,12 @@ const judge = (
   probe: Probe,
 ): Effect.Effect<Judged> =>
   Effect.map(
-    walk(io, ctx.options.baseUrl, withQuery(path, pairsOf(probe.node))),
+    walk(io, ctx.options.baseUrl, withQuery(path, queryOf(probe))),
     Walked.$match({
       Undecided: ({ why }) => Judged.Undecided({ why: `${probe.rules} on ${path}: ${why}` }),
       Refused: ({ observation }) =>
         Judged.Undecided({
-          why: `${probe.rules} on ${path}: ${show(probe.node)} answered ${statusOf(observation)}`,
+          why: `${probe.rules} on ${path}: ${described(probe)} answered ${statusOf(observation)}`,
         }),
       Walked: ({ first, resources }) =>
         Judged.Decided({ findings: compared(path, candidates, probe, first, resources) }),
@@ -578,9 +742,9 @@ const judgeAll = (
   Effect.forEach(probes, (probe) => judge(io, ctx, path, candidates, probe), { concurrency: 1 });
 
 /**
- * The NULL cases over each discriminating attribute in turn, stopping at the
- * first the server decides anything on: one that refuses every tree (an
- * attribute that is not filterable, say) gives way to the next.
+ * One family of trees over each discriminating field in turn, stopping at the
+ * first the server decides anything on: one that refuses every tree (a field
+ * that is not filterable, say) gives way to the next.
  */
 const judgeFields = (
   io: Io,
@@ -588,21 +752,29 @@ const judgeFields = (
   path: string,
   candidates: ReadonlyArray<Candidate>,
   fields: ReadonlyArray<Discriminating>,
+  probesOf: (field: Discriminating) => ReadonlyArray<Probe>,
 ): Effect.Effect<ReadonlyArray<Judged>> =>
   Arr.matchLeft(fields, {
     onEmpty: () => Effect.succeed<ReadonlyArray<Judged>>([]),
     onNonEmpty: (field, rest) =>
       Effect.flatMap(
-        judgeAll(io, ctx, path, candidates, fieldProbes(field)),
+        judgeAll(io, ctx, path, candidates, probesOf(field)),
         (judged): Effect.Effect<ReadonlyArray<Judged>> =>
           Arr.some(judged, Judged.$is("Decided"))
             ? Effect.succeed(judged)
-            : Effect.map(judgeFields(io, ctx, path, candidates, rest), (after) => [
+            : Effect.map(judgeFields(io, ctx, path, candidates, rest, probesOf), (after) => [
                 ...judged,
                 ...after,
               ]),
       ),
   });
+
+/** One family of trees: the fields it reads, and why it is undecided without one. */
+interface Family {
+  readonly fields: ReadonlyArray<Discriminating>;
+  readonly probesOf: (field: Discriminating) => ReadonlyArray<Probe>;
+  readonly none: string;
+}
 
 // ---------------------------------------------------------------------------
 // The rule
@@ -621,10 +793,91 @@ const negotiated = (observation: Observation): boolean =>
 
 const undecided = (why: string): ReadonlyArray<Judged> => [Judged.Undecided({ why })];
 
+/**
+ * The F-EVAL-6 probe over a field: `eq` on its first literal, beside a sparse
+ * fieldset naming another field the sample carries and leaving it out. None
+ * when the sample carries no other field to name.
+ */
+const sparseProbe =
+  (candidates: ReadonlyArray<Candidate>, type: string) =>
+  ({ field, literals }: Discriminating): Option.Option<Probe> =>
+    Option.map(
+      Arr.findFirst(
+        Arr.dedupe(Arr.flatMap(candidates, ({ members, toOne }) => [...members, ...toOne])),
+        (name) => name !== field,
+      ),
+      (names) => ({
+        rules: "F-EVAL-6",
+        node: { _tag: "Compare", op: "eq", field, value: Arr.headNonEmpty(literals) },
+        fieldset: Option.some({ type, names }),
+      }),
+    );
+
+/**
+ * The F-EVAL-6 family: a fieldset is sent only for the one type the
+ * collection serves, and only when the endpoint declares `fields[TYPE]` for it
+ * — an undeclared one is a 400 (#261), which would decide nothing.
+ */
+const sparseFamily = (
+  endpoint: Discovered,
+  path: string,
+  candidates: ReadonlyArray<Candidate>,
+  fields: ReadonlyArray<Discriminating>,
+): Family => {
+  const types = Arr.dedupe(Arr.map(candidates, ({ type }) => type));
+  const type = Arr.length(types) === 1 ? Arr.head(types) : Option.none<string>();
+  const declared = Option.filter(
+    type,
+    (name) =>
+      Arr.contains(endpoint.queryKeys, `fields[${name}]`) ||
+      Arr.contains(endpoint.queryPrefixes, "fields["),
+  );
+  const none = `F-EVAL-6 on ${path}: ${Option.match(declared, {
+    onSome: () => "no discriminating field has another field beside it to request in its place",
+    onNone: () =>
+      Option.match(type, {
+        onSome: (name) => `it declares no \`fields[${name}]\`, so no sparse fieldset can be sent`,
+        onNone: () => `it serves more than one type, so no one sparse fieldset applies`,
+      }),
+  })}`;
+  return Option.match(declared, {
+    onNone: () => ({ fields: [], probesOf: () => [], none }),
+    onSome: (name) => {
+      const probeOf = sparseProbe(candidates, name);
+      return {
+        fields: Arr.filter(fields, (field) => Option.isSome(probeOf(field))),
+        probesOf: (field) => Arr.fromOption(probeOf(field)),
+        none,
+      };
+    },
+  });
+};
+
+/** Every family judged in turn, each one's undecided reason kept when it has no field. */
+const judgeFamilies = (
+  io: Io,
+  ctx: Context,
+  path: string,
+  candidates: ReadonlyArray<Candidate>,
+  families: ReadonlyArray<Family>,
+): Effect.Effect<ReadonlyArray<Judged>> =>
+  Effect.map(
+    Effect.forEach(
+      families,
+      ({ fields, probesOf, none }) =>
+        Arr.isReadonlyArrayEmpty(fields)
+          ? Effect.succeed(undecided(none))
+          : judgeFields(io, ctx, path, candidates, Arr.take(fields, FIELD_CAP), probesOf),
+      { concurrency: 1 },
+    ),
+    Arr.flatten,
+  );
+
 /** Every tree judged on one collection, given its unfiltered walk. */
 const judgeWalked = (
   io: Io,
   ctx: Context,
+  endpoint: Discovered,
   path: string,
   first: Observation,
   resources: ReadonlyArray<ResourceObject>,
@@ -642,27 +895,41 @@ const judgeWalked = (
     return Effect.succeed(
       undecided(`${path} serves no resources unfiltered, so no filter can discriminate`),
     );
-  const fields = Arr.take(discriminating(candidates), FIELD_CAP);
-  return Effect.flatMap(
-    judgeAll(io, ctx, path, candidates, groupProbes),
-    (groups): Effect.Effect<ReadonlyArray<Judged>> =>
-      Arr.isReadonlyArrayEmpty(fields)
-        ? Effect.succeed([
-            ...groups,
-            ...undecided(
-              `F-CMP-1, F-IN-2 / F-IN-3, F-ISNULL-1 / F-ISNULL-2 and F-CONS-1 on ${path}: no attribute of the ${counted(Arr.length(candidates), "resource")} it serves is NULL on some and a JSON scalar of one type on others, so the sample cannot tell three-valued evaluation from two-valued`,
-            ),
-          ])
-        : Effect.map(judgeFields(io, ctx, path, candidates, fields), (judged) => [
-            ...groups,
-            ...judged,
-          ]),
+  const served = counted(Arr.length(candidates), "resource");
+  const attributes = attributeFields(candidates);
+  const nullable = Arr.filter(attributes, (field) => field.nullable);
+  const total = Arr.filter(attributes, (field) => !field.nullable);
+  const relationships = relationshipFields(candidates);
+  const families: ReadonlyArray<Family> = [
+    {
+      fields: nullable,
+      probesOf: nullableProbes,
+      none: `F-CMP-1, F-IN-2 / F-IN-3, F-ISNULL-1 / F-ISNULL-2 and F-CONS-1 on ${path}: no attribute of the ${served} it serves is NULL on some and a JSON scalar of one type on others, so the sample cannot tell three-valued evaluation from two-valued`,
+    },
+    {
+      fields: total,
+      probesOf: totalProbes,
+      none: `F-CMP-2 / F-ORD-1 and F-ISNULL-4 over an attribute never NULL on ${path}: no attribute of the ${served} it serves is a JSON scalar of one type on every one, with two or more values`,
+    },
+    {
+      fields: relationships,
+      probesOf: relationshipProbes,
+      none: `F-EVAL-4 / F-ORD-5 on ${path}: no to-one relationship shows its linkage on every one of the ${served} it serves, with two or more ids or an empty linkage among them`,
+    },
+    sparseFamily(endpoint, path, candidates, [...nullable, ...total, ...relationships]),
+  ];
+  return Effect.flatMap(judgeAll(io, ctx, path, candidates, groupProbes), (groups) =>
+    Effect.map(judgeFamilies(io, ctx, path, candidates, families), (judged) => [
+      ...groups,
+      ...judged,
+    ]),
   );
 };
 
 const judgeCollection = (
   io: Io,
   ctx: Context,
+  endpoint: Discovered,
   path: string,
 ): Effect.Effect<ReadonlyArray<Judged>> =>
   Effect.flatMap(
@@ -671,7 +938,7 @@ const judgeCollection = (
       Undecided: ({ why }) => Effect.succeed(undecided(`${path}: ${why}`)),
       Refused: ({ observation }) =>
         Effect.succeed(undecided(`${path} answered ${statusOf(observation)} unfiltered`)),
-      Walked: ({ first, resources }) => judgeWalked(io, ctx, path, first, resources),
+      Walked: ({ first, resources }) => judgeWalked(io, ctx, endpoint, path, first, resources),
     }),
   );
 
@@ -698,7 +965,9 @@ export const evaluation: RuleImpl = {
       );
     const io = budgeted(ctx, REQUEST_BUDGET);
     return Effect.map(
-      Effect.forEach(targets, ({ path }) => judgeCollection(io, ctx, path), { concurrency: 1 }),
+      Effect.forEach(targets, ({ endpoint, path }) => judgeCollection(io, ctx, endpoint, path), {
+        concurrency: 1,
+      }),
       (perCollection) => {
         const judged = Arr.flatten(perCollection);
         const decided = Arr.filter(judged, Judged.$is("Decided"));

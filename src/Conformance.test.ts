@@ -2722,53 +2722,109 @@ describe("Conformance: the filter grammar profile", () => {
  * the filter with the package's own codec and evaluate it with an evaluator of
  * their own — SQL's three-valued reading for the correct one, written here
  * independently of the kit's fold, so the oracle is not checked against itself
- * — and the broken ones are each one familiar way of getting NULL wrong.
+ * — and the broken ones are each one familiar way of getting §6 wrong: NULL
+ * read as a value (#161), NULL sorted below every value, numbers compared as
+ * text, empty linkage read as a value, and a filter evaluated on the sparse
+ * representation rather than the complete one (#433).
  */
 describe("Conformance: the filter evaluation oracle", () => {
+  const Maker = Resource.make("makers", { attributes: {} });
+
   const Product = Resource.make("products", {
     attributes: {
+      price: Resource.attribute(Schema.Number, { filter: true }),
       name: Resource.attribute(Schema.String, { filter: true }),
       colour: Resource.attribute(Schema.NullOr(Schema.String), { filter: true }),
     },
+    relationships: { maker: Relationship.optional(() => Maker, { filter: true }) },
   });
 
   const oracleApi = HttpApi.make("catalog").add(
-    Group.make(Product, Endpoint.list(Product, { filter: true })),
+    Group.make(Product, Endpoint.list(Product, { filter: true, fields: true })),
   );
 
   const decodeFilter = Schema.decodeUnknownOption(Query.Filter(Product));
 
-  type Attributes = Readonly<Record<string, string | null>>;
+  type Scalar = string | number;
+
+  type Attributes = Readonly<Record<string, Scalar | null>>;
+
+  /** A `maker` relationship's linkage on the wire: empty (`data: null`) for `None`. */
+  const linkage = (maker: Option.Option<string>) => ({
+    data: Option.match(maker, {
+      onNone: () => null,
+      onSome: (id) => ({ type: "makers" as const, id }),
+    }),
+  });
+
+  interface Relationships {
+    readonly maker?: ReturnType<typeof linkage> | { readonly links: { readonly related: string } };
+  }
 
   interface Product {
     readonly type: "products";
     readonly id: string;
     readonly attributes: Attributes;
+    /** Absent when a fieldset leaves `maker` out; links only when it shows no linkage. */
+    readonly relationships?: Relationships;
   }
 
+  const product = (id: string, attributes: Attributes, maker: Option.Option<string>): Product => ({
+    type: "products",
+    id,
+    attributes,
+    relationships: { maker: linkage(maker) },
+  });
+
+  // `price` is never NULL and orders differently as text (`"100" < "20"`);
+  // `colour` and `maker` are NULL on products:3 alone.
   const products: ReadonlyArray<Product> = [
-    { type: "products", id: "1", attributes: { name: "Widget", colour: "red" } },
-    { type: "products", id: "2", attributes: { name: "Gadget", colour: "blue" } },
-    { type: "products", id: "3", attributes: { name: "Gizmo", colour: null } },
-    { type: "products", id: "4", attributes: { name: "Doohickey", colour: "red" } },
+    product("1", { price: 10, name: "Widget", colour: "red" }, Option.some("m1")),
+    product("2", { price: 5, name: "Gadget", colour: "blue" }, Option.some("m2")),
+    product("3", { price: 100, name: "Gizmo", colour: null }, Option.none()),
+    product("4", { price: 20, name: "Doohickey", colour: "red" }, Option.some("m1")),
   ];
 
   /** A server's reading of a tree for one resource: `None` is UNKNOWN. */
-  type Evaluator = (node: Filter.Node, attributes: Attributes) => Option.Option<boolean>;
+  type Evaluator = (node: Filter.Node, row: Product) => Option.Option<boolean>;
 
-  /** A resource's value for a field: `None` when the member is `null` or absent. */
-  const valueIn = (attributes: Attributes, field: string): Option.Option<string> =>
-    Option.fromNullishOr(attributes[field]);
+  /**
+   * A resource's value for a field — an attribute's, or a to-one
+   * relationship's related id — `None` when it is `null` or absent.
+   */
+  const valueIn = (row: Product, field: string): Option.Option<Scalar> =>
+    field === "maker"
+      ? Option.flatMap(Option.fromUndefinedOr(row.relationships?.maker), (maker) =>
+          "data" in maker ? Option.fromNullishOr(maker.data?.id) : Option.none(),
+        )
+      : Option.fromNullishOr(row.attributes[field]);
 
-  /** A relation on two strings, by operator. */
-  const RELATIONS: Readonly<Record<Filter.CompareOperator, (v: string, x: string) => boolean>> = {
-    eq: (v, x) => v === x,
-    ne: (v, x) => v !== x,
-    lt: (v, x) => v < x,
-    lte: (v, x) => v <= x,
-    gt: (v, x) => v > x,
-    gte: (v, x) => v >= x,
+  /** A decoded literal as the scalar it compares as: `price`'s a number, every other a string. */
+  const scalarOf = (literal: Filter.Compare["value"]): Scalar =>
+    Predicate.isNumber(literal) ? literal : String(literal);
+
+  /** Numbers numerically, strings by code unit, which is code point here. */
+  const order = (v: Scalar, x: Scalar): number =>
+    Predicate.isNumber(v) && Predicate.isNumber(x)
+      ? v - x
+      : String(v) < String(x)
+        ? -1
+        : String(v) > String(x)
+          ? 1
+          : 0;
+
+  /** A relation on an order, by operator. */
+  const RELATIONS: Readonly<Record<Filter.CompareOperator, (order: number) => boolean>> = {
+    eq: (o) => o === 0,
+    ne: (o) => o !== 0,
+    lt: (o) => o < 0,
+    lte: (o) => o <= 0,
+    gt: (o) => o > 0,
+    gte: (o) => o >= 0,
   };
+
+  const isOrdering = (op: Filter.CompareOperator): boolean =>
+    op === "lt" || op === "lte" || op === "gt" || op === "gte";
 
   /** Kleene's connective over `members`: `decisive` wins, else any UNKNOWN, else `!decisive`. */
   const kleene = (
@@ -2781,36 +2837,44 @@ describe("Conformance: the filter evaluation oracle", () => {
         ? Option.none()
         : Option.some(!decisive);
 
-  /** SQL's three-valued reading — §6, written independently of the kit's fold. */
-  const threeValued: Evaluator = (node, attributes) =>
-    Match.valueTags(node, {
-      Compare: ({ op, field, value }) =>
-        Option.map(valueIn(attributes, field), (v) => RELATIONS[op](v, String(value))),
-      In: ({ field, values }) =>
-        Option.map(valueIn(attributes, field), (v) => Arr.contains(Arr.map(values, String), v)),
-      NotIn: ({ field, values }) =>
-        Option.map(valueIn(attributes, field), (v) => !Arr.contains(Arr.map(values, String), v)),
-      IsNull: ({ field, negated }) =>
-        Option.some(Option.isNone(valueIn(attributes, field)) !== negated),
-      Not: ({ member }) => Option.map(threeValued(member, attributes), (inner) => !inner),
-      And: ({ members }) =>
-        kleene(
-          Arr.map(members, (member) => threeValued(member, attributes)),
-          false,
-        ),
-      Or: ({ members }) =>
-        kleene(
-          Arr.map(members, (member) => threeValued(member, attributes)),
-          true,
-        ),
-    });
+  /**
+   * SQL's three-valued reading — §6, written independently of the kit's fold —
+   * with `compare` as the order of a value against a literal.
+   */
+  const threeValuedWith =
+    (compare: (v: Scalar, x: Scalar) => number): Evaluator =>
+    (node, row) => {
+      const self = threeValuedWith(compare);
+      const member = (values: ReadonlyArray<unknown>, v: Scalar) =>
+        Arr.some(values, (value) => value === v);
+      return Match.valueTags(node, {
+        Compare: ({ op, field, value }) =>
+          Option.map(valueIn(row, field), (v) => RELATIONS[op](compare(v, scalarOf(value)))),
+        In: ({ field, values }) => Option.map(valueIn(row, field), (v) => member(values, v)),
+        NotIn: ({ field, values }) => Option.map(valueIn(row, field), (v) => !member(values, v)),
+        IsNull: ({ field, negated }) => Option.some(Option.isNone(valueIn(row, field)) !== negated),
+        Not: ({ member }) => Option.map(self(member, row), (inner) => !inner),
+        And: ({ members }) =>
+          kleene(
+            Arr.map(members, (member) => self(member, row)),
+            false,
+          ),
+        Or: ({ members }) =>
+          kleene(
+            Arr.map(members, (member) => self(member, row)),
+            true,
+          ),
+      });
+    };
+
+  const threeValued: Evaluator = threeValuedWith(order);
 
   /** A two-valued server: NULL is just a value no literal equals. */
-  const twoValued: Evaluator = (node, attributes) => {
+  const twoValued: Evaluator = (node, row) => {
     const is = (field: string, literal: Filter.Compare["value"]): boolean =>
-      Option.contains(valueIn(attributes, field), String(literal));
+      Option.contains(valueIn(row, field), scalarOf(literal));
     const holds = (member: Filter.Node): boolean =>
-      Option.getOrElse(twoValued(member, attributes), () => false);
+      Option.getOrElse(twoValued(member, row), () => false);
     return Option.some(
       Match.valueTags(node, {
         Compare: ({ op, field, value }) =>
@@ -2818,10 +2882,10 @@ describe("Conformance: the filter evaluation oracle", () => {
             ? !is(field, value)
             : op === "eq"
               ? is(field, value)
-              : Option.contains(threeValued(node, attributes), true),
+              : Option.contains(threeValued(node, row), true),
         In: ({ field, values }) => Arr.some(values, (value) => is(field, value)),
         NotIn: ({ field, values }) => !Arr.some(values, (value) => is(field, value)),
-        IsNull: ({ field, negated }) => Option.isNone(valueIn(attributes, field)) !== negated,
+        IsNull: ({ field, negated }) => Option.isNone(valueIn(row, field)) !== negated,
         Not: ({ member }) => !holds(member),
         And: ({ members }) => Arr.every(members, holds),
         Or: ({ members }) => Arr.some(members, holds),
@@ -2829,16 +2893,79 @@ describe("Conformance: the filter evaluation oracle", () => {
     );
   };
 
-  /** Three-valued everywhere but `ne`, which includes the NULL rows. */
-  const twoValuedNe: Evaluator = (node, attributes) =>
-    "op" in node && node.op === "ne" ? twoValued(node, attributes) : threeValued(node, attributes);
+  /** Three-valued everywhere but `ne` on `colour`, which includes the NULL rows. */
+  const twoValuedNe: Evaluator = (node, row) =>
+    Predicate.isTagged(node, "Compare") && node.op === "ne" && node.field === "colour"
+      ? twoValued(node, row)
+      : threeValued(node, row);
+
+  /** NULL sorted below every value, as JavaScript's `null < 1` has it. */
+  const nullSmallest: Evaluator = (node, row) =>
+    Predicate.isTagged(node, "Compare") &&
+    isOrdering(node.op) &&
+    Option.isNone(valueIn(row, node.field))
+      ? Option.some(node.op === "lt" || node.op === "lte")
+      : threeValued(node, row);
+
+  /** Every value compared as text: `100 < 20`. */
+  const textual: Evaluator = threeValuedWith((v, x) => order(String(v), String(x)));
+
+  /** Three-valued on attributes, two-valued on the relationship: empty linkage is a value. */
+  const twoValuedLinkage: Evaluator = (node, row) =>
+    "field" in node && node.field === "maker" ? twoValued(node, row) : threeValued(node, row);
 
   const contentType = `${MEDIA_TYPE};profile="${Filter.PROFILE_URI}"`;
+
+  /** A row with only the fields `fields[products]` names. */
+  const project = (row: Product, names: ReadonlyArray<string>): Product => ({
+    type: row.type,
+    id: row.id,
+    attributes: Rec.filter(row.attributes, (_, name) => Arr.contains(names, name)),
+    relationships: Arr.contains(names, "maker") ? (row.relationships ?? {}) : {},
+  });
+
+  /** `rows` with only the fields a request's `fields[products]` names, if it names any. */
+  const projectedBy =
+    (query: URLSearchParams) =>
+    (rows: ReadonlyArray<Product>): ReadonlyArray<Product> =>
+      Option.match(Option.fromNullishOr(query.get("fields[products]")), {
+        onNone: () => rows,
+        onSome: (names) => Arr.map(rows, (row) => project(row, names.split(","))),
+      });
+
+  /** `rows` filtered by a request's `filter[…]` under `evaluate`; `None` when it does not decode. */
+  const filteredBy = (
+    query: URLSearchParams,
+    evaluate: Evaluator,
+    rows: ReadonlyArray<Product>,
+  ): Option.Option<ReadonlyArray<Product>> => {
+    const record = Rec.fromEntries(Arr.filter([...query], ([key]) => key.startsWith("filter")));
+    return Rec.isEmptyRecord(record)
+      ? Option.some(rows)
+      : Option.map(decodeFilter(record), (node) =>
+          Arr.filter(rows, (row) => Option.contains(evaluate(node, row), true)),
+        );
+  };
+
+  /** One page of `rows`, by `page[number]`, with a `next` link while more remain. */
+  const pageOf = (query: URLSearchParams, rows: ReadonlyArray<Product>, pageSize?: number) => {
+    const size = pageSize ?? rows.length;
+    const page = Number(query.get("page[number]") ?? "0");
+    const next = new URLSearchParams(query);
+    next.set("page[number]", String(page + 1));
+    return {
+      jsonapi: { version: "1.1" },
+      data: rows.slice(page * size, (page + 1) * size),
+      links: (page + 1) * size < rows.length ? { next: `/products?${next.toString()}` } : {},
+    };
+  };
 
   /**
    * A server for `rows` under `evaluate`: decodes `filter[…]` with the
    * package's codec (a 400 naming nothing in particular when it does not
-   * decode), and pages by `pageSize` through `links.next` when one is given.
+   * decode), projects `fields[products]` — after filtering, or before when
+   * `projectFirst` — and pages by `pageSize` through `links.next` when one is
+   * given.
    */
   const oracleServe =
     (
@@ -2847,43 +2974,39 @@ describe("Conformance: the filter evaluation oracle", () => {
         readonly rows?: ReadonlyArray<Product>;
         readonly pageSize?: number;
         readonly contentType?: string;
+        readonly projectFirst?: boolean;
       } = {},
     ) =>
     (request: { readonly path: string }): Canned => {
-      const rows = options.rows ?? products;
       const query = queryOf(request);
-      const record = Rec.fromEntries(Arr.filter([...query], ([key]) => key.startsWith("filter")));
-      let matched = rows;
-      if (!Rec.isEmptyRecord(record)) {
-        const node = decodeFilter(record);
-        if (Option.isNone(node)) return badRequest();
-        matched = rows.filter((row) => Option.contains(evaluate(node.value, row.attributes), true));
-      }
-      const size = options.pageSize ?? matched.length;
-      const page = Number(query.get("page[number]") ?? "0");
-      const data = matched.slice(page * size, (page + 1) * size);
-      const more = (page + 1) * size < matched.length;
-      const next = new URLSearchParams(query);
-      next.set("page[number]", String(page + 1));
-      return {
-        contentType: options.contentType ?? contentType,
-        body: {
-          jsonapi: { version: "1.1" },
-          data,
-          links: more ? { next: `/products?${next.toString()}` } : {},
-        },
-      };
+      const projected = projectedBy(query);
+      const first = options.projectFirst === true;
+      const rows = options.rows ?? products;
+      return Option.match(filteredBy(query, evaluate, first ? projected(rows) : rows), {
+        onNone: () => badRequest(),
+        onSome: (matched) => ({
+          contentType: options.contentType ?? contentType,
+          body: pageOf(query, first ? matched : projected(matched), options.pageSize),
+        }),
+      });
     };
 
-  const verifyOracle = (serve: (request: { readonly path: string }) => Canned) =>
+  /** The rule alone, run against `serve` over `api`. */
+  const verifyOracleOn = <ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+    api: HttpApi.HttpApi<ApiId, Groups>,
+    serve: (request: { readonly path: string }) => Canned,
+  ) =>
     Effect.runPromise(
-      Conformance.verifyWith(oracleApi, {
+      Conformance.verifyWith(api, {
         client: cannedClient(serve),
         baseUrl: "http://fixture.test",
         tiers: ["profile"],
         only: ["profile/filter/evaluation"],
       }),
     );
+
+  const verifyOracle = (serve: (request: { readonly path: string }) => Canned) =>
+    verifyOracleOn(oracleApi, serve);
 
   const RULE = "profile/filter/evaluation";
 
@@ -2892,10 +3015,48 @@ describe("Conformance: the filter evaluation oracle", () => {
     return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
   };
 
+  const rulesOf = (report: Conformance.Report): ReadonlyArray<string> =>
+    findingsOf(report).map((found) => found.detail.slice(0, found.detail.indexOf(":")));
+
+  /** The trees a run sent, as the kit spelt them. */
+  const sent = async (
+    serve: (request: { readonly path: string }) => Canned,
+  ): Promise<ReadonlyArray<string>> => {
+    const paths: Array<string> = [];
+    await verifyOracle((request) => {
+      paths.push(decodeURIComponent(request.path));
+      return serve(request);
+    });
+    return paths;
+  };
+
   it("passes against a server that evaluates §6, having decided every case", async () => {
     const report = await verifyOracle(oracleServe(threeValued));
-    // Two empty groups, then ne, gte, nin, isnull twice and excluded middle on `colour`.
-    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 8, note: undefined });
+    // Two empty groups; ne, gte, lt, lte, gt, nin, isnull twice and excluded
+    // middle on `colour`; lt, lte, gt, gte and isnull on `price`, never NULL;
+    // eq, ne, nin and isnull twice on `maker`; and eq beside a fieldset.
+    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 22, note: undefined });
+  });
+
+  it("sends the ordering operators at a pivot that splits the sample", async () => {
+    const paths = await sent(oracleServe(threeValued));
+    // `colour`'s values in code-point order are blue, red, red: the pivot is red.
+    // `price`'s are 5, 10, 20, 100: the pivot is 20, which text order misplaces.
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/products?filter[colour][lt]=red",
+        "/products?filter[colour][gt]=red",
+        "/products?filter[price][lt]=20",
+        "/products?filter[price][lte]=20",
+        "/products?filter[price][gt]=20",
+        "/products?filter[price][gte]=20",
+        "/products?filter[price][isnull]=true",
+        "/products?filter[maker][eq]=m1",
+        "/products?filter[maker][nin]=m1,m2",
+        "/products?filter[colour][eq]=red&fields[products]=price",
+      ]),
+    );
+    expect(paths.filter((path) => path.includes("[maker][lt"))).toEqual([]);
   });
 
   it("detects a server whose `ne` is two-valued, naming the NULL row it included", async () => {
@@ -2912,10 +3073,71 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   it("detects a two-valued server on every NULL case it gets wrong, and only those", async () => {
     const report = await verifyOracle(oracleServe(twoValued));
-    expect(findingsOf(report).map((found) => found.detail.split(":")[0])).toEqual([
+    expect(rulesOf(report)).toEqual([
       "F-CMP-1",
       "F-IN-2 / F-IN-3",
       "F-CONS-1",
+      "F-EVAL-4 / F-ORD-5 / F-CMP-1",
+      "F-EVAL-4 / F-ORD-5 / F-IN-2 / F-IN-3",
+    ]);
+  });
+
+  it("detects NULL sorted below every value on `lt` and `lte`, and on nothing else", async () => {
+    const report = await verifyOracle(oracleServe(nullSmallest));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-CMP-1 / F-CMP-2 / F-ORD-1: lt(colour, "red") on /products answered the wrong resources',
+        observed: "wrongly included: products:3 (colour: null (NULL)); wrongly excluded: none",
+      },
+      {
+        detail:
+          'F-CMP-1 / F-CMP-2 / F-ORD-1: lte(colour, "red") on /products answered the wrong resources',
+      },
+    ]);
+  });
+
+  it("detects numbers ordered as text on an attribute never NULL", async () => {
+    const report = await verifyOracle(oracleServe(textual));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail: "F-CMP-2 / F-ORD-1: lt(price, 20) on /products answered the wrong resources",
+        observed:
+          "wrongly included: products:3 (price: 100); wrongly excluded: products:2 (price: 5)",
+      },
+      { detail: "F-CMP-2 / F-ORD-1: lte(price, 20) on /products answered the wrong resources" },
+      { detail: "F-CMP-2 / F-ORD-1: gt(price, 20) on /products answered the wrong resources" },
+      { detail: "F-CMP-2 / F-ORD-1: gte(price, 20) on /products answered the wrong resources" },
+    ]);
+  });
+
+  it("detects empty linkage read as a value, naming the relationship's NULL", async () => {
+    const report = await verifyOracle(oracleServe(twoValuedLinkage));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-EVAL-4 / F-ORD-5 / F-CMP-1: ne(maker, "m1") on /products answered the wrong resources',
+        observed: "wrongly included: products:3 (maker: null (NULL)); wrongly excluded: none",
+        probe: { url: "/products?filter[maker][ne]=m1" },
+      },
+      {
+        detail:
+          'F-EVAL-4 / F-ORD-5 / F-IN-2 / F-IN-3: NotIn(maker, ["m1", "m2"]) on /products answered the wrong resources',
+      },
+    ]);
+  });
+
+  it("detects a filter evaluated on the sparse representation (F-EVAL-6)", async () => {
+    const report = await verifyOracle(oracleServe(threeValued, { projectFirst: true }));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-EVAL-6: eq(colour, "red") with fields[products]=price on /products answered the wrong resources',
+        expected:
+          "2 resources of the 4 resources the collection serves unfiltered: products:1, products:4",
+        observed:
+          'wrongly included: none; wrongly excluded: products:1 (colour: "red"), products:4 (colour: "red")',
+      },
     ]);
   });
 
@@ -2941,22 +3163,71 @@ describe("Conformance: the filter evaluation oracle", () => {
   it("walks a paginated collection whole, filtered and unfiltered", async () => {
     expect(
       outcomeFor(await verifyOracle(oracleServe(threeValued, { pageSize: 1 })), RULE),
-    ).toMatchObject({ _tag: "Passed", probes: 8 });
+    ).toMatchObject({ _tag: "Passed", probes: 22 });
     const broken = await verifyOracle(oracleServe(twoValuedNe, { pageSize: 1 }));
-    expect(findingsOf(broken).map((found) => found.detail.split(":")[0])).toEqual(["F-CMP-1"]);
+    expect(rulesOf(broken)).toEqual(["F-CMP-1"]);
   });
 
-  it("decides only the empty groups when no attribute is ever NULL, and says so", async () => {
+  it("decides no NULL case when nothing is ever NULL, and says so", async () => {
     const report = await verifyOracle(
-      oracleServe(twoValued, { rows: products.filter((row) => row.attributes["colour"] !== null) }),
+      oracleServe(twoValued, {
+        rows: [
+          product("1", { price: 10, name: "Widget", colour: "red" }, Option.some("m1")),
+          product("2", { price: 5, name: "Gadget", colour: "blue" }, Option.some("m2")),
+        ],
+      }),
     );
+    // The empty groups; the ordering operators on `price`; eq, ne and nin on
+    // `maker`; and eq beside a fieldset — none of which a two-valued server
+    // gets wrong without a NULL to get wrong.
     expect(outcomeFor(report, RULE)).toMatchObject({
       _tag: "Passed",
-      probes: 2,
+      probes: 11,
       note: expect.stringContaining(
         "the sample cannot tell three-valued evaluation from two-valued",
       ),
     });
+  });
+
+  it("says why a relationship or a fieldset was not probed", async () => {
+    const Plain = Resource.make("products", {
+      attributes: { colour: Resource.attribute(Schema.NullOr(Schema.String), { filter: true }) },
+    });
+    const plainApi = HttpApi.make("plain").add(
+      Group.make(Plain, Endpoint.list(Plain, { filter: true })),
+    );
+    const report = await verifyOracleOn(
+      plainApi,
+      oracleServe(threeValued, {
+        rows: Arr.map(products, ({ type, id, attributes }) => ({
+          type,
+          id,
+          attributes: { colour: attributes["colour"] ?? null },
+        })),
+      }),
+    );
+    const outcome = outcomeFor(report, RULE);
+    expect(outcome).toMatchObject({ _tag: "Passed" });
+    expect(outcome).toMatchObject({
+      note: expect.stringContaining(
+        "F-EVAL-4 / F-ORD-5 on /products: no to-one relationship shows its linkage",
+      ),
+    });
+    expect(outcome).toMatchObject({
+      note: expect.stringContaining("F-EVAL-6 on /products: it declares no `fields[products]`"),
+    });
+  });
+
+  it("reads a relationship that shows no linkage as no field at all", async () => {
+    const paths = await sent(
+      oracleServe(threeValued, {
+        rows: Arr.map(products, (row) => ({
+          ...row,
+          relationships: { maker: { links: { related: `/products/${row.id}/maker` } } },
+        })),
+      }),
+    );
+    expect(paths.filter((path) => path.includes("[maker]"))).toEqual([]);
   });
 
   it("decides nothing a server refuses, and nothing for a server that has not negotiated the profile", async () => {
