@@ -561,11 +561,11 @@ export const relationshipRefs = (resource: ResourceLike, key: string): ReadonlyA
 };
 
 /** A relationship object's link block with every member a wire string. */
-const wireRelationshipLinks = (value: unknown): unknown => {
-  const links = (value as RelationshipObject | null)?.links;
+const wireRelationshipLinks = (value: RelationshipObject): RelationshipObject => {
+  const links = value.links;
   if (links === undefined || links === null) return value;
   return {
-    ...(value as object),
+    ...value,
     links: {
       ...links,
       ...(links.related === undefined ? {} : { related: toLinkString(links.related) }),
@@ -608,7 +608,12 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
           relationships: Object.fromEntries(
             Object.entries(relationships).map(([key, value]) => [
               key,
-              wireRelationshipLinks(value),
+              // SAFETY: a relationship value is read only for its `links`
+              // member; any other value (a bare identifier, an identifier
+              // array) has none and comes back as it was.
+              value === null || value === undefined
+                ? value
+                : wireRelationshipLinks(value as RelationshipObject),
             ]),
           ),
         }),
@@ -618,23 +623,42 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
   return out as WireResource<R>;
 };
 
-const toWireValue = (value: unknown): unknown => {
+/**
+ * A value in wire form: a JSON value, whose leaves may include one JSON has
+ * no spelling for (`undefined`, a `bigint`, a `symbol`, a function) — passed
+ * through untouched by {@link toWireValue} for the serialiser to judge.
+ */
+type WireValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | bigint
+  | symbol
+  | Function
+  | ReadonlyArray<WireValue>
+  | { readonly [key: string]: WireValue };
+
+const toWireValue = (value: unknown): WireValue => {
   if (value instanceof Date) return value.toISOString();
   if (value instanceof URL) return value.href;
   if (Array.isArray(value)) {
     return value.map((entry) => (entry === undefined ? null : toWireValue(entry)));
   }
   if (value !== null && typeof value === "object") {
-    const withToJson = value as { readonly toJSON?: () => unknown };
-    if (typeof withToJson.toJSON === "function") return toWireValue(withToJson.toJSON());
-    const out: { [key: string]: unknown } = {};
+    const toJson = (value as { readonly toJSON?: unknown }).toJSON;
+    if (typeof toJson === "function") return toWireValue(toJson.call(value));
+    const out: { [key: string]: WireValue } = {};
     for (const [key, entry] of Object.entries(value)) {
       // An own `__proto__` member (as `JSON.parse` gives) stays a member.
       if (entry !== undefined) assign(out, key, toWireValue(entry));
     }
     return out;
   }
-  return value;
+  // SAFETY: what is left is not an object — a JSON primitive or one of the
+  // leaves `WireValue` names.
+  return value as WireValue;
 };
 
 /**
@@ -666,7 +690,10 @@ const toWireValue = (value: unknown): unknown => {
  * @category utils
  */
 export const toWireSafeResource = <R extends ResourceLike>(resource: R): R =>
-  toWireValue(resource) as R;
+  // SAFETY: the walk keeps every member of the resource, coercing only the
+  // runtime-only leaves above; the signature promises `R` by design, since the
+  // response encoder reads the coerced members as their own wire forms.
+  toWireValue(resource) as unknown as R;
 
 // ---------------------------------------------------------------------------
 // The pipeline

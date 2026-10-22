@@ -100,7 +100,6 @@ export default defineConfig({
       "effect/no-conditional-empty-object-spread": "warn",
       "effect/avoid-object-type": "warn",
       "effect/no-unknown-parameters": "warn",
-      "effect/no-unknown-returns": "warn",
       // One site, and a contract: `ApiError.toDocument(error: object)` takes any
       // value a framework hook caught and throws on a non-`ApiError.make`
       // instance (src/ApiError.ts). Narrowing the parameter is a breaking

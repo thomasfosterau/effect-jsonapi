@@ -442,7 +442,7 @@ const declare = (
   let declared = schema;
   const filter = options?.filter;
   if (filter !== undefined && filter !== false) {
-    if (annotationAt(schema.ast, Filter.AnnotationId) !== undefined) {
+    if (annotationAt(schema.ast, Filter.AnnotationId, isFilterAnnotation).kind !== "absent") {
       throw new Error(
         "Resource.attribute: the schema is already Filter.able; drop the `filter` option or the pipe, not both",
       );
@@ -457,7 +457,7 @@ const declare = (
     );
   }
   if (options?.sort === true) {
-    if (annotationAt(schema.ast, Sort.AnnotationId) !== undefined) {
+    if (annotationAt(schema.ast, Sort.AnnotationId, isSortAnnotation).kind !== "absent") {
       throw new Error(
         "Resource.attribute: the schema is already Sort.able; drop the `sort` option or the pipe, not both",
       );
@@ -2320,19 +2320,33 @@ const deriveFilterLiteral = (
   return scalarLiteral(kind, base);
 };
 
+// What a schema declares under an annotation id, read through a guard `is`:
+// nothing, a declaration `is` accepts, or a present value `is` rejects — a
+// definition error the caller names.
+type Declared<A> =
+  | { readonly kind: "absent" }
+  | { readonly kind: "declared"; readonly declaration: A }
+  | { readonly kind: "malformed" };
+
+const absent: Declared<never> = { kind: "absent" };
+
 // The annotation under `id` on a schema node itself. Effect's `annotate` stamps
 // the node's *last* check when it has checks (the node otherwise), and a later
 // `.check(...)` appends a new last check without touching the earlier ones — so
 // the declaration may sit on any check or on the node. Scan them all, most
 // recent first, rather than only what `Schema.resolveAnnotations` reads.
-const ownAnnotationAt = (ast: SchemaAST.AST, id: string): unknown => {
-  if (ast.checks) {
-    for (let index = ast.checks.length - 1; index >= 0; index--) {
-      const found = ast.checks[index]?.annotations?.[id];
-      if (found !== undefined) return found;
-    }
-  }
-  return ast.annotations?.[id];
+const ownAnnotationAt = <A>(
+  ast: SchemaAST.AST,
+  id: string,
+  is: (found: unknown) => found is A,
+): Declared<A> => {
+  const candidates = [
+    ...(ast.checks ?? []).map((check) => check.annotations?.[id]).reverse(),
+    ast.annotations?.[id],
+  ];
+  const found = candidates.find((candidate) => candidate !== undefined);
+  if (found === undefined) return absent;
+  return is(found) ? { kind: "declared", declaration: found } : { kind: "malformed" };
 };
 
 // Resolves the annotation under `id` from an AST, looking through the wrappers
@@ -2340,23 +2354,31 @@ const ownAnnotationAt = (ast: SchemaAST.AST, id: string): unknown => {
 // `Schema.NullOr` union (the non-null member — NULL is never a literal and never
 // a sort key). `optionalKey` needs no case: it keeps the wrapped schema's
 // annotations.
-const annotationAt = (ast: SchemaAST.AST, id: string): unknown => {
-  const own = ownAnnotationAt(ast, id);
-  if (own !== undefined) return own;
-  if (ast._tag === "Suspend") return annotationAt(ast.thunk(), id);
+const annotationAt = <A>(
+  ast: SchemaAST.AST,
+  id: string,
+  is: (found: unknown) => found is A,
+): Declared<A> => {
+  const own = ownAnnotationAt(ast, id, is);
+  if (own.kind !== "absent") return own;
+  if (ast._tag === "Suspend") return annotationAt(ast.thunk(), id, is);
   const base = nullableBaseAst(ast);
-  return base === undefined ? undefined : annotationAt(base, id);
+  return base === undefined ? absent : annotationAt(base, id, is);
 };
 
 // Reads a declaration (`Filter.able` / `Sort.able`) off an attribute field via
 // its annotations — on the field itself (the descriptor's `annotate` merges
 // with, never replaces, the declaration's), else through the wrappers above,
 // else on the descriptor's inner schema (a descriptor stamped by hand).
-const declarationOf = (field: Schema.Top, id: string): unknown => {
-  const found = annotationAt(field.ast, id);
-  if (found !== undefined) return found;
+const declarationOf = <A>(
+  field: Schema.Top,
+  id: string,
+  is: (found: unknown) => found is A,
+): Declared<A> => {
+  const found = annotationAt(field.ast, id, is);
+  if (found.kind !== "absent") return found;
   const inner = descriptorOf(field)?.schema;
-  return inner === undefined ? undefined : annotationAt(inner.ast, id);
+  return inner === undefined ? absent : annotationAt(inner.ast, id, is);
 };
 
 // The schema an attribute field wraps, for deriving its literal codec: the
@@ -2383,15 +2405,19 @@ const isFilterAnnotation = (u: unknown): u is Filter.Annotation => {
   );
 };
 
+// Whether a value read from under `Sort.AnnotationId` is a well-formed
+// declaration: `Sort.able` stamps `true`.
+const isSortAnnotation = (u: unknown): u is true => u === true;
+
 // The sortable keys of a resource's attribute fields, in declaration order. A
 // present-but-malformed sort annotation (anything but `true`) is a definition
 // error naming the attribute, as a malformed filter annotation is.
 const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray<string> => {
   const keys: Array<string> = [];
   for (const [key, field] of Object.entries(fields)) {
-    const declaration = declarationOf(field as Schema.Top, Sort.AnnotationId);
-    if (declaration === undefined) continue;
-    if (declaration !== true) {
+    const declared = declarationOf(field as Schema.Top, Sort.AnnotationId, isSortAnnotation);
+    if (declared.kind === "absent") continue;
+    if (declared.kind === "malformed") {
       throw new Error(
         `Resource.make("${type}"): attribute "${key}" carries a malformed sort declaration under ` +
           `"${Sort.AnnotationId}"; declare it with Sort.able`,
@@ -2425,14 +2451,15 @@ const filterableFields = (
 ): Record<string, RuntimeFilterable> => {
   const result: Record<string, RuntimeFilterable> = {};
   for (const [key, field] of Object.entries(fields)) {
-    const declaration = declarationOf(field as Schema.Top, Filter.AnnotationId);
-    if (declaration === undefined) continue;
-    if (!isFilterAnnotation(declaration)) {
+    const declared = declarationOf(field as Schema.Top, Filter.AnnotationId, isFilterAnnotation);
+    if (declared.kind === "absent") continue;
+    if (declared.kind === "malformed") {
       throw new Error(
         `Resource.make("${type}"): attribute "${key}" carries a malformed filter declaration under ` +
           `"${Filter.AnnotationId}"; declare it with Filter.able`,
       );
     }
+    const { declaration } = declared;
     result[key] = {
       operators: declaration.operators,
       literal:
@@ -2616,13 +2643,15 @@ const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void =
           "so it would appear nowhere; keep a create or update projection, or drop the attribute",
       );
     }
-    if (declarationOf(field as Schema.Top, Filter.AnnotationId) !== undefined) {
+    if (
+      declarationOf(field as Schema.Top, Filter.AnnotationId, isFilterAnnotation).kind !== "absent"
+    ) {
       throw new Error(
         `Resource.make("${type}"): attribute "${key}" is input-only (resource: false) but declared filterable; ` +
           "an attribute absent from the resource object cannot be filtered on",
       );
     }
-    if (declarationOf(field as Schema.Top, Sort.AnnotationId) !== undefined) {
+    if (declarationOf(field as Schema.Top, Sort.AnnotationId, isSortAnnotation).kind !== "absent") {
       throw new Error(
         `Resource.make("${type}"): attribute "${key}" is input-only (resource: false) but declared sortable; ` +
           "an attribute absent from the resource object cannot be sorted on",
