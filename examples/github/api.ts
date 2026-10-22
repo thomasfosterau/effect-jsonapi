@@ -22,6 +22,7 @@ import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {
   IssueLocked,
   IssueNotFound,
+  LabelNotFound,
   PullRequestNotFound,
   RepositoryNameTaken,
   RepositoryNotFound,
@@ -243,11 +244,11 @@ export const issues = Group.make(
   }),
   // PATCH /issues/:id/relationships/labels — replace all labels
   Endpoint.updateRelationship(Issue, "labels", {
-    errors: [IssueNotFound, IssueLocked],
+    errors: [IssueNotFound, IssueLocked, LabelNotFound],
   }),
   // POST /issues/:id/relationships/labels — add labels
   Endpoint.addRelationship(Issue, "labels", {
-    errors: [IssueNotFound, IssueLocked],
+    errors: [IssueNotFound, IssueLocked, LabelNotFound],
   }),
   // DELETE /issues/:id/relationships/labels → 204 — remove labels
   Endpoint.removeRelationship(Issue, "labels", {

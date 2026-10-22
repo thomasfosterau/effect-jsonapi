@@ -8,7 +8,7 @@ import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "e
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
 import { Api, SearchQuery } from "../api.js";
-import { ArticleNotFound, TitleTaken } from "../errors.js";
+import { ArticleNotFound, CommentNotFound, PersonNotFound, TitleTaken } from "../errors.js";
 import {
   ArticlesLive,
   sampleArticle,
@@ -436,6 +436,58 @@ describe("blog example: relationship endpoints", () => {
         );
       }),
     );
+  });
+
+  it("404s when PATCHing the author to a person that does not exist, leaving it unchanged", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.updateAuthorRelationship({
+          params: { id: Article.Id.make("1") },
+          payload: { data: Person.ref("nobody") },
+        });
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(PersonNotFound);
+    const article = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+      }),
+    );
+    expect(article.data?.relationships?.author.data.id).toBe(sampleAuthor.id);
+  });
+
+  it("404s when POSTing a comment that does not exist, linking none of the batch", async () => {
+    const exit = await runExit(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.addCommentsRelationship({
+          params: { id: Article.Id.make("1") },
+          payload: {
+            data: [
+              ...sampleComments.map((comment) => Comment.ref(comment.id)),
+              Comment.ref("nothing"),
+            ],
+          },
+        });
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(CommentNotFound);
+    const linkage = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.commentsRelationship({
+          params: { id: Article.Id.make("1") },
+          query: {},
+        });
+      }),
+    );
+    expect(linkage.data.map((identifier) => identifier.id)).not.toContain("nothing");
   });
 
   it("documents relationship endpoints in OpenAPI", () => {

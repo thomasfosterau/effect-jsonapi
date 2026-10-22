@@ -13,6 +13,14 @@ export class UserNotFound extends ApiError.make<UserNotFound>()("UserNotFound", 
   detail: (e) => `User ${e.id} not found`,
 }) {}
 
+export class LabelNotFound extends ApiError.make<LabelNotFound>()("LabelNotFound", {
+  status: 404,
+  code: "label_not_found",
+  title: "Label not found",
+  fields: { id: Schema.String },
+  detail: (e) => `Label ${e.id} not found`,
+}) {}
+
 export class RepositoryNotFound extends ApiError.make<RepositoryNotFound>()("RepositoryNotFound", {
   status: 404,
   code: "repository_not_found",

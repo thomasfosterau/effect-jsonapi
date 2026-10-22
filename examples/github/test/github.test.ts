@@ -8,7 +8,13 @@ import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "e
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Filter, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, IssuesQuery, SearchQuery } from "../api.js";
-import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../errors.js";
+import {
+  IssueLocked,
+  LabelNotFound,
+  RepositoryNameTaken,
+  RepositoryNotFound,
+  UserNotFound,
+} from "../errors.js";
 import {
   bugComments,
   bugIssue,
@@ -704,6 +710,43 @@ describe("github example: issue triage via relationship endpoints", () => {
     assert(Exit.isFailure(exit));
     expect(findFailure(exit.cause)).toBeInstanceOf(UserNotFound);
   });
+
+  it.each(["updateLabelsRelationship", "addLabelsRelationship"] as const)(
+    "404s when %s names a label that does not exist, leaving the labels unchanged",
+    async (endpoint) => {
+      const before = await run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.issues.labelsRelationship({
+            params: { id: featureIssue.id },
+            query: {},
+          });
+        }),
+      );
+      const exit = await runExit(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.issues[endpoint]({
+            params: { id: featureIssue.id },
+            payload: { data: [Label.ref(bugLabel.id), Label.ref("no-such-label")] },
+          });
+        }),
+      );
+
+      assert(Exit.isFailure(exit));
+      expect(findFailure(exit.cause)).toBeInstanceOf(LabelNotFound);
+      const after = await run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.issues.labelsRelationship({
+            params: { id: featureIssue.id },
+            query: {},
+          });
+        }),
+      );
+      expect(after.data).toEqual(before.data);
+    },
+  );
 
   it("403s when triaging a locked issue", async () => {
     const exit = await runExit(
