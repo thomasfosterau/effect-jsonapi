@@ -521,6 +521,23 @@ export const ErrorObjectWithCodes = <const Codes extends ReadonlyArray<string>>(
 // Top-level documents (exactly one of data / errors / meta)
 // ---------------------------------------------------------------------------
 
+// The top-level members every data and linkage document carries beside
+// `data` and `included`: `links`, `meta` (at the caller's schema, `AnyMeta`
+// by default) and `jsonapi`.
+const topLevelMembers = <M extends Schema.Top>(meta: M | undefined) => ({
+  links: Schema.optionalKey(TopLevelLinks),
+  // SAFETY: `M` defaults to `typeof AnyMeta`, the schema used when none is passed.
+  meta: Schema.optionalKey((meta ?? AnyMeta) as M),
+  jsonapi: Schema.optionalKey(JsonApiObject),
+});
+
+// The `included` member of a data document: an optional array of `Included`,
+// `Schema.Never` (no member admitted) by default.
+const includedMember = <Included extends Schema.Top>(included: Included | undefined) => ({
+  // SAFETY: `Included` defaults to `typeof Schema.Never`, the schema used when none is passed.
+  included: Schema.optionalKey(Schema.Array((included ?? Schema.Never) as Included)),
+});
+
 /**
  * A single-resource data document: a pure envelope whose `data` member is
  * *exactly* the schema you pass — no implicit nullability.
@@ -603,10 +620,8 @@ export const DataDocument = <
 ): DataDocument<R, Included, M> =>
   Schema.Struct({
     data,
-    included: Schema.optionalKey(Schema.Array((options?.included ?? Schema.Never) as Included)),
-    links: Schema.optionalKey(TopLevelLinks),
-    meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
-    jsonapi: Schema.optionalKey(JsonApiObject),
+    ...includedMember(options?.included),
+    ...topLevelMembers(options?.meta),
   });
 
 /**
@@ -679,10 +694,8 @@ export const CollectionDocument = <
 ): CollectionDocument<R, Included, M> =>
   Schema.Struct({
     data: Schema.Array(resource),
-    included: Schema.optionalKey(Schema.Array((options?.included ?? Schema.Never) as Included)),
-    links: Schema.optionalKey(TopLevelLinks),
-    meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
-    jsonapi: Schema.optionalKey(JsonApiObject),
+    ...includedMember(options?.included),
+    ...topLevelMembers(options?.meta),
   });
 
 /**
@@ -693,54 +706,109 @@ export const CollectionDocument = <
  * identifier array, depending on the relationship kind — never full resource
  * objects.
  *
+ * A relationship document may also be a compound document (JSON:API 1.1
+ * §Inclusion of Related Resources: `GET /articles/1/relationships/comments?include=comments.author`):
+ * pass an `Included` union and the document gains an optional `included`
+ * member carrying the resources its identifiers name, and the resources
+ * reached from those. Left at its default (`Schema.Never`), the document has
+ * no `included` member at all, as before.
+ *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
  *
- * @since 0.1.0
+ * @since 0.1.0 (`Included` since 0.18.0)
  * @category models
  */
 export interface LinkageDocument<
   D extends Schema.Top,
   M extends Schema.Top = typeof AnyMeta,
-> extends Schema.Struct<{
+  Included extends Schema.Top = typeof Schema.Never,
+> extends Schema.Struct<LinkageDocumentFields<D, M, Included>> {}
+
+/**
+ * The struct fields of a {@link LinkageDocument}: `data`, `links`, `meta` and
+ * `jsonapi`, plus an optional `included` member unless `Included` is
+ * `Schema.Never`.
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type LinkageDocumentFields<
+  D extends Schema.Top,
+  M extends Schema.Top,
+  Included extends Schema.Top,
+> = {
   readonly data: D;
   readonly links: Schema.optionalKey<typeof TopLevelLinks>;
   readonly meta: Schema.optionalKey<M>;
   readonly jsonapi: Schema.optionalKey<typeof JsonApiObject>;
-}> {}
+} & ([Included] extends [typeof Schema.Never]
+  ? unknown
+  : { readonly included: Schema.optionalKey<Schema.$Array<Included>> });
 
 /**
  * Creates a relationship-linkage document schema. Pass the linkage shape as
  * `data`: an identifier schema, `Schema.NullOr(identifier)` or
  * `Schema.Array(identifier)`.
  *
+ * Pass `included` — the union of the resources the document may carry — to
+ * make it a compound relationship document, with an optional `included`
+ * member. Without it the document has no `included` member.
+ *
  * @example
  * ```ts
- * import { Document, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Document, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
  *
  * const Person = Resource.make("people", {
  *   attributes: { name: Schema.NonEmptyString }
  * })
+ * const Comment = Resource.make("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
  *
  * // Linkage document for a to-one relationship endpoint.
  * const AuthorLinkage = Document.LinkageDocument(Schema.NullOr(Person.identifier))
+ *
+ * // A compound one: `GET /articles/1/relationships/comments?include=comments.author`
+ * const CommentsLinkage = Document.LinkageDocument(Schema.Array(Comment.identifier), {
+ *   included: Schema.Union([Comment, Person])
+ * })
+ * Schema.decodeUnknownSync(CommentsLinkage)({
+ *   data: [{ type: "comments", id: "5" }],
+ *   included: [
+ *     {
+ *       type: "comments",
+ *       id: "5",
+ *       attributes: { body: "First!" },
+ *       relationships: { author: { data: { type: "people", id: "9" } } }
+ *     },
+ *     { type: "people", id: "9", attributes: { name: "Dan" } }
+ *   ]
+ * })
  * ```
  *
- * @since 0.1.0
+ * @since 0.1.0 (`included` since 0.18.0)
  * @category constructors
  */
-export const LinkageDocument = <D extends Schema.Top, M extends Schema.Top = typeof AnyMeta>(
+export const LinkageDocument = <
+  D extends Schema.Top,
+  M extends Schema.Top = typeof AnyMeta,
+  Included extends Schema.Top = typeof Schema.Never,
+>(
   data: D,
   options?: {
     readonly meta?: M | undefined;
+    readonly included?: Included | undefined;
   },
-): LinkageDocument<D, M> =>
-  Schema.Struct({
-    data,
-    links: Schema.optionalKey(TopLevelLinks),
-    meta: Schema.optionalKey((options?.meta ?? AnyMeta) as M),
-    jsonapi: Schema.optionalKey(JsonApiObject),
-  });
+): LinkageDocument<D, M, Included> =>
+  // SAFETY: the struct's fields are `LinkageDocumentFields<D, M, Included>`:
+  // `included` only when an `Included` union was passed.
+  Schema.Struct(
+    options?.included === undefined
+      ? { data, ...topLevelMembers(options?.meta) }
+      : { data, ...includedMember(options.included), ...topLevelMembers(options.meta) },
+  ) as unknown as LinkageDocument<D, M, Included>;
 
 /**
  * An error document: a non-empty `errors` array, never `data`.

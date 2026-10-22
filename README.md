@@ -931,7 +931,7 @@ The spec defines two URL families per relationship; both are first-class:
 | Constructor | Method & path | Payload | Success |
 | --- | --- | --- | --- |
 | `Endpoint.related` | `GET /<type>/:id/<name>` | — | 200 — the related resource(s) themselves: a single-resource document (to-one) or a collection document with full query support (to-many) |
-| `Endpoint.getRelationship` | `GET /<type>/:id/relationships/<name>` | — | 200 — a linkage document (`data` is identifiers, never full resources) |
+| `Endpoint.getRelationship` | `GET /<type>/:id/relationships/<name>` | — | 200 — a linkage document (`data` is identifiers, never full resources); with `include`, a compound one |
 | `Endpoint.updateRelationship` | `PATCH /<type>/:id/relationships/<name>` | replacement linkage | 200 — the updated linkage |
 | `Endpoint.addRelationship` | `POST /<type>/:id/relationships/<name>` | identifiers to add | 200 — the resulting linkage (to-many only) |
 | `Endpoint.removeRelationship` | `DELETE /<type>/:id/relationships/<name>` | identifiers to remove | 204 (to-many only) |
@@ -982,6 +982,31 @@ Handlers.paginatedRelationship("articles", id, "comments", {
   self: "/v2/articles/1/relationships/comments",
 });
 // → { links: { self: "/v2/articles/1/relationships/comments", related: "/articles/1/comments" } }
+```
+
+#### Compound relationship documents
+
+A relationship document may be a compound document ([§Inclusion of Related Resources](https://jsonapi.org/format/1.1/#fetching-includes)): `GET /articles/1/relationships/comments?include=comments.author` answers the comment identifiers as `data`, and the comments and their authors in `included`. Pass `getRelationship` an `include` option, shaped as the other read endpoints' is. The paths are the **parent's**, rooted at the relationship, so each one's first segment is the relationship's name:
+
+- `include: true` legalises the parent's include paths that start with the relationship, to a depth of 2 from the parent (`comments`, `comments.author`);
+- `{ depth }` bounds that derivation, counted from the parent (`1` is the relationship alone), and `{ paths }` is an explicit allow-list whose every path must be rooted at the relationship;
+- an `Include.Surface` over the parent whose paths are all rooted at the relationship (`Include.make(Article, { comments: Include.nested(Comment, { author: Person }) })`) also derives the `included` union.
+
+Any other path is a 400 naming the legal ones, and a path outside the relationship is a compile error. The success document gains an optional `included` admitting every resource the legal paths reach; without `include` it has none, as before. A `paginated` relationship is never an include path of its parent, so its relationship endpoint has none to legalise. `Handlers.linkage` takes the members as `included`: it deduplicates them among themselves but not against the identifiers (an identifier is not a resource object, so `comments:5` in both is no duplicate), and checks full linkage from the identifiers themselves. `Assemble.relationship`'s `included` reaches the wire the same way.
+
+```ts
+Endpoint.getRelationship(Article, "tags", { include: true });
+// GET /articles/:id/relationships/tags?include=tags
+
+.handle("tagsRelationship", ({ params, query }) =>
+  loadArticle(params.id).pipe(Effect.map((article) => {
+    const tags = article.relationships?.tags.data ?? [];
+    return Handlers.linkage(tags, {
+      // `undefined` without `?include=` (no `included` member)
+      included: query.include === undefined ? undefined : loadTags(tags),
+      self: Handlers.relationshipLink("articles", article.id, "tags"),
+    });
+  })))
 ```
 
 ### Heterogeneous endpoints (search, feeds)
@@ -2028,8 +2053,9 @@ const query2 = ListArticles2.pipe(
 | 409 Conflict for a create or update whose resource object's `type` the endpoint does not serve | `Endpoint.create` / `Endpoint.update` declare the type they serve, and `Middleware.SchemaErrorsLive` answers a string `data.type` naming another with a 409 whose `source.pointer` is `/data/type`; a `type` missing or not a string stays a 400 ([#428](https://github.com/thomasfosterau/effect-jsonapi/issues/428)). An update's `data.id` that differs from `:id` is the handler's 409 (`ResourceHandlers.make` answers it) |
 | Relationships hold at least one of `data` / `links` / `meta` | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related` |
 | Relationship endpoints: GET/PATCH on to-one, GET/POST/PATCH/DELETE on to-many | `Endpoint.getRelationship` / `updateRelationship` / `addRelationship` / `removeRelationship`; add/remove only constructible for to-many relationships |
+| Related resources requested from a relationship endpoint (`?include=` rooted at the relationship) | `Endpoint.getRelationship`'s `include` option legalises the parent's include paths rooted at the relationship and adds an `included` member to its linkage document; `Handlers.linkage`'s `included` checks full linkage from the identifiers ([#439](https://github.com/thomasfosterau/effect-jsonapi/issues/439)) |
 | Related resource endpoints (`related` links) | `Endpoint.related` — single-resource document with nullable `data` for to-one (empty-linkage case), paginated collection for to-many |
-| Compound documents: no duplicate resources, full linkage | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so its output is fully linked by construction; `Handlers.data` / `Handlers.collection` deduplicate against the primary data and check full linkage on the resources they emit, after `onResource` (runtime check — it catches an `included` member a transform has left unreachable, [so keep it on](#resolving-included--one-batch-per-level)). The check walks reachability from the primary data — from the primary identifiers themselves when `Handlers.buildIncluded` is handed a relationship document's linkage — as [the conformance kit](#proving-it-the-conformance-kit)'s `spec/document/full-linkage` does, so a document the builders accept passes that rule on the document value they build: a cycle of members the primary data does not reach, or a member referenced only by itself, throws. Encoding drops relationship keys the resource does not declare, so `Middleware.SchemaErrorsLive` re-runs the same walk on every 2xx document the endpoint encoded and answers a member reached only through an undeclared relationship with the opaque JSON:API 500, reported at `Error` severity ([#250](https://github.com/thomasfosterau/effect-jsonapi/issues/250)); `Middleware.schemaErrorsLayer({ checkLinkage: false })` / `layerWith` turn that wire check off |
+| Compound documents: no duplicate resources, full linkage | `Handlers.resolveIncluded` walks the requested paths into one `(type, id)`-keyed bucket, so its output is fully linked by construction; `Handlers.data` / `Handlers.collection` deduplicate against the primary data (`Handlers.linkage`, whose primary data is identifiers, only among the members) and check full linkage on the resources they emit, after `onResource` (runtime check — it catches an `included` member a transform has left unreachable, [so keep it on](#resolving-included--one-batch-per-level)). The check walks reachability from the primary data — from the primary identifiers themselves when `Handlers.buildIncluded` is handed a relationship document's linkage — as [the conformance kit](#proving-it-the-conformance-kit)'s `spec/document/full-linkage` does, so a document the builders accept passes that rule on the document value they build: a cycle of members the primary data does not reach, or a member referenced only by itself, throws. Encoding drops relationship keys the resource does not declare, so `Middleware.SchemaErrorsLive` re-runs the same walk on every 2xx document the endpoint encoded and answers a member reached only through an undeclared relationship with the opaque JSON:API 500, reported at `Error` severity ([#250](https://github.com/thomasfosterau/effect-jsonapi/issues/250)); `Middleware.schemaErrorsLayer({ checkLinkage: false })` / `layerWith` turn that wire check off |
 | Compound documents never inline unbounded relationships | `paginated` relationships are excluded from `?include=` paths and `included` unions by construction |
 | `errors` array is never empty | non-empty check on the error document schema |
 | 200 / 201 / 204 status codes per operation | set by the endpoint constructors |

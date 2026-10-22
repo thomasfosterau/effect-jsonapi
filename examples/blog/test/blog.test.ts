@@ -14,9 +14,10 @@ import {
   sampleArticle,
   sampleAuthor,
   sampleComments,
+  sampleTag,
   SearchLive,
 } from "../handlers.js";
-import { Article, Comment, Person } from "../resources.js";
+import { Article, Comment, Person, Tag } from "../resources.js";
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "search"]);
 
@@ -383,6 +384,29 @@ describe("blog example: relationship endpoints", () => {
     expect(document.links?.self).toBe("/articles/1/relationships/comments");
     expect(document.links?.related).toBe("/articles/1/comments");
     expect(document.meta?.total).toBe(2);
+  });
+
+  it("GET /articles/:id/relationships/tags?include=tags serves a compound relationship document", async () => {
+    const [bare, compound] = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const params = { id: Article.Id.make("1") };
+        return [
+          yield* client.articles.tagsRelationship({ params, query: {} }),
+          yield* client.articles.tagsRelationship({ params, query: { include: ["tags"] } }),
+        ] as const;
+      }),
+    );
+
+    // Without `?include=`, linkage only: no `included` member.
+    expect(bare.data).toEqual([{ type: "tags", id: sampleTag.id }]);
+    expect(bare).not.toHaveProperty("included");
+    // With it, the identifiers stay the primary data and the tags they name are
+    // `included` — the same `(type, id)` in both is no duplicate.
+    expect(compound.data).toEqual([{ type: "tags", id: sampleTag.id }]);
+    expectTypeOf(compound.included).toEqualTypeOf<ReadonlyArray<Tag> | undefined>();
+    expect(compound.included).toEqual([sampleTag]);
+    expect(compound.links?.self).toBe("/articles/1/relationships/tags");
   });
 
   it("PATCH /articles/:id/relationships/author replaces the author", async () => {

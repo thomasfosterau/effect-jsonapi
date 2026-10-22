@@ -120,6 +120,14 @@ export const articles = Group.make(
     page: Pagination,
     errors: [ArticleNotFound],
   }),
+  // GET /articles/:id/relationships/tags?include=tags — a compound relationship
+  // document: the tag identifiers as `data`, the tags themselves in `included`.
+  // Include paths are the article's, rooted at `tags`; the paginated
+  // `comments` relationship is never an include path, so it has none.
+  Endpoint.getRelationship(Article, "tags", {
+    include: true,
+    errors: [ArticleNotFound],
+  }),
   // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
   Endpoint.updateRelationship(Article, "author", {
     errors: [ArticleNotFound, PersonNotFound],

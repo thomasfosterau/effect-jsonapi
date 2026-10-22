@@ -153,6 +153,21 @@ describe("blog: JSON:API conformance", () => {
     });
   });
 
+  it("judges the compound relationship document by the compound-document rules", () => {
+    // #439: `GET /articles/:id/relationships/tags` declares `include`, so the
+    // kit's compound probe asks it for `?include=tags`. Its primary data is
+    // the tag identifiers and its `included` the tags they name: full linkage
+    // starts from those identifiers, and a tag in both is no duplicate.
+    const ids = [
+      "spec/document/full-linkage",
+      "spec/document/no-duplicate-resources",
+      "spec/document/included-on-include",
+    ];
+    expect(
+      ids.map((id) => `${id}: ${report.outcomes.find((o) => o.rule.id === id)?._tag}`),
+    ).toEqual(ids.map((id) => `${id}: Passed`));
+  });
+
   it("ran the write rules against targets it created, and left nothing behind", () => {
     const writeRules = [
       "spec/status/create-response-document",

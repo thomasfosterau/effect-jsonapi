@@ -88,6 +88,9 @@ export const polymorphicInclude = Endpoint.polymorphic(AnyNode, { include: true 
 export const related = Endpoint.related(Article, "comments", { include: true, fields: true });
 export const relatedOne = Endpoint.related(Article, "author");
 export const getRelationship = Endpoint.getRelationship(Article, "author");
+export const getRelationshipInclude = Endpoint.getRelationship(Article, "comments", {
+  include: true,
+});
 export const updateRelationship = Endpoint.updateRelationship(Article, "comments");
 export const addRelationship = Endpoint.addRelationship(Article, "comments");
 export const removeRelationship = Endpoint.removeRelationship(Article, "comments");

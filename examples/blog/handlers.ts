@@ -344,6 +344,27 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         }),
       ),
     )
+    .handle("tagsRelationship", ({ params, query }) =>
+      loadArticle(params.id).pipe(
+        Effect.map((article) => {
+          const tags = article.relationships?.tags.data ?? [];
+          return Handlers.linkage(tags, {
+            // `undefined` without `?include=` (no `included` member); with
+            // `include=tags`, the tags the identifiers name. `Handlers.linkage`
+            // checks full linkage from the identifiers themselves.
+            included:
+              query.include === undefined
+                ? undefined
+                : tags.flatMap((identifier) => {
+                    const tag = store.tags.get(identifier.id);
+                    return tag === undefined ? [] : [tag];
+                  }),
+            self: Handlers.relationshipLink("articles", article.id, "tags"),
+            jsonapi: Document.v1_1,
+          });
+        }),
+      ),
+    )
     .handle("updateAuthorRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.tap(() => requirePerson(payload.data.id)),
