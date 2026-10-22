@@ -434,9 +434,19 @@ const includableOf = (body: unknown): ReadonlyArray<string> => {
 };
 
 /**
+ * The include path a relationship endpoint's compound probe asks for: its
+ * relationship's name, the last segment of its path (JSON:API 1.1: `GET
+ * /articles/1/relationships/comments?include=comments`). Its primary data is
+ * resource linkage, which carries no relationships to learn a path from.
+ */
+const relationshipIncludable = (path: string): ReadonlyArray<string> =>
+  Arr.fromNullishOr(/\/relationships\/([^/:][^/]*)$/.exec(path)?.[1]);
+
+/**
  * Every document the api will hand the kit for its read endpoints: a bare probe
  * per endpoint, plus a compound probe wherever `include` is declared and a
- * relationship with inline linkage can be learned from the bare response.
+ * relationship with inline linkage can be learned from the bare response — or,
+ * on a relationship endpoint, the relationship itself.
  *
  * The compound probe is what gives the full-linkage and duplicate-resource rules
  * something to be true *about*; without it they would pass over documents that
@@ -452,7 +462,10 @@ const documentProbes = (ctx: Context) =>
           const bare = yield* ctx.request({ url: path, headers: jsonApiAccept });
           out.push({ where: path, observation: bare });
           if (!endpoint.queryKeys.includes("include")) return;
-          const includable = includableOf(bare.body);
+          const includable =
+            endpoint.role === "relationship"
+              ? relationshipIncludable(endpoint.path)
+              : includableOf(bare.body);
           if (Arr.isReadonlyArrayEmpty(includable)) return;
           const url = withQuery(path, [["include", includable.join(",")]]);
           const compound = yield* ctx.request({ url, headers: jsonApiAccept });

@@ -76,6 +76,7 @@
  *
  * @since 0.1.0
  */
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -86,6 +87,7 @@ import type { WireSchema } from "./Document.js";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Idempotency from "./Idempotency.js";
 import { isSurface } from "./Include.js";
+import type { AnySurface, SurfaceFor } from "./Include.js";
 import { asJsonApi, asJsonApiAtomic, asMediaType } from "./internal/httpMedia.js";
 import { closedStruct, defaultMaxUndeclaredMemberErrors } from "./internal/schemaExt.js";
 import { MEDIA_TYPE } from "./internal/media.js";
@@ -115,8 +117,11 @@ import type {
   Family,
   FamilyDefaultIncluded,
   Id,
+  IncludeDepth,
+  IncludePathsTo,
   Parameter,
   RelationshipName,
+  ResolveIncludePath,
   Resource,
   Target,
   ToManyName,
@@ -1811,16 +1816,168 @@ export type LinkageData<R extends Any, Name extends string> =
 
 /**
  * The success document schema of a relationship endpoint: a linkage document
- * whose `data` member matches the relationship's kind.
+ * whose `data` member matches the relationship's kind. When `Include` turns
+ * `?include=` on ({@link getRelationship}), it is a compound document whose
+ * optional `included` admits {@link RelationshipIncludedOf}; otherwise it has
+ * no `included` member.
  *
- * @since 0.1.0
+ * @since 0.1.0 (`Include` since 0.18.0)
  * @category type-level
  */
 export type RelationshipSuccess<
   R extends Any,
   Name extends string,
   DocMeta extends Schema.Top,
-> = LinkageDocument<AsSchema<LinkageData<R, Name>>, DocMeta>;
+  Include = false,
+> = LinkageDocument<
+  AsSchema<LinkageData<R, Name>>,
+  DocMeta,
+  AsSchema<RelationshipIncludedOf<R, Name, Include>>
+>;
+
+// The paths of `P` rooted at the relationship `Name`: `Name` itself and every
+// dotted path whose first segment it is.
+type RootedAt<P, Name extends string> = Extract<P, Name | `${Name}.${string}`>;
+
+/**
+ * Constrains the `?include=` paths {@link getRelationship} advertises, as
+ * `Query.IncludeOptions` does for the other read endpoints. The paths are the
+ * parent resource's, rooted at the relationship (JSON:API 1.1: `GET
+ * /articles/1/relationships/comments?include=comments.author`), so each one's
+ * first segment is the relationship's name.
+ *
+ * Pass `paths` for an explicit allow-list — every one rooted at the
+ * relationship — or `depth` to bound the derivation, counted from the parent
+ * (`1` — the relationship itself, `2` — the default, one hop further, `3`).
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export interface RelationshipIncludeOptions<R extends Any, Name extends string> {
+  /** The exact set of legal paths, each rooted at the relationship. Anything else fails decoding (→ 400). */
+  readonly paths?: ReadonlyArray<RootedAt<IncludePathsTo<R, 3>, Name>>;
+  /** How many hops from the parent resource to derive. Defaults to 2. */
+  readonly depth?: IncludeDepth;
+  /**
+   * Declared `never` so that a declared `Include.Surface` never satisfies
+   * this arm of {@link RelationshipIncludeOption}, as on `Query.IncludeOptions`.
+   *
+   * @internal
+   */
+  readonly "~@thomasfosterau/effect-jsonapi/include"?: never;
+}
+
+/**
+ * The `include` option of {@link getRelationship}: `false` (the default, no
+ * `?include=` parameter), `true` (the parent resource's include paths rooted
+ * at the relationship, to a depth of 2 from the parent), a
+ * {@link RelationshipIncludeOptions} constraining that derivation, or a
+ * declared `Include.Surface` over the parent resource whose every path is
+ * rooted at the relationship (`Include.make(Article, { comments: … })`), which
+ * also derives the document's `included` union.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type RelationshipIncludeOption<R extends Any, Name extends string> =
+  | boolean
+  | RelationshipIncludeOptions<R, Name>
+  | (SurfaceFor<R> & { readonly paths: ReadonlyArray<Name | `${Name}.${string}`> });
+
+/**
+ * The `?include=` paths a {@link getRelationship} over `R`'s relationship
+ * `Name` with the `include` option `Include` legalises: the parent resource's
+ * legal include paths (`Query.IncludePathsOf`) rooted at the relationship —
+ * `never` while `include` is off. Under `include: true` on a `comments`
+ * relationship whose target has an `author`: `"comments" | "comments.author"`.
+ *
+ * A `paginated` relationship is never an include path of its parent, so its
+ * relationship endpoint legalises none.
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type RelationshipIncludePaths<R extends Any, Name extends string, Include> =
+  IncludeEnabled<Include> extends true ? RootedAt<Query.IncludePathsOf<R, Include>, Name> : never;
+
+/**
+ * The `included` union of a compound relationship document: every resource
+ * a legal {@link RelationshipIncludePaths} path reaches from the parent — the
+ * relationship's target and every resource further along each path.
+ * Exported so a consumer that emits declarations can name it (#348).
+ *
+ * @since 0.18.0
+ * @category schemas
+ */
+export interface RelationshipIncluded<
+  R extends Any,
+  Name extends string,
+  Include,
+> extends Schema.Union<
+  ReadonlyArray<ResolveIncludePath<R, RelationshipIncludePaths<R, Name, Include>>>
+> {}
+
+/**
+ * The `included` union {@link getRelationship}'s document carries: a declared
+ * surface's own union; else, while `include` is on,
+ * {@link RelationshipIncluded}; else `Schema.Never`, and the document has no
+ * `included` member.
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type RelationshipIncludedOf<R extends Any, Name extends string, Include> =
+  IncludeEnabled<Include> extends true
+    ? Include extends { readonly included: infer U extends Schema.Top }
+      ? U
+      : RelationshipIncluded<R, Name, Include>
+    : typeof Schema.Never;
+
+// The `include` option `getRelationship` hands `Query.schema` over the parent
+// resource: a declared surface as it stands (its paths are all rooted at the
+// relationship), else the rooted paths as an explicit allow-list, else off.
+type RelationshipQueryInclude<R extends Any, Name extends string, Include> = [Include] extends [
+  AnySurface,
+]
+  ? Include
+  : IncludeEnabled<Include> extends true
+    ? {
+        readonly paths: ReadonlyArray<
+          Extract<RelationshipIncludePaths<R, Name, Include>, IncludePathsTo<R, 3>>
+        >;
+      }
+    : false;
+
+// Whether an include path is rooted at the relationship `name`.
+const rootedAt =
+  (name: string) =>
+  (path: string): boolean =>
+    path === name || path.startsWith(`${name}.`);
+
+// The runtime `RelationshipIncludePaths`: `None` while `include` is off, else
+// the parent's legal paths rooted at the relationship. An explicit allow-list
+// or a surface naming a path outside the relationship is a programmer error
+// (also a compile error at the call site), so it throws.
+const relationshipIncludePaths = (
+  resource: Any,
+  name: string,
+  include: IncludeArgument | undefined,
+): Option.Option<ReadonlyArray<string>> => {
+  if (include === undefined || include === false) return Option.none();
+  if (include !== true && include.paths !== undefined) {
+    const outside = include.paths.filter((path) => !rootedAt(name)(path));
+    if (Arr.isReadonlyArrayNonEmpty(outside)) {
+      throw new Error(
+        `Endpoint.getRelationship: include path(s) ${outside.map((path) => `"${path}"`).join(", ")} ` +
+          `are not rooted at the relationship "${name}" of "${resource.type}"`,
+      );
+    }
+    return Option.some(includePathsFor([resource], include));
+  }
+  return Option.some(
+    includePathsFor([resource], include === true ? undefined : include).filter(rootedAt(name)),
+  );
+};
 
 /**
  * The request payload schema of a relationship mutation: `{ data: linkage }`.
@@ -2071,6 +2228,20 @@ export const related = <
  * For `paginated` relationships the identifier collection itself can be
  * paginated — enable `page`.
  *
+ * Enable `include` to serve a compound relationship document (JSON:API 1.1
+ * §Inclusion of Related Resources): `GET
+ * /articles/1/relationships/comments?include=comments.author` answers the
+ * comment identifiers as `data`, and the comments and their authors in
+ * `included`. Include paths are the *parent* resource's, rooted at the
+ * relationship, so each one's first segment is the relationship's name; the
+ * legal set is the parent's include paths that start with it (see
+ * {@link RelationshipIncludeOption}), and any other path is a 400. The
+ * document's `included` union is every resource those paths reach. Full
+ * linkage applies: each `included` member must be reachable from the
+ * identifiers (`Handlers.linkage`'s `included` option checks it). A
+ * `paginated` relationship is never an include path, so it has none to
+ * legalise.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -2090,7 +2261,8 @@ export const related = <
  *     author: Relationship.one(() => Person),
  *     editor: Relationship.optional(() => Person),
  *     tags: Relationship.many(() => Tag),
- *     comments: Relationship.paginated(() => Comment)
+ *     comments: Relationship.paginated(() => Comment),
+ *     replies: Relationship.many(() => Comment)
  *   }
  * })
  *
@@ -2105,12 +2277,19 @@ export const related = <
  *   Endpoint.getRelationship(Article, "comments", {
  *     page: Query.Page.Offset,
  *     errors: [ArticleNotFound]
+ *   }),
+ *   // GET /articles/:id/relationships/replies?include=replies.author — a
+ *   // compound relationship document: `replies` and `replies.author` are legal
+ *   Endpoint.getRelationship(Article, "replies", {
+ *     include: true,
+ *     errors: [ArticleNotFound]
  *   })
  * )
  * ```
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
- * @since 0.1.0
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
+ * @since 0.1.0 (`include` since 0.18.0)
  * @category constructors
  */
 export const getRelationship = <
@@ -2125,6 +2304,10 @@ export const getRelationship = <
   const Path extends `/${string}` = `/${Type}/:id/relationships/${Name}`,
   const PageFields extends Schema.Struct.Fields | undefined = undefined,
   DocMeta extends Schema.Top = typeof AnyMeta,
+  const Include extends RelationshipIncludeOption<
+    Resource<Type, Attributes, Rels, Meta, IdSchema>,
+    Name
+  > = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
@@ -2133,15 +2316,40 @@ export const getRelationship = <
     readonly page?: PageFields;
     /** Override the linkage document's `meta` schema. */
     readonly meta?: DocMeta;
+    /**
+     * Enable the `?include=` query parameter, making the success document a
+     * compound relationship document: `true` for the parent's include paths
+     * rooted at the relationship (depth 2 from the parent), a
+     * {@link RelationshipIncludeOptions} object to constrain them, or a
+     * declared `Include.Surface` over the parent whose paths are all rooted
+     * at the relationship, which also derives the `included` union.
+     *
+     * @since 0.18.0
+     */
+    readonly include?: Include;
   },
 ) => {
   type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
-  // The cast is sound: `linkageData` mirrors `LinkageData` kind by kind.
+  // SAFETY: every `RelationshipIncludeOption` is an `IncludeArgument` at
+  // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
+  const include = options?.include as IncludeArgument | undefined;
+  const includable = relationshipIncludePaths(resource, name, include);
+  // A declared surface's own union, else every resource the rooted paths
+  // reach from the parent — the target first. Absent while `include` is off,
+  // so the document has no `included` member.
+  const included = Option.map(includable, (paths) =>
+    isSurface(include)
+      ? include.included
+      : Schema.Union(includedResources([resource], true, paths)),
+  );
+  // SAFETY: `linkageData` mirrors `LinkageData` kind by kind, and `included`
+  // mirrors `RelationshipIncludedOf`.
   const success = LinkageDocument(linkageData(descriptor, target), {
     meta: (options?.meta ?? AnyMeta) as DocMeta,
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta>;
+    included: Option.getOrUndefined(included),
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta, Include>;
 
   return HttpApiEndpoint.get(
     (options?.name ?? `${name}Relationship`) as EndpointName,
@@ -2150,15 +2358,21 @@ export const getRelationship = <
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
       query: Query.schema(
-        target as Target<R, Name>,
+        // SAFETY: `Parameter` is the resource definition `R` names. The query
+        // is the parent's: its include paths are rooted at the relationship,
+        // and nothing else it declares depends on the resource it is built over.
+        resource as R,
         {
-          include: false,
+          include: Option.match(includable, {
+            onNone: () => false,
+            onSome: (paths) => (isSurface(include) ? include : { paths }),
+          }),
           fields: false,
           sort: false,
           page: options?.page,
           filter: undefined,
         } as {
-          readonly include: false;
+          readonly include: RelationshipQueryInclude<R, Name, Include>;
           readonly fields: false;
           readonly sort: false;
           readonly page: PageFields;

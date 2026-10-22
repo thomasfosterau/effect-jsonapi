@@ -1215,9 +1215,9 @@ const linkWithQuery = (link: LinkValue, query: string): LinkValue =>
 // option, and `query` is appended to whichever `self` the document ends up
 // with — a `query` with no self link to carry it is a programming error.
 const buildLinks = (options: {
-  readonly self?: string;
-  readonly query?: string | ReadonlyArray<Pair>;
-  readonly links?: LinksValue;
+  readonly self?: string | undefined;
+  readonly query?: string | ReadonlyArray<Pair> | undefined;
+  readonly links?: LinksValue | undefined;
 }): LinksValue | undefined => {
   const links: LinksValue | undefined =
     options.self !== undefined ? { self: options.self, ...options.links } : options.links;
@@ -1233,21 +1233,24 @@ const buildLinks = (options: {
 // `data` and `primary` are the already-transformed primary resources: the
 // transform runs on them before the document is assembled, and `onResource`
 // is the memoised pass shared with `included` so nothing is shaped twice.
+// `asLinkage` marks `primary` as a relationship document's identifiers, which
+// `included` is seeded from rather than deduplicated against (#423).
 const build = (
   data: unknown,
   primary: ReadonlyArray<ResourceValue>,
   options:
     | {
         readonly included?: ReadonlyArray<ResourceValue> | undefined;
-        readonly meta?: MetaValue;
-        readonly jsonapi?: JsonApiObjectValue;
-        readonly self?: string;
-        readonly query?: string | ReadonlyArray<Pair>;
-        readonly links?: LinksValue;
+        readonly meta?: MetaValue | undefined;
+        readonly jsonapi?: JsonApiObjectValue | undefined;
+        readonly self?: string | undefined;
+        readonly query?: string | ReadonlyArray<Pair> | undefined;
+        readonly links?: LinksValue | undefined;
         readonly checkLinkage?: boolean | undefined;
       }
     | undefined,
   onResource: ResourceTransform<TransformLambda> | undefined,
+  asLinkage = false,
 ) => {
   const links = options === undefined ? undefined : buildLinks(options);
   // An array — however empty, and however empty dedup against the primary
@@ -1258,7 +1261,7 @@ const build = (
   const included =
     options?.included === undefined
       ? undefined
-      : includedFor(primary, false, options.included, {
+      : includedFor(primary, asLinkage, options.included, {
           checkLinkage: options.checkLinkage,
           onResource,
         });
@@ -1694,14 +1697,18 @@ export type LinkageValue = ResourceIdentifierValue | ReadonlyArray<ResourceIdent
 
 // The builder's return type is conditional on its generics for the same
 // reason as `DocumentValue` above.
+// `included` is typed only when the builder is handed one, so a plain linkage
+// document's type is what it was before compound relationship documents.
 type LinkageDocumentValue<
   Data,
   M extends MetaValue,
   J extends JsonApiObjectValue = never,
+  Included = never,
 > = Simplify<
-  { readonly data: Data; readonly links?: LinksValue } & ([M] extends [never]
-    ? {}
-    : { readonly meta?: M }) &
+  { readonly data: Data; readonly links?: LinksValue } & ([Included] extends [never]
+    ? unknown
+    : { readonly included?: ReadonlyArray<Included> }) &
+    ([M] extends [never] ? {} : { readonly meta?: M }) &
     ([J] extends [never] ? {} : { readonly jsonapi: J })
 >;
 
@@ -1713,10 +1720,48 @@ type TransformedLinkage<F extends TransformLambda, Data> = Data extends null
     ? { readonly [K in keyof Data]: Transformed<F, Data[K]> }
     : Transformed<F, Data>;
 
+// A linkage document's top-level links: `self` and `related`, then `links`.
+const linkageLinks = (
+  options:
+    | { readonly self?: string; readonly related?: string; readonly links?: LinksValue }
+    | undefined,
+): LinksValue | undefined =>
+  options?.self === undefined && options?.related === undefined
+    ? options?.links
+    : {
+        ...(options.self !== undefined ? { self: options.self } : {}),
+        ...(options.related !== undefined ? { related: options.related } : {}),
+        ...options.links,
+      };
+
+// The linkage with the transform applied to each identifier.
+const applyToLinkage = (
+  data: LinkageValue,
+  onResource: ResourceTransform<TransformLambda> | undefined,
+): LinkageValue =>
+  onResource === undefined || data === null
+    ? data
+    : Array.isArray(data)
+      ? mapResources(data, onResource)
+      : (onResource(data as ResourceIdentifierValue) as ResourceIdentifierValue);
+
 /**
  * Builds a relationship-linkage document value — what relationship-endpoint
  * handlers (`fetchRelationship` / `updateRelationship` / `addRelationship`)
- * return: `{ data, links?, meta?, jsonapi? }` where `data` is resource linkage.
+ * return: `{ data, included?, links?, meta?, jsonapi? }` where `data` is
+ * resource linkage.
+ *
+ * Pass `included` to build a compound relationship document — the answer to
+ * `GET /articles/1/relationships/comments?include=comments.author` on an
+ * `Endpoint.getRelationship` declaring `include`. As with {@link data}, an
+ * array — even `[]` — emits the member, and `undefined` omits it. The members
+ * go through {@link buildIncluded} with the linkage as its primary data:
+ * they are deduplicated against each other but not against the identifiers
+ * (an identifier is not a resource object, so `comments:5` in `data` and in
+ * `included` is no duplicate), and full linkage is checked from the
+ * identifiers themselves — each member must be one the linkage names or be
+ * reachable from one through other members' relationships. Empty linkage
+ * (`null`, `[]`) reaches nothing, so any member then fails the check.
  *
  * As with {@link data}, `jsonapi` is only emitted, and only narrows into the
  * return type, when you pass it — see {@link data} for why it is opt-in.
@@ -1763,7 +1808,38 @@ type TransformedLinkage<F extends TransformLambda, Data> = Data extends null
  *   )
  * ```
  *
- * @since 0.1.0
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", {
+ *   attributes: { name: Schema.NonEmptyString }
+ * })
+ * const Comment = Resource.make("comments", {
+ *   attributes: { body: Schema.NonEmptyString },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * const author = Person.make({ id: Person.Id.make("9"), attributes: { name: "Dan" } })
+ * const comment = Comment.make({
+ *   id: Comment.Id.make("5"),
+ *   attributes: { body: "First!" },
+ *   relationships: { author: { data: Person.ref(author.id) } }
+ * })
+ *
+ * // GET /articles/1/relationships/comments?include=comments.author: the
+ * // identifiers as `data`, the comments and their authors as `included`
+ * const document = Handlers.linkage([Comment.ref(comment.id)], {
+ *   included: [comment, author],
+ *   self: Handlers.relationshipLink("articles", "1", "comments")
+ * })
+ *
+ * console.log(document.data)                     // → [ { type: "comments", id: "5" } ]
+ * console.log(document.included?.map((r) => r.type)) // → [ "comments", "people" ]
+ * ```
+ *
+ * @since 0.1.0 (`included` and `checkLinkage` since 0.18.0)
  * @category constructors
  */
 export const linkage = <
@@ -1771,9 +1847,27 @@ export const linkage = <
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
   F extends TransformLambda = IdentityLambda,
+  const Included extends ResourceValue = never,
 >(
   data: Data,
   options?: {
+    /**
+     * The compound relationship document's members: the resources the
+     * linkage names and those reached from them, for a request carrying
+     * `include`. An array — even `[]` — emits `included`; `undefined` omits
+     * it. Deduplicated among themselves (never against the identifiers) and
+     * checked for full linkage from the identifiers ({@link buildIncluded}).
+     *
+     * @since 0.18.0
+     */
+    readonly included?: ReadonlyArray<Included> | undefined;
+    /**
+     * `false` skips the full-linkage check on `included`, which is on by
+     * default — as on {@link data}.
+     *
+     * @since 0.18.0
+     */
+    readonly checkLinkage?: boolean | undefined;
     readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
     readonly jsonapi?: J;
@@ -1783,38 +1877,39 @@ export const linkage = <
     /**
      * Applied to every resource identifier the document carries, exactly once
      * each — the slot a relationship document's resources occupy (§8.4 makes
-     * its primary data bare identifiers). A fieldset projection is a no-op on
-     * an identifier, which has no `attributes`; per-resource {@link withMeta}
-     * is not, and is the reason the hook is here: the same resource must not
-     * describe different capabilities in a relationship document than it does
-     * as an `included` member elsewhere.
+     * its primary data bare identifiers) — and to every deduplicated
+     * `included` member. A fieldset projection is a no-op on an identifier,
+     * which has no `attributes`; per-resource {@link withMeta} is not, and is
+     * the reason the hook is here: the same resource must not describe
+     * different capabilities in a relationship document than it does as an
+     * `included` member elsewhere. An identifier and the `included` member it
+     * names are shaped separately, each from its own value.
      *
      * @since 0.15.0
      */
     readonly onResource?: ResourceTransform<F> | undefined;
   },
-): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J> => {
-  const links: LinksValue | undefined =
-    options?.self !== undefined || options?.related !== undefined
-      ? {
-          ...(options?.self !== undefined ? { self: options.self } : {}),
-          ...(options?.related !== undefined ? { related: options.related } : {}),
-          ...options?.links,
-        }
-      : options?.links;
+): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J, Transformed<F, Included>> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
-  const shaped =
-    onResource === undefined || data === null
-      ? data
-      : Array.isArray(data)
-        ? mapResources(data as ReadonlyArray<ResourceIdentifierValue>, onResource)
-        : onResource(data as ResourceIdentifierValue);
-  return {
-    data: shaped,
-    ...(links !== undefined ? { links } : {}),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {}),
-  } as LinkageDocumentValue<TransformedLinkage<F, Data>, M, J>;
+  const transformed = applyToLinkage(data, onResource);
+  // The identifiers are the primary data `included` is seeded from (#423). An
+  // `included` member is shaped by its own pass, not the identifiers'
+  // memoised one: the two share a `(type, id)` but not a shape.
+  // SAFETY: `build` emits each member exactly when its option was passed, as
+  // `LinkageDocumentValue` types it.
+  return build(
+    transformed,
+    transformed === null ? [] : Arr.ensure(transformed),
+    {
+      included: options?.included,
+      checkLinkage: options?.checkLinkage,
+      meta: options?.meta,
+      jsonapi: options?.jsonapi,
+      links: linkageLinks(options),
+    },
+    options?.onResource,
+    true,
+  ) as LinkageDocumentValue<TransformedLinkage<F, Data>, M, J, Transformed<F, Included>>;
 };
 
 // ---------------------------------------------------------------------------

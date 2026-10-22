@@ -173,9 +173,10 @@ describe("SchemaErrorsLive re-checks full linkage on the encoded document (#250)
 });
 
 describe("SchemaErrorsLive walks from primary identifiers in a relationship document (#423)", () => {
-  // The library's relationship endpoints declare no `included`; one whose
-  // schema does (`?include=comments.author` on a relationship endpoint)
-  // carries the members the primary identifiers name.
+  // A relationship endpoint whose schema declares `included`
+  // (`?include=comments.author`, as `Endpoint.getRelationship`'s `include`
+  // option declares since #439) carries the members the primary identifiers
+  // name.
   const Comment = Resource.make("comments", {
     attributes: { body: Schema.String },
     relationships: { author: Relationship.one(() => Person) },

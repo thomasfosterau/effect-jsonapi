@@ -271,6 +271,91 @@ describe("Handlers.linkage", () => {
       next: "/articles/1/relationships/comments?page[offset]=10",
     });
   });
+
+  // #439: a compound relationship document — `GET
+  // /articles/1/relationships/comments?include=comments.author`.
+  describe("with `included`", () => {
+    const comment = (id: string, author = "9") => ({
+      type: "comments",
+      id,
+      attributes: { body: `comment ${id}` },
+      relationships: { author: { data: { type: "people", id: author } } },
+    });
+    const person = (id: string) => ({ type: "people", id, attributes: { name: `person ${id}` } });
+    const ids = (...values: ReadonlyArray<string>) =>
+      values.map((id) => ({ type: "comments", id }));
+
+    it("carries the resources the identifiers name, and those reached from them", () => {
+      const doc = Handlers.linkage(ids("5", "12"), {
+        included: [comment("5"), comment("12"), person("9")],
+      });
+      expect(doc).toEqual({
+        data: ids("5", "12"),
+        included: [comment("5"), comment("12"), person("9")],
+      });
+      expectTypeOf(doc.included).toEqualTypeOf<
+        ReadonlyArray<ReturnType<typeof comment> | ReturnType<typeof person>> | undefined
+      >();
+    });
+
+    it("does not dedupe against the identifiers, only among the members", () => {
+      // `comments:5` is an identifier in `data` and a resource object in
+      // `included`: no duplicate. Two `included` copies are.
+      const doc = Handlers.linkage(ids("5"), {
+        included: [comment("5"), comment("5"), person("9")],
+      });
+      expect(doc.included).toEqual([comment("5"), person("9")]);
+    });
+
+    it("keeps an empty `included`, and omits the member without one", () => {
+      expect(Handlers.linkage(ids("5"), { included: [] })).toEqual({
+        data: ids("5"),
+        included: [],
+      });
+      expect(Handlers.linkage(ids("5"))).not.toHaveProperty("included");
+      expect(Handlers.linkage(ids("5"), { included: undefined })).not.toHaveProperty("included");
+    });
+
+    it("seeds full linkage from a to-one identifier", () => {
+      const doc = Handlers.linkage({ type: "comments", id: "5" }, { included: [comment("5")] });
+      expect(doc.included).toEqual([comment("5")]);
+    });
+
+    it("throws on a member no identifier reaches", () => {
+      // `people:7` is linked from nothing; `comments:3` is not in `data`.
+      expect(() => Handlers.linkage(ids("5"), { included: [comment("5"), person("7")] })).toThrow(
+        /full linkage violation: included resource "people:7"/,
+      );
+      expect(() => Handlers.linkage(ids("5"), { included: [comment("3")] })).toThrow(
+        /full linkage violation: included resource "comments:3"/,
+      );
+      // Empty linkage reaches nothing.
+      expect(() => Handlers.linkage(null, { included: [comment("5")] })).toThrow(/full linkage/);
+      expect(() => Handlers.linkage([], { included: [comment("5")] })).toThrow(/full linkage/);
+    });
+
+    it("skips the check with `checkLinkage: false`", () => {
+      expect(
+        Handlers.linkage(ids("5"), { included: [person("7")], checkLinkage: false }).included,
+      ).toEqual([person("7")]);
+    });
+
+    it("shapes each identifier and each member from its own value", () => {
+      // The identifier and the member share `comments:5`; neither is handed
+      // the other's transformed value.
+      const doc = Handlers.linkage(ids("5"), {
+        included: [comment("5"), person("9")],
+        onResource: Handlers.withMeta((resource) => ({
+          slot: resource.attributes === undefined ? "identifier" : "resource",
+        })),
+      });
+      expect(doc.data).toEqual([{ type: "comments", id: "5", meta: { slot: "identifier" } }]);
+      expect(doc.included).toEqual([
+        { ...comment("5"), meta: { slot: "resource" } },
+        { ...person("9"), meta: { slot: "resource" } },
+      ]);
+    });
+  });
 });
 
 // A resource type that appears on both sides of a compound document: an
