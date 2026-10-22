@@ -184,17 +184,16 @@ export default defineConfig({
           "effect/no-barrel-imports": "off",
         },
       },
-      // Build/test configs, the docgen runner and the module-hook fixture are
-      // evaluated by Vite / Vitest / Node in bare Node, before any Effect
-      // runtime exists — there is no `Config` provider to read from and no
-      // `FileSystem` or `ChildProcess` service to call, so `process.env` and
-      // `node:*` are the only things that work there. The two artifact tests
-      // drive the built package from outside, the same way: a module graph
-      // walk, and a consumer project compiled by `tsc` in a temp directory.
+      // Build/test configs and the module-hook fixture are evaluated by Vite /
+      // Vitest / Node in bare Node, before any Effect runtime exists — there
+      // is no `Config` provider to read from and no `FileSystem` or
+      // `ChildProcess` service to call, so `process.env` and `node:*` are the
+      // only things that work there. The two artifact tests drive the built
+      // package from outside, the same way: a module graph walk, and a
+      // consumer project compiled by `tsc` in a temp directory.
       {
         files: [
           "**/vite.config.ts",
-          "scripts/**",
           "test/fixtures/**",
           "test/entry-points.test.ts",
           "test/declaration-emit.test.ts",
@@ -289,11 +288,12 @@ export default defineConfig({
       },
       // Type-checks AND executes every JSDoc `@example`, and generates the API
       // docs under docs/. Not part of `check`: it is a separate CI step, so a
-      // broken example fails visibly on its own line. docgen itself skips the
-      // `@example` in a class's own doc comment (#276); the second sub-task
-      // checks and runs those through the same pipeline.
+      // broken example fails visibly on its own line. Depends on `build`
+      // because docgen 4.x resolves an example's package imports through the
+      // package's `exports`, i.e. against `dist/`, not `src/`.
       docgen: {
-        command: "docgen && tsx scripts/docgen-class-examples.ts",
+        command: "docgen",
+        dependsOn: ["build"],
         cache: false,
       },
     },
