@@ -312,17 +312,16 @@ export const negotiate = (
  * The part of a request whose decoding failed — the input to
  * {@link schemaError} and {@link schemaErrorDocument}.
  *
- * `"Params"`, `"Headers"`, `"Query"` and `"Payload"` are the request-side
- * kinds `HttpApiSchemaError` uses; HttpApi calls the request body
- * `"Payload"`. `"Body"` is accepted for a host that decodes a request body
- * itself and names it so, but inside HttpApi an `HttpApiSchemaError` of kind
- * `"Body"` is a failure to encode the handler's *response* — a server error
- * that {@link SchemaErrorsLive} never answers as a 400.
+ * These are the request-side kinds `HttpApiSchemaError` uses; HttpApi calls
+ * the request body `"Payload"`. Its `"Body"` kind is not a request part: it is
+ * a failure to encode the handler's *response* — a server error that
+ * {@link SchemaErrorsLive} never answers as a 400 — so a host that decodes a
+ * request body itself names it `"Payload"` too.
  *
  * @since 0.7.0
  * @category models
  */
-export type RequestPart = "Params" | "Headers" | "Query" | "Body" | "Payload";
+export type RequestPart = "Params" | "Headers" | "Query" | "Payload";
 
 /**
  * The JSON:API 400 a request-validation failure produces — the standalone form
@@ -371,8 +370,8 @@ const jsonPointer = (path: ReadonlyArray<string | number>): string =>
 // grammar key like `filter[age][gt]` is already one segment) up to the first
 // list index — everything after an index is inside a decoded value (the sort
 // codec's `["sort", 0, "field"]`), not part of the wire key; path params and
-// headers take the first segment; a request body (HttpApi's `Payload`, or a
-// host's own `Body`) takes the JSON Pointer.
+// headers take the first segment; a request body (`Payload`) takes the JSON
+// Pointer.
 const sourceOf = (
   part: RequestPart,
   path: ReadonlyArray<string | number>,
@@ -402,7 +401,6 @@ const sourceOf = (
       const key = path.find((segment): segment is string => typeof segment === "string");
       return key === undefined ? undefined : { header: key };
     }
-    case "Body":
     case "Payload":
       return path.length === 0 ? undefined : { pointer: jsonPointer(path) };
   }
