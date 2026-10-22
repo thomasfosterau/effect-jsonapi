@@ -111,6 +111,7 @@ import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Core from "./internal/conformance/core.js";
 import * as ProfileRules from "./internal/conformance/profile.js";
 import * as ReportFormat from "./internal/conformance/report.js";
+import * as SortRules from "./internal/conformance/sort.js";
 import * as SpecRules from "./internal/conformance/spec.js";
 import * as WriteFixtures from "./internal/conformance/write.js";
 
@@ -580,7 +581,11 @@ class RuleDied extends Schema.TaggedError<RuleDied>()("RuleDied", {
 // The catalogue
 // ---------------------------------------------------------------------------
 
-const implementations: ReadonlyArray<Core.RuleImpl> = [...SpecRules.rules, ...ProfileRules.rules];
+const implementations: ReadonlyArray<Core.RuleImpl> = [
+  ...SpecRules.rules,
+  ...ProfileRules.rules,
+  ...SortRules.rules,
+];
 
 /**
  * Every rule the kit can check, spec tier first.
@@ -635,12 +640,6 @@ export const gaps: ReadonlyArray<Gap> = [
     reason:
       "The profile's syntax, closed operator core, canonical form, error pointers and advertisement are checked; what a tree *means* is not. #116 has since supplied the normative tables — `docs/filter-grammar.md` §6, rule-identified F-EVAL-*, F-CMP-*, F-IN-*, F-LOGIC-*, F-ISNULL-* — and deliberately ships no reference evaluator, assigning the executable oracle to this kit instead. The remaining work is a fold over the AST implementing §6.3, run against the unfiltered collection's JSON (which a probe already has, per F-ORD-1's JSON-representation domain) and compared against what the filtered request returned. Open first: whether that evaluator is public API — #116's \"shared building block\" — or stays internal to the kit.",
     tracking: ["#116", "#120"],
-  },
-  {
-    area: "Sort ordering correctness",
-    reason:
-      "A `sort` field the server does not support must be a 400, and that is checked. Whether `?sort=-createdAt` actually orders the collection, and where NULLs land, requires known data. Note the filter profile's §6.2 ordering rules govern `filter` comparison only — `sort` ordering is still unspecified, so there is no normative text to check against yet.",
-    tracking: [],
   },
   {
     area: "Write semantics beyond the success responses",
