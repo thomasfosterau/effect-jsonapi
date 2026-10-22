@@ -87,6 +87,7 @@ import {
   Effect,
   ErrorReporter,
   Layer,
+  Match,
   Option,
   Record as Rec,
   Schema,
@@ -385,15 +386,15 @@ const jsonPointer = (path: ReadonlyArray<string | number>): string =>
 const sourceOf = (
   part: RequestPart,
   path: ReadonlyArray<string | number>,
-): typeof ErrorSource.Type | undefined => {
-  switch (part) {
-    case "Query": {
+): typeof ErrorSource.Type | undefined =>
+  Match.value(part).pipe(
+    Match.when("Query", () => {
       const keys: Array<string> = [];
       for (const segment of path) {
         if (typeof segment !== "string") break;
         keys.push(segment);
       }
-      if (keys.length === 0) return undefined;
+      if (Arr.isReadonlyArrayEmpty(keys)) return undefined;
       return {
         parameter:
           keys[0]! +
@@ -402,19 +403,20 @@ const sourceOf = (
             .map((key) => `[${key}]`)
             .join(""),
       };
-    }
-    case "Params": {
+    }),
+    Match.when("Params", () => {
       const key = path.find((segment): segment is string => typeof segment === "string");
       return key === undefined ? undefined : { parameter: key };
-    }
-    case "Headers": {
+    }),
+    Match.when("Headers", () => {
       const key = path.find((segment): segment is string => typeof segment === "string");
       return key === undefined ? undefined : { header: key };
-    }
-    case "Payload":
-      return path.length === 0 ? undefined : { pointer: jsonPointer(path) };
-  }
-};
+    }),
+    Match.when("Payload", () =>
+      Arr.isReadonlyArrayEmpty(path) ? undefined : { pointer: jsonPointer(path) },
+    ),
+    Match.exhaustive,
+  );
 
 /**
  * The JSON:API 400 document for a request-validation failure, from the
@@ -1100,8 +1102,8 @@ export const contentNegotiationLayer = (
 ): Layer.Layer<ContentNegotiation> =>
   Layer.effect(
     ContentNegotiation,
-    Effect.succeed<typeof ContentNegotiation.Service>((httpEffect) =>
-      Effect.gen(function* () {
+    Effect.succeed<typeof ContentNegotiation.Service>(
+      Effect.fnUntraced(function* (httpEffect) {
         const request = yield* HttpServerRequest;
         const error = yield* Effect.sync(() =>
           negotiate(

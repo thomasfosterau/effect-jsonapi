@@ -42,6 +42,7 @@ import {
   finding,
   type Finding,
   isRecord,
+  eachSuccessfulRead,
   jsonApiAccept,
   noProbeReason,
   type Observation,
@@ -138,7 +139,10 @@ const learnField = (ctx: Context, path: string) =>
     const attributes = first["attributes"];
     if (!isRecord(attributes)) return undefined;
     const keys = Object.keys(attributes);
-    return keys.length === 0 ? undefined : { field: keys[0]!, value: attributes[keys[0]!] };
+    return Arr.match(keys, {
+      onEmpty: () => undefined,
+      onNonEmpty: ([field]) => ({ field, value: attributes[field] }),
+    });
   });
 
 // ---------------------------------------------------------------------------
@@ -156,11 +160,9 @@ const advertisesProfile: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const targets = grammarEndpoints(ctx);
-      if (targets.length === 0) return skip(advertisesProfile.rule, NO_GRAMMAR);
+      if (Arr.isReadonlyArrayEmpty(targets)) return skip(advertisesProfile.rule, NO_GRAMMAR);
       const findings: Array<Finding> = [];
-      for (const { path } of targets) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-        if (observation.status < 200 || observation.status >= 300) continue;
+      yield* eachSuccessfulRead(ctx, targets, (path, observation) => {
         const header = observation.contentType;
         const profiles =
           header === undefined
@@ -178,7 +180,7 @@ const advertisesProfile: RuleImpl = {
             }),
           );
         }
-      }
+      });
       return settle(advertisesProfile.rule, targets.length, findings);
     }),
 };
@@ -227,44 +229,50 @@ const rejections: RuleImpl = {
         { key: `filter[${learned.field}]`, value: "a", why: "a repeated filter key", repeat: true },
       ];
       const findings: Array<Finding> = [];
-      for (const probe of probes) {
-        const pairs: ReadonlyArray<readonly [string, string]> =
-          probe.repeat === true
-            ? [
-                [probe.key, probe.value],
-                [probe.key, "b"],
-              ]
-            : [[probe.key, probe.value]];
-        const observation = yield* ctx.request({
-          url: withQuery(target.path, pairs),
-          headers: jsonApiAccept,
-        });
-        if (observation.status !== 400) {
-          findings.push(
-            finding(rejections.rule, {
-              detail: `${probe.why} (\`${probe.key}\`) was not rejected`,
-              expected: "400 Bad Request",
-              observed: describe(observation),
-              probe: observation.probe,
-            }),
-          );
-          continue;
-        }
-        const parameters = sourceParametersOf(observation);
-        if (!parameters.includes(probe.key)) {
-          findings.push(
-            finding(rejections.rule, {
-              detail: `the 400 for ${probe.why} does not name \`${probe.key}\` in \`source.parameter\``,
-              expected: `source: { parameter: "${probe.key}" }`,
-              observed:
-                parameters.length === 0
-                  ? "no error object carried `source.parameter`"
-                  : `source.parameter: ${parameters.map((p) => JSON.stringify(p)).join(", ")}`,
-              probe: observation.probe,
-            }),
-          );
-        }
-      }
+      yield* Effect.forEach(
+        probes,
+        (probe) =>
+          Effect.gen(function* () {
+            const pairs: ReadonlyArray<readonly [string, string]> =
+              probe.repeat === true
+                ? [
+                    [probe.key, probe.value],
+                    [probe.key, "b"],
+                  ]
+                : [[probe.key, probe.value]];
+            const observation = yield* ctx.request({
+              url: withQuery(target.path, pairs),
+              headers: jsonApiAccept,
+            });
+            if (observation.status !== 400) {
+              findings.push(
+                finding(rejections.rule, {
+                  detail: `${probe.why} (\`${probe.key}\`) was not rejected`,
+                  expected: "400 Bad Request",
+                  observed: describe(observation),
+                  probe: observation.probe,
+                }),
+              );
+              return;
+            }
+            const parameters = sourceParametersOf(observation);
+            if (!parameters.includes(probe.key)) {
+              findings.push(
+                finding(rejections.rule, {
+                  detail: `the 400 for ${probe.why} does not name \`${probe.key}\` in \`source.parameter\``,
+                  expected: `source: { parameter: "${probe.key}" }`,
+                  observed: Arr.match(parameters, {
+                    onEmpty: () => "no error object carried `source.parameter`",
+                    onNonEmpty: (named) =>
+                      `source.parameter: ${named.map((p) => JSON.stringify(p)).join(", ")}`,
+                  }),
+                  probe: observation.probe,
+                }),
+              );
+            }
+          }),
+        { concurrency: 1, discard: true },
+      );
       return settle(rejections.rule, probes.length, findings);
     }),
 };
@@ -317,23 +325,28 @@ const spellingEquivalence: RuleImpl = {
         readonly status: number;
         readonly body: string;
       }> = [];
-      for (const [label, pairs] of spellings) {
-        const observation = yield* ctx.request({
-          url: withQuery(target.path, pairs),
-          headers: jsonApiAccept,
-        });
-        observations.push({ label, status: observation.status, body: observation.text });
-        if (observation.status !== 200) {
-          findings.push(
-            finding(spellingEquivalence.rule, {
-              detail: `the ${label} spelling of \`${field} eq ${JSON.stringify(value)}\` was not accepted`,
-              expected: "200 OK — every spelling decodes to the same tree",
-              observed: describe(observation),
-              probe: observation.probe,
-            }),
-          );
-        }
-      }
+      yield* Effect.forEach(
+        spellings,
+        ([label, pairs]) =>
+          Effect.gen(function* () {
+            const observation = yield* ctx.request({
+              url: withQuery(target.path, pairs),
+              headers: jsonApiAccept,
+            });
+            observations.push({ label, status: observation.status, body: observation.text });
+            if (observation.status !== 200) {
+              findings.push(
+                finding(spellingEquivalence.rule, {
+                  detail: `the ${label} spelling of \`${field} eq ${JSON.stringify(value)}\` was not accepted`,
+                  expected: "200 OK — every spelling decodes to the same tree",
+                  observed: describe(observation),
+                  probe: observation.probe,
+                }),
+              );
+            }
+          }),
+        { concurrency: 1, discard: true },
+      );
       const accepted = observations.filter((observation) => observation.status === 200);
       const reference = accepted[0];
       if (reference !== undefined) {
@@ -560,14 +573,12 @@ const jsonApiMember: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(jsonApiMember.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
-      for (const { path } of resolved) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-        if (observation.status < 200 || observation.status >= 300) continue;
+      yield* eachSuccessfulRead(ctx, resolved, (path, observation) => {
         const body = observation.body;
-        if (!isRecord(body)) continue;
+        if (!isRecord(body)) return;
         const jsonapi = body["jsonapi"];
         if (!isRecord(jsonapi) || jsonapi["version"] !== "1.1") {
           findings.push(
@@ -579,7 +590,7 @@ const jsonApiMember: RuleImpl = {
             }),
           );
         }
-      }
+      });
       return settle(jsonApiMember.rule, resolved.length, findings, coverageNote(unresolved));
     }),
 };
@@ -599,53 +610,69 @@ const repeatedKeySpelling: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(resolved)) {
         return skip(repeatedKeySpelling.rule, noProbeReason("JSON:API read endpoint", unresolved));
       }
       const findings: Array<Finding> = [];
       let probes = 0;
       let evaluated = 0;
-      for (const { endpoint, path } of resolved) {
-        // Learn two accepted values per family from the target itself: a
-        // repeated-key probe only means something for values the comma spelling
-        // already accepts.
-        const families = yield* learnFamilies(ctx, endpoint, path);
-        for (const family of families) {
-          const comma = withQuery(path, [[family.key, family.values.join(",")]]);
-          const repeated = withQuery(
-            path,
-            family.values.map((value) => [family.key, value] as const),
-          );
-          const commaObservation = yield* ctx.request({ url: comma, headers: jsonApiAccept });
-          probes += 1;
-          if (commaObservation.status !== 200) continue;
-          const repeatedObservation = yield* ctx.request({ url: repeated, headers: jsonApiAccept });
-          probes += 1;
-          evaluated += 1;
-          if (repeatedObservation.status !== 200) {
-            findings.push(
-              finding(repeatedKeySpelling.rule, {
-                detail: `\`?${family.key}=${family.values.join(",")}\` is accepted but the repeated-key spelling of the same set is not`,
-                expected: "200 OK — the two spellings denote the same set",
-                observed: describe(repeatedObservation),
-                probe: repeatedObservation.probe,
-              }),
+      yield* Effect.forEach(
+        resolved,
+        ({ endpoint, path }) =>
+          Effect.gen(function* () {
+            // Learn two accepted values per family from the target itself: a
+            // repeated-key probe only means something for values the comma spelling
+            // already accepts.
+            const families = yield* learnFamilies(ctx, endpoint, path);
+            yield* Effect.forEach(
+              families,
+              (family) =>
+                Effect.gen(function* () {
+                  const comma = withQuery(path, [[family.key, family.values.join(",")]]);
+                  const repeated = withQuery(
+                    path,
+                    family.values.map((value) => [family.key, value] as const),
+                  );
+                  const commaObservation = yield* ctx.request({
+                    url: comma,
+                    headers: jsonApiAccept,
+                  });
+                  probes += 1;
+                  if (commaObservation.status !== 200) return;
+                  const repeatedObservation = yield* ctx.request({
+                    url: repeated,
+                    headers: jsonApiAccept,
+                  });
+                  probes += 1;
+                  evaluated += 1;
+                  if (repeatedObservation.status !== 200) {
+                    findings.push(
+                      finding(repeatedKeySpelling.rule, {
+                        detail: `\`?${family.key}=${family.values.join(",")}\` is accepted but the repeated-key spelling of the same set is not`,
+                        expected: "200 OK — the two spellings denote the same set",
+                        observed: describe(repeatedObservation),
+                        probe: repeatedObservation.probe,
+                      }),
+                    );
+                  } else if (repeatedObservation.text !== commaObservation.text) {
+                    findings.push(
+                      finding(repeatedKeySpelling.rule, {
+                        detail: `the comma and repeated-key spellings of \`${family.key}\` answered different documents`,
+                        expected: "byte-identical responses",
+                        observed: `comma: ${commaObservation.text.slice(0, 120)}… vs repeated: ${repeatedObservation.text.slice(
+                          0,
+                          120,
+                        )}…`,
+                        probe: repeatedObservation.probe,
+                      }),
+                    );
+                  }
+                }),
+              { concurrency: 1, discard: true },
             );
-          } else if (repeatedObservation.text !== commaObservation.text) {
-            findings.push(
-              finding(repeatedKeySpelling.rule, {
-                detail: `the comma and repeated-key spellings of \`${family.key}\` answered different documents`,
-                expected: "byte-identical responses",
-                observed: `comma: ${commaObservation.text.slice(0, 120)}… vs repeated: ${repeatedObservation.text.slice(
-                  0,
-                  120,
-                )}…`,
-                probe: repeatedObservation.probe,
-              }),
-            );
-          }
-        }
-      }
+          }),
+        { concurrency: 1, discard: true },
+      );
       if (evaluated === 0) {
         return skip(
           repeatedKeySpelling.rule,

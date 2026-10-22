@@ -1,5 +1,5 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Effect, Layer, Schema, SchemaGetter, SchemaIssue } from "effect";
+import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
+import { Array as Arr, Effect, Layer, Match, Schema, SchemaGetter, SchemaIssue } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -660,8 +660,8 @@ describe("Query.Filter: rejections name the offending key", () => {
       [eq("body", "x"), /Unknown filter field "body"/],
     ] as const) {
       const result = encoded(tree);
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") expect(result.failure.message).toMatch(message);
+      assert(result._tag === "Failure");
+      expect(result.failure.message).toMatch(message);
     }
     // …so a URL the codec emits always decodes back
     expect(decode(encode(Filter.isNull("deletedAt", true)))).toEqual(
@@ -912,7 +912,9 @@ const filterGenerator = (seed: number) => {
   const int = (max: number): number => Math.floor(random() * max);
   const pick = <A>(items: ReadonlyArray<A>): A => items[int(items.length)]!;
 
-  const literal: { readonly [K in FilterableKeys<typeof Article>]: () => unknown } = {
+  const literal: {
+    readonly [K in FilterableKeys<typeof Article>]: () => string | number | boolean | Date;
+  } = {
     status: () => pick(["open", "done", "archived"]),
     age: () => int(2001) - 1000 + pick([0, 0.5, 0.25, 0.125]),
     priority: () => int(21) - 10,
@@ -935,21 +937,17 @@ const filterGenerator = (seed: number) => {
       literal[field](),
       ...Array.from({ length: int(4) }, literal[field]),
     ];
-    switch (op) {
-      case "in":
-        return { _tag: "In", field, values: values() };
-      case "nin":
-        return { _tag: "NotIn", field, values: values() };
-      case "isnull":
-        return { _tag: "IsNull", field, negated: random() < 0.5 };
-      default:
-        return {
-          _tag: "Compare",
-          op: op as Filter.CompareOperator,
-          field,
-          value: literal[field](),
-        };
-    }
+    return Match.value(op).pipe(
+      Match.when("in", (): Filter.Node => ({ _tag: "In", field, values: values() })),
+      Match.when("nin", (): Filter.Node => ({ _tag: "NotIn", field, values: values() })),
+      Match.when("isnull", (): Filter.Node => ({ _tag: "IsNull", field, negated: random() < 0.5 })),
+      Match.orElse((op): Filter.Node => ({
+        _tag: "Compare",
+        op: op as Filter.CompareOperator,
+        field,
+        value: literal[field](),
+      })),
+    );
   };
 
   const node = (depth: number): Filter.Node => {
@@ -995,7 +993,9 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
     };
     expect(has((n) => (n._tag === "And" || n._tag === "Or") && n.members.length === 1)).toBe(true);
     expect(has((n) => n._tag === "Not" && n.member._tag === "Not")).toBe(true);
-    expect(has((n) => (n._tag === "And" || n._tag === "Or") && n.members.length === 0)).toBe(true);
+    expect(
+      has((n) => (n._tag === "And" || n._tag === "Or") && Arr.isReadonlyArrayEmpty(n.members)),
+    ).toBe(true);
     expect(
       has(
         (n) =>
@@ -1117,7 +1117,7 @@ describe("Query.canonical with filter: true", () => {
       if (random() < 0.7) {
         const fields: Record<string, unknown> = {};
         if (random() < 0.7) fields.articles = subset(attributes);
-        if (random() < 0.5 || Object.keys(fields).length === 0)
+        if (random() < 0.5 || Arr.isReadonlyArrayEmpty(Object.keys(fields)))
           fields.people = subset(["name"] as const);
         q.fields = fields;
       }
@@ -1130,7 +1130,7 @@ describe("Query.canonical with filter: true", () => {
       if (random() < 0.7) {
         const page: Record<string, number> = {};
         if (random() < 0.7) page.offset = int(1000);
-        if (random() < 0.7 || Object.keys(page).length === 0) page.limit = int(100);
+        if (random() < 0.7 || Arr.isReadonlyArrayEmpty(Object.keys(page))) page.limit = int(100);
         q.page = page;
       }
       if (random() < 0.8) q.filter = Filter.normalise(node(0) as Ast, fields);
@@ -1155,7 +1155,9 @@ describe("Query.canonical with filter: true", () => {
     it("covers every family, both filter forms, and a value that needs escaping", () => {
       const queries = cases.map(([, q]) => q);
       const strings = cases.map(([, q]) => canonical(q));
-      expect(queries.some((q) => q.include !== undefined && q.include.length > 0)).toBe(true);
+      expect(
+        queries.some((q) => q.include !== undefined && Arr.isReadonlyArrayNonEmpty(q.include)),
+      ).toBe(true);
       expect(
         queries.some((q) => q.fields?.articles !== undefined && q.fields.people !== undefined),
       ).toBe(true);
@@ -1171,7 +1173,10 @@ describe("Query.canonical with filter: true", () => {
       expect(strings.some((s) => s.includes("%5C%2C"))).toBe(true);
       expect(
         queries.some(
-          (q) => Object.keys(q).length === 5 && q.include!.length > 0 && q.sort!.length > 0,
+          (q) =>
+            Object.keys(q).length === 5 &&
+            Arr.isReadonlyArrayNonEmpty(q.include!) &&
+            Arr.isReadonlyArrayNonEmpty(q.sort!),
         ),
       ).toBe(true);
     });
@@ -1335,23 +1340,19 @@ describe("Query.schema with filter: true", () => {
       "filter[age][gt]": "abc",
       "page[limit]": "1",
     });
-    expect(result._tag).toBe("Failure");
-    if (result._tag === "Failure") {
-      expect(
-        SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((i) => i.path),
-      ).toEqual([["filter[age][gt]"]]);
-    }
+    assert(result._tag === "Failure");
+    expect(
+      SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((i) => i.path),
+    ).toEqual([["filter[age][gt]"]]);
   });
 
   it("rejects a malformed or bare filter key instead of dropping it", () => {
     for (const key of ["filter[status]x", "filter[", "filter"]) {
       const result = Schema.decodeUnknownResult(query)({ [key]: "open", "page[limit]": "1" });
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const [issue] = SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues;
-        expect(issue?.path).toEqual([key]);
-        expect(issue?.message).toMatch(/^Malformed filter key/);
-      }
+      assert(result._tag === "Failure");
+      const [issue] = SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues;
+      expect(issue?.path).toEqual([key]);
+      expect(issue?.message).toMatch(/^Malformed filter key/);
     }
     // a parameter that merely starts with "filter" is not the family
     expect(decodeQuery({ filters: "x", filtering: "y" })).toEqual({});
@@ -1389,16 +1390,13 @@ describe("Endpoint.list with filter: true, end to end", () => {
       Layer.provide(Middleware.layer),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(new Request(url));
-      return {
-        status: response.status,
-        contentType: response.headers.get("content-type"),
-        body: (await response.json()) as any,
-      };
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const response = await handler(new Request(url));
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: (await response.json()) as any,
+    };
   };
 
   const error = (detail: string, parameter: string) => ({

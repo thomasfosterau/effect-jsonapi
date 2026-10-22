@@ -4,7 +4,6 @@
  * @internal
  */
 import { Option, Record as Rec, Schema, SchemaTransformation } from "effect";
-import type { Term } from "../Sort.js";
 import { define } from "./define.js";
 import { vocabularyAnnotations } from "./vocabulary.js";
 
@@ -89,11 +88,6 @@ export const repeatable = <S extends Schema.Top>(
   item: S,
 ): Schema.decodeTo<S, Repeatable, never, never> =>
   Repeatable.pipe(Schema.decodeTo(item)) as Schema.decodeTo<S, Repeatable, never, never>;
-
-/**
- * A sort term: an attribute name and a direction — the public `Sort.Term`.
- */
-export type SortTerm<Field extends string> = Term<Field>;
 
 /**
  * The schema of a decoded sort list.

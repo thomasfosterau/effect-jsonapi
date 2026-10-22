@@ -17,7 +17,7 @@ import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
 import * as Rec from "effect/Record";
 import ts from "typescript";
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import config from "../vite.config.js";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -152,7 +152,7 @@ const specifiersOf = (file: string): ReadonlyArray<string> => {
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-      node.arguments.length > 0 &&
+      Arr.isReadonlyArrayNonEmpty(node.arguments) &&
       ts.isStringLiteral(node.arguments[0])
     ) {
       found.push(node.arguments[0].text);
@@ -197,11 +197,11 @@ const graphFrom = (entry: string, dir: string): Graph => {
       if (specifier.startsWith(".")) {
         const resolved = resolveRelative(file, specifier);
         // An unresolvable relative import is a broken graph, not a pass.
-        expect(
-          resolved,
+        assert(
+          resolved !== null,
           `${path.relative(dir, file)} imports unresolvable "${specifier}"`,
-        ).not.toBeNull();
-        walk(resolved as string, here);
+        );
+        walk(resolved, here);
       } else if (!externals.has(specifier)) {
         externals.set(specifier, here);
       }

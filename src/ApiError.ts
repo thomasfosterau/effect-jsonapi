@@ -30,7 +30,7 @@
  * @since 0.1.0
  */
 import type { Cause } from "effect";
-import { Schema, SchemaTransformation } from "effect";
+import { Array as Arr, Schema, SchemaTransformation } from "effect";
 import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
@@ -205,7 +205,7 @@ const makeWire = (
                   ...(options.title !== undefined ? { title: options.title } : {}),
                   ...(detail !== undefined ? { detail } : {}),
                   ...(source !== undefined ? { source } : {}),
-                  ...(options.fieldKeys.length > 0
+                  ...(Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
                     ? {
                         meta: Object.fromEntries(
                           options.fieldKeys.map((key) => [key, fields[key]]),
@@ -471,9 +471,10 @@ export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()(
       includablePaths: Schema.Array(Schema.String),
     },
     detail: (e) =>
-      `Include path "${e.path}" is not supported; supported paths: ${
-        e.includablePaths.length > 0 ? e.includablePaths.join(", ") : "(none)"
-      }`,
+      `Include path "${e.path}" is not supported; supported paths: ${Arr.match(e.includablePaths, {
+        onEmpty: () => "(none)",
+        onNonEmpty: (paths) => paths.join(", "),
+      })}`,
     source: { parameter: "include" },
   },
 ) {}
@@ -559,9 +560,10 @@ export class UnsupportedSortField extends make<UnsupportedSortField>()("Unsuppor
     sortableFields: Schema.Array(Schema.String),
   },
   detail: (e) =>
-    `Sort field "${e.field}" is not supported; supported fields: ${
-      e.sortableFields.length > 0 ? e.sortableFields.join(", ") : "(none)"
-    }`,
+    `Sort field "${e.field}" is not supported; supported fields: ${Arr.match(e.sortableFields, {
+      onEmpty: () => "(none)",
+      onNonEmpty: (fields) => fields.join(", "),
+    })}`,
   source: { parameter: "sort" },
 }) {}
 
@@ -607,9 +609,13 @@ export class UnsupportedFieldsetMember extends make<UnsupportedFieldsetMember>()
       attributes: Schema.Array(Schema.String),
     },
     detail: (e) =>
-      `Field "${e.field}" is not a supported attribute of "${e.type}"; supported attributes: ${
-        e.attributes.length > 0 ? e.attributes.join(", ") : "(none)"
-      }`,
+      `Field "${e.field}" is not a supported attribute of "${e.type}"; supported attributes: ${Arr.match(
+        e.attributes,
+        {
+          onEmpty: () => "(none)",
+          onNonEmpty: (attributes) => attributes.join(", "),
+        },
+      )}`,
     source: (e) => ({ parameter: `fields[${e.type}]` }),
   },
 ) {}

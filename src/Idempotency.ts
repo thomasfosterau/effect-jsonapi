@@ -52,7 +52,7 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
-import { Effect, Layer, Schema, SchemaTransformation } from "effect";
+import { Effect, Layer, Option, Schema, SchemaTransformation } from "effect";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
 import type * as ServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -343,10 +343,9 @@ export const headersFor = (option: Option | undefined): Schema.Top | undefined =
 export const applied = <E, O extends Option | undefined>(endpoint: E, option: O): Applied<E, O> =>
   (option === undefined || option === false
     ? endpoint
-    : (endpoint as { middleware: (key: unknown) => unknown }).middleware(Middleware)) as Applied<
-    E,
-    O
-  >;
+    : (endpoint as { middleware: (key: typeof Middleware) => E }).middleware(
+        Middleware,
+      )) as Applied<E, O>;
 
 // ---------------------------------------------------------------------------
 // Fingerprinting
@@ -414,14 +413,14 @@ export const canonical = (request: Fingerprinted): string => {
   const [path, ...rest] = request.url.split("?");
   const query = rest.join("?");
   const pairs = query === "" ? [] : query.split("&").sort();
-  let body = request.body;
-  if (body !== "") {
-    try {
-      body = JSON.stringify(canonicalValue(JSON.parse(body)));
-    } catch {
-      // Not JSON — compare the bytes as received.
-    }
-  }
+  const body =
+    request.body === ""
+      ? request.body
+      : // Not JSON — compare the bytes as received.
+        Option.getOrElse(
+          Option.liftThrowable(() => JSON.stringify(canonicalValue(JSON.parse(request.body))))(),
+          () => request.body,
+        );
   return `${request.method.toUpperCase()}\n${path ?? ""}\n${pairs.join("&")}\n${body}`;
 };
 
@@ -458,10 +457,14 @@ const hex = (bytes: ArrayBuffer): string =>
  * @category utils
  */
 export const fingerprint = (request: Fingerprinted): Effect.Effect<string> =>
-  Effect.promise(() =>
+  Effect.tryPromise(() =>
     globalThis.crypto.subtle
       .digest("SHA-256", new TextEncoder().encode(canonical(request)))
       .then(hex),
+  ).pipe(
+    // SHA-256 is mandatory in every WebCrypto implementation, so a rejection
+    // is a broken runtime, not a failure a caller could recover from.
+    Effect.orDie,
   );
 
 // ---------------------------------------------------------------------------
@@ -816,8 +819,8 @@ const replay = (recorded: Recorded): HttpServerResponse.HttpServerResponse => {
 export const layer = (store: Store): Layer.Layer<Middleware> =>
   Layer.effect(
     Middleware,
-    Effect.succeed<typeof Middleware.Service>((httpEffect) =>
-      Effect.gen(function* () {
+    Effect.succeed<typeof Middleware.Service>(
+      Effect.fnUntraced(function* (httpEffect) {
         const request = yield* HttpServerRequest;
         const raw = request.headers[HEADER];
         if (raw === undefined || isSafe(request.method)) return yield* httpEffect;

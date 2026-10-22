@@ -5,7 +5,7 @@
  * typed by cardinality; a dotted path, hop by hop), and the page cursor
  * readers and href builders.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
@@ -58,9 +58,11 @@ const call = (client: HttpClient.HttpClient, decodeErrors = true) =>
     >,
   );
 
-const failureOf = <A>(exit: Exit.Exit<A, unknown>): unknown => {
+const failureOf = <A, E>(exit: Exit.Exit<A, E>): E => {
   if (Exit.isSuccess(exit)) throw new Error("expected a failure");
-  return Option.getOrThrow(Cause.findErrorOption(exit.cause));
+  const error = Cause.findErrorOption(exit.cause);
+  assert(Option.isSome(error), "expected a typed failure");
+  return error.value;
 };
 
 describe("Client.make({ decodeErrors: true })", () => {

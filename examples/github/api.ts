@@ -48,6 +48,11 @@ export const PageMeta = Schema.Struct({
 });
 
 /**
+ * The decoded type of the typed collection {@link PageMeta}.
+ */
+export type PageMeta = typeof PageMeta.Type;
+
+/**
  * GitHub-style page-number pagination with the page size capped at 100 — a
  * shared DoS guard.
  *

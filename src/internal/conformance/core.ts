@@ -14,10 +14,12 @@ import {
   Effect,
   Formatter,
   HashSet,
+  Match,
   MutableHashSet,
   Option,
   Predicate,
   Result,
+  Schema,
   SchemaAST,
   type Scope,
 } from "effect";
@@ -367,29 +369,21 @@ const requiresIdempotencyKey = (ast: SchemaAST.AST): boolean => {
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
   const literals = segments.filter((segment) => !segment.startsWith(":"));
-  switch (`${method} ${shape}`) {
-    case "GET L":
-      return "collection";
-    case "GET LP":
-      return "resource";
-    case "POST L":
-      return "create";
-    case "PATCH LP":
-    case "PUT LP":
-      return "update";
-    case "DELETE LP":
-      return "delete";
-    case "GET LPL":
-      return "related";
-    case "GET LPLL":
-      return literals[1] === "relationships" ? "relationship" : "unknown";
-    case "PATCH LPLL":
-    case "POST LPLL":
-    case "DELETE LPLL":
-      return literals[1] === "relationships" ? "relationshipWrite" : "unknown";
-    default:
-      return "unknown";
-  }
+  return Match.value(`${method} ${shape}`).pipe(
+    Match.when("GET L", (): Role => "collection"),
+    Match.when("GET LP", (): Role => "resource"),
+    Match.when("POST L", (): Role => "create"),
+    Match.when(Match.is("PATCH LP", "PUT LP"), (): Role => "update"),
+    Match.when("DELETE LP", (): Role => "delete"),
+    Match.when("GET LPL", (): Role => "related"),
+    Match.when("GET LPLL", (): Role =>
+      literals[1] === "relationships" ? "relationship" : "unknown",
+    ),
+    Match.when(Match.is("PATCH LPLL", "POST LPLL", "DELETE LPLL"), (): Role =>
+      literals[1] === "relationships" ? "relationshipWrite" : "unknown",
+    ),
+    Match.orElse((): Role => "unknown"),
+  );
 };
 
 /** The one cardinality every entry shows, or `"unshown"` when they differ or there are none. */
@@ -579,7 +573,7 @@ export const resolvePath = (endpoint: Discovered, options: ResolvedOptions): Res
   const key = `${endpoint.group}.${endpoint.name}`;
   const override = options.paths[key];
   if (override !== undefined) return { _tag: "Resolved", path: override };
-  if (endpoint.params.length === 0) return { _tag: "Resolved", path: endpoint.path };
+  if (Arr.isReadonlyArrayEmpty(endpoint.params)) return { _tag: "Resolved", path: endpoint.path };
   const type = endpoint.segment;
   if (type === undefined) {
     return {
@@ -640,6 +634,9 @@ export interface Context {
     readonly requests?: number;
   }) => Effect.Effect<Observation>;
 }
+
+/** A response body as JSON, or `None` when it is not JSON. */
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 const headerRecord = (
   headers: Readonly<Record<string, string | undefined>>,
@@ -1124,14 +1121,7 @@ const answerOf = (
     const textResult = yield* Effect.result(response.text);
     const text = Result.isSuccess(textResult) ? textResult.success : "";
     const headersOut = headerRecord(response.headers);
-    let body: unknown;
-    if (text !== "") {
-      try {
-        body = JSON.parse(text) as unknown;
-      } catch {
-        body = undefined;
-      }
-    }
+    const body: unknown = text === "" ? undefined : Option.getOrUndefined(parseJson(text));
     return {
       probe,
       status: response.status,
@@ -1382,7 +1372,9 @@ export const settle = (
   findings: ReadonlyArray<Finding>,
   note?: string,
 ): Outcome =>
-  findings.length === 0 ? pass(rule, probes, note) : { _tag: "Failed", rule, probes, findings };
+  Arr.isReadonlyArrayEmpty(findings)
+    ? pass(rule, probes, note)
+    : { _tag: "Failed", rule, probes, findings };
 
 /** @internal */
 export const finding = (
@@ -1587,13 +1579,34 @@ export const withQuery = (
   path: string,
   pairs: ReadonlyArray<readonly [string, string]>,
 ): string => {
-  if (pairs.length === 0) return path;
+  if (Arr.isReadonlyArrayEmpty(pairs)) return path;
   const query = pairs.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
   return `${path}${path.includes("?") ? "&" : "?"}${query}`;
 };
 
 /** @internal */
 export const jsonApiAccept: Readonly<Record<string, string>> = { accept: MEDIA_TYPE };
+
+/**
+ * Reads each path with the JSON:API `Accept`, one at a time and in order, and
+ * hands every 2xx answer to `check`. A non-2xx answer is passed over: whether
+ * a read should succeed is another rule's finding.
+ *
+ * @internal
+ */
+export const eachSuccessfulRead = (
+  ctx: Context,
+  targets: ReadonlyArray<{ readonly path: string }>,
+  check: (path: string, observation: Observation) => void,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    targets,
+    ({ path }) =>
+      Effect.map(ctx.request({ url: path, headers: jsonApiAccept }), (observation) => {
+        if (observation.status >= 200 && observation.status < 300) check(path, observation);
+      }),
+    { concurrency: 1, discard: true },
+  );
 
 /** @internal */
 export const atomicMediaType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
@@ -1630,9 +1643,11 @@ export const probeable = (
  * @internal
  */
 export const coverageNote = (unresolved: ReadonlyArray<string>): string | undefined =>
-  unresolved.length === 0
-    ? undefined
-    : `${unresolved.length} endpoint${unresolved.length === 1 ? "" : "s"} not probed: ${unresolved.join("; ")}`;
+  Arr.match(unresolved, {
+    onEmpty: () => undefined,
+    onNonEmpty: (missing) =>
+      `${missing.length} endpoint${missing.length === 1 ? "" : "s"} not probed: ${missing.join("; ")}`,
+  });
 
 /**
  * The standard skip reason when a rule found no endpoint of the shape it needs:
@@ -1642,6 +1657,7 @@ export const coverageNote = (unresolved: ReadonlyArray<string>): string | undefi
  * @internal
  */
 export const noProbeReason = (what: string, unresolved: ReadonlyArray<string>): string =>
-  unresolved.length === 0
-    ? `no ${what} in this api`
-    : `no ${what} with a resolvable URL: ${unresolved.join("; ")}`;
+  Arr.match(unresolved, {
+    onEmpty: () => `no ${what} in this api`,
+    onNonEmpty: (missing) => `no ${what} with a resolvable URL: ${missing.join("; ")}`,
+  });

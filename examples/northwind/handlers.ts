@@ -21,7 +21,7 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import { Effect, Layer } from "effect";
+import { Effect, Iterable, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Handlers, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "./api.js";
@@ -417,6 +417,16 @@ const loadEmployee = (id: string): Effect.Effect<Employee, EmployeeNotFound> => 
     : Effect.succeed(employee);
 };
 
+// The employee, once every territory `refs` names is known — checked in order,
+// so the first unknown one is the one reported.
+const withKnownTerritories = (
+  id: string,
+  refs: ReadonlyArray<{ readonly id: string }>,
+): Effect.Effect<Employee, EmployeeNotFound | TerritoryNotFound> =>
+  loadEmployee(id).pipe(
+    Effect.tap(() => Effect.forEach(refs, (ref) => loadTerritory(ref.id), { concurrency: 1 })),
+  );
+
 /**
  * Removes a product outright, bypassing the API — the cleanup a conformance
  * run's write fixture hands back (`test/conformance.test.ts`).
@@ -735,10 +745,8 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("create", ({ payload }) =>
       Effect.gen(function* () {
         const name = payload.data.attributes.name;
-        for (const existing of store.products.values()) {
-          if (existing.attributes.name === name)
-            return yield* Effect.fail(new ProductNameTaken({ name }));
-        }
+        if (Iterable.some(store.products.values(), (existing) => existing.attributes.name === name))
+          return yield* Effect.fail(new ProductNameTaken({ name }));
         // `category` and `supplier` are required (`one`) relationships — the
         // payload always carries them, and both targets must exist.
         yield* loadCategory(payload.data.relationships.category.data.id);
@@ -886,46 +894,38 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
     )
     // PATCH /employees/:id/relationships/territories — replace the full set
     .handle("updateTerritoriesRelationship", ({ params, payload }) =>
-      loadEmployee(params.id).pipe(
-        Effect.flatMap((employee) =>
-          // every territory in the replacement set must exist
-          Effect.forEach(payload.data, (ref) => loadTerritory(ref.id)).pipe(
-            Effect.map(() => {
-              const updated = Employee.make({
-                ...employee,
-                relationships: { ...employee.relationships!, territories: { data: payload.data } },
-              });
-              store.employees.set(updated.id, updated);
-              return Handlers.linkage(payload.data, {
-                self: Handlers.relationshipLink("employees", employee.id, "territories"),
-                jsonapi: Document.v1_1,
-              });
-            }),
-          ),
-        ),
+      // every territory in the replacement set must exist
+      withKnownTerritories(params.id, payload.data).pipe(
+        Effect.map((employee) => {
+          const updated = Employee.make({
+            ...employee,
+            relationships: { ...employee.relationships!, territories: { data: payload.data } },
+          });
+          store.employees.set(updated.id, updated);
+          return Handlers.linkage(payload.data, {
+            self: Handlers.relationshipLink("employees", employee.id, "territories"),
+            jsonapi: Document.v1_1,
+          });
+        }),
       ),
     )
     // POST /employees/:id/relationships/territories — assign territories
     .handle("addTerritoriesRelationship", ({ params, payload }) =>
-      loadEmployee(params.id).pipe(
-        Effect.flatMap((employee) =>
-          Effect.forEach(payload.data, (ref) => loadTerritory(ref.id)).pipe(
-            Effect.map(() => {
-              const existing = employee.relationships?.territories.data ?? [];
-              const known = new Set<string>(existing.map((ref) => ref.id));
-              const added = [...existing, ...payload.data.filter((ref) => !known.has(ref.id))];
-              const updated = Employee.make({
-                ...employee,
-                relationships: { ...employee.relationships!, territories: { data: added } },
-              });
-              store.employees.set(updated.id, updated);
-              return Handlers.linkage(added, {
-                self: Handlers.relationshipLink("employees", employee.id, "territories"),
-                jsonapi: Document.v1_1,
-              });
-            }),
-          ),
-        ),
+      withKnownTerritories(params.id, payload.data).pipe(
+        Effect.map((employee) => {
+          const existing = employee.relationships?.territories.data ?? [];
+          const known = new Set<string>(existing.map((ref) => ref.id));
+          const added = [...existing, ...payload.data.filter((ref) => !known.has(ref.id))];
+          const updated = Employee.make({
+            ...employee,
+            relationships: { ...employee.relationships!, territories: { data: added } },
+          });
+          store.employees.set(updated.id, updated);
+          return Handlers.linkage(added, {
+            self: Handlers.relationshipLink("employees", employee.id, "territories"),
+            jsonapi: Document.v1_1,
+          });
+        }),
       ),
     )
     // DELETE /employees/:id/relationships/territories → 204 — unassign territories

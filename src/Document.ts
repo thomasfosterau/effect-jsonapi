@@ -35,6 +35,14 @@ import { JsonPointer, Option, Schema } from "effect";
  */
 export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown);
 
+/**
+ * The decoded type of an {@link AnyMeta} free-form metadata object.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type AnyMeta = typeof AnyMeta.Type;
+
 // ---------------------------------------------------------------------------
 // Links (JSON:API 1.1 link object + per-context member sets)
 // ---------------------------------------------------------------------------
@@ -58,6 +66,14 @@ export const AnyMeta = Schema.Record(Schema.String, Schema.Unknown);
 export const Url = Schema.Union([Schema.URLFromString, Schema.String]);
 
 /**
+ * The decoded type of a {@link Url}: an absolute `URL`, or a relative URI-reference `string`.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type Url = typeof Url.Type;
+
+/**
  * A link object, per https://jsonapi.org/format/1.1/#document-links
  *
  * @since 0.1.0
@@ -72,6 +88,14 @@ export const LinkObject = Schema.Struct({
   hreflang: Schema.optionalKey(Schema.String),
   meta: Schema.optionalKey(AnyMeta),
 });
+
+/**
+ * The decoded type of a {@link LinkObject}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type LinkObject = typeof LinkObject.Type;
 
 /**
  * A link: either a {@link Url} (an absolute `URL` or a relative URI-reference
@@ -134,6 +158,14 @@ export const ResourceLinks = Schema.Struct({
 });
 
 /**
+ * The decoded type of a resource object's {@link ResourceLinks}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type ResourceLinks = typeof ResourceLinks.Type;
+
+/**
  * A relationship object's `links`: the spec standardises `self` and `related`.
  *
  * @since 0.1.0
@@ -145,6 +177,14 @@ export const RelationshipLinks = Schema.Struct({
 });
 
 /**
+ * The decoded type of a relationship object's {@link RelationshipLinks}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type RelationshipLinks = typeof RelationshipLinks.Type;
+
+/**
  * {@link RelationshipLinks} that also admits profile-defined members.
  *
  * @since 0.1.0
@@ -153,6 +193,14 @@ export const RelationshipLinks = Schema.Struct({
 export const RelationshipLinksOpen = Schema.StructWithRest(RelationshipLinks, [
   Schema.Record(Schema.String, Schema.NullOr(Link)),
 ]);
+
+/**
+ * The decoded type of {@link RelationshipLinksOpen}: relationship links plus profile-defined members.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type RelationshipLinksOpen = typeof RelationshipLinksOpen.Type;
 
 /**
  * The `links` of a paginated relationship: `related` is *required* — it is the
@@ -172,6 +220,14 @@ export const PaginatedRelationshipLinks = Schema.Struct({
 });
 
 /**
+ * The decoded type of a paginated relationship's {@link PaginatedRelationshipLinks}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type PaginatedRelationshipLinks = typeof PaginatedRelationshipLinks.Type;
+
+/**
  * Top-level `links`: `self`/`related`/`describedby` plus the pagination
  * members (each nullable, per the spec).
  *
@@ -187,6 +243,14 @@ export const TopLevelLinks = Schema.Struct({
   prev: Schema.optionalKey(Schema.NullOr(Link)),
   next: Schema.optionalKey(Schema.NullOr(Link)),
 });
+
+/**
+ * The decoded type of a document's {@link TopLevelLinks}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type TopLevelLinks = typeof TopLevelLinks.Type;
 
 // ---------------------------------------------------------------------------
 // jsonapi object
@@ -204,6 +268,14 @@ export const JsonApiObject = Schema.Struct({
   profile: Schema.optionalKey(Schema.Array(Url)),
   meta: Schema.optionalKey(AnyMeta),
 });
+
+/**
+ * The decoded type of the top-level {@link JsonApiObject}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type JsonApiObject = typeof JsonApiObject.Type;
 
 /**
  * A ready-made `jsonapi` member value advertising JSON:API v1.1.
@@ -229,6 +301,14 @@ export const ErrorSource = Schema.Union([
   Schema.Struct({ parameter: Schema.String }),
   Schema.Struct({ header: Schema.String }),
 ]);
+
+/**
+ * The decoded type of an error's {@link ErrorSource}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type ErrorSource = typeof ErrorSource.Type;
 
 const memberPointer =
   (kind: "attributes" | "relationships") =>
@@ -406,6 +486,14 @@ export const ErrorObject = Schema.Struct({
   source: Schema.optionalKey(ErrorSource),
   meta: Schema.optionalKey(AnyMeta),
 });
+
+/**
+ * The decoded type of a JSON:API {@link ErrorObject}.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type ErrorObject = typeof ErrorObject.Type;
 
 /**
  * A tightened error object with a closed `code` union.

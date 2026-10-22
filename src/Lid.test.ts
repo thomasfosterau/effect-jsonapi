@@ -65,11 +65,9 @@ describe("lidMap", () => {
     expect(() => lids.identifier(Article, { type: "articles", lid: "nope" })).toThrow(
       UnknownLidError,
     );
-    try {
-      lids.identifier(Article, { type: "articles", lid: "nope" });
-    } catch (error) {
-      expect((error as UnknownLidError).lid).toBe("nope");
-    }
+    expect(() => lids.identifier(Article, { type: "articles", lid: "nope" })).toThrow(
+      expect.objectContaining({ lid: "nope" }),
+    );
   });
 
   it("throws when the ref type does not match the resource", () => {

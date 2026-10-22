@@ -3,7 +3,7 @@
  * (request encoding → routing → middleware → handler → response decoding)
  * through the in-memory `HttpApiTest` client.
  */
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Filter, Query } from "@thomasfosterau/effect-jsonapi";
@@ -181,12 +181,10 @@ describe("github example: fetching", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(RepositoryNotFound);
-      expect((error as RepositoryNotFound).id).toBe("nope");
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(RepositoryNotFound);
+    expect((error as RepositoryNotFound).id).toBe("nope");
   });
 });
 
@@ -379,10 +377,8 @@ describe("github example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNameTaken);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNameTaken);
   });
 
   it("opens an issue against a repository (201)", async () => {
@@ -446,10 +442,8 @@ describe("github example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNotFound);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNotFound);
   });
 
   it("closes an issue with a partial update", async () => {
@@ -493,12 +487,10 @@ describe("github example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(IssueLocked);
-      expect((error as IssueLocked).id).toBe(lockedIssue.id);
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(IssueLocked);
+    expect((error as IssueLocked).id).toBe(lockedIssue.id);
   });
 });
 
@@ -633,10 +625,8 @@ describe("github example: issue triage via relationship endpoints", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(UserNotFound);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(UserNotFound);
   });
 
   it("403s when triaging a locked issue", async () => {
@@ -650,10 +640,8 @@ describe("github example: issue triage via relationship endpoints", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(IssueLocked);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(IssueLocked);
   });
 
   it("POST adds labels, DELETE removes them, PATCH replaces them", async () => {

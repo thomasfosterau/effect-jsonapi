@@ -288,7 +288,7 @@ const Knot = Resource.make("knots", {
 // Runtime values are reachable from the derived schemas (documents decode)
 // ---------------------------------------------------------------------------
 
-const program = Effect.gen(function* () {
+const program = Effect.fn("program")(function* () {
   const decoded = yield* Schema.decodeUnknownEffect(articleDocument)({
     data: {
       type: "articles",

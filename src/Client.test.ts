@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Effect, Option, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { HttpApi, HttpApiClient } from "effect/http-api";
@@ -294,8 +294,8 @@ const notFound = toDocument(new ArticleNotFound());
 describe("Client.decodeErrorDocument", () => {
   it("decodes a conformant document from body text", () => {
     const decoded = decodeErrorDocument(JSON.stringify(notFound));
-    expect(Option.isSome(decoded)).toBe(true);
-    expect(Option.getOrThrow(decoded).errors[0]?.status).toBe("404");
+    assert(Option.isSome(decoded));
+    expect(decoded.value.errors[0]?.status).toBe("404");
   });
 
   it("decodes an already-parsed JSON value, so it is reachable off the response path", () => {
@@ -303,8 +303,8 @@ describe("Client.decodeErrorDocument", () => {
     // HttpClientError; it decodes the body it just rendered.
     const offline = toDocument(new Conflict({ detail: "Not available offline" }));
     const decoded = decodeErrorDocument(offline);
-    expect(Option.isSome(decoded)).toBe(true);
-    expect(errorMessage(Option.getOrThrow(decoded))).toBe("Not available offline");
+    assert(Option.isSome(decoded));
+    expect(errorMessage(decoded.value)).toBe("Not available offline");
   });
 
   it("round-trips exactly what the server renders", () => {
@@ -371,8 +371,8 @@ describe("Client.errorDocument", () => {
     const document = await Effect.runPromise(
       errorDocument(clientError(JSON.stringify(notFound), 404)),
     );
-    expect(Option.isSome(document)).toBe(true);
-    expect(errorMessage(Option.getOrThrow(document))).toBe(ArticleNotFound.title);
+    assert(Option.isSome(document));
+    expect(errorMessage(document.value)).toBe(ArticleNotFound.title);
   });
 
   it("decodes through the same seam as a body handed in directly", async () => {

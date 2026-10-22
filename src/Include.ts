@@ -62,7 +62,7 @@
  *
  * @since 0.15.0
  */
-import { Schema } from "effect";
+import { Array as Arr, Schema } from "effect";
 import type { IncludedResources } from "./internal/includeGraph.js";
 import { includedResources, includePathsFor } from "./internal/includeGraph.js";
 import type { Any, IncludableKeys, IncludeDepth, IncludePathsTo, Target } from "./Resource.js";
@@ -825,7 +825,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
   spec: S,
 ): Surface<R, AsSpec<S>> => {
   const entries = entriesOf(resource, spec as AsSpec<S>);
-  if (entries.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(entries)) {
     throw new Error(
       `Include.make: the surface for "${resource.type}" declares no paths; ` +
         "omit the `include` option entirely for an endpoint that serves no walk",

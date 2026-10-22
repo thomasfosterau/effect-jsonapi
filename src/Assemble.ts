@@ -44,7 +44,7 @@
  *
  * @since 0.16.0
  */
-import { Effect } from "effect";
+import { Array as Arr, Effect } from "effect";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -808,7 +808,8 @@ export const resource = <
 const withoutEmptyIncluded = <T extends { readonly included?: ReadonlyArray<unknown> }>(
   document: T,
 ): T => {
-  if (document.included === undefined || document.included.length > 0) return document;
+  if (document.included === undefined || Arr.isReadonlyArrayNonEmpty(document.included))
+    return document;
   const { included: _included, ...rest } = document;
   return rest as T;
 };

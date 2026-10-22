@@ -173,6 +173,8 @@ fi
 if [ -f "$PROJECT_DIR/pnpm-lock.yaml" ]; then
   log "syncing dependencies against the lockfile…"
   (cd "$PROJECT_DIR" && vp install --frozen-lockfile >/dev/null 2>&1) \
+    || (cd "$PROJECT_DIR" && command -v corepack >/dev/null 2>&1 \
+      && corepack pnpm install --frozen-lockfile >/dev/null 2>&1) \
     || (cd "$PROJECT_DIR" && pnpm install --frozen-lockfile >/dev/null 2>&1) \
     || log "dependency install failed; continuing"
   # node_modules/.bin only exists after the install, so re-link what it provides.

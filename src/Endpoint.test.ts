@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
 import { Cause, Effect, Exit, Layer, Result, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import {
@@ -811,12 +811,10 @@ describe("HTTP round-trip via HttpApiTest", () => {
       ),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(ArticleNotFound);
-      expect((error as ArticleNotFound).id).toBe("missing");
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(ArticleNotFound);
+    expect((error as ArticleNotFound).id).toBe("missing");
   });
 
   it("recovers from domain errors with catchTag", async () => {
@@ -988,10 +986,8 @@ describe("HTTP round-trip via HttpApiTest", () => {
       ),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
   });
 });
 
@@ -1468,17 +1464,14 @@ describe("Endpoint.delete success override", () => {
       Layer.provide(Middleware.layer),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(new Request(url, { method: "DELETE" }));
-      const text = await response.text();
-      return {
-        status: response.status,
-        contentType: response.headers.get("content-type"),
-        body: text === "" ? undefined : (JSON.parse(text) as any),
-      };
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const response = await handler(new Request(url, { method: "DELETE" }));
+    const text = await response.text();
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: text === "" ? undefined : (JSON.parse(text) as any),
+    };
   };
 
   it("answers 204 with an empty body when no `success` is given (regression: unchanged default)", async () => {
@@ -2138,22 +2131,19 @@ describe("Endpoint.create / Endpoint.update status override", () => {
       Layer.provide(Middleware.layer),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(
-        new Request(url, {
-          method,
-          headers: { "content-type": MEDIA_TYPE },
-          body: JSON.stringify(body),
-        }),
-      );
-      return {
-        status: response.status,
-        contentType: response.headers.get("content-type"),
-        body: (await response.json()) as any,
-      };
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const response = await handler(
+      new Request(url, {
+        method,
+        headers: { "content-type": MEDIA_TYPE },
+        body: JSON.stringify(body),
+      }),
+    );
+    return {
+      status: response.status,
+      contentType: response.headers.get("content-type"),
+      body: (await response.json()) as any,
+    };
   };
 
   const createBody = {
@@ -2301,22 +2291,19 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
       Layer.provide(Middleware.layerHostNegotiated),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(
-        new Request("http://localhost/articles", {
-          method: "POST",
-          headers: { "content-type": contentType },
-          body: JSON.stringify({
-            title: "Hello",
-            body: "World",
-            createdAt: "2024-01-01T00:00:00.000Z",
-          }),
+    onTestFinished(() => dispose());
+    const response = await handler(
+      new Request("http://localhost/articles", {
+        method: "POST",
+        headers: { "content-type": contentType },
+        body: JSON.stringify({
+          title: "Hello",
+          body: "World",
+          createdAt: "2024-01-01T00:00:00.000Z",
         }),
-      );
-      return { status: response.status, body: await response.text() };
-    } finally {
-      await dispose();
-    }
+      }),
+    );
+    return { status: response.status, body: await response.text() };
   };
 
   const apiWith = (name: string, options: any) => {
@@ -2357,24 +2344,21 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
       Layer.provide(Middleware.layerHostNegotiated),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(
-        new Request("http://localhost/articles", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            data: {
-              type: "articles",
-              attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
-            },
-          }),
+    onTestFinished(() => dispose());
+    const response = await handler(
+      new Request("http://localhost/articles", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          data: {
+            type: "articles",
+            attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
+          },
         }),
-      );
-      expect(response.status).toBe(201);
-      expect(response.headers.get("content-type")).toContain(MEDIA_TYPE);
-    } finally {
-      await dispose();
-    }
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect(response.headers.get("content-type")).toContain(MEDIA_TYPE);
   });
 
   it("changes neither the payload schema nor anything else about the endpoint", () => {
@@ -2573,12 +2557,9 @@ describe("HTTP round-trip with repeated ?include= keys", () => {
       Layer.provide(Middleware.layer),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
-      return { status: response.status, body: (await response.json()) as any };
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
+    return { status: response.status, body: (await response.json()) as any };
   };
 
   it("serves 200 for the comma grammar (regression: unchanged)", async () => {
@@ -2768,14 +2749,11 @@ describe("Endpoint constructors with an injected id schema", () => {
       Layer.provide(Middleware.layer),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(
-        new Request("http://localhost/invoices/inv_1", { headers: { accept: MEDIA_TYPE } }),
-      );
-      expect(response.status).toBe(200);
-      expect(((await response.json()) as any).data.id).toBe("inv_1");
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const response = await handler(
+      new Request("http://localhost/invoices/inv_1", { headers: { accept: MEDIA_TYPE } }),
+    );
+    expect(response.status).toBe(200);
+    expect(((await response.json()) as any).data.id).toBe("inv_1");
   });
 });

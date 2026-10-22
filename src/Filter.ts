@@ -500,27 +500,27 @@ export type Ast<Fields extends FieldTypes = FieldTypes> =
 export type Node = Ast<FieldTypes>;
 
 const Literal = Schema.Unknown;
-const NodeSchema: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);
-const CompareSchema = Schema.TaggedStruct("Compare", {
+const LazyNode: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);
+const CompareNode = Schema.TaggedStruct("Compare", {
   op: Schema.Literals(compareOperators),
   field: Schema.String,
   value: Literal,
 });
-const InSchema = Schema.TaggedStruct("In", {
+const InNode = Schema.TaggedStruct("In", {
   field: Schema.String,
   values: Schema.NonEmptyArray(Literal),
 });
-const NotInSchema = Schema.TaggedStruct("NotIn", {
+const NotInNode = Schema.TaggedStruct("NotIn", {
   field: Schema.String,
   values: Schema.NonEmptyArray(Literal),
 });
-const IsNullSchema = Schema.TaggedStruct("IsNull", {
+const IsNullNode = Schema.TaggedStruct("IsNull", {
   field: Schema.String,
   negated: Schema.Boolean,
 });
-const AndSchema = Schema.TaggedStruct("And", { members: Schema.Array(NodeSchema) });
-const OrSchema = Schema.TaggedStruct("Or", { members: Schema.Array(NodeSchema) });
-const NotSchema = Schema.TaggedStruct("Not", { member: NodeSchema });
+const AndNode = Schema.TaggedStruct("And", { members: Schema.Array(LazyNode) });
+const OrNode = Schema.TaggedStruct("Or", { members: Schema.Array(LazyNode) });
+const NotNode = Schema.TaggedStruct("Not", { member: LazyNode });
 
 /**
  * The runtime schema of the untyped AST ({@link Node}): validates a tree's
@@ -543,13 +543,13 @@ const NotSchema = Schema.TaggedStruct("Not", { member: NodeSchema });
  * @category schemas
  */
 export const Ast: Schema.Codec<Node> = Schema.Union([
-  CompareSchema,
-  InSchema,
-  NotInSchema,
-  IsNullSchema,
-  AndSchema,
-  OrSchema,
-  NotSchema,
+  CompareNode,
+  InNode,
+  NotInNode,
+  IsNullNode,
+  AndNode,
+  OrNode,
+  NotNode,
 ]) as unknown as Schema.Codec<Node>;
 
 // ---------------------------------------------------------------------------

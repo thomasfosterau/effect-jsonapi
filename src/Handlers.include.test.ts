@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Effect, Schema } from "effect";
+import { Duration, Effect, Schema } from "effect";
 import * as Handlers from "./Handlers.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
@@ -284,7 +284,7 @@ describe("Handlers.resolveIncluded — batching is per level, not per resource",
         Effect.gen(function* () {
           inFlight.now++;
           inFlight.peak = Math.max(inFlight.peak, inFlight.now);
-          yield* Effect.sleep(10);
+          yield* Effect.sleep(Duration.millis(10));
           inFlight.now--;
           return rows;
         });

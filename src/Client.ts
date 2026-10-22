@@ -470,8 +470,8 @@ export interface MakeOptions extends NegotiationOptions {
    * unchanged.
    *
    * The generated client's *static* error type is `HttpApiClient`'s and
-   * cannot name the class; match at runtime with {@link isErrorResponse} or
-   * `Effect.catchTag("ErrorResponse", …)`.
+   * cannot name the class, so `Effect.catchTag("ErrorResponse", …)` does not
+   * type-check; match at runtime with {@link isErrorResponse}.
    *
    * @since 0.16.0
    */
@@ -608,15 +608,15 @@ const decodeWireDocument = Schema.decodeUnknownOption(WireDocument);
  * @since 0.15.0
  * @category constructors
  */
-export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> => {
-  try {
-    return decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body);
-  } catch {
-    // A body that isn't JSON at all, or a decoder that threw on a hostile
-    // value: there is no document here, and this is an error path already.
-    return Option.none();
-  }
-};
+export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> =>
+  // A body that isn't JSON at all, or a decoder that threw on a hostile
+  // value, lifts to `None`: there is no document here, and this is an error
+  // path already.
+  Option.flatten(
+    Option.liftThrowable(() =>
+      decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body),
+    )(),
+  );
 
 /**
  * Best-effort decode of the error document carried by a failed HTTP call.
@@ -654,10 +654,12 @@ export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<Error
   const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined;
   if (response === undefined) return Effect.succeed(Option.none());
   return response.text.pipe(
-    Effect.map(decodeErrorDocument),
     // The body may be unreadable (already consumed, a broken stream): that is
     // still "no document", never a second failure on top of the first.
-    Effect.catchCause(() => Effect.succeed(Option.none<ErrorDocument>())),
+    Effect.matchCause({
+      onFailure: () => Option.none<ErrorDocument>(),
+      onSuccess: decodeErrorDocument,
+    }),
   );
 };
 

@@ -5,7 +5,7 @@
 ## Common pitfalls
 
 - **Versions live only in the `pnpm-workspace.yaml` catalog** (`catalogMode: strict`; peer ranges under `catalogs.peers`). After editing it, run `pnpm install` and commit `pnpm-lock.yaml` — a stale lockfile fails CI with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`.
-- **`@effect/tsgo`, `@typescript/native` and `vite-plus` bump as a set** — read the comment on `@effect/tsgo` in `pnpm-workspace.yaml` first; an unsupported pairing fails `pnpm install` (the `prepare` script's `effect-tsgo patch` hard-errors).
+- **`@effect/tsgo`, `@typescript/native` and `vite-plus` bump as a set** (with `vite`, `vitest`, `@vitest/coverage-istanbul`, `typescript` and `@mpsuesser/oxlint-plugin-effect`; Dependabot's `toolchain` group) — read the comment on `@effect/tsgo` in `pnpm-workspace.yaml` first; an unsupported pairing fails `pnpm install` (the `prepare` script's `effect-tsgo patch` hard-errors). The lockstep sets are the `groups` in `.github/dependabot.yml`. The transitive floors under `overrides` (`js-yaml`, `launch-editor`, `shell-quote`) are not Dependabot's to bump: raise or drop them by hand, as their comment says.
 - **The type checker of record is TypeScript 7** (`tsc`, the native compiler, via `vp run check`). It anchors a failed overload at the _properties_ that fail against the last overload rather than at the one the TS6 checker elaborated, which is why the `@ts-expect-error` markers on effect's `ErrorNoStream` guard in `src/Endpoint.ts` sit on `params:` / `query:` lines as well as `error:`. TS6 (`tsc6`, the JS compiler) is only what the JS-API consumers — `test/entry-points.test.ts`, the tsdown declaration bundler, the editor language service — load. `@effect/docgen` is not one of them: it parses with a compiler bundled in its own dependencies (see [below](#vp-run-docgen-executes-your-examples)).
 - **`vp lint` runs the full Effect preset with a staged rollout.** The `warn` tier in `vite.config.ts` is debt, not headroom: fix any new site, and when a rule's count reaches zero flip it to `error` and delete its line. `@ts-expect-error` is the assertion mechanism of `test/*.types.ts` and stays allowed there.
 - **`dist/` JavaScript is bundled; its declarations are not.** `vp pack` (tsdown) emits one ESM entry per export (`.`, `./schema` and each module subpath) with shared code in hashed chunks; `tsc -p tsconfig.build.json` then writes one `.d.ts` per source module, because a consumer's declaration emit cannot name a type in a bundled chunk (#385). `test/entry-points.test.ts` walks the built graph, `test/emitted/*.types.ts` type-check against the emitted `.d.ts`, and `test/declaration-emit.test.ts` compiles a consumer through `node_modules` — all because what consumers see is not what `src/` resolves to.
@@ -89,6 +89,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
 - `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
 - `vp run docgen` — build `dist/`, then type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
+- `vp run test:coverage` — the root suite under one Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads for exact per-function CRAP scores (`health.coverage` in `.fallowrc.json`). Without it fallow scores every function as uncovered.
 - `fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
 
@@ -104,7 +105,7 @@ Before you report work as done, run the gates below in order and quote each comm
 4. `vp run check`
 5. `vp run -r test:unit`
 6. `vp run docgen`
-7. `fallow audit --base origin/trunk`
+7. `vp run test:coverage`, then `fallow audit --base origin/trunk` — the PreToolUse fallow gate reads the coverage map on disk and never refreshes it.
 8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
 
 None needs a credential, a database, a browser or Docker. CI also runs `pnpm audit --audit-level high`.
@@ -133,13 +134,13 @@ Issues are the backlog: when you find work you can't do now, file an issue rathe
 
 ## Effect
 
-**IMPORTANT:** Consult effect-solutions before writing Effect code (`vp exec effect-solutions list`, then `vp exec effect-solutions show <topic>…`: data-modeling, services-and-layers, error-handling, testing, basics); never guess at an Effect pattern.
+**IMPORTANT:** Never guess at an Effect API. Read the installed package before writing Effect code: its declarations (`node_modules/effect/dist/*.d.ts`), its sources (`node_modules/effect/src`), and the guides it ships for agents (`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`).
 
-The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When effect-solutions and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
+The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
 
 ## Agent sessions
 
-The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) runs `vp install --frozen-lockfile` (which applies the tsgo patch) and links `vp`, `tsx` and `fallow` onto PATH for non-interactive shells. It hydrates no secrets; every gate runs offline. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate before `git commit` / `git push`.
+The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) runs `vp install --frozen-lockfile` (which applies the tsgo patch) and links `vp`, `tsx` and `fallow` onto PATH for non-interactive shells. It hydrates no secrets; every gate runs offline. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate before `git commit` / `git push` (run `vp run test:coverage` first; the gate reads that map).
 
 ## Documentation surfaces
 

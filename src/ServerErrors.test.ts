@@ -4,7 +4,7 @@
  * arm of `fromTaggedError`, the `ApiError.make` pass-through (the Conflict
  * arm), and `respond`'s two catch paths.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Option, Schema, SchemaIssue } from "effect";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
@@ -387,7 +387,9 @@ describe("fromTaggedError", () => {
 
   it("passes a JsonapiError through and declines unknown errors", () => {
     const own = new ServerErrors.JsonapiError({ status: 418, errors: [] });
-    expect(Option.getOrThrow(ServerErrors.fromTaggedError(own))).toBe(own);
+    const passed = ServerErrors.fromTaggedError(own);
+    assert(Option.isSome(passed));
+    expect(passed.value).toBe(own);
     expect(Option.isNone(ServerErrors.fromTaggedError(new Error("oops")))).toBe(true);
     expect(Option.isNone(ServerErrors.fromTaggedError("strings are not errors"))).toBe(true);
     expect(Option.isNone(ServerErrors.fromTaggedError({ random: "object" }))).toBe(true);

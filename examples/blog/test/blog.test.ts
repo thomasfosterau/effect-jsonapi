@@ -3,7 +3,7 @@
  * encoding → routing → middleware → handler → response decoding) through the
  * in-memory `HttpApiTest` client.
  */
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
@@ -165,12 +165,10 @@ describe("blog example: fetching", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(ArticleNotFound);
-      expect((error as ArticleNotFound).id).toBe("nope");
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(ArticleNotFound);
+    expect((error as ArticleNotFound).id).toBe("nope");
   });
 });
 
@@ -268,10 +266,8 @@ describe("blog example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(TitleTaken);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(TitleTaken);
   });
 
   it("updates an article with partial attributes", async () => {
@@ -363,10 +359,8 @@ describe("blog example: related resource endpoints", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
   });
 });
 
@@ -485,11 +479,13 @@ describe("blog example: heterogeneous search", () => {
     for (const result of document.data) {
       if (result.type === "articles") {
         expectTypeOf(result.attributes.title).toEqualTypeOf<string | undefined>();
-        expect(typeof result.attributes.title).toBe("string");
       } else {
         expectTypeOf(result.attributes.firstName).toEqualTypeOf<string | undefined>();
-        expect(typeof result.attributes.firstName).toBe("string");
       }
+      // each member still carries its own type's attribute at runtime
+      expect(
+        typeof (result.type === "articles" ? result.attributes.title : result.attributes.firstName),
+      ).toBe("string");
     }
   });
 

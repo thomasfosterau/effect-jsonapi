@@ -10,7 +10,7 @@
  * @since 0.15.0
  * @internal
  */
-import { Array as Arr, Predicate, Result } from "effect";
+import { Array as Arr, Match, Predicate, Result } from "effect";
 import type { Disposal, Gap, Outcome, Rule, Tier, WriteRecord } from "./core.js";
 import { resolved, type SampleRecord } from "./samples.js";
 
@@ -34,23 +34,25 @@ export const summarise = (outcomes: ReadonlyArray<Outcome>): Summary => {
   let findings = 0;
   let probes = 0;
   for (const outcome of outcomes) {
-    switch (outcome._tag) {
-      case "Passed":
-        passed += 1;
-        probes += outcome.probes;
-        break;
-      case "Failed":
-        failed += 1;
-        findings += outcome.findings.length;
-        probes += outcome.probes;
-        break;
-      case "Skipped":
-        skipped += 1;
-        break;
-      case "Errored":
-        errored += 1;
-        break;
-    }
+    Match.value(outcome).pipe(
+      Match.tagsExhaustive({
+        Passed: (outcome) => {
+          passed += 1;
+          probes += outcome.probes;
+        },
+        Failed: (outcome) => {
+          failed += 1;
+          findings += outcome.findings.length;
+          probes += outcome.probes;
+        },
+        Skipped: () => {
+          skipped += 1;
+        },
+        Errored: () => {
+          errored += 1;
+        },
+      }),
+    );
   }
   return { passed, failed, skipped, errored, findings, probes };
 };
@@ -118,43 +120,44 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
     header(outcome.rule, MARK[outcome._tag]),
     indent(meta(outcome.rule), "      "),
   ];
-  switch (outcome._tag) {
-    case "Passed":
-      lines.push(indent(`${outcome.probes} probe${outcome.probes === 1 ? "" : "s"}`, "      "));
-      if (outcome.note !== undefined) lines.push(indent(outcome.note, "      "));
-      break;
-    case "Skipped":
-      lines.push(indent(`not checked: ${outcome.reason}`, "      "));
-      break;
-    case "Errored":
-      lines.push(indent(`not decided — the rule died: ${outcome.message}`, "      "));
-      break;
-    case "Failed": {
-      for (const line of wrap(outcome.rule.requirement, width - 6))
-        lines.push(indent(line, "      "));
-      lines.push(indent(outcome.rule.reference, "      "));
-      for (const found of outcome.findings) {
-        lines.push(hang(found.detail, "      · ", "        "));
-        if (found.probe !== undefined) {
-          const headers = Object.entries(found.probe.headers)
-            .map(([name, value]) => `${name}: ${value}`)
-            .join(", ");
-          lines.push(
-            indent(
-              `${found.probe.method} ${found.probe.url}${headers === "" ? "" : `  [${headers}]`}`,
-              "        ",
-            ),
-          );
-          if (found.probe.body !== undefined) {
-            lines.push(indent(`body: ${JSON.stringify(found.probe.body)}`, "        "));
+  Match.value(outcome).pipe(
+    Match.tagsExhaustive({
+      Passed: (outcome) => {
+        lines.push(indent(`${outcome.probes} probe${outcome.probes === 1 ? "" : "s"}`, "      "));
+        if (outcome.note !== undefined) lines.push(indent(outcome.note, "      "));
+      },
+      Skipped: (outcome) => {
+        lines.push(indent(`not checked: ${outcome.reason}`, "      "));
+      },
+      Errored: (outcome) => {
+        lines.push(indent(`not decided — the rule died: ${outcome.message}`, "      "));
+      },
+      Failed: (outcome) => {
+        for (const line of wrap(outcome.rule.requirement, width - 6))
+          lines.push(indent(line, "      "));
+        lines.push(indent(outcome.rule.reference, "      "));
+        for (const found of outcome.findings) {
+          lines.push(hang(found.detail, "      · ", "        "));
+          if (found.probe !== undefined) {
+            const headers = Object.entries(found.probe.headers)
+              .map(([name, value]) => `${name}: ${value}`)
+              .join(", ");
+            lines.push(
+              indent(
+                `${found.probe.method} ${found.probe.url}${headers === "" ? "" : `  [${headers}]`}`,
+                "        ",
+              ),
+            );
+            if (found.probe.body !== undefined) {
+              lines.push(indent(`body: ${JSON.stringify(found.probe.body)}`, "        "));
+            }
           }
+          lines.push(hang(`expected: ${found.expected}`, "        ", "          "));
+          lines.push(hang(`observed: ${found.observed}`, "        ", "          "));
         }
-        lines.push(hang(`expected: ${found.expected}`, "        ", "          "));
-        lines.push(hang(`observed: ${found.observed}`, "        ", "          "));
-      }
-      break;
-    }
-  }
+      },
+    }),
+  );
   return lines.join("\n");
 };
 
@@ -267,7 +270,7 @@ export const format = (
 
   for (const tier of ["spec", "profile"] as const) {
     const outcomes = report.outcomes.filter((outcome) => outcome.rule.tier === tier);
-    if (outcomes.length === 0) continue;
+    if (Arr.isReadonlyArrayEmpty(outcomes)) continue;
     const tierSummary = summarise(outcomes);
     out.push(`${TIER_TITLE[tier].toUpperCase()}`);
     out.push(
@@ -287,7 +290,7 @@ export const format = (
   out.push(...renderWrites(report.writes ?? []));
 
   out.push("NOT COVERED BY THIS KIT");
-  if (report.gaps.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(report.gaps)) {
     out.push("  (none declared)");
   } else {
     out.push("  Areas the kit does not check at all. A rule that is absent here and");
@@ -297,7 +300,7 @@ export const format = (
     for (const gap of report.gaps) {
       out.push(`  · ${gap.area}`);
       for (const line of wrap(gap.reason, width - 6)) out.push(indent(line, "      "));
-      if (gap.tracking.length > 0)
+      if (Arr.isReadonlyArrayNonEmpty(gap.tracking))
         out.push(indent(`tracking: ${gap.tracking.join(", ")}`, "      "));
     }
   }

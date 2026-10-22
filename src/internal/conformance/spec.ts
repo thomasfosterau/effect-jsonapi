@@ -49,6 +49,7 @@ import {
   HOP_CAP,
   identity,
   isRecord,
+  eachSuccessfulRead,
   jsonApiAccept,
   coverageNote,
   noProbeReason,
@@ -138,13 +139,11 @@ const responseMediaType: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(responseMediaType.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
-      for (const { path } of resolved) {
-        const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-        if (observation.status < 200 || observation.status >= 300) continue;
-        if (observation.text === "") continue;
+      yield* eachSuccessfulRead(ctx, resolved, (path, observation) => {
+        if (observation.text === "") return;
         const header = observation.contentType;
         if (header === undefined) {
           findings.push(
@@ -155,7 +154,7 @@ const responseMediaType: RuleImpl = {
               probe: observation.probe,
             }),
           );
-          continue;
+          return;
         }
         const { base, parameters } = parseMediaType(header);
         if (base !== MEDIA_TYPE) {
@@ -167,10 +166,10 @@ const responseMediaType: RuleImpl = {
               probe: observation.probe,
             }),
           );
-          continue;
+          return;
         }
         const illegal = parameters.filter(([name]) => name !== "ext" && name !== "profile");
-        if (illegal.length > 0) {
+        if (Arr.isReadonlyArrayNonEmpty(illegal)) {
           findings.push(
             finding(responseMediaType.rule, {
               detail: `${path} answered with the media type parameter(s) ${illegal.map(([n]) => n).join(", ")}`,
@@ -180,7 +179,7 @@ const responseMediaType: RuleImpl = {
             }),
           );
         }
-      }
+      });
       return settle(responseMediaType.rule, resolved.length, findings, coverageNote(unresolved));
     }),
 };
@@ -290,19 +289,24 @@ const acceptWeight: RuleImpl = {
         ],
       ];
       const findings: Array<Finding> = [];
-      for (const [accept, description] of accepts) {
-        const observation = yield* ctx.request({ url: target.path, headers: { accept } });
-        if (observation.status === 406) {
-          findings.push(
-            finding(acceptWeight.rule, {
-              detail: `${description} was treated as a disallowed media type parameter`,
-              expected: "any status but 406 — the weight is not a media type parameter",
-              observed: describe(observation),
-              probe: observation.probe,
-            }),
-          );
-        }
-      }
+      yield* Effect.forEach(
+        accepts,
+        ([accept, description]) =>
+          Effect.gen(function* () {
+            const observation = yield* ctx.request({ url: target.path, headers: { accept } });
+            if (observation.status === 406) {
+              findings.push(
+                finding(acceptWeight.rule, {
+                  detail: `${description} was treated as a disallowed media type parameter`,
+                  expected: "any status but 406 — the weight is not a media type parameter",
+                  observed: describe(observation),
+                  probe: observation.probe,
+                }),
+              );
+            }
+          }),
+        { concurrency: 1, discard: true },
+      );
       return settle(acceptWeight.rule, accepts.length, findings);
     }),
 };
@@ -438,17 +442,22 @@ const includableOf = (body: unknown): ReadonlyArray<string> => {
 const documentProbes = (ctx: Context) =>
   Effect.gen(function* () {
     const out: Array<{ readonly where: string; readonly observation: Observation }> = [];
-    for (const { endpoint, path } of readable(ctx).resolved) {
-      const bare = yield* ctx.request({ url: path, headers: jsonApiAccept });
-      out.push({ where: path, observation: bare });
-      if (!endpoint.queryKeys.includes("include")) continue;
-      const includable = includableOf(bare.body);
-      if (includable.length === 0) continue;
-      const url = withQuery(path, [["include", includable.join(",")]]);
-      const compound = yield* ctx.request({ url, headers: jsonApiAccept });
-      if (compound.status >= 200 && compound.status < 300)
-        out.push({ where: url, observation: compound });
-    }
+    yield* Effect.forEach(
+      readable(ctx).resolved,
+      ({ endpoint, path }) =>
+        Effect.gen(function* () {
+          const bare = yield* ctx.request({ url: path, headers: jsonApiAccept });
+          out.push({ where: path, observation: bare });
+          if (!endpoint.queryKeys.includes("include")) return;
+          const includable = includableOf(bare.body);
+          if (Arr.isReadonlyArrayEmpty(includable)) return;
+          const url = withQuery(path, [["include", includable.join(",")]]);
+          const compound = yield* ctx.request({ url, headers: jsonApiAccept });
+          if (compound.status >= 200 && compound.status < 300)
+            out.push({ where: url, observation: compound });
+        }),
+      { concurrency: 1, discard: true },
+    );
     return out;
   });
 
@@ -475,7 +484,7 @@ const overDocuments =
   (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(impl, noProbeReason("JSON:API read endpoint", unresolved));
       const documents = yield* documentProbes(ctx);
       const note = coverageNote(unresolved);
@@ -518,7 +527,7 @@ const topLevelMembers: RuleImpl = {
           ];
         }
         const has = ["data", "errors", "meta"].filter((member) => member in body);
-        return has.length > 0
+        return Arr.isReadonlyArrayNonEmpty(has)
           ? []
           : [
               finding(topLevelMembers.rule, {
@@ -595,12 +604,14 @@ const fullLinkage: RuleImpl = {
   run: (ctx) =>
     overDocuments(fullLinkage.rule, {
       applicable: (body) =>
-        isRecord(body) && Array.isArray(body["included"]) && body["included"].length > 0,
+        isRecord(body) &&
+        Array.isArray(body["included"]) &&
+        Arr.isReadonlyArrayNonEmpty(body["included"]),
       inapplicable:
         "no endpoint returned a compound document — either none declares `include`, or no resource it returned carries inline relationship linkage to include",
       check: (body, observation, where) => {
         const orphans = isRecord(body) ? Linkage.unlinkedIncluded(body) : [];
-        return orphans.length === 0
+        return Arr.isReadonlyArrayEmpty(orphans)
           ? []
           : [
               finding(fullLinkage.rule, {
@@ -637,7 +648,7 @@ const noDuplicateResources: RuleImpl = {
           if (first === undefined) seen.set(key, pointer);
           else duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`);
         }
-        return duplicates.length === 0
+        return Arr.isReadonlyArrayEmpty(duplicates)
           ? []
           : [
               finding(noDuplicateResources.rule, {
@@ -734,7 +745,7 @@ const resourceIdentification: RuleImpl = {
   ),
   run: (ctx) =>
     overDocuments(resourceIdentification.rule, {
-      applicable: (body) => resourcesOf(body).length > 0,
+      applicable: (body) => Arr.isReadonlyArrayNonEmpty(resourcesOf(body)),
       inapplicable: "no endpoint returned a document carrying a resource object",
       check: (body, observation, where) => {
         const findings: Array<Finding> = [];
@@ -868,7 +879,7 @@ const errorDocumentShape: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const observations = yield* errorProbes(ctx);
-      if (observations.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(observations)) {
         return skip(
           errorDocumentShape.rule,
           "no error response could be provoked without mutating the target",
@@ -878,7 +889,11 @@ const errorDocumentShape: RuleImpl = {
       for (const observation of observations) {
         if (observation.status === 404 && observation.text === "") continue;
         const body = observation.body;
-        if (!isRecord(body) || !Array.isArray(body["errors"]) || body["errors"].length === 0) {
+        if (
+          !isRecord(body) ||
+          !Array.isArray(body["errors"]) ||
+          Arr.isReadonlyArrayEmpty(body["errors"])
+        ) {
           findings.push(
             finding(errorDocumentShape.rule, {
               detail: `a ${observation.status} response was not a JSON:API error document`,
@@ -907,7 +922,7 @@ const errorMemberTypes: RuleImpl = {
       const errors = observations.flatMap((observation) =>
         errorObjectsOf(observation.body).map((error) => ({ error, observation })),
       );
-      if (errors.length === 0)
+      if (Arr.isReadonlyArrayEmpty(errors))
         return skip(errorMemberTypes.rule, "no error object could be provoked");
       const findings: Array<Finding> = [];
       for (const { error, observation } of errors) {
@@ -957,7 +972,7 @@ const errorSourceDiscrimination: RuleImpl = {
           .filter(isRecord)
           .map((source) => ({ source, observation })),
       );
-      if (sources.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(sources)) {
         return skip(
           errorSourceDiscrimination.rule,
           "no provoked error object carried a `source` member",
@@ -1018,7 +1033,7 @@ const errorStatusMatches: RuleImpl = {
       const observations = (yield* errorProbes(ctx)).filter(
         (observation) => errorObjectsOf(observation.body).length === 1,
       );
-      if (observations.length === 0)
+      if (Arr.isReadonlyArrayEmpty(observations))
         return skip(errorStatusMatches.rule, "no single-error document could be provoked");
       const findings: Array<Finding> = [];
       for (const observation of observations) {
@@ -1048,7 +1063,31 @@ const fieldsOf = (queryKeys: ReadonlyArray<string>): ReadonlyArray<string> =>
     .filter((key) => key.startsWith("fields[") && key.endsWith("]"))
     .map((key) => key.slice("fields[".length, -1));
 
-const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
+type Slot = "primary" | "included";
+
+/** Whether the resource object at `pointer` sits in the document slot `where`. */
+const inSlot = (pointer: string, where: Slot): boolean =>
+  pointer.startsWith("/included") === (where === "included");
+
+/**
+ * The attribute names of the first resource of each type in slot `where`:
+ * only types that actually appear in the slot under test can decide a
+ * projection rule; anything else would be a pass over an empty set.
+ */
+const attributesByType = (body: unknown, where: Slot): Map<string, ReadonlyArray<string>> => {
+  const byType = new Map<string, ReadonlyArray<string>>();
+  for (const { pointer, resource } of resourcesOf(body)) {
+    if (!inSlot(pointer, where)) continue;
+    const type = resource["type"];
+    const attributes = resource["attributes"];
+    if (typeof type === "string" && isRecord(attributes) && !byType.has(type)) {
+      byType.set(type, Object.keys(attributes));
+    }
+  }
+  return byType;
+};
+
+const sparseFieldsets = (where: Slot): RuleImpl => {
   const impl = rule(
     `spec/query/sparse-fieldsets-${where}`,
     "Sparse Fieldsets",
@@ -1062,76 +1101,76 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
     rule: impl,
     run: (ctx) =>
       Effect.gen(function* () {
-        const candidates = readable(ctx).resolved.filter(
-          ({ endpoint }) => fieldsOf(endpoint.queryKeys).length > 0,
+        const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
+          Arr.isReadonlyArrayNonEmpty(fieldsOf(endpoint.queryKeys)),
         );
-        if (candidates.length === 0) return skip(impl, "no endpoint declares `fields[TYPE]`");
+        if (Arr.isReadonlyArrayEmpty(candidates))
+          return skip(impl, "no endpoint declares `fields[TYPE]`");
         const findings: Array<Finding> = [];
         let probes = 0;
         let evaluated = 0;
-        for (const { endpoint, path } of candidates) {
-          // Learn the attribute names this endpoint actually emits, then ask for
-          // exactly the first one: a projection rule needs a field set the
-          // server is known to be able to return. The `included` variant needs a
-          // compound document, so the baseline is taken with `include` on.
-          const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
-          probes += 1;
-          let source = baseline;
-          let base = path;
-          if (where === "included") {
-            if (!endpoint.queryKeys.includes("include")) continue;
-            const includable = includableOf(baseline.body);
-            if (includable.length === 0) continue;
-            base = withQuery(path, [["include", includable.join(",")]]);
-            source = yield* ctx.request({ url: base, headers: jsonApiAccept });
-            probes += 1;
-            if (source.status < 200 || source.status >= 300) continue;
-          }
-          // Only types that actually appear in the slot under test can decide
-          // this rule; anything else would be a pass over an empty set.
-          const byType = new Map<string, ReadonlyArray<string>>();
-          for (const { pointer, resource } of resourcesOf(source.body)) {
-            const inIncluded = pointer.startsWith("/included");
-            if (where === "included" ? !inIncluded : inIncluded) continue;
-            const type = resource["type"];
-            const attributes = resource["attributes"];
-            if (typeof type === "string" && isRecord(attributes) && !byType.has(type)) {
-              byType.set(type, Object.keys(attributes));
-            }
-          }
-          for (const type of fieldsOf(endpoint.queryKeys)) {
-            const attributes = byType.get(type);
-            if (attributes === undefined || attributes.length < 2) continue;
-            const requested = attributes[0]!;
-            const url = withQuery(base, [[`fields[${type}]`, requested]]);
-            const observation = yield* ctx.request({ url, headers: jsonApiAccept });
-            probes += 1;
-            if (observation.status < 200 || observation.status >= 300) continue;
-            const subjects = resourcesOf(observation.body).filter(({ pointer, resource }) => {
-              const inIncluded = pointer.startsWith("/included");
-              return (where === "included" ? inIncluded : !inIncluded) && resource["type"] === type;
-            });
-            // A projection request that returned no resource of that type in
-            // that slot proves nothing either way.
-            if (subjects.length === 0) continue;
-            evaluated += 1;
-            for (const { pointer, resource } of subjects) {
-              const emitted = resource["attributes"];
-              if (!isRecord(emitted)) continue;
-              const extra = Object.keys(emitted).filter((key) => key !== requested);
-              if (extra.length > 0) {
-                findings.push(
-                  finding(impl, {
-                    detail: `\`fields[${type}]=${requested}\` still returned other fields at ${pointer}`,
-                    expected: `only \`${requested}\` in \`attributes\``,
-                    observed: `also returned: ${extra.join(", ")}`,
-                    probe: observation.probe,
-                  }),
-                );
+        yield* Effect.forEach(
+          candidates,
+          ({ endpoint, path }) =>
+            Effect.gen(function* () {
+              // Learn the attribute names this endpoint actually emits, then ask for
+              // exactly the first one: a projection rule needs a field set the
+              // server is known to be able to return. The `included` variant needs a
+              // compound document, so the baseline is taken with `include` on.
+              const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+              probes += 1;
+              let source = baseline;
+              let base = path;
+              if (where === "included") {
+                if (!endpoint.queryKeys.includes("include")) return;
+                const includable = includableOf(baseline.body);
+                if (Arr.isReadonlyArrayEmpty(includable)) return;
+                base = withQuery(path, [["include", includable.join(",")]]);
+                source = yield* ctx.request({ url: base, headers: jsonApiAccept });
+                probes += 1;
+                if (source.status < 200 || source.status >= 300) return;
               }
-            }
-          }
-        }
+              const byType = attributesByType(source.body, where);
+              yield* Effect.forEach(
+                fieldsOf(endpoint.queryKeys),
+                (type) =>
+                  Effect.gen(function* () {
+                    const attributes = byType.get(type);
+                    if (attributes === undefined || attributes.length < 2) return;
+                    const requested = attributes[0]!;
+                    const url = withQuery(base, [[`fields[${type}]`, requested]]);
+                    const observation = yield* ctx.request({ url, headers: jsonApiAccept });
+                    probes += 1;
+                    if (observation.status < 200 || observation.status >= 300) return;
+                    const subjects = resourcesOf(observation.body).filter(
+                      ({ pointer, resource }) =>
+                        inSlot(pointer, where) && resource["type"] === type,
+                    );
+                    // A projection request that returned no resource of that type in
+                    // that slot proves nothing either way.
+                    if (Arr.isReadonlyArrayEmpty(subjects)) return;
+                    evaluated += 1;
+                    for (const { pointer, resource } of subjects) {
+                      const emitted = resource["attributes"];
+                      if (!isRecord(emitted)) continue;
+                      const extra = Object.keys(emitted).filter((key) => key !== requested);
+                      if (Arr.isReadonlyArrayNonEmpty(extra)) {
+                        findings.push(
+                          finding(impl, {
+                            detail: `\`fields[${type}]=${requested}\` still returned other fields at ${pointer}`,
+                            expected: `only \`${requested}\` in \`attributes\``,
+                            observed: `also returned: ${extra.join(", ")}`,
+                            probe: observation.probe,
+                          }),
+                        );
+                      }
+                    }
+                  }),
+                { concurrency: 1, discard: true },
+              );
+            }),
+          { concurrency: 1, discard: true },
+        );
         if (evaluated === 0) {
           return skip(
             impl,
@@ -2567,7 +2606,7 @@ const reachable: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(reachable.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const observations = yield* Effect.forEach(
         resolved,

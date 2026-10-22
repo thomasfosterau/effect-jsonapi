@@ -48,7 +48,7 @@
  *
  * @since 0.1.0
  */
-import { Schema } from "effect";
+import { Array as Arr, Schema } from "effect";
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js";
 import type { Operator } from "./Filter.js";
 import type { Any, AttributeKeys } from "./Resource.js";
@@ -486,7 +486,7 @@ export const paginated = <R extends Any, const O extends Order<R> | undefined = 
 ): Paginated<R, NoInfer<O>> => {
   const order = options?.order;
   if (order !== undefined) {
-    if (order.length === 0) {
+    if (Arr.isReadonlyArrayEmpty(order)) {
       throw new Error(
         "Relationship.paginated: `order` declares no terms; name at least one, or omit the option",
       );

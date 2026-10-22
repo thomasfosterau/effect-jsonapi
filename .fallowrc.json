@@ -13,7 +13,6 @@
   "ignorePatterns": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "docs/**"],
   "ignoreDependencies": [
     "@types/node",
-    "effect-solutions",
     "@effect/docgen",
     "@effect/tsgo",
     "@effect/language-service",
@@ -24,7 +23,8 @@
     "vitest",
     "vite-plus",
     "@changesets/cli",
-    "fallow"
+    "fallow",
+    "@vitest/coverage-istanbul"
   ],
   "ignoreExports": [
     {
@@ -55,11 +55,25 @@
       "file": "src/ServerErrors.ts",
       "exports": ["ErrorDocument", "Forbidden", "errorResponse", "pathToJsonPointer"]
     },
+    // Each conformance tier module exports its rule list as `rules`; the
+    // Conformance module imports each tier as a namespace (SpecRules.rules,
+    // ProfileRules.rules, SortRules.rules), so the shared name is the design,
+    // not a duplicate.
+    { "file": "src/internal/conformance/spec.ts", "exports": ["rules"] },
+    { "file": "src/internal/conformance/profile.ts", "exports": ["rules"] },
+    { "file": "src/internal/conformance/sort.ts", "exports": ["rules"] },
+    // Likewise `Samples.snapshot` / `targets` and `WriteFixtures.snapshot` /
+    // `targets`: each module's own ledger, read through its namespace.
+    { "file": "src/internal/conformance/samples.ts", "exports": ["snapshot", "targets"] },
+    { "file": "src/internal/conformance/write.ts", "exports": ["snapshot", "targets"] },
     {
       "file": "src/internal/media.ts",
       "exports": ["parseMediaType"]
     }
   ],
+  "health": {
+    "coverage": "coverage/coverage-final.json"
+  },
   "rules": {
     "unused-files": "error",
     "unused-exports": "warn",

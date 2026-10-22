@@ -45,7 +45,16 @@
  *
  * @since 0.1.0
  */
-import { Effect, Schema, SchemaAST, SchemaIssue, SchemaTransformation, Struct } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Match,
+  Schema,
+  SchemaAST,
+  SchemaIssue,
+  SchemaTransformation,
+  Struct,
+} from "effect";
 import { AnyMeta, CollectionDocument, DataDocument, ResourceLinks } from "./Document.js";
 import * as Filter from "./Filter.js";
 import { resolveOperators } from "./internal/operators.js";
@@ -2189,37 +2198,36 @@ type ScalarKind = "string" | "number" | "boolean";
 // an array, a `Date` declaration, …) or mixes kinds.
 const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
   const kinds = new Set<ScalarKind>();
-  const visit = (node: SchemaAST.AST): boolean => {
-    switch (node._tag) {
-      case "String":
+  const visit = (node: SchemaAST.AST): boolean =>
+    Match.value(node).pipe(
+      Match.tag("String", () => {
         kinds.add("string");
         return true;
-      case "Number":
+      }),
+      Match.tag("Number", () => {
         kinds.add("number");
         return true;
-      case "Boolean":
+      }),
+      Match.tag("Boolean", () => {
         kinds.add("boolean");
         return true;
-      case "Null":
-        return true;
-      case "Literal": {
+      }),
+      Match.tag("Null", () => true),
+      Match.tag("Literal", (node) => {
         const kind = typeof node.literal;
         if (kind !== "string" && kind !== "number" && kind !== "boolean") return false;
         kinds.add(kind);
         return true;
-      }
-      case "TemplateLiteral":
-        // Encodes as a plain string; the template's own check applies on decode.
+      }),
+      // Encodes as a plain string; the template's own check applies on decode.
+      Match.tag("TemplateLiteral", () => {
         kinds.add("string");
         return true;
-      case "Union":
-        return node.types.every(visit);
-      case "Suspend":
-        return visit(node.thunk());
-      default:
-        return false;
-    }
-  };
+      }),
+      Match.tag("Union", (node) => node.types.every(visit)),
+      Match.tag("Suspend", (node) => visit(node.thunk())),
+      Match.orElse(() => false),
+    );
   if (!visit(ast) || kinds.size !== 1) return undefined;
   return [...kinds][0];
 };
@@ -2230,19 +2238,17 @@ const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
 const DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 // Parses a wire literal as one scalar kind; `undefined` when it is not one.
-const parseScalar = (kind: ScalarKind, input: string): string | number | boolean | undefined => {
-  switch (kind) {
-    case "string":
-      return input;
-    case "number": {
+const parseScalar = (kind: ScalarKind, input: string): string | number | boolean | undefined =>
+  Match.value(kind).pipe(
+    Match.when("string", () => input),
+    Match.when("number", () => {
       if (!DECIMAL.test(input)) return undefined;
       const value = Number(input);
       return Number.isFinite(value) ? value : undefined;
-    }
-    case "boolean":
-      return input === "true" ? true : input === "false" ? false : undefined;
-  }
-};
+    }),
+    Match.when("boolean", () => (input === "true" ? true : input === "false" ? false : undefined)),
+    Match.exhaustive,
+  );
 
 // The literal codec for an attribute whose encoded form is `kind`: wire string
 // → scalar (strictly) → the attribute schema's own decoder, and the reverse on
@@ -2365,7 +2371,7 @@ const isFilterAnnotation = (u: unknown): u is Filter.Annotation => {
   const { operators, literal } = u as { readonly operators?: unknown; readonly literal?: unknown };
   return (
     Array.isArray(operators) &&
-    operators.length > 0 &&
+    Arr.isReadonlyArrayNonEmpty(operators) &&
     operators.every(Filter.isOperator) &&
     (literal === undefined || Schema.isSchema(literal))
   );
@@ -3636,7 +3642,7 @@ export function family(
   nameOrBase: string | Any,
   members: ReadonlyArray<Any>,
 ): Family<string, ReadonlyArray<Any>, any> {
-  if (members.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(members)) {
     throw new Error("Resource.family requires at least one member");
   }
   const base = typeof nameOrBase === "string" ? undefined : nameOrBase;

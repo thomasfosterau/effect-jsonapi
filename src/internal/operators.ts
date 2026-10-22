@@ -6,7 +6,7 @@
  *
  * @internal
  */
-import { Schema } from "effect";
+import { Array as Arr, Schema } from "effect";
 
 /** The six comparison operators: one literal against the field. */
 export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const;
@@ -41,7 +41,7 @@ export const resolveOperators = <const L extends ReadonlyArray<string>>(
   subject: string,
 ): ReadonlyArray<L[number]> => {
   if (filter === true) return allowed.literals;
-  if (filter.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(filter)) {
     throw new Error(
       `${subject} declares filter: [] — no operators; omit \`filter\` (or pass false) instead`,
     );

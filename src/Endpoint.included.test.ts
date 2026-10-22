@@ -14,7 +14,7 @@
  * the union it had. The type-level half is
  * `test/include-depth-included.types.ts`.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -106,12 +106,18 @@ const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>
   // JSON:API document codec; decoding unknown input is what it is for.
   [...endpoint.success][0] as Schema.Codec<unknown, unknown>;
 
+// A wire resource object, as a document's primary data.
+interface WireResource {
+  readonly type: string;
+  readonly id: string;
+}
+
 // The types an endpoint's success document admits in `included`: each type's
 // wire object is decoded as the sole `included` member of a document whose
 // primary data is `primary` (wrapped in an array for a collection).
 const admitted = (
   endpoint: { readonly success: Iterable<Schema.Top> },
-  primary: object,
+  primary: WireResource,
   collection: boolean,
 ): ReadonlyArray<WireType> => {
   const success = successOf(endpoint);
@@ -314,8 +320,11 @@ describe("the default `included` union reaches every legal include path (#320)",
 
   it("`Endpoint.resource` derives the same union for its `get` and `list`", () => {
     const endpoints = Endpoint.resource(Article, { include: true });
-    const named = (name: string) =>
-      Option.getOrThrow(Arr.findFirst(endpoints, (endpoint) => endpoint.identifier === name));
+    const named = (name: string) => {
+      const found = Arr.findFirst(endpoints, (endpoint) => endpoint.identifier === name);
+      assert(Option.isSome(found), `no endpoint named ${name}`);
+      return found.value;
+    };
     expect(admitted(named("get"), wire.articles, false)).toEqual(["comments", "people"]);
     expect(admitted(named("list"), wire.articles, true)).toEqual(["comments", "people"]);
   });

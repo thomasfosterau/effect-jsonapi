@@ -5,7 +5,7 @@
  *
  * @internal
  */
-import { Option, Record as Rec, Schema, SchemaIssue } from "effect";
+import { Array as Arr, Match, Option, Record as Rec, Schema, SchemaIssue } from "effect";
 import type { Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 
@@ -106,13 +106,13 @@ const issueMessage = (error: Schema.SchemaError): string =>
 // ---------------------------------------------------------------------------
 
 /** Escapes a wire literal: `\` → `\\`, `,` → `\,`. */
-export const escape = (literal: string): string => literal.replace(/[\\,]/g, (c) => `\\${c}`);
+const escape = (literal: string): string => literal.replace(/[\\,]/g, (c) => `\\${c}`);
 
 /**
  * Unescapes a wire value, splitting it on unescaped commas in a list position.
  * Returns the items, or the reason the value is malformed.
  */
-export const unescape = (
+const unescape = (
   raw: string,
   list: boolean,
 ): { readonly items: ReadonlyArray<string> } | { readonly error: string } => {
@@ -494,7 +494,7 @@ export const decodeFilter = (
   }
   if (issues.size > 0) return { _tag: "Issues", issues: [...issues.values()] };
 
-  if (roots.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(roots)) {
     return {
       _tag: "Issues",
       issues: [new SchemaIssue.InvalidValue({ message: "Expected at least one filter[...] key" })],
@@ -543,7 +543,7 @@ export const compareCodePoints = (a: string, b: string): number => {
 };
 
 /** The total node order of §3.2. */
-export const compareNodes = (a: Prepared, b: Prepared): number => {
+const compareNodes = (a: Prepared, b: Prepared): number => {
   if (a.kind !== b.kind) return a.kind === "condition" ? -1 : 1;
   if (a.kind === "condition" && b.kind === "condition") {
     return (
@@ -581,9 +581,9 @@ export const prepare = (
   node: Node,
   encode: LiteralEncoder,
   check: OperatorCheck = () => {},
-): Prepared => {
-  switch (node._tag) {
-    case "Compare":
+): Prepared =>
+  Match.value(node).pipe(
+    Match.tag("Compare", (node): Prepared => {
       check(node.field, node.op);
       return {
         kind: "condition",
@@ -593,10 +593,10 @@ export const prepare = (
         value: escape(encode(node.field, node.value)),
         arity: 1,
       };
-    case "In":
-    case "NotIn": {
+    }),
+    Match.tag("In", "NotIn", (node): Prepared => {
       check(node.field, node._tag === "In" ? "in" : "nin");
-      if (node.values.length === 0)
+      if (Arr.isReadonlyArrayEmpty(node.values))
         throw new InvalidFilter({ message: `A ${node._tag} node needs at least one value` });
       const items = sortedUnique(
         node.values.map((value) => ({ wire: escape(encode(node.field, value)), value })),
@@ -614,8 +614,8 @@ export const prepare = (
         value: items.map((item) => item.wire).join(","),
         arity: items.length,
       };
-    }
-    case "IsNull":
+    }),
+    Match.tag("IsNull", (node): Prepared => {
       check(node.field, nullOperator);
       return {
         kind: "condition",
@@ -625,8 +625,8 @@ export const prepare = (
         value: node.negated ? "false" : "true",
         arity: 1,
       };
-    case "And":
-    case "Or": {
+    }),
+    Match.tag("And", "Or", (node): Prepared => {
       const members = sortedUnique(
         node.members.map((member) => prepare(member, encode, check)),
         compareNodes,
@@ -637,8 +637,8 @@ export const prepare = (
         conjunction: node._tag === "And" ? "AND" : "OR",
         members,
       };
-    }
-    case "Not": {
+    }),
+    Match.tag("Not", (node): Prepared => {
       const member = prepare(node.member, encode, check);
       return {
         kind: "group",
@@ -646,13 +646,14 @@ export const prepare = (
         conjunction: "NOT",
         members: [member],
       };
-    }
-    default:
+    }),
+    // An untyped caller can still hand over a node outside the union.
+    Match.orElse((): never => {
       throw new InvalidFilter({
         message: `Unknown filter node ${quote((node as { readonly _tag?: unknown })._tag)}`,
       });
-  }
-};
+    }),
+  );
 
 // ---------------------------------------------------------------------------
 // Canonical encoding (§3.1, §3.3)

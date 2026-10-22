@@ -40,6 +40,14 @@ export const PageOffset: Schema.Number = Schema.Number.check(
 );
 
 /**
+ * The decoded type of a {@link PageOffset}: a non-negative integer.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type PageOffset = typeof PageOffset.Type;
+
+/**
  * A bounded pagination `limit`: a positive integer no greater than
  * `maxLimit`. One cap, enforced uniformly across every list input built from
  * it, so a hostile request can't drive an unbounded `LIMIT`.
@@ -295,6 +303,14 @@ export const sortField: { readonly sort: Schema.optional<typeof SortParam> } = {
  * @category schemas
  */
 export const Uuid: Schema.String = Schema.String.check(Schema.isUUID());
+
+/**
+ * The decoded type of a {@link Uuid}: a UUID string.
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export type Uuid = typeof Uuid.Type;
 
 /**
  * The most ids one `filter[ids]` may carry by default.

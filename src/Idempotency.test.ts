@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished } from "vite-plus/test";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -265,19 +265,16 @@ describe("Idempotency.layer", () => {
       }),
     );
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      const first = await request({ key: "k1", body: createBody });
-      const second = await request({ key: "k1", body: createBody });
+    onTestFinished(() => dispose());
+    const first = await request({ key: "k1", body: createBody });
+    const second = await request({ key: "k1", body: createBody });
 
-      expect(calls).toBe(1);
-      expect(first.status).toBe(201);
-      expect(first.replayed).toBeNull();
-      expect(second.status).toBe(201);
-      expect(second.body).toBe(first.body);
-      expect(second.replayed).toBe("true");
-    } finally {
-      await dispose();
-    }
+    expect(calls).toBe(1);
+    expect(first.status).toBe(201);
+    expect(first.replayed).toBeNull();
+    expect(second.status).toBe(201);
+    expect(second.body).toBe(first.body);
+    expect(second.replayed).toBe("true");
   });
 
   it("accepts the RFC 8941 String spelling of the same key as the same key", async () => {
@@ -290,14 +287,11 @@ describe("Idempotency.layer", () => {
       }),
     );
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      await request({ key: "k1", body: createBody });
-      const replay = await request({ key: `"k1"`, body: createBody });
-      expect(calls).toBe(1);
-      expect(replay.replayed).toBe("true");
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    await request({ key: "k1", body: createBody });
+    const replay = await request({ key: `"k1"`, body: createBody });
+    expect(calls).toBe(1);
+    expect(replay.replayed).toBe("true");
   });
 
   it("rejects the same key carrying a different body with a 422, without running the handler", async () => {
@@ -310,21 +304,18 @@ describe("Idempotency.layer", () => {
       }),
     );
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      await request({ key: "k1", body: createBody });
-      const conflicting = await request({
-        key: "k1",
-        body: { data: { type: "articles", attributes: { title: "Different", body: "World" } } },
-      });
+    onTestFinished(() => dispose());
+    await request({ key: "k1", body: createBody });
+    const conflicting = await request({
+      key: "k1",
+      body: { data: { type: "articles", attributes: { title: "Different", body: "World" } } },
+    });
 
-      expect(calls).toBe(1);
-      expect(conflicting.status).toBe(422);
-      expect(JSON.parse(conflicting.body)).toEqual(
-        ApiError.toDocument(new Idempotency.KeyMismatch()),
-      );
-    } finally {
-      await dispose();
-    }
+    expect(calls).toBe(1);
+    expect(conflicting.status).toBe(422);
+    expect(JSON.parse(conflicting.body)).toEqual(
+      ApiError.toDocument(new Idempotency.KeyMismatch()),
+    );
   });
 
   it("treats the same key on a different target as a mismatch, not a fresh slot", async () => {
@@ -341,17 +332,14 @@ describe("Idempotency.layer", () => {
         .handle("draft", () => Effect.succeed({ data: sample })),
     ) as Layer.Layer<any, any, any>;
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      await request({ key: "k1", body: createBody });
-      const elsewhere = await request({
-        key: "k1",
-        url: "http://localhost/drafts",
-        body: createBody,
-      });
-      expect(elsewhere.status).toBe(422);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    await request({ key: "k1", body: createBody });
+    const elsewhere = await request({
+      key: "k1",
+      url: "http://localhost/drafts",
+      body: createBody,
+    });
+    expect(elsewhere.status).toBe(422);
   });
 
   it("answers 409 while an attempt with the same key and body is still in flight", async () => {
@@ -362,15 +350,10 @@ describe("Idempotency.layer", () => {
     const api = articlesApi(true);
     const live = articlesLive(api, () => Effect.succeed({ data: sample }));
     const { dispose, request } = server({ api, live, store });
-    try {
-      const inFlight = await request({ key: "k1", body: createBody });
-      expect(inFlight.status).toBe(409);
-      expect(JSON.parse(inFlight.body)).toEqual(
-        ApiError.toDocument(new Idempotency.KeyInProgress()),
-      );
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const inFlight = await request({ key: "k1", body: createBody });
+    expect(inFlight.status).toBe(409);
+    expect(JSON.parse(inFlight.body)).toEqual(ApiError.toDocument(new Idempotency.KeyInProgress()));
   });
 
   it("prefers the mismatch over the in-flight conflict", async () => {
@@ -381,11 +364,8 @@ describe("Idempotency.layer", () => {
     const api = articlesApi(true);
     const live = articlesLive(api, () => Effect.succeed({ data: sample }));
     const { dispose, request } = server({ api, live, store });
-    try {
-      expect((await request({ key: "k1", body: createBody })).status).toBe(422);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    expect((await request({ key: "k1", body: createBody })).status).toBe(422);
   });
 
   it("records nothing for a request carrying no key", async () => {
@@ -399,14 +379,11 @@ describe("Idempotency.layer", () => {
     );
     const store = Idempotency.memoryStore();
     const { dispose, request } = server({ api, live, store });
-    try {
-      await request({ body: createBody });
-      await request({ body: createBody });
-      expect(calls).toBe(2);
-      expect(Effect.runSync(store.claim(attempt("k1", "fp")))).toEqual({ _tag: "Claimed" });
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    await request({ body: createBody });
+    await request({ body: createBody });
+    expect(calls).toBe(2);
+    expect(Effect.runSync(store.claim(attempt("k1", "fp")))).toEqual({ _tag: "Claimed" });
   });
 
   it("releases the key when the handler fails, so the write may be attempted again", async () => {
@@ -421,18 +398,15 @@ describe("Idempotency.layer", () => {
       }).pipe(Effect.andThen(Effect.fail(new TitleTaken()))),
     );
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      const first = await request({ key: "k1", body: createBody });
-      const second = await request({ key: "k1", body: createBody });
-      // A declared failure is not a completed write: the handler ran again and
-      // answered the same way, rather than the key being burned on a 409.
-      expect(calls).toBe(2);
-      expect(first.status).toBe(409);
-      expect(second.status).toBe(409);
-      expect(second.replayed).toBeNull();
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const first = await request({ key: "k1", body: createBody });
+    const second = await request({ key: "k1", body: createBody });
+    // A declared failure is not a completed write: the handler ran again and
+    // answered the same way, rather than the key being burned on a 409.
+    expect(calls).toBe(2);
+    expect(first.status).toBe(409);
+    expect(second.status).toBe(409);
+    expect(second.replayed).toBeNull();
   });
 
   it("records a rejection rendered before the handler, so a corrected retry must use a new key", async () => {
@@ -445,21 +419,18 @@ describe("Idempotency.layer", () => {
       }),
     );
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      const malformed = await request({
-        key: "k1",
-        body: { data: { type: "articles", attributes: {} } },
-      });
-      const corrected = await request({ key: "k1", body: createBody });
+    onTestFinished(() => dispose());
+    const malformed = await request({
+      key: "k1",
+      body: { data: { type: "articles", attributes: {} } },
+    });
+    const corrected = await request({ key: "k1", body: createBody });
 
-      expect(calls).toBe(0);
-      expect(malformed.status).toBe(400);
-      // The client changed the request under a key that already named another
-      // one — a mismatch, not a second chance at the same key.
-      expect(corrected.status).toBe(422);
-    } finally {
-      await dispose();
-    }
+    expect(calls).toBe(0);
+    expect(malformed.status).toBe(400);
+    // The client changed the request under a key that already named another
+    // one — a mismatch, not a second chance at the same key.
+    expect(corrected.status).toBe(422);
   });
 
   it("releases the key on a 5xx, so the client may retry it", async () => {
@@ -473,29 +444,23 @@ describe("Idempotency.layer", () => {
       }),
     );
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      const failed = await request({ key: "k1", body: createBody });
-      const retried = await request({ key: "k1", body: createBody });
-      expect(failed.status).toBe(500);
-      expect(retried.status).toBe(201);
-      expect(retried.replayed).toBeNull();
-      expect(calls).toBe(2);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const failed = await request({ key: "k1", body: createBody });
+    const retried = await request({ key: "k1", body: createBody });
+    expect(failed.status).toBe(500);
+    expect(retried.status).toBe(201);
+    expect(retried.replayed).toBeNull();
+    expect(calls).toBe(2);
   });
 
   it("answers a missing required key with the standard 400 naming the header", async () => {
     const api = articlesApi("required");
     const live = articlesLive(api, () => Effect.succeed({ data: sample }));
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      const missing = await request({ body: createBody });
-      expect(missing.status).toBe(400);
-      expect(JSON.parse(missing.body).errors[0].source).toEqual({ header: "idempotency-key" });
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const missing = await request({ body: createBody });
+    expect(missing.status).toBe(400);
+    expect(JSON.parse(missing.body).errors[0].source).toEqual({ header: "idempotency-key" });
   });
 
   it("replays a bodyless 204 as a 204", async () => {
@@ -511,26 +476,23 @@ describe("Idempotency.layer", () => {
       ),
     ) as Layer.Layer<any, any, any>;
     const { dispose, request } = server({ api, live, store: Idempotency.memoryStore() });
-    try {
-      const first = await request({
-        method: "DELETE",
-        url: "http://localhost/articles/1",
-        key: "k1",
-      });
-      const second = await request({
-        method: "DELETE",
-        url: "http://localhost/articles/1",
-        key: "k1",
-      });
+    onTestFinished(() => dispose());
+    const first = await request({
+      method: "DELETE",
+      url: "http://localhost/articles/1",
+      key: "k1",
+    });
+    const second = await request({
+      method: "DELETE",
+      url: "http://localhost/articles/1",
+      key: "k1",
+    });
 
-      expect(calls).toBe(1);
-      expect(first.status).toBe(204);
-      expect(second.status).toBe(204);
-      expect(second.body).toBe("");
-      expect(second.replayed).toBe("true");
-    } finally {
-      await dispose();
-    }
+    expect(calls).toBe(1);
+    expect(first.status).toBe(204);
+    expect(second.status).toBe(204);
+    expect(second.body).toBe("");
+    expect(second.replayed).toBe("true");
   });
 
   it("leaves safe methods alone", async () => {
@@ -542,13 +504,10 @@ describe("Idempotency.layer", () => {
     ) as Layer.Layer<any, any, any>;
     const store = Idempotency.memoryStore();
     const { dispose, request } = server({ api, live, store });
-    try {
-      const read = await request({ method: "GET", url: "http://localhost/articles/1", key: "k1" });
-      expect(read.status).toBe(200);
-      expect(Effect.runSync(store.claim(attempt("k1", "fp")))).toEqual({ _tag: "Claimed" });
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const read = await request({ method: "GET", url: "http://localhost/articles/1", key: "k1" });
+    expect(read.status).toBe(200);
+    expect(Effect.runSync(store.claim(attempt("k1", "fp")))).toEqual({ _tag: "Claimed" });
   });
 });
 
@@ -585,25 +544,22 @@ describe("Idempotency and the atomic operations extension", () => {
       live,
       store: Idempotency.memoryStore(),
     });
-    try {
-      const first = await request({
-        key: "k1",
-        url: "http://localhost/operations",
-        body: operationsBody,
-      });
-      const second = await request({
-        key: "k1",
-        url: "http://localhost/operations",
-        body: operationsBody,
-      });
+    onTestFinished(() => dispose());
+    const first = await request({
+      key: "k1",
+      url: "http://localhost/operations",
+      body: operationsBody,
+    });
+    const second = await request({
+      key: "k1",
+      url: "http://localhost/operations",
+      body: operationsBody,
+    });
 
-      expect(calls).toBe(1);
-      expect(JSON.parse(first.body)["atomic:results"][0].data.id).toBe("1");
-      expect(second.body).toBe(first.body);
-      expect(second.replayed).toBe("true");
-    } finally {
-      await dispose();
-    }
+    expect(calls).toBe(1);
+    expect(JSON.parse(first.body)["atomic:results"][0].data.id).toBe("1");
+    expect(second.body).toBe(first.body);
+    expect(second.replayed).toBe("true");
   });
 
   it("rejects the same key carrying a different operations list", async () => {
@@ -615,24 +571,21 @@ describe("Idempotency and the atomic operations extension", () => {
       live,
       store: Idempotency.memoryStore(),
     });
-    try {
-      await request({ key: "k1", url: "http://localhost/operations", body: operationsBody });
-      const changed = await request({
-        key: "k1",
-        url: "http://localhost/operations",
-        body: {
-          "atomic:operations": [
-            ...operationsBody["atomic:operations"],
-            {
-              op: "add",
-              data: { type: "articles", lid: "a2", attributes: { title: "Second", body: "!" } },
-            },
-          ],
-        },
-      });
-      expect(changed.status).toBe(422);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    await request({ key: "k1", url: "http://localhost/operations", body: operationsBody });
+    const changed = await request({
+      key: "k1",
+      url: "http://localhost/operations",
+      body: {
+        "atomic:operations": [
+          ...operationsBody["atomic:operations"],
+          {
+            op: "add",
+            data: { type: "articles", lid: "a2", attributes: { title: "Second", body: "!" } },
+          },
+        ],
+      },
+    });
+    expect(changed.status).toBe(422);
   });
 });

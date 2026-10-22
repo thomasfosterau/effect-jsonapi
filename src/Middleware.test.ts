@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished } from "vite-plus/test";
 import { Effect, ErrorReporter, Layer, Schema, SchemaIssue, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
 import {
@@ -197,7 +197,15 @@ describe("Middleware.schemaErrorDocument", () => {
     if (result._tag === "Success") throw new Error("expected a failure");
     return result.failure;
   };
-  const bad = (detail: string, source: object) => ({
+  // The error-object `source` members these cases assert on.
+  interface ErrorSource {
+    readonly parameter?: string;
+    readonly header?: string;
+    readonly pointer?: string;
+  }
+  // The allow-lists a rejection publishes under `meta`.
+  type ErrorMeta = Readonly<Record<string, ReadonlyArray<string>>>;
+  const bad = (detail: string, source: ErrorSource) => ({
     status: "400",
     code: "bad_request",
     title: "Bad Request",
@@ -249,7 +257,7 @@ describe("Middleware.schemaErrorDocument", () => {
       page: undefined,
       filter: undefined,
     });
-    const withMeta = (detail: string, parameter: string, meta: object) => ({
+    const withMeta = (detail: string, parameter: string, meta: ErrorMeta) => ({
       ...bad(detail, { parameter }),
       meta,
     });
@@ -358,12 +366,9 @@ const request = async (
   ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-  try {
-    const response = await handler(new Request(url, { headers }));
-    return { status: response.status, body: (await response.json()) as any };
-  } finally {
-    await dispose();
-  }
+  onTestFinished(() => dispose());
+  const response = await handler(new Request(url, { headers }));
+  return { status: response.status, body: (await response.json()) as any };
 };
 
 // Like `request`, but provides a recording `Tracer` (the pattern the `effect`
@@ -391,12 +396,9 @@ const requestTraced = async (
   ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-  try {
-    const response = await handler(new Request(url, { headers }));
-    return { status: response.status, body: (await response.json()) as any, spans };
-  } finally {
-    await dispose();
-  }
+  onTestFinished(() => dispose());
+  const response = await handler(new Request(url, { headers }));
+  return { status: response.status, body: (await response.json()) as any, spans };
 };
 
 describe("Middleware.layer and a malformed Accept weight (#245)", () => {
