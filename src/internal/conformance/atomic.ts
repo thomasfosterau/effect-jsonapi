@@ -109,7 +109,12 @@ const atomicRule = (
 /** The request headers every atomic operations request sends, before any `Idempotency-Key`. */
 const atomicHeaders = { accept: atomicMediaType, "content-type": atomicMediaType };
 
-const operationsEndpoint = (ctx: Context) =>
+/**
+ * The api's atomic operations endpoint, if it declares one.
+ *
+ * @internal
+ */
+export const operationsEndpoint = (ctx: Context) =>
   ctx.endpoints.find((endpoint) => endpoint.role === "operations");
 
 const atomicMalformedRejected: RuleImpl = {
@@ -242,8 +247,12 @@ const LID = "conformance-lid";
  */
 const ABSENT_LID = "conformance-absent-lid";
 
-/** Sends `operations` as one atomic request, keyed when the endpoint requires a key. */
-const sendOperations = (
+/**
+ * Sends `operations` as one atomic request, keyed when the endpoint requires a key.
+ *
+ * @internal
+ */
+export const sendOperations = (
   ctx: Context,
   endpoint: Discovered,
   operations: ReadonlyArray<unknown>,

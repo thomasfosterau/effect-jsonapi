@@ -597,8 +597,9 @@ export interface Fixture {
   readonly cleanup?: ((id: string) => Effect.Effect<unknown, unknown>) | undefined;
   /**
    * Opts the type into the client-generated id rules: whether the server
-   * supports a client-generated id on `POST /<type>`, and an id to send with
-   * `create`'s payload. The kit never makes one up.
+   * supports a client-generated id on `POST /<type>` (and on an atomic
+   * `add`), and an id to send with `create`'s payload. The kit never makes
+   * one up.
    */
   readonly clientId?: ClientIdFixture | undefined;
 }
@@ -608,7 +609,8 @@ export interface ClientIdFixture {
   /**
    * `true` when the server accepts a client-generated id, so a create under
    * one answers 201 or 204 and a second create under the same id 409; `false`
-   * when it does not, so a create under one answers 403.
+   * when it does not, so a create under one answers 403 — and likewise for an
+   * atomic `add` under one.
    */
   readonly supported: boolean;
   /**

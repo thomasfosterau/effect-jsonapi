@@ -2,7 +2,10 @@
  * The client-generated id rules ([§Client-Generated IDs]
  * (https://jsonapi.org/format/1.1/#crud-creating-client-ids)): what a create
  * under a client-generated id answers where the server supports them, the
- * 409 for a second create under the same id, and the 403 where it does not.
+ * 409 for a second create under the same id, and the 403 where it does not —
+ * each through the type's create endpoint and, where the api declares one,
+ * through the atomic operations endpoint as an `add` operation, to which the
+ * Atomic Operations extension applies the same rules (#471).
  *
  * The kit never makes up a client-generated id. Every probe here sends the id
  * the type's `writes[type].clientId` returns with its `create` payload, and
@@ -10,35 +13,47 @@
  * without one skips every rule here naming the key. What a create under a
  * client-generated id makes is the kit's like any other create's — vetted,
  * recorded and disposed of by `withCreated` (`./write.ts`); a 204 names no id,
- * so the kit takes the one it sent.
+ * nor does an `add` result with no `data`, so the kit takes the one it sent.
+ * Each atomic probe is a request of one `add`, so a refused request — which,
+ * all-or-nothing, applies nothing — is taken to have created nothing, and a
+ * 2xx is recorded and disposed of whatever it answered.
  *
  * @since 0.18.0
  * @internal
  */
-import { Effect, Option, Result } from "effect";
+import { Array as Arr, Effect, Option, Predicate, Result, Schema } from "effect";
+import { operationsEndpoint, sendOperations } from "./atomic.js";
 import {
   type Context,
   describe,
+  errorObjectsOf,
   finding,
+  isRecord,
   type Observation,
   type Outcome,
   type Rule,
   type RuleImpl,
+  skip,
   succeeded,
 } from "./core.js";
 import {
   type Accepted,
+  atomicIdentity,
+  atomicTargets,
   buildClientId,
   Created,
   decided,
+  type Identity,
   onAccepted,
   overTargets,
   plusRequests,
   primaryIdentity,
   refusedOnKeyGrounds,
   targets,
+  type Targets,
   undecided,
   type Verdict,
+  type Via,
   viaClientId,
   withCreated,
   type WriteTarget,
@@ -46,35 +61,129 @@ import {
 
 const SPEC = "https://jsonapi.org/format/1.1";
 
-const rule = (id: string, anchor: string, requirement: string): Rule => ({
+// ---------------------------------------------------------------------------
+// Channels: through the create endpoint, or as an atomic `add`
+// ---------------------------------------------------------------------------
+
+/** How a client id probe creates, and what its accepted answer should be. */
+interface Channel {
+  /** The section the channel's rules cite. */
+  readonly section: string;
+  /** The targets to probe, or why the rule skips — the api declares no endpoint for it. */
+  readonly found: (ctx: Context) => Result.Result<Targets, string>;
+  /** The endpoints probed, for a skip reason. */
+  readonly what: string;
+  readonly via: (ctx: Context, target: WriteTarget, id: string) => Via;
+  /** How a create under `id` reads in a finding. */
+  readonly under: (target: WriteTarget, id: string) => string;
+  /** The status an accepted create carrying a document answers. */
+  readonly status: number;
+  /** The resource that document carries, if it carries one. */
+  readonly identity: (observation: Observation) => Option.Option<Identity>;
+  /** Whether that document carries no resource, and need not — taken to have made the one asked for. */
+  readonly bare: (observation: Observation) => boolean;
+  readonly expected: (type: string, id: string) => string;
+  /** Where that document carries the resource, for a finding. */
+  readonly carries: string;
+  /**
+   * The JSON pointer of the probe's one operation, which a refusal's error
+   * objects point within; none through the create endpoint.
+   */
+  readonly operation: Option.Option<string>;
+}
+
+const throughCreate: Channel = {
+  section: "Creating Resources",
+  found: (ctx) => Result.succeed(targets(ctx, "create")),
+  what: "create endpoint",
+  via: viaClientId,
+  under: (target, id) =>
+    `a POST to ${target.createPath} of writes["${target.key}"].create under the client-generated id "${id}"`,
+  status: 201,
+  identity: primaryIdentity,
+  bare: () => false,
+  expected: (type, id) =>
+    `201 Created with a document whose \`data\` is the "${type}" resource "${id}", or 204 No Content`,
+  carries: "the resource as primary data",
+  operation: Option.none(),
+};
+
+const decodeFirstResult = Schema.decodeUnknownOption(
+  Schema.Struct({ "atomic:results": Schema.NonEmptyArray(Schema.Unknown) }),
+);
+
+/** Whether the first `atomic:results` entry is a result object with no `data`. */
+const firstResultBare = (observation: Observation): boolean =>
+  Option.match(decodeFirstResult(observation.body), {
+    onNone: () => false,
+    onSome: (body) => {
+      const first = body["atomic:results"][0];
+      return isRecord(first) && !("data" in first);
+    },
+  });
+
+/** The pointer of the one operation an atomic probe sends. */
+const OPERATION = "/atomic:operations/0";
+
+const throughAtomic: Channel = {
+  section: "Creating Resources (with the Atomic Operations extension)",
+  found: (ctx) =>
+    Option.match(Option.fromUndefinedOr(operationsEndpoint(ctx)), {
+      onNone: () => Result.fail("no atomic operations endpoint"),
+      onSome: (endpoint) => Result.succeed(atomicTargets(ctx, endpoint)),
+    }),
+  what: "atomic operations endpoint",
+  via: (ctx, target, id) => ({
+    send: (payload) =>
+      sendOperations(ctx, target.createEndpoint, [{ op: "add", data: { ...payload, id } }]),
+    identify: (observation, payload) =>
+      Option.orElse(atomicIdentity(observation), () =>
+        observation.status === 204 || firstResultBare(observation)
+          ? Option.some({ type: payload.type, id })
+          : Option.none(),
+      ),
+  }),
+  under: (target, id) =>
+    `an atomic \`add\` to ${target.createPath} of writes["${target.key}"].create under the client-generated id "${id}"`,
+  status: 200,
+  identity: atomicIdentity,
+  bare: firstResultBare,
+  expected: (type, id) =>
+    `200 OK with \`atomic:results\` whose first result's \`data\` is the "${type}" resource "${id}", or carries no \`data\`; or 204 No Content`,
+  carries: "the resource as its first result's `data`",
+  operation: Option.some(OPERATION),
+};
+
+const rule = (channel: Channel, id: string, anchor: string, requirement: string): Rule => ({
   id,
   tier: "spec",
-  section: "Creating Resources",
+  section: channel.section,
   reference: `${SPEC}/#${anchor}`,
   level: "MUST",
   requirement,
 });
 
 /**
- * One probe per create endpoint whose type's fixture supplies a client id for
- * the case `supported` names; `probe` gets the id.
+ * One probe per target whose type's fixture supplies a client id for the case
+ * `supported` names; `probe` gets the id.
  */
 const overClientIds = (
   ctx: Context,
+  channel: Channel,
   impl: Rule,
   supported: boolean,
   probe: (target: WriteTarget, id: string) => Effect.Effect<Verdict>,
 ): Effect.Effect<Outcome> =>
-  overTargets(ctx, impl, targets(ctx, "create"), "create endpoint", (target) =>
-    Result.match(buildClientId(target, supported), {
-      onFailure: (reason) => Effect.succeed(undecided(reason)),
-      onSuccess: (id) => probe(target, id),
-    }),
-  );
-
-/** How a create under `id` reads in a finding. */
-const under = (target: WriteTarget, id: string): string =>
-  `a POST to ${target.createPath} of writes["${target.key}"].create under the client-generated id "${id}"`;
+  Result.match(channel.found(ctx), {
+    onFailure: (reason) => Effect.succeed(skip(impl, reason)),
+    onSuccess: (found) =>
+      overTargets(ctx, impl, found, channel.what, (target) =>
+        Result.match(buildClientId(target, supported), {
+          onFailure: (reason) => Effect.succeed(undecided(reason)),
+          onSuccess: (id) => probe(target, id),
+        }),
+      ),
+  });
 
 /**
  * The verdict on an answer that only `status` passes, after the answers that
@@ -106,16 +215,18 @@ const judgeStatus = (
 };
 
 // ---------------------------------------------------------------------------
-// Supported: 201 or 204
+// Supported: the resource is made under the id
 // ---------------------------------------------------------------------------
 
 /** What a create under `id` the server accepted answered, judged. */
 const judgeCreated = (
+  channel: Channel,
   impl: Rule,
   target: WriteTarget,
   id: string,
   { observation, payload }: Accepted,
 ): Verdict => {
+  const under = channel.under(target, id);
   const broken = (detail: string, expected: string): Verdict =>
     decided(1, [
       finding(impl, {
@@ -127,101 +238,98 @@ const judgeCreated = (
     ]);
   if (observation.status === 202)
     return undecided(
-      `${under(target, id)} answered 202 Accepted — the creation is deferred, so there is no created resource to check`,
+      `${under} answered 202 Accepted — the creation is deferred, so there is no created resource to check`,
     );
   if (observation.status === 204)
     return observation.text.trim() === ""
       ? decided(1, [])
-      : broken(`the 204 to ${under(target, id)} carries a body`, "204 No Content with no body");
-  const expected = `201 Created with a document whose \`data\` is the "${payload.type}" resource "${id}", or 204 No Content`;
-  if (observation.status !== 201)
-    return broken(`${under(target, id)} answered ${observation.status}`, expected);
-  return Option.match(primaryIdentity(observation), {
+      : broken(`the 204 to ${under} carries a body`, "204 No Content with no body");
+  const expected = channel.expected(payload.type, id);
+  if (observation.status !== channel.status)
+    return broken(`${under} answered ${observation.status}`, expected);
+  if (channel.bare(observation)) return decided(1, []);
+  return Option.match(channel.identity(observation), {
     onNone: () =>
-      broken(
-        `the 201 to ${under(target, id)} does not carry the resource as primary data`,
-        expected,
-      ),
+      broken(`the ${observation.status} to ${under} does not carry ${channel.carries}`, expected),
     onSome: (named) =>
       named.type === payload.type && named.id === id
         ? decided(1, [])
         : broken(
-            `the 201 to ${under(target, id)} carries \`${named.type}:${named.id}\` — the server created it under another id, or answered with another resource`,
+            `the ${observation.status} to ${under} carries \`${named.type}:${named.id}\` — the server created it under another id, or answered with another resource`,
             expected,
           ),
   });
 };
 
-const createClientId: RuleImpl = {
+const clientIdRule = (channel: Channel, impl: Rule): RuleImpl => ({
   creates: true,
-  rule: rule(
-    "spec/status/create-client-id",
-    "crud-creating-responses-204",
-    "If a POST request did include a Client-Generated ID and the requested resource has been created successfully, the server MUST return either a 201 Created status code and response document (as described above) or a 204 No Content status code with no response document.",
-  ),
+  rule: impl,
   run: (ctx) =>
-    overClientIds(ctx, createClientId.rule, true, (target, id) =>
+    overClientIds(ctx, channel, impl, true, (target, id) =>
       withCreated(
         ctx,
-        createClientId.rule,
+        impl,
         target,
-        viaClientId(ctx, target, id),
+        channel.via(ctx, target, id),
         onAccepted(target, (created) =>
-          Effect.succeed(judgeCreated(createClientId.rule, target, id, created)),
+          Effect.succeed(judgeCreated(channel, impl, target, id, created)),
         ),
       ),
     ),
-};
+});
 
 // ---------------------------------------------------------------------------
 // Supported: a duplicate is a 409
 // ---------------------------------------------------------------------------
 
 /** Why the first create under `id` gives the duplicate probe nothing to repeat, if it does not. */
-const notHeldUnder = (target: WriteTarget, id: string, first: Accepted): Option.Option<string> =>
+const notHeldUnder = (
+  under: string,
+  id: string,
+  first: Accepted,
+  see: string,
+): Option.Option<string> =>
   first.entry.id === id
     ? Option.none()
     : Option.some(
-        `${under(target, id)} ${
+        `${under} ${
           first.entry.id === undefined
             ? `kept no id the kit may act on (${first.entry.detail ?? "it named none"})`
             : `made ${first.entry.type}:${first.entry.id}, not "${id}"`
-        } — see spec/status/create-client-id`,
+        } — see ${see}`,
       );
 
-const createConflictId: RuleImpl = {
+const conflictIdRule = (channel: Channel, impl: Rule, see: string): RuleImpl => ({
   creates: true,
-  rule: rule(
-    "spec/status/create-conflict-id",
-    "crud-creating-responses-409",
-    "A server MUST return 409 Conflict when processing a POST request to create a resource with a client-generated ID that already exists.",
-  ),
+  rule: impl,
   run: (ctx) =>
-    overClientIds(ctx, createConflictId.rule, true, (target, id) => {
-      const via = viaClientId(ctx, target, id);
+    overClientIds(ctx, channel, impl, true, (target, id) => {
+      const via = channel.via(ctx, target, id);
+      const under = channel.under(target, id);
       return withCreated(
         ctx,
-        createConflictId.rule,
+        impl,
         target,
         via,
         onAccepted(target, (first) =>
-          Option.match(notHeldUnder(target, id, first), {
+          Option.match(notHeldUnder(under, id, first, see), {
             onSome: (reason) => Effect.succeed(undecided(reason)),
             // A fresh payload under the same id, so a 409 is the id's and not
             // a uniqueness constraint on the fixture's attributes; anything a
-            // wrong 2xx makes is vetted and disposed of like the first.
+            // wrong 2xx makes is vetted and disposed of like the first. Each
+            // is a request of its own: the second, refused, applies nothing.
             onNone: () =>
-              withCreated(ctx, createConflictId.rule, target, via, (second) =>
+              withCreated(ctx, impl, target, via, (second) =>
                 Effect.succeed(
                   Created.$match(second, {
                     Unbuilt: ({ reason }) => undecided(reason),
                     Sent: ({ observation }) =>
                       judgeStatus(
-                        createConflictId.rule,
+                        impl,
                         target,
                         observation,
                         409,
-                        `${under(target, id)}, sent again while ${first.entry.type}:${id} the kit had just created holds that id,`,
+                        `${under}, sent again while ${first.entry.type}:${id} the kit had just created holds that id,`,
                       ),
                   }),
                 ),
@@ -230,56 +338,189 @@ const createConflictId: RuleImpl = {
         ),
       );
     }),
-};
+});
 
 // ---------------------------------------------------------------------------
 // Unsupported: 403
 // ---------------------------------------------------------------------------
 
-const createClientIdUnsupported: RuleImpl = {
+/** The `source.pointer` of every error object a refusal carries that has one. */
+const errorPointers = (observation: Observation): ReadonlyArray<string> =>
+  Arr.filterMap(errorObjectsOf(observation.body), (error) => {
+    const source = error["source"];
+    return isRecord(source) && Predicate.isString(source["pointer"])
+      ? Result.succeed(source["pointer"])
+      : Result.failVoid;
+  });
+
+/** Whether `pointer` names the operation at `operation`, something within it, or the operations array. */
+const within = (operation: string, pointer: string): boolean =>
+  pointer === "/atomic:operations" || pointer === operation || pointer.startsWith(`${operation}/`);
+
+/**
+ * The 403 to an atomic `add`, judged on its error objects' `source.pointer`s:
+ * a pointer outside `atomic:operations` — `/data/id`, say, as a create
+ * endpoint's refusal names it — points at nothing in the request document.
+ */
+const judgePointers = (
+  impl: Rule,
+  operation: string,
+  observation: Observation,
+  detail: string,
+): Verdict =>
+  Arr.match(
+    Arr.filter(errorPointers(observation), (pointer) => !within(operation, pointer)),
+    {
+      onEmpty: () => decided(1, []),
+      onNonEmpty: (stray) =>
+        decided(1, [
+          finding(impl, {
+            detail: `the 403 to ${detail} names \`source.pointer\` ${stray
+              .map((pointer) => `"${pointer}"`)
+              .join(", ")}, which points at nothing in the atomic request document`,
+            expected: `403 Forbidden, any \`source.pointer\` within ${operation}`,
+            observed: describe(observation),
+            probe: observation.probe,
+          }),
+        ]),
+    },
+  );
+
+/** Under what id a 2xx the server should have refused made its resource, for a finding. */
+const madeUnder = (made: Option.Option<string>, id: string) =>
+  Option.match(made, {
+    onNone: () => "",
+    onSome: (named) =>
+      named === id
+        ? ` under that id`
+        : ` under the id "${named}" of its own, ignoring the one sent`,
+  });
+
+const judgeUnsupported = (
+  channel: Channel,
+  impl: Rule,
+  target: WriteTarget,
+  id: string,
+  observation: Observation,
+  made: string,
+): Verdict => {
+  const detail = `${channel.under(target, id)} — which writes["${target.key}"].clientId declares the server does not support —`;
+  return Option.match(channel.operation, {
+    onNone: () => judgeStatus(impl, target, observation, 403, detail, made),
+    onSome: (operation) => {
+      // The operations endpoint may not take every type with a fixture: a
+      // refusal of the `type` says nothing of the id.
+      if (
+        observation.status !== 403 &&
+        !succeeded(observation) &&
+        Arr.contains(errorPointers(observation), `${operation}/data/type`)
+      )
+        return undecided(
+          `${channel.under(target, id)} was refused over its \`type\` (${describe(observation)}), which says nothing of its id`,
+        );
+      const verdict = judgeStatus(impl, target, observation, 403, detail, made);
+      return observation.status === 403 && Predicate.isTagged(verdict, "Decided")
+        ? judgePointers(impl, operation, observation, channel.under(target, id))
+        : verdict;
+    },
+  });
+};
+
+const unsupportedRule = (channel: Channel, impl: Rule): RuleImpl => ({
   creates: true,
-  rule: rule(
+  rule: impl,
+  run: (ctx) =>
+    overClientIds(ctx, channel, impl, false, (target, id) =>
+      withCreated(ctx, impl, target, channel.via(ctx, target, id), (created) =>
+        Effect.succeed(
+          Created.$match(created, {
+            Unbuilt: ({ reason }) => undecided(reason),
+            Sent: ({ observation, entry }) =>
+              judgeUnsupported(
+                channel,
+                impl,
+                target,
+                id,
+                observation,
+                madeUnder(
+                  Option.flatMap(entry, ({ id: made }) => Option.fromUndefinedOr(made)),
+                  id,
+                ),
+              ),
+          }),
+        ),
+      ),
+    ),
+});
+
+// ---------------------------------------------------------------------------
+// The rules
+// ---------------------------------------------------------------------------
+
+const createClientId = clientIdRule(
+  throughCreate,
+  rule(
+    throughCreate,
+    "spec/status/create-client-id",
+    "crud-creating-responses-204",
+    "If a POST request did include a Client-Generated ID and the requested resource has been created successfully, the server MUST return either a 201 Created status code and response document (as described above) or a 204 No Content status code with no response document.",
+  ),
+);
+
+const createConflictId = conflictIdRule(
+  throughCreate,
+  rule(
+    throughCreate,
+    "spec/status/create-conflict-id",
+    "crud-creating-responses-409",
+    "A server MUST return 409 Conflict when processing a POST request to create a resource with a client-generated ID that already exists.",
+  ),
+  "spec/status/create-client-id",
+);
+
+const createClientIdUnsupported = unsupportedRule(
+  throughCreate,
+  rule(
+    throughCreate,
     "spec/status/create-client-id-unsupported",
     "crud-creating-client-ids",
     "A server MUST return 403 Forbidden in response to an unsupported request to create a resource with a client-generated ID.",
   ),
-  run: (ctx) =>
-    overClientIds(ctx, createClientIdUnsupported.rule, false, (target, id) =>
-      withCreated(
-        ctx,
-        createClientIdUnsupported.rule,
-        target,
-        viaClientId(ctx, target, id),
-        (created) =>
-          Effect.succeed(
-            Created.$match(created, {
-              Unbuilt: ({ reason }) => undecided(reason),
-              Sent: ({ observation, entry }) =>
-                judgeStatus(
-                  createClientIdUnsupported.rule,
-                  target,
-                  observation,
-                  403,
-                  `${under(target, id)} — which writes["${target.key}"].clientId declares the server does not support —`,
-                  Option.match(
-                    Option.flatMap(entry, ({ id: made }) => Option.fromUndefinedOr(made)),
-                    {
-                      onNone: () => "",
-                      onSome: (made) =>
-                        made === id
-                          ? ` under that id`
-                          : ` under the id "${made}" of its own, ignoring the one sent`,
-                    },
-                  ),
-                ),
-            }),
-          ),
-      ),
-    ),
-};
+);
+
+const addClientId = clientIdRule(
+  throughAtomic,
+  rule(
+    throughAtomic,
+    "spec/atomic/add-client-id",
+    "crud-creating-client-ids",
+    "An atomic `add` operation creates a resource as a POST does, so where the server supports Client-Generated IDs, an `add` whose resource object includes one and succeeds MUST create the resource under that ID: its result carries the resource, under that ID, as `data` — or carries no `data`, or the request is answered 204 No Content.",
+  ),
+);
+
+const addConflictId = conflictIdRule(
+  throughAtomic,
+  rule(
+    throughAtomic,
+    "spec/atomic/add-conflict-id",
+    "crud-creating-responses-409",
+    "A server MUST return 409 Conflict when processing an atomic `add` operation that creates a resource with a client-generated ID that already exists.",
+  ),
+  "spec/atomic/add-client-id",
+);
+
+const addClientIdUnsupported = unsupportedRule(
+  throughAtomic,
+  rule(
+    throughAtomic,
+    "spec/atomic/add-client-id-unsupported",
+    "crud-creating-client-ids",
+    "A server MUST return 403 Forbidden in response to an atomic `add` operation that creates a resource with an unsupported client-generated ID; an error object's `source.pointer` names the value in the request document that caused it, so any it gives lies within that operation, under `/atomic:operations`.",
+  ),
+);
 
 /**
- * The client-generated id rules, in report order.
+ * The client-generated id rules through the create endpoint, in report order.
  *
  * @internal
  */
@@ -287,4 +528,16 @@ export const clientIdRules: ReadonlyArray<RuleImpl> = [
   createClientId,
   createConflictId,
   createClientIdUnsupported,
+];
+
+/**
+ * The client-generated id rules through the atomic operations endpoint, in
+ * report order.
+ *
+ * @internal
+ */
+export const atomicClientIdRules: ReadonlyArray<RuleImpl> = [
+  addClientId,
+  addConflictId,
+  addClientIdUnsupported,
 ];

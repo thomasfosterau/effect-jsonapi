@@ -441,6 +441,14 @@ export interface WriteFixture extends Core.Fixture {}
  * - **`supported: false`** — `spec/status/create-client-id-unsupported`
  *   creates under an `id` and wants a 403.
  *
+ * Where the api declares an atomic operations endpoint, the same three rules
+ * run again as an `add` operation carrying the `id`, one per request:
+ * `spec/atomic/add-client-id` wants the `add`'s result to carry the resource
+ * under that id (or no `data`, or a 204), `spec/atomic/add-conflict-id` a 409
+ * for a second `add` under it, and `spec/atomic/add-client-id-unsupported` a
+ * 403 whose error objects' `source.pointer`, where given, lies within the
+ * operation (`/atomic:operations/0/…`).
+ *
  * What a create under an `id` makes is the kit's like any other: vetted as a
  * created id is, recorded in {@link Report.writes} and handed to `cleanup` —
  * a 204 names no id, so the kit takes the one it sent. With
@@ -775,7 +783,7 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "A relationship removal naming a resource that does not exist",
     reason:
-      "Given a `writes` fixture and `mutating: true`, the kit checks what a create, update and delete answer, the 409s for an unserved `type` and a duplicate client-generated id, what a create under a client-generated id answers, reading a create or update back, and every relationship write through `/relationships/…`: a `PATCH` / `POST` / `DELETE` read back (a to-one `PATCH` of `null` included), what each answers (202, 204, or 200 with the linkage as it now stands), and the 404 for a `PATCH` or `POST` linking a resource that does not exist. A `DELETE` naming a resource that does not exist is not probed for that 404: the specification makes a 204 the appropriate answer to a `DELETE` of a member the relationship does not hold, which leaves open whether one naming an absent resource must answer 404 or may answer 204.",
+      "Given a `writes` fixture and `mutating: true`, the kit checks what a create, update and delete answer, the 409s for an unserved `type` and a duplicate client-generated id, what a create under a client-generated id answers (and an atomic `add` under one), reading a create or update back, and every relationship write through `/relationships/…`: a `PATCH` / `POST` / `DELETE` read back (a to-one `PATCH` of `null` included), what each answers (202, 204, or 200 with the linkage as it now stands), and the 404 for a `PATCH` or `POST` linking a resource that does not exist. A `DELETE` naming a resource that does not exist is not probed for that 404: the specification makes a 204 the appropriate answer to a `DELETE` of a member the relationship does not hold, which leaves open whether one naming an absent resource must answer 404 or may answer 204.",
     tracking: [],
   },
   {

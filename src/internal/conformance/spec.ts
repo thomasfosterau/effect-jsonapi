@@ -39,7 +39,7 @@ import {
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import { atomicRules } from "./atomic.js";
-import { clientIdRules } from "./clientIds.js";
+import { atomicClientIdRules, clientIdRules } from "./clientIds.js";
 import { relationshipRules } from "./relationships.js";
 import {
   type Context,
@@ -2710,4 +2710,5 @@ export const rules: ReadonlyArray<RuleImpl> = [
   ...clientIdRules,
   ...relationshipRules,
   ...atomicRules,
+  ...atomicClientIdRules,
 ];

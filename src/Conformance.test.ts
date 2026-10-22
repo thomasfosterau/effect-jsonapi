@@ -191,6 +191,13 @@ const CLIENT_ID_RULES = [
   "spec/status/create-client-id-unsupported",
 ];
 
+/** The client-generated id rules for an atomic `add` (#471), likewise opt-in. */
+const ATOMIC_CLIENT_ID_RULES = [
+  "spec/atomic/add-client-id",
+  "spec/atomic/add-conflict-id",
+  "spec/atomic/add-client-id-unsupported",
+];
+
 /** The relationship mutation rules. */
 const RELATIONSHIP_RULES = [
   "spec/relationships/update-replaces",
@@ -4715,8 +4722,14 @@ describe("Conformance: the write fixture", () => {
     // whose operations endpoint applies only `add`, they otherwise skip (their
     // own fixture is under "Conformance: atomic operations processing"). So
     // do the client-generated id rules, which this fixture opts into none of
-    // (theirs is under "Conformance: client-generated ids").
-    const reads = new Set([...WRITE_RULES, ...ATOMIC_PROCESSING_RULES, ...CLIENT_ID_RULES]);
+    // (theirs are under "Conformance: client-generated ids" and "…through
+    // atomic operations").
+    const reads = new Set([
+      ...WRITE_RULES,
+      ...ATOMIC_PROCESSING_RULES,
+      ...CLIENT_ID_RULES,
+      ...ATOMIC_CLIENT_ID_RULES,
+    ]);
     const reading = Conformance.rules.map((rule) => rule.id).filter((id) => reads.has(id));
     expect(errored.map((outcome) => outcome.rule.id)).toEqual(reading);
     expect(errored.map((outcome) => outcome.message)).toEqual(
@@ -10442,5 +10455,289 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     });
     // The DELETE still runs, linked first through a POST the server forbids.
     expect(outcomeFor(forbidden.report, "spec/relationships/write-response")._tag).toBe("Skipped");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Client-generated ids through the atomic operations endpoint
+// ---------------------------------------------------------------------------
+
+/**
+ * The client-generated id rules for an atomic `add` (#471), against a canned
+ * operations endpoint over a store of posts, conformant by default, with one
+ * switch per deliberate breakage. Each request carries one `add`, so a refusal
+ * applies nothing.
+ */
+describe("Conformance: client-generated ids through atomic operations", () => {
+  const Post = Resource.make("posts", { attributes: { title: Schema.String } });
+  const atomicApi = HttpApi.make("atomicClientIds")
+    .add(Group.make(Post, Endpoint.get(Post)))
+    .add(Group.make("operations", Endpoint.operations([Post])));
+  const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
+
+  /** How the canned server departs from the extension, one switch per breakage. */
+  interface Breakage {
+    /** What an `add` carrying an id does: honour it (the default), refuse it with 403, or drop it. */
+    readonly clientIds?: "supported" | "unsupported" | "ignored";
+    /** Answer an `add` under a client id with a result carrying no `data`. */
+    readonly bareResult?: boolean;
+    /** Answer an `add` under a client id with 204 No Content. */
+    readonly noContent?: boolean;
+    /** Overwrite a post on an `add` under an id it already holds, rather than 409. */
+    readonly overwrites?: boolean;
+    /** Name `/data/id` in the 403, as a create endpoint's refusal would. */
+    readonly createPointer?: boolean;
+    /** Refuse every `add` over its `type`, as an endpoint that does not take it would. */
+    readonly refusesType?: boolean;
+  }
+
+  const Operations = Schema.Struct({
+    "atomic:operations": Schema.Tuple([
+      Schema.Struct({
+        op: Schema.Literal("add"),
+        data: Schema.Struct({
+          type: Schema.Literal("posts"),
+          id: Schema.optionalKey(Schema.String),
+          attributes: Schema.Struct({ title: Schema.String }),
+        }),
+      }),
+    ]),
+  });
+  const decodeOperations = Schema.decodeUnknownOption(Operations);
+
+  /** An error document of `code`, its one error naming `pointer` as its source. */
+  const refused = (code: number, pointer: string): Canned => ({
+    status: code,
+    contentType: atomicType,
+    body: { errors: [{ status: `${code}`, source: { pointer } }] },
+  });
+  const ID_POINTER = "/atomic:operations/0/data/id";
+
+  /** An `add` result: the post it made as `data`, or no `data`. */
+  interface AddResult {
+    readonly data?: {
+      readonly type: "posts";
+      readonly id: string;
+      readonly attributes: { readonly title: string };
+    };
+  }
+
+  /** The one `add` result of a request. */
+  const results = (result: AddResult): Canned => ({
+    contentType: atomicType,
+    body: { "atomic:results": [result] },
+  });
+
+  /**
+   * An operations endpoint over `posts` that applies the one `add` a request
+   * carries; every other request answers 404 (the rules under test read
+   * nothing back).
+   */
+  const atomicServer = (
+    posts: MutableHashMap.MutableHashMap<string, string>,
+    breakage: Breakage,
+  ) => {
+    let next = 100;
+    const mode = breakage.clientIds ?? "supported";
+    /** The refusal of an `add` the server does not apply, if it refuses it. */
+    const refusal = (asked: Option.Option<string>): Option.Option<Canned> => {
+      if (breakage.refusesType === true)
+        return Option.some(refused(400, "/atomic:operations/0/data/type"));
+      if (Option.isNone(asked) || mode !== "unsupported") return Option.none();
+      return Option.some(refused(403, breakage.createPointer === true ? "/data/id" : ID_POINTER));
+    };
+    /** The answer to an `add` stored under `id`, `asked` the id it carried. */
+    const added = (asked: Option.Option<string>, id: string, title: string): Canned => {
+      const data: AddResult = { data: { type: "posts", id, attributes: { title } } };
+      if (Option.isNone(asked)) return results(data);
+      if (breakage.noContent === true) return { status: 204 };
+      return results(breakage.bareResult === true ? {} : data);
+    };
+    const onAdd = (asked: Option.Option<string>, title: string): Canned =>
+      Option.getOrElse(refusal(asked), () => {
+        const id = mode === "supported" ? Option.getOrElse(asked, () => `${next++}`) : `${next++}`;
+        if (MutableHashMap.has(posts, id) && breakage.overwrites !== true)
+          return refused(409, ID_POINTER);
+        MutableHashMap.set(posts, id, title);
+        return added(asked, id, title);
+      });
+    return (request: CannedRequest): Canned =>
+      request.method === "POST" && request.path === "/operations"
+        ? Option.match(decodeOperations(request.body), {
+            onNone: () => refused(400, "/atomic:operations"),
+            onSome: (document) => {
+              const [{ data }] = document["atomic:operations"];
+              return onAdd(Option.fromUndefinedOr(data.id), data.attributes.title);
+            },
+          })
+        : refused(404, "/");
+  };
+
+  let sequence = 0;
+  const run = async (
+    breakage: Breakage = {},
+    clientId: Conformance.ClientIdFixture | "none" = {
+      supported: true,
+      id: () => `client-${++sequence}`,
+    },
+  ) => {
+    const posts = MutableHashMap.empty<string, string>();
+    const seen: Array<string> = [];
+    const serve = atomicServer(posts, breakage);
+    const report = await verifyOver(atomicApi)(
+      (request) => {
+        seen.push(`${request.method} ${request.path}`);
+        return serve(request);
+      },
+      {
+        ids: {},
+        mutating: true,
+        only: ATOMIC_CLIENT_ID_RULES,
+        writes: {
+          posts: {
+            create: () => ({ type: "posts", attributes: { title: `post ${++sequence}` } }),
+            cleanup: (id) => Effect.sync(() => MutableHashMap.remove(posts, id)),
+            clientId: clientId === "none" ? undefined : clientId,
+          },
+        },
+      },
+    );
+    return { report, posts, seen, writes: report.writes ?? [] };
+  };
+  const unsupported = { supported: false, id: () => `client-${++sequence}` };
+
+  const tags = (report: Conformance.Report) =>
+    ATOMIC_CLIENT_ID_RULES.map((id) => outcomeFor(report, id)._tag);
+
+  const findingsOf = (report: Conformance.Report, id: string) => {
+    const outcome = outcomeFor(report, id);
+    return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+  };
+
+  it("passes a server that honours the id, and leaves nothing behind", async () => {
+    const { report, posts, writes } = await run();
+    expect(tags(report)).toEqual(["Passed", "Passed", "Skipped"]);
+    expect(outcomeFor(report, "spec/atomic/add-client-id-unsupported")).toMatchObject({
+      reason: expect.stringContaining("declares client-generated ids supported"),
+    });
+    expect(MutableHashMap.size(posts)).toBe(0);
+    expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
+    expect(
+      writes.filter((write) => write.rule === "spec/atomic/add-client-id").map((w) => w.id),
+    ).toEqual([expect.stringMatching(/^client-\d+$/)]);
+  });
+
+  it.each([
+    ["a result with no `data`", { bareResult: true }],
+    ["204 No Content", { noContent: true }],
+  ])("passes %s, and cleans up under the id it sent", async (_, breakage) => {
+    const { report, posts, writes } = await run(breakage);
+    expect(tags(report)).toEqual(["Passed", "Passed", "Skipped"]);
+    expect(MutableHashMap.size(posts)).toBe(0);
+    expect(writes.find((write) => write.rule === "spec/atomic/add-client-id")).toEqual(
+      expect.objectContaining({ id: expect.stringMatching(/^client-/), disposal: "cleaned-up" }),
+    );
+  });
+
+  it("detects a server that drops the id and creates under its own", async () => {
+    const { report, posts } = await run({ clientIds: "ignored" });
+    expect(failed(report)).toEqual(["spec/atomic/add-client-id"]);
+    expect(findingsOf(report, "spec/atomic/add-client-id")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /^the 200 to an atomic `add` to \/operations .* carries `posts:\d+` — the server created it under another id/,
+        ),
+        probe: expect.objectContaining({ method: "POST" }),
+      }),
+    ]);
+    expect(outcomeFor(report, "spec/atomic/add-conflict-id")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("see spec/atomic/add-client-id"),
+    });
+    expect(MutableHashMap.size(posts)).toBe(0);
+  });
+
+  it("detects a server that answers a duplicate id with anything but 409", async () => {
+    const { report, posts, writes } = await run({ overwrites: true });
+    expect(failed(report)).toEqual(["spec/atomic/add-conflict-id"]);
+    expect(findingsOf(report, "spec/atomic/add-conflict-id")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /, sent again while posts:client-\d+ the kit had just created holds that id, answered 200, accepting it$/,
+        ),
+        expected: "409 Conflict",
+      }),
+    ]);
+    // The second answer names the id the first holds, so the kit refuses it;
+    // the first is disposed of, which leaves the store empty.
+    expect(writes.filter((write) => write.rule === "spec/atomic/add-conflict-id")).toEqual([
+      expect.objectContaining({ disposal: "cleaned-up" }),
+      expect.objectContaining({ id: undefined, disposal: "left" }),
+    ]);
+    expect(MutableHashMap.size(posts)).toBe(0);
+  });
+
+  it("passes a 403 naming the operation where the fixture declares ids unsupported", async () => {
+    const { report, seen } = await run({ clientIds: "unsupported" }, unsupported);
+    expect(tags(report)).toEqual(["Skipped", "Skipped", "Passed"]);
+    expect(seen).toEqual(["POST /operations"]);
+  });
+
+  it("detects a server that accepts an unsupported id", async () => {
+    const { report, posts, writes } = await run({ clientIds: "ignored" }, unsupported);
+    expect(failed(report)).toEqual(["spec/atomic/add-client-id-unsupported"]);
+    expect(findingsOf(report, "spec/atomic/add-client-id-unsupported")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /answered 200, accepting it under the id "\d+" of its own, ignoring the one sent$/,
+        ),
+        expected: "403 Forbidden",
+      }),
+    ]);
+    expect(MutableHashMap.size(posts)).toBe(0);
+    expect(writes.map((write) => write.disposal)).toEqual(["cleaned-up"]);
+  });
+
+  it("detects a 403 whose pointer is outside `atomic:operations`", async () => {
+    const { report } = await run({ clientIds: "unsupported", createPointer: true }, unsupported);
+    expect(failed(report)).toEqual(["spec/atomic/add-client-id-unsupported"]);
+    expect(findingsOf(report, "spec/atomic/add-client-id-unsupported")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringContaining('names `source.pointer` "/data/id"'),
+        expected: "403 Forbidden, any `source.pointer` within /atomic:operations/0",
+      }),
+    ]);
+  });
+
+  it("decides nothing on an `add` refused over its `type`", async () => {
+    const { report } = await run({ refusesType: true }, unsupported);
+    expect(outcomeFor(report, "spec/atomic/add-client-id-unsupported")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("was refused over its `type`"),
+    });
+  });
+
+  it("never makes up a client id: without `clientId` every rule skips naming it", async () => {
+    const { report, seen } = await run({}, "none");
+    expect(tags(report)).toEqual(["Skipped", "Skipped", "Skipped"]);
+    expect(ATOMIC_CLIENT_ID_RULES.map((id) => outcomeFor(report, id))).toEqual(
+      ATOMIC_CLIENT_ID_RULES.map(() =>
+        expect.objectContaining({
+          reason: expect.stringContaining('pass writes["posts"].clientId'),
+        }),
+      ),
+    );
+    expect(seen).toEqual([]);
+  });
+
+  it("skips every rule where the api has no operations endpoint", async () => {
+    const report = await verifyOver(
+      HttpApi.make("plain").add(Group.make(Post, Endpoint.get(Post))),
+    )(() => refused(404, "/"), { ids: {}, mutating: true, only: ATOMIC_CLIENT_ID_RULES });
+    expect(ATOMIC_CLIENT_ID_RULES.map((id) => outcomeFor(report, id))).toEqual(
+      ATOMIC_CLIENT_ID_RULES.map(() =>
+        expect.objectContaining({ _tag: "Skipped", reason: "no atomic operations endpoint" }),
+      ),
+    );
   });
 });
