@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-jsonapi": minor
----
-
-Conformance: three more write rules, run with `mutating: true` and a `writes` fixture (#237). `spec/status/create-conflict-type` sends the fixture's payload under a `type` the endpoint does not serve and requires 409 Conflict; `spec/status/create-read-back` and `spec/status/update-read-back` read a created or updated resource back through its `GET /<type>/:id` and require the `attributes` and relationship linkage the write answered (or, for a 204 update, the request's own). `Endpoint.create` answers a foreign `type` with 400, so the first fails against apis built on it until #428 is fixed. The kit's id vetting is narrowed: a read only exempts an id from the "a read returned it" refusal while the kit held that id live, so a sighting of another holder's resource after the kit removed its own now counts. `Conformance.Write.type` is now the type the kit created (the `type` of its `create` payload), not the `writes` key — the same for any api on the conventional paths. The `Write semantics beyond the success responses` gap now tracks #429 (client-generated ids, the duplicate-id 409, relationship mutation).
