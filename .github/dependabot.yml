@@ -20,8 +20,8 @@
 #   outside the sets above stay individual.
 #
 # Not bumpable here: the transitive floors under `overrides` in
-# pnpm-workspace.yaml (`brace-expansion`, `js-yaml`, `launch-editor`,
-# `shell-quote`) — raise or drop them by hand (AGENTS.md → Common pitfalls).
+# pnpm-workspace.yaml (`js-yaml`, `launch-editor`, `shell-quote`) — raise or
+# drop them by hand (AGENTS.md → Common pitfalls).
 #
 # `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
 # first-party packages exempt as `minimumReleaseAgeExclude` exempts them.
