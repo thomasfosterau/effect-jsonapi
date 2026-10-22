@@ -133,13 +133,8 @@ const HTTP_TIER = [
  * emits no runtime edge, but it still makes the published `.d.ts` unresolvable
  * without the peer, which is the surface this test is protecting.
  */
-const specifiersOf = (file: string): ReadonlyArray<string> => {
-  const source = ts.createSourceFile(
-    file,
-    fs.readFileSync(file, "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
-  );
+const parseSpecifiers = (file: string): ReadonlyArray<string> => {
+  const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest);
   const found: Array<string> = [];
   const visit = (node: ts.Node): void => {
     if (
@@ -165,6 +160,25 @@ const specifiersOf = (file: string): ReadonlyArray<string> => {
     ts.forEachChild(node, visit);
   };
   visit(source);
+  return found;
+};
+
+/**
+ * Specifiers already read, by file. Parsing is what made this file slow (#465):
+ * the cases walk overlapping graphs (every HTTP-tier subpath reaches most of
+ * `src/`, every `dist/` entry the same shared chunks), so without a cache each
+ * file was re-parsed once per walk that reached it, and under a loaded machine
+ * the two per-subpath cases ran past the 5 s default timeout. A file's
+ * specifiers do not change during the run, so each is parsed once; the walks
+ * themselves still run per entry, so every assertion sees its own graph.
+ */
+const specifierCache = new Map<string, ReadonlyArray<string>>();
+
+const specifiersOf = (file: string): ReadonlyArray<string> => {
+  const cached = specifierCache.get(file);
+  if (cached !== undefined) return cached;
+  const found = parseSpecifiers(file);
+  specifierCache.set(file, found);
   return found;
 };
 
@@ -290,6 +304,18 @@ const httpSurface = (graph: Graph): ReadonlyArray<string> =>
     .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`)
     .sort();
 
+/**
+ * The timeout for the cases that load modules rather than read them: the
+ * `import()`s of the package (a cold Vite transform of all of `src/` on first
+ * use) and the `node` processes spawned against `dist/`. Both are I/O- and
+ * process-bound, so their time scales with machine load, not with anything this
+ * file controls; the 5 s default fits an idle machine and fails a loaded one
+ * (#465). Sized for a cold load on a busy CI runner, not as headroom for a
+ * regression: the graph walks, which this file does control, stay on the
+ * default.
+ */
+const LOAD_TIMEOUT = 30_000;
+
 describe("schema-only entry point", () => {
   const schema = graphFrom(path.join(SRC, "schema.ts"), SRC);
   const root = graphFrom(path.join(SRC, "index.ts"), SRC);
@@ -402,7 +428,7 @@ describe("module subpaths", () => {
   });
 });
 
-describe("root entry point", () => {
+describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
   it("still exports every namespace, unchanged", async () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
     expect(Object.keys(index).sort()).toEqual([
@@ -446,7 +472,7 @@ describe("root entry point", () => {
   });
 });
 
-describe("module subpaths, from source", () => {
+describe("module subpaths, from source", { timeout: LOAD_TIMEOUT }, () => {
   it("are the root's namespaces", () =>
     import("@thomasfosterau/effect-jsonapi")
       .then((index) =>
@@ -578,9 +604,12 @@ describe("built artifact", () => {
    * chunk and exports it from there under a short name (`t`). Nothing else
    * may ride along, and the declarations (`tsc`'s) do not mention it.
    */
-  it.skipIf(!hasDist)("ships subpaths whose members are the root namespaces' own", () => {
-    // The module names arrive as arguments; each mismatch is one line out.
-    const script = `
+  it.skipIf(!hasDist)(
+    "ships subpaths whose members are the root namespaces' own",
+    { timeout: LOAD_TIMEOUT },
+    () => {
+      // The module names arrive as arguments; each mismatch is one line out.
+      const script = `
       const root = await import("@thomasfosterau/effect-jsonapi");
       for (const name of process.argv.slice(1)) {
         const sub = await import("@thomasfosterau/effect-jsonapi/" + name);
@@ -593,14 +622,15 @@ describe("built artifact", () => {
       }
       console.log("CHECKED");
     `;
-    const result = spawnSync(
-      process.execPath,
-      ["--input-type=module", "-e", script, ...PUBLIC_MODULES],
-      { cwd: ROOT, encoding: "utf8" },
-    );
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toBe("CHECKED\n");
-  });
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", script, ...PUBLIC_MODULES],
+        { cwd: ROOT, encoding: "utf8" },
+      );
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toBe("CHECKED\n");
+    },
+  );
 
   /**
    * The end-to-end statement, and the one that does not depend on the walker
@@ -623,6 +653,7 @@ describe("built artifact", () => {
 
   it.skipIf(!hasDist)(
     "loads every schema-tier subpath with every non-core effect namespace unresolvable",
+    { timeout: LOAD_TIMEOUT },
     () => {
       // One process for all of them: any one that reached a blocked
       // specifier would fail the whole load.
@@ -650,11 +681,15 @@ describe("built artifact", () => {
    * That the root barrel really does reach `effect/http-api` is
    * asserted deterministically by the static walker above.
    */
-  it.skipIf(!hasDist)("is checked by hooks that do block the root barrel (control)", () => {
-    const result = loadWithoutHttp("@thomasfosterau/effect-jsonapi");
-    const output = `${result.stdout}${result.stderr}`;
-    expect(output).toContain("FORBIDDEN_PEER:effect/http");
-    expect(output).not.toContain("LOADED");
-    expect(result.status).not.toBe(0);
-  });
+  it.skipIf(!hasDist)(
+    "is checked by hooks that do block the root barrel (control)",
+    { timeout: LOAD_TIMEOUT },
+    () => {
+      const result = loadWithoutHttp("@thomasfosterau/effect-jsonapi");
+      const output = `${result.stdout}${result.stderr}`;
+      expect(output).toContain("FORBIDDEN_PEER:effect/http");
+      expect(output).not.toContain("LOADED");
+      expect(result.status).not.toBe(0);
+    },
+  );
 });
