@@ -207,14 +207,14 @@ export type UnpaginatedCollectionDocument<
 
 /**
  * A §8.4 relationship document as {@link relationship} assembles it: the
- * linkage as `data`, the (post-mutation) parent and any extras as `included`.
+ * linkage as `data`, the caller's extras (never the parent) as `included`.
  *
  * @since 0.16.0
  * @category models
  */
 export interface RelationshipDocument<R extends ResourceLike, I extends ResourceLike = R> {
   readonly data: Ref | ReadonlyArray<Ref> | null;
-  readonly included: ReadonlyArray<WireResource<R> | WireResource<I>>;
+  readonly included: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly related: string };
   readonly jsonapi: typeof JSONAPI_MEMBER;
 }
@@ -1028,16 +1028,24 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
   readonly key: string;
   readonly viewer?: V | undefined;
   readonly capabilities?: CapabilitiesHook<V> | undefined;
-  /** Further resources to carry in `included` beside the parent. */
+  /**
+   * Resources to carry in `included`, typically the related resources the
+   * linkage names. Full linkage applies: each must be reachable from the
+   * primary identifiers.
+   */
   readonly included?: ReadonlyArray<I> | undefined;
 }
 
 /**
  * Assembles a §8.4 relationship document: primary `data` is the parent's
- * linkage for `key`, `included` is the parent itself (so a client that
- * mutated the relationship has the updated parent in hand) plus any extras,
- * deduplicated; `links.related` is the relationship's related link when the
- * parent carries one.
+ * linkage for `key`, `included` is the extras passed as `included`,
+ * deduplicated (empty when none are); `links.related` is the relationship's
+ * related link when the parent carries one.
+ *
+ * The parent itself is never in `included`: the primary data names the
+ * related resources, not the parent, so it would be reachable only through a
+ * child linking back to it and the document would fail full linkage (#444).
+ * A client that needs the post-mutation parent fetches it.
  *
  * @example
  * ```ts
@@ -1049,7 +1057,7 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
  * }
  * const document = Assemble.relationship({ parent: list, key: "items" })
  * console.log(document.data, document.included.length, document.links?.related)
- * // → [ { type: "books", id: "b1" } ] 1 https://example.test/lists/1/items
+ * // → [ { type: "books", id: "b1" } ] 0 https://example.test/lists/1/items
  * ```
  *
  * @since 0.16.0
@@ -1063,7 +1071,7 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
     stamp(asValue(stringifyLinks(r))) as unknown as WireResource<ResourceLike>;
   const seen = new Set<string>();
   const included: Array<WireResource<ResourceLike>> = [];
-  for (const candidate of [input.parent, ...(input.included ?? [])]) {
+  for (const candidate of input.included ?? []) {
     const key = `${candidate.type}\0${candidate.id}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1073,7 +1081,7 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
   const related = rel?.links?.related === undefined ? undefined : toLinkString(rel.links.related);
   return {
     data: rel?.data ?? null,
-    included: included as unknown as ReadonlyArray<WireResource<R> | WireResource<I>>,
+    included: included as unknown as ReadonlyArray<WireResource<I>>,
     ...(related === undefined || related === "" ? {} : { links: { related } }),
     jsonapi: JSONAPI_MEMBER,
   };
