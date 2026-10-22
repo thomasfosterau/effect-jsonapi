@@ -596,6 +596,42 @@ describe("the per-resource transform pass", () => {
     expect(() => Handlers.buildIncluded([unlinked], [manager])).toThrow(/full linkage/);
   });
 
+  describe("when the primary data is resource linkage (#423)", () => {
+    // `GET /articles/1/relationships/comments?include=comments.author`'s
+    // document: the primary identifiers are where the walk starts.
+    const identifiers = [
+      { type: "comments", id: "5" },
+      { type: "comments", id: "12" },
+    ];
+    const comment = (id: string, author: string) => ({
+      type: "comments",
+      id,
+      attributes: { body: "First!" },
+      relationships: { author: { data: { type: "people", id: author } } },
+    });
+    const person = (id: string) => ({ type: "people", id, attributes: { name: "Ann" } });
+
+    it("seeds the walk from the identifiers, keeping their included resource objects", () => {
+      const included = [comment("5", "2"), comment("12", "9"), person("2"), person("9")];
+      // Not deduplicated against the identifiers: they are not resource objects.
+      expect(Handlers.buildIncluded(identifiers, included)).toEqual(included);
+    });
+
+    it("still rejects a member no identifier reaches", () => {
+      expect(() =>
+        Handlers.buildIncluded(identifiers, [comment("5", "2"), person("2"), person("7")]),
+      ).toThrow(/full linkage violation: included resource "people:7"/);
+    });
+
+    it("leaves `data` and `collection` reading their primary data as resource objects", () => {
+      // A resource object with no attributes or relationships is still one there:
+      // its included copy is dropped as a duplicate, not linked as linkage.
+      const bare = { type: "comments", id: "5" };
+      expect(Handlers.data(bare, { included: [comment("5", "2")] }).included).toEqual([]);
+      expect(Handlers.collection([bare], { included: [comment("5", "2")] }).included).toEqual([]);
+    });
+  });
+
   it("rejects every member of a chain the primary data no longer reaches (#239)", () => {
     // articles:1 → people:9 → companies:3. Stripping articles:1's
     // relationships orphans people:9, and companies:3 with it, though

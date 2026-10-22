@@ -50,11 +50,66 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
     expect(orphans({ data, included: [ref("people", "9")] })).toEqual([]);
   });
 
-  it("does not count the primary data's own identity as linked", () => {
+  it("does not count a primary resource object's own identity as linked", () => {
     // An included copy of the primary resource is reachable only if something links to it.
-    expect(orphans({ data: ref("articles", "1"), included: [ref("articles", "1")] })).toEqual([
-      "articles:1",
-    ]);
+    const primary = { ...ref("articles", "1"), attributes: { title: "Hi" } };
+    expect(orphans({ data: primary, included: [ref("articles", "1")] })).toEqual(["articles:1"]);
+  });
+
+  describe("when the primary data is resource linkage (#423)", () => {
+    // `GET /articles/1/relationships/comments?include=comments,comments.author`:
+    // the primary identifiers are where the walk starts.
+    const comment = (id: string, author: string) => ({
+      ...ref("comments", id),
+      attributes: { body: "First!" },
+      relationships: { author: one(ref("people", author)) },
+    });
+
+    it("seeds the walk from to-many primary identifiers", () => {
+      const document = {
+        data: [ref("comments", "5"), ref("comments", "12")],
+        included: [comment("5", "2"), comment("12", "9"), ref("people", "2"), ref("people", "9")],
+      };
+      expect(orphans(document)).toEqual([]);
+    });
+
+    it("seeds the walk from a to-one primary identifier, `meta` and all", () => {
+      const document = {
+        data: { ...ref("comments", "5"), meta: { pinned: true } },
+        included: [comment("5", "2"), ref("people", "2")],
+      };
+      expect(orphans(document)).toEqual([]);
+    });
+
+    it("seeds from a `lid` identifier by its `lid`", () => {
+      const document = {
+        data: [{ type: "comments", lid: "c1" }],
+        included: [{ type: "comments", lid: "c1", attributes: { body: "Draft" } }],
+      };
+      expect(orphans(document)).toEqual([]);
+    });
+
+    it("still reports a member no identifier reaches", () => {
+      const document = {
+        data: [ref("comments", "5")],
+        included: [comment("5", "2"), ref("people", "2"), ref("articles", "1")],
+      };
+      expect(orphans(document)).toEqual(["articles:1"]);
+    });
+
+    it("reports everything when the linkage is empty or null", () => {
+      expect(orphans({ data: [], included: [ref("comments", "5")] })).toEqual(["comments:5"]);
+      expect(orphans({ data: null, included: [ref("comments", "5")] })).toEqual(["comments:5"]);
+    });
+
+    it("does not seed from resource objects' own identities", () => {
+      // One resource object makes the primary data resource data, not linkage.
+      const document = {
+        data: [ref("comments", "5"), { ...ref("comments", "12"), attributes: { body: "Hi" } }],
+        included: [comment("5", "2")],
+      };
+      expect(orphans(document)).toEqual(["comments:5"]);
+    });
   });
 
   it("keys members by `lid` when they have no `id`, apart from an `id` of the same value", () => {

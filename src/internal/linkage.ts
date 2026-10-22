@@ -2,7 +2,9 @@
  * The compound-document reachability walk behind the spec's full-linkage
  * rule: an `included` member is linked when it can be reached from the
  * primary data by following resource linkage, through the primary data's
- * relationships and then through other `included` members'.
+ * relationships and then through other `included` members'. When the primary
+ * data is itself resource linkage (a relationship document's identifiers),
+ * those identifiers are where the walk starts ({@link seeds}, #423).
  *
  * It works on string keys, not on resource values, so the document builders
  * (typed values) and a checker over arbitrary JSON can walk the same graph
@@ -68,6 +70,59 @@ export const identity = (resource: Readonly<Record<string, unknown>>): string | 
   return undefined;
 };
 
+// A resource object's identity as zero or one keys.
+const identities = (resource: Parameters<typeof identity>[0]): ReadonlyArray<string> =>
+  Arr.fromOption(Option.fromUndefinedOr(identity(resource)));
+
+/**
+ * Whether a primary-data element is a resource identifier object rather than
+ * a resource object: it carries none of the members only a resource object
+ * may (`attributes`, `relationships`, `links`).
+ *
+ * @internal
+ */
+export const isIdentifierObject = (value: {
+  readonly attributes?: unknown;
+  readonly relationships?: unknown;
+  readonly links?: unknown;
+}): boolean => !("attributes" in value) && !("relationships" in value) && !("links" in value);
+
+/**
+ * Whether a document's primary data, as its elements, is resource linkage — a
+ * relationship document's (§Fetching Relationships): at least one element,
+ * every one an identifier object ({@link isIdentifierObject}). Empty or
+ * `null` primary data seeds nothing either way, so it is read as resources.
+ *
+ * A resource object carrying only `type` and `id` (and perhaps `meta`) cannot
+ * be told from an identifier, so primary data made only of such objects reads
+ * as linkage. Seeding from it links only an `included` copy of that same
+ * resource, which a resource document may not carry anyway (§Compound
+ * Documents' one resource object per `type` and `id`).
+ *
+ * @internal
+ */
+export const isLinkageData = (
+  primaries: ReadonlyArray<Parameters<typeof isIdentifierObject>[0]>,
+): boolean => Arr.isReadonlyArrayNonEmpty(primaries) && Arr.every(primaries, isIdentifierObject);
+
+/**
+ * Where the full-linkage walk starts (JSON:API 1.1 §Compound Documents): the
+ * identifiers in the primary resources' relationships, or, when the primary
+ * data is resource linkage, the primary identifiers themselves (#423) — an
+ * identifier carries no relationships, so it would otherwise seed nothing.
+ * `keyOf` and `linkageOf` are the caller's notion of identity and of edges,
+ * as for {@link reachable}.
+ *
+ * @internal
+ */
+export const seeds = <A>(
+  primaries: ReadonlyArray<A>,
+  asLinkage: boolean,
+  keyOf: (primary: A) => Iterable<string>,
+  linkageOf: (primary: A) => Iterable<string>,
+): ReadonlyArray<string> =>
+  Arr.flatMap(primaries, (primary) => Arr.fromIterable((asLinkage ? keyOf : linkageOf)(primary)));
+
 /**
  * The identities a resource object's `relationships` point at — the edges
  * full-linkage is computed over.
@@ -98,8 +153,10 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
  * primary data through resource linkage, in document order — the violations
  * `spec/document/full-linkage` reports.
  *
- * The walk is the builders' ({@link reachable}, shared so the two cannot
- * drift apart); identity and linkage are over arbitrary JSON:
+ * The walk is the builders' ({@link reachable} from {@link seeds}, shared so
+ * the two cannot drift apart): from the primary identifiers when the primary
+ * data is resource linkage ({@link isLinkageData}), else from the primary
+ * resources' relationships. Identity and linkage are over arbitrary JSON:
  * {@link identity} keys a member by `type` and `id`, or by `lid` when it has
  * no `id`, and {@link linkageOf} reads the identifiers a member's
  * relationships name (a `null`, empty, meta-only or links-only relationship
@@ -118,13 +175,11 @@ export const unlinkedIncluded = (document: Readonly<Record<string, unknown>>) =>
   const members = Arr.filter(included, isRecord);
   const byIdentity = HashMap.fromIterable(
     Arr.flatMap(members, (resource) =>
-      Arr.map(
-        Arr.fromOption(Option.fromUndefinedOr(identity(resource))),
-        (key) => [key, resource] as const,
-      ),
+      Arr.map(identities(resource), (key) => [key, resource] as const),
     ),
   );
-  const linked = reachable(Arr.flatMap(primaries, linkageOf), (key) =>
+  const start = seeds(primaries, isLinkageData(primaries), identities, linkageOf);
+  const linked = reachable(start, (key) =>
     Option.match(HashMap.get(byIdentity, key), { onNone: () => [], onSome: linkageOf }),
   );
   return Arr.filter(members, (resource) =>

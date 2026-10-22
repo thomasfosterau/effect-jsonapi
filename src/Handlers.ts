@@ -49,7 +49,7 @@ import { Array as Arr, Effect, HashMap, HashSet, Option, Record as Rec } from "e
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
-import { reachable } from "./internal/linkage.js";
+import { isLinkageData, reachable, seeds } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
 
 /**
@@ -630,6 +630,14 @@ const mapResources = <F extends TransformLambda>(
  * reaches it. Being referenced is not enough: a cycle of members the primary
  * data no longer reaches, or a member whose only reference is its own, fails.
  *
+ * `primary` may instead be a relationship document's resource linkage — every
+ * element a bare identifier, with no `attributes`, `relationships` or `links`
+ * (`Handlers.linkage`'s `data`, as an array). Then the walk starts from those
+ * identifiers themselves (JSON:API 1.1 §Compound Documents), and `included` is
+ * not deduplicated against them, since an identifier is not a resource object
+ * (#423). {@link data} and {@link collection} always read their primary data
+ * as resource objects.
+ *
  * It checks the value it is given, which counts every relationship key a
  * resource carries. Encoding through an endpoint's schema drops a
  * relationship the resource does not declare, so a member linked only through
@@ -671,10 +679,23 @@ export const buildIncluded = <
      */
     readonly onResource?: ResourceTransform<F> | undefined;
   },
+): ReadonlyArray<Transformed<F, Included>> =>
+  includedFor(primary, isLinkageData(primary), included, options);
+
+// `buildIncluded`, told whether `primary` is resource linkage rather than
+// resource objects. `data` and `collection` pass `false`: their primary data
+// is resource objects however bare, and a bare one's included copy is a
+// duplicate to drop, not a member to link.
+const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
+  primary: ReadonlyArray<ResourceValue>,
+  asLinkage: boolean,
+  included: ReadonlyArray<Included>,
+  options?: Parameters<typeof buildIncluded<Included, F>>[2],
 ): ReadonlyArray<Transformed<F, Included>> => {
   // Dedupe by (type, id), against the primary data as well as within
   // `included`: the one-resource-object-per-pair rule is document-wide.
-  const seen = new Set<string>(primary.map(key));
+  // Linkage is no resource object, so there is nothing to dedupe against.
+  const seen = new Set<string>(asLinkage ? [] : primary.map(key));
   const deduped: Array<Included> = [];
   for (const resource of included) {
     const k = key(resource);
@@ -690,7 +711,8 @@ export const buildIncluded = <
   // through its linkage and then through other included members' linkage.
   if (options?.checkLinkage !== false) {
     const members = HashMap.fromIterable(Arr.map(shaped, (resource) => [key(resource), resource]));
-    const linked = reachable(Arr.flatMap(primary, linkageKeys), (k) =>
+    const start = seeds(primary, asLinkage, (identifier) => [key(identifier)], linkageKeys);
+    const linked = reachable(start, (k) =>
       Option.match(HashMap.get(members, k), { onNone: () => [], onSome: linkageKeys }),
     );
     for (const resource of shaped) {
@@ -1236,7 +1258,7 @@ const build = (
   const included =
     options?.included === undefined
       ? undefined
-      : buildIncluded(primary, options.included, {
+      : includedFor(primary, false, options.included, {
           checkLinkage: options.checkLinkage,
           onResource,
         });

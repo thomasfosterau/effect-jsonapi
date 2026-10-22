@@ -13,7 +13,7 @@ import * as ErrorReporter from "effect/ErrorReporter";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
-import { HttpApi, HttpApiBuilder } from "effect/http-api";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Document from "./Document.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
@@ -169,5 +169,71 @@ describe("SchemaErrorsLive re-checks full linkage on the encoded document (#250)
     );
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ included: [ann] });
+  });
+});
+
+describe("SchemaErrorsLive walks from primary identifiers in a relationship document (#423)", () => {
+  // The library's relationship endpoints declare no `included`; one whose
+  // schema does (`?include=comments.author` on a relationship endpoint)
+  // carries the members the primary identifiers name.
+  const Comment = Resource.make("comments", {
+    attributes: { body: Schema.String },
+    relationships: { author: Relationship.one(() => Person) },
+  });
+  const commentsRelationship = HttpApiEndpoint.get(
+    "commentsRelationship",
+    "/articles/1/relationships/comments",
+    {
+      success: Schema.Struct({
+        data: Schema.Array(Comment.identifier),
+        included: Schema.Array(Schema.Union([Comment, Person])),
+      }),
+    },
+  ).middleware(Middleware.SchemaErrors);
+  const Api = HttpApi.make("relationship").add(
+    HttpApiGroup.make("articles").add(commentsRelationship),
+  );
+
+  const comment = {
+    type: "comments",
+    id: "5",
+    attributes: { body: "First!" },
+    relationships: { author: { data: { type: "people", id: "9" } } },
+  };
+
+  const serve = async (included: ReadonlyArray<unknown>) => {
+    const appLayer = HttpApiBuilder.layer(Api).pipe(
+      Layer.provide(
+        HttpApiBuilder.group(Api, "articles", (handlers) =>
+          handlers.handle("commentsRelationship", () =>
+            // SAFETY: the members under test, whatever the schema's union infers.
+            Effect.succeed({ data: [{ type: "comments", id: "5" }], included } as never),
+          ),
+        ),
+      ),
+      Layer.provide(Middleware.layer),
+      Layer.provide(ErrorReporter.layer([])),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(
+      new Request("http://localhost/articles/1/relationships/comments"),
+    ).finally(dispose);
+    return { status: response.status, body: decodeJson(await response.text()) };
+  };
+
+  it("serves the members an identifier reaches", async () => {
+    const response = await serve([comment, ann]);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: [{ type: "comments", id: "5" }],
+      included: [comment, ann],
+    });
+  });
+
+  it("still answers a member no identifier reaches with the JSON:API 500", async () => {
+    const response = await serve([comment, { ...ann, id: "7" }]);
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual(SERVER_ERROR.toDocument());
   });
 });
