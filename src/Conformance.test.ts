@@ -6,7 +6,7 @@
  * flag. A kit that reports nothing against a real server is only trustworthy
  * once it has been shown to report the right things against a broken one.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import {
   Array as Arr,
   Cause,
@@ -338,7 +338,7 @@ const conformantServe = (request: {
       const base = entry.split(";")[0]!.trim();
       return base === "*/*" || base === "application/*";
     });
-    if (jsonApi.length > 0 || !wildcard) {
+    if (Arr.isReadonlyArrayNonEmpty(jsonApi) || !wildcard) {
       const usable = jsonApi.filter((entry) => {
         if (weightOf(entry) === 0) return false;
         if (!mediaTypeParameters(entry).every((name) => name === "ext" || name === "profile"))
@@ -346,7 +346,7 @@ const conformantServe = (request: {
         // §Extensions: this fixture supports no extension, so any `ext` is unsupported.
         return !/;\s*ext=/.test(entry);
       });
-      if (usable.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(usable)) {
         return { status: 406, body: { errors: [{ status: "406", title: "Not Acceptable" }] } };
       }
     }
@@ -719,11 +719,9 @@ describe("Conformance: discovery and selection", () => {
       only: ["spec/document/top-level-members"],
     });
     const partial = outcomeFor(documents, "spec/document/top-level-members");
-    expect(partial._tag).toBe("Passed");
-    if (partial._tag === "Passed") {
-      expect(partial.note).toContain("not probed");
-      expect(partial.note).toContain(`ids["articles"]`);
-    }
+    assert(partial._tag === "Passed");
+    expect(partial.note).toContain("not probed");
+    expect(partial.note).toContain(`ids["articles"]`);
 
     // With no resolvable endpoint at all, the rule skips outright and names the
     // option that would have let it run.
@@ -738,8 +736,8 @@ describe("Conformance: discovery and selection", () => {
       }),
     );
     const skipped = outcomeFor(none, "spec/document/top-level-members");
-    expect(skipped._tag).toBe("Skipped");
-    if (skipped._tag === "Skipped") expect(skipped.reason).toContain(`ids["articles"]`);
+    assert(skipped._tag === "Skipped");
+    expect(skipped.reason).toContain(`ids["articles"]`);
   });
 
   const ids = (report: Conformance.Report) => report.outcomes.map((outcome) => outcome.rule.id);
@@ -1110,14 +1108,12 @@ const broken = (
     const report = await verifyCanned((request) => mutate(conformantServe(request), request));
     expect(failed(report)).toContain(id);
     const outcome = outcomeFor(report, id);
-    expect(outcome._tag).toBe("Failed");
-    if (outcome._tag === "Failed") {
-      expect(outcome.findings.length).toBeGreaterThan(0);
-      // A finding always says what it wanted and what it got.
-      for (const found of outcome.findings) {
-        expect(found.expected).not.toBe("");
-        expect(found.observed).not.toBe("");
-      }
+    assert(outcome._tag === "Failed");
+    expect(outcome.findings.length).toBeGreaterThan(0);
+    // A finding always says what it wanted and what it got.
+    for (const found of outcome.findings) {
+      expect(found.expected).not.toBe("");
+      expect(found.observed).not.toBe("");
     }
   });
 
@@ -1217,7 +1213,10 @@ describe("Conformance: detects a deliberately broken server", () => {
     (canned) =>
       withData(canned, (body) => {
         const included = Array.isArray(body["included"]) ? body["included"] : [];
-        return included.length === 0 ? body : { ...body, included: [...included, included[0]] };
+        return Arr.match(included, {
+          onEmpty: () => body,
+          onNonEmpty: (present) => ({ ...body, included: [...present, present[0]] }),
+        });
       }),
   );
 
@@ -2581,7 +2580,7 @@ describe("Conformance: the filter grammar profile", () => {
         return reject(key);
       }
       // Shorthand: filter[field] or filter[field][op]. Anything deeper is a 400.
-      if (segments.length > 2 || segments.length === 0) return reject(key);
+      if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments)) return reject(key);
       const field = segments[0]!;
       const operators = declared[field];
       if (operators === undefined) return reject(key);
@@ -2644,8 +2643,8 @@ describe("Conformance: the filter grammar profile", () => {
       }),
     );
     for (const outcome of report.outcomes) {
-      expect(outcome._tag).toBe("Skipped");
-      if (outcome._tag === "Skipped") expect(outcome.reason).toContain("filter: true");
+      assert(outcome._tag === "Skipped");
+      expect(outcome.reason).toContain("filter: true");
     }
   });
 
@@ -2678,12 +2677,8 @@ describe("Conformance: the filter grammar profile", () => {
         : grammarServe(request),
     );
     const outcome = outcomeFor(report, "profile/filter/rejections");
-    expect(outcome._tag).toBe("Failed");
-    if (outcome._tag === "Failed") {
-      expect(outcome.findings.some((found) => found.detail.includes("outside the core"))).toBe(
-        true,
-      );
-    }
+    assert(outcome._tag === "Failed");
+    expect(outcome.findings.some((found) => found.detail.includes("outside the core"))).toBe(true);
   });
 
   it("detects a rejection that does not name the offending key in source.parameter", async () => {
@@ -2693,12 +2688,8 @@ describe("Conformance: the filter grammar profile", () => {
       return { ...canned, body: { errors: [{ status: "400", title: "Bad Request" }] } };
     });
     const outcome = outcomeFor(report, "profile/filter/rejections");
-    expect(outcome._tag).toBe("Failed");
-    if (outcome._tag === "Failed") {
-      expect(outcome.findings.every((found) => found.detail.includes("source.parameter"))).toBe(
-        true,
-      );
-    }
+    assert(outcome._tag === "Failed");
+    expect(outcome.findings.every((found) => found.detail.includes("source.parameter"))).toBe(true);
   });
 
   it("detects the group form disagreeing with the shorthand it desugars from", async () => {

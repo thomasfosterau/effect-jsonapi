@@ -52,7 +52,7 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
-import { Effect, Layer, Schema, SchemaTransformation } from "effect";
+import { Effect, Layer, Option, Schema, SchemaTransformation } from "effect";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
 import type * as ServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -413,14 +413,14 @@ export const canonical = (request: Fingerprinted): string => {
   const [path, ...rest] = request.url.split("?");
   const query = rest.join("?");
   const pairs = query === "" ? [] : query.split("&").sort();
-  let body = request.body;
-  if (body !== "") {
-    try {
-      body = JSON.stringify(canonicalValue(JSON.parse(body)));
-    } catch {
-      // Not JSON — compare the bytes as received.
-    }
-  }
+  const body =
+    request.body === ""
+      ? request.body
+      : // Not JSON — compare the bytes as received.
+        Option.getOrElse(
+          Option.liftThrowable(() => JSON.stringify(canonicalValue(JSON.parse(request.body))))(),
+          () => request.body,
+        );
   return `${request.method.toUpperCase()}\n${path ?? ""}\n${pairs.join("&")}\n${body}`;
 };
 

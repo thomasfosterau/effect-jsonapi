@@ -44,9 +44,11 @@ export const suppliedValue = <A>(field: Option.Option<A> | undefined): Option.Op
  * is `""` (the whole document). Segments are escaped (`~` → `~0`, `/` → `~1`).
  */
 export const pathToJsonPointer = (path: ReadonlyArray<PropertyKey>): string =>
-  path.length === 0
-    ? ""
-    : `/${path.map((segment) => JsonPointer.escapeToken(String(segment))).join("/")}`;
+  Arr.match(path, {
+    onEmpty: () => "",
+    onNonEmpty: (segments) =>
+      `/${segments.map((segment) => JsonPointer.escapeToken(String(segment))).join("/")}`,
+  });
 
 /** One terminal issue of a schema failure, with the path that reaches it. */
 export interface IssueLeaf {
@@ -108,7 +110,7 @@ export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> 
         for (const child of current.issues) walk(child, path, filter);
       }),
       Match.tag("AnyOf", (current) => {
-        if (current.issues.length === 0) {
+        if (Arr.isReadonlyArrayEmpty(current.issues)) {
           leaves.push({ path, issue: current, describedBy: current });
           return;
         }

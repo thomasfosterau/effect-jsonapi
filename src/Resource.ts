@@ -46,6 +46,7 @@
  * @since 0.1.0
  */
 import {
+  Array as Arr,
   Effect,
   Match,
   Schema,
@@ -2370,7 +2371,7 @@ const isFilterAnnotation = (u: unknown): u is Filter.Annotation => {
   const { operators, literal } = u as { readonly operators?: unknown; readonly literal?: unknown };
   return (
     Array.isArray(operators) &&
-    operators.length > 0 &&
+    Arr.isReadonlyArrayNonEmpty(operators) &&
     operators.every(Filter.isOperator) &&
     (literal === undefined || Schema.isSchema(literal))
   );
@@ -3641,7 +3642,7 @@ export function family(
   nameOrBase: string | Any,
   members: ReadonlyArray<Any>,
 ): Family<string, ReadonlyArray<Any>, any> {
-  if (members.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(members)) {
     throw new Error("Resource.family requires at least one member");
   }
   const base = typeof nameOrBase === "string" ? undefined : nameOrBase;

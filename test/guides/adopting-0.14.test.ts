@@ -11,7 +11,7 @@
  * cannot describe a call shape that does not compile or a property that does
  * not hold.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished } from "vite-plus/test";
 import { Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -323,12 +323,9 @@ describe("the 400 for a rejected include path publishes the legal set", () => {
       Layer.provide(Middleware.layer),
     ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-    try {
-      const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
-      return { status: response.status, body: (await response.json()) as any };
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
+    return { status: response.status, body: (await response.json()) as any };
   };
 
   it("names `include` and lists the includable paths", async () => {

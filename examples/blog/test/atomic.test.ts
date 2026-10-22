@@ -5,7 +5,7 @@
  * lid-based references, relationship operations (including on `paginated`
  * relationships) and all-or-nothing semantics.
  */
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { ApiError, Atomic, Middleware } from "@thomasfosterau/effect-jsonapi";
@@ -104,14 +104,14 @@ describe("atomic operations: creating with lids", () => {
     expect(comment?.type).toBe("comments");
     expect(results[2]?.data).toBeUndefined();
 
-    if (article?.type === "articles" && comment?.type === "comments") {
-      expect(article.attributes.createdAt).toBeInstanceOf(Date);
-      // the data union is discriminated by `type`
-      expectTypeOf(article.attributes.title).toEqualTypeOf<string>();
-      expectTypeOf(comment.attributes.body).toEqualTypeOf<string>();
-      // the lid-based linkage was resolved to the comment's real id
-      expect(linkage.data.map((ref) => ref.id)).toEqual([comment.id]);
-    }
+    assert(article?.type === "articles");
+    assert(comment?.type === "comments");
+    expect(article.attributes.createdAt).toBeInstanceOf(Date);
+    // the data union is discriminated by `type`
+    expectTypeOf(article.attributes.title).toEqualTypeOf<string>();
+    expectTypeOf(comment.attributes.body).toEqualTypeOf<string>();
+    // the lid-based linkage was resolved to the comment's real id
+    expect(linkage.data.map((ref) => ref.id)).toEqual([comment.id]);
   });
 
   it("the created resources are visible through the regular endpoints", async () => {
@@ -318,13 +318,11 @@ describe("atomic operations: all-or-nothing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(OperationFailed);
-      // the error identifies the operation that failed
-      expect((error as OperationFailed).operation).toBe(1);
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(OperationFailed);
+    // the error identifies the operation that failed
+    expect((error as OperationFailed).operation).toBe(1);
 
     // the first operation's article was not committed
     const list = await run(
@@ -353,13 +351,11 @@ describe("atomic operations: all-or-nothing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(OperationFailed);
-      expect((error as OperationFailed).reason).toMatch(/never-declared/);
-      expect((error as OperationFailed).operation).toBe(0);
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(OperationFailed);
+    expect((error as OperationFailed).reason).toMatch(/never-declared/);
+    expect((error as OperationFailed).operation).toBe(0);
   });
 });
 

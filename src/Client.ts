@@ -608,15 +608,15 @@ const decodeWireDocument = Schema.decodeUnknownOption(WireDocument);
  * @since 0.15.0
  * @category constructors
  */
-export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> => {
-  try {
-    return decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body);
-  } catch {
-    // A body that isn't JSON at all, or a decoder that threw on a hostile
-    // value: there is no document here, and this is an error path already.
-    return Option.none();
-  }
-};
+export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> =>
+  // A body that isn't JSON at all, or a decoder that threw on a hostile
+  // value, lifts to `None`: there is no document here, and this is an error
+  // path already.
+  Option.flatten(
+    Option.liftThrowable(() =>
+      decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body),
+    )(),
+  );
 
 /**
  * Best-effort decode of the error document carried by a failed HTTP call.

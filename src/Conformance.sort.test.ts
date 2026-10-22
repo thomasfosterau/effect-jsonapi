@@ -5,7 +5,7 @@
  * end, a locale collation — must fail it, while a collection that cannot show
  * an order leaves the rule `Skipped`, never passed.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Array as Arr, Effect, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
@@ -245,12 +245,10 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
 
   it("passes over an attribute the server refuses to sort by, and notes NULL placement went unobserved", async () => {
     const { outcome, sent } = await run(serve({ ...profileSorter, refuses: ["due"] }));
-    expect(outcome._tag).toBe("Passed");
-    if (outcome._tag === "Passed") {
-      expect(outcome.note).toBe(
-        "NULL placement (S-ORD-3) not observed: no attribute decided held a NULL in its answers",
-      );
-    }
+    assert(outcome._tag === "Passed");
+    expect(outcome.note).toBe(
+      "NULL placement (S-ORD-3) not observed: no attribute decided held a NULL in its answers",
+    );
     expect(sent.slice(0, 6)).toEqual([
       "/tasks",
       "/tasks?sort=due",
@@ -286,12 +284,10 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
 
   it("skips when the server refuses every attribute", async () => {
     const { outcome } = await run(serve({ ...profileSorter, refuses: ["title", "rank", "due"] }));
-    expect(outcome._tag).toBe("Skipped");
-    if (outcome._tag === "Skipped") {
-      expect(outcome.reason).toBe(
-        "no attribute's order could be observed: /tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there); /projects/1/tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there)",
-      );
-    }
+    assert(outcome._tag === "Skipped");
+    expect(outcome.reason).toBe(
+      "no attribute's order could be observed: /tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there); /projects/1/tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there)",
+    );
   });
 
   it("decides nothing on a server error", async () => {
@@ -300,10 +296,8 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
         ? { status: 503, body: { errors: [{ status: "503" }] } }
         : serve(profileSorter)(path);
     const { outcome } = await run(failing);
-    expect(outcome._tag).toBe("Skipped");
-    if (outcome._tag === "Skipped") {
-      expect(outcome.reason).toContain("`due`: `?sort=due` answered 503");
-    }
+    assert(outcome._tag === "Skipped");
+    expect(outcome.reason).toContain("`due`: `?sort=due` answered 503");
   });
 
   it("decides nothing on an attribute whose values are of more than one JSON type (S-KEY-2)", async () => {

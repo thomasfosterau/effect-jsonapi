@@ -138,7 +138,7 @@ const responseMediaType: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(responseMediaType.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
       yield* Effect.forEach(
@@ -173,7 +173,7 @@ const responseMediaType: RuleImpl = {
               return;
             }
             const illegal = parameters.filter(([name]) => name !== "ext" && name !== "profile");
-            if (illegal.length > 0) {
+            if (Arr.isReadonlyArrayNonEmpty(illegal)) {
               findings.push(
                 finding(responseMediaType.rule, {
                   detail: `${path} answered with the media type parameter(s) ${illegal.map(([n]) => n).join(", ")}`,
@@ -456,7 +456,7 @@ const documentProbes = (ctx: Context) =>
           out.push({ where: path, observation: bare });
           if (!endpoint.queryKeys.includes("include")) return;
           const includable = includableOf(bare.body);
-          if (includable.length === 0) return;
+          if (Arr.isReadonlyArrayEmpty(includable)) return;
           const url = withQuery(path, [["include", includable.join(",")]]);
           const compound = yield* ctx.request({ url, headers: jsonApiAccept });
           if (compound.status >= 200 && compound.status < 300)
@@ -490,7 +490,7 @@ const overDocuments =
   (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(impl, noProbeReason("JSON:API read endpoint", unresolved));
       const documents = yield* documentProbes(ctx);
       const note = coverageNote(unresolved);
@@ -533,7 +533,7 @@ const topLevelMembers: RuleImpl = {
           ];
         }
         const has = ["data", "errors", "meta"].filter((member) => member in body);
-        return has.length > 0
+        return Arr.isReadonlyArrayNonEmpty(has)
           ? []
           : [
               finding(topLevelMembers.rule, {
@@ -610,12 +610,14 @@ const fullLinkage: RuleImpl = {
   run: (ctx) =>
     overDocuments(fullLinkage.rule, {
       applicable: (body) =>
-        isRecord(body) && Array.isArray(body["included"]) && body["included"].length > 0,
+        isRecord(body) &&
+        Array.isArray(body["included"]) &&
+        Arr.isReadonlyArrayNonEmpty(body["included"]),
       inapplicable:
         "no endpoint returned a compound document — either none declares `include`, or no resource it returned carries inline relationship linkage to include",
       check: (body, observation, where) => {
         const orphans = isRecord(body) ? Linkage.unlinkedIncluded(body) : [];
-        return orphans.length === 0
+        return Arr.isReadonlyArrayEmpty(orphans)
           ? []
           : [
               finding(fullLinkage.rule, {
@@ -652,7 +654,7 @@ const noDuplicateResources: RuleImpl = {
           if (first === undefined) seen.set(key, pointer);
           else duplicates.push(`${resourceLabel(resource)} at ${first} and ${pointer}`);
         }
-        return duplicates.length === 0
+        return Arr.isReadonlyArrayEmpty(duplicates)
           ? []
           : [
               finding(noDuplicateResources.rule, {
@@ -749,7 +751,7 @@ const resourceIdentification: RuleImpl = {
   ),
   run: (ctx) =>
     overDocuments(resourceIdentification.rule, {
-      applicable: (body) => resourcesOf(body).length > 0,
+      applicable: (body) => Arr.isReadonlyArrayNonEmpty(resourcesOf(body)),
       inapplicable: "no endpoint returned a document carrying a resource object",
       check: (body, observation, where) => {
         const findings: Array<Finding> = [];
@@ -883,7 +885,7 @@ const errorDocumentShape: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const observations = yield* errorProbes(ctx);
-      if (observations.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(observations)) {
         return skip(
           errorDocumentShape.rule,
           "no error response could be provoked without mutating the target",
@@ -893,7 +895,11 @@ const errorDocumentShape: RuleImpl = {
       for (const observation of observations) {
         if (observation.status === 404 && observation.text === "") continue;
         const body = observation.body;
-        if (!isRecord(body) || !Array.isArray(body["errors"]) || body["errors"].length === 0) {
+        if (
+          !isRecord(body) ||
+          !Array.isArray(body["errors"]) ||
+          Arr.isReadonlyArrayEmpty(body["errors"])
+        ) {
           findings.push(
             finding(errorDocumentShape.rule, {
               detail: `a ${observation.status} response was not a JSON:API error document`,
@@ -922,7 +928,7 @@ const errorMemberTypes: RuleImpl = {
       const errors = observations.flatMap((observation) =>
         errorObjectsOf(observation.body).map((error) => ({ error, observation })),
       );
-      if (errors.length === 0)
+      if (Arr.isReadonlyArrayEmpty(errors))
         return skip(errorMemberTypes.rule, "no error object could be provoked");
       const findings: Array<Finding> = [];
       for (const { error, observation } of errors) {
@@ -972,7 +978,7 @@ const errorSourceDiscrimination: RuleImpl = {
           .filter(isRecord)
           .map((source) => ({ source, observation })),
       );
-      if (sources.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(sources)) {
         return skip(
           errorSourceDiscrimination.rule,
           "no provoked error object carried a `source` member",
@@ -1033,7 +1039,7 @@ const errorStatusMatches: RuleImpl = {
       const observations = (yield* errorProbes(ctx)).filter(
         (observation) => errorObjectsOf(observation.body).length === 1,
       );
-      if (observations.length === 0)
+      if (Arr.isReadonlyArrayEmpty(observations))
         return skip(errorStatusMatches.rule, "no single-error document could be provoked");
       const findings: Array<Finding> = [];
       for (const observation of observations) {
@@ -1077,10 +1083,11 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
     rule: impl,
     run: (ctx) =>
       Effect.gen(function* () {
-        const candidates = readable(ctx).resolved.filter(
-          ({ endpoint }) => fieldsOf(endpoint.queryKeys).length > 0,
+        const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
+          Arr.isReadonlyArrayNonEmpty(fieldsOf(endpoint.queryKeys)),
         );
-        if (candidates.length === 0) return skip(impl, "no endpoint declares `fields[TYPE]`");
+        if (Arr.isReadonlyArrayEmpty(candidates))
+          return skip(impl, "no endpoint declares `fields[TYPE]`");
         const findings: Array<Finding> = [];
         let probes = 0;
         let evaluated = 0;
@@ -1099,7 +1106,7 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
               if (where === "included") {
                 if (!endpoint.queryKeys.includes("include")) return;
                 const includable = includableOf(baseline.body);
-                if (includable.length === 0) return;
+                if (Arr.isReadonlyArrayEmpty(includable)) return;
                 base = withQuery(path, [["include", includable.join(",")]]);
                 source = yield* ctx.request({ url: base, headers: jsonApiAccept });
                 probes += 1;
@@ -1139,13 +1146,13 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
                     );
                     // A projection request that returned no resource of that type in
                     // that slot proves nothing either way.
-                    if (subjects.length === 0) return;
+                    if (Arr.isReadonlyArrayEmpty(subjects)) return;
                     evaluated += 1;
                     for (const { pointer, resource } of subjects) {
                       const emitted = resource["attributes"];
                       if (!isRecord(emitted)) continue;
                       const extra = Object.keys(emitted).filter((key) => key !== requested);
-                      if (extra.length > 0) {
+                      if (Arr.isReadonlyArrayNonEmpty(extra)) {
                         findings.push(
                           finding(impl, {
                             detail: `\`fields[${type}]=${requested}\` still returned other fields at ${pointer}`,
@@ -2567,7 +2574,7 @@ const reachable: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(reachable.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const observations = yield* Effect.forEach(
         resolved,

@@ -394,7 +394,7 @@ const sourceOf = (
         if (typeof segment !== "string") break;
         keys.push(segment);
       }
-      if (keys.length === 0) return undefined;
+      if (Arr.isReadonlyArrayEmpty(keys)) return undefined;
       return {
         parameter:
           keys[0]! +
@@ -412,7 +412,9 @@ const sourceOf = (
       const key = path.find((segment): segment is string => typeof segment === "string");
       return key === undefined ? undefined : { header: key };
     }),
-    Match.when("Payload", () => (path.length === 0 ? undefined : { pointer: jsonPointer(path) })),
+    Match.when("Payload", () =>
+      Arr.isReadonlyArrayEmpty(path) ? undefined : { pointer: jsonPointer(path) },
+    ),
     Match.exhaustive,
   );
 

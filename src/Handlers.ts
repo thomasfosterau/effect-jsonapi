@@ -336,7 +336,7 @@ const projectResource = (
   const requested = fields[resource.type];
   // No requested set for this type is the spec's "every field", not "no
   // field" — and an empty `fields[TYPE]=` is read the same way.
-  if (requested === undefined || requested.length === 0) return resource;
+  if (requested === undefined || Arr.isReadonlyArrayEmpty(requested)) return resource;
   const attributes = resource.attributes;
   // Resource identifiers (and any resource with no attributes) have nothing
   // to project.
@@ -453,7 +453,7 @@ const stampMeta = (
   computed: MetaValue | undefined,
 ): AnyResourceValue => {
   const merged = { ...resource.meta, ...computed };
-  if (Object.keys(merged).length > 0) return { ...resource, meta: merged };
+  if (Arr.isReadonlyArrayNonEmpty(Object.keys(merged))) return { ...resource, meta: merged };
   // An empty `meta` is a *present* meta object to the spec, which is a
   // different statement from having none: emit no member at all.
   if (resource.meta === undefined) return resource;
@@ -908,7 +908,7 @@ const resolve = (
     let level: ReadonlyArray<Level> = [{ nodes: pathTrie(paths), parents: primary }];
     let hops = depth;
 
-    while (level.length > 0 && hops > 0) {
+    while (Arr.isReadonlyArrayNonEmpty(level) && hops > 0) {
       hops--;
 
       // Every identifier this level reaches, deduplicated across paths, parents
@@ -988,7 +988,7 @@ const resolve = (
           const resource = known.get(k);
           if (resource !== undefined) parents.push(resource);
         }
-        if (parents.length > 0) next.push({ nodes: branch.nodes, parents });
+        if (Arr.isReadonlyArrayNonEmpty(parents)) next.push({ nodes: branch.nodes, parents });
       }
       level = next;
     }
@@ -1140,7 +1140,7 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
 > =>
   (paths === undefined
     ? Effect.succeed(undefined)
-    : paths.length === 0
+    : Arr.isReadonlyArrayEmpty(paths)
       ? Effect.succeed([])
       : resolve(
           primary === null ? [] : Array.isArray(primary) ? primary : [primary as ResourceValue],

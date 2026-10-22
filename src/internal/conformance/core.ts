@@ -19,6 +19,7 @@ import {
   Option,
   Predicate,
   Result,
+  Schema,
   SchemaAST,
   type Scope,
 } from "effect";
@@ -572,7 +573,7 @@ export const resolvePath = (endpoint: Discovered, options: ResolvedOptions): Res
   const key = `${endpoint.group}.${endpoint.name}`;
   const override = options.paths[key];
   if (override !== undefined) return { _tag: "Resolved", path: override };
-  if (endpoint.params.length === 0) return { _tag: "Resolved", path: endpoint.path };
+  if (Arr.isReadonlyArrayEmpty(endpoint.params)) return { _tag: "Resolved", path: endpoint.path };
   const type = endpoint.segment;
   if (type === undefined) {
     return {
@@ -633,6 +634,9 @@ export interface Context {
     readonly requests?: number;
   }) => Effect.Effect<Observation>;
 }
+
+/** A response body as JSON, or `None` when it is not JSON. */
+const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 const headerRecord = (
   headers: Readonly<Record<string, string | undefined>>,
@@ -1117,14 +1121,7 @@ const answerOf = (
     const textResult = yield* Effect.result(response.text);
     const text = Result.isSuccess(textResult) ? textResult.success : "";
     const headersOut = headerRecord(response.headers);
-    let body: unknown;
-    if (text !== "") {
-      try {
-        body = JSON.parse(text) as unknown;
-      } catch {
-        body = undefined;
-      }
-    }
+    const body: unknown = text === "" ? undefined : Option.getOrUndefined(parseJson(text));
     return {
       probe,
       status: response.status,
@@ -1375,7 +1372,9 @@ export const settle = (
   findings: ReadonlyArray<Finding>,
   note?: string,
 ): Outcome =>
-  findings.length === 0 ? pass(rule, probes, note) : { _tag: "Failed", rule, probes, findings };
+  Arr.isReadonlyArrayEmpty(findings)
+    ? pass(rule, probes, note)
+    : { _tag: "Failed", rule, probes, findings };
 
 /** @internal */
 export const finding = (
@@ -1580,7 +1579,7 @@ export const withQuery = (
   path: string,
   pairs: ReadonlyArray<readonly [string, string]>,
 ): string => {
-  if (pairs.length === 0) return path;
+  if (Arr.isReadonlyArrayEmpty(pairs)) return path;
   const query = pairs.map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
   return `${path}${path.includes("?") ? "&" : "?"}${query}`;
 };
@@ -1623,9 +1622,11 @@ export const probeable = (
  * @internal
  */
 export const coverageNote = (unresolved: ReadonlyArray<string>): string | undefined =>
-  unresolved.length === 0
-    ? undefined
-    : `${unresolved.length} endpoint${unresolved.length === 1 ? "" : "s"} not probed: ${unresolved.join("; ")}`;
+  Arr.match(unresolved, {
+    onEmpty: () => undefined,
+    onNonEmpty: (missing) =>
+      `${missing.length} endpoint${missing.length === 1 ? "" : "s"} not probed: ${missing.join("; ")}`,
+  });
 
 /**
  * The standard skip reason when a rule found no endpoint of the shape it needs:
@@ -1635,6 +1636,7 @@ export const coverageNote = (unresolved: ReadonlyArray<string>): string | undefi
  * @internal
  */
 export const noProbeReason = (what: string, unresolved: ReadonlyArray<string>): string =>
-  unresolved.length === 0
-    ? `no ${what} in this api`
-    : `no ${what} with a resolvable URL: ${unresolved.join("; ")}`;
+  Arr.match(unresolved, {
+    onEmpty: () => `no ${what} in this api`,
+    onNonEmpty: (missing) => `no ${what} with a resolvable URL: ${missing.join("; ")}`,
+  });

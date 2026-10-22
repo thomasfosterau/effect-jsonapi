@@ -275,7 +275,7 @@ const routePattern = (path: string): Option.Option<RegExp> => {
     .replace(/\/+$/, "")
     .split("/")
     .filter((segment) => segment !== "");
-  if (segments.length === 0) return Option.none();
+  if (Arr.isReadonlyArrayEmpty(segments)) return Option.none();
   const body = segments
     .map((segment) => (segment.startsWith(":") ? "[^/]+" : escapeRegExp(segment)))
     .join("/");
@@ -350,7 +350,7 @@ const maxWeight = (entries: ReadonlyArray<AcceptEntry>): number =>
  */
 const wins = (entries: ReadonlyArray<AcceptEntry>, predicate: (entry: AcceptEntry) => boolean) => {
   const selected = entries.filter((entry) => predicate(entry) && entry.clean && entry.weight > 0);
-  if (selected.length === 0) return false;
+  if (Arr.isReadonlyArrayEmpty(selected)) return false;
   return maxWeight(selected) >= maxWeight(entries.filter((entry) => !predicate(entry)));
 };
 
@@ -462,7 +462,7 @@ export const make = (options: Options): Negotiator => {
       }
     }
     const jsonapi = entries.filter((entry) => entry.base === MEDIA_TYPE);
-    if (jsonapi.length === 0 || !isApiPath(pathname)) return html;
+    if (Arr.isReadonlyArrayEmpty(jsonapi) || !isApiPath(pathname)) return html;
     return Option.match(readError(entries, jsonapi, refuseExplicitly), {
       onSome: (error) => ({ ...html, error }),
       onNone: () => (wins(entries, (entry) => entry.base === MEDIA_TYPE) ? dispatch : html),

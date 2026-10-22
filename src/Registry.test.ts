@@ -132,14 +132,11 @@ describe("the router, over HTTP", () => {
   /** The host's front door: negotiate, relabel, dispatch with a fresh per-request context. */
   const serve = async (request: Request, store = new Map<string, Person>()) => {
     const { handler, dispose } = Registry.webHandler(Api, families);
-    try {
-      const verdict = negotiate(request);
-      if (verdict.error !== undefined) return Negotiation.errorResponse(verdict.error);
-      if (!verdict.dispatch) return new Response("html", { status: 200 });
-      return await handler(Negotiation.requestForRouter(request), Context.make(Store, store));
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    const verdict = negotiate(request);
+    if (verdict.error !== undefined) return Negotiation.errorResponse(verdict.error);
+    if (!verdict.dispatch) return new Response("html", { status: 200 });
+    return await handler(Negotiation.requestForRouter(request), Context.make(Store, store));
   };
   const json = async (response: Response) => ({
     status: response.status,
@@ -260,22 +257,19 @@ describe("the router, over HTTP", () => {
             Option.some(new ServerErrors.JsonapiError({ status: 418, errors: [] })),
         }),
     });
-    try {
-      // `Middleware.layer` negotiates itself: an application/json Accept is a 406 from inside the api.
-      const rejected = await handler(
-        new Request("https://example.test/people/1", { headers: { accept: "application/json" } }),
-        Context.make(Store, new Map()),
-      );
-      expect(rejected.status).toBe(406);
-      const ok = await handler(
-        new Request("https://example.test/people/9", { headers: { accept: MEDIA_TYPE } }),
-        Context.make(Store, new Map()),
-      );
-      // The catalogue still maps NotFound first; the extra arm only sees what it declines.
-      expect(ok.status).toBe(404);
-    } finally {
-      await dispose();
-    }
+    onTestFinished(() => dispose());
+    // `Middleware.layer` negotiates itself: an application/json Accept is a 406 from inside the api.
+    const rejected = await handler(
+      new Request("https://example.test/people/1", { headers: { accept: "application/json" } }),
+      Context.make(Store, new Map()),
+    );
+    expect(rejected.status).toBe(406);
+    const ok = await handler(
+      new Request("https://example.test/people/9", { headers: { accept: MEDIA_TYPE } }),
+      Context.make(Store, new Map()),
+    );
+    // The catalogue still maps NotFound first; the extra arm only sees what it declines.
+    expect(ok.status).toBe(404);
   });
 
   // #236: `Endpoint.create` attaches `Middleware.CreatedLocation`, which

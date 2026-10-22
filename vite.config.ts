@@ -79,10 +79,12 @@ export default defineConfig({
       // `warn`: every site stays reported and countable, but the tree stays
       // committable while the remaining work lands incrementally. Flip a rule
       // back to `error` (and delete its line) the moment its count reaches
-      // zero — a new site is a defect, not headroom. Counted at adoption
-      // (`vp lint`, 2026-09-18): 693 `require-safety-comment-for-type-
-      // assertion`, 524 `casting-awareness`, 282 `prefer-option-over-null`,
-      // 269 `avoid-native-object-helpers`, 245 `avoid-non-null-assertion`.
+      // zero — a new site is a defect, not headroom. Counted on adopting
+      // plugin 0.6.0 (`vp lint`, 2026-10-22): 4,040 warnings, with 813
+      // `require-safety-comment-for-type-assertion`, 626 `casting-awareness`,
+      // 489 `prefer-option-over-null`, 326 `avoid-native-object-helpers` and
+      // 237 `avoid-non-null-assertion` the largest. Per-rule remainder and the
+      // order to pay it down in: #436.
       "effect/require-safety-comment-for-type-assertion": "warn",
       "effect/no-chained-type-assertions": "warn",
       // This rule and `no-known-value-widening` only check the built-in
@@ -125,12 +127,8 @@ export default defineConfig({
       "effect/avoid-any": "warn",
       "effect/avoid-untagged-errors": "warn",
       "effect/avoid-direct-json": "warn",
-      "effect/prefer-arr-match": "warn",
-      "effect/no-length-comparison": "warn",
       "effect/prefer-arr-sort": "warn",
-      "effect/avoid-try-catch": "warn",
       "effect/prefer-effect-is": "warn",
-      "effect/avoid-expect-in-if": "warn",
       "effect/effect-run-in-body": "warn",
       "effect/avoid-direct-tag-checks": "warn",
       "effect/no-barrel-imports": "warn",

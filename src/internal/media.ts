@@ -1,15 +1,17 @@
 /**
  * JSON:API media type constants.
  *
- * Deliberately import-free: these constants are reachable from the
- * schema-only entry point, so binding them to `effect/http-api` here
- * would put the HTTP surface back into that entry point's graph. The
- * annotation helpers that *do* need `HttpApiSchema` live in the public
- * {@link MediaType} module, re-exported for internal use from `./httpMedia.js`.
+ * Deliberately imports nothing but the `effect` barrel: these constants are
+ * reachable from the schema-only entry point, so binding them to
+ * `effect/http-api` here would put the HTTP surface back into that entry
+ * point's graph. The annotation helpers that *do* need `HttpApiSchema` live in
+ * the public {@link MediaType} module, re-exported for internal use from
+ * `./httpMedia.js`.
  *
  * @since 0.1.0
  * @internal
  */
+import { Array as Arr } from "effect";
 
 /**
  * The JSON:API media type, per
@@ -67,7 +69,7 @@ export const baseMediaType = (entry: string): string =>
  * @internal
  */
 export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): string =>
-  extensions === undefined || extensions.length === 0
+  extensions === undefined || Arr.isReadonlyArrayEmpty(extensions)
     ? MEDIA_TYPE
     : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`;
 

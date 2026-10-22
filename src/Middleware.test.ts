@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished } from "vite-plus/test";
 import { Effect, ErrorReporter, Layer, Schema, SchemaIssue, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
 import {
@@ -366,12 +366,9 @@ const request = async (
   ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-  try {
-    const response = await handler(new Request(url, { headers }));
-    return { status: response.status, body: (await response.json()) as any };
-  } finally {
-    await dispose();
-  }
+  onTestFinished(() => dispose());
+  const response = await handler(new Request(url, { headers }));
+  return { status: response.status, body: (await response.json()) as any };
 };
 
 // Like `request`, but provides a recording `Tracer` (the pattern the `effect`
@@ -399,12 +396,9 @@ const requestTraced = async (
   ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
 
   const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
-  try {
-    const response = await handler(new Request(url, { headers }));
-    return { status: response.status, body: (await response.json()) as any, spans };
-  } finally {
-    await dispose();
-  }
+  onTestFinished(() => dispose());
+  const response = await handler(new Request(url, { headers }));
+  return { status: response.status, body: (await response.json()) as any, spans };
 };
 
 describe("Middleware.layer and a malformed Accept weight (#245)", () => {

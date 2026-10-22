@@ -52,6 +52,7 @@ import {
   Array as Arr,
   Effect,
   Record as Rec,
+  Result,
   Schema,
   SchemaIssue,
   SchemaTransformation,
@@ -1284,11 +1285,12 @@ const decodeFilterRecord = (
   const decoded = decodeFilter(fields, input);
   if (decoded._tag === "Issues")
     return Effect.fail(filterIssues(ast, input, decoded.issues, options));
-  try {
-    return Effect.succeed(prepare(decoded.node, literalEncoder(fields)).node);
-  } catch (error) {
-    return Effect.fail(new SchemaIssue.InvalidValue({ message: messageOf(error) }, input, options));
-  }
+  return Effect.fromResult(
+    Result.try({
+      try: () => prepare(decoded.node, literalEncoder(fields)).node,
+      catch: (error) => new SchemaIssue.InvalidValue({ message: messageOf(error) }, input, options),
+    }),
+  );
 };
 
 // Encodes a tree (normalising it first, and checking every field and operator
@@ -1297,15 +1299,13 @@ const encodeFilterNode = (
   fields: FieldCodecs,
   node: Node,
   options: SchemaAST.ParseOptions,
-): Effect.Effect<Record<string, string>, SchemaIssue.Issue> => {
-  try {
-    return Effect.succeed(
-      encodeFilter(prepare(node, literalEncoder(fields), operatorCheck(fields))),
-    );
-  } catch (error) {
-    return Effect.fail(new SchemaIssue.InvalidValue({ message: messageOf(error) }, node, options));
-  }
-};
+): Effect.Effect<Record<string, string>, SchemaIssue.Issue> =>
+  Effect.fromResult(
+    Result.try({
+      try: () => encodeFilter(prepare(node, literalEncoder(fields), operatorCheck(fields))),
+      catch: (error) => new SchemaIssue.InvalidValue({ message: messageOf(error) }, node, options),
+    }),
+  );
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -1707,7 +1707,10 @@ export const schema = <R extends Any, const O extends Options<R>>(
     nestedFields.fields = Schema.optionalKey(Schema.Struct(fieldsetFields));
   }
 
-  if (options.sort === true || (Array.isArray(options.sort) && options.sort.length > 0)) {
+  if (
+    options.sort === true ||
+    (Array.isArray(options.sort) && Arr.isReadonlyArrayNonEmpty(options.sort))
+  ) {
     const sortable =
       options.sort === true
         ? dedupe(resources.flatMap((r) => attributeKeys(r)))
@@ -1785,7 +1788,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
               const filterKeys = Rec.filter(flatValues, (_, key) => isFilterKey(key));
               const others = Rec.filter(flatValues, (_, key) => !isFilterKey(key));
               const nestedValues = nest(others);
-              if (Object.keys(filterKeys).length === 0) return Effect.succeed(nestedValues);
+              if (Rec.isEmptyRecord(filterKeys)) return Effect.succeed(nestedValues);
               return Effect.map(
                 decodeFilterRecord(fields, flat.ast, filterKeys, parseOptions),
                 (filter) => ({

@@ -270,7 +270,7 @@ export const format = (
 
   for (const tier of ["spec", "profile"] as const) {
     const outcomes = report.outcomes.filter((outcome) => outcome.rule.tier === tier);
-    if (outcomes.length === 0) continue;
+    if (Arr.isReadonlyArrayEmpty(outcomes)) continue;
     const tierSummary = summarise(outcomes);
     out.push(`${TIER_TITLE[tier].toUpperCase()}`);
     out.push(
@@ -290,7 +290,7 @@ export const format = (
   out.push(...renderWrites(report.writes ?? []));
 
   out.push("NOT COVERED BY THIS KIT");
-  if (report.gaps.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(report.gaps)) {
     out.push("  (none declared)");
   } else {
     out.push("  Areas the kit does not check at all. A rule that is absent here and");
@@ -300,7 +300,7 @@ export const format = (
     for (const gap of report.gaps) {
       out.push(`  · ${gap.area}`);
       for (const line of wrap(gap.reason, width - 6)) out.push(indent(line, "      "));
-      if (gap.tracking.length > 0)
+      if (Arr.isReadonlyArrayNonEmpty(gap.tracking))
         out.push(indent(`tracking: ${gap.tracking.join(", ")}`, "      "));
     }
   }

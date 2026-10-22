@@ -5,7 +5,7 @@
  *
  * @internal
  */
-import { Match, Option, Record as Rec, Schema, SchemaIssue } from "effect";
+import { Array as Arr, Match, Option, Record as Rec, Schema, SchemaIssue } from "effect";
 import type { Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 
@@ -494,7 +494,7 @@ export const decodeFilter = (
   }
   if (issues.size > 0) return { _tag: "Issues", issues: [...issues.values()] };
 
-  if (roots.length === 0) {
+  if (Arr.isReadonlyArrayEmpty(roots)) {
     return {
       _tag: "Issues",
       issues: [new SchemaIssue.InvalidValue({ message: "Expected at least one filter[...] key" })],
@@ -596,7 +596,7 @@ export const prepare = (
     }),
     Match.tag("In", "NotIn", (node): Prepared => {
       check(node.field, node._tag === "In" ? "in" : "nin");
-      if (node.values.length === 0)
+      if (Arr.isReadonlyArrayEmpty(node.values))
         throw new InvalidFilter({ message: `A ${node._tag} node needs at least one value` });
       const items = sortedUnique(
         node.values.map((value) => ({ wire: escape(encode(node.field, value)), value })),

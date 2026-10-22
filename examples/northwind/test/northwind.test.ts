@@ -3,7 +3,7 @@
  * (request encoding → routing → middleware → handler → response decoding)
  * through the in-memory `HttpApiTest` client.
  */
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client } from "@thomasfosterau/effect-jsonapi";
@@ -213,12 +213,10 @@ describe("northwind example: fetching", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(ProductNotFound);
-      expect((error as ProductNotFound).id).toBe("nope");
-    }
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    expect(error).toBeInstanceOf(ProductNotFound);
+    expect((error as ProductNotFound).id).toBe("nope");
   });
 });
 
@@ -404,10 +402,8 @@ describe("northwind example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(ProductNameTaken);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(ProductNameTaken);
   });
 
   it("404s when creating a product in a missing category", async () => {
@@ -434,10 +430,8 @@ describe("northwind example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(CategoryNotFound);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(CategoryNotFound);
   });
 
   it("marks a product discontinued with a partial update", async () => {
@@ -523,10 +517,8 @@ describe("northwind example: writing", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(CustomerNotFound);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(CustomerNotFound);
   });
 
   it("records an order's shipped date with a partial update", async () => {
@@ -710,10 +702,8 @@ describe("northwind example: related & relationship endpoints", () => {
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(findFailure(exit.cause)).toBeInstanceOf(Error);
-    }
+    assert(Exit.isFailure(exit));
+    expect(findFailure(exit.cause)).toBeInstanceOf(Error);
   });
 });
 

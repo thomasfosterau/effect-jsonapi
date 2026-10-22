@@ -138,7 +138,10 @@ const learnField = (ctx: Context, path: string) =>
     const attributes = first["attributes"];
     if (!isRecord(attributes)) return undefined;
     const keys = Object.keys(attributes);
-    return keys.length === 0 ? undefined : { field: keys[0]!, value: attributes[keys[0]!] };
+    return Arr.match(keys, {
+      onEmpty: () => undefined,
+      onNonEmpty: ([field]) => ({ field, value: attributes[field] }),
+    });
   });
 
 // ---------------------------------------------------------------------------
@@ -156,7 +159,7 @@ const advertisesProfile: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const targets = grammarEndpoints(ctx);
-      if (targets.length === 0) return skip(advertisesProfile.rule, NO_GRAMMAR);
+      if (Arr.isReadonlyArrayEmpty(targets)) return skip(advertisesProfile.rule, NO_GRAMMAR);
       const findings: Array<Finding> = [];
       yield* Effect.forEach(
         targets,
@@ -264,10 +267,11 @@ const rejections: RuleImpl = {
                 finding(rejections.rule, {
                   detail: `the 400 for ${probe.why} does not name \`${probe.key}\` in \`source.parameter\``,
                   expected: `source: { parameter: "${probe.key}" }`,
-                  observed:
-                    parameters.length === 0
-                      ? "no error object carried `source.parameter`"
-                      : `source.parameter: ${parameters.map((p) => JSON.stringify(p)).join(", ")}`,
+                  observed: Arr.match(parameters, {
+                    onEmpty: () => "no error object carried `source.parameter`",
+                    onNonEmpty: (named) =>
+                      `source.parameter: ${named.map((p) => JSON.stringify(p)).join(", ")}`,
+                  }),
                   probe: observation.probe,
                 }),
               );
@@ -575,7 +579,7 @@ const jsonApiMember: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0)
+      if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(jsonApiMember.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
       yield* Effect.forEach(
@@ -619,7 +623,7 @@ const repeatedKeySpelling: RuleImpl = {
   run: (ctx) =>
     Effect.gen(function* () {
       const { resolved, unresolved } = readable(ctx);
-      if (resolved.length === 0) {
+      if (Arr.isReadonlyArrayEmpty(resolved)) {
         return skip(repeatedKeySpelling.rule, noProbeReason("JSON:API read endpoint", unresolved));
       }
       const findings: Array<Finding> = [];
