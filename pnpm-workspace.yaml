@@ -124,24 +124,25 @@ overrides:
   effect: "catalog:"
   # Advisory floors for transitive dependencies of the dev toolchain, which
   # `pnpm audit --audit-level high` (CI's last step) gates. None is reached
-  # by the published package: `brace-expansion` arrives via
-  # @effect/docgen > glob > minimatch (GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg,
-  # GHSA-rgw5-rvv9-x895 — patched in 2.1.4); `js-yaml` 3.x via
-  # @effect/docgen > @effect/markdown-toc > gray-matter and effect-solutions >
-  # gray-matter (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh —
-  # patched in 3.15.2); `shell-quote` via @changesets/cli > launch-editor
-  # (GHSA-pqg4-j6r4-53mv — patched in 1.11.0; the locked launch-editor
-  # 2.14.1 declares `^1.8.4` (2.14.2 raises it to `^1.10.0`), which admits the
-  # fix, but the floor is what moves the locked 1.10.0 and keeps it from
-  # coming back); `launch-editor` itself via @changesets/cli
-  # (GHSA-587h-7wmj-h5pm — patched in 2.14.2; @changesets/cli 3.0.3 declares
-  # `^2.14.1`). Scoped to the affected major so a consumer of another
-  # major elsewhere in the tree keeps its own range. Drop each once its
-  # dependent's own range floor excludes the vulnerable versions.
-  "brace-expansion@2": ">=2.1.4"
-  "js-yaml@3": ">=3.15.2"
-  "launch-editor@2": ">=2.14.2"
-  "shell-quote@1": ">=1.11.0"
+  # by the published package: `js-yaml` 3.x via
+  # @effect/docgen > @effect/markdown-toc > gray-matter 3 (`^3.10.0`) and
+  # effect-solutions > gray-matter 4 (`^3.13.1`) (GHSA-52cp-r559-cp3m,
+  # GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh — patched in 3.15.2);
+  # `shell-quote` via @changesets/cli > launch-editor (GHSA-pqg4-j6r4-53mv —
+  # patched in 1.11.0; the locked launch-editor 2.14.2 declares `^1.10.0`,
+  # which still admits the vulnerable 1.10.x); `launch-editor` itself via
+  # @changesets/cli (GHSA-587h-7wmj-h5pm — patched in 2.14.2; @changesets/cli
+  # 3.0.3 declares `^2.14.1`). Each is a caret range on the major its
+  # dependents ask for, never an open `>=` floor, so it cannot lift them onto
+  # a major they were never tested against (an open `js-yaml@3` floor had
+  # resolved gray-matter to js-yaml 5.x, #421), and is scoped to that major so
+  # a consumer of another major elsewhere in the tree keeps its own range.
+  # Drop each once its dependent's own range floor excludes the vulnerable
+  # versions — as `brace-expansion@2` was (#421): minimatch 10 asks for
+  # `^5`, and nothing in the lockfile resolves 2.x any more.
+  "js-yaml@3": "^3.15.2"
+  "launch-editor@2": "^2.14.2"
+  "shell-quote@1": "^1.11.0"
   # `@mpsuesser/oxlint-plugin-effect` (^0.5.0) declares a peer on an `effect`
   # beta and ships no rc.118 build, so the singleton override above would force
   # it onto rc.118. Pin the plugin's own `effect` to the beta it was built
