@@ -1,0 +1,9 @@
+---
+"@thomasfosterau/effect-jsonapi": minor
+---
+
+`Conformance` gains `profile/filter/evaluation`, the first rule that executes the filter profile's evaluation semantics (`docs/filter-grammar.md` §6) against a server. On each collection endpoint that speaks the grammar (`filter: true`) and advertises `Filter.PROFILE_URI` on its media type, the kit fetches the collection unfiltered, following its `next` links so a paginated collection is compared whole. It builds filter trees over attributes the collection carries and evaluates each over every resource's JSON with its own internal §6.3 fold. It then compares that match set with the filtered collection's on `(type, id)`. A finding names the §6 rule, the tree, the URL that showed it, and every resource wrongly included or wrongly excluded, with the value the tree read on it.
+
+The trees are the ones that tell three-valued evaluation from two-valued, on an attribute that is NULL (or absent) on some resources of the sample and a JSON scalar of one type on others: `ne` and `gte` over NULL (F-CMP-1), `nin` (F-IN-2, F-IN-3), `isnull=false` and `isnull=true` (F-ISNULL-1, F-ISNULL-2), and `Or(eq, Not(eq))` (F-CONS-1). `And([])` and `Or([])` (F-AND-2) need no field. The comparison domain (F-ORD-1) is inferred from the JSON type the server answered, as §6.2 defines it. Nothing new is exported from `Filter`, and `Resource.filterable`'s shape is unchanged (§6.9 stands). A filter the server refuses with a 400 decides nothing, since the rejection rules judge refusals. A sample with no attribute that is sometimes NULL decides the empty groups only, and the rule's note says why. With nothing decided, the rule reports `Skipped`.
+
+The `Conformance.gaps` entry for the filter profile's evaluation semantics is narrowed to what the rule does not probe yet: `lt` / `lte` / `gt`, to-one relationship fields, a filter beside a sparse fieldset, and attributes the sample never shows NULL.

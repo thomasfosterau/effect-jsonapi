@@ -698,10 +698,10 @@ export const rules: ReadonlyArray<Rule> = implementations.map(
  */
 export const gaps: ReadonlyArray<Gap> = [
   {
-    area: "The filter profile's evaluation semantics",
+    area: "The filter profile's evaluation semantics, beyond the NULL cases",
     reason:
-      "The profile's syntax, closed operator core, canonical form, error pointers and advertisement are checked; what a tree *means* is not. #116 has since supplied the normative tables — `docs/filter-grammar.md` §6, rule-identified F-EVAL-*, F-CMP-*, F-IN-*, F-LOGIC-*, F-ISNULL-* — and deliberately ships no reference evaluator, assigning the executable oracle to this kit instead. The remaining work is a fold over the AST implementing §6.3, run against the unfiltered collection's JSON (which a probe already has, per F-ORD-1's JSON-representation domain) and compared against what the filtered request returned. Open first: whether that evaluator is public API — #116's \"shared building block\" — or stays internal to the kit.",
-    tracking: ["#116", "#120"],
+      "`profile/filter/evaluation` executes `docs/filter-grammar.md` §6 against the server with the kit's own internal fold (#161): it evaluates filter trees over the collection served unfiltered and names every resource the filtered request wrongly included or excluded, on the trees that tell three-valued evaluation from two-valued — `ne` and `gte` over NULL (F-CMP-1), `nin` (F-IN-2, F-IN-3), `isnull` (F-ISNULL-1, F-ISNULL-2), `Or(x, Not(x))` (F-CONS-1) and the empty groups (F-AND-2). It needs an attribute that is NULL on some resources of the sample and not on others, and infers the comparison domain (F-ORD-1) from the JSON type the server answered. Not yet probed: `lt` / `lte` / `gt`, to-one relationship fields (F-EVAL-4, F-ORD-5), a filter beside a sparse fieldset (F-EVAL-6), and attributes the sample never shows NULL.",
+    tracking: ["#116", "#161", "#433"],
   },
   {
     area: "Write semantics beyond the success responses",

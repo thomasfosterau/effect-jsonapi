@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Filter from "./Filter.js";
-import { compareCodePoints } from "./internal/filter.js";
+import {
+  AND,
+  evaluate,
+  matches,
+  NOT,
+  NULL,
+  OR,
+  type Row,
+  truth,
+  type Truth,
+} from "./internal/conformance/semantics.js";
 
 // ---------------------------------------------------------------------------
 // The profile's semantics (docs/filter-grammar.md §6), as an executable table.
@@ -8,116 +18,20 @@ import { compareCodePoints } from "./internal/filter.js";
 // This package evaluates no filter — a server does, against its store (§6.9).
 // What is checked here is that §6 is *coherent*: that the truth tables compose
 // into the outcomes §6.3 spells out, and that the corollaries §6.5 claims
-// really follow from them. The reference fold below is a fixture of this file,
-// not a shipped API; a conformance suite (#120) runs the same rules against a
-// server, which is the thing that actually has to conform.
+// really follow from them.
+//
+// Kept deliberately as the specification-coherence check, and not superseded
+// by the conformance kit (#161): it imports the kit's own fold
+// (`src/internal/conformance/semantics.ts`) rather than keeping a copy, so the
+// tables checked here are the very ones `profile/filter/evaluation` runs
+// against a server. That rule is what executes §6 against an implementation;
+// this file is what pins the oracle to §6's text.
 //
 // Each test names the rule it pins, so a failure reads as "§6 says X" rather
 // than as an assertion diff.
 // ---------------------------------------------------------------------------
 
-/** §6.3: the three truth values. */
-type Truth = "TRUE" | "FALSE" | "UNKNOWN";
-
-/** §6.4: the absence of a value for a field on one resource. Never a literal. */
-const NULL = Symbol.for("effect-jsonapi/test/NULL");
-type Null = typeof NULL;
-
-/** §6.2 F-ORD-1: every filterable field's values are a JSON scalar. */
-type Json = string | number | boolean;
-
-/** One resource, as §6.1 F-EVAL-4 reads it: each field to its JSON value or NULL. */
-interface Row {
-  readonly [field: string]: Json | Null;
-}
-
-const truth = (value: boolean): Truth => (value ? "TRUE" : "FALSE");
-
-// --- §6.3.3 F-LOGIC-1: Kleene's strong three-valued connectives ------------
-
-const AND: { readonly [A in Truth]: { readonly [B in Truth]: Truth } } = {
-  TRUE: { TRUE: "TRUE", FALSE: "FALSE", UNKNOWN: "UNKNOWN" },
-  FALSE: { TRUE: "FALSE", FALSE: "FALSE", UNKNOWN: "FALSE" },
-  UNKNOWN: { TRUE: "UNKNOWN", FALSE: "FALSE", UNKNOWN: "UNKNOWN" },
-};
-
-const OR: { readonly [A in Truth]: { readonly [B in Truth]: Truth } } = {
-  TRUE: { TRUE: "TRUE", FALSE: "TRUE", UNKNOWN: "TRUE" },
-  FALSE: { TRUE: "TRUE", FALSE: "FALSE", UNKNOWN: "UNKNOWN" },
-  UNKNOWN: { TRUE: "TRUE", FALSE: "UNKNOWN", UNKNOWN: "UNKNOWN" },
-};
-
-const NOT: { readonly [A in Truth]: Truth } = { TRUE: "FALSE", FALSE: "TRUE", UNKNOWN: "UNKNOWN" };
-
 const values: ReadonlyArray<Truth> = ["TRUE", "FALSE", "UNKNOWN"];
-
-// --- §6.2 F-ORD-1: comparison, in the domain of the field's JSON type ------
-
-const compare = (value: Json, literal: Json): number => {
-  if (typeof value !== typeof literal) {
-    throw new Error(`§6.2 F-ORD-1: ${typeof value} and ${typeof literal} are not one domain`);
-  }
-  if (typeof value === "number")
-    return value < (literal as number) ? -1 : value > (literal as number) ? 1 : 0;
-  if (typeof value === "boolean") return Number(value) - Number(literal as boolean);
-  return compareCodePoints(value as string, literal as string);
-};
-
-// --- §6.3: the reference fold ----------------------------------------------
-
-const evaluate = (node: Filter.Node, row: Row): Truth => {
-  switch (node._tag) {
-    case "Compare": {
-      const value = row[node.field];
-      // §6.3.1 F-CMP-1: every comparison against NULL is UNKNOWN.
-      if (value === undefined || value === NULL) return "UNKNOWN";
-      // §6.3.1 F-CMP-2: otherwise the two-valued result of the relation.
-      const order = compare(value, node.value as Json);
-      switch (node.op) {
-        case "eq":
-          return truth(order === 0);
-        case "ne":
-          return truth(order !== 0);
-        case "lt":
-          return truth(order < 0);
-        case "lte":
-          return truth(order <= 0);
-        case "gt":
-          return truth(order > 0);
-        case "gte":
-          return truth(order >= 0);
-      }
-    }
-    // §6.3.2 F-IN-1: a disjunction of equalities.
-    case "In":
-      return evaluate(
-        Filter.or(...node.values.map((value) => Filter.eq(node.field, value))) as Filter.Node,
-        row,
-      );
-    // §6.3.2 F-IN-2: the negation of F-IN-1.
-    case "NotIn":
-      return evaluate(Filter.not(Filter.isIn(node.field, node.values)) as Filter.Node, row);
-    // §6.3.4 F-ISNULL-1 / F-ISNULL-2: total, never UNKNOWN.
-    case "IsNull": {
-      const value = row[node.field];
-      const isNull = value === undefined || value === NULL;
-      return truth(node.negated ? !isNull : isNull);
-    }
-    // §6.3.3 F-AND-1 / F-AND-2: the folds, with TRUE and FALSE as identities.
-    case "And":
-      return node.members.reduce<Truth>((acc, member) => AND[acc][evaluate(member, row)], "TRUE");
-    case "Or":
-      return node.members.reduce<Truth>((acc, member) => OR[acc][evaluate(member, row)], "FALSE");
-    // §6.3.3 F-NOT-1.
-    case "Not":
-      return NOT[evaluate(node.member, row)];
-  }
-};
-
-/** §6.1 F-EVAL-3: a resource is in the primary data iff the root is TRUE. */
-const matches = (node: Filter.Node, row: Row): boolean => evaluate(node, row) === "TRUE";
-
-// ---------------------------------------------------------------------------
 
 describe("filter profile §6.1 — the evaluation model", () => {
   it("F-EVAL-3: a resource matches iff the root is TRUE; FALSE and UNKNOWN both exclude", () => {
