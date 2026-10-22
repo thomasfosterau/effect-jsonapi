@@ -367,6 +367,83 @@ describe("an endpoint that turns no include path on keeps its union (#320)", () 
   });
 });
 
+describe("a declared surface on `collection` / `polymorphic` derives their union (#336)", () => {
+  // A depth-2 surface: `comments.author` is advertised, so `people` must be
+  // admitted; `companies`, a direct target of `Person.employer` the surface
+  // never names, is not — the union narrows to what the surface names, as on
+  // `get`.
+  const surface = Include.make(Article, {
+    comments: Include.nested(Comment, { author: Person }),
+  });
+  const Node = Resource.make("nodes", { attributes: { name: Schema.String } });
+  const Author = Resource.extend(Node, "authors", {
+    inheritId: true,
+    relationships: { comments: Relationship.many(() => Comment) },
+  });
+  const Editor = Resource.extend(Node, "editors", {
+    inheritId: true,
+    relationships: { employer: Relationship.one(() => Company) },
+  });
+  const AnyNode = Resource.family(Node, [Author, Editor]);
+  const nodeSurface = Include.make(Author, {
+    comments: Include.nested(Comment, { author: Person }),
+  });
+  const editor = {
+    type: "editors",
+    id: "1",
+    attributes: { name: "E" },
+    relationships: { employer: { data: { type: "companies", id: "2" } } },
+  };
+
+  it.each([
+    ["", {}],
+    ["with `fields: true`", { fields: true }],
+  ] as const)("`collection` admits exactly the surface's union %s", (_, options) => {
+    const search = Endpoint.collection([Article, Person], {
+      name: "search",
+      path: "/search",
+      include: surface,
+      ...options,
+    });
+    expect(admitted(search, wire.articles, true)).toEqual(["comments", "people"]);
+  });
+
+  it.each([
+    ["", {}],
+    ["with `fields: true`", { fields: true }],
+  ] as const)("`polymorphic` admits exactly the surface's union %s", (_, options) => {
+    expect(
+      admitted(Endpoint.polymorphic(AnyNode, { include: nodeSurface, ...options }), editor, false),
+    ).toEqual(["comments", "people"]);
+  });
+
+  it.each([
+    [
+      "`collection`",
+      Endpoint.collection([Article, Person], {
+        name: "search",
+        path: "/search",
+        include: surface,
+        fields: true,
+      }),
+      [wire.articles],
+    ],
+    [
+      "`polymorphic`",
+      Endpoint.polymorphic(AnyNode, { include: nodeSurface, fields: true }),
+      editor,
+    ],
+  ] as const)(
+    "%s with `fields: true`: a surface member a fieldset names is partial",
+    (_, endpoint, data) => {
+      const sparse = { ...wire.people, attributes: { name: "Ada" } };
+      expect(
+        Exit.isSuccess(Schema.decodeUnknownExit(successOf(endpoint))({ data, included: [sparse] })),
+      ).toBe(true);
+    },
+  );
+});
+
 describe("a depth-2 include path answered over HTTP (#320)", () => {
   const Api = HttpApi.make("includeDepthIncluded").add(
     Group.make(

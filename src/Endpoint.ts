@@ -223,7 +223,8 @@ export interface ReachableIncluded<R extends Any, Include> extends Schema.Union<
 // shares).
 
 // The runtime mirror of `ReachableIncluded`: `None` when the `include` option
-// is off or a declared surface — which keep the union they had.
+// is off (the default union stands) or a declared surface (whose own union
+// each caller binds).
 const reachableIncluded = (
   resources: ReadonlyArray<Any>,
   include?: IncludeArgument,
@@ -1336,12 +1337,14 @@ export interface CollectionIncluded<Resources extends ReadonlyArray<Any>> extend
 > {}
 
 // The `included` union of a heterogeneous collection or a polymorphic
-// endpoint: its `Default` union, whose members are `DefaultMembers` — widened,
-// when the `include` option is `true` or a `Query.IncludeOptions`, by every
-// resource a legal include path reaches from any of `Members` (#320).
-// Distributes over a widened `include`, as `IncludedOf` does (#382): under
-// `include: boolean` it admits what either value admits, since the endpoint
-// built from that value may have turned `include` on.
+// endpoint: a declared surface's own union, exactly as on `get` / `list` /
+// `related` (#336); else its `Default` union, whose members are
+// `DefaultMembers` — widened, when the `include` option is `true` or a
+// `Query.IncludeOptions`, by every resource a legal include path reaches from
+// any of `Members` (#320). Distributes over a widened `include`, as
+// `IncludedOf` does (#382): under `include: boolean` it admits what either
+// value admits, since the endpoint built from that value may have turned
+// `include` on.
 type MembersIncludedOf<
   Members extends Any,
   Include,
@@ -1350,7 +1353,9 @@ type MembersIncludedOf<
 > = Include extends unknown
   ? IncludeEnabled<Include> extends true
     ? DeclaresSurface<Include> extends true
-      ? Default
+      ? Include extends { readonly included: infer U extends Schema.Top }
+        ? U
+        : Default
       : MembersReachableIncluded<Members, Include, DefaultMembers>
     : Default
   : never;
@@ -1379,7 +1384,9 @@ type MembersIncludedMembers<
 > = Include extends unknown
   ? IncludeEnabled<Include> extends true
     ? DeclaresSurface<Include> extends true
-      ? DefaultMembers
+      ? Include extends { readonly included: { readonly members: ReadonlyArray<infer M> } }
+        ? M
+        : DefaultMembers
       : DefaultMembers | IncludedResources<Members, Include>
     : DefaultMembers
   : never;
@@ -1450,8 +1457,9 @@ const membersDocumentParts = (
 // non-`paginated` direct target of every member of `Resources` (what
 // `directTargets` returns) is, by construction, a member of
 // `IncludedResources<..., false>`, every resource an include path reaches one of
-// `IncludedResources`, and `membersDocumentParts` makes partial exactly the
-// members `MembersDocument` does.
+// `IncludedResources`, a declared surface's `included` is the union
+// `MembersIncludedOf` names for it, and `membersDocumentParts` makes partial
+// exactly the members `MembersDocument` does.
 const collectionDocument = (
   resources: ReadonlyArray<Any>,
   options: {
@@ -1464,9 +1472,11 @@ const collectionDocument = (
     resources,
     options,
     Schema.Union(resources),
-    Option.getOrElse(reachableIncluded(resources, options.include), () =>
-      Schema.Union(dedupe(resources.flatMap((resource) => directTargets(resource)))),
-    ),
+    isSurface(options.include)
+      ? options.include.included
+      : Option.getOrElse(reachableIncluded(resources, options.include), () =>
+          Schema.Union(dedupe(resources.flatMap((resource) => directTargets(resource)))),
+        ),
   );
   return CollectionDocument(data, { included, meta: options.meta ?? AnyMeta });
 };
@@ -1482,7 +1492,10 @@ const collectionDocument = (
  * Success is a 200 collection document whose `data` member is the union of
  * the given resources and whose `included` union spans all of their
  * non-`paginated` relationship targets and, when `include` is `true` or a
- * `Query.IncludeOptions`, every resource a legal include path reaches.
+ * `Query.IncludeOptions`, every resource a legal include path reaches. A
+ * declared `Include.Surface` derives the union instead, exactly as it does on
+ * `get` / `list`: the `included` admits what the surface names, and nothing
+ * else.
  *
  * @example
  * ```ts
@@ -1539,7 +1552,11 @@ export const collection = <
     readonly path: Path;
     /** `ApiError` classes this endpoint can fail with. */
     readonly errors?: Errors;
-    /** Enable the `?include=` query parameter (paths span all resources' graphs). */
+    /**
+     * Enable the `?include=` query parameter (paths span all resources'
+     * graphs), or an `Include.Surface` over one of them — a declared surface,
+     * which also derives this endpoint's `included` union.
+     */
     readonly include?: Include;
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets for all resources, their
@@ -1596,7 +1613,8 @@ export const collection = <
 // ---------------------------------------------------------------------------
 
 // The runtime document of `polymorphic`: the family's own `document()`, its
-// default `included` union unless `include` reaches further — with every
+// default `included` union unless `include` is a declared surface (whose own
+// union it binds) or reaches further — with every
 // member whose type a fieldset names made partial when the endpoint declares
 // `fields`. The cast at its use is sound as `collectionDocument`'s is.
 const polymorphicDocument = (
@@ -1607,11 +1625,15 @@ const polymorphicDocument = (
     readonly meta?: Schema.Top;
   },
 ): Schema.Top => {
-  const reachable = reachableIncluded(family.members, options?.include);
+  // A declared surface's own union (#336), else the walk when `include` is on.
+  const reachable = isSurface(options?.include)
+    ? Option.some(options.include.included)
+    : reachableIncluded(family.members, options?.include);
   if (options?.fields !== true) {
     return family.document({
       ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-      // The family's own default union unless `include` reaches further.
+      // The family's own default union unless `include` declares a surface
+      // or reaches further.
       ...Option.match(reachable, {
         onNone: () => ({}),
         onSome: (included) => ({ included }),
@@ -1635,7 +1657,8 @@ const polymorphicDocument = (
  * Success is a 200 single-resource document whose primary `data` is the family's
  * member union (discriminated by `type`) and whose `included` spans every
  * member's non-`paginated` targets and, when `include` is `true` or a `Query.IncludeOptions`,
- * every resource a legal include path reaches. The `:id` param is the family's
+ * every resource a legal include path reaches. A declared `Include.Surface`
+ * derives the union instead, as on `get`: exactly what the surface names. The `:id` param is the family's
  * shared id, and `?include=` / `?fields[TYPE]=` span all members' graphs.
  *
  * For the collection case (`GET /nodes`) use {@link collection} with
@@ -1673,7 +1696,11 @@ export const polymorphic = <
 >(
   family: Family<FamilyName, Members, Base>,
   options?: CommonOptions<Name, Path, Errors> & {
-    /** Enable the `?include=` query parameter (paths span all members' graphs). */
+    /**
+     * Enable the `?include=` query parameter (paths span all members'
+     * graphs), or an `Include.Surface` over one of them — a declared surface,
+     * which also derives this endpoint's `included` union.
+     */
     readonly include?: Include;
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets for all members, their
