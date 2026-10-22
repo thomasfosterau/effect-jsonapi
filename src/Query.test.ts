@@ -1273,22 +1273,55 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
       }),
     );
 
-    const request = async (url: string) => {
+    const request = async (
+      url: string,
+      middleware: Layer.Layer<
+        Middleware.ContentNegotiation | Middleware.SchemaErrors
+      > = Middleware.layer,
+    ) => {
       const appLayer = HttpApiBuilder.layer(Api).pipe(
         Layer.provide(PeopleLive),
-        Layer.provide(Middleware.layer),
+        Layer.provide(middleware),
         Layer.provide(platformLayer),
       );
       const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
       return (await handler(new Request(url)).finally(dispose)).status;
     };
 
-    it.each(titled(implementationSpecific))(
+    // A base name that is not a legal member name — `__proto__`, or the
+    // empty one of `[x]` — is a 400 since #263 unless the allow-list admits
+    // it. `__proto__` is admitted here, so the reshaper still sees it end to
+    // end; an empty base name no entry can admit.
+    const illegal = (search: string) => search.startsWith("[") || search.startsWith("__proto__");
+    const proto = implementationSpecific.filter((search) => search.startsWith("__proto__"));
+    const allowingProto = Middleware.layerWith({ allowedQueryParameters: ["__proto__"] });
+
+    it.each(titled(implementationSpecific.filter((search) => !illegal(search))))(
       "answers 200 to ?%s and hands the handler {}",
       async (_, search) => {
         received.length = 0;
         expect(await request(`http://localhost/people/1?${search}`)).toBe(200);
         expect(received).toEqual([{}]);
+        expect(polluted()).toBe(false);
+      },
+    );
+
+    it.each(titled(proto))(
+      "answers 200 to ?%s with `__proto__` allowed and hands the handler {}",
+      async (_, search) => {
+        received.length = 0;
+        expect(await request(`http://localhost/people/1?${search}`, allowingProto)).toBe(200);
+        expect(received).toEqual([{}]);
+        expect(polluted()).toBe(false);
+      },
+    );
+
+    it.each(titled(implementationSpecific.filter(illegal)))(
+      "answers 400 to ?%s under the default allow-list, before the handler",
+      async (_, search) => {
+        received.length = 0;
+        expect(await request(`http://localhost/people/1?${search}`)).toBe(400);
+        expect(received).toEqual([]);
         expect(polluted()).toBe(false);
       },
     );
