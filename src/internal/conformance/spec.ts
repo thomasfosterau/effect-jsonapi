@@ -39,6 +39,7 @@ import {
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
 import { atomicRules } from "./atomic.js";
+import { relationshipRules } from "./relationships.js";
 import {
   type Context,
   describe,
@@ -90,8 +91,10 @@ import {
   targets,
   undecided,
   type Verdict,
+  type Via,
   viaCreateEndpoint,
   withCreated,
+  writeHeaders,
 } from "./write.js";
 
 const SPEC = "https://jsonapi.org/format/1.1";
@@ -2466,6 +2469,99 @@ const updateReadBack: RuleImpl = {
     ),
 };
 // ---------------------------------------------------------------------------
+// A client-generated id that already exists
+// ---------------------------------------------------------------------------
+
+/**
+ * Sends the fixture's payload again through the target's create endpoint,
+ * carrying `id` — the id the server gave the resource the kit just created —
+ * as a client-generated one. No id is minted: the server named it.
+ */
+const viaExistingId = (ctx: Context, target: Target, id: string): Via => ({
+  ...viaCreateEndpoint(ctx, target),
+  send: (payload) =>
+    idempotencyHeaders(target.createEndpoint).pipe(
+      Effect.flatMap((key) =>
+        ctx.request({
+          method: "POST",
+          url: target.createPath,
+          headers: { ...writeHeaders, ...key },
+          body: { data: { ...payload, id } },
+        }),
+      ),
+    ),
+});
+
+const createConflictId: RuleImpl = {
+  creates: true,
+  rule: rule(
+    "spec/status/create-conflict-id",
+    "Creating Resources",
+    "crud-creating-responses-409",
+    "MUST",
+    "A server MUST return 409 Conflict when processing a POST request to create a resource with a client-generated ID that already exists — or 403 Forbidden, when it does not support client-generated IDs at all.",
+  ),
+  run: (ctx) =>
+    overTargets(ctx, createConflictId.rule, targets(ctx, "create"), "create endpoint", (target) =>
+      withCreated(
+        ctx,
+        createConflictId.rule,
+        target,
+        viaCreateEndpoint(ctx, target),
+        onAccepted(target, (created) =>
+          Result.match(ownId(created), {
+            onFailure: (reason) => Effect.succeed(undecided(reason)),
+            onSuccess: (id) =>
+              withCreated(
+                ctx,
+                createConflictId.rule,
+                target,
+                viaExistingId(ctx, target, id),
+                (again): Effect.Effect<Verdict> =>
+                  Effect.succeed(
+                    Created.$match(again, {
+                      Unbuilt: ({ reason }) => undecided(reason),
+                      Sent: ({ observation }) =>
+                        judgeExistingId(target, created.payload.type, id, observation),
+                    }),
+                  ),
+              ),
+          }),
+        ),
+      ),
+    ),
+};
+
+const judgeExistingId = (
+  target: Target,
+  type: string,
+  id: string,
+  observation: Observation,
+): Verdict => {
+  const request = `the POST to ${target.createPath} carrying the existing id \`${type}:${id}\``;
+  if (observation.status === 0)
+    return undecided(`${request} got no answer (${describe(observation)})`);
+  if (refusedOnKeyGrounds(target.createEndpoint, observation.probe.headers, observation))
+    return undecided(
+      `${request} was refused over \`Idempotency-Key\` (${describe(observation)}), which says nothing of its id`,
+    );
+  if (observation.status === 409) return decided(2, []);
+  if (observation.status === 403)
+    return undecided(
+      `${request} answered 403: the server does not support client-generated ids, so none can already exist`,
+    );
+  return decided(2, [
+    finding(createConflictId.rule, {
+      detail: `${request} — the id of the resource the kit had just created — answered ${observation.status}${succeeded(observation) ? ", accepting it" : ""}`,
+      expected:
+        "409 Conflict, or 403 Forbidden from a server that does not support client-generated ids",
+      observed: describe(observation),
+      probe: observation.probe,
+    }),
+  ]);
+};
+
+// ---------------------------------------------------------------------------
 // Reachability
 // ---------------------------------------------------------------------------
 
@@ -2627,5 +2723,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   createConflictType,
   createReadBack,
   updateReadBack,
+  createConflictId,
+  ...relationshipRules,
   ...atomicRules,
 ];

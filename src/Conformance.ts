@@ -706,8 +706,8 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "Write semantics beyond the success responses",
     reason:
-      "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — that a create of a `type` the endpoint does not serve is a 409, and that what a create or update answered reads back through the resource's GET, on resources it creates and disposes of itself. Still unchecked: creation with a client-generated id (201 or 204, or 403 where unsupported) and the 409 for a duplicate one, which need an id the fixture supplies; and relationship mutation through `/relationships/…` (replacement, append, removal), which needs a resource to link to and a read-back through the relationship endpoint. The fixture makes each of these probe-able; they are not yet written.",
-    tracking: ["#429"],
+      "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — that a create of a `type` the endpoint does not serve is a 409, that a create carrying an id the server already gave a resource is a 409, that what a create or update answered reads back through the resource's GET, and that a relationship PATCH, POST or DELETE replaces, adds to or removes from the linkage its relationship endpoint reads back — on resources it creates and disposes of itself. Still unchecked: creation with a client-generated id (201 or 204, or 403 where unsupported), which needs an id the fixture supplies, since the kit never mints one.",
+    tracking: ["#456"],
   },
   {
     area: "The Idempotency-Key profile",

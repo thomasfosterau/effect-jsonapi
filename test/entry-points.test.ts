@@ -99,6 +99,7 @@ const HTTP_TIER = [
   "internal/conformance/links.ts",
   "internal/conformance/pagination.ts",
   "internal/conformance/profile.ts",
+  "internal/conformance/relationships.ts",
   "internal/conformance/report.ts",
   "internal/conformance/samples.ts",
   "internal/conformance/semantics.ts",

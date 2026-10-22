@@ -262,6 +262,14 @@ export interface Discovered {
    * `Schema.Unknown` success, say). `"unshown"` for every other role.
    */
   readonly linkage: Cardinality;
+  /**
+   * For a `relationship` endpoint, the resource types its success schema
+   * declares the linkage's identifiers to be — each identifier's `type`
+   * literal — in declaration order. Empty when the schema names none it can
+   * read (a hand-built or `Schema.Unknown` success, say) and for every other
+   * role.
+   */
+  readonly linkageTypes: ReadonlyArray<string>;
   /** The first literal path segment — the resource type under the conventional paths. */
   readonly segment: string | undefined;
   readonly params: ReadonlyArray<string>;
@@ -419,6 +427,48 @@ const documentCardinality = (ast: SchemaAST.AST): Cardinality => {
   return data === undefined ? "unshown" : linkageCardinality(data.type);
 };
 
+/** The `type` literals the identifiers of resource linkage of this schema's wire shape declare. */
+const linkageTypesOf = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return linkageTypesOf(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(linkageTypesOf);
+  if (SchemaAST.isArrays(encoded))
+    return [...encoded.elements, ...encoded.rest].flatMap(linkageTypesOf);
+  if (!SchemaAST.isObjects(encoded)) return [];
+  const type = encoded.propertySignatures.find((signature) => signature.name === "type");
+  return type === undefined ? [] : literalsOf(type.type);
+};
+
+/** The string literals a schema's wire shape admits. */
+const literalsOf = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(literalsOf);
+  return SchemaAST.isLiteral(encoded) && Predicate.isString(encoded.literal)
+    ? [encoded.literal]
+    : [];
+};
+
+/** The identifier types a linkage document schema's `data` declares. */
+const documentLinkageTypes = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return documentLinkageTypes(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(documentLinkageTypes);
+  if (!SchemaAST.isObjects(encoded)) return [];
+  const data = encoded.propertySignatures.find((signature) => signature.name === "data");
+  return data === undefined ? [] : linkageTypesOf(data.type);
+};
+
+/**
+ * The identifier types a relationship endpoint's success schemas declare,
+ * deduplicated; none for an endpoint of any other role.
+ */
+const declaredLinkageTypes = (endpoint: HttpApiEndpoint.Top, role: Role): ReadonlyArray<string> =>
+  role === "relationship"
+    ? Arr.dedupe(
+        Arr.flatMap(Array.from(endpoint.success), (success) => documentLinkageTypes(success.ast)),
+      )
+    : [];
+
 /**
  * How many identifiers a relationship endpoint's success schemas agree it
  * answers; `"unshown"` for an endpoint of any other role.
@@ -464,6 +514,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
         path: endpoint.path,
         role,
         linkage: declaredCardinality(endpoint, role),
+        linkageTypes: declaredLinkageTypes(endpoint, role),
         segment: segments.find((segment) => !segment.startsWith(":")),
         params: segments
           .filter((segment) => segment.startsWith(":"))

@@ -16,7 +16,7 @@ import { BlogLive, discardArticle } from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to. None: the
+ * Remove an entry when its issue is fixed; the test will tell you to. The other
  * write rules have been clean since #428, which answers a resource object of
  * another `type` with 409, and the read rules since #169: the handlers of the reads
  * that declare `fields` (`GET /articles/:id` and `/search`) project
@@ -24,7 +24,10 @@ import { BlogLive, discardArticle } from "../handlers.js";
  * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
  * document (the `Atomic.results` answer carries none).
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
+  // `Endpoint.create` drops a client-generated id and answers 201, not 403 or 409.
+  ["spec/status/create-conflict-id", "#454"],
+];
 
 /**
  * The write fixture: a payload the blog accepts, an update it must apply, and

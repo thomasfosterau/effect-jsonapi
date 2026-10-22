@@ -72,8 +72,12 @@ import {
 const MUTATING_SKIP =
   "mutating probe — pass `mutating: true` to run it against a disposable target";
 
-/** The request headers every write probe sends. */
-const writeHeaders = {
+/**
+ * The request headers every write probe sends.
+ *
+ * @internal
+ */
+export const writeHeaders = {
   accept: MEDIA_TYPE,
   "content-type": MEDIA_TYPE,
 };
@@ -187,7 +191,7 @@ export interface Targets {
   readonly candidates: number;
 }
 
-type WriteRole = "create" | "update" | "delete";
+type WriteRole = "create" | "update" | "delete" | "relationshipWrite";
 
 /** A fixture's members, narrowed: what every write rule needs, and what only some do. */
 interface Usable {
@@ -259,8 +263,8 @@ const usable = (
 
 /**
  * The endpoints of `role` a write rule can drive. For `"create"` that is every
- * create endpoint whose type has a `create` fixture; for `"update"` and
- * `"delete"` it is every such endpoint whose type also has a create endpoint
+ * create endpoint whose type has a `create` fixture; for `"update"`,
+ * `"delete"` and `"relationshipWrite"` it is every such endpoint whose type also has a create endpoint
  * and fixture — the kit acts on resources it created itself, never on a
  * caller's sample — and, for `"update"`, an `update` fixture. `admits`
  * narrows the candidates to the endpoints a rule is about (those declaring

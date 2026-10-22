@@ -3010,6 +3010,7 @@ describe("Conformance: the write fixture", () => {
     "spec/status/create-conflict-type",
     "spec/status/create-read-back",
     "spec/status/update-read-back",
+    "spec/status/create-conflict-id",
     "spec/atomic/response-ext-parameter",
   ];
 
@@ -3032,6 +3033,7 @@ describe("Conformance: the write fixture", () => {
   type Attributes = typeof Attributes.Type;
   const NewArticle = Schema.Struct({
     type: Schema.Literal("articles"),
+    id: Schema.optionalKey(Schema.String),
     attributes: Schema.optionalKey(Attributes),
   });
   const decodeCreate = Schema.decodeUnknownOption(Schema.Struct({ data: NewArticle }));
@@ -3087,8 +3089,10 @@ describe("Conformance: the write fixture", () => {
       attributes,
       links: { self: `/articles/${id}` },
     });
-    const create = (attributes: Attributes) => {
-      const id = options.reuseIds === true ? `${100 + MutableHashMap.size(store)}` : `${next++}`;
+    const create = (attributes: Attributes, clientId?: string) => {
+      const id =
+        clientId ??
+        (options.reuseIds === true ? `${100 + MutableHashMap.size(store)}` : `${next++}`);
       MutableHashMap.set(store, id, attributes);
       return resource(id, attributes);
     };
@@ -3099,7 +3103,10 @@ describe("Conformance: the write fixture", () => {
             ? refusal(409, "Conflict")
             : refusal(400, "Bad Request"),
         onSome: ({ data }) => {
-          const made = create(data.attributes ?? {});
+          // A client-generated id is honoured, and one already taken is a 409.
+          if (data.id !== undefined && MutableHashMap.has(store, data.id))
+            return refusal(409, "Conflict");
+          const made = create(data.attributes ?? {}, data.id);
           return { status: 201, headers: { location: made.links.self }, body: { data: made } };
         },
       });
@@ -3908,6 +3915,7 @@ describe("Conformance: the write fixture", () => {
       "cleaned-up",
       "cleaned-up",
       "deleted",
+      "cleaned-up",
       "cleaned-up",
       "cleaned-up",
       "cleaned-up",
@@ -4776,6 +4784,9 @@ describe("Conformance: the write fixture", () => {
       expect(writes.filter((write) => write.disposal === "left").length).toBe(leaves);
     });
 
+  /** A `POST /articles` of a resource object whose `type` that endpoint does not serve. */
+  const foreign = (request: CannedRequest) => Option.isSome(decodeForeignCreate(request.body));
+
   /** A successful `POST /articles` — not the 415 the negotiation rule provokes. */
   const creates = (request: CannedRequest, canned: Canned) =>
     request.method === "POST" && request.path === "/articles" && canned.status === 201;
@@ -4794,7 +4805,7 @@ describe("Conformance: the write fixture", () => {
     "spec/status/create-response-document",
     (canned, request) =>
       creates(request, canned) ? { ...canned, body: { meta: { ok: true } } } : canned,
-    7,
+    8,
   );
 
   brokenWrite(
@@ -4893,7 +4904,9 @@ describe("Conformance: the write fixture", () => {
     "a create of a type the endpoint does not serve answered 400, not 409",
     "spec/status/create-conflict-type",
     (canned, request) =>
-      request.method === "POST" && canned.status === 409 ? refusal(400, "Bad Request") : canned,
+      request.method === "POST" && canned.status === 409 && foreign(request)
+        ? refusal(400, "Bad Request")
+        : canned,
   );
 
   brokenWrite(
@@ -4993,9 +5006,33 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(report, "spec/status/create-read-back")).toEqual(skippedFor("answered 503"));
   });
 
+  brokenWrite(
+    "a create carrying the id of an existing resource answered 201 under another id",
+    "spec/status/create-conflict-id",
+    (canned, request) =>
+      request.method === "POST" && canned.status === 409 && !foreign(request)
+        ? // As if the server dropped the client-generated id and minted its own.
+          { status: 201, body: { data: { type: "articles", id: "901", attributes: {} } } }
+        : canned,
+    0,
+    /POST/,
+  );
+
+  it("decides nothing on an existing id from a server that refuses client-generated ids with 403", async () => {
+    const { report } = await run((canned, request) =>
+      request.method === "POST" && canned.status === 409 && !foreign(request)
+        ? refusal(403, "Forbidden")
+        : canned,
+    );
+    expect(failed(report)).toEqual([]);
+    expect(outcomeFor(report, "spec/status/create-conflict-id")).toEqual(
+      skippedFor("answered 403: the server does not support client-generated ids"),
+    );
+  });
+
   it("disposes of what a server that accepts a create of a type it does not serve made", async () => {
     const { report, store, writes } = await run((canned, request) => {
-      if (request.method !== "POST" || canned.status !== 409) return canned;
+      if (request.method !== "POST" || canned.status !== 409 || !foreign(request)) return canned;
       // As if the server ignored `type`: it makes an article of the payload.
       const made = { type: "articles", id: "900", attributes: {} };
       return { status: 201, body: { data: made } };
@@ -5015,6 +5052,266 @@ describe("Conformance: the write fixture", () => {
         ? { ...canned, contentType: MEDIA_TYPE }
         : canned,
   );
+});
+
+describe("Conformance: relationship mutation (#429)", () => {
+  const Tag = Resource.make("tags", { attributes: { name: Schema.String } });
+  const Post = Resource.make("posts", {
+    attributes: { title: Schema.String },
+    relationships: {
+      author: Relationship.one(() => Person),
+      tags: Relationship.many(() => Tag),
+    },
+  });
+  const relationshipApi = HttpApi.make("relationships").add(
+    Group.make(
+      Post,
+      Endpoint.get(Post),
+      Endpoint.create(Post),
+      Endpoint.getRelationship(Post, "author"),
+      Endpoint.getRelationship(Post, "tags"),
+      Endpoint.updateRelationship(Post, "author"),
+      Endpoint.updateRelationship(Post, "tags"),
+      Endpoint.addRelationship(Post, "tags"),
+      Endpoint.removeRelationship(Post, "tags"),
+    ),
+  );
+
+  const RULES = [
+    "spec/relationships/replace",
+    "spec/relationships/add",
+    "spec/relationships/remove",
+  ];
+
+  interface Linkage {
+    author: Option.Option<string>;
+    tags: ReadonlyArray<string>;
+  }
+
+  /** Ways a server gets a relationship write wrong; none set is a conformant server. */
+  interface Defects {
+    /** PATCH answers 204 and changes nothing. */
+    readonly patchIgnored?: true;
+    /** POST replaces the to-many linkage instead of adding to it. */
+    readonly postReplaces?: true;
+    /** DELETE answers 204 and removes nothing. */
+    readonly deleteIgnored?: true;
+    /** PATCH is refused with 403, as §Updating Relationships allows. */
+    readonly patchForbidden?: true;
+  }
+
+  const Ref = Schema.Struct({ type: Schema.String, id: Schema.String });
+  const decodeLinkage = Schema.decodeUnknownOption(
+    Schema.Struct({ data: Schema.Union([Schema.Null, Ref, Schema.Array(Ref)]) }),
+  );
+  const decodeNewPost = Schema.decodeUnknownOption(
+    Schema.Struct({
+      data: Schema.Struct({
+        relationships: Schema.Struct({
+          author: Schema.Struct({ data: Schema.NullOr(Ref) }),
+          tags: Schema.Struct({ data: Schema.Array(Ref) }),
+        }),
+      }),
+    }),
+  );
+  const Route = /^\/posts\/([^/]+)\/relationships\/(author|tags)$/;
+
+  /** The ids a linkage document's `data` names: none for `null`. */
+  const idsOf = (request: CannedRequest): ReadonlyArray<string> =>
+    Option.match(decodeLinkage(request.body), {
+      onNone: () => [],
+      onSome: ({ data }) => (data === null ? [] : Arr.map(Arr.ensure(data), ({ id }) => id)),
+    });
+
+  const linkageDocument = (name: string, held: Linkage) => ({
+    data:
+      name === "author"
+        ? Option.match(held.author, {
+            onNone: () => null,
+            onSome: (id) => ({ type: "people", id }),
+          })
+        : Arr.map(held.tags, (id) => ({ type: "tags", id })),
+  });
+
+  /** What a relationship write leaves the post's linkage as, under `defects`. */
+  const written = (
+    request: CannedRequest,
+    name: string,
+    held: Linkage,
+    defects: Defects,
+  ): Linkage => {
+    const sent = idsOf(request);
+    if (request.method === "PATCH") {
+      if (defects.patchIgnored === true) return held;
+      return name === "author" ? { ...held, author: Arr.head(sent) } : { ...held, tags: sent };
+    }
+    if (request.method === "POST")
+      return { ...held, tags: defects.postReplaces === true ? sent : Arr.union(held.tags, sent) };
+    return defects.deleteIgnored === true
+      ? held
+      : { ...held, tags: Arr.difference(held.tags, sent) };
+  };
+
+  /** A server over `store` that stores each post's linkage and answers its relationship endpoints. */
+  const relationshipServer = (
+    store: MutableHashMap.MutableHashMap<string, Linkage>,
+    defects: Defects,
+  ) => {
+    let next = 100;
+    const notFound: Canned = { status: 404, body: { errors: [{ status: "404" }] } };
+    return (request: CannedRequest): Canned => {
+      if (request.method === "POST" && request.path === "/posts")
+        return Option.match(decodeNewPost(request.body), {
+          onNone: () => ({ status: 400, body: { errors: [{ status: "400" }] } }),
+          onSome: ({ data: { relationships } }) => {
+            const id = `${next++}`;
+            MutableHashMap.set(store, id, {
+              author: Option.map(Option.fromNullishOr(relationships.author.data), (ref) => ref.id),
+              tags: Arr.map(relationships.tags.data, (ref) => ref.id),
+            });
+            return {
+              status: 201,
+              body: { data: { type: "posts", id, attributes: { title: "t" } } },
+            };
+          },
+        });
+      const [, id = "", name = ""] = Route.exec(request.path) ?? [];
+      return Option.match(MutableHashMap.get(store, id), {
+        onNone: () => notFound,
+        onSome: (held) => {
+          if (request.method === "GET") return { body: linkageDocument(name, held) };
+          if (request.method === "PATCH" && defects.patchForbidden === true)
+            return { status: 403, body: { errors: [{ status: "403" }] } };
+          MutableHashMap.set(store, id, written(request, name, held, defects));
+          return { status: 204 };
+        },
+      });
+    };
+  };
+
+  const verifyRelationships = verifyOver(relationshipApi);
+
+  const run = async (defects: Defects = {}, options: Partial<Conformance.Options> = {}) => {
+    const store = MutableHashMap.empty<string, Linkage>();
+    const seen: Array<string> = [];
+    const serve = relationshipServer(store, defects);
+    const report = await verifyRelationships(
+      (request) => {
+        seen.push(`${request.method} ${request.path}`);
+        return serve(request);
+      },
+      {
+        ids: { posts: "1", people: "9", tags: "7" },
+        only: RULES,
+        mutating: true,
+        writes: {
+          posts: {
+            create: () => ({
+              type: "posts",
+              attributes: { title: "probe" },
+              relationships: {
+                author: { data: { type: "people", id: "1" } },
+                tags: { data: [{ type: "tags", id: "3" }] },
+              },
+            }),
+            cleanup: (id) => Effect.sync(() => MutableHashMap.remove(store, id)),
+          },
+        },
+        ...options,
+      },
+    );
+    return { report, store, seen };
+  };
+
+  const outcomes = (report: Conformance.Report) => RULES.map((id) => outcomeFor(report, id));
+
+  it("passes a server that replaces, adds to and removes from linkage as told, on posts it created", async () => {
+    const { report, store, seen } = await run();
+    expect(outcomes(report)).toEqual(RULES.map(() => expect.objectContaining({ _tag: "Passed" })));
+    expect(MutableHashMap.size(store)).toBe(0);
+    expect(seen).toEqual([
+      // replace: the to-one, then the to-many, each on a post of its own
+      "POST /posts",
+      "PATCH /posts/100/relationships/author",
+      "GET /posts/100/relationships/author",
+      "POST /posts",
+      "PATCH /posts/101/relationships/tags",
+      "GET /posts/101/relationships/tags",
+      // add: read, POST, read
+      "POST /posts",
+      "GET /posts/102/relationships/tags",
+      "POST /posts/102/relationships/tags",
+      "GET /posts/102/relationships/tags",
+      // remove: put the sample in first, then read, DELETE, read
+      "POST /posts",
+      "POST /posts/103/relationships/tags",
+      "GET /posts/103/relationships/tags",
+      "DELETE /posts/103/relationships/tags",
+      "GET /posts/103/relationships/tags",
+    ]);
+  });
+
+  it("fails a server whose PATCH changes nothing, on the to-one and the to-many alike", async () => {
+    const { report } = await run({ patchIgnored: true });
+    const outcome = outcomeFor(report, "spec/relationships/replace");
+    expect(
+      Predicate.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.detail) : [],
+    ).toEqual([
+      "after PATCH /posts/100/relationships/author replaced the linkage with people:9, /posts/100/relationships/author reads back people:1",
+      "after PATCH /posts/101/relationships/tags replaced the linkage with [tags:7], /posts/101/relationships/tags reads back [tags:3]",
+    ]);
+    expect(failed(report)).toEqual(["spec/relationships/replace"]);
+  });
+
+  it("fails a server whose POST replaces the linkage instead of adding to it", async () => {
+    const { report } = await run({ postReplaces: true });
+    expect(failed(report)).toEqual(["spec/relationships/add"]);
+    const outcome = outcomeFor(report, "spec/relationships/add");
+    expect(Predicate.isTagged(outcome, "Failed") ? outcome.findings : []).toEqual([
+      expect.objectContaining({
+        detail:
+          "after POST /posts/102/relationships/tags added tags:7 over [tags:3], /posts/102/relationships/tags reads back [tags:7]",
+        expected: "the linkage [tags:3, tags:7]",
+      }),
+    ]);
+  });
+
+  it("fails a server whose DELETE removes nothing", async () => {
+    const { report } = await run({ deleteIgnored: true });
+    expect(failed(report)).toEqual(["spec/relationships/remove"]);
+  });
+
+  it("decides nothing on a PATCH refused with 403", async () => {
+    const { report } = await run({ patchForbidden: true });
+    expect(outcomeFor(report, "spec/relationships/replace")).toEqual(
+      expect.objectContaining({
+        _tag: "Skipped",
+        reason: expect.stringContaining("was refused with 403"),
+      }),
+    );
+    // The DELETE puts its member in through POST, so it is unaffected.
+    expect(outcomeFor(report, "spec/relationships/remove")).toEqual(
+      expect.objectContaining({ _tag: "Passed" }),
+    );
+  });
+
+  it("skips, naming the `ids` key it wants, with no sample of the related type", async () => {
+    const { report } = await run({}, { ids: { posts: "1" } });
+    expect(outcomes(report)).toEqual(
+      RULES.map(() =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining('pass ids["'),
+        }),
+      ),
+    );
+  });
+
+  it("never writes without `mutating: true`", async () => {
+    const { report, seen } = await run({}, { mutating: false });
+    expect(outcomes(report)).toEqual(RULES.map(() => expect.objectContaining({ _tag: "Skipped" })));
+    expect(seen).toEqual([]);
+  });
 });
 // ---------------------------------------------------------------------------
 // Atomic operations processing (#164)
