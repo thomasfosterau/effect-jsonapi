@@ -29,15 +29,19 @@ import {
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to. None: the
- * write rules have been clean since #428, which answers a resource object of
- * another `type` with 409, and the read rules since #169: the handlers of the reads
- * that declare `fields` (`GET /products/:id`, `GET /orders/:id` and `/search`)
- * project `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)`
- * and stamp `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` /
- * `linkage` document.
+ * Remove an entry when its issue is fixed; the test will tell you to. The read
+ * rules have been clean since #169: the handlers of the reads that declare
+ * `fields` (`GET /products/:id`, `GET /orders/:id` and `/search`) project
+ * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
+ * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
+ * document. The write rules have been clean since #428, which answers a
+ * resource object of another `type` with 409, but for one: `Endpoint.create`
+ * drops a client-generated id and answers 201 under an id of its own, where
+ * JSON:API wants a 403 (#450).
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
+  ["spec/status/create-client-id-unsupported", "#450"],
+];
 
 /**
  * One id per resource type, each taken from a record the example's store is
@@ -80,6 +84,8 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { unitsInStock: 10 } }),
     cleanup: discardProduct,
+    // The example mints its own ids, so a client-generated one must be refused (#450).
+    clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
   orders: {
     create: () => ({
@@ -97,6 +103,8 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { shipCity: "Melbourne" } }),
     cleanup: discardOrder,
+    // The example mints its own ids, so a client-generated one must be refused (#450).
+    clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
 };
 
@@ -267,6 +275,11 @@ describe("northwind: JSON:API conformance", () => {
       // resource's own GET.
       "spec/status/create-read-back",
       "spec/status/update-read-back",
+      // #429: a created order's `shipper` replaced with the `ids` shipper and
+      // read back through `GET /orders/:id/relationships/shipper`. A product's
+      // `category` / `supplier` PATCH has no relationship GET to read back
+      // through, so is not decided.
+      "spec/relationships/update-replaces",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

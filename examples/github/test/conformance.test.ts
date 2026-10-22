@@ -16,15 +16,19 @@ import { discardIssue, discardRepository, GitHubLive } from "../handlers.js";
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to. None: the
- * write rules have been clean since #428, which answers a resource object of
- * another `type` with 409, and the read rules since #169: the handlers of the reads
- * that declare `fields` (`GET /repositories/:id`, `GET /issues/:id` and
- * `/search`) project `?fields[TYPE]=` with `onResource:
- * Handlers.project(query.fields)` and stamp `jsonapi: Document.v1_1` on every
- * `Handlers.data` / `collection` / `linkage` document.
+ * Remove an entry when its issue is fixed; the test will tell you to. The read
+ * rules have been clean since #169: the handlers of the reads that declare
+ * `fields` (`GET /repositories/:id`, `GET /issues/:id` and `/search`) project
+ * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
+ * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
+ * document. The write rules have been clean since #428, which answers a
+ * resource object of another `type` with 409, but for one: `Endpoint.create`
+ * drops a client-generated id and answers 201 under an id of its own, where
+ * JSON:API wants a 403 (#450).
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
+  ["spec/status/create-client-id-unsupported", "#450"],
+];
 
 const IDS = {
   users: "1",
@@ -74,6 +78,8 @@ const WRITES: Conformance.Options["writes"] = {
     }),
     update: () => ({ attributes: { state: "closed" } }),
     cleanup: discardIssue,
+    // The example mints its own ids, so a client-generated one must be refused (#450).
+    clientId: { supported: false, id: () => `conformance-client-${++sequence}` },
   },
 };
 
@@ -206,6 +212,13 @@ describe("github: JSON:API conformance", () => {
       // resource's own GET.
       "spec/status/create-read-back",
       "spec/status/update-read-back",
+      // #429: a created issue's `labels` replaced with, added to and removed
+      // from by the `ids` label, each read back through
+      // `GET /issues/:id/relationships/labels`. The `assignee` PATCH has no
+      // relationship GET to read back through, so is not decided.
+      "spec/relationships/update-replaces",
+      "spec/relationships/add-appends",
+      "spec/relationships/remove-deletes",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

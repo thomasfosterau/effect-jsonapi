@@ -261,9 +261,17 @@ export interface Discovered {
    * declares: `"one"` when the linkage document's `data` encodes as an
    * identifier or `null`, `"many"` when it encodes as an array, and
    * `"unshown"` when the schema cannot be read that way (a hand-built or
-   * `Schema.Unknown` success, say). `"unshown"` for every other role.
+   * `Schema.Unknown` success, say). For a `relationshipWrite` endpoint, the
+   * same of its request payload schema. `"unshown"` for every other role.
    */
   readonly linkage: Cardinality;
+  /**
+   * For a `relationshipWrite` endpoint, the resource types its payload's
+   * identifiers admit — the string literals their `type` encodes as, in
+   * declaration order — so a probe can pick an `ids` sample to link to.
+   * Empty for every other role, and for a payload whose `type` is no literal.
+   */
+  readonly linkageTypes: ReadonlyArray<string>;
   /** The first literal path segment — the resource type under the conventional paths. */
   readonly segment: string | undefined;
   readonly params: ReadonlyArray<string>;
@@ -413,14 +421,60 @@ const documentCardinality = (ast: SchemaAST.AST): Cardinality => {
   return data === undefined ? "unshown" : linkageCardinality(data.type);
 };
 
+/** The request payload schemas an endpoint declares, over every content type. */
+const payloadSchemas = (endpoint: HttpApiEndpoint.Top): ReadonlyArray<Schema.Top> =>
+  Array.from(endpoint.payload.values(), ({ schemas }) => schemas).flat();
+
 /**
  * How many identifiers a relationship endpoint's success schemas agree it
- * answers; `"unshown"` for an endpoint of any other role.
+ * answers, or a relationship write endpoint's payload schemas agree it takes;
+ * `"unshown"` for an endpoint of any other role.
  */
-const declaredCardinality = (endpoint: HttpApiEndpoint.Top, role: Role): Cardinality =>
-  role === "relationship"
-    ? agreed(Array.from(endpoint.success, (success) => documentCardinality(success.ast)))
-    : "unshown";
+const declaredCardinality = (endpoint: HttpApiEndpoint.Top, role: Role): Cardinality => {
+  if (role === "relationship")
+    return agreed(Array.from(endpoint.success, (success) => documentCardinality(success.ast)));
+  if (role === "relationshipWrite")
+    return agreed(payloadSchemas(endpoint).map((payload) => documentCardinality(payload.ast)));
+  return "unshown";
+};
+
+/** The string literals a schema's encoded side admits. */
+const literalsOf = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return literalsOf(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(literalsOf);
+  return SchemaAST.isLiteral(encoded) && Predicate.isString(encoded.literal)
+    ? [encoded.literal]
+    : [];
+};
+
+/** The `type` literals of the resource identifiers linkage of this schema's wire shape holds. */
+const identifierTypes = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return identifierTypes(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(identifierTypes);
+  if (SchemaAST.isArrays(encoded))
+    return [...encoded.elements, ...encoded.rest].flatMap(identifierTypes);
+  if (!SchemaAST.isObjects(encoded)) return [];
+  const type = encoded.propertySignatures.find((signature) => signature.name === "type");
+  return type === undefined ? [] : literalsOf(type.type);
+};
+
+/** The `type` literals a linkage document schema's `data` declares. */
+const documentTypes = (ast: SchemaAST.AST): ReadonlyArray<string> => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return documentTypes(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.flatMap(documentTypes);
+  if (!SchemaAST.isObjects(encoded)) return [];
+  const data = encoded.propertySignatures.find((signature) => signature.name === "data");
+  return data === undefined ? [] : identifierTypes(data.type);
+};
+
+/** The resource types a relationship write endpoint's payload links to; none for any other role. */
+const declaredLinkageTypes = (endpoint: HttpApiEndpoint.Top, role: Role): ReadonlyArray<string> =>
+  role === "relationshipWrite"
+    ? Arr.dedupe(payloadSchemas(endpoint).flatMap((payload) => documentTypes(payload.ast)))
+    : [];
 
 /**
  * Walks an `HttpApi` value and classifies every endpoint. Discovery is static —
@@ -458,6 +512,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
         path: endpoint.path,
         role,
         linkage: declaredCardinality(endpoint, role),
+        linkageTypes: declaredLinkageTypes(endpoint, role),
         segment: segments.find((segment) => !segment.startsWith(":")),
         params: segments
           .filter((segment) => segment.startsWith(":"))
@@ -507,6 +562,29 @@ export interface Fixture {
    * died. It runs uninterruptibly, so one that never completes hangs the run.
    */
   readonly cleanup?: ((id: string) => Effect.Effect<unknown, unknown>) | undefined;
+  /**
+   * Opts the type into the client-generated id rules: whether the server
+   * supports a client-generated id on `POST /<type>`, and an id to send with
+   * `create`'s payload. The kit never makes one up.
+   */
+  readonly clientId?: ClientIdFixture | undefined;
+}
+
+/** @internal */
+export interface ClientIdFixture {
+  /**
+   * `true` when the server accepts a client-generated id, so a create under
+   * one answers 201 or 204 and a second create under the same id 409; `false`
+   * when it does not, so a create under one answers 403.
+   */
+  readonly supported: boolean;
+  /**
+   * An id to create a resource under, called once per create that carries
+   * one — so, where `supported` is `true`, one the server will accept and
+   * that no resource holds yet. The kit acts on a resource made under it as
+   * on any other it created: vetted, and handed to `cleanup`.
+   */
+  readonly id: () => string;
 }
 
 /**

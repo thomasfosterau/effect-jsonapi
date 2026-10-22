@@ -349,6 +349,10 @@ export interface WritePayload extends Core.Payload {}
  *   close over or provide whatever it needs up front. It runs uninterruptibly,
  *   as a release step, so a `cleanup` that never completes hangs the run —
  *   give one that talks to a remote store its own timeout.
+ * - **`clientId`** — opts the type into the client-generated id rules
+ *   ({@link ClientIdFixture}): whether the server supports a client-generated
+ *   id, and an id to send. The kit never makes an id up, so without
+ *   `clientId` those rules skip naming it.
  *
  * Every member is optional, and each one gates only its own rules: a type with
  * no `create` skips every write rule naming `writes["<type>"].create`, and a
@@ -384,6 +388,15 @@ export interface WritePayload extends Core.Payload {}
  * `lid`, read back). Each needs a single-resource GET to read back through,
  * and `all-or-nothing` a collection GET to list.
  *
+ * The relationship mutation rules need no member of their own: for each
+ * `PATCH` / `POST` / `DELETE` on `/<type>/:id/relationships/<name>` whose type
+ * has a `create`, they create a resource, link it to the `ids` sample of a type
+ * the endpoint's payload names, and read the linkage back through
+ * `GET /<type>/:id/relationships/<name>`. The sample is only linked to, never
+ * written to — but a server that stores the inverse of the relationship on the
+ * sample (a comment's one article, say) changes it, so give such a type an
+ * `ids` sample you can afford to have relinked.
+ *
  * @example
  * ```ts
  * import { Effect } from "effect"
@@ -411,6 +424,44 @@ export interface WritePayload extends Core.Payload {}
  * @category models
  */
 export interface WriteFixture extends Core.Fixture {}
+
+/**
+ * A {@link WriteFixture}'s opt-in to the client-generated id rules
+ * ([§Client-Generated IDs](https://jsonapi.org/format/1.1/#crud-creating-client-ids)).
+ * The kit never makes up a client-generated id: each rule sends the one `id`
+ * returns with `create`'s payload, and runs only for the case `supported`
+ * declares.
+ *
+ * - **`supported: true`** — `spec/status/create-client-id` creates under an
+ *   `id` and wants a 201 carrying the resource under that id, or a 204 with no
+ *   document; `spec/status/create-conflict-id` creates under an `id` and then
+ *   sends the same payload under the same id again, and wants a 409.
+ * - **`supported: false`** — `spec/status/create-client-id-unsupported`
+ *   creates under an `id` and wants a 403.
+ *
+ * What a create under an `id` makes is the kit's like any other: vetted as a
+ * created id is, recorded in {@link Report.writes} and handed to `cleanup` —
+ * a 204 names no id, so the kit takes the one it sent. With
+ * `supported: true`, return an id no resource holds yet, fresh per call.
+ *
+ * @example
+ * ```ts
+ * import { Conformance } from "@thomasfosterau/effect-jsonapi"
+ *
+ * let sequence = 0
+ * const articles: Conformance.WriteFixture = {
+ *   create: () => ({ type: "articles", attributes: { title: `probe ${++sequence}` } }),
+ *   // the server mints its own ids, so a client-generated one must be refused with 403
+ *   clientId: { supported: false, id: () => `conformance-client-${++sequence}` }
+ * }
+ *
+ * articles.clientId?.supported // false
+ * ```
+ *
+ * @since 0.18.0
+ * @category models
+ */
+export interface ClientIdFixture extends Core.ClientIdFixture {}
 
 /**
  * One resource the kit created during a run, and what became of it — the audit
@@ -720,10 +771,10 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: ["#116", "#161", "#433"],
   },
   {
-    area: "Write semantics beyond the success responses",
+    area: "Relationship writes beyond the read-back",
     reason:
-      "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — that a create of a `type` the endpoint does not serve is a 409, and that what a create or update answered reads back through the resource's GET, on resources it creates and disposes of itself. Still unchecked: creation with a client-generated id (201 or 204, or 403 where unsupported) and the 409 for a duplicate one, which need an id the fixture supplies; and relationship mutation through `/relationships/…` (replacement, append, removal), which needs a resource to link to and a read-back through the relationship endpoint. The fixture makes each of these probe-able; they are not yet written.",
-    tracking: ["#429"],
+      "Given a `writes` fixture and `mutating: true`, the kit checks what a create, update and delete answer, the 409s for an unserved `type` and a duplicate client-generated id, what a create under a client-generated id answers (201 or 204, or 403 where unsupported — only for a type whose fixture opts in with `clientId`, since the kit never makes an id up), and that a create, an update and a `PATCH` / `POST` / `DELETE` on `/relationships/…` read back as they should. A relationship write is judged by its read-back alone: what the write itself answers (202, 204, or 200 with the linkage as it now stands) is not checked, nor is a to-one replacement with `null`, nor the 404 for linking a resource that does not exist.",
+    tracking: ["#451"],
   },
   {
     area: "The Idempotency-Key profile",

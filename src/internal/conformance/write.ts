@@ -172,6 +172,7 @@ export interface WriteTarget {
   readonly create: () => Payload;
   readonly update: Option.Option<() => Patch>;
   readonly cleanup: Option.Option<(id: string) => Effect.Effect<unknown, unknown>>;
+  readonly clientId: Option.Option<ClientId>;
   readonly createPath: string;
   /** The endpoint `createPath` resolves — the one the kit creates through. */
   readonly createEndpoint: Discovered;
@@ -187,13 +188,24 @@ export interface Targets {
   readonly candidates: number;
 }
 
-type WriteRole = "create" | "update" | "delete";
+type WriteRole = "create" | "update" | "delete" | "relationshipWrite";
+
+/**
+ * A fixture's `clientId`, its `id` bound to it.
+ *
+ * @internal
+ */
+export interface ClientId {
+  readonly supported: boolean;
+  readonly id: () => string;
+}
 
 /** A fixture's members, narrowed: what every write rule needs, and what only some do. */
 interface Usable {
   readonly create: () => Payload;
   readonly update: Option.Option<() => Patch>;
   readonly cleanup: Option.Option<(id: string) => Effect.Effect<unknown, unknown>>;
+  readonly clientId: Option.Option<ClientId>;
 }
 
 const usableFixture = (key: string, fixture: Fixture): Result.Result<Usable, string> =>
@@ -212,6 +224,10 @@ const usableFixture = (key: string, fixture: Fixture): Result.Result<Usable, str
           Option.fromUndefinedOr(fixture.cleanup),
           (cleanup) => (id: string) => cleanup.call(fixture, id),
         ),
+        clientId: Option.map(Option.fromUndefinedOr(fixture.clientId), (clientId) => ({
+          supported: clientId.supported,
+          id: () => clientId.id.call(clientId),
+        })),
       }),
   });
 
@@ -259,10 +275,11 @@ const usable = (
 
 /**
  * The endpoints of `role` a write rule can drive. For `"create"` that is every
- * create endpoint whose type has a `create` fixture; for `"update"` and
- * `"delete"` it is every such endpoint whose type also has a create endpoint
- * and fixture — the kit acts on resources it created itself, never on a
- * caller's sample — and, for `"update"`, an `update` fixture. `admits`
+ * create endpoint whose type has a `create` fixture; for `"update"`,
+ * `"delete"` and `"relationshipWrite"` it is every such endpoint whose type
+ * also has a create endpoint and fixture — the kit acts on resources it
+ * created itself, never on a caller's sample — and, for `"update"`, an
+ * `update` fixture. `admits`
  * narrows the candidates to the endpoints a rule is about (those declaring
  * `Idempotency-Key`, say), so one it leaves out is neither a target nor missing.
  *
@@ -407,7 +424,8 @@ export const Created = Data.taggedEnum<Created>();
  */
 export interface Via {
   readonly send: (payload: Payload) => Effect.Effect<Observation>;
-  readonly identify: (observation: Observation) => Option.Option<Identity>;
+  /** The resource `observation`, the answer to sending `payload`, names. */
+  readonly identify: (observation: Observation, payload: Payload) => Option.Option<Identity>;
 }
 
 /**
@@ -623,7 +641,7 @@ const create = (ctx: Context, rule: Rule, target: WriteTarget, via: Via): Effect
             payload,
             observation,
             entry: isSuccessful(observation)
-              ? Option.some(record(ctx, rule, target, payload, via.identify(observation)))
+              ? Option.some(record(ctx, rule, target, payload, via.identify(observation, payload)))
               : Option.none(),
           }),
         ),
@@ -807,6 +825,56 @@ export const viaCreateEndpoint = (ctx: Context, target: WriteTarget): Via => ({
 });
 
 /**
+ * The fixture's client-generated id for a rule that probes a server that
+ * does (`supported: true`) or does not support them, or why there is none —
+ * `clientId` is absent, declares the other case, or its `id` threw. The kit
+ * never makes one up.
+ *
+ * @internal
+ */
+export const buildClientId = (
+  target: WriteTarget,
+  supported: boolean,
+): Result.Result<string, string> =>
+  Option.match(target.clientId, {
+    onNone: () =>
+      Result.fail(
+        `no client-generated id for "${target.key}" — pass writes["${target.key}"].clientId`,
+      ),
+    onSome: (clientId) =>
+      clientId.supported === supported
+        ? Result.try({
+            try: clientId.id,
+            catch: (error) => `writes["${target.key}"].clientId.id threw: ${renderThrown(error)}`,
+          })
+        : Result.fail(
+            `writes["${target.key}"].clientId declares client-generated ids ${clientId.supported ? "supported" : "unsupported"}, and this rule probes a server that ${supported ? "supports" : "does not support"} them`,
+          ),
+  });
+
+/**
+ * Creates through the target's own create endpoint as {@link viaCreateEndpoint}
+ * does, with `id` — a client-generated id the fixture supplied — on the
+ * resource object. A 204 names no resource, so it is taken to have made the
+ * one the kit asked for: `id`, of the payload's type.
+ *
+ * @internal
+ */
+export const viaClientId = (ctx: Context, target: WriteTarget, id: string): Via => {
+  const via = viaCreateEndpoint(ctx, target);
+  return {
+    send: (payload) => {
+      const identified = { ...payload, id };
+      return via.send(identified);
+    },
+    identify: (observation, payload) =>
+      Option.orElse(primaryIdentity(observation), () =>
+        observation.status === 204 ? Option.some({ type: payload.type, id }) : Option.none(),
+      ),
+  };
+};
+
+/**
  * Sends `patch` — the fixture's update — to `type:id`, a resource the kit
  * created, through the target's update endpoint, with a fresh
  * `Idempotency-Key` when that endpoint requires one.
@@ -827,6 +895,30 @@ export const sendUpdate = (
         url: pathFor(target.endpoint, id),
         headers: { ...writeHeaders, ...key },
         body: { data: { ...patch, type, id } },
+      }),
+    ),
+  );
+
+/**
+ * Sends `data` — resource linkage — through `endpoint`, a relationship write
+ * endpoint, to `url`, with a fresh `Idempotency-Key` when that endpoint
+ * requires one.
+ *
+ * @internal
+ */
+export const sendLinkage = (
+  ctx: Context,
+  endpoint: Discovered,
+  url: string,
+  data: Identity | ReadonlyArray<Identity> | null,
+): Effect.Effect<Observation> =>
+  idempotencyHeaders(endpoint).pipe(
+    Effect.flatMap((key) =>
+      ctx.request({
+        method: endpoint.method,
+        url,
+        headers: { ...writeHeaders, ...key },
+        body: { data },
       }),
     ),
   );
@@ -1027,6 +1119,18 @@ export const decided = (requests: number, findings: ReadonlyArray<Finding>): Ver
 export const undecided = (reason: string): Verdict => Verdict.Undecided({ reason });
 
 /**
+ * `verdict`, counting `more` requests made before the ones it counts; an
+ * undecided verdict as it is.
+ *
+ * @internal
+ */
+export const plusRequests = (verdict: Verdict, more: number): Verdict =>
+  Verdict.$match(verdict, {
+    Decided: ({ requests, findings }) => decided(requests + more, findings),
+    Undecided: () => verdict,
+  });
+
+/**
  * A creation the server accepted: a 2xx, on the record.
  *
  * @internal
@@ -1085,6 +1189,24 @@ export const onAccepted =
       onFailure: (reason) => Effect.succeed(undecided(reason)),
       onSuccess: decide,
     });
+
+/**
+ * A rule decided on the resource a create probe made and may act on:
+ * `decide` runs only when the server accepted the fixture's payload and named
+ * an id the kit may act on.
+ *
+ * @internal
+ */
+export const onOwnId = (
+  target: WriteTarget,
+  decide: (created: Accepted, id: string) => Effect.Effect<Verdict>,
+): ((created: Created) => Effect.Effect<Verdict>) =>
+  onAccepted(target, (created) =>
+    Result.match(ownId(created), {
+      onFailure: (reason) => Effect.succeed(undecided(reason)),
+      onSuccess: (id) => decide(created, id),
+    }),
+  );
 
 const decision = (verdict: Verdict): Result.Result<Decided, string> =>
   Verdict.$match(verdict, {

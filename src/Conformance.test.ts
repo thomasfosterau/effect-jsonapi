@@ -184,6 +184,20 @@ const outcomeFor = (report: Conformance.Report, id: string): Conformance.Outcome
   return found;
 };
 
+/** The client-generated id rules, each run only for the case its fixture declares. */
+const CLIENT_ID_RULES = [
+  "spec/status/create-client-id",
+  "spec/status/create-conflict-id",
+  "spec/status/create-client-id-unsupported",
+];
+
+/** The relationship mutation rules. */
+const RELATIONSHIP_RULES = [
+  "spec/relationships/update-replaces",
+  "spec/relationships/add-appends",
+  "spec/relationships/remove-deletes",
+];
+
 /** A 400 error document whose one error object carries `members` too. */
 const badRequest = (
   members: { readonly source?: { readonly parameter: string } } = {},
@@ -4465,8 +4479,11 @@ describe("Conformance: the write fixture", () => {
     const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
     // The atomic processing rules read the fixtures too; against this server,
     // whose operations endpoint applies only `add`, they otherwise skip (their
-    // own fixture is under "Conformance: atomic operations processing").
-    const reading = [...WRITE_RULES, ...ATOMIC_PROCESSING_RULES];
+    // own fixture is under "Conformance: atomic operations processing"). So
+    // do the client-generated id rules, which this fixture opts into none of
+    // (theirs is under "Conformance: client-generated ids").
+    const reads = new Set([...WRITE_RULES, ...ATOMIC_PROCESSING_RULES, ...CLIENT_ID_RULES]);
+    const reading = Conformance.rules.map((rule) => rule.id).filter((id) => reads.has(id));
     expect(errored.map((outcome) => outcome.rule.id)).toEqual(reading);
     expect(errored.map((outcome) => outcome.message)).toEqual(
       reading.map(() => "FixturesUnreadable"),
@@ -9650,5 +9667,362 @@ describe("Conformance: the Idempotency-Key profile advertisement", () => {
       const report = await runOver(idempotentApi, live(false))(options);
       expect(outcomeFor(report, RULE)._tag).toBe("Failed");
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Client-generated ids and relationship mutation
+// ---------------------------------------------------------------------------
+
+/**
+ * The write rules that need more than a payload: the client-generated id
+ * rules, which need a `clientId` in the fixture, and the relationship
+ * mutation rules, which need relationship endpoints and an `ids` sample to
+ * link to. A canned server over a store of posts, conformant by default, with
+ * one switch per deliberate breakage.
+ */
+describe("Conformance: client-generated ids and relationship mutation", () => {
+  const Tag = Resource.make("tags", { attributes: { name: Schema.String } });
+  const Post = Resource.make("posts", {
+    attributes: { title: Schema.String },
+    relationships: {
+      author: Relationship.optional(() => Person),
+      tags: Relationship.many(() => Tag),
+    },
+  });
+  const mutationApi = HttpApi.make("mutation").add(
+    Group.make(
+      Post,
+      Endpoint.get(Post),
+      Endpoint.create(Post),
+      Endpoint.getRelationship(Post, "author"),
+      Endpoint.updateRelationship(Post, "author"),
+      Endpoint.getRelationship(Post, "tags"),
+      Endpoint.updateRelationship(Post, "tags"),
+      Endpoint.addRelationship(Post, "tags"),
+      Endpoint.removeRelationship(Post, "tags"),
+    ),
+  );
+
+  interface Identifier {
+    readonly type: string;
+    readonly id: string;
+  }
+  interface Stored {
+    readonly title: string;
+    author: Identifier | null;
+    tags: Array<Identifier>;
+  }
+  type Posts = Map<string, Stored>;
+
+  /** How the canned server departs from the specification, one switch per breakage. */
+  interface Breakage {
+    /** What a create carrying an id does: honour it (the default), refuse it with 403, or drop it. */
+    readonly clientIds?: "supported" | "unsupported" | "ignored";
+    /** Answer a create under a client id with 204 rather than 201. */
+    readonly noContent?: boolean;
+    /** Overwrite a resource on a create under an id it already holds, rather than 409. */
+    readonly overwrites?: boolean;
+    /** Relationship writes of these methods answer 204 and change nothing. */
+    readonly ignores?: ReadonlyArray<string>;
+    /** Relationship writes of these methods answer 403. */
+    readonly forbids?: ReadonlyArray<string>;
+  }
+
+  const Body = Schema.Struct({
+    data: Schema.Struct({
+      type: Schema.Literal("posts"),
+      id: Schema.optionalKey(Schema.String),
+      attributes: Schema.optionalKey(Schema.Struct({ title: Schema.String })),
+    }),
+  });
+  const decodeBody = Schema.decodeUnknownOption(Body);
+  const Linkage = Schema.Struct({
+    data: Schema.Union([
+      Schema.Null,
+      Schema.Struct({ type: Schema.String, id: Schema.String }),
+      Schema.Array(Schema.Struct({ type: Schema.String, id: Schema.String })),
+    ]),
+  });
+  const decodeLinkage = Schema.decodeUnknownOption(Linkage);
+
+  /** An error document of `code`, as the canned server answers every refusal. */
+  const refused = (code: number): Canned => ({
+    status: code,
+    body: { errors: [{ status: `${code}` }] },
+  });
+
+  const sameIdentifier = (item: Identifier) => (other: Identifier) =>
+    other.type === item.type && other.id === item.id;
+
+  /** A to-many linkage after a `PATCH`, `POST` or `DELETE` of `data`. */
+  const applied = (
+    method: string,
+    tags: ReadonlyArray<Identifier>,
+    data: ReadonlyArray<Identifier>,
+  ): Array<Identifier> => {
+    if (method === "PATCH") return [...data];
+    if (method === "POST")
+      return [...tags, ...data.filter((item) => !tags.some(sameIdentifier(item)))];
+    return tags.filter((tag) => !data.some((item) => sameIdentifier(item)(tag)));
+  };
+
+  const mutationServer = (posts: Posts, breakage: Breakage) => {
+    let next = 100;
+    const resource = (id: string, post: Stored) => ({
+      type: "posts",
+      id,
+      attributes: { title: post.title },
+      relationships: { author: { data: post.author }, tags: { data: post.tags } },
+    });
+    const honours = (asked: string | undefined): asked is string =>
+      asked !== undefined && (breakage.clientIds ?? "supported") === "supported";
+    const refusesId = (asked: string | undefined): boolean =>
+      asked !== undefined && breakage.clientIds === "unsupported";
+    /** The answer to a create that stored `post` under `id`, `asked` the id it carried. */
+    const created = (id: string, post: Stored, asked: string | undefined): Canned =>
+      asked !== undefined && breakage.noContent === true
+        ? { status: 204 }
+        : { status: 201, body: { data: resource(id, post) } };
+    const onCreate = (request: CannedRequest): Canned =>
+      Option.match(decodeBody(request.body), {
+        onNone: () => refused(400),
+        onSome: ({ data }) => {
+          if (refusesId(data.id)) return refused(403);
+          const id = honours(data.id) ? data.id : `${next++}`;
+          if (posts.has(id) && breakage.overwrites !== true) return refused(409);
+          const post: Stored = { title: data.attributes?.title ?? "", author: null, tags: [] };
+          posts.set(id, post);
+          return created(id, post, data.id);
+        },
+      });
+    const onWrite = (request: CannedRequest, post: Stored, name: "author" | "tags"): Canned =>
+      Option.match(decodeLinkage(request.body), {
+        onNone: () => refused(400),
+        onSome: ({ data }) => {
+          if (Array.isArray(data) !== (name === "tags")) return refused(400);
+          if (Array.isArray(data)) post.tags = applied(request.method, post.tags, data);
+          else post.author = data as Identifier | null;
+          return { status: 204 };
+        },
+      });
+    const onRelationship = (
+      request: CannedRequest,
+      post: Stored,
+      name: "author" | "tags",
+    ): Canned => {
+      if (request.method === "GET") return { body: { data: post[name] } };
+      if (breakage.forbids?.includes(request.method) === true) return refused(403);
+      if (breakage.ignores?.includes(request.method) === true) return { status: 204 };
+      return onWrite(request, post, name);
+    };
+    return (request: CannedRequest): Canned => {
+      if (request.method === "POST" && request.path === "/posts") return onCreate(request);
+      const match = /^\/posts\/([^/?]+)(?:\/relationships\/(author|tags))?$/.exec(request.path);
+      const post = match === null ? undefined : posts.get(decodeURIComponent(match[1]!));
+      if (match === null || post === undefined) return refused(404);
+      const name = match[2] as "author" | "tags" | undefined;
+      if (name !== undefined) return onRelationship(request, post, name);
+      return request.method === "GET"
+        ? { body: { data: resource(match[1]!, post) } }
+        : refused(405);
+    };
+  };
+
+  let sequence = 0;
+  /** A run of the rules under test, with `breakage` and the fixture's `clientId` as given — `"none"` for none. */
+  const run = async (
+    breakage: Breakage = {},
+    clientId: Conformance.ClientIdFixture | "none" = {
+      supported: true,
+      id: () => `client-${++sequence}`,
+    },
+    ids: Readonly<Record<string, string>> = { people: "9", tags: "7" },
+  ) => {
+    const posts: Posts = new Map();
+    const seen: Array<string> = [];
+    const serve = mutationServer(posts, breakage);
+    const report = await verifyOver(mutationApi)(
+      (request) => {
+        seen.push(`${request.method} ${request.path}`);
+        return serve(request);
+      },
+      {
+        ids,
+        mutating: true,
+        only: [...CLIENT_ID_RULES, ...RELATIONSHIP_RULES],
+        writes: {
+          posts: {
+            create: () => ({ type: "posts", attributes: { title: `post ${++sequence}` } }),
+            cleanup: (id) => Effect.sync(() => posts.delete(id)),
+            clientId: clientId === "none" ? undefined : clientId,
+          },
+        },
+      },
+    );
+    return { report, posts, seen, writes: report.writes ?? [] };
+  };
+
+  const tags = (report: Conformance.Report, ids: ReadonlyArray<string>) =>
+    ids.map((id) => outcomeFor(report, id)._tag);
+
+  const findingsOf = (report: Conformance.Report, id: string) => {
+    const outcome = outcomeFor(report, id);
+    return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+  };
+
+  it("passes a conformant server on every rule its fixture opts into, and leaves nothing behind", async () => {
+    const { report, posts, writes } = await run();
+    expect(failed(report)).toEqual([]);
+    expect(
+      tags(report, [
+        "spec/status/create-client-id",
+        "spec/status/create-conflict-id",
+        ...RELATIONSHIP_RULES,
+      ]),
+    ).toEqual(["Passed", "Passed", "Passed", "Passed", "Passed"]);
+    // The fixture declares client ids supported, so the 403 probe is not run.
+    expect(outcomeFor(report, "spec/status/create-client-id-unsupported")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("declares client-generated ids supported"),
+    });
+    // Every relationship write endpoint was probed: replace twice (to-one and to-many).
+    expect(outcomeFor(report, "spec/relationships/update-replaces")).toMatchObject({
+      probes: 6,
+    });
+    expect(posts.size).toBe(0);
+    expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
+    // The first create under a client id is the kit's under that id.
+    expect(
+      writes.filter((write) => write.rule === "spec/status/create-client-id").map((w) => w.id),
+    ).toEqual([expect.stringMatching(/^client-\d+$/)]);
+  });
+
+  it("passes a 204 to a create under a client id, and cleans up under the id it sent", async () => {
+    const { report, posts, writes } = await run({ noContent: true });
+    expect(failed(report)).toEqual([]);
+    expect(
+      tags(report, ["spec/status/create-client-id", "spec/status/create-conflict-id"]),
+    ).toEqual(["Passed", "Passed"]);
+    expect(posts.size).toBe(0);
+    expect(writes.find((write) => write.rule === "spec/status/create-client-id")).toEqual(
+      expect.objectContaining({ id: expect.stringMatching(/^client-/), disposal: "cleaned-up" }),
+    );
+  });
+
+  it("detects a server that drops a client-generated id and creates under its own", async () => {
+    const { report, posts } = await run({ clientIds: "ignored" });
+    expect(failed(report)).toEqual(["spec/status/create-client-id"]);
+    expect(findingsOf(report, "spec/status/create-client-id")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /carries `posts:\d+` — the server created it under another id/,
+        ),
+        probe: expect.objectContaining({ method: "POST" }),
+      }),
+    ]);
+    // With no resource under the client id, there is no duplicate to send.
+    expect(outcomeFor(report, "spec/status/create-conflict-id")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("see spec/status/create-client-id"),
+    });
+    expect(posts.size).toBe(0);
+  });
+
+  it("detects a server that answers a duplicate client-generated id with anything but 409", async () => {
+    const { report, posts, writes } = await run({ overwrites: true });
+    expect(failed(report)).toEqual(["spec/status/create-conflict-id"]);
+    expect(findingsOf(report, "spec/status/create-conflict-id")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /^a POST to \/posts .*, sent again while posts:client-\d+ the kit had just created holds that id, answered 201, accepting it$/,
+        ),
+        expected: "409 Conflict",
+      }),
+    ]);
+    // The second answer names the id the first create holds, so the kit
+    // refuses it; the first is disposed of, which leaves the store empty.
+    expect(writes.filter((write) => write.rule === "spec/status/create-conflict-id")).toEqual([
+      expect.objectContaining({ disposal: "cleaned-up" }),
+      expect.objectContaining({ id: undefined, disposal: "left" }),
+    ]);
+    expect(posts.size).toBe(0);
+  });
+
+  it("probes the 403 only where the fixture declares client ids unsupported", async () => {
+    const unsupported = { supported: false, id: () => `client-${++sequence}` };
+    const passing = await run({ clientIds: "unsupported" }, unsupported);
+    expect(failed(passing.report)).toEqual([]);
+    expect(outcomeFor(passing.report, "spec/status/create-client-id-unsupported")._tag).toBe(
+      "Passed",
+    );
+    expect(
+      tags(passing.report, ["spec/status/create-client-id", "spec/status/create-conflict-id"]),
+    ).toEqual(["Skipped", "Skipped"]);
+
+    // What `Endpoint.create` does (#429): drops the id and answers 201.
+    const { report, posts, writes } = await run({ clientIds: "ignored" }, unsupported);
+    expect(failed(report)).toEqual(["spec/status/create-client-id-unsupported"]);
+    expect(findingsOf(report, "spec/status/create-client-id-unsupported")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /answered 201, accepting it under the id "\d+" of its own, ignoring the one sent$/,
+        ),
+        expected: "403 Forbidden",
+      }),
+    ]);
+    expect(posts.size).toBe(0);
+    expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
+  });
+
+  it("never makes up a client id: without `clientId` every client id rule skips naming it", async () => {
+    const { report, seen } = await run({}, "none");
+    expect(tags(report, CLIENT_ID_RULES)).toEqual(["Skipped", "Skipped", "Skipped"]);
+    for (const id of CLIENT_ID_RULES)
+      expect(outcomeFor(report, id)).toMatchObject({
+        reason: expect.stringContaining('pass writes["posts"].clientId'),
+      });
+    // The relationship rules still ran; no create carried an id.
+    expect(seen.filter((line) => line === "POST /posts").length).toBe(4);
+  });
+
+  it.each([
+    ["PATCH", "spec/relationships/update-replaces"],
+    ["POST", "spec/relationships/add-appends"],
+    ["DELETE", "spec/relationships/remove-deletes"],
+  ])("detects a server whose %s on a relationship changes nothing", async (method, id) => {
+    const { report, posts } = await run({ ignores: [method] });
+    expect(failed(report)).toEqual([id]);
+    const findings = findingsOf(report, id);
+    expect(findings).not.toEqual([]);
+    for (const found of findings) {
+      expect(found.probe?.method).toBe(method);
+      expect(found.detail).toMatch(/reads back/);
+    }
+    expect(posts.size).toBe(0);
+  });
+
+  it("decides nothing on a relationship write the server forbids", async () => {
+    const { report } = await run({ forbids: ["DELETE"] });
+    expect(failed(report)).toEqual([]);
+    expect(outcomeFor(report, "spec/relationships/remove-deletes")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("did not accept DELETE"),
+    });
+  });
+
+  it("skips the relationship rules naming the `ids` sample they want", async () => {
+    const { report, seen } = await run({}, "none", { people: "9" });
+    expect(outcomeFor(report, "spec/relationships/add-appends")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining('pass ids["tags"]'),
+    });
+    // The to-one replacement still has its sample.
+    expect(outcomeFor(report, "spec/relationships/update-replaces")).toMatchObject({
+      _tag: "Passed",
+      note: expect.stringContaining('ids["tags"]'),
+    });
+    // Nothing is created for a probe that cannot link anything.
+    expect(seen.filter((line) => line === "POST /posts").length).toBe(1);
   });
 });
