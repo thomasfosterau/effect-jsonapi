@@ -63,7 +63,7 @@ catalog:
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
   "@effect/tsgo": 0.55.0
-  "@mpsuesser/oxlint-plugin-effect": ^0.5.0
+  "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@types/node": ^26.4.1
   # Deliberately tracks the `latest` dist-tag, ahead of the applications'
   # lockstep, so the gates run against the newest `effect` release. What
