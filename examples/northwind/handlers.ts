@@ -450,74 +450,52 @@ const loadOrder = (id: string): Effect.Effect<Order, OrderNotFound> => {
 // Include resolution & shared helpers
 // ---------------------------------------------------------------------------
 
-const resolveProductIncluded = (
-  product: Product,
-  include: ReadonlyArray<string> | undefined,
-): Array<Category | Supplier> => {
-  const included: Array<Category | Supplier> = [];
-  if (include === undefined) return included;
-  if (include.includes("category")) {
-    const category = store.categories.get(product.relationships!.category.data.id);
-    if (category !== undefined) included.push(category);
-  }
-  if (include.includes("supplier")) {
-    const supplier = store.suppliers.get(product.relationships!.supplier.data.id);
-    if (supplier !== undefined) included.push(supplier);
-  }
-  return included;
-};
+// `?include=` is resolved by `Handlers.resolveIncluded`, which walks every
+// requested path to its last segment — `employee.territories` on an order,
+// `product.supplier` on a line item — loading each level in one batch per type
+// and contributing each `(type, id)` once across the whole primary set. All it
+// needs is one loader per resource type the paths can reach; over this
+// in-memory store, a loader is a lookup in that type's table.
+const loadFrom =
+  <A extends Handlers.ResourceValue>(table: ReadonlyMap<string, A>): Handlers.IncludeTarget<A> =>
+  (ids) =>
+    Effect.succeed(
+      ids.flatMap((id) => {
+        const resource = table.get(id);
+        return resource === undefined ? [] : [resource];
+      }),
+    );
 
-const resolveOrderIncluded = (
-  order: Order,
-  include: ReadonlyArray<string> | undefined,
-): Array<Customer | Employee | Shipper> => {
-  const included: Array<Customer | Employee | Shipper> = [];
-  if (include === undefined) return included;
-  if (include.includes("customer")) {
-    const customer = store.customers.get(order.relationships!.customer.data.id);
-    if (customer !== undefined) included.push(customer);
-  }
-  if (include.includes("employee")) {
-    const employee = store.employees.get(order.relationships!.employee.data.id);
-    if (employee !== undefined) included.push(employee);
-  }
-  if (include.includes("shipper")) {
-    const ref = order.relationships!.shipper.data;
-    if (ref !== null) {
-      const shipper = store.shippers.get(ref.id);
-      if (shipper !== undefined) included.push(shipper);
-    }
-  }
-  return included;
-};
+// One registry per primary type, holding exactly the types its include paths
+// reach — so the resolved `included` stays within the union the endpoint's
+// document schema declares for it.
 
-// The related line-item endpoint's `included` union is one hop: the line item's
-// product (the catalog resources behind it are reached by fetching the product).
-const resolveOrderItemIncluded = (
-  item: OrderItem,
-  include: ReadonlyArray<string> | undefined,
-): Array<Product> => {
-  const included: Array<Product> = [];
-  if (include?.includes("product")) {
-    const product = store.products.get(item.relationships!.product.data.id);
-    if (product !== undefined) included.push(product);
-  }
-  return included;
-};
+// products → category, supplier (also the products in `/search` results)
+const productTargets = {
+  categories: loadFrom(store.categories),
+  suppliers: loadFrom(store.suppliers),
+} satisfies Handlers.IncludeTargets;
 
-const resolveEmployeeIncluded = (
-  employee: Employee,
-  include: ReadonlyArray<string> | undefined,
-): Array<Territory> => {
-  const included: Array<Territory> = [];
-  if (include?.includes("territories")) {
-    for (const ref of employee.relationships?.territories.data ?? []) {
-      const territory = store.territories.get(ref.id);
-      if (territory !== undefined) included.push(territory);
-    }
-  }
-  return included;
-};
+// employees → territories
+const employeeTargets = {
+  territories: loadFrom(store.territories),
+} satisfies Handlers.IncludeTargets;
+
+// orders → customer, employee, employee.territories, shipper (`lineItems` is
+// paginated, so it is not an include path)
+const orderTargets = {
+  customers: loadFrom(store.customers),
+  employees: loadFrom(store.employees),
+  territories: loadFrom(store.territories),
+  shippers: loadFrom(store.shippers),
+} satisfies Handlers.IncludeTargets;
+
+// line items → product, product.category, product.supplier
+const orderItemTargets = {
+  products: loadFrom(store.products),
+  categories: loadFrom(store.categories),
+  suppliers: loadFrom(store.suppliers),
+} satisfies Handlers.IncludeTargets;
 
 // Apply `?sort=` terms (already decoded to `{ field, direction }`) in order.
 const sortBy = <A extends { readonly attributes: any }>(
@@ -695,19 +673,16 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
 export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
   handlers
     .handle("get", ({ params, query }) =>
-      loadProduct(params.id).pipe(
-        Effect.map((product) =>
-          Handlers.data(product, {
-            included:
-              query.include === undefined
-                ? undefined
-                : resolveProductIncluded(product, query.include),
-            self: `/products/${product.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
-        ),
-      ),
+      Effect.gen(function* () {
+        const product = yield* loadProduct(params.id);
+        const included = yield* Handlers.resolveIncluded(product, query.include, productTargets);
+        return Handlers.data(product, {
+          included,
+          self: `/products/${product.id}`,
+          onResource: Handlers.project(query.fields),
+          jsonapi: Document.v1_1,
+        });
+      }),
     )
     .handle("list", ({ query }) => {
       let products = [...store.products.values()];
@@ -746,16 +721,15 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       sortBy(products, query.sort);
       const { limit, offset, page, total } = paginate(products, query.page);
 
-      return Effect.succeed(
-        Handlers.collection(page, {
-          included:
-            query.include === undefined
-              ? undefined
-              : page.flatMap((product) => resolveProductIncluded(product, query.include)),
-          meta: { total },
-          links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total),
-          jsonapi: Document.v1_1,
-        }),
+      return Handlers.resolveIncluded(page, query.include, productTargets).pipe(
+        Effect.map((included) =>
+          Handlers.collection(page, {
+            included,
+            meta: { total },
+            links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total),
+            jsonapi: Document.v1_1,
+          }),
+        ),
       );
     })
     .handle("create", ({ payload }) =>
@@ -868,18 +842,15 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
 export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =>
   handlers
     .handle("get", ({ params, query }) =>
-      loadEmployee(params.id).pipe(
-        Effect.map((employee) =>
-          Handlers.data(employee, {
-            included:
-              query.include === undefined
-                ? undefined
-                : resolveEmployeeIncluded(employee, query.include),
-            self: `/employees/${employee.id}`,
-            jsonapi: Document.v1_1,
-          }),
-        ),
-      ),
+      Effect.gen(function* () {
+        const employee = yield* loadEmployee(params.id);
+        const included = yield* Handlers.resolveIncluded(employee, query.include, employeeTargets);
+        return Handlers.data(employee, {
+          included,
+          self: `/employees/${employee.id}`,
+          jsonapi: Document.v1_1,
+        });
+      }),
     )
     .handle("list", ({ query }) => {
       let employees = [...store.employees.values()];
@@ -890,16 +861,15 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
       }
       sortBy(employees, query.sort);
       const { limit, offset, page, total } = paginate(employees, query.page);
-      return Effect.succeed(
-        Handlers.collection(page, {
-          included:
-            query.include === undefined
-              ? undefined
-              : page.flatMap((employee) => resolveEmployeeIncluded(employee, query.include)),
-          meta: { total },
-          links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total),
-          jsonapi: Document.v1_1,
-        }),
+      return Handlers.resolveIncluded(page, query.include, employeeTargets).pipe(
+        Effect.map((included) =>
+          Handlers.collection(page, {
+            included,
+            meta: { total },
+            links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total),
+            jsonapi: Document.v1_1,
+          }),
+        ),
       );
     })
     // GET /employees/:id/relationships/territories
@@ -990,17 +960,16 @@ const itemsFor = (orderId: string): Array<OrderItem> =>
 export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
   handlers
     .handle("get", ({ params, query }) =>
-      loadOrder(params.id).pipe(
-        Effect.map((order) =>
-          Handlers.data(order, {
-            included:
-              query.include === undefined ? undefined : resolveOrderIncluded(order, query.include),
-            self: `/orders/${order.id}`,
-            onResource: Handlers.project(query.fields),
-            jsonapi: Document.v1_1,
-          }),
-        ),
-      ),
+      Effect.gen(function* () {
+        const order = yield* loadOrder(params.id);
+        const included = yield* Handlers.resolveIncluded(order, query.include, orderTargets);
+        return Handlers.data(order, {
+          included,
+          self: `/orders/${order.id}`,
+          onResource: Handlers.project(query.fields),
+          jsonapi: Document.v1_1,
+        });
+      }),
     )
     .handle("list", ({ query }) => {
       let orders = [...store.orders.values()];
@@ -1031,16 +1000,15 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
       sortBy(orders, query.sort);
       const { limit, offset, page, total } = paginate(orders, query.page);
 
-      return Effect.succeed(
-        Handlers.collection(page, {
-          included:
-            query.include === undefined
-              ? undefined
-              : page.flatMap((order) => resolveOrderIncluded(order, query.include)),
-          meta: { total },
-          links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total),
-          jsonapi: Document.v1_1,
-        }),
+      return Handlers.resolveIncluded(page, query.include, orderTargets).pipe(
+        Effect.map((included) =>
+          Handlers.collection(page, {
+            included,
+            meta: { total },
+            links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total),
+            jsonapi: Document.v1_1,
+          }),
+        ),
       );
     })
     .handle("create", ({ payload }) =>
@@ -1091,22 +1059,19 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
     )
     // GET /orders/:id/lineItems — the paginated line-item feed, with deep includes
     .handle("lineItems", ({ params, query }) =>
-      loadOrder(params.id).pipe(
-        Effect.map((order) => {
-          const all = itemsFor(order.id);
-          const { limit, offset, page, total } = paginate(all, query.page);
-          const path = Handlers.relatedLink("orders", order.id, "lineItems");
-          return Handlers.collection(page, {
-            included:
-              query.include === undefined
-                ? undefined
-                : page.flatMap((item) => resolveOrderItemIncluded(item, query.include)),
-            meta: { total },
-            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
-            jsonapi: Document.v1_1,
-          });
-        }),
-      ),
+      Effect.gen(function* () {
+        const order = yield* loadOrder(params.id);
+        const all = itemsFor(order.id);
+        const { limit, offset, page, total } = paginate(all, query.page);
+        const path = Handlers.relatedLink("orders", order.id, "lineItems");
+        const included = yield* Handlers.resolveIncluded(page, query.include, orderItemTargets);
+        return Handlers.collection(page, {
+          included,
+          meta: { total },
+          links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
+          jsonapi: Document.v1_1,
+        });
+      }),
     )
     // GET /orders/:id/relationships/lineItems — the line-item feed's identifiers
     .handle("lineItemsRelationship", ({ params, query }) =>
@@ -1182,19 +1147,19 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     const { limit, offset, page, total } = paginate(results, query.page);
 
-    return Effect.succeed(
-      Handlers.collection(page, {
-        included:
-          query.include === undefined
-            ? undefined
-            : page.flatMap((result) =>
-                result.type === "products" ? resolveProductIncluded(result, query.include) : [],
-              ),
-        meta: { total },
-        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
-        onResource: Handlers.project(query.fields),
-        jsonapi: Document.v1_1,
-      }),
+    // Only products have relationships, so the walk reaches nothing from the
+    // customers and suppliers in the page; a supplier already in the results is
+    // not repeated in `included`.
+    return Handlers.resolveIncluded(page, query.include, productTargets).pipe(
+      Effect.map((included) =>
+        Handlers.collection(page, {
+          included,
+          meta: { total },
+          links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
+          onResource: Handlers.project(query.fields),
+          jsonapi: Document.v1_1,
+        }),
+      ),
     );
   }),
 );
