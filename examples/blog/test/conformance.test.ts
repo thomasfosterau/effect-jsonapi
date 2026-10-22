@@ -24,7 +24,7 @@ import { BlogLive, discardArticle } from "../handlers.js";
  * (the `Atomic.results` answer carries none). The write rules have been clean
  * since #428, which answers a resource object of another `type` with 409, and
  * #450, which answers a client-generated id `Endpoint.create` does not
- * support with 403.
+ * support with 403 — as #464 does one on an atomic `add`.
  */
 const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
 
@@ -178,6 +178,9 @@ describe("blog: JSON:API conformance", () => {
       "spec/atomic/all-or-nothing",
       "spec/atomic/lid-resolution",
       "spec/atomic/results-order",
+      // #471: an `add` under the fixture's client id, which the blog does not
+      // support, answered 403 naming `/atomic:operations/0/data/id` (#464).
+      "spec/atomic/add-client-id-unsupported",
       // #429: a created article's `comments` linked to the `ids` comment and
       // unlinked again, each read back through
       // `GET /articles/:id/relationships/comments`. The `author` PATCH has no
