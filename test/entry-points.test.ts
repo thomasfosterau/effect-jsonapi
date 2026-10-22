@@ -92,6 +92,7 @@ const HTTP_TIER = [
   "ServerErrors.ts",
   "internal/canonical.ts",
   "internal/codecs.ts",
+  "internal/conformance/atomic.ts",
   "internal/conformance/core.ts",
   "internal/conformance/crawl.ts",
   "internal/conformance/links.ts",

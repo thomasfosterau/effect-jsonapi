@@ -15,12 +15,14 @@ import {
   Effect,
   Exit,
   Fiber,
+  HashMap,
   Layer,
   Match,
   MutableHashMap,
   Option,
   Predicate,
   Record as Rec,
+  Result,
   Schema,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
@@ -2713,6 +2715,13 @@ describe("Conformance: the write fixture", () => {
     "spec/atomic/response-ext-parameter",
   ];
 
+  /** The atomic rules that judge processing, which this fixture's `add`-only server cannot decide. */
+  const ATOMIC_PROCESSING_RULES = [
+    "spec/atomic/all-or-nothing",
+    "spec/atomic/lid-resolution",
+    "spec/atomic/results-order",
+  ];
+
   /**
    * The write rules that create a resource against a conformant server: all
    * but `create-conflict-type`, whose create such a server refuses with 409.
@@ -3715,9 +3724,13 @@ describe("Conformance: the write fixture", () => {
       Conformance.rules.map((rule) => rule.id),
     );
     const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
-    expect(errored.map((outcome) => outcome.rule.id)).toEqual(WRITE_RULES);
+    // The atomic processing rules read the fixtures too; against this server,
+    // whose operations endpoint applies only `add`, they otherwise skip (their
+    // own fixture is under "Conformance: atomic operations processing").
+    const reading = [...WRITE_RULES, ...ATOMIC_PROCESSING_RULES];
+    expect(errored.map((outcome) => outcome.rule.id)).toEqual(reading);
     expect(errored.map((outcome) => outcome.message)).toEqual(
-      WRITE_RULES.map(() => "FixturesUnreadable"),
+      reading.map(() => "FixturesUnreadable"),
     );
     // Every other rule still ran.
     expect(failed(report)).toEqual([]);
@@ -4704,6 +4717,519 @@ describe("Conformance: the write fixture", () => {
         ? { ...canned, contentType: MEDIA_TYPE }
         : canned,
   );
+});
+// ---------------------------------------------------------------------------
+// Atomic operations processing (#164)
+// ---------------------------------------------------------------------------
+
+/**
+ * The atomic rules that judge processing — `lid` resolution, all-or-nothing
+ * and the order of `atomic:results` — against a canned server that processes
+ * `add`, `update` and `remove` over a store of articles and people, inside a
+ * draft it commits only when every operation succeeds. Each fault breaks one
+ * thing a real server gets wrong, and the rule that judges it must catch it
+ * by what the store holds afterwards, not by the answer alone.
+ */
+describe("Conformance: atomic operations processing", () => {
+  const atomicApi = HttpApi.make("atomic")
+    .add(Group.make(Article, Endpoint.get(Article), Endpoint.list(Article)))
+    .add(Group.make(Person, Endpoint.get(Person), Endpoint.list(Person)))
+    .add(Group.make("operations", Endpoint.operations([Article, Person])));
+
+  const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
+
+  type Fields = Readonly<Record<string, unknown>>;
+  interface Stored {
+    readonly type: string;
+    readonly id: string;
+    readonly attributes: Fields;
+    readonly relationships: Fields;
+  }
+  /** What the server holds: every resource, keyed `type:id`, replaced as a whole on each commit. */
+  interface Store {
+    current: HashMap.HashMap<string, Stored>;
+  }
+
+  interface Faults {
+    /** Commits the operations before the one that fails, rather than none of them. */
+    readonly appliesOnFailure?: boolean;
+    /** Resolves every `lid` to the type's seed resource, not the one its `add` created. */
+    readonly misresolvesLid?: boolean;
+    /** Answers a reference to a `lid` no operation assigned by skipping that operation. */
+    readonly ignoresAbsentLid?: boolean;
+    /** Refuses a failed request with a bare 422, carrying no error document. */
+    readonly bareRefusal?: boolean;
+    /** Answers `atomic:results` in reverse order. */
+    readonly reversesResults?: boolean;
+    /** Answers one result fewer than there were operations. */
+    readonly dropsResult?: boolean;
+    /** Has someone else create a person, with attributes of their own, while a request fails. */
+    readonly bystander?: boolean;
+  }
+
+  const keyOf = (type: string, id: string) => `${type}:${id}`;
+
+  const SEEDS: ReadonlyArray<Stored> = [
+    {
+      type: "people",
+      id: "9",
+      attributes: { firstName: "Dan", lastName: "Gebhardt" },
+      relationships: {},
+    },
+    ...Arr.map(["1", "2", "3"], (id) => ({
+      type: "articles",
+      id,
+      attributes: { title: `seed ${id}`, body: "" },
+      relationships: { author: { data: { type: "people", id: "9" } } },
+    })),
+  ];
+
+  const seeded = (): Store => ({
+    current: HashMap.fromIterable(Arr.map(SEEDS, (seed) => [keyOf(seed.type, seed.id), seed])),
+  });
+
+  /** Every resource `store` holds beyond the seeds, as `type:id`. */
+  const leftovers = (store: Store): ReadonlyArray<string> =>
+    Arr.filter(
+      Arr.fromIterable(HashMap.keys(store.current)),
+      (key) => !Arr.some(SEEDS, (seed) => keyOf(seed.type, seed.id) === key),
+    );
+
+  const resource = ({ type, id, attributes, relationships }: Stored) => ({
+    type,
+    id,
+    attributes,
+    relationships,
+    links: { self: `/${type}/${id}` },
+  });
+
+  const Ref = Schema.Struct({
+    type: Schema.String,
+    id: Schema.optionalKey(Schema.String),
+    lid: Schema.optionalKey(Schema.String),
+  });
+  type Ref = typeof Ref.Type;
+  const Linkage = Schema.Struct({ data: Schema.Union([Schema.Null, Ref, Schema.Array(Ref)]) });
+  const Operation = Schema.Struct({
+    op: Schema.Literals(["add", "update", "remove"]),
+    data: Schema.optionalKey(
+      Schema.Struct({
+        type: Schema.String,
+        id: Schema.optionalKey(Schema.String),
+        lid: Schema.optionalKey(Schema.String),
+        attributes: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
+        relationships: Schema.optionalKey(Schema.Record(Schema.String, Linkage)),
+      }),
+    ),
+    ref: Schema.optionalKey(Ref),
+  });
+  type Operation = typeof Operation.Type;
+  const decodeOperations = Schema.decodeUnknownOption(
+    Schema.Struct({ "atomic:operations": Schema.Array(Operation) }),
+  );
+
+  /** A request's progress through its operations: what it has made of the store, its `lid`s and its results. */
+  interface Draft {
+    readonly store: HashMap.HashMap<string, Stored>;
+    readonly lids: HashMap.HashMap<string, Ref>;
+    readonly results: ReadonlyArray<Fields>;
+  }
+
+  /**
+   * Applies `operations` in order to `store`, answering the draft they made, or
+   * the draft as the first failing one left it and why it failed.
+   */
+  const apply = (
+    store: HashMap.HashMap<string, Stored>,
+    operations: ReadonlyArray<Operation>,
+    faults: Faults,
+    next: () => string,
+  ): Result.Result<Draft, readonly [Draft, string]> => {
+    const resolve = (draft: Draft, ref: Ref): Result.Result<string, string> => {
+      if (ref.id !== undefined) return Result.succeed(ref.id);
+      if (faults.misresolvesLid === true)
+        return Result.fromOption(
+          Option.map(
+            Arr.findFirst(SEEDS, (seed) => seed.type === ref.type),
+            (seed) => seed.id,
+          ),
+          () => `no ${ref.type}`,
+        );
+      return Result.fromOption(
+        Option.filter(HashMap.get(draft.lids, ref.lid ?? ""), (named) => named.type === ref.type),
+        () => `no lid "${ref.lid ?? ""}"`,
+      ).pipe(Result.map((named) => named.id ?? ""));
+    };
+    const relink = (
+      draft: Draft,
+      relationships: Readonly<Record<string, typeof Linkage.Type>>,
+    ): Result.Result<Fields, string> => {
+      const one = (ref: Ref) =>
+        Result.map(resolve(draft, ref), (id): Ref => ({ type: ref.type, id }));
+      return Result.all(
+        Rec.map(relationships, ({ data }) => {
+          if (data === null) return Result.succeed({ data });
+          if ("type" in data) return Result.map(one(data), (linked) => ({ data: linked }));
+          return Result.map(Result.all(Arr.map(data, one)), (linked) => ({ data: linked }));
+        }),
+      );
+    };
+    const stored = (draft: Draft, ref: Ref): Result.Result<Stored, string> =>
+      Result.flatMap(resolve(draft, ref), (id) =>
+        Result.fromOption(
+          HashMap.get(draft.store, keyOf(ref.type, id)),
+          () => `no ${ref.type}:${id}`,
+        ),
+      );
+    /** `draft` with `made` as its store, `result` appended and, when given, `lids` as its lids. */
+    const answered = (
+      draft: Draft,
+      made: HashMap.HashMap<string, Stored>,
+      result: Fields,
+      lids = draft.lids,
+    ): Draft => ({ store: made, lids, results: [...draft.results, result] });
+    type Data = NonNullable<Operation["data"]>;
+    const remove = (draft: Draft, ref: Ref): Result.Result<Draft, string> => {
+      const absent = ref.lid !== undefined && !HashMap.has(draft.lids, ref.lid);
+      if (absent && faults.ignoresAbsentLid === true)
+        return Result.succeed(answered(draft, draft.store, {}));
+      return Result.map(stored(draft, ref), (gone) =>
+        answered(draft, HashMap.remove(draft.store, keyOf(gone.type, gone.id)), {}),
+      );
+    };
+    const add = (draft: Draft, data: Data): Result.Result<Draft, string> =>
+      Result.map(relink(draft, data.relationships ?? {}), (relationships) => {
+        const made: Stored = {
+          type: data.type,
+          id: next(),
+          attributes: data.attributes ?? {},
+          relationships,
+        };
+        const lids =
+          data.lid === undefined
+            ? draft.lids
+            : HashMap.set(draft.lids, data.lid, { type: made.type, id: made.id });
+        return answered(
+          draft,
+          HashMap.set(draft.store, keyOf(made.type, made.id), made),
+          { data: resource(made) },
+          lids,
+        );
+      });
+    const update = (draft: Draft, ref: Ref, data: Data): Result.Result<Draft, string> =>
+      Result.flatMap(stored(draft, ref), (before) =>
+        Result.map(relink(draft, data.relationships ?? {}), (relationships) => {
+          const after: Stored = {
+            ...before,
+            attributes: { ...before.attributes, ...data.attributes },
+            relationships: { ...before.relationships, ...relationships },
+          };
+          return answered(draft, HashMap.set(draft.store, keyOf(after.type, after.id), after), {
+            data: resource(after),
+          });
+        }),
+      );
+    const step = (draft: Draft, operation: Operation): Result.Result<Draft, string> => {
+      const data = operation.data;
+      if (operation.op === "remove") return remove(draft, operation.ref ?? { type: "" });
+      if (data === undefined) return Result.fail("no data");
+      return operation.op === "add" ? add(draft, data) : update(draft, operation.ref ?? data, data);
+    };
+    const start: Result.Result<Draft, readonly [Draft, string]> = Result.succeed({
+      store,
+      lids: HashMap.empty(),
+      results: [],
+    });
+    return Arr.reduce(operations, start, (progress, operation) =>
+      Result.flatMap(progress, (draft) =>
+        Result.mapError(step(draft, operation), (why) => [draft, why] as const),
+      ),
+    );
+  };
+
+  /** The page size the collections are listed at, so a listing takes more than one page. */
+  const PAGE = 2;
+
+  const atomicServer = (store: Store, faults: Faults = {}) => {
+    let counter = 100;
+    const next = () => `${counter++}`;
+    const onOperations = (request: CannedRequest): Canned =>
+      Option.match(decodeOperations(request.body), {
+        onNone: () => ({ status: 400, body: { errors: [{ status: "400" }] } }),
+        onSome: (body) =>
+          Result.match(apply(store.current, body["atomic:operations"], faults, next), {
+            onSuccess: ({ store: made, results }) => {
+              store.current = made;
+              const ordered = faults.reversesResults === true ? Arr.reverse(results) : results;
+              return {
+                contentType: atomicType,
+                body: {
+                  "atomic:results": faults.dropsResult === true ? ordered.slice(1) : ordered,
+                },
+              };
+            },
+            onFailure: ([partial, why]) => {
+              if (faults.appliesOnFailure === true) store.current = partial.store;
+              if (faults.bystander === true) {
+                const id = next();
+                store.current = HashMap.set(store.current, keyOf("people", id), {
+                  type: "people",
+                  id,
+                  attributes: { firstName: "Someone", lastName: "Else" },
+                  relationships: {},
+                });
+              }
+              return faults.bareRefusal === true
+                ? { status: 422 }
+                : { status: 422, body: { errors: [{ status: "422", detail: why }] } };
+            },
+          }),
+      });
+    const onList = (type: string, request: CannedRequest): Canned => {
+      const offset = Number(queryOf(request).get("offset") ?? "0");
+      const all = Arr.filter(
+        Arr.fromIterable(HashMap.values(store.current)),
+        (held) => held.type === type,
+      );
+      return {
+        body: {
+          data: Arr.map(all.slice(offset, offset + PAGE), resource),
+          links: {
+            self: `/${type}?offset=${offset}`,
+            next: offset + PAGE < all.length ? `/${type}?offset=${offset + PAGE}` : null,
+          },
+        },
+      };
+    };
+    return (request: CannedRequest): Canned => {
+      const path = withoutQuery(request).path;
+      if (request.method === "POST" && path === "/operations") return onOperations(request);
+      if (request.method !== "GET") return { status: 405 };
+      const listed = /^\/(articles|people)$/.exec(path)?.[1];
+      if (listed !== undefined) return onList(listed, request);
+      const [, type = "", id = ""] = /^\/(articles|people)\/([^/]+)$/.exec(path) ?? [];
+      return Option.match(HashMap.get(store.current, keyOf(type, id)), {
+        onNone: () => ({ status: 404, body: { errors: [{ status: "404" }] } }),
+        onSome: (held) => ({ body: { data: resource(held) } }),
+      });
+    };
+  };
+
+  let sequence = 0;
+  /** A fixture per type over `store`; `cleanup` records each `type:id` it removes in `cleaned`. */
+  const fixtures = (
+    store: Store,
+    cleaned: Array<string>,
+  ): Readonly<Record<"articles" | "people", Conformance.WriteFixture>> => {
+    const cleanup = (type: string) => (id: string) =>
+      Effect.sync(() => {
+        cleaned.push(`${type}:${id}`);
+        store.current = HashMap.remove(store.current, keyOf(type, id));
+      });
+    return {
+      articles: {
+        create: () => ({
+          type: "articles",
+          attributes: { title: `atomic probe ${++sequence}`, body: "" },
+          relationships: { author: { data: { type: "people", id: "9" } } },
+        }),
+        update: () => ({ attributes: { title: `atomic probe ${++sequence} (updated)` } }),
+        cleanup: cleanup("articles"),
+      },
+      people: {
+        create: () => ({
+          type: "people",
+          attributes: { firstName: `Probe ${++sequence}`, lastName: "Atomic" },
+        }),
+        cleanup: cleanup("people"),
+      },
+    };
+  };
+
+  const runAtomic = async (
+    only: string,
+    faults: Faults = {},
+    writes: (
+      all: ReturnType<typeof fixtures>,
+    ) => Readonly<Record<string, Conformance.WriteFixture>> = (all) => all,
+  ) => {
+    const store = seeded();
+    const cleaned: Array<string> = [];
+    const report = await verifyOver(atomicApi)(atomicServer(store, faults), {
+      only: [only],
+      mutating: true,
+      writes: writes(fixtures(store, cleaned)),
+    });
+    return { outcome: outcomeFor(report, only), store, cleaned, writes: report.writes ?? [] };
+  };
+
+  const findingsOf = (outcome: Conformance.Outcome) =>
+    Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+
+  describe("against a conformant server", () => {
+    it.each([
+      "spec/atomic/lid-resolution",
+      "spec/atomic/all-or-nothing",
+      "spec/atomic/results-order",
+    ])("%s passes, and the store ends as it began", async (id) => {
+      const { outcome, store, writes } = await runAtomic(id);
+      expect(outcome._tag).toBe("Passed");
+      expect(leftovers(store)).toEqual([]);
+      expect(writes.map((write) => write.disposal)).toEqual(
+        writes.map(() => expect.stringMatching(/^(deleted|cleaned-up)$/)),
+      );
+    });
+
+    it("resolves a lid through linkage and through an update, reading both resources back", async () => {
+      const { outcome, writes } = await runAtomic("spec/atomic/lid-resolution");
+      // The linkage probe creates a person and an article; the update probe an article.
+      expect(writes.map((write) => `${write.type} ${write.disposal}`)).toEqual([
+        "people cleaned-up",
+        "articles cleaned-up",
+        "articles cleaned-up",
+      ]);
+      // The people fixture has no update and links to nothing, which the note names.
+      expect(outcome).toMatchObject({
+        _tag: "Passed",
+        note: expect.stringContaining('writes["people"] has no update'),
+      });
+    });
+
+    it("disposes of the linking resource before the one it links to", async () => {
+      const { cleaned } = await runAtomic("spec/atomic/lid-resolution");
+      expect(cleaned.slice(0, 2)).toEqual(["articles:101", "people:100"]);
+    });
+
+    it("records the results-order probe's resource as deleted by its own `remove`", async () => {
+      const { writes, cleaned } = await runAtomic("spec/atomic/results-order");
+      expect(writes.filter((write) => write.type === "articles")).toEqual([
+        expect.objectContaining({ rule: "spec/atomic/results-order", disposal: "deleted" }),
+      ]);
+      expect(cleaned.filter((id) => id.startsWith("articles:"))).toEqual([]);
+    });
+
+    it("runs lid-resolution through an update alone when no fixture links to another", async () => {
+      const { outcome } = await runAtomic("spec/atomic/lid-resolution", {}, ({ articles }) => ({
+        articles,
+      }));
+      expect(outcome._tag).toBe("Passed");
+    });
+
+    it("skips lid-resolution, naming what is missing, with neither an update nor a link", async () => {
+      const { outcome } = await runAtomic("spec/atomic/lid-resolution", {}, ({ people }) => ({
+        people,
+      }));
+      expect(outcome).toMatchObject({
+        _tag: "Skipped",
+        reason: expect.stringContaining('pass writes["people"].update'),
+      });
+    });
+
+    it("leaves a bystander's resource alone: it does not carry the fixture's attributes", async () => {
+      const { outcome, store, cleaned } = await runAtomic("spec/atomic/all-or-nothing", {
+        bystander: true,
+      });
+      expect(outcome._tag).toBe("Passed");
+      expect(leftovers(store)).toHaveLength(2);
+      expect(cleaned).toEqual([]);
+    });
+  });
+
+  describe("detects a server that", () => {
+    it("resolves a lid to some other resource", async () => {
+      const { outcome, store } = await runAtomic("spec/atomic/lid-resolution", {
+        misresolvesLid: true,
+      });
+      expect(outcome._tag).toBe("Failed");
+      const observed = findingsOf(outcome).map((finding) => finding.observed);
+      // The article links to the seed person, not the one the request created…
+      expect(observed).toContainEqual(expect.stringContaining("relationships.author.data"));
+      // …and the update patched the seed article, not the one the request created.
+      expect(observed).toContainEqual(expect.stringContaining("attributes.title"));
+      expect(leftovers(store)).toEqual([]);
+    });
+
+    it("applies the operations before the one that fails, and has what it left cleaned up", async () => {
+      const { outcome, store, writes } = await runAtomic("spec/atomic/all-or-nothing", {
+        appliesOnFailure: true,
+      });
+      expect(outcome._tag).toBe("Failed");
+      expect(findingsOf(outcome)).toEqual([
+        expect.objectContaining({
+          detail: expect.stringMatching(
+            /yet its `add` was applied: (articles|people):\d+ appeared/,
+          ),
+        }),
+        expect.objectContaining({
+          detail: expect.stringMatching(
+            /yet its `add` was applied: (articles|people):\d+ appeared/,
+          ),
+        }),
+      ]);
+      expect(leftovers(store)).toEqual([]);
+      expect(writes.map((write) => `${write.rule} ${write.disposal}`)).toEqual([
+        "spec/atomic/all-or-nothing cleaned-up",
+        "spec/atomic/all-or-nothing cleaned-up",
+      ]);
+    });
+
+    it("refuses a failed request without an error document", async () => {
+      const { outcome } = await runAtomic("spec/atomic/all-or-nothing", { bareRefusal: true });
+      expect(findingsOf(outcome).map((finding) => finding.detail)).toEqual([
+        expect.stringContaining("was refused without an error document"),
+        expect.stringContaining("was refused without an error document"),
+      ]);
+    });
+
+    it.each([
+      ["answers its results in reverse order", { reversesResults: true }, "out of order"],
+      [
+        "answers one result short",
+        { dropsResult: true },
+        "with 1 result object for its two operations",
+      ],
+    ] as const)("%s", async (_, faults, detail) => {
+      const { outcome, store } = await runAtomic("spec/atomic/results-order", faults);
+      expect(outcome._tag).toBe("Failed");
+      expect(findingsOf(outcome)).toContainEqual(
+        expect.objectContaining({ detail: expect.stringContaining(detail) }),
+      );
+      expect(leftovers(store)).toEqual([]);
+    });
+  });
+
+  it("does not decide all-or-nothing on a server that fails no operation, and disposes of what it made", async () => {
+    const { outcome, store } = await runAtomic("spec/atomic/all-or-nothing", {
+      ignoresAbsentLid: true,
+    });
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("the server failed no operation"),
+    });
+    expect(leftovers(store)).toEqual([]);
+  });
+
+  it("decides nothing, and writes nothing, without `mutating: true`", async () => {
+    const store = seeded();
+    const report = await verifyOver(atomicApi)(atomicServer(store), {
+      only: ["spec/atomic/"],
+      writes: fixtures(store, []),
+    });
+    const processing = [
+      "spec/atomic/lid-resolution",
+      "spec/atomic/all-or-nothing",
+      "spec/atomic/results-order",
+    ];
+    expect(processing.map((id) => outcomeFor(report, id))).toEqual(
+      processing.map(() =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining("mutating: true"),
+        }),
+      ),
+    );
+    expect(leftovers(store)).toEqual([]);
+  });
 });
 // ---------------------------------------------------------------------------
 // Pagination links enumerate the collection (#166)
