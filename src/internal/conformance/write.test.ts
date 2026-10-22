@@ -26,11 +26,11 @@ const article = (id: string) => ({ data: { type: "articles", id, attributes: {} 
 /**
  * A run's context over a server that stores articles and hands out the next
  * free id — so an id comes back once its resource is gone — and answers a GET
- * of a stored article with it. Every request goes through `observing`, as in a
- * real run.
+ * of a stored article with it. Every request goes through `observing`, over
+ * the run's own ledger, as in a real run. `store` is the server's, so a test
+ * can put a resource there that someone other than the kit made.
  */
-const context = (): Core.Context => {
-  const store = MutableHashMap.empty<string, string>();
+const context = (store = MutableHashMap.empty<string, string>()): Core.Context => {
   const serve = (probe: { readonly method?: string; readonly url: string }) => {
     if (probe.method === "POST") {
       const id = `${100 + MutableHashMap.size(store)}`;
@@ -43,6 +43,7 @@ const context = (): Core.Context => {
       : { status: 404, body: { errors: [{ status: "404" }] } };
   };
   const observed = MutableHashSet.empty<string>();
+  const writes: Core.Context["writes"] = [];
   return {
     endpoints: Core.discover(api),
     options: {
@@ -60,7 +61,7 @@ const context = (): Core.Context => {
       },
       requestTimeout: Option.none(),
     },
-    writes: [],
+    writes,
     observed,
     request: Core.observing(
       (probe) =>
@@ -75,43 +76,71 @@ const context = (): Core.Context => {
           ...serve(probe),
         })),
       observed,
+      writes,
     ),
   };
 };
 
+/**
+ * One create through the fixture, handing `use` what it made before the
+ * resource is disposed of.
+ */
+const createThen = (ctx: Core.Context, use: () => Effect.Effect<void>) =>
+  Effect.gen(function* () {
+    const rule = yield* Effect.fromOption(Arr.head(Spec.rules));
+    const target = yield* Effect.fromOption(Arr.head(Write.targets(ctx, "create").targets));
+    yield* Write.withCreated(ctx, rule.rule, target, Write.viaCreateEndpoint(ctx, target), use);
+  });
+
+/** Reads back every id the run holds, as a rule checking that a write was stored would. */
+const readBackAll = (ctx: Core.Context) =>
+  Effect.forEach(
+    Arr.filterMap(ctx.writes, ({ id }) =>
+      id === undefined ? Result.failVoid : Result.succeed(id),
+    ),
+    (id) => ctx.request({ url: `/articles/${id}` }),
+    { concurrency: 1, discard: true },
+  );
+
 describe("the write fixture's id vetting", () => {
   it("accepts an id it created, read back and removed when the server reuses it", async () => {
     const ctx = context();
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const rule = yield* Effect.fromOption(Arr.head(Spec.rules));
-        const target = yield* Effect.fromOption(Arr.head(Write.targets(ctx, "create").targets));
-        // A probe that reads back what it created — as a rule checking that a
-        // write was stored would — before the resource is disposed of.
-        const readBack = Write.withCreated(
-          ctx,
-          rule.rule,
-          target,
-          Write.viaCreateEndpoint(ctx, target),
-          () =>
-            Effect.forEach(
-              Arr.filterMap(ctx.writes, ({ id }) =>
-                id === undefined ? Result.failVoid : Result.succeed(id),
-              ),
-              (id) => ctx.request({ url: `/articles/${id}` }),
-              { concurrency: 1, discard: true },
-            ),
-        );
-        yield* readBack;
-        yield* readBack;
-      }),
-    );
-    // The read showed articles:100, but the kit had made it: the second create,
-    // which the server answered with the same id, is the kit's too.
-    expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(true);
+    const readBack = createThen(ctx, () => readBackAll(ctx));
+    await Effect.runPromise(Effect.andThen(readBack, readBack));
+    // The read showed articles:100 while the kit held it, so it is not counted
+    // as seen: the second create, which the server answered with the same id,
+    // is the kit's too.
+    expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(false);
     expect(ctx.writes.map(({ id, disposal, detail }) => ({ id, disposal, detail }))).toEqual([
       { id: "100", disposal: "cleaned-up", detail: undefined },
       { id: "100", disposal: "cleaned-up", detail: undefined },
+    ]);
+  });
+
+  it("refuses an id it once held when a read after its removal showed another holder's", async () => {
+    const store = MutableHashMap.empty<string, string>();
+    const ctx = context(store);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        // 1–2. The kit takes articles:100, and removes it.
+        yield* createThen(ctx, () => Effect.void);
+        // 3. Someone else's articles:100, which a later read shows.
+        MutableHashMap.set(store, "100", "another holder's");
+        yield* ctx.request({ url: "/articles/100" });
+        MutableHashMap.remove(store, "100");
+        // 4. The server answers a create with 100 again.
+        yield* createThen(ctx, () => Effect.void);
+      }),
+    );
+    expect(MutableHashSet.has(ctx.observed, Core.idKey("articles", "100"))).toBe(true);
+    expect(ctx.writes.map(({ id, disposal, detail }) => ({ id, disposal, detail }))).toEqual([
+      { id: "100", disposal: "cleaned-up", detail: undefined },
+      {
+        id: undefined,
+        disposal: "left",
+        detail:
+          "the create response named `articles:100`, which the kit did not create (a read earlier in this run returned it) — not touched",
+      },
     ]);
   });
 });

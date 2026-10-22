@@ -57,11 +57,10 @@ import {
   accepted,
   buildUpdate,
   decided,
-  idempotencyHeaders,
   onAccepted,
   overTargetsAll,
   ownId,
-  pathFor,
+  sendUpdate,
   type Targets,
   targets,
   undecided,
@@ -69,7 +68,6 @@ import {
   viaCreateEndpoint,
   withCreated,
   type WriteTarget,
-  writeHeaders,
 } from "./write.js";
 import { quote } from "./crawl.js";
 
@@ -493,15 +491,7 @@ const probeUpdate = (ctx: Context, rule: Rule, target: WriteTarget) =>
         return Result.match(Result.all({ id: ownId(made), patch: buildUpdate(target) }), {
           onFailure: (reason) => Effect.succeed([...onCreate, undecided(reason)]),
           onSuccess: ({ id, patch }) =>
-            idempotencyHeaders(target.endpoint).pipe(
-              Effect.flatMap((key) =>
-                ctx.request({
-                  method: target.endpoint.method,
-                  url: pathFor(target.endpoint, id),
-                  headers: { ...writeHeaders, ...key },
-                  body: { data: { ...patch, type: made.payload.type, id } },
-                }),
-              ),
+            sendUpdate(ctx, target, made.payload.type, id, patch).pipe(
               Effect.map((observation) => [
                 ...onCreate,
                 observation.status >= 200 && observation.status < 300

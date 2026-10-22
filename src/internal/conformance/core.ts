@@ -13,6 +13,7 @@ import {
   Duration,
   Effect,
   Formatter,
+  HashSet,
   MutableHashSet,
   Option,
   Predicate,
@@ -525,6 +526,11 @@ export type Disposal = "deleted" | "cleaned-up" | "cleanup-failed" | "left";
 
 /** @internal */
 export interface WriteRecord {
+  /**
+   * The type of the resource the kit created — the `type` its `create`
+   * fixture returned, which is what a document showing it carries, rather
+   * than the `writes` key it was created under.
+   */
   readonly type: string;
   /**
    * The id the server answered with, or `undefined` when the response named
@@ -615,9 +621,10 @@ export interface Context {
   readonly writes: Array<{ -readonly [K in keyof WriteRecord]: WriteRecord[K] }>;
   /**
    * The `idKey` of every resource a successful `GET` has shown the run —
-   * primary, included, or named by a relationship. The server held each of
-   * them before the kit asked, so a create response naming one did not make
-   * it. Filled by `observing`.
+   * primary, included, or named by a relationship — other than one `writes`
+   * held live when the read came back. The server held each of them before
+   * the kit asked, so a create response naming one did not make it. Filled by
+   * `observing`.
    */
   readonly observed: MutableHashSet.MutableHashSet<string>;
   readonly request: (probe: {
@@ -1502,8 +1509,29 @@ const shownBy = (observation: Observation): ReadonlyArray<string> =>
   ]);
 
 /**
+ * Whether a ledger entry is still in place: nothing the kit did has removed it.
+ *
+ * @internal
+ */
+export const isLive = (entry: Pick<WriteRecord, "disposal">): boolean =>
+  entry.disposal === "left" || entry.disposal === "cleanup-failed";
+
+/** The `idKey` of every resource the ledger holds live, by the id the kit took for it. */
+const heldBy = (writes: ReadonlyArray<WriteRecord>): HashSet.HashSet<string> =>
+  HashSet.fromIterable(
+    Arr.filterMap(writes, (entry) =>
+      entry.id !== undefined && isLive(entry)
+        ? Result.succeed(idKey(entry.type, entry.id))
+        : Result.failVoid,
+    ),
+  );
+
+/**
  * Wraps a probe runner so that every resource a 2xx `GET` shows is added to
- * `observed` — see `Context.observed`.
+ * `observed` — see `Context.observed` — except one `writes` holds live when the
+ * read comes back: a read of what the kit itself created and has not removed
+ * (a read-back) says nothing about who made it. A sighting of the same id once
+ * the kit has removed its resource is another holder's, and counts.
  *
  * @internal
  */
@@ -1511,6 +1539,7 @@ export const observing =
   (
     request: Context["request"],
     observed: MutableHashSet.MutableHashSet<string>,
+    writes: ReadonlyArray<WriteRecord>,
   ): Context["request"] =>
   (probe) =>
     request(probe).pipe(
@@ -1518,7 +1547,10 @@ export const observing =
         Effect.sync(() => {
           const read = (probe.method ?? "GET") === "GET";
           if (!read || observation.status < 200 || observation.status >= 300) return;
-          Arr.forEach(shownBy(observation), (key) => MutableHashSet.add(observed, key));
+          const held = heldBy(writes);
+          Arr.forEach(shownBy(observation), (key) => {
+            if (!HashSet.has(held, key)) MutableHashSet.add(observed, key);
+          });
         }),
       ),
     );
