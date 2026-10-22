@@ -1360,6 +1360,42 @@ describe("Conformance: detects a deliberately broken server", () => {
     ).toEqual(["people:7"]);
   });
 
+  // #443: a relationship document's primary data is resource linkage, not
+  // resource objects, so the full resource for a primary identifier may sit in
+  // `included` without duplicating anything.
+  it("does not count a relationship document's primary identifiers as resources", async () => {
+    const reads = HttpApi.make("reads").add(
+      Group.make(Article, Endpoint.get(Article), Endpoint.getRelationship(Article, "author")),
+    );
+    const person = (id: string) => ({
+      type: "people",
+      id,
+      attributes: { firstName: "Dan", lastName: "Gebhardt" },
+    });
+    const serving =
+      (included: ReadonlyArray<unknown>) =>
+      (request: CannedRequest): Canned =>
+        request.path === "/articles/1"
+          ? { body: { data: { type: "articles", id: "1", attributes: {} } } }
+          : request.path === "/articles/1/relationships/author"
+            ? { body: { data: { type: "people", id: "9" }, included } }
+            : { status: 404, body: { errors: [{ status: "404" }] } };
+    const findingsOf = async (included: ReadonlyArray<unknown>) => {
+      const report = await verifyOver(reads)(serving(included), {
+        only: ["spec/document/no-duplicate-resources"],
+      });
+      const outcome = outcomeFor(report, "spec/document/no-duplicate-resources");
+      return Predicate.isTagged(outcome, "Failed")
+        ? outcome.findings.map((found) => found.observed)
+        : [];
+    };
+    expect(await findingsOf([person("9")])).toEqual([]);
+    expect(await findingsOf([person("9"), person("2")])).toEqual([]);
+    expect(await findingsOf([person("9"), person("9")])).toEqual([
+      "people:9 at /included/0 and /included/1",
+    ]);
+  });
+
   broken(
     "a resource object with a non-string id",
     "spec/document/resource-identification",

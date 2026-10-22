@@ -57,6 +57,7 @@ import {
   parseMediaType,
   probeable,
   resourceLabel,
+  resourceObjectsOf,
   resourcesOf,
   type Role,
   type Rule,
@@ -635,10 +636,10 @@ const noDuplicateResources: RuleImpl = {
   ),
   run: (ctx) =>
     overDocuments(noDuplicateResources.rule, {
-      applicable: (body) => resourcesOf(body).length > 1,
+      applicable: (body) => resourceObjectsOf(body).length > 1,
       inapplicable: "no endpoint returned a document carrying more than one resource object",
       check: (body, observation, where) => {
-        const resources = resourcesOf(body);
+        const resources = resourceObjectsOf(body);
         const seen = new Map<string, string>();
         const duplicates: Array<string> = [];
         for (const { pointer, resource } of resources) {
