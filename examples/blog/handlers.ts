@@ -29,6 +29,7 @@ import {
   CommentNotFound,
   OperationFailed,
   PersonNotFound,
+  TagNotFound,
   TitleTaken,
 } from "./errors.js";
 import { Article, Comment, Person, Tag } from "./resources.js";
@@ -501,6 +502,46 @@ const getComment = (
   return comment;
 };
 
+/** The 404s an operation fails with when its linkage names an absent resource. */
+type LinkageNotFound = PersonNotFound | TagNotFound | CommentNotFound;
+
+const isLinkageNotFound = (error: unknown): error is LinkageNotFound =>
+  error instanceof PersonNotFound ||
+  error instanceof TagNotFound ||
+  error instanceof CommentNotFound;
+
+/**
+ * Returns `identifier` when `held` has a resource with its id, and otherwise
+ * throws the 404 `notFound` builds: an operation linking a resource that does
+ * not exist answers 404 (JSON:API §Creating Resources, §Updating
+ * Relationships) rather than linking it. `pointer` locates the identifier
+ * inside `atomic:operations`. The handler fails the whole request with the
+ * error, so nothing is committed.
+ */
+const requireHeld = <I extends { readonly id: string }>(
+  held: ReadonlyMap<string, unknown>,
+  notFound: (fields: { readonly id: string; readonly pointer: string }) => LinkageNotFound,
+  identifier: I,
+  pointer: string,
+): I => {
+  if (!held.has(identifier.id)) throw notFound({ id: identifier.id, pointer });
+  return identifier;
+};
+
+// People and tags are never written by operations, so the store is the
+// reference; comments are, so an operation checks them against the draft
+// (which holds comments added, and lacks comments removed, earlier in the request).
+const requireAuthor = <I extends { readonly id: string }>(identifier: I, pointer: string): I =>
+  requireHeld(store.people, (fields) => new PersonNotFound(fields), identifier, pointer);
+
+const requireTags = <I extends { readonly id: string }>(
+  identifiers: ReadonlyArray<I>,
+  pointer: string,
+): Array<I> =>
+  identifiers.map((identifier, index) =>
+    requireHeld(store.tags, (fields) => new TagNotFound(fields), identifier, `${pointer}/${index}`),
+  );
+
 /**
  * Applies one operation to the draft, returning its result entry.
  *
@@ -509,9 +550,16 @@ const getComment = (
  * narrow each case to fully typed `data` / `ref`.
  *
  * Failures throw; the handler converts them into typed `OperationFailed`
- * errors carrying the index of the operation that failed.
+ * errors carrying the index of the operation that failed, except the
+ * `LinkageNotFound` 404s, which it passes through. `at` is the operation's
+ * pointer (`Atomic.operationPointer`), for locating linkage inside it.
  */
-const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperation): ResultEntry =>
+const applyOperation = (
+  draft: Draft,
+  lids: Lid.LidMap,
+  operation: AtomicOperation,
+  at: string,
+): ResultEntry =>
   Match.value(operation).pipe(
     // --- relationship operations (refs carrying a `relationship` member) ----
     // replace an article's author (`one`: the new linkage is never null)
@@ -523,7 +571,9 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
           ...article,
           relationships: {
             ...article.relationships!,
-            author: { data: lids.identifier(Person, op.data) },
+            author: {
+              data: requireAuthor(lids.identifier(Person, op.data), `${at}/data`),
+            },
           },
         }),
       );
@@ -532,7 +582,10 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
     // add to / replace / remove from an article's tags (`many`: inline linkage)
     Match.when(Atomic.targetsRelationship(Article, "tags"), (op) => {
       const article = getArticle(draft, lids, op.ref);
-      const refs = op.data.map((ref) => lids.identifier(Tag, ref));
+      const refs = requireTags(
+        op.data.map((ref) => lids.identifier(Tag, ref)),
+        `${at}/data`,
+      );
       const current = article.relationships?.tags.data ?? [];
       const next =
         op.op === "add"
@@ -553,7 +606,15 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
     // linkage lives in the relationship index, not inline on the article)
     Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => {
       const article = getArticle(draft, lids, op.ref);
-      const ids: ReadonlyArray<string> = op.data.map((ref) => lids.identifier(Comment, ref).id);
+      const ids: ReadonlyArray<string> = op.data.map(
+        (ref, index) =>
+          requireHeld(
+            draft.comments,
+            (fields) => new CommentNotFound(fields),
+            lids.identifier(Comment, ref),
+            `${at}/data/${index}`,
+          ).id,
+      );
       const current = draft.articleComments.get(article.id) ?? [];
       const next =
         op.op === "add"
@@ -571,7 +632,11 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
         comment.id,
         Comment.make({
           ...comment,
-          relationships: { author: { data: lids.identifier(Person, op.data) } },
+          relationships: {
+            author: {
+              data: requireAuthor(lids.identifier(Person, op.data), `${at}/data`),
+            },
+          },
         }),
       );
       return Atomic.emptyResult;
@@ -587,8 +652,18 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
             attributes: add.data.attributes,
             relationships: {
               // `author` is required (`one`), so the operation always carries it
-              author: { data: lids.identifier(Person, add.data.relationships.author.data) },
-              tags: resolved.tags ?? { data: [] },
+              author: {
+                data: requireAuthor(
+                  lids.identifier(Person, add.data.relationships.author.data),
+                  `${at}${Document.pointer.relationship("author")}/data`,
+                ),
+              },
+              tags: {
+                data: requireTags(
+                  resolved.tags?.data ?? [],
+                  `${at}${Document.pointer.relationship("tags")}/data`,
+                ),
+              },
               // `comments` is paginated: new articles start with an empty collection
               comments: Handlers.paginatedRelationship("articles", id, "comments"),
             },
@@ -601,6 +676,15 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
         Match.when({ op: "update" }, (update) => {
           const article = getArticle(draft, lids, update.ref ?? update.data);
           const resolved = lids.resolveLinkage(Article, update.data.relationships);
+          if (resolved.author !== undefined) {
+            requireAuthor(
+              resolved.author.data,
+              `${at}${Document.pointer.relationship("author")}/data`,
+            );
+          }
+          if (resolved.tags !== undefined) {
+            requireTags(resolved.tags.data, `${at}${Document.pointer.relationship("tags")}/data`);
+          }
           const updated = Article.make({
             ...article,
             attributes: patchAttributes(article.attributes, update.data.attributes),
@@ -626,7 +710,12 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
             attributes: add.data.attributes,
             relationships: {
               // `author` is required (`one`)
-              author: { data: lids.identifier(Person, add.data.relationships.author.data) },
+              author: {
+                data: requireAuthor(
+                  lids.identifier(Person, add.data.relationships.author.data),
+                  `${at}${Document.pointer.relationship("author")}/data`,
+                ),
+              },
             },
           });
           draft.comments.set(comment.id, comment);
@@ -636,6 +725,12 @@ const applyOperation = (draft: Draft, lids: Lid.LidMap, operation: AtomicOperati
         Match.when({ op: "update" }, (update) => {
           const comment = getComment(draft, lids, update.ref ?? update.data);
           const resolved = lids.resolveLinkage(Comment, update.data.relationships);
+          if (resolved.author !== undefined) {
+            requireAuthor(
+              resolved.author.data,
+              `${at}${Document.pointer.relationship("author")}/data`,
+            );
+          }
           const updated = Comment.make({
             ...comment,
             attributes: patchAttributes(comment.attributes, update.data.attributes),
@@ -678,12 +773,14 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
         payload["atomic:operations"],
         (operation, index) =>
           Effect.try({
-            try: () => applyOperation(draft, lids, operation),
+            try: () => applyOperation(draft, lids, operation, Atomic.operationPointer(index)),
             catch: (error) =>
-              new OperationFailed({
-                operation: index,
-                reason: error instanceof Error ? error.message : String(error),
-              }),
+              isLinkageNotFound(error)
+                ? error
+                : new OperationFailed({
+                    operation: index,
+                    reason: error instanceof Error ? error.message : String(error),
+                  }),
           }),
         { concurrency: 1 },
       );

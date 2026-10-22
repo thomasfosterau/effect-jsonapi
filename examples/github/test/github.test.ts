@@ -528,6 +528,82 @@ describe("github example: writing", () => {
     expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNotFound);
   });
 
+  it("404s when opening an issue with linkage to a missing label, creating nothing", async () => {
+    const { before, exit, after } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const list = client.issues.list({ query: {} });
+        const before = (yield* list).meta?.total;
+        const exit = yield* Effect.exit(
+          client.issues.create({
+            payload: {
+              data: {
+                type: "issues",
+                attributes: {
+                  number: 1351,
+                  title: "Mislabelled",
+                  body: "",
+                  state: "open",
+                  locked: false,
+                  createdAt: bugIssue.attributes.createdAt,
+                },
+                relationships: {
+                  repository: { data: Repository.ref(helloWorld.id) },
+                  author: { data: User.ref(octocat.id) },
+                  assignee: { data: null },
+                  labels: { data: [Label.ref(bugLabel.id), Label.ref("does-not-exist")] },
+                },
+              },
+            },
+          }),
+        );
+        const after = (yield* list).meta?.total;
+        return { before, exit, after };
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof LabelNotFound);
+    expect(error.id).toBe("does-not-exist");
+    expect(after).toBe(before);
+  });
+
+  it("404s when updating an issue's labels to a missing label, leaving it unchanged", async () => {
+    const { exit, labels, title } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const exit = yield* Effect.exit(
+          client.issues.update({
+            params: { id: bugIssue.id },
+            payload: {
+              data: {
+                type: "issues",
+                id: bugIssue.id,
+                attributes: { title: "Renamed" },
+                relationships: { labels: { data: [Label.ref("does-not-exist")] } },
+              },
+            },
+          }),
+        );
+        const after = yield* client.issues.get({ params: { id: bugIssue.id }, query: {} });
+        return {
+          exit,
+          labels: after.data?.relationships?.labels.data,
+          title: after.data?.attributes.title,
+        };
+      }),
+    );
+
+    assert(Exit.isFailure(exit));
+    const error = findFailure(exit.cause);
+    assert(error instanceof LabelNotFound);
+    expect(error.id).toBe("does-not-exist");
+    // the whole update is refused, attributes included
+    expect(labels).toEqual(bugIssue.relationships?.labels.data);
+    expect(title).toBe(bugIssue.attributes.title);
+  });
+
   it("closes an issue with a partial update", async () => {
     const document = await run(
       Effect.gen(function* () {

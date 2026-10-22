@@ -192,7 +192,9 @@ const makeWire = (
             }
             return { _tag: options.tag, ...fields };
           },
-          // class encoded form -> document
+          // class encoded form -> document. An optional field the instance
+          // leaves absent stays out of `meta` (an `undefined` member is not
+          // JSON), mirroring `decode` above.
           encode: (encoded) => {
             const fields = encoded as Record<string, unknown>;
             const detail = options.detail?.(fields);
@@ -208,7 +210,9 @@ const makeWire = (
                   ...(Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
                     ? {
                         meta: Object.fromEntries(
-                          options.fieldKeys.map((key) => [key, fields[key]]),
+                          options.fieldKeys.flatMap((key) =>
+                            fields[key] === undefined ? [] : [[key, fields[key]]],
+                          ),
                         ),
                       }
                     : {}),

@@ -831,30 +831,37 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       if (!store.repositories.has(repository.id)) {
         return Effect.fail(new RepositoryNotFound({ id: repository.id }));
       }
-      const id = Issue.Id.make(`${store.issues.size + 1}`);
-      const issue = Issue.make({
-        id,
-        attributes: definedAttributes(payload.data.attributes),
-        relationships: {
-          repository: payload.data.relationships.repository,
-          author: payload.data.relationships.author,
-          assignee: payload.data.relationships.assignee ?? { data: null },
-          labels: payload.data.relationships.labels ?? { data: [] },
-          // The paginated comment feed starts empty; only its links exist.
-          comments: issueComments(id),
-        },
-      });
-      store.issues.set(issue.id, issue);
-      store.commentsByIssue.set(issue.id, []);
-      // The created resource carries its own `self` link: the 201's `Location`
-      // header is copied from it, so the two match.
-      const self = `/issues/${issue.id}`;
-      return Effect.succeed(
-        Handlers.data({ ...issue, links: { self } }, { self, jsonapi: Document.v1_1 }),
+      // Linkage naming a label the store does not hold answers 404 (JSON:API
+      // §Creating Resources) rather than creating the issue with it.
+      return requireLabels(payload.data.relationships.labels?.data ?? []).pipe(
+        Effect.map(() => {
+          const id = Issue.Id.make(`${store.issues.size + 1}`);
+          const issue = Issue.make({
+            id,
+            attributes: definedAttributes(payload.data.attributes),
+            relationships: {
+              repository: payload.data.relationships.repository,
+              author: payload.data.relationships.author,
+              assignee: payload.data.relationships.assignee ?? { data: null },
+              labels: payload.data.relationships.labels ?? { data: [] },
+              // The paginated comment feed starts empty; only its links exist.
+              comments: issueComments(id),
+            },
+          });
+          store.issues.set(issue.id, issue);
+          store.commentsByIssue.set(issue.id, []);
+          // The created resource carries its own `self` link: the 201's
+          // `Location` header is copied from it, so the two match.
+          const self = `/issues/${issue.id}`;
+          return Handlers.data({ ...issue, links: { self } }, { self, jsonapi: Document.v1_1 });
+        }),
       );
     })
     .handle("update", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
+        // Linkage naming an absent label answers 404 (JSON:API §Updating
+        // Resources) and leaves the issue unchanged.
+        Effect.tap(() => requireLabels(payload.data.relationships?.labels?.data ?? [])),
         Effect.map((issue) => {
           const relationships = issue.relationships!;
           const updated = Issue.make({

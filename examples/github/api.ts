@@ -210,11 +210,11 @@ export const issues = Group.make(
   }).middleware(FilterProfile),
   // POST /issues → 201 (repository and author are required relationships)
   Endpoint.create(Issue, {
-    errors: [RepositoryNotFound],
+    errors: [RepositoryNotFound, LabelNotFound],
   }),
   // PATCH /issues/:id — closing an issue is `attributes: { state: "closed" }`
   Endpoint.update(Issue, {
-    errors: [IssueNotFound, IssueLocked],
+    errors: [IssueNotFound, IssueLocked, LabelNotFound],
   }),
   // --- Related resource endpoints --------------------------------------------
   // GET /issues/:id/comments?page[number]=1&page[size]=30&include=author —
