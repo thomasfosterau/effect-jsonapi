@@ -4,18 +4,21 @@
  * to a relationship URL replaces its linkage — a to-one one with `null` too —
  * a `POST` adds to a to-many one and a `DELETE` removes from it, each judged
  * by reading the linkage back through `GET /<type>/:id/relationships/<name>`,
- * never by the write's answer alone. Two more judge the answer: a successful
- * write answers 202, 204 or 200 with the linkage as it now stands, and one
- * naming a resource that does not exist answers 404.
+ * never by the write's answer alone. Three more judge the answer: a successful
+ * write answers 202, 204 or 200 with the linkage as it now stands; a `PATCH`
+ * or `POST` naming a resource that does not exist answers 404; and a `DELETE`
+ * naming one succeeds, since that resource is already missing from the
+ * relationship.
  *
  * Each probe acts on a resource it created from the type's `writes` fixture
  * (`withCreated`, `./write.ts`), disposed of however the rule ends, and links
  * it to the `ids` sample of a type the write endpoint's payload names — or,
- * for the 404, to `absentId` under that type. The sample is only linked to,
- * never written to itself. A write the server does not accept — a `403`
- * included, which the specification allows for a replacement or removal the
- * server does not permit — decides nothing, nor does a read the server cannot
- * answer; a `202` decides nothing that a read-back would.
+ * for the 404 and the absent removal, to `absentId` under that type. The
+ * sample is only linked to, never written to itself. A write the server does
+ * not accept — a `403` included, which the specification allows for a
+ * replacement or removal the server does not permit — decides nothing, nor
+ * does a read the server cannot answer; a `202` decides nothing that a
+ * read-back would.
  *
  * @since 0.18.0
  * @internal
@@ -102,6 +105,13 @@ const readUrlOf = (plan: Plan, id: string): Result.Result<string, Verdict> =>
     onSome: (read) => Result.succeed(pathFor(read, id)),
   });
 
+/** The relationship GET at `endpoint`'s path, which its linkage is read back through — if there is one. */
+const readFor = (ctx: Context, endpoint: Discovered): Option.Option<Discovered> =>
+  Arr.findFirst(
+    ctx.endpoints,
+    (candidate) => candidate.role === "relationship" && candidate.path === endpoint.path,
+  );
+
 /**
  * The plan for `target`'s relationship write endpoint, or why there is none —
  * which, unless `readless`, includes a relationship GET to read back through.
@@ -113,10 +123,7 @@ const planOf = (
 ): Result.Result<Plan, string> =>
   Result.gen(function* () {
     const endpoint = target.endpoint;
-    const read = Arr.findFirst(
-      ctx.endpoints,
-      (candidate) => candidate.role === "relationship" && candidate.path === endpoint.path,
-    );
+    const read = readFor(ctx, endpoint);
     if (!readless && Option.isNone(read)) return yield* Result.fail(noRead(endpoint));
     const sample = yield* Result.fromOption(
       Arr.findFirst(endpoint.linkageTypes, (type) =>
@@ -834,6 +841,116 @@ const absentLinked404: RuleImpl = {
     ),
 };
 
+// ---------------------------------------------------------------------------
+// DELETE naming a resource that does not exist
+// ---------------------------------------------------------------------------
+
+/**
+ * The plan for removing an absent resource from `target`'s relationship, or
+ * why there is none: {@link absentPlanFor}'s identifier as the sample, and the
+ * relationship GET a 200's linkage is compared with, if there is one.
+ */
+const absentRemovePlanFor = (ctx: Context, target: WriteTarget): Result.Result<Plan, string> =>
+  Result.map(absentPlanFor(ctx, target), ({ endpoint, absent }) => ({
+    endpoint,
+    read: readFor(ctx, endpoint),
+    sample: absent,
+  }));
+
+/**
+ * Removes the plan's absent identifier. `expected` goes unused: a 200 carrying
+ * linkage is judged against the relationship as it then reads back, and with
+ * no relationship GET to read it through is set aside (see
+ * {@link judgeRemoveAbsent}).
+ */
+const sendRemoveAbsent: Send = toManyOnly((ctx, { endpoint, sample }, id) =>
+  sendLinkage(ctx, endpoint, pathFor(endpoint, id), [sample]).pipe(
+    Effect.map((answer) =>
+      Result.succeed({
+        answer,
+        requests: 1,
+        expected: [],
+        what: `removing ${label(sample)}, which does not exist`,
+      }),
+    ),
+  ),
+);
+
+/**
+ * The verdict on a removal naming a resource that does not exist: it must
+ * succeed, answered as {@link judgeResponse} judges any relationship write. A
+ * `403` decides nothing — the server does not permit the removal at all — nor
+ * does a request that got no answer; a `404`, or any other error, is a finding.
+ */
+const judgeRemoveAbsent = (
+  ctx: Context,
+  plan: Plan,
+  id: string,
+  sent: Sent,
+): Effect.Effect<Verdict> => {
+  const { answer, requests } = sent;
+  const removing = `DELETE ${pathFor(plan.endpoint, id)} removing ${label(plan.sample)}, which does not exist,`;
+  if (answer.status === 403)
+    return Effect.succeed(
+      undecided(
+        `${removing} answered 403 Forbidden — the server does not permit the removal at all (${describe(answer)})`,
+      ),
+    );
+  if (answer.status === 0)
+    return Effect.succeed(undecided(`${removing} got no answer (${statusOf(answer)})`));
+  if (!succeeded(answer))
+    return Effect.succeed(
+      decided(requests, [
+        finding(removeAbsentSucceeds.rule, {
+          detail: `${removing} answered ${answer.status}: the resource is already missing from the relationship, so the removal succeeds`,
+          expected: RESPONSES,
+          observed: describe(answer),
+          probe: answer.probe,
+        }),
+      ]),
+    );
+  if (
+    answer.status === 200 &&
+    Option.isNone(plan.read) &&
+    isRecord(answer.body) &&
+    "data" in answer.body
+  )
+    return Effect.succeed(
+      undecided(
+        `${removing} answered 200 with linkage, and there is no GET ${plan.endpoint.path} to compare it with`,
+      ),
+    );
+  return judgeResponse(ctx, removeAbsentSucceeds.rule, plan, id, sent);
+};
+
+const removeAbsent: Probe<Plan> = (ctx, plan, id) =>
+  sendRemoveAbsent(ctx, plan, id).pipe(
+    Effect.flatMap(
+      Result.match({
+        onFailure: Effect.succeed,
+        onSuccess: (sent) => judgeRemoveAbsent(ctx, plan, id, sent),
+      }),
+    ),
+  );
+
+const removeAbsentSucceeds: RuleImpl = {
+  creates: true,
+  rule: rule(
+    "spec/relationships/remove-absent-succeeds",
+    "crud-updating-to-many-relationships",
+    "If all of the specified resources are able to be removed from, or are already missing from, the relationship then the server MUST return a successful response — so a DELETE to a URL from a relationship link naming a resource that does not exist, which is already missing from the relationship, succeeds (or is refused with 403 Forbidden).",
+  ),
+  run: (ctx) =>
+    overRelationshipWrites(
+      ctx,
+      removeAbsentSucceeds.rule,
+      ofMethod("DELETE"),
+      "DELETE relationship endpoint",
+      absentRemovePlanFor,
+      removeAbsent,
+    ),
+};
+
 /**
  * The relationship mutation rules, in report order.
  *
@@ -846,4 +963,5 @@ export const relationshipRules: ReadonlyArray<RuleImpl> = [
   removeDeletes,
   writeResponse,
   absentLinked404,
+  removeAbsentSucceeds,
 ];

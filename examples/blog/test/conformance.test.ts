@@ -193,6 +193,11 @@ describe("blog: JSON:API conformance", () => {
       // #461: the `author` PATCH and `comments` POST answer 404 for a resource
       // that does not exist.
       "spec/relationships/absent-related-404",
+      // #477: a `comments` DELETE, and an atomic `remove` from a created
+      // article's `comments`, naming a comment that does not exist succeed —
+      // it is already missing from the relationship.
+      "spec/relationships/remove-absent-succeeds",
+      "spec/atomic/remove-absent-succeeds",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

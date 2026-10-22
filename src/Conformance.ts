@@ -781,12 +781,6 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: ["#116", "#161", "#433", "#458"],
   },
   {
-    area: "A relationship removal naming a resource that does not exist",
-    reason:
-      "Given a `writes` fixture and `mutating: true`, the kit checks what a create, update and delete answer, the 409s for an unserved `type` and a duplicate client-generated id, what a create under a client-generated id answers (and an atomic `add` under one), reading a create or update back, and every relationship write through `/relationships/…`: a `PATCH` / `POST` / `DELETE` read back (a to-one `PATCH` of `null` included), what each answers (202, 204, or 200 with the linkage as it now stands), and the 404 for a `PATCH` or `POST` linking a resource that does not exist. A `DELETE` naming a resource that does not exist is not probed for that 404: the specification makes a 204 the appropriate answer to a `DELETE` of a member the relationship does not hold, which leaves open whether one naming an absent resource must answer 404 or may answer 204.",
-    tracking: [],
-  },
-  {
     area: "The Idempotency-Key profile",
     reason:
       "This package publishes a second profile (`Idempotency.PROFILE_URI`, normative in `docs/idempotency.md`). The profile tier checks its advertisement (§1): given a `writes` fixture and `mutating: true`, a create or an update on an endpoint declaring `Idempotency-Key` must answer with the profile URI in `jsonapi.profile` or on its media type. Delete endpoints (usually a 204, with no document to name it in) and the atomic operations endpoint are not checked. What a *retried* write does is not checked either: replay of the recorded response, the fingerprint mismatch conflict, the in-flight case and the scope of a key. Each needs the kit to resend a request it has already sent, byte for byte, which neither the write fixture (#162) nor the kit yet provides.",

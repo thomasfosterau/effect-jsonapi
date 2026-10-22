@@ -579,13 +579,14 @@ const applyOperation = (
       );
       return Atomic.emptyResult;
     }),
-    // add to / replace / remove from an article's tags (`many`: inline linkage)
+    // add to / replace / remove from an article's tags (`many`: inline linkage).
+    // A `remove` naming a tag that does not exist succeeds: that tag is
+    // already missing from the relationship (JSON:API §Updating To-Many
+    // Relationships), so only `add` and `update` check their targets.
     Match.when(Atomic.targetsRelationship(Article, "tags"), (op) => {
       const article = getArticle(draft, lids, op.ref);
-      const refs = requireTags(
-        op.data.map((ref) => lids.identifier(Tag, ref)),
-        `${at}/data`,
-      );
+      const named = op.data.map((ref) => lids.identifier(Tag, ref));
+      const refs = op.op === "remove" ? named : requireTags(named, `${at}/data`);
       const current = article.relationships?.tags.data ?? [];
       const next =
         op.op === "add"
@@ -603,18 +604,21 @@ const applyOperation = (
       return Atomic.emptyResult;
     }),
     // add to / replace / remove from an article's comments (`paginated`: the
-    // linkage lives in the relationship index, not inline on the article)
+    // linkage lives in the relationship index, not inline on the article).
+    // As for tags, a `remove` naming a comment that does not exist succeeds.
     Match.when(Atomic.targetsRelationship(Article, "comments"), (op) => {
       const article = getArticle(draft, lids, op.ref);
-      const ids: ReadonlyArray<string> = op.data.map(
-        (ref, index) =>
-          requireHeld(
-            draft.comments,
-            (fields) => new CommentNotFound(fields),
-            lids.identifier(Comment, ref),
-            `${at}/data/${index}`,
-          ).id,
-      );
+      const ids: ReadonlyArray<string> = op.data.map((ref, index) => {
+        const identifier = lids.identifier(Comment, ref);
+        return op.op === "remove"
+          ? identifier.id
+          : requireHeld(
+              draft.comments,
+              (fields) => new CommentNotFound(fields),
+              identifier,
+              `${at}/data/${index}`,
+            ).id;
+      });
       const current = draft.articleComments.get(article.id) ?? [];
       const next =
         op.op === "add"

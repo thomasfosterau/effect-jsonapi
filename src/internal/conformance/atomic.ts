@@ -26,6 +26,11 @@
  *   - **`results-order`** sends an `add` and then a `remove` of the same
  *     resource by `lid` — one operation with data and one without — so a
  *     result list out of order, or short of one, cannot pass.
+ *   - **`remove-absent-succeeds`** `add`s a resource, then sends a `remove` on
+ *     one of its to-many relationships naming `absentId`: a resource that does
+ *     not exist is already missing from the relationship, so the request
+ *     succeeds. It is judged by its answer alone — there is no change to read
+ *     back.
  *
  * @since 0.17.0
  * @internal
@@ -74,6 +79,7 @@ import {
   decided,
   idempotencyHeaders,
   onAccepted,
+  onOwnId,
   overTargets,
   overTargetsAll,
   pathFor,
@@ -963,6 +969,129 @@ const atomicResultsOrder: RuleImpl = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// remove naming a resource that does not exist
+// ---------------------------------------------------------------------------
+
+/** A to-many relationship of a type, by name, and a type its linkage admits. */
+interface ToMany {
+  readonly name: string;
+  readonly type: string;
+}
+
+const RELATIONSHIP_PATH = /\/relationships\/([^/]+)$/;
+
+/**
+ * The first to-many relationship of `target`'s type that a relationship write
+ * endpoint shows — its name, from the endpoint's path, and the first type its
+ * payload admits. Which relationships the operations endpoint accepts is not
+ * discoverable, so the `/relationships/…` endpoints stand in for it.
+ */
+const toManyOf = (ctx: Context, target: WriteTarget): Result.Result<ToMany, string> =>
+  Result.fromOption(
+    Arr.findFirst(ctx.endpoints, (endpoint) =>
+      endpoint.role === "relationshipWrite" &&
+      endpoint.segment === target.key &&
+      endpoint.linkage === "many"
+        ? Option.flatMap(Option.fromNullishOr(RELATIONSHIP_PATH.exec(endpoint.path)?.[1]), (name) =>
+            Option.map(Arr.head(endpoint.linkageTypes), (type) => ({ name, type })),
+          )
+        : Option.none(),
+    ),
+    () =>
+      `no relationship write endpoint shows a to-many relationship of "${target.key}" (with a resource type its payload names) for a \`remove\` to name`,
+  );
+
+/** Judges the answer to a `remove` naming a resource that does not exist: it must succeed. */
+const judgeRemoveAbsent = (
+  endpoint: Discovered,
+  sent: string,
+  observation: Observation,
+): Verdict => {
+  if (observation.status === 0)
+    return undecided(`${sent} got no answer (${describe(observation)})`);
+  if (refusedOnKeyGrounds(endpoint, observation.probe.headers, observation))
+    return undecided(
+      `${sent} was refused over \`Idempotency-Key\` (${describe(observation)}), so no operation was processed`,
+    );
+  if (observation.status === 403)
+    return undecided(
+      `${sent} answered 403 Forbidden — the server does not permit the removal at all (${describe(observation)})`,
+    );
+  return decided(
+    2,
+    observation.status === 200 || observation.status === 204
+      ? []
+      : [
+          finding(atomicRemoveAbsent.rule, {
+            detail: `${sent} answered ${observation.status}: the resource is already missing from the relationship, so the operation succeeds`,
+            expected: "200 OK with `atomic:results`, or 204 No Content",
+            observed: describe(observation),
+            probe: observation.probe,
+          }),
+        ],
+  );
+};
+
+const removeAbsentProbe = (
+  ctx: Context,
+  endpoint: Discovered,
+  target: WriteTarget,
+): Effect.Effect<Verdict> =>
+  Result.match(toManyOf(ctx, target), {
+    onFailure: (reason) => Effect.succeed(undecided(reason)),
+    onSuccess: (relationship) =>
+      withCreated(
+        ctx,
+        atomicRemoveAbsent.rule,
+        target,
+        {
+          send: (payload) => sendOperations(ctx, endpoint, [add(payload)]),
+          identify: atomicIdentity,
+        },
+        onOwnId(target, ({ payload }, id) => {
+          const absent = { type: relationship.type, id: ctx.options.absentId };
+          return Effect.map(
+            sendOperations(ctx, endpoint, [
+              {
+                op: "remove",
+                ref: { type: payload.type, id, relationship: relationship.name },
+                data: [absent],
+              },
+            ]),
+            (observation) =>
+              judgeRemoveAbsent(
+                endpoint,
+                `a \`remove\` from the \`${relationship.name}\` of ${payload.type}:${id} naming ${absent.type}:${absent.id}, which does not exist,`,
+                observation,
+              ),
+          );
+        }),
+      ),
+  });
+
+const atomicRemoveAbsent: RuleImpl = {
+  creates: true,
+  rule: atomicRule(
+    "spec/atomic/remove-absent-succeeds",
+    "Atomic Operations — Processing",
+    "MUST",
+    "A `remove` operation on a to-many relationship removes the members its `data` names, as a DELETE to the relationship's URL does; if the server is able to update the relationship it MUST return a result with no `data` — so a `remove` naming a resource that does not exist, which is already missing from the relationship, succeeds.",
+  ),
+  run: (ctx) => {
+    const endpoint = operationsEndpoint(ctx);
+    if (endpoint === undefined)
+      return Effect.succeed(skip(atomicRemoveAbsent.rule, "no atomic operations endpoint"));
+    return overTargets(
+      ctx,
+      atomicRemoveAbsent.rule,
+      atomicTargets(ctx, endpoint),
+      "atomic operations endpoint",
+      (target) => removeAbsentProbe(ctx, endpoint, target),
+    );
+  },
+};
+
 /**
  * The atomic operations extension's rules, in report order.
  *
@@ -974,4 +1103,5 @@ export const atomicRules: ReadonlyArray<RuleImpl> = [
   atomicAllOrNothing,
   atomicLidResolution,
   atomicResultsOrder,
+  atomicRemoveAbsent,
 ];

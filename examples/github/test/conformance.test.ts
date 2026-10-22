@@ -227,6 +227,9 @@ describe("github: JSON:API conformance", () => {
       // #461: the `assignee` and `labels` writes answer 404 for a resource
       // that does not exist.
       "spec/relationships/absent-related-404",
+      // #477: a `labels` DELETE naming a label that does not exist succeeds —
+      // it is already missing from the relationship.
+      "spec/relationships/remove-absent-succeeds",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),
