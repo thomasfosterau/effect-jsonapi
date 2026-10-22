@@ -1,9 +1,10 @@
 /**
- * The profile's sort-order rule (`docs/filter-grammar.md` §10), against a
- * canned transport: a server that sorts as the profile says must pass, and
- * each way of getting the order wrong — ignoring `sort`, NULLs on the wrong
- * end, a locale collation — must fail it, while a collection that cannot show
- * an order leaves the rule `Skipped`, never passed.
+ * The profile's sort rules (`docs/filter-grammar.md` §10), against a canned
+ * transport: a server that sorts as the profile says must pass, and each way
+ * of getting the order wrong — ignoring `sort`, NULLs on the wrong end, a
+ * locale collation, a second term ignored, ties broken by reversing the
+ * answer, pages sorted one at a time — must fail its rule, while a collection
+ * that cannot show what a rule checks leaves it `Skipped`, never passed.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
 import { Array as Arr, Effect, Schema } from "effect";
@@ -12,6 +13,7 @@ import { HttpApi } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
+import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
@@ -32,8 +34,12 @@ const Project = Resource.make("projects", {
 });
 
 const api = HttpApi.make("sorting").add(
-  Group.make(Task, Endpoint.list(Task, { sort: true })),
+  Group.make(Task, Endpoint.list(Task, { sort: true, page: Query.Page.Offset })),
   Group.make(Project, Endpoint.related(Project, "tasks", { sort: true })),
+);
+
+const unpagedApi = HttpApi.make("unpaged").add(
+  Group.make(Task, Endpoint.list(Task, { sort: true })),
 );
 
 type Wire = {
@@ -79,49 +85,123 @@ interface Sorter {
   readonly refuses?: ReadonlyArray<string>;
   /** When set, `sort` is ignored altogether. */
   readonly ignores?: true;
+  /** When set, only the first term of `sort` is applied. */
+  readonly firstTermOnly?: true;
+  /** When set, the first term's direction is applied to every term. */
+  readonly oneDirection?: true;
+  /** When set, `-f` is answered as `f`, ties broken by `id`, then reversed whole. */
+  readonly reverses?: true;
+  /** When set, `page[limit]` is ignored: the whole collection is one page. */
+  readonly unpaged?: true;
+  /** When set, a page is cut from the collection unsorted, then sorted. */
+  readonly sortsEachPage?: true;
 }
 
 const profileSorter: Sorter = { compare: (left, right) => ascending(left, right) };
 
-/** A server ordering `tasks` by `sort` with `sorter`, lexicographically, ties broken by `id`. */
+/** What the canned server answers a request with. */
+interface Answer {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+interface Ordering {
+  readonly field: string;
+  readonly sign: number;
+}
+
+/** `rows` ordered by `terms` with `sorter`, lexicographically, ties broken by `id` ascending. */
+const ordered = (
+  sorter: Sorter,
+  rows: ReadonlyArray<Wire>,
+  terms: ReadonlyArray<Ordering>,
+): ReadonlyArray<Wire> => {
+  if (sorter.ignores === true) return rows;
+  // Reversing the ascending answer for a leading `-` is the bug S-TIE-2 rules out.
+  const reversed = sorter.reverses === true && terms[0]?.sign === -1;
+  const flip = reversed ? -1 : 1;
+  const applied = (sorter.firstTermOnly === true ? terms.slice(0, 1) : terms).map(
+    ({ field, sign }) => ({
+      field,
+      sign: flip * (sorter.oneDirection === true ? (terms[0]?.sign ?? sign) : sign),
+    }),
+  );
+  const sorted = [...rows].sort((a, b) => {
+    for (const { field, sign } of applied) {
+      const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
+      if (order !== 0) return order;
+    }
+    return ascending(a.id, b.id);
+  });
+  return reversed ? sorted.reverse() : sorted;
+};
+
+/**
+ * A server ordering `tasks` by `sort` with `sorter`, and paging `/tasks` by
+ * `page[offset]` / `page[limit]` when a limit is asked for, with a `next`
+ * link on every page but the last.
+ */
+/** The terms of a `sort` value, in order. */
+const termsOf = (sort: string): ReadonlyArray<Ordering> =>
+  sort
+    .split(",")
+    .filter((term) => term !== "")
+    .map((term) =>
+      term.startsWith("-") ? { field: term.slice(1), sign: -1 } : { field: term, sign: 1 },
+    );
+
+const refusal: Answer = {
+  status: 400,
+  body: { errors: [{ status: "400", source: { parameter: "sort" } }] },
+};
+
+/** One page of `tasks` at `page[offset]` / `page[limit]`, with a `next` link unless it is the last. */
+const paged = (
+  sorter: Sorter,
+  tasks: ReadonlyArray<Wire>,
+  pathname: string,
+  params: URLSearchParams,
+  size: number,
+): Answer => {
+  const sort = params.get("sort") ?? "";
+  const terms = termsOf(sort);
+  const offset = Number(params.get("page[offset]") ?? "0");
+  const page =
+    sorter.sortsEachPage === true
+      ? ordered(sorter, tasks.slice(offset, offset + size), terms)
+      : ordered(sorter, tasks, terms).slice(offset, offset + size);
+  const next =
+    offset + size < tasks.length
+      ? `${pathname}?sort=${sort}&page[offset]=${offset + size}&page[limit]=${size}`
+      : null;
+  return { status: 200, body: { data: page, links: { next } } };
+};
+
+/**
+ * A server ordering `tasks` by `sort` with `sorter`, and paging `/tasks` by
+ * `page[offset]` / `page[limit]` when a limit is asked for.
+ */
 const serve =
   (sorter: Sorter, tasks: ReadonlyArray<Wire> = TASKS) =>
-  (path: string): { readonly status: number; readonly body: unknown } => {
-    const [pathname, search = ""] = path.split("?");
-    if (pathname !== "/tasks" && pathname !== "/projects/1/tasks" && !/^\/t\d+$/.test(pathname!)) {
+  (path: string): Answer => {
+    const [pathname = "", search = ""] = path.split("?");
+    if (pathname !== "/tasks" && pathname !== "/projects/1/tasks" && !/^\/t\d+$/.test(pathname)) {
       return { status: 404, body: { errors: [{ status: "404" }] } };
     }
     const params = new URLSearchParams(search);
-    const terms = (params.get("sort") ?? "")
-      .split(",")
-      .filter((term) => term !== "")
-      .map((term) =>
-        term.startsWith("-") ? { field: term.slice(1), sign: -1 } : { field: term, sign: 1 },
-      );
-    const refused = terms.find(({ field }) => sorter.refuses?.includes(field));
-    if (refused !== undefined) {
-      return {
-        status: 400,
-        body: { errors: [{ status: "400", source: { parameter: "sort" } }] },
-      };
-    }
-    const ordered =
-      sorter.ignores === true
-        ? tasks
-        : [...tasks].sort((a, b) => {
-            for (const { field, sign } of terms) {
-              const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
-              if (order !== 0) return order;
-            }
-            return ascending(a.id, b.id);
-          });
-    return { status: 200, body: { data: ordered } };
+    const terms = termsOf(params.get("sort") ?? "");
+    if (terms.some(({ field }) => sorter.refuses?.includes(field))) return refusal;
+    const limit = params.get("page[limit]");
+    return limit === null || sorter.unpaged === true
+      ? { status: 200, body: { data: ordered(sorter, tasks, terms) } }
+      : paged(sorter, tasks, pathname, params, Number(limit));
   };
 
 /** The paths a run sent, in order. */
 const run = async (
-  answer: (path: string) => { readonly status: number; readonly body: unknown },
+  answer: (path: string) => Answer,
   target: HttpApi.HttpApi<string, any> = api,
+  ruleId: string = RULE,
 ) => {
   const sent: Array<string> = [];
   const client = HttpClient.make((request, url) =>
@@ -140,11 +220,11 @@ const run = async (
       client,
       baseUrl: "http://fixture.test",
       ids: { projects: "1" },
-      only: [RULE],
+      only: [ruleId],
     }),
   );
-  const outcome = report.outcomes.find((candidate) => candidate.rule.id === RULE);
-  if (outcome === undefined) throw new Error(`no outcome for ${RULE}`);
+  const outcome = report.outcomes.find((candidate) => candidate.rule.id === ruleId);
+  if (outcome === undefined) throw new Error(`no outcome for ${ruleId}`);
   return { outcome, sent };
 };
 
@@ -347,6 +427,196 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     expect(outcome).toMatchObject({
       _tag: "Skipped",
       reason: "no list or related endpoint in this api declares `sort`",
+    });
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", () => {
+  const MULTI = "profile/sort/multi-field";
+
+  it("is a MUST citing §10.4", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === MULTI);
+    expect(rule).toMatchObject({ tier: "profile", level: "MUST" });
+    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#104-several-fields$/);
+  });
+
+  it("passes a server that orders lexicographically, each term in its own direction", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), api, MULTI);
+    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+    // `rank` ties tasks 1 and 4, whose `title`s differ: both directions of each term are asked for.
+    expect(sent).toEqual([
+      "/tasks",
+      "/tasks?sort=rank,-title",
+      "/tasks?sort=-rank,title",
+      "/projects/1/tasks",
+      "/projects/1/tasks?sort=rank,-title",
+      "/projects/1/tasks?sort=-rank,title",
+    ]);
+  });
+
+  it("fails a server that ignores every term but the first", async () => {
+    // Ties on `rank` fall to `id` order, which `rank,-title` happens to agree with; `-rank,title` does not.
+    const { outcome } = await run(serve({ ...profileSorter, firstTermOnly: true }), api, MULTI);
+    const findings = findingsOf(outcome);
+    expect(findings.map((found) => found.detail)).toEqual([
+      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+    ]);
+    expect(findings[0]).toMatchObject({
+      expected:
+        "primary data ordered by `rank` descending, then by `title` ascending, each later term breaking only the ties the terms before it left (S-MULTI-1)",
+      observed: '`rank`, `title` in the order served: (3, "c"), (2, "b"), (2, "B"), (1, "a")',
+    });
+    expect(findings[0]?.probe?.url).toBe("/tasks?sort=-rank%2Ctitle");
+  });
+
+  it("fails a server that applies the first term's direction to every term", async () => {
+    const { outcome } = await run(serve({ ...profileSorter, oneDirection: true }), api, MULTI);
+    expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
+      '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
+      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+      '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
+      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+    ]);
+  });
+
+  it("passes over a pair the server refuses for the next", async () => {
+    const { outcome, sent } = await run(
+      serve({ ...profileSorter, refuses: ["title"] }),
+      api,
+      MULTI,
+    );
+    expect(outcome).toMatchObject({ _tag: "Passed" });
+    expect(sent.slice(0, 4)).toEqual([
+      "/tasks",
+      "/tasks?sort=rank,-title",
+      "/tasks?sort=rank,-due",
+      "/tasks?sort=-rank,due",
+    ]);
+  });
+
+  it("skips a collection in which no two resources tie on an attribute another tells apart", async () => {
+    const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
+    const { outcome } = await run(serve(profileSorter, distinct), api, MULTI);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no two-term order could be observed: /tasks: no two of its 4 resources tie on one attribute and differ on another, so no second term can be observed; /projects/1/tasks: no two of its 4 resources tie on one attribute and differ on another, so no second term can be observed",
+    });
+  });
+});
+
+describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () => {
+  const TIE = "profile/sort/id-tiebreak";
+
+  it("is a SHOULD citing §10.5", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === TIE);
+    expect(rule).toMatchObject({ tier: "profile", level: "SHOULD" });
+    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#105-ties-and-stability$/);
+  });
+
+  it("passes a server that breaks ties by `id` whatever the direction", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), api, TIE);
+    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+    expect(sent).toEqual([
+      "/tasks",
+      "/tasks?sort=rank",
+      "/tasks?sort=-rank",
+      "/projects/1/tasks",
+      "/projects/1/tasks?sort=rank",
+      "/projects/1/tasks?sort=-rank",
+    ]);
+  });
+
+  it("fails a server that answers `-f` by reversing its answer to `f`", async () => {
+    // The order on `rank` itself is right both ways: only the tie shows the reversal.
+    const { outcome } = await run(serve({ ...profileSorter, reverses: true }), api, TIE);
+    const findings = findingsOf(outcome);
+    expect(findings.map((found) => found.detail)).toEqual([
+      "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
+      "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
+    ]);
+    expect(findings[0]).toMatchObject({
+      observed: "1 of the 1 tied pair both answers list in the other order: tasks:1 / tasks:4",
+    });
+    expect(findings[0]?.probe?.url).toBe("/tasks?sort=-rank");
+    const ordering = await run(serve({ ...profileSorter, reverses: true }));
+    expect(ordering.outcome).toMatchObject({ _tag: "Passed" });
+  });
+
+  it("passes over an attribute the server refuses for the next tie", async () => {
+    const { outcome, sent } = await run(serve({ ...profileSorter, refuses: ["rank"] }), api, TIE);
+    expect(outcome).toMatchObject({ _tag: "Passed" });
+    expect(sent.slice(0, 4)).toEqual([
+      "/tasks",
+      "/tasks?sort=rank",
+      "/tasks?sort=due",
+      "/tasks?sort=-due",
+    ]);
+  });
+
+  it("skips a collection in which no two resources tie", async () => {
+    const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
+    const { outcome } = await run(serve(profileSorter, distinct), api, TIE);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no tie could be observed: /tasks: no two of its 4 resources tie on an attribute, so no tiebreak can be observed; /projects/1/tasks: no two of its 4 resources tie on an attribute, so no tiebreak can be observed",
+    });
+  });
+});
+
+describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)", () => {
+  const PAGES = "profile/sort/across-pages";
+
+  it("is a MUST citing §10.6", () => {
+    const rule = Conformance.rules.find((candidate) => candidate.id === PAGES);
+    expect(rule).toMatchObject({ tier: "profile", level: "MUST" });
+    expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#106-with-filter-and-page$/);
+  });
+
+  it("passes a server that sorts the collection before it pages it, walking `next`", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), api, PAGES);
+    expect(outcome).toMatchObject({ _tag: "Passed", probes: 3, note: undefined });
+    // Only the list declares a page size; half the baseline's four resources a page.
+    expect(sent).toEqual([
+      "/tasks",
+      "/tasks?sort=due&page[limit]=2",
+      "/tasks?sort=due&page[offset]=2&page[limit]=2",
+    ]);
+  });
+
+  it("fails a server that sorts each page on its own", async () => {
+    const { outcome } = await run(serve({ ...profileSorter, sortsEachPage: true }), api, PAGES);
+    const findings = findingsOf(outcome);
+    expect(findings.map((found) => found.detail)).toEqual([
+      'page 1 of `?sort=due&page[limit]=2` (/tasks?sort=due&page[limit]=2) lists tasks:2 (NULL), which sorts after tasks:3 ("2026-01-01T00:00:00.000Z") on page 2 (/tasks?sort=due&page[offset]=2&page[limit]=2)',
+    ]);
+    expect(findings[0]).toMatchObject({
+      observed:
+        '`due` page by page: ["2026-01-02T00:00:00.000Z", NULL] ["2026-01-01T00:00:00.000Z", NULL]',
+    });
+    // Each page is in order on its own, so the ordering rule cannot see it.
+    const ordering = await run(serve({ ...profileSorter, sortsEachPage: true }));
+    expect(ordering.outcome).toMatchObject({ _tag: "Passed" });
+  });
+
+  it("decides nothing on a server that ignores the page size", async () => {
+    const { outcome } = await run(serve({ ...profileSorter, unpaged: true }), api, PAGES);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no order across pages could be observed: /tasks: `due`: `?sort=due&page[limit]=2` answered one page, so no page boundary can be observed; `title`: `?sort=title&page[limit]=2` answered one page, so no page boundary can be observed; `rank`: `?sort=rank&page[limit]=2` answered one page, so no page boundary can be observed",
+    });
+  });
+
+  it("skips an api with no endpoint declaring both `sort` and a page size", async () => {
+    const { outcome, sent } = await run(serve(profileSorter), unpagedApi, PAGES);
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason:
+        "no list or related endpoint in this api declares `sort` and `page[limit]` or `page[size]`",
     });
     expect(sent).toEqual([]);
   });
