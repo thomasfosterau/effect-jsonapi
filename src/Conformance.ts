@@ -753,18 +753,25 @@ export interface Options {
   /** Which tiers to run. Defaults to both. */
   readonly tiers?: ReadonlyArray<Tier> | undefined;
   /**
-   * Run only these rule ids. A prefix matches every rule beneath it, so
-   * `["spec/content-negotiation"]` selects that whole section. A rule it does
-   * not select is left out of the run and out of the report.
+   * Run only these rule ids. Each entry matches by path segment: the rule
+   * with that id, and every rule whose id continues it with `/`. So
+   * `["spec/content-negotiation"]` (or `["spec/content-negotiation/"]`)
+   * selects that whole section, `["spec/status/create-location"]` that rule
+   * alone — not `spec/status/create-location-matches-self` — and a partial
+   * segment such as `["spec/content-neg"]` nothing. A rule it does not select
+   * is left out of the run and out of the report.
    */
   readonly only?: ReadonlyArray<string> | undefined;
   /**
    * Leave out these rule ids — the complement of `only`, matched the same
-   * way: a prefix (a plain string prefix of the id) matches every rule
-   * beneath it, so `["spec/links/"]` leaves out the link crawl and
-   * `["spec/pagination/links-enumerate-collection"]` the pagination walk. It
-   * applies after `tiers` and `only`, so it removes rules from what they
-   * select, and a rule both name is left out. A rule it leaves out is left out
+   * way, by path segment: an entry matches the rule with that id and every
+   * rule whose id continues it with `/`, so `["spec/links/"]` (or
+   * `["spec/links"]`) leaves out the link crawl,
+   * `["spec/pagination/links-enumerate-collection"]` the pagination walk, and
+   * `["spec/status/create-location"]` that rule alone, keeping
+   * `spec/status/create-location-matches-self`. It applies after `tiers` and
+   * `only`, so it removes rules from what they select, and a rule both name
+   * is left out. A rule it leaves out is left out
    * of the run and out of the report, as one `only` does not select is.
    *
    * @since 0.17.0
@@ -814,8 +821,13 @@ const selected = (options: Options | undefined): ReadonlyArray<Core.RuleImpl> =>
   const tiers = options?.tiers;
   const only = options?.only;
   const skip = options?.skip ?? [];
+  // By segment: a prefix is the id itself, or the id continues it with `/`
+  // (#367), so `spec/status/create-location` never reaches
+  // `spec/status/create-location-matches-self`.
   const matches = (prefixes: ReadonlyArray<string>, id: string): boolean =>
-    prefixes.some((prefix) => id.startsWith(prefix));
+    prefixes.some(
+      (prefix) => id === prefix || id.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`),
+    );
   return implementations.filter((implementation) => {
     const { id, tier } = implementation.rule;
     if (tiers !== undefined && !tiers.includes(tier)) return false;
