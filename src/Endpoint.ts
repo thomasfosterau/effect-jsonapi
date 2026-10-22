@@ -3821,7 +3821,9 @@ const relationshipConfig = (
 
 // A generated `getRelationship`'s `include` option: absent while it is off,
 // so the endpoint is exactly the one built without it.
-const includeOpt = (include: unknown): Record<string, unknown> =>
+const includeOpt = (
+  include: IncludeArgument | undefined,
+): { readonly include?: IncludeArgument } =>
   include === undefined || include === false ? {} : { include };
 
 // An op's own value under `key` when it sets one (even `undefined`), else the
@@ -4146,7 +4148,13 @@ export const resource = <
       // Off unless asked for: the relationship's own `relationshipInclude`,
       // else the top-level one. On a `paginated` relationship it legalises
       // no path (`getRelationship` derives none), and never throws.
-      const relationshipInclude = pick(relConfig, "relationshipInclude", gRelInclude);
+      // SAFETY: a `RelationshipConfig`'s `relationshipInclude` is a
+      // `RelationshipIncludeOption` and the top-level one a
+      // `ResourceRelationshipIncludeOption`; each is an `IncludeArgument` at
+      // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
+      const relationshipInclude = pick(relConfig, "relationshipInclude", gRelInclude) as
+        | IncludeArgument
+        | undefined;
       endpoints.push(
         getRelationship(
           resource,
