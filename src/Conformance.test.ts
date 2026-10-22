@@ -1988,6 +1988,124 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
 });
 
 // ---------------------------------------------------------------------------
+// A parameter whose name alone requires a 400 (#438)
+// ---------------------------------------------------------------------------
+
+describe("Conformance: a parameter whose name alone requires a 400", () => {
+  const rules = [
+    [
+      "spec/query/unknown-query-parameter",
+      "unknown",
+      "a name with no non a-z character that the specification does not define",
+    ],
+    ["spec/query/illegal-parameter-name", "foo!", "a base name that is not a legal member name"],
+    [
+      "spec/query/unsupported-extension-parameter",
+      "unsupported:param",
+      "a parameter of an extension the server does not support",
+    ],
+  ] as const;
+
+  /** `conformantServe`, with `probe` answering every request that carries `name`. */
+  const answering =
+    (name: string, probe: (request: CannedRequest) => Canned) => (request: CannedRequest) =>
+      queryOf(request).has(name) ? probe(request) : conformantServe(request);
+
+  it.each(rules)("%s passes on a 400 naming `%s`, sent after a 2xx baseline", async (id, name) => {
+    const seen: Array<string> = [];
+    const report = await verifyCanned(
+      (request) => {
+        seen.push(request.path);
+        return conformantServe(request);
+      },
+      { only: [id] },
+    );
+    expect(outcomeFor(report, id)).toMatchObject({ _tag: "Passed", probes: 2, note: undefined });
+    expect(seen).toEqual(["/articles/1", `/articles/1?${name}=1`]);
+  });
+
+  it.each(rules)(
+    "%s fails a 400 whose `source.parameter` names another parameter",
+    async (id, name) => {
+      const report = await verifyCanned(
+        answering(name, () => badRequest({ source: { parameter: "include" } })),
+        { only: [id] },
+      );
+      expect(outcomeFor(report, id)).toMatchObject({
+        _tag: "Failed",
+        findings: [
+          {
+            detail: `the 400 for \`?${name}=1\` on /articles/1 does not name \`${name}\` in \`source.parameter\`, so it refused something else`,
+            expected: `source: { parameter: "${name}" }`,
+            observed: "source.parameter: `include`",
+            probe: { url: `/articles/1?${name}=1` },
+          },
+        ],
+      });
+    },
+  );
+
+  it.each(rules)("%s passes a 400 naming no `source.parameter`, and says so", async (id, name) => {
+    const report = await verifyCanned(
+      answering(name, () => badRequest()),
+      { only: [id] },
+    );
+    expect(outcomeFor(report, id)).toMatchObject({
+      _tag: "Passed",
+      note: expect.stringContaining("named no `source.parameter`"),
+    });
+  });
+
+  it.each(Arr.flatMap(rules, ([id, name]) => [[id, name, 429] as const, [id, name, 408] as const]))(
+    "%s does not decide on a probe `%s` answered %i",
+    async (id, name, status) => {
+      const report = await verifyCanned(
+        answering(name, () => ({ status, body: { errors: [{ status: `${status}` }] } })),
+        { only: [id] },
+      );
+      expect(outcomeFor(report, id)).toMatchObject({
+        _tag: "Skipped",
+        reason: `not decided: \`?${name}=1\` on /articles/1 answered ${status}, and a rate limit, a request timeout or a lost response says nothing of whether the server refuses the parameter`,
+      });
+    },
+  );
+
+  it.each(rules)("%s fails a probe answered 500, as not rejected", async (id, name, why) => {
+    const report = await verifyCanned(
+      answering(name, () => serverError),
+      { only: [id] },
+    );
+    expect(outcomeFor(report, id)).toMatchObject({
+      _tag: "Failed",
+      findings: [
+        {
+          detail: `\`?${name}=1\` on /articles/1, ${why}, was not rejected`,
+          expected: "400 Bad Request",
+          observed: expect.stringMatching(/^500 /),
+        },
+      ],
+    });
+  });
+
+  it.each(rules)("%s passes over an endpoint whose baseline fails", async (id, name) => {
+    const seen: Array<string> = [];
+    const report = await verifyCanned(
+      (request) => {
+        seen.push(request.path);
+        return request.path === "/articles/1" ? serverError : conformantServe(request);
+      },
+      { only: [id] },
+    );
+    expect(outcomeFor(report, id)).toMatchObject({ _tag: "Passed", probes: 3 });
+    // The next read endpoint's baseline, then the probe on it.
+    expect(seen).toHaveLength(3);
+    expect(seen[0]).toBe("/articles/1");
+    expect(seen[1]).not.toContain("?");
+    expect(seen[2]).toBe(`${seen[1]}?${name}=1`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Discovery of a hand-built endpoint whose query is not a plain struct (#278)
 // ---------------------------------------------------------------------------
 
@@ -3768,10 +3886,11 @@ describe("Conformance: the write fixture", () => {
     const { report } = await run(undefined, undefined, {
       client: followingOffsite((_, url) => url.searchParams.has("unknown"), "refused"),
     });
+    // The rule's baseline is read, so 1 of its 2 requests went unread (#438).
     expect(outcomeFor(report, "spec/query/unknown-query-parameter")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${refused("/articles/1?unknown=1")})`,
+      reason: `not decided: \`?unknown=1\` on /articles/1 answered ${refused("/articles/1?unknown=1")}; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${refused("/articles/1?unknown=1")})`,
     });
   });
 
@@ -4135,7 +4254,7 @@ describe("Conformance: the write fixture", () => {
     expect(outcomeFor(unknown.report, "spec/query/unknown-query-parameter")).toEqual({
       _tag: "Skipped",
       rule: expect.anything(),
-      reason: `no answer to decide on: every request the rule sent was answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
+      reason: `not decided: \`?unknown=1\` on /articles/1 answered ${followed("/articles/1?unknown=1")}; 1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET /articles/1?unknown=1 answered ${followed("/articles/1?unknown=1")})`,
     });
     const errors = [
       "spec/errors/error-document-shape",
