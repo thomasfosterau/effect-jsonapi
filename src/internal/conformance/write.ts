@@ -11,7 +11,7 @@
  *     response's id is taken only when the response names a resource of the
  *     type the kit sent, under an id that is a URL path segment of its own and
  *     is neither an `ids` sample, nor one a read earlier in the run returned
- *     (unless the kit took it from a create of its own), nor one the run
+ *     (unless the kit held it live at the time), nor one the run
  *     already holds a live record for. A refused id is recorded as named and
  *     never updated, deleted or handed to `cleanup`. Any other id is trusted:
  *     the kit cannot tell a server that names an existing resource it has not
@@ -47,6 +47,7 @@ import {
   type Finding,
   type Fixture,
   idKey,
+  isLive,
   isRecord,
   type Observation,
   type Outcome,
@@ -64,7 +65,7 @@ const MUTATING_SKIP =
   "mutating probe — pass `mutating: true` to run it against a disposable target";
 
 /** The request headers every write probe sends. */
-export const writeHeaders = {
+const writeHeaders = {
   accept: MEDIA_TYPE,
   "content-type": MEDIA_TYPE,
 };
@@ -387,7 +388,8 @@ export type Created = Data.TaggedEnum<{
   };
 }>;
 
-const Created = Data.taggedEnum<Created>();
+/** @internal */
+export const Created = Data.taggedEnum<Created>();
 
 /**
  * How a write probe creates: the request that sends a payload, and where the
@@ -422,10 +424,6 @@ export const buildUpdate = (target: WriteTarget): Result.Result<Patch, string> =
       }),
   });
 
-/** A ledger entry still in place: nothing the kit did has removed it. */
-const live = (entry: Entry): boolean =>
-  entry.disposal === "left" || entry.disposal === "cleanup-failed";
-
 /**
  * Whether `id`, percent-encoded as one URL path segment, is still exactly that
  * segment once the URL is normalised. `encodeURIComponent` escapes `/`, `?`,
@@ -454,9 +452,10 @@ const isOwnSegment = (id: string): boolean =>
  *   - is a URL path segment of its own (see `isOwnSegment`), since the update
  *     and delete rules put it in a URL and `cleanup` may too;
  *   - is not an `ids` sample, which the kit did not create;
- *   - no successful `GET` earlier in the run has shown (`Context.observed`),
- *     unless the kit took that id from an earlier create of its own: the
- *     server held a resource it showed before the kit made one under its id;
+ *   - no successful `GET` earlier in the run has shown (`Context.observed`)
+ *     while the kit held no live resource under it: the server held a
+ *     resource it showed before the kit made one under its id — a read-back of
+ *     the kit's own resource, made while it was live, is not counted;
  *   - the run does not already hold a live record for (two live resources
  *     cannot share an id, so one of the two answers is wrong).
  *
@@ -483,19 +482,16 @@ const vet = (
   const samples = [ctx.options.ids[target.key], ctx.options.ids[named.type]];
   if (Arr.contains(samples, named.id))
     return refuse("which the kit did not create (it is the `ids` sample)");
+  // A read-back of what the kit created shows its id too, but `observing`
+  // leaves out an id the ledger held live when the read came back — so what
+  // is here was shown while the kit held no resource under it.
+  if (MutableHashSet.has(ctx.observed, idKey(named.type, named.id)))
+    return refuse("which the kit did not create (a read earlier in this run returned it)");
   const mine = Arr.filter(
     ctx.writes,
-    (entry) => entry.type === target.key && entry.id === named.id,
+    (entry) => entry.type === named.type && entry.id === named.id,
   );
-  // A read of what the kit itself created earlier — a read-back — shows that
-  // id too; it says nothing about who made it, so only an id the kit never
-  // took is refused for having been read.
-  if (
-    Arr.isReadonlyArrayEmpty(mine) &&
-    MutableHashSet.has(ctx.observed, idKey(named.type, named.id))
-  )
-    return refuse("which the kit did not create (a read earlier in this run returned it)");
-  if (Arr.some(mine, live))
+  if (Arr.some(mine, isLive))
     return refuse(
       "which this create did not make (an earlier create in this run holds that id and has not been removed)",
     );
@@ -517,14 +513,14 @@ const record = (
   // With an id, `dispose` settles `disposal` and `detail` once the probe is done with it.
   const entry: Entry = Result.match(claim, {
     onSuccess: (id) => ({
-      type: target.key,
+      type: payload.type,
       id,
       rule: rule.id,
       disposal: "left",
       detail: undefined,
     }),
     onFailure: (detail) => ({
-      type: target.key,
+      type: payload.type,
       id: undefined,
       rule: rule.id,
       disposal: "left",
@@ -655,6 +651,31 @@ export const viaCreateEndpoint = (ctx: Context, target: WriteTarget): Via => ({
     ),
   identify: primaryIdentity,
 });
+
+/**
+ * Sends `patch` — the fixture's update — to `type:id`, a resource the kit
+ * created, through the target's update endpoint, with a fresh
+ * `Idempotency-Key` when that endpoint requires one.
+ *
+ * @internal
+ */
+export const sendUpdate = (
+  ctx: Context,
+  target: WriteTarget,
+  type: string,
+  id: string,
+  patch: Patch,
+): Effect.Effect<Observation> =>
+  idempotencyHeaders(target.endpoint).pipe(
+    Effect.flatMap((key) =>
+      ctx.request({
+        method: target.endpoint.method,
+        url: pathFor(target.endpoint, id),
+        headers: { ...writeHeaders, ...key },
+        body: { data: { ...patch, type, id } },
+      }),
+    ),
+  );
 
 // ---------------------------------------------------------------------------
 // Settling a write rule

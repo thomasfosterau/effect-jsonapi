@@ -16,8 +16,11 @@
 import {
   Array as Arr,
   Effect,
+  Equal,
+  Formatter,
   Match,
   Option,
+  Order,
   Predicate,
   Record as Rec,
   Result,
@@ -71,6 +74,7 @@ import {
 import {
   type Accepted,
   atomicIdentity,
+  Created,
   atomicTargets,
   buildUpdate,
   decided,
@@ -82,13 +86,13 @@ import {
   primaryIdentity,
   refusedForMissingKey,
   refusedOnKeyGrounds,
+  sendUpdate,
   type WriteTarget as Target,
   targets,
   undecided,
   type Verdict,
   viaCreateEndpoint,
   withCreated,
-  writeHeaders,
 } from "./write.js";
 
 const SPEC = "https://jsonapi.org/format/1.1";
@@ -1972,15 +1976,7 @@ const updateResponse: RuleImpl = {
           Result.match(Result.all({ id: ownId(created), patch: buildUpdate(target) }), {
             onFailure: (reason) => Effect.succeed(undecided(reason)),
             onSuccess: ({ id, patch }) =>
-              idempotencyHeaders(target.endpoint).pipe(
-                Effect.flatMap((key) =>
-                  ctx.request({
-                    method: target.endpoint.method,
-                    url: pathFor(target.endpoint, id),
-                    headers: { ...writeHeaders, ...key },
-                    body: { data: { ...patch, type: created.payload.type, id } },
-                  }),
-                ),
+              sendUpdate(ctx, target, created.payload.type, id, patch).pipe(
                 Effect.map((observation) =>
                   judgeUpdate(target, created.payload.type, id, observation),
                 ),
@@ -2206,6 +2202,360 @@ const judgeDelete = (observation: Observation): ReadonlyArray<Finding> => {
         "204, 200 with only `meta`, or 202",
       ),
   );
+};
+
+// ---------------------------------------------------------------------------
+// Conflicts
+// ---------------------------------------------------------------------------
+
+/**
+ * The `type` the conflict probe sends in place of the fixture's: one no
+ * realistic api serves, so the create endpoint's collection cannot be made of
+ * it.
+ */
+const UNSERVED_TYPE = "conformance-unserved-type";
+
+/**
+ * Sends the fixture's payload under {@link UNSERVED_TYPE} through the
+ * target's create endpoint. A server that wrongly accepts it is still vetted
+ * against the fixture's own type, so a resource it made of the fixture's
+ * payload is the kit's, and is disposed of like any other.
+ */
+const viaUnservedType = (ctx: Context, target: Target) => {
+  const via = viaCreateEndpoint(ctx, target);
+  return { ...via, send: (payload: Payload) => via.send({ ...payload, type: UNSERVED_TYPE }) };
+};
+
+const createConflictType: RuleImpl = {
+  creates: true,
+  rule: rule(
+    "spec/status/create-conflict-type",
+    "Creating Resources",
+    "crud-creating-responses-409",
+    "MUST",
+    "A server MUST return 409 Conflict when processing a POST request in which the resource object's `type` is not among the type(s) that constitute the collection represented by the endpoint.",
+  ),
+  run: (ctx) =>
+    overTargets(ctx, createConflictType.rule, targets(ctx, "create"), "create endpoint", (target) =>
+      withCreated(
+        ctx,
+        createConflictType.rule,
+        target,
+        viaUnservedType(ctx, target),
+        (created): Effect.Effect<Verdict> =>
+          Effect.succeed(
+            Created.$match(created, {
+              Unbuilt: ({ reason }) => undecided(reason),
+              Sent: ({ payload, observation }) => judgeConflict(target, payload, observation),
+            }),
+          ),
+      ),
+    ),
+};
+
+const judgeConflict = (target: Target, payload: Payload, observation: Observation): Verdict => {
+  if (observation.status === 0)
+    return undecided(
+      `the POST to ${target.createPath} with an unserved \`type\` got no answer (${describe(observation)})`,
+    );
+  if (refusedOnKeyGrounds(target.createEndpoint, observation.probe.headers, observation))
+    return undecided(
+      `the POST to ${target.createPath} with an unserved \`type\` was refused over \`Idempotency-Key\` (${describe(observation)}), which says nothing of its \`type\``,
+    );
+  if (observation.status === 409) return decided(1, []);
+  return decided(1, [
+    finding(createConflictType.rule, {
+      detail: `a POST to ${target.createPath} of writes["${target.key}"].create with \`type\` "${UNSERVED_TYPE}" in place of "${payload.type}" — a type that endpoint does not serve — answered ${observation.status}${succeeded(observation) ? ", accepting it" : ""}`,
+      expected: "409 Conflict",
+      observed: describe(observation),
+      probe: observation.probe,
+    }),
+  ]);
+};
+
+// ---------------------------------------------------------------------------
+// Reading a write back
+// ---------------------------------------------------------------------------
+
+/** The single-resource GET of `target`'s type, which a write is read back through — or why there is none. */
+const readEndpointFor = (ctx: Context, target: Target): Result.Result<Discovered, string> =>
+  Result.fromOption(
+    Arr.findFirst(
+      ctx.endpoints,
+      (endpoint) =>
+        endpoint.role === "resource" &&
+        endpoint.segment === target.key &&
+        endpoint.params.length === 1,
+    ),
+    () =>
+      `no single-resource GET endpoint for "${target.key}" with one path parameter to read a write back through`,
+  );
+
+/** A server value for an `observed` line, cut to 80 code units; `absent` for no value. */
+const shown = (value: unknown): string => {
+  const rendered = value === undefined ? "absent" : Formatter.format(value);
+  return rendered.length > 80 ? `${rendered.slice(0, 79)}…` : rendered;
+};
+
+const membersOf = (
+  resource: Readonly<Record<string, unknown>>,
+  member: "attributes" | "relationships",
+): Readonly<Record<string, unknown>> => {
+  const members = resource[member];
+  return isRecord(members) ? members : {};
+};
+
+/**
+ * A relationship's linkage as one comparable value: `null`, one identity, or
+ * a to-many relationship's identities in sorted order — JSON:API gives a
+ * to-many linkage no order a read must keep. None when it carries no `data`.
+ */
+const linkageValue = (relationship: unknown): Option.Option<unknown> => {
+  if (!isRecord(relationship) || !("data" in relationship)) return Option.none();
+  const data = relationship["data"];
+  const key = (item: unknown) => (isRecord(item) ? (identity(item) ?? shown(item)) : shown(item));
+  if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
+  return Option.some(data === null ? null : key(data));
+};
+
+/**
+ * Each member `expected` states that `stored` does not show alike, as
+ * `attributes.<name>: … · read back …`: every attribute `expected` carries,
+ * and the linkage of every relationship it carries `data` for. A member only
+ * `stored` carries is not compared — a default fieldset may differ.
+ */
+const readBackDifferences = (
+  expected: Readonly<Record<string, unknown>>,
+  stored: Readonly<Record<string, unknown>>,
+): ReadonlyArray<string> => {
+  const storedAttributes = membersOf(stored, "attributes");
+  const storedRelationships = membersOf(stored, "relationships");
+  const attributes = Arr.filterMap(
+    Arr.fromRecord(membersOf(expected, "attributes")),
+    ([name, value]) =>
+      Equal.equals(value, storedAttributes[name])
+        ? Result.failVoid
+        : Result.succeed(
+            `attributes.${name}: ${shown(value)} · read back ${shown(storedAttributes[name])}`,
+          ),
+  );
+  const relationships = Arr.filterMap(
+    Arr.fromRecord(membersOf(expected, "relationships")),
+    ([name, relationship]) =>
+      Option.match(linkageValue(relationship), {
+        onNone: () => Result.failVoid,
+        onSome: (linkage) => {
+          const read = linkageValue(storedRelationships[name]);
+          return Option.exists(read, (other) => Equal.equals(linkage, other))
+            ? Result.failVoid
+            : Result.succeed(
+                `relationships.${name}.data: ${shown(linkage)} · read back ${Option.match(read, {
+                  onNone: () => "no linkage",
+                  onSome: shown,
+                })}`,
+              );
+        },
+      }),
+  );
+  return [...attributes, ...relationships];
+};
+
+const decodePrimaryResource = Schema.decodeUnknownOption(
+  Schema.Struct({ data: Schema.Record(Schema.String, Schema.Unknown) }),
+);
+
+/** A response document's primary data, when it is one resource object. */
+const primaryResource = (
+  observation: Observation,
+): Option.Option<Readonly<Record<string, unknown>>> =>
+  decodePrimaryResource(observation.body).pipe(Option.map(({ data }) => data));
+
+/**
+ * Reads `type:id` back through `get` and judges it against `expected` — what
+ * the write said the resource now is, which `what` names. A resource the
+ * server no longer has (`404` or `410`) was not stored; an answer that is not
+ * that resource, or shows a member otherwise, is a finding. Any other answer
+ * (a server error, a refusal, no answer) decides nothing.
+ */
+const readBack = (
+  ctx: Context,
+  rule: Rule,
+  requests: number,
+  get: Discovered,
+  type: string,
+  id: string,
+  what: string,
+  expected: Readonly<Record<string, unknown>>,
+): Effect.Effect<Verdict> =>
+  ctx.request({ url: pathFor(get, id), headers: jsonApiAccept }).pipe(
+    Effect.map((observation): Verdict => {
+      const broken = (detail: string, observed = describe(observation)) =>
+        decided(requests + 1, [
+          finding(rule, {
+            detail,
+            expected: `the resource as ${what} — the same \`attributes\` and relationship linkage`,
+            observed,
+            probe: observation.probe,
+          }),
+        ]);
+      if (observation.status === 404 || observation.status === 410)
+        return broken(`${type}:${id}, which ${what}, does not read back through ${get.path}`);
+      if (!succeeded(observation))
+        return undecided(
+          `reading ${type}:${id} back through ${get.path} answered ${statusOf(observation)} (${describe(observation)})`,
+        );
+      return Option.match(
+        Option.filter(
+          primaryResource(observation),
+          (resource) => resource["type"] === type && resource["id"] === id,
+        ),
+        {
+          onNone: () =>
+            broken(`reading ${type}:${id} back through ${get.path} did not answer that resource`),
+          onSome: (stored) =>
+            Arr.match(readBackDifferences(expected, stored), {
+              onEmpty: () => decided(requests + 1, []),
+              onNonEmpty: (differences) =>
+                broken(
+                  `${type}:${id} reads back through ${get.path} otherwise than ${what}`,
+                  differences.join("; "),
+                ),
+            }),
+        },
+      );
+    }),
+  );
+
+const createReadBack: RuleImpl = {
+  creates: true,
+  rule: rule(
+    "spec/status/create-read-back",
+    "Creating Resources",
+    "crud-creating-responses-201",
+    "MUST",
+    "A 201 Created response MUST carry a document that contains the resource as primary data — so the created resource, fetched afterwards, shows the `attributes` and relationship linkage the 201 carried.",
+  ),
+  run: (ctx) =>
+    overTargets(ctx, createReadBack.rule, targets(ctx, "create"), "create endpoint", (target) =>
+      withCreated(
+        ctx,
+        createReadBack.rule,
+        target,
+        viaCreateEndpoint(ctx, target),
+        onAccepted(target, (created) => {
+          if (created.observation.status !== 201)
+            return Effect.succeed(not201(target, created.observation));
+          return Result.match(
+            Result.all({
+              id: ownId(created),
+              get: readEndpointFor(ctx, target),
+              answered: Result.fromOption(
+                primaryResource(created.observation),
+                () => `the 201 creating a "${target.key}" resource carried no resource object`,
+              ),
+            }),
+            {
+              onFailure: (reason) => Effect.succeed(undecided(reason)),
+              onSuccess: ({ id, get, answered }) =>
+                readBack(
+                  ctx,
+                  createReadBack.rule,
+                  1,
+                  get,
+                  created.payload.type,
+                  id,
+                  "the 201 creating it answered",
+                  answered,
+                ),
+            },
+          );
+        }),
+      ),
+    ),
+};
+
+/**
+ * What an update answered the resource now is, or why the answer states none
+ * to read back against: a 200 carrying the resource states it; a 204, or a 200
+ * with no primary data — the server changed nothing beyond the request — states
+ * the request's own members.
+ */
+const updateStated = (
+  type: string,
+  id: string,
+  patch: Omit<Payload, "type">,
+  observation: Observation,
+): Result.Result<
+  { readonly what: string; readonly expected: Readonly<Record<string, unknown>> },
+  string
+> => {
+  const request = {
+    what: `the update requested (answered ${observation.status})`,
+    expected: patch,
+  };
+  if (observation.status === 204) return Result.succeed(request);
+  if (observation.status === 202)
+    return Result.fail(
+      `updating ${type}:${id} answered 202 Accepted — the update is deferred, so there is nothing stored to read back yet`,
+    );
+  if (observation.status !== 200)
+    return Result.fail(
+      `the server did not accept the update of ${type}:${id} (${describe(observation)}) — see spec/status/update-response`,
+    );
+  if (!isRecord(observation.body) || !Predicate.hasProperty(observation.body, "data"))
+    return Result.succeed(request);
+  return Result.fromOption(
+    Option.filter(
+      primaryResource(observation),
+      (resource) => resource["type"] === type && resource["id"] === id,
+    ).pipe(Option.map((expected) => ({ what: "the 200 updating it answered", expected }))),
+    () =>
+      `the 200 updating ${type}:${id} carries primary data that is not that resource — see spec/status/update-response`,
+  );
+};
+
+const updateReadBack: RuleImpl = {
+  creates: true,
+  rule: rule(
+    "spec/status/update-read-back",
+    "Updating Resources",
+    "crud-updating-responses",
+    "MUST",
+    "A 200 OK to an update MUST carry the updated resource as primary data, and a 204 No Content (or a 200 with no primary data) means the server changed nothing beyond the request — so the resource, fetched afterwards, shows what the 200 carried, or the request's `attributes` and relationship linkage.",
+  ),
+  run: (ctx) =>
+    overTargets(ctx, updateReadBack.rule, targets(ctx, "update"), "update endpoint", (target) =>
+      withCreated(
+        ctx,
+        updateReadBack.rule,
+        target,
+        viaCreateEndpoint(ctx, target),
+        onAccepted(target, (created) =>
+          Result.match(
+            Result.all({
+              id: ownId(created),
+              patch: buildUpdate(target),
+              get: readEndpointFor(ctx, target),
+            }),
+            {
+              onFailure: (reason) => Effect.succeed(undecided(reason)),
+              onSuccess: ({ id, patch, get }) => {
+                const type = created.payload.type;
+                return sendUpdate(ctx, target, type, id, patch).pipe(
+                  Effect.flatMap((observation) =>
+                    Result.match(updateStated(type, id, patch, observation), {
+                      onFailure: (reason) => Effect.succeed(undecided(reason)),
+                      onSuccess: ({ what, expected }) =>
+                        readBack(ctx, updateReadBack.rule, 2, get, type, id, what, expected),
+                    }),
+                  ),
+                );
+              },
+            },
+          ),
+        ),
+      ),
+    ),
 };
 
 // ---------------------------------------------------------------------------
@@ -2523,6 +2873,9 @@ export const rules: ReadonlyArray<RuleImpl> = [
   createLocationMatchesSelf,
   updateResponse,
   deleteResponse,
+  createConflictType,
+  createReadBack,
+  updateReadBack,
   atomicMalformedRejected,
   atomicResponseExt,
   atomicAllOrNothing,

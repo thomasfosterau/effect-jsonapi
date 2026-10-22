@@ -644,8 +644,8 @@ export const gaps: ReadonlyArray<Gap> = [
   {
     area: "Write semantics beyond the success responses",
     reason:
-      "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — on resources it creates and disposes of itself. Still unchecked: the 409 Conflict rules (a `type` the endpoint does not serve, a duplicate client-generated id), creation with a client-generated id (201 or 204), relationship mutation through `/relationships/…` (replacement, append, removal), and whether a write was actually stored, which needs the resource read back. The fixture makes each of these probe-able; they are not yet written.",
-    tracking: ["#237"],
+      "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — that a create of a `type` the endpoint does not serve is a 409, and that what a create or update answered reads back through the resource's GET, on resources it creates and disposes of itself. Still unchecked: creation with a client-generated id (201 or 204, or 403 where unsupported) and the 409 for a duplicate one, which need an id the fixture supplies; and relationship mutation through `/relationships/…` (replacement, append, removal), which needs a resource to link to and a read-back through the relationship endpoint. The fixture makes each of these probe-able; they are not yet written.",
+    tracking: ["#429"],
   },
   {
     area: "Atomic operations processing",
@@ -855,14 +855,16 @@ const execute = (
       yield* Core.requestTimeoutOf(Option.fromUndefinedOr(options?.requestTimeout)),
     );
     const observed = MutableHashSet.empty<string>();
+    const writes: Core.Context["writes"] = [];
     const ctx: Core.Context = {
       endpoints: Core.discover(api),
       options: resolved,
       request: Core.observing(
         Core.runner(client, resolved.baseUrl, resolved.requestTimeout),
         observed,
+        writes,
       ),
-      writes: [],
+      writes,
       observed,
     };
     // Every rule that creates nothing (the profile tier's included) runs

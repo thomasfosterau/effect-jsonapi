@@ -3,9 +3,10 @@
  *
  * This is an acceptance gate for the kit as much as for the example. Rather
  * than assert a clean run, it pins the exact set of rules the example breaks —
- * none today — which is what keeps both honest: a new failure means a
- * regression in the example (or a defect to file and pin here), and a
- * disappearing one means a fixed bug whose entry should come off this list.
+ * one today, a library defect — which is what keeps both honest: a new
+ * failure means a regression in the example (or a defect to file and pin
+ * here), and a disappearing one means a fixed bug whose entry should come
+ * off this list.
  */
 import { describe, expect, it } from "vite-plus/test";
 import { Effect, Predicate } from "effect";
@@ -28,14 +29,18 @@ import {
 
 /**
  * The rules this example is known to break, each with the issue tracking it.
- * Remove an entry when its issue is fixed; the test will tell you to. Empty
- * since #169: the handlers of the reads that declare `fields`
- * (`GET /products/:id`, `GET /orders/:id` and `/search`) project
- * `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)` and stamp
- * `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` / `linkage`
- * document.
+ * Remove an entry when its issue is fixed; the test will tell you to. One
+ * entry, #428: `Endpoint.create` answers a resource object of another `type`
+ * with 400 (it decodes `data.type` against a literal), where JSON:API requires
+ * 409. The read rules have been clean since #169: the handlers of the reads
+ * that declare `fields` (`GET /products/:id`, `GET /orders/:id` and `/search`)
+ * project `?fields[TYPE]=` with `onResource: Handlers.project(query.fields)`
+ * and stamp `jsonapi: Document.v1_1` on every `Handlers.data` / `collection` /
+ * `linkage` document.
  */
-const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [];
+const KNOWN_FAILURES: ReadonlyArray<readonly [id: string, tracking: string]> = [
+  ["spec/status/create-conflict-type", "#428"],
+];
 
 /**
  * One id per resource type, each taken from a record the example's store is
@@ -273,6 +278,10 @@ describe("northwind: JSON:API conformance", () => {
       "spec/status/create-location-matches-self",
       "spec/status/update-response",
       "spec/status/delete-response",
+      // #237: what each create and update answered reads back through the
+      // resource's own GET.
+      "spec/status/create-read-back",
+      "spec/status/update-read-back",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

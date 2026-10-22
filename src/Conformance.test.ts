@@ -2643,8 +2643,17 @@ describe("Conformance: the write fixture", () => {
     "spec/status/create-location-matches-self",
     "spec/status/update-response",
     "spec/status/delete-response",
+    "spec/status/create-conflict-type",
+    "spec/status/create-read-back",
+    "spec/status/update-read-back",
     "spec/atomic/response-ext-parameter",
   ];
+
+  /**
+   * The write rules that create a resource against a conformant server: all
+   * but `create-conflict-type`, whose create such a server refuses with 409.
+   */
+  const CREATING_RULES = WRITE_RULES.filter((id) => id !== "spec/status/create-conflict-type");
 
   const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
 
@@ -2655,6 +2664,12 @@ describe("Conformance: the write fixture", () => {
     attributes: Schema.optionalKey(Attributes),
   });
   const decodeCreate = Schema.decodeUnknownOption(Schema.Struct({ data: NewArticle }));
+  /** A create whose resource object carries a `type` other than the one `/articles` serves. */
+  const decodeForeignCreate = Schema.decodeUnknownOption(
+    Schema.Struct({
+      data: Schema.Struct({ type: Schema.String.check(Schema.isPattern(/^(?!articles$)/)) }),
+    }),
+  );
   const decodeOperations = Schema.decodeUnknownOption(
     Schema.Struct({
       "atomic:operations": Schema.Array(
@@ -2708,7 +2723,10 @@ describe("Conformance: the write fixture", () => {
     };
     const onCreate = (request: CannedRequest): Canned =>
       Option.match(decodeCreate(request.body), {
-        onNone: () => refusal(400, "Bad Request"),
+        onNone: () =>
+          Option.isSome(decodeForeignCreate(request.body))
+            ? refusal(409, "Conflict")
+            : refusal(400, "Bad Request"),
         onSome: ({ data }) => {
           const made = create(data.attributes ?? {});
           return { status: 201, headers: { location: made.links.self }, body: { data: made } };
@@ -2726,15 +2744,23 @@ describe("Conformance: the write fixture", () => {
           },
         }),
       });
-    /** PATCH and DELETE on a stored article; none for anything else. */
+    /** GET, PATCH and DELETE on a stored article; none for anything else. */
     const onStored = (request: CannedRequest): Option.Option<Canned> => {
       const id = /^\/articles\/([^/?]+)$/.exec(request.path)?.[1];
-      if (id === undefined || !MutableHashMap.has(store, id)) return Option.none();
+      if (id === undefined) return Option.none();
+      const stored = MutableHashMap.get(store, id);
+      if (Option.isNone(stored)) return Option.none();
+      if (request.method === "GET")
+        return Option.some({ body: { data: resource(id, stored.value) } });
       if (request.method === "PATCH")
         return Option.some(
           Option.match(decodeUpdate(request.body), {
             onNone: () => refusal(400, "Bad Request"),
-            onSome: ({ data }) => ({ body: { data: resource(id, data.attributes ?? {}) } }),
+            onSome: ({ data }) => {
+              const attributes = { ...stored.value, ...data.attributes };
+              MutableHashMap.set(store, id, attributes);
+              return { body: { data: resource(id, attributes) } };
+            },
           }),
         );
       if (request.method !== "DELETE") return Option.none();
@@ -3504,13 +3530,15 @@ describe("Conformance: the write fixture", () => {
     expect(failed(report)).toEqual([]);
     everyWriteRule(report);
     // Every creation is on the record, and nothing outlived the run.
-    expect(writes.map((write) => write.rule)).toEqual(WRITE_RULES);
+    expect(writes.map((write) => write.rule)).toEqual(CREATING_RULES);
     expect(disposals(writes)).toEqual([
       "cleaned-up",
       "cleaned-up",
       "cleaned-up",
       "cleaned-up",
       "deleted",
+      "cleaned-up",
+      "cleaned-up",
       "cleaned-up",
     ]);
     expect(MutableHashMap.size(store)).toBe(0);
@@ -3576,27 +3604,30 @@ describe("Conformance: the write fixture", () => {
     expect(report.outcomes.map((outcome) => outcome.rule.id)).toEqual(
       Conformance.rules.map((rule) => rule.id),
     );
-    // Only the rule whose probe died is Errored, and it names the defect.
+    // Only the rules whose probe died — the two that PATCH — are Errored, and
+    // each names the defect.
+    const dying = ["spec/status/update-response", "spec/status/update-read-back"];
     const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
-    expect(errored.map((outcome) => outcome.rule.id)).toEqual(["spec/status/update-response"]);
+    expect(errored.map((outcome) => outcome.rule.id)).toEqual(dying);
     expect(errored[0]).toMatchObject({ message: "TransportFellOver" });
     expect(Predicate.isTagged(errored[0], "Errored") && errored[0].defect).toBeInstanceOf(
       TransportFellOver,
     );
     // The rules after it still ran, the write rules among them.
     expect(failed(report)).toEqual([]);
-    const survivors = WRITE_RULES.filter((id) => id !== "spec/status/update-response");
+    const survivors = WRITE_RULES.filter((id) => !dying.includes(id));
     expect(survivors.map((id) => outcomeFor(report, id)._tag)).toEqual(
       survivors.map(() => "Passed"),
     );
     // The ledger survives, the dead rule's creation included, and it was
     // cleaned up.
-    expect(writes.map((write) => write.rule)).toEqual(WRITE_RULES);
+    expect(writes.map((write) => write.rule)).toEqual(CREATING_RULES);
     expect(disposals(writes)).not.toContain("left");
     expect(MutableHashMap.size(store)).toBe(0);
-    expect(Conformance.summarise(report).errored).toBe(1);
+    expect(Conformance.summarise(report).errored).toBe(2);
     const text = Conformance.format(report);
     expect(text).toContain("DIED  spec/status/update-response");
+    expect(text).toContain("DIED  spec/status/update-read-back");
     expect(text).toContain("not decided — the rule died: TransportFellOver");
   });
 
@@ -3851,9 +3882,9 @@ describe("Conformance: the write fixture", () => {
     expect(failed(report)).toEqual([]);
     const stuck = writes.filter((write) => write.disposal === "cleanup-failed");
     // Every creation but the one the kit's own DELETE removed.
-    expect(stuck.length).toBe(WRITE_RULES.length - 1);
+    expect(stuck.length).toBe(CREATING_RULES.length - 1);
     expect(stuck[0]?.detail).toContain("store offline");
-    expect(MutableHashMap.size(store)).toBe(WRITE_RULES.length - 1);
+    expect(MutableHashMap.size(store)).toBe(CREATING_RULES.length - 1);
     expect(Conformance.format(report)).toContain("CLEANUP FAILED");
   });
 
@@ -3972,10 +4003,11 @@ describe("Conformance: the write fixture", () => {
         writes: ReadonlyArray<Conformance.Write>,
         rendered: string,
       ) => {
-        expect(outcomeFor(report, "spec/status/update-response")).toEqual(
-          skippedFor(`writes["articles"].update threw: ${rendered}`),
+        const updating = ["spec/status/update-response", "spec/status/update-read-back"];
+        expect(updating.map((id) => outcomeFor(report, id))).toEqual(
+          updating.map(() => skippedFor(`writes["articles"].update threw: ${rendered}`)),
         );
-        const others = WRITE_RULES.filter((id) => id !== "spec/status/update-response");
+        const others = WRITE_RULES.filter((id) => !updating.includes(id));
         expect(others.map((id) => outcomeFor(report, id)._tag)).toEqual(others.map(() => "Passed"));
         expect(disposals(writes)).not.toContain("left");
       },
@@ -4014,7 +4046,7 @@ describe("Conformance: the write fixture", () => {
   ) => {
     everyWriteRule(report);
     const stuck = writes.filter((write) => write.disposal === "cleanup-failed");
-    expect(stuck.length).toBe(WRITE_RULES.length - 1);
+    expect(stuck.length).toBe(CREATING_RULES.length - 1);
     expect(stuck.map((write) => write.detail)).toEqual(stuck.map(() => rendered));
   };
 
@@ -4062,12 +4094,12 @@ describe("Conformance: the write fixture", () => {
     });
     expect(failed(report)).toEqual([]);
     const left = writes.filter((write) => write.disposal === "left");
-    expect(left.length).toBe(WRITE_RULES.length - 1);
+    expect(left.length).toBe(CREATING_RULES.length - 1);
     expect(left[0]?.detail).toContain(`writes["articles"].cleanup`);
-    expect(MutableHashMap.size(store)).toBe(WRITE_RULES.length - 1);
+    expect(MutableHashMap.size(store)).toBe(CREATING_RULES.length - 1);
     const text = Conformance.format(report);
     expect(text).toContain("WRITES");
-    expect(text).toContain(`${WRITE_RULES.length - 1} still in place`);
+    expect(text).toContain(`${CREATING_RULES.length - 1} still in place`);
     expect(text).toContain("LEFT IN PLACE");
     // What is still there is listed before what is gone.
     expect(text.indexOf("LEFT IN PLACE")).toBeLessThan(text.indexOf("deleted by the kit"));
@@ -4104,7 +4136,7 @@ describe("Conformance: the write fixture", () => {
       expect(seen).not.toContain(`DELETE /articles/${id}`);
       expect(cleaned).not.toContain(id);
       expect(writes).toEqual(
-        WRITE_RULES.map(() =>
+        CREATING_RULES.map(() =>
           expect.objectContaining({
             id: undefined,
             disposal: "left",
@@ -4132,7 +4164,7 @@ describe("Conformance: the write fixture", () => {
       expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
       expect(cleaned).toEqual([]);
       expect(writes).toEqual(
-        WRITE_RULES.map(() =>
+        CREATING_RULES.map(() =>
           expect.objectContaining({
             id: undefined,
             disposal: "left",
@@ -4185,7 +4217,7 @@ describe("Conformance: the write fixture", () => {
     expect(seen.filter((request) => /^(PATCH|DELETE) /.test(request))).toEqual([]);
     expect(cleaned).toEqual([]);
     expect(writes).toEqual(
-      WRITE_RULES.map(() =>
+      CREATING_RULES.map(() =>
         expect.objectContaining({
           id: undefined,
           disposal: "left",
@@ -4254,7 +4286,7 @@ describe("Conformance: the write fixture", () => {
     expect(seen).not.toContain("DELETE /articles/500");
     expect(writes.map((write) => [write.id, write.disposal])).toEqual([
       ["500", "cleanup-failed"],
-      ...WRITE_RULES.slice(1).map(() => [undefined, "left"]),
+      ...CREATING_RULES.slice(1).map(() => [undefined, "left"]),
     ]);
     expect(writes[1]?.detail).toMatch(/`articles:500`.*not touched/);
   });
@@ -4262,7 +4294,7 @@ describe("Conformance: the write fixture", () => {
   it("accepts an id the server reuses once the kit has removed its first holder", async () => {
     const { report, store, writes } = await run(undefined, undefined, { reuseIds: true });
     expect(failed(report)).toEqual([]);
-    expect(writes.map((write) => write.id)).toEqual(WRITE_RULES.map(() => "100"));
+    expect(writes.map((write) => write.id)).toEqual(CREATING_RULES.map(() => "100"));
     expect(disposals(writes)).not.toContain("left");
     expect(MutableHashMap.size(store)).toBe(0);
   });
@@ -4342,6 +4374,7 @@ describe("Conformance: the write fixture", () => {
     id: string,
     change: (canned: Canned, request: CannedRequest) => Canned,
     leaves = 0,
+    sent: RegExp = /POST|PATCH|DELETE/,
   ) =>
     it(name, async () => {
       const { report, store, writes } = await run(change);
@@ -4359,7 +4392,7 @@ describe("Conformance: the write fixture", () => {
         findings.map(() => ({
           expected: true,
           observed: true,
-          method: expect.stringMatching(/POST|PATCH|DELETE/),
+          method: expect.stringMatching(sent),
         })),
       );
       expect(findings).not.toEqual([]);
@@ -4379,14 +4412,14 @@ describe("Conformance: the write fixture", () => {
   );
 
   // A 201 that does not say what it created cannot be cleaned up after: each
-  // of the five create-endpoint rules leaves its resource behind, and the
-  // report says so rather than pretending otherwise.
+  // of the seven create-endpoint rules that the server lets create leaves its
+  // resource behind, and the report says so rather than pretending otherwise.
   brokenWrite(
     "a 201 whose primary data is not the created resource",
     "spec/status/create-response-document",
     (canned, request) =>
       creates(request, canned) ? { ...canned, body: { meta: { ok: true } } } : canned,
-    5,
+    7,
   );
 
   brokenWrite(
@@ -4478,6 +4511,126 @@ describe("Conformance: the write fixture", () => {
         ? { status: 200, body: { data: null } }
         : canned,
   );
+
+  brokenWrite(
+    // What `Endpoint.create` answers today: it decodes `data.type` against a
+    // literal, so a foreign type is a 400 (#428).
+    "a create of a type the endpoint does not serve answered 400, not 409",
+    "spec/status/create-conflict-type",
+    (canned, request) =>
+      request.method === "POST" && canned.status === 409 ? refusal(400, "Bad Request") : canned,
+  );
+
+  brokenWrite(
+    "a 201 carrying an attribute the resource does not read back with",
+    "spec/status/create-read-back",
+    (canned, request) =>
+      creates(request, canned)
+        ? withData(canned, (body) => {
+            const data = body["data"] as Record<string, unknown>;
+            const attributes = data["attributes"] as Record<string, unknown>;
+            return { ...body, data: { ...data, attributes: { ...attributes, rating: 5 } } };
+          })
+        : canned,
+    0,
+    /GET/,
+  );
+
+  brokenWrite(
+    "a 200 update carrying a title other than the one it stored",
+    "spec/status/update-read-back",
+    (canned, request) =>
+      request.method === "PATCH" && canned.status === undefined
+        ? withData(canned, (body) => {
+            const data = body["data"] as Record<string, unknown>;
+            const attributes = data["attributes"] as Record<string, unknown>;
+            return { ...body, data: { ...data, attributes: { ...attributes, title: "unstored" } } };
+          })
+        : canned,
+    0,
+    /GET/,
+  );
+
+  {
+    // A 204 says the server changed nothing beyond the request, so the
+    // request is what must read back; here a later read shows another title.
+    const patched = new Set<string>();
+    brokenWrite(
+      "a 204 update whose request does not read back",
+      "spec/status/update-read-back",
+      (canned, request) => {
+        const id = /^\/articles\/(\d+)$/.exec(request.path)?.[1];
+        if (id === undefined) return canned;
+        if (request.method === "PATCH" && canned.status === undefined) {
+          patched.add(id);
+          return { status: 204 };
+        }
+        return request.method === "GET" && patched.has(id)
+          ? withData(canned, (body) => {
+              const data = body["data"] as Record<string, unknown>;
+              return { ...body, data: { ...data, attributes: { title: "unstored" } } };
+            })
+          : canned;
+      },
+      0,
+      /GET/,
+    );
+  }
+
+  it("passes a 204 update whose request reads back, and a 201 that reads back as answered", async () => {
+    const { report } = await run((canned, request) =>
+      request.method === "PATCH" && canned.status === undefined ? { status: 204 } : canned,
+    );
+    expect(failed(report)).toEqual([]);
+    expect(
+      ["spec/status/create-read-back", "spec/status/update-read-back"].map(
+        (id) => outcomeFor(report, id)._tag,
+      ),
+    ).toEqual(["Passed", "Passed"]);
+  });
+
+  it("reports a created resource that does not read back at all", async () => {
+    const { report } = await run((canned, request) =>
+      request.method === "GET" && /^\/articles\/\d{3}$/.test(request.path)
+        ? refusal(404, "Not Found")
+        : canned,
+    );
+    expect(failed(report)).toEqual([
+      "spec/status/create-read-back",
+      "spec/status/update-read-back",
+    ]);
+    const outcome = outcomeFor(report, "spec/status/create-read-back");
+    const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    expect(findings.map((found) => found.detail)).toEqual([
+      expect.stringMatching(
+        /^articles:\d+, which the 201 creating it answered, does not read back/,
+      ),
+    ]);
+  });
+
+  it("decides nothing on a read-back the server cannot answer", async () => {
+    const { report } = await run((canned, request) =>
+      request.method === "GET" && /^\/articles\/\d{3}$/.test(request.path)
+        ? refusal(503, "Unavailable")
+        : canned,
+    );
+    expect(failed(report)).toEqual([]);
+    expect(outcomeFor(report, "spec/status/create-read-back")).toEqual(skippedFor("answered 503"));
+  });
+
+  it("disposes of what a server that accepts a create of a type it does not serve made", async () => {
+    const { report, store, writes } = await run((canned, request) => {
+      if (request.method !== "POST" || canned.status !== 409) return canned;
+      // As if the server ignored `type`: it makes an article of the payload.
+      const made = { type: "articles", id: "900", attributes: {} };
+      return { status: 201, body: { data: made } };
+    });
+    expect(failed(report)).toEqual(["spec/status/create-conflict-type"]);
+    expect(writes.find((write) => write.rule === "spec/status/create-conflict-type")).toEqual(
+      expect.objectContaining({ id: "900", disposal: "cleaned-up" }),
+    );
+    expect(MutableHashMap.size(store)).toBe(0);
+  });
 
   brokenWrite(
     "an atomic response without the extension's media type",
