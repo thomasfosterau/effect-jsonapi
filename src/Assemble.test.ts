@@ -10,6 +10,7 @@ import { Effect, Exit, Record as Rec, Schema } from "effect";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
+import { unlinkedIncluded } from "./internal/linkage.js";
 import * as Query from "./Query.js";
 
 interface User {
@@ -823,7 +824,7 @@ describe("Assemble.unpaginatedCollection", () => {
 });
 
 describe("Assemble.relationship", () => {
-  it("answers the linkage as data, the parent (and extras) as included, and the related link", () => {
+  it("answers the linkage as data, the extras as included, and the related link", () => {
     const document = Assemble.relationship({
       parent: contest("x"),
       key: "candidates",
@@ -833,12 +834,32 @@ describe("Assemble.relationship", () => {
       { type: "candidates", id: "c-1" },
       { type: "candidates", id: "c-2" },
     ]);
-    expect(ids(document.included)).toEqual(["contests:x", "candidates:c-1"]);
+    expect(ids(document.included)).toEqual(["candidates:c-1"]);
     expect(document.links).toBeUndefined();
     expect(document.jsonapi).toEqual({ version: "1.1" });
     const withLink = Assemble.relationship({ parent: person("p1"), key: "birthPlace" });
     expect(withLink.data).toEqual({ type: "places", id: "place-1" });
     expect(withLink.links).toEqual({ related: "https://example.test/people/p1/birthPlace" });
+  });
+
+  // #444: the primary data names the children, so the parent in `included`
+  // was reachable only through a child linking back to it.
+  it("leaves the parent out of included, so the document passes the full-linkage walk", () => {
+    const parent = contest("x");
+    const document = Assemble.relationship({ parent, key: "candidates" });
+    expect(document.included).toEqual([]);
+    expect(unlinkedIncluded({ ...document })).toEqual([]);
+    const toOne = Assemble.relationship({ parent: person("p1"), key: "birthPlace" });
+    expect(toOne.included).toEqual([]);
+    expect(unlinkedIncluded({ ...toOne })).toEqual([]);
+    // The children the identifiers name are reachable from them (#423).
+    const withChildren = Assemble.relationship({
+      parent,
+      key: "candidates",
+      included: [candidate("c-1"), candidate("c-2")],
+    });
+    expect(ids(withChildren.included)).toEqual(["candidates:c-1", "candidates:c-2"]);
+    expect(unlinkedIncluded({ ...withChildren })).toEqual([]);
   });
 
   it("spells an empty to-one as `data: null`", () => {
