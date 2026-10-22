@@ -1145,36 +1145,44 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
   };
 };
 
-const unknownQueryParameter: RuleImpl = {
-  rule: rule(
+/**
+ * A rule that sends the first read endpoint one query parameter, `name=1`,
+ * whose name alone requires a 400, and fails on any other answer.
+ */
+const parameterNameRefused = (decides: Rule, name: string, detail: string): RuleImpl => ({
+  rule: decides,
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const target = readable(ctx).resolved[0];
+      if (target === undefined) return skip(decides, noProbeReason("JSON:API read endpoint", []));
+      const url = withQuery(target.path, [[name, "1"]]);
+      const observation = yield* ctx.request({ url, headers: jsonApiAccept });
+      const findings =
+        observation.status === 400
+          ? []
+          : [
+              finding(decides, {
+                detail: `\`?${name}=1\` — ${detail} — was not rejected`,
+                expected: "400 Bad Request",
+                observed: describe(observation),
+                probe: observation.probe,
+              }),
+            ];
+      return settle(decides, 1, findings);
+    }),
+});
+
+const unknownQueryParameter: RuleImpl = parameterNameRefused(
+  rule(
     "spec/query/unknown-query-parameter",
     "Query Parameters",
     "query-parameters-custom",
     "MUST",
     "Implementation-specific query parameters MUST contain at least one non a-z character, so a server MUST respond with 400 Bad Request to a query parameter named only with a-z that it does not recognise from the specification.",
   ),
-  run: (ctx) =>
-    Effect.gen(function* () {
-      const target = readable(ctx).resolved[0];
-      if (target === undefined)
-        return skip(unknownQueryParameter.rule, noProbeReason("JSON:API read endpoint", []));
-      const url = withQuery(target.path, [["unknown", "1"]]);
-      const observation = yield* ctx.request({ url, headers: jsonApiAccept });
-      const findings =
-        observation.status === 400
-          ? []
-          : [
-              finding(unknownQueryParameter.rule, {
-                detail:
-                  "`?unknown=1` — a name with no non a-z character, not reserved by the spec — was not rejected",
-                expected: "400 Bad Request",
-                observed: describe(observation),
-                probe: observation.probe,
-              }),
-            ];
-      return settle(unknownQueryParameter.rule, 1, findings);
-    }),
-};
+  "unknown",
+  "a name with no non a-z character, not reserved by the spec",
+);
 
 const unsupportedInclude: RuleImpl = {
   rule: rule(
@@ -1607,6 +1615,28 @@ const GENERAL_RULE =
 /** A rule that rests on {@link GENERAL_RULE}: a parameter the endpoint does not process. */
 const generalRule = (id: string, applied: string): Rule =>
   rule(id, "Query Parameters", "query-parameters-custom", "MUST", `${GENERAL_RULE} ${applied}`);
+
+// `!` is no member-name character, so the name follows none of the
+// conventions; it is not `_`, the cache-buster a server may admit (#263).
+const illegalParameterName: RuleImpl = parameterNameRefused(
+  generalRule(
+    "spec/query/illegal-parameter-name",
+    "A base name that is not a legal member name, such as `foo!`, does not follow the naming conventions.",
+  ),
+  "foo!",
+  "a base name that is not a legal member name",
+);
+
+// A legal extension base name (§Extension-Specific Query Parameters: an
+// alphanumeric namespace, a colon, a-z), so only the extension is unknown.
+const unsupportedExtensionParameter: RuleImpl = parameterNameRefused(
+  generalRule(
+    "spec/query/unsupported-extension-parameter",
+    "A parameter of an extension the server does not support (`ns:param`, its namespace and a colon) is not one it knows how to process.",
+  ),
+  "unsupported:param",
+  "a parameter of an extension the server does not support",
+);
 
 /**
  * The types of the resource objects a baseline shows, primary data first,
@@ -2599,6 +2629,8 @@ export const rules: ReadonlyArray<RuleImpl> = [
   sparseFieldsets("primary"),
   sparseFieldsets("included"),
   unknownQueryParameter,
+  illegalParameterName,
+  unsupportedExtensionParameter,
   unsupportedInclude,
   unsupportedSort,
   includeUnsupportedEndpoint,

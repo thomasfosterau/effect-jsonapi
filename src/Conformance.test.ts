@@ -275,10 +275,16 @@ const PROCESSED = ["include", "sort", "fields[articles]", "fields[people]"];
  * Whether `conformantServe` refuses a query parameter with a 400: a name of a
  * family the specification defines that it does not process, or — §Query
  * Parameters: an implementation-specific name must carry a non a-z character
- * — a purely a-z name it does not know.
+ * — a purely a-z name it does not know; or a name that does not follow the
+ * naming conventions or is an extension's (it supports none): a base name
+ * that is not a legal member name (#425).
  */
-const refusesParameter = (key: string): boolean =>
-  FAMILIES.includes(key.split("[")[0] ?? key) ? !PROCESSED.includes(key) : /^[a-z]+$/.test(key);
+const refusesParameter = (key: string): boolean => {
+  const base = key.split("[")[0] ?? key;
+  return FAMILIES.includes(base)
+    ? !PROCESSED.includes(key)
+    : /^[a-z]+$/.test(key) || !/^[A-Za-z0-9](?:[\w -]*[A-Za-z0-9])?$/.test(base);
+};
 
 /**
  * §Fetching Includes: a request that supplies `include`, even empty, gets an
@@ -1431,6 +1437,24 @@ describe("Conformance: detects a deliberately broken server", () => {
     (canned, request) =>
       request.path.includes("unknown=")
         ? conformantServe({ ...request, path: request.path.split("?")[0]! })
+        : canned,
+  );
+
+  broken(
+    "an illegal query parameter name that is not rejected",
+    "spec/query/illegal-parameter-name",
+    (canned, request) =>
+      request.path.includes("foo!=")
+        ? conformantServe({ ...request, path: request.path.split("?")[0] ?? request.path })
+        : canned,
+  );
+
+  broken(
+    "an unsupported extension's query parameter that is not rejected",
+    "spec/query/unsupported-extension-parameter",
+    (canned, request) =>
+      request.path.includes("unsupported:param=")
+        ? conformantServe({ ...request, path: request.path.split("?")[0] ?? request.path })
         : canned,
   );
 
