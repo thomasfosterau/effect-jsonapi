@@ -159,6 +159,17 @@ describe("blog: JSON:API conformance", () => {
       "spec/status/create-read-back",
       "spec/status/update-read-back",
       "spec/atomic/response-ext-parameter",
+      // #164: processing, judged by what the blog stored afterwards. The
+      // blog's operations endpoint takes articles and comments, and the one
+      // fixture here, `articles`, links only to a person, which no fixture
+      // creates, so `lid-resolution` runs its update probe rather than its
+      // linkage one: an `add` under a `lid`, then an `update` naming it by
+      // that `lid`, read back by the id the blog gave it. `all-or-nothing`
+      // lists `/articles` around a request whose last operation names an
+      // absent `lid`; `results-order` sends an `add` then a `remove` by `lid`.
+      "spec/atomic/all-or-nothing",
+      "spec/atomic/lid-resolution",
+      "spec/atomic/results-order",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

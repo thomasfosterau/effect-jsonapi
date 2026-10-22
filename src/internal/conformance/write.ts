@@ -31,9 +31,12 @@ import {
   Cause,
   Data,
   Effect,
+  Equal,
   Exit,
+  Formatter,
   MutableHashSet,
   Option,
+  Order,
   Predicate,
   Result,
   Schema,
@@ -42,13 +45,17 @@ import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { MEDIA_TYPE } from "../media.js";
 import {
   type Context,
+  describe,
   type Discovered,
   errorObjectsOf,
+  finding,
   type Finding,
   type Fixture,
+  identity,
   idKey,
   isLive,
   isRecord,
+  jsonApiAccept,
   type Observation,
   type Outcome,
   type Payload,
@@ -58,6 +65,7 @@ import {
   settle,
   skip,
   statusOf,
+  succeeded,
   type WriteRecord,
 } from "./core.js";
 
@@ -402,7 +410,12 @@ export interface Via {
   readonly identify: (observation: Observation) => Option.Option<Identity>;
 }
 
-const build = (target: WriteTarget): Result.Result<Payload, string> =>
+/**
+ * The fixture's create payload, or why there is none — `create` threw.
+ *
+ * @internal
+ */
+export const buildCreate = (target: WriteTarget): Result.Result<Payload, string> =>
   Result.try({
     try: target.create,
     catch: (error) => `writes["${target.key}"].create threw: ${renderThrown(error)}`,
@@ -464,15 +477,23 @@ const isOwnSegment = (id: string): boolean =>
  * that names an existing resource the run has not seen cannot be told from an
  * honest one. The observed check is only as complete as the reads before it,
  * which is why the read rules run first (`rules` in `./spec.ts`).
+ *
+ * `found` vets a resource no response named — one a probe found in a
+ * collection after a request that should have created nothing (see
+ * {@link withBatch}) — and words the refusal by it. That read showed the id,
+ * so the observed check is left out; the rest stand.
  */
 const vet = (
   ctx: Context,
   target: WriteTarget,
   payload: Payload,
   named: Identity,
+  found?: string,
 ): Result.Result<string, string> => {
   const refuse = (why: string) =>
-    Result.fail(`the create response named \`${named.type}:${named.id}\`, ${why} — not touched`);
+    Result.fail(
+      `${found ?? "the create response named"} \`${named.type}:${named.id}\`, ${why} — not touched`,
+    );
   if (named.type !== payload.type)
     return refuse(`which the kit did not create (it sent a "${payload.type}" resource)`);
   if (!isOwnSegment(named.id))
@@ -484,8 +505,9 @@ const vet = (
     return refuse("which the kit did not create (it is the `ids` sample)");
   // A read-back of what the kit created shows its id too, but `observing`
   // leaves out an id the ledger held live when the read came back — so what
-  // is here was shown while the kit held no resource under it.
-  if (MutableHashSet.has(ctx.observed, idKey(named.type, named.id)))
+  // is here was shown while the kit held no resource under it. A resource
+  // `found` was shown by the read that found it, which is the point.
+  if (found === undefined && MutableHashSet.has(ctx.observed, idKey(named.type, named.id)))
     return refuse("which the kit did not create (a read earlier in this run returned it)");
   const mine = Arr.filter(
     ctx.writes,
@@ -592,7 +614,7 @@ const isSuccessful = (observation: Observation): boolean =>
 
 /** Builds the fixture's payload and sends it; a non-2xx answer is taken to have created nothing. */
 const create = (ctx: Context, rule: Rule, target: WriteTarget, via: Via): Effect.Effect<Created> =>
-  Result.match(build(target), {
+  Result.match(buildCreate(target), {
     onFailure: (reason) => Effect.succeed(Created.Unbuilt({ reason })),
     onSuccess: (payload) =>
       via.send(payload).pipe(
@@ -629,6 +651,138 @@ export const withCreated = <A>(
   Effect.acquireUseRelease(create(ctx, rule, target, via), use, (created) =>
     dispose(target, created),
   );
+
+// ---------------------------------------------------------------------------
+// Creating several resources in one atomic request
+// ---------------------------------------------------------------------------
+
+/**
+ * One resource an atomic probe's request is to `add`: the target whose
+ * fixture built it, and the payload it built.
+ *
+ * @internal
+ */
+export interface Planned {
+  readonly target: WriteTarget;
+  readonly payload: Payload;
+}
+
+/**
+ * What an atomic probe's request was answered with, and — when that was a
+ * 2xx — the ledger entry for each planned resource, in plan order, keyed by
+ * the `atomic:results` entry at the same position.
+ *
+ * @internal
+ */
+export interface Batch {
+  readonly observation: Observation;
+  /** None when the request was not answered with a 2xx. */
+  readonly entries: Option.Option<Arr.NonEmptyReadonlyArray<Entry>>;
+}
+
+/**
+ * Records a resource the probe found its request left, though the server
+ * answered as if it created nothing, so that it is disposed of with the rest
+ * — or refuses it, as `vet` would (`found` names where it was found). Answers
+ * the entry it recorded.
+ *
+ * @internal
+ */
+export type Adopt = (target: WriteTarget, payload: Payload, id: string, found: string) => Entry;
+
+/**
+ * The resource each `atomic:results` entry identifies, by position; none for
+ * an entry with no resource object as `data`, and no entries at all when the
+ * document carries no `atomic:results` array.
+ *
+ * @internal
+ */
+export const atomicIdentities = (
+  observation: Observation,
+): ReadonlyArray<Option.Option<Identity>> =>
+  Option.match(decodeAtomicResults(observation.body), {
+    onNone: () => [],
+    onSome: (body) =>
+      Arr.map(body["atomic:results"], (result) =>
+        decodePrimary(result).pipe(Option.map(({ data }) => data)),
+      ),
+  });
+
+/**
+ * Sends one atomic request that `add`s every `planned` resource, hands what it
+ * was answered with to `use`, and then disposes of everything recorded —
+ * latest first, so a resource that links to an earlier one goes before it —
+ * however `use` exits. A 2xx records one entry per planned resource, its id
+ * taken from the `atomic:results` entry at the same position and vetted
+ * against that resource's payload; any other answer records nothing, and
+ * `use` may `adopt` what it finds the request left anyway.
+ *
+ * @internal
+ */
+export const withBatch = <A>(
+  ctx: Context,
+  rule: Rule,
+  planned: Arr.NonEmptyReadonlyArray<Planned>,
+  send: Effect.Effect<Observation>,
+  use: (batch: Batch, adopt: Adopt) => Effect.Effect<A>,
+): Effect.Effect<A> => {
+  const held: Array<readonly [WriteTarget, Entry]> = [];
+  const hold = (target: WriteTarget, entry: Entry): Entry => {
+    held.push([target, entry]);
+    return entry;
+  };
+  const acquire = send.pipe(
+    Effect.map((observation): Batch => {
+      if (!isSuccessful(observation)) return { observation, entries: Option.none() };
+      const named = atomicIdentities(observation);
+      return {
+        observation,
+        entries: Option.some(
+          Arr.map(planned, ({ target, payload }, index) =>
+            hold(target, record(ctx, rule, target, payload, Option.flatten(Arr.get(named, index)))),
+          ),
+        ),
+      };
+    }),
+  );
+  const adopt: Adopt = (target, payload, id, found) => {
+    const entry: Entry = Result.match(
+      vet(ctx, target, payload, { type: payload.type, id }, found),
+      {
+        onSuccess: (own) => {
+          // The read that found it showed it; it is the kit's now, so a later
+          // create the server hands the same id once it is gone is not refused.
+          MutableHashSet.remove(ctx.observed, idKey(payload.type, own));
+          return {
+            type: payload.type,
+            id: own,
+            rule: rule.id,
+            disposal: "left",
+            detail: undefined,
+          };
+        },
+        onFailure: (detail) => ({
+          type: payload.type,
+          id: undefined,
+          rule: rule.id,
+          disposal: "left",
+          detail,
+        }),
+      },
+    );
+    ctx.writes.push(entry);
+    return hold(target, entry);
+  };
+  return Effect.acquireUseRelease(
+    acquire,
+    (batch) => use(batch, adopt),
+    () =>
+      Effect.forEach(Arr.reverse(held), ([target, entry]) => disposeEntry(target, entry), {
+        concurrency: 1,
+        discard: true,
+      }),
+  );
+};
 
 /**
  * Creates through the target's own create endpoint — `POST /<type>` with the
@@ -675,6 +829,175 @@ export const sendUpdate = (
         body: { data: { ...patch, type, id } },
       }),
     ),
+  );
+
+// ---------------------------------------------------------------------------
+// Reading a write back
+// ---------------------------------------------------------------------------
+
+/**
+ * The single-resource GET of `target`'s type, which a write is read back
+ * through — or why there is none.
+ *
+ * @internal
+ */
+export const readEndpointFor = (
+  ctx: Context,
+  target: WriteTarget,
+): Result.Result<Discovered, string> =>
+  Result.fromOption(
+    Arr.findFirst(
+      ctx.endpoints,
+      (endpoint) =>
+        endpoint.role === "resource" &&
+        endpoint.segment === target.key &&
+        endpoint.params.length === 1,
+    ),
+    () =>
+      `no single-resource GET endpoint for "${target.key}" with one path parameter to read a write back through`,
+  );
+
+/** A server value for an `observed` line, cut to 80 code units; `absent` for no value. */
+const shown = (value: unknown): string => {
+  const rendered = value === undefined ? "absent" : Formatter.format(value);
+  return rendered.length > 80 ? `${rendered.slice(0, 79)}…` : rendered;
+};
+
+const membersOf = (
+  resource: Readonly<Record<string, unknown>>,
+  member: "attributes" | "relationships",
+): Readonly<Record<string, unknown>> => {
+  const members = resource[member];
+  return isRecord(members) ? members : {};
+};
+
+/**
+ * A relationship's linkage as one comparable value: `null`, one identity, or
+ * a to-many relationship's identities in sorted order — JSON:API gives a
+ * to-many linkage no order a read must keep. None when it carries no `data`.
+ */
+const linkageValue = (relationship: unknown): Option.Option<unknown> => {
+  if (!isRecord(relationship) || !("data" in relationship)) return Option.none();
+  const data = relationship["data"];
+  const key = (item: unknown) => (isRecord(item) ? (identity(item) ?? shown(item)) : shown(item));
+  if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
+  return Option.some(data === null ? null : key(data));
+};
+
+/**
+ * Each member `expected` states that `stored` does not show alike, as
+ * `attributes.<name>: … · read back …`: every attribute `expected` carries,
+ * and the linkage of every relationship it carries `data` for. A member only
+ * `stored` carries is not compared — a default fieldset may differ.
+ *
+ * @internal
+ */
+export const readBackDifferences = (
+  expected: Readonly<Record<string, unknown>>,
+  stored: Readonly<Record<string, unknown>>,
+): ReadonlyArray<string> => {
+  const storedAttributes = membersOf(stored, "attributes");
+  const storedRelationships = membersOf(stored, "relationships");
+  const attributes = Arr.filterMap(
+    Arr.fromRecord(membersOf(expected, "attributes")),
+    ([name, value]) =>
+      Equal.equals(value, storedAttributes[name])
+        ? Result.failVoid
+        : Result.succeed(
+            `attributes.${name}: ${shown(value)} · read back ${shown(storedAttributes[name])}`,
+          ),
+  );
+  const relationships = Arr.filterMap(
+    Arr.fromRecord(membersOf(expected, "relationships")),
+    ([name, relationship]) =>
+      Option.match(linkageValue(relationship), {
+        onNone: () => Result.failVoid,
+        onSome: (linkage) => {
+          const read = linkageValue(storedRelationships[name]);
+          return Option.exists(read, (other) => Equal.equals(linkage, other))
+            ? Result.failVoid
+            : Result.succeed(
+                `relationships.${name}.data: ${shown(linkage)} · read back ${Option.match(read, {
+                  onNone: () => "no linkage",
+                  onSome: shown,
+                })}`,
+              );
+        },
+      }),
+  );
+  return [...attributes, ...relationships];
+};
+
+const decodePrimaryResource = Schema.decodeUnknownOption(
+  Schema.Struct({ data: Schema.Record(Schema.String, Schema.Unknown) }),
+);
+
+/**
+ * A response document's primary data, when it is one resource object.
+ *
+ * @internal
+ */
+export const primaryResource = (
+  observation: Observation,
+): Option.Option<Readonly<Record<string, unknown>>> =>
+  decodePrimaryResource(observation.body).pipe(Option.map(({ data }) => data));
+
+/**
+ * Reads `type:id` back through `get` and judges it against `expected` — what
+ * the write said the resource now is, which `what` names. A resource the
+ * server no longer has (`404` or `410`) was not stored; an answer that is not
+ * that resource, or shows a member otherwise, is a finding. Any other answer
+ * (a server error, a refusal, no answer) decides nothing.
+ *
+ * @internal
+ */
+export const readBack = (
+  ctx: Context,
+  rule: Rule,
+  requests: number,
+  get: Discovered,
+  type: string,
+  id: string,
+  what: string,
+  expected: Readonly<Record<string, unknown>>,
+): Effect.Effect<Verdict> =>
+  ctx.request({ url: pathFor(get, id), headers: jsonApiAccept }).pipe(
+    Effect.map((observation): Verdict => {
+      const broken = (detail: string, observed = describe(observation)) =>
+        decided(requests + 1, [
+          finding(rule, {
+            detail,
+            expected: `the resource as ${what} — the same \`attributes\` and relationship linkage`,
+            observed,
+            probe: observation.probe,
+          }),
+        ]);
+      if (observation.status === 404 || observation.status === 410)
+        return broken(`${type}:${id}, which ${what}, does not read back through ${get.path}`);
+      if (!succeeded(observation))
+        return undecided(
+          `reading ${type}:${id} back through ${get.path} answered ${statusOf(observation)} (${describe(observation)})`,
+        );
+      return Option.match(
+        Option.filter(
+          primaryResource(observation),
+          (resource) => resource["type"] === type && resource["id"] === id,
+        ),
+        {
+          onNone: () =>
+            broken(`reading ${type}:${id} back through ${get.path} did not answer that resource`),
+          onSome: (stored) =>
+            Arr.match(readBackDifferences(expected, stored), {
+              onEmpty: () => decided(requests + 1, []),
+              onNonEmpty: (differences) =>
+                broken(
+                  `${type}:${id} reads back through ${get.path} otherwise than ${what}`,
+                  differences.join("; "),
+                ),
+            }),
+        },
+      );
+    }),
   );
 
 // ---------------------------------------------------------------------------

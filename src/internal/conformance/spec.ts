@@ -1,6 +1,7 @@
 /**
  * The JSON:API v1.1 rules: content negotiation, document structure, error
- * objects, query parameters, status codes and the atomic operations extension.
+ * objects, query parameters, status codes and — from `./atomic.ts` — the
+ * atomic operations extension.
  *
  * Each rule is one normative sentence with its section and a probe that decides
  * it. Rules that would change the target's state are gated behind
@@ -16,11 +17,8 @@
 import {
   Array as Arr,
   Effect,
-  Equal,
-  Formatter,
   Match,
   Option,
-  Order,
   Predicate,
   Record as Rec,
   Result,
@@ -40,8 +38,8 @@ import {
   topLevelSelfMatchesDocument,
 } from "./links.js";
 import { linksEnumerateCollection } from "./pagination.js";
+import { atomicRules } from "./atomic.js";
 import {
-  atomicMediaType,
   type Context,
   describe,
   type Discovered,
@@ -73,9 +71,7 @@ import {
 } from "./core.js";
 import {
   type Accepted,
-  atomicIdentity,
   Created,
-  atomicTargets,
   buildUpdate,
   decided,
   idempotencyHeaders,
@@ -84,6 +80,9 @@ import {
   ownId,
   pathFor,
   primaryIdentity,
+  primaryResource,
+  readBack,
+  readEndpointFor,
   refusedForMissingKey,
   refusedOnKeyGrounds,
   sendUpdate,
@@ -96,7 +95,6 @@ import {
 } from "./write.js";
 
 const SPEC = "https://jsonapi.org/format/1.1";
-const ATOMIC = "https://jsonapi.org/ext/atomic";
 
 const rule = (
   id: string,
@@ -109,20 +107,6 @@ const rule = (
   tier: "spec",
   section,
   reference: `${SPEC}/#${anchor}`,
-  level,
-  requirement,
-});
-
-const atomicRule = (
-  id: string,
-  section: string,
-  level: Rule["level"],
-  requirement: string,
-): Rule => ({
-  id,
-  tier: "spec",
-  section,
-  reference: ATOMIC,
   level,
   requirement,
 });
@@ -2350,155 +2334,6 @@ const judgeConflict = (target: Target, payload: Payload, observation: Observatio
 // Reading a write back
 // ---------------------------------------------------------------------------
 
-/** The single-resource GET of `target`'s type, which a write is read back through — or why there is none. */
-const readEndpointFor = (ctx: Context, target: Target): Result.Result<Discovered, string> =>
-  Result.fromOption(
-    Arr.findFirst(
-      ctx.endpoints,
-      (endpoint) =>
-        endpoint.role === "resource" &&
-        endpoint.segment === target.key &&
-        endpoint.params.length === 1,
-    ),
-    () =>
-      `no single-resource GET endpoint for "${target.key}" with one path parameter to read a write back through`,
-  );
-
-/** A server value for an `observed` line, cut to 80 code units; `absent` for no value. */
-const shown = (value: unknown): string => {
-  const rendered = value === undefined ? "absent" : Formatter.format(value);
-  return rendered.length > 80 ? `${rendered.slice(0, 79)}…` : rendered;
-};
-
-const membersOf = (
-  resource: Readonly<Record<string, unknown>>,
-  member: "attributes" | "relationships",
-): Readonly<Record<string, unknown>> => {
-  const members = resource[member];
-  return isRecord(members) ? members : {};
-};
-
-/**
- * A relationship's linkage as one comparable value: `null`, one identity, or
- * a to-many relationship's identities in sorted order — JSON:API gives a
- * to-many linkage no order a read must keep. None when it carries no `data`.
- */
-const linkageValue = (relationship: unknown): Option.Option<unknown> => {
-  if (!isRecord(relationship) || !("data" in relationship)) return Option.none();
-  const data = relationship["data"];
-  const key = (item: unknown) => (isRecord(item) ? (identity(item) ?? shown(item)) : shown(item));
-  if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
-  return Option.some(data === null ? null : key(data));
-};
-
-/**
- * Each member `expected` states that `stored` does not show alike, as
- * `attributes.<name>: … · read back …`: every attribute `expected` carries,
- * and the linkage of every relationship it carries `data` for. A member only
- * `stored` carries is not compared — a default fieldset may differ.
- */
-const readBackDifferences = (
-  expected: Readonly<Record<string, unknown>>,
-  stored: Readonly<Record<string, unknown>>,
-): ReadonlyArray<string> => {
-  const storedAttributes = membersOf(stored, "attributes");
-  const storedRelationships = membersOf(stored, "relationships");
-  const attributes = Arr.filterMap(
-    Arr.fromRecord(membersOf(expected, "attributes")),
-    ([name, value]) =>
-      Equal.equals(value, storedAttributes[name])
-        ? Result.failVoid
-        : Result.succeed(
-            `attributes.${name}: ${shown(value)} · read back ${shown(storedAttributes[name])}`,
-          ),
-  );
-  const relationships = Arr.filterMap(
-    Arr.fromRecord(membersOf(expected, "relationships")),
-    ([name, relationship]) =>
-      Option.match(linkageValue(relationship), {
-        onNone: () => Result.failVoid,
-        onSome: (linkage) => {
-          const read = linkageValue(storedRelationships[name]);
-          return Option.exists(read, (other) => Equal.equals(linkage, other))
-            ? Result.failVoid
-            : Result.succeed(
-                `relationships.${name}.data: ${shown(linkage)} · read back ${Option.match(read, {
-                  onNone: () => "no linkage",
-                  onSome: shown,
-                })}`,
-              );
-        },
-      }),
-  );
-  return [...attributes, ...relationships];
-};
-
-const decodePrimaryResource = Schema.decodeUnknownOption(
-  Schema.Struct({ data: Schema.Record(Schema.String, Schema.Unknown) }),
-);
-
-/** A response document's primary data, when it is one resource object. */
-const primaryResource = (
-  observation: Observation,
-): Option.Option<Readonly<Record<string, unknown>>> =>
-  decodePrimaryResource(observation.body).pipe(Option.map(({ data }) => data));
-
-/**
- * Reads `type:id` back through `get` and judges it against `expected` — what
- * the write said the resource now is, which `what` names. A resource the
- * server no longer has (`404` or `410`) was not stored; an answer that is not
- * that resource, or shows a member otherwise, is a finding. Any other answer
- * (a server error, a refusal, no answer) decides nothing.
- */
-const readBack = (
-  ctx: Context,
-  rule: Rule,
-  requests: number,
-  get: Discovered,
-  type: string,
-  id: string,
-  what: string,
-  expected: Readonly<Record<string, unknown>>,
-): Effect.Effect<Verdict> =>
-  ctx.request({ url: pathFor(get, id), headers: jsonApiAccept }).pipe(
-    Effect.map((observation): Verdict => {
-      const broken = (detail: string, observed = describe(observation)) =>
-        decided(requests + 1, [
-          finding(rule, {
-            detail,
-            expected: `the resource as ${what} — the same \`attributes\` and relationship linkage`,
-            observed,
-            probe: observation.probe,
-          }),
-        ]);
-      if (observation.status === 404 || observation.status === 410)
-        return broken(`${type}:${id}, which ${what}, does not read back through ${get.path}`);
-      if (!succeeded(observation))
-        return undecided(
-          `reading ${type}:${id} back through ${get.path} answered ${statusOf(observation)} (${describe(observation)})`,
-        );
-      return Option.match(
-        Option.filter(
-          primaryResource(observation),
-          (resource) => resource["type"] === type && resource["id"] === id,
-        ),
-        {
-          onNone: () =>
-            broken(`reading ${type}:${id} back through ${get.path} did not answer that resource`),
-          onSome: (stored) =>
-            Arr.match(readBackDifferences(expected, stored), {
-              onEmpty: () => decided(requests + 1, []),
-              onNonEmpty: (differences) =>
-                broken(
-                  `${type}:${id} reads back through ${get.path} otherwise than ${what}`,
-                  differences.join("; "),
-                ),
-            }),
-        },
-      );
-    }),
-  );
-
 const createReadBack: RuleImpl = {
   creates: true,
   rule: rule(
@@ -2630,164 +2465,6 @@ const updateReadBack: RuleImpl = {
       ),
     ),
 };
-
-// ---------------------------------------------------------------------------
-// Atomic operations extension
-// ---------------------------------------------------------------------------
-
-/** The request headers every atomic operations request sends, before any `Idempotency-Key`. */
-const atomicHeaders = { accept: atomicMediaType, "content-type": atomicMediaType };
-
-const operationsEndpoint = (ctx: Context) =>
-  ctx.endpoints.find((endpoint) => endpoint.role === "operations");
-
-const atomicMalformedRejected: RuleImpl = {
-  rule: atomicRule(
-    "spec/atomic/malformed-operations-rejected",
-    "Atomic Operations — Request Document",
-    "MUST",
-    "An atomic operations request document's `atomic:operations` member MUST be an array of operation objects, so a server MUST reject a document whose `atomic:operations` is not an array.",
-  ),
-  run: (ctx) =>
-    Effect.gen(function* () {
-      const endpoint = operationsEndpoint(ctx);
-      if (endpoint === undefined)
-        return skip(atomicMalformedRejected.rule, "no atomic operations endpoint");
-      // Keyed when the endpoint requires a key, so its 4xx is about the
-      // malformed document, not the refusal of a write without one.
-      const key = yield* idempotencyHeaders(endpoint);
-      const observation = yield* ctx.request({
-        method: endpoint.method,
-        url: endpoint.path,
-        headers: { ...atomicHeaders, ...key },
-        body: { "atomic:operations": "not an array" },
-      });
-      // Sent no key, the endpoint may refuse it over the key — for missing it,
-      // or with a 409 or 422 — which says nothing of whether the document was
-      // examined. Any such 4xx leaves the rule undecided; the delete rule,
-      // which judges the answer itself, sets aside only the missing-key 400.
-      if (refusedOnKeyGrounds(endpoint, key, observation))
-        return skip(
-          atomicMalformedRejected.rule,
-          `the malformed document answered ${observation.status} from ${endpoint.path}, which declares \`Idempotency-Key\` without plainly requiring it, so the kit sent no key, and the error names that header as its source (${describe(observation)})`,
-        );
-      const findings =
-        observation.status >= 400 && observation.status < 500
-          ? []
-          : [
-              finding(atomicMalformedRejected.rule, {
-                detail: "a non-array `atomic:operations` was not rejected",
-                expected: "a 4xx status",
-                observed: describe(observation),
-                probe: observation.probe,
-              }),
-            ];
-      return settle(atomicMalformedRejected.rule, 1, findings);
-    }),
-};
-
-const atomicResponseExt: RuleImpl = {
-  creates: true,
-  rule: rule(
-    "spec/atomic/response-ext-parameter",
-    "Content Negotiation — Universal Responsibilities (with the Atomic Operations extension)",
-    "content-negotiation-all",
-    "MUST",
-    "Clients and servers MUST specify the `ext` media type parameter in the `Content-Type` header when they have applied one or more extensions to a JSON:API document — so a response to an atomic operations request, which applies that extension, names its URI in `ext`.",
-  ),
-  run: (ctx) => {
-    const endpoint = operationsEndpoint(ctx);
-    if (endpoint === undefined)
-      return Effect.succeed(skip(atomicResponseExt.rule, "no atomic operations endpoint"));
-    const send = (payload: Payload) =>
-      idempotencyHeaders(endpoint).pipe(
-        Effect.flatMap((key) =>
-          ctx.request({
-            method: endpoint.method,
-            url: endpoint.path,
-            headers: { ...atomicHeaders, ...key },
-            body: { "atomic:operations": [{ op: "add", data: payload }] },
-          }),
-        ),
-      );
-    return overTargets(
-      ctx,
-      atomicResponseExt.rule,
-      atomicTargets(ctx, endpoint),
-      "atomic operations endpoint",
-      (target) =>
-        withCreated(
-          ctx,
-          atomicResponseExt.rule,
-          target,
-          { send, identify: atomicIdentity },
-          onAccepted(target, ({ observation }) =>
-            Effect.succeed(judgeAtomicMediaType(target, observation)),
-          ),
-        ),
-    );
-  },
-};
-
-const judgeAtomicMediaType = (target: Target, observation: Observation): Verdict => {
-  const header = observation.contentType;
-  if (observation.text === "" || header === undefined)
-    return undecided(
-      `an \`add\` of a "${target.key}" resource answered ${observation.status} with no document, so there was no media type to check`,
-    );
-  const { base, parameters } = parseMediaType(header);
-  const ext = parameters.find(([name]) => name === "ext")?.[1] ?? "";
-  return decided(
-    1,
-    base === MEDIA_TYPE && ext.split(/\s+/).includes(ATOMIC)
-      ? []
-      : [
-          finding(atomicResponseExt.rule, {
-            detail: `the response to an atomic \`add\` of a "${target.key}" resource does not name the extension`,
-            expected: atomicMediaType,
-            observed: describe(observation),
-            probe: observation.probe,
-          }),
-        ],
-  );
-};
-
-const atomicAllOrNothing: RuleImpl = {
-  rule: atomicRule(
-    "spec/atomic/all-or-nothing",
-    "Atomic Operations — Processing",
-    "MUST",
-    "If an operation in an atomic operations request fails, the server MUST NOT apply any of the operations in that request, and MUST respond with an error document.",
-  ),
-  run: (ctx) =>
-    Effect.succeed(
-      operationsEndpoint(ctx) === undefined
-        ? skip(atomicAllOrNothing.rule, "no atomic operations endpoint")
-        : skip(
-            atomicAllOrNothing.rule,
-            "requires applying operations, then observing what was stored — not yet written (see the coverage gaps, #164)",
-          ),
-    ),
-};
-
-const atomicLidResolution: RuleImpl = {
-  rule: atomicRule(
-    "spec/atomic/lid-resolution",
-    "Atomic Operations — Local Identifiers",
-    "MUST",
-    "A `lid` assigned by one operation MUST be resolvable as a reference in every later operation of the same request.",
-  ),
-  run: (ctx) =>
-    Effect.succeed(
-      operationsEndpoint(ctx) === undefined
-        ? skip(atomicLidResolution.rule, "no atomic operations endpoint")
-        : skip(
-            atomicLidResolution.rule,
-            "requires applying operations, then reading back what they stored — not yet written (see the coverage gaps, #164)",
-          ),
-    ),
-};
-
 // ---------------------------------------------------------------------------
 // Reachability
 // ---------------------------------------------------------------------------
@@ -2950,8 +2627,5 @@ export const rules: ReadonlyArray<RuleImpl> = [
   createConflictType,
   createReadBack,
   updateReadBack,
-  atomicMalformedRejected,
-  atomicResponseExt,
-  atomicAllOrNothing,
-  atomicLidResolution,
+  ...atomicRules,
 ];

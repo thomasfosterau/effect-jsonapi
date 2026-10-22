@@ -372,7 +372,18 @@ export interface WritePayload extends Core.Payload {}
  * trusted, because a server that names some other existing resource cannot be
  * told from an honest one — so supply `writes` only for a server and data you
  * can afford to have modified. A create answered with anything but a 2xx is
- * taken to have created nothing, so nothing is recorded or cleaned up for it.
+ * taken to have created nothing, so nothing is recorded or cleaned up for it —
+ * except by `spec/atomic/all-or-nothing`, which lists the type's collection
+ * before and after a request that must fail, and records and cleans up any
+ * resource that appeared in between carrying the fixture's `attributes`.
+ *
+ * The atomic rules send `create`'s payload as an `add` operation. A type whose
+ * payload links to another type with a `create` fixture gives
+ * `spec/atomic/lid-resolution` its linkage probe (create the linked resource
+ * under a `lid`, link to it by that `lid`, read both back); a type with an
+ * `update` gives it its update probe (an `update` naming the new resource by
+ * `lid`, read back). Each needs a single-resource GET to read back through,
+ * and `all-or-nothing` a collection GET to list.
  *
  * @example
  * ```ts
@@ -407,7 +418,9 @@ export interface WriteFixture extends Core.Fixture {}
  * trail {@link Report.writes} carries, so a run against a real server can be
  * checked for what it left behind.
  *
- * `disposal` is `"deleted"` when the kit's own DELETE probe removed it,
+ * `disposal` is `"deleted"` when the kit's own DELETE probe — or an atomic
+ * `remove` in the request that created it, confirmed by a read that no longer
+ * finds it — removed it,
  * `"cleaned-up"` when the fixture's `cleanup` did, `"cleanup-failed"` when
  * `cleanup` failed (with the cause in `detail`), and `"left"` when nothing
  * removed it — no `cleanup` was supplied, the response named no id, or it
@@ -695,12 +708,6 @@ export const gaps: ReadonlyArray<Gap> = [
     reason:
       "Given a `writes` fixture and `mutating: true`, the kit checks what a successful create, update and delete answer — the status, the primary data, `Location` — that a create of a `type` the endpoint does not serve is a 409, and that what a create or update answered reads back through the resource's GET, on resources it creates and disposes of itself. Still unchecked: creation with a client-generated id (201 or 204, or 403 where unsupported) and the 409 for a duplicate one, which need an id the fixture supplies; and relationship mutation through `/relationships/…` (replacement, append, removal), which needs a resource to link to and a read-back through the relationship endpoint. The fixture makes each of these probe-able; they are not yet written.",
     tracking: ["#429"],
-  },
-  {
-    area: "Atomic operations processing",
-    reason:
-      "The request document's shape is checked, and — given a `writes` fixture — that an `add` is answered under the extension's media type. `lid` resolution across operations, all-or-nothing application and `atomic:results` ordering need operations applied and what was stored then observed, and all-or-nothing also needs a deliberately-invalid operation the fixture does not supply.",
-    tracking: ["#164"],
   },
   {
     area: "The Idempotency-Key profile",
