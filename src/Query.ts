@@ -1547,7 +1547,7 @@ export type FieldsetTypesOf<R extends Any, O extends Options<R>> = [O["fields"]]
 // one optional fieldset per type, its vocabulary the attributes of every
 // definition sharing that wire type (#362); no member when `Types` is empty.
 type NestedFieldsets<R extends Any, I, Types extends string> = [Types] extends [never]
-  ? {}
+  ? Record<never, never>
   : {
       readonly fields: Schema.optionalKey<
         Schema.Struct<{
