@@ -10485,8 +10485,12 @@ describe("Conformance: client-generated ids through atomic operations", () => {
     readonly noContent?: boolean;
     /** Overwrite a post on an `add` under an id it already holds, rather than 409. */
     readonly overwrites?: boolean;
-    /** Name `/data/id` in the 403, as a create endpoint's refusal would. */
-    readonly createPointer?: boolean;
+    /**
+     * What the 403 names as `source.pointer`: the operation's id (the
+     * default), `/data/id` as a create endpoint's refusal would, the operation
+     * itself, or nothing.
+     */
+    readonly pointer?: "id" | "create" | "operation" | "none";
     /** Refuse every `add` over its `type`, as an endpoint that does not take it would. */
     readonly refusesType?: boolean;
   }
@@ -10512,6 +10516,12 @@ describe("Conformance: client-generated ids through atomic operations", () => {
     body: { errors: [{ status: `${code}`, source: { pointer } }] },
   });
   const ID_POINTER = "/atomic:operations/0/data/id";
+  const POINTERS = { id: ID_POINTER, create: "/data/id", operation: "/atomic:operations/0" };
+  /** The 403 refusing a client id, naming the pointer `named` picks, or none. */
+  const forbidden = (named: NonNullable<Breakage["pointer"]>): Canned =>
+    named === "none"
+      ? { status: 403, contentType: atomicType, body: { errors: [{ status: "403" }] } }
+      : refused(403, POINTERS[named]);
 
   /** An `add` result: the post it made as `data`, or no `data`. */
   interface AddResult {
@@ -10544,7 +10554,7 @@ describe("Conformance: client-generated ids through atomic operations", () => {
       if (breakage.refusesType === true)
         return Option.some(refused(400, "/atomic:operations/0/data/type"));
       if (Option.isNone(asked) || mode !== "unsupported") return Option.none();
-      return Option.some(refused(403, breakage.createPointer === true ? "/data/id" : ID_POINTER));
+      return Option.some(forbidden(breakage.pointer ?? "id"));
     };
     /** The answer to an `add` stored under `id`, `asked` the id it carried. */
     const added = (asked: Option.Option<string>, id: string, title: string): Canned => {
@@ -10698,13 +10708,26 @@ describe("Conformance: client-generated ids through atomic operations", () => {
     expect(writes.map((write) => write.disposal)).toEqual(["cleaned-up"]);
   });
 
-  it("detects a 403 whose pointer is outside `atomic:operations`", async () => {
-    const { report } = await run({ clientIds: "unsupported", createPointer: true }, unsupported);
+  it.each([
+    [
+      "names `/data/id`, as a create endpoint's refusal would",
+      "create",
+      'names `source.pointer` "/data/id", not the operation\'s id',
+    ],
+    [
+      "names the operation, not its id",
+      "operation",
+      'names `source.pointer` "/atomic:operations/0", not the operation\'s id',
+    ],
+    ["names no pointer", "none", "names no `source.pointer`"],
+  ] as const)("detects a 403 that %s", async (_, pointer, detail) => {
+    const { report } = await run({ clientIds: "unsupported", pointer }, unsupported);
     expect(failed(report)).toEqual(["spec/atomic/add-client-id-unsupported"]);
     expect(findingsOf(report, "spec/atomic/add-client-id-unsupported")).toEqual([
       expect.objectContaining({
-        detail: expect.stringContaining('names `source.pointer` "/data/id"'),
-        expected: "403 Forbidden, any `source.pointer` within /atomic:operations/0",
+        detail: expect.stringContaining(detail),
+        expected:
+          "403 Forbidden with an error object whose `source.pointer` is /atomic:operations/0/data/id",
       }),
     ]);
   });

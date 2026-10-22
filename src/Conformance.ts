@@ -446,8 +446,8 @@ export interface WriteFixture extends Core.Fixture {}
  * `spec/atomic/add-client-id` wants the `add`'s result to carry the resource
  * under that id (or no `data`, or a 204), `spec/atomic/add-conflict-id` a 409
  * for a second `add` under it, and `spec/atomic/add-client-id-unsupported` a
- * 403 whose error objects' `source.pointer`, where given, lies within the
- * operation (`/atomic:operations/0/…`).
+ * 403 with an error object whose `source.pointer` names the operation's id,
+ * `/atomic:operations/0/data/id`.
  *
  * What a create under an `id` makes is the kit's like any other: vetted as a
  * created id is, recorded in {@link Report.writes} and handed to `cleanup` —

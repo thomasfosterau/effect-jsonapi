@@ -86,8 +86,9 @@ interface Channel {
   /** Where that document carries the resource, for a finding. */
   readonly carries: string;
   /**
-   * The JSON pointer of the probe's one operation, which a refusal's error
-   * objects point within; none through the create endpoint.
+   * The JSON pointer of the probe's one operation, whose `data/id` a 403's
+   * error object must name; none through the create endpoint, whose 403 is
+   * judged on its status alone.
    */
   readonly operation: Option.Option<string>;
 }
@@ -353,38 +354,35 @@ const errorPointers = (observation: Observation): ReadonlyArray<string> =>
       : Result.failVoid;
   });
 
-/** Whether `pointer` names the operation at `operation`, something within it, or the operations array. */
-const within = (operation: string, pointer: string): boolean =>
-  pointer === "/atomic:operations" || pointer === operation || pointer.startsWith(`${operation}/`);
-
 /**
  * The 403 to an atomic `add`, judged on its error objects' `source.pointer`s:
- * a pointer outside `atomic:operations` — `/data/id`, say, as a create
- * endpoint's refusal names it — points at nothing in the request document.
+ * one must name the operation's id, `<operation>/data/id` (owner decision on
+ * #471). None at all, or only others — `/data/id`, say, as a create
+ * endpoint's refusal names it, which points at nothing in an atomic document —
+ * is a finding.
  */
 const judgePointers = (
   impl: Rule,
   operation: string,
   observation: Observation,
   detail: string,
-): Verdict =>
-  Arr.match(
-    Arr.filter(errorPointers(observation), (pointer) => !within(operation, pointer)),
-    {
-      onEmpty: () => decided(1, []),
-      onNonEmpty: (stray) =>
-        decided(1, [
-          finding(impl, {
-            detail: `the 403 to ${detail} names \`source.pointer\` ${stray
-              .map((pointer) => `"${pointer}"`)
-              .join(", ")}, which points at nothing in the atomic request document`,
-            expected: `403 Forbidden, any \`source.pointer\` within ${operation}`,
-            observed: describe(observation),
-            probe: observation.probe,
-          }),
-        ]),
-    },
-  );
+): Verdict => {
+  const wanted = `${operation}/data/id`;
+  const pointers = errorPointers(observation);
+  if (Arr.contains(pointers, wanted)) return decided(1, []);
+  return decided(1, [
+    finding(impl, {
+      detail: `the 403 to ${detail} ${Arr.match(pointers, {
+        onEmpty: () => "names no `source.pointer`",
+        onNonEmpty: (named) =>
+          `names \`source.pointer\` ${named.map((pointer) => `"${pointer}"`).join(", ")}, not the operation's id`,
+      })}`,
+      expected: `403 Forbidden with an error object whose \`source.pointer\` is ${wanted}`,
+      observed: describe(observation),
+      probe: observation.probe,
+    }),
+  ]);
+};
 
 /** Under what id a 2xx the server should have refused made its resource, for a finding. */
 const madeUnder = (made: Option.Option<string>, id: string) =>
@@ -515,7 +513,7 @@ const addClientIdUnsupported = unsupportedRule(
     throughAtomic,
     "spec/atomic/add-client-id-unsupported",
     "crud-creating-client-ids",
-    "A server MUST return 403 Forbidden in response to an atomic `add` operation that creates a resource with an unsupported client-generated ID; an error object's `source.pointer` names the value in the request document that caused it, so any it gives lies within that operation, under `/atomic:operations`.",
+    "A server MUST return 403 Forbidden in response to an atomic `add` operation that creates a resource with an unsupported client-generated ID; its error object's `source.pointer` names the value in the request document that caused it, so the refusal names the operation's id, `/atomic:operations/N/data/id` (N the operation's index).",
   ),
 );
 
