@@ -6,7 +6,7 @@
  * the transaction boundary each write opens, the `?include=` walk on `get`
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Schema } from "effect";
 import * as ApiError from "./ApiError.js";
 import type * as Assemble from "./Assemble.js";
@@ -138,7 +138,7 @@ const makeOps = (seed: ReadonlyArray<PersonLike>) => {
         yield* Transaction;
         calls.update += 1;
         const current = store.get(input.id);
-        if (current === undefined) throw new Error("missing");
+        if (current === undefined) return yield* Effect.die("missing");
         store.set(input.id, {
           ...current,
           attributes: { name: input.name ?? current.attributes.name },
@@ -226,7 +226,9 @@ const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
 const failure = async <A, E>(effect: Effect.Effect<A, E, never>) => {
   const exit = await Effect.runPromiseExit(effect);
   if (Exit.isSuccess(exit)) return expect.fail("expected a failure");
-  return Option.getOrThrow(Cause.findErrorOption(exit.cause)) as { readonly _tag: string };
+  const error = Cause.findErrorOption(exit.cause);
+  assert(Option.isSome(error), "expected a typed failure");
+  return error.value as { readonly _tag: string };
 };
 
 /** Runs `effect` to its success, failing the test on any other exit. */

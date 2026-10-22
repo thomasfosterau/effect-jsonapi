@@ -90,7 +90,6 @@
  */
 import {
   Array as Arr,
-  Data,
   Duration,
   Effect,
   Layer,
@@ -597,15 +596,32 @@ export interface Summary extends ReportFormat.Summary {}
  * @since 0.15.0
  * @category errors
  */
-export class ContractViolation extends Data.TaggedError("ContractViolation")<{
-  readonly rule: Rule;
-  readonly detail: string;
-  readonly expected: string;
-  readonly observed: string;
-  readonly probe: Probe | undefined;
-  /** How many further findings the report carries beyond this one. */
-  readonly remaining: number;
-}> {
+export class ContractViolation extends Schema.TaggedError<ContractViolation>()(
+  "ContractViolation",
+  {
+    rule: Schema.Struct({
+      id: Schema.String,
+      tier: Schema.Literals(["spec", "profile"]),
+      section: Schema.String,
+      reference: Schema.String,
+      level: Schema.Literals(["MUST", "MUST NOT", "SHOULD", "MAY"]),
+      requirement: Schema.String,
+    }),
+    detail: Schema.String,
+    expected: Schema.String,
+    observed: Schema.String,
+    probe: Schema.UndefinedOr(
+      Schema.Struct({
+        method: Schema.String,
+        url: Schema.String,
+        headers: Schema.Record(Schema.String, Schema.String),
+        body: Schema.Unknown,
+      }),
+    ),
+    /** How many further findings the report carries beyond this one. */
+    remaining: Schema.Number,
+  },
+) {
   /**
    * The rule, its requirement and its citation, then the observation — in that
    * order, because the rule is what a reader needs first.

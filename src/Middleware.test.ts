@@ -197,7 +197,15 @@ describe("Middleware.schemaErrorDocument", () => {
     if (result._tag === "Success") throw new Error("expected a failure");
     return result.failure;
   };
-  const bad = (detail: string, source: object) => ({
+  // The error-object `source` members these cases assert on.
+  interface ErrorSource {
+    readonly parameter?: string;
+    readonly header?: string;
+    readonly pointer?: string;
+  }
+  // The allow-lists a rejection publishes under `meta`.
+  type ErrorMeta = Readonly<Record<string, ReadonlyArray<string>>>;
+  const bad = (detail: string, source: ErrorSource) => ({
     status: "400",
     code: "bad_request",
     title: "Bad Request",
@@ -249,7 +257,7 @@ describe("Middleware.schemaErrorDocument", () => {
       page: undefined,
       filter: undefined,
     });
-    const withMeta = (detail: string, parameter: string, meta: object) => ({
+    const withMeta = (detail: string, parameter: string, meta: ErrorMeta) => ({
       ...bad(detail, { parameter }),
       meta,
     });

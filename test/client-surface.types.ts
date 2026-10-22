@@ -29,7 +29,7 @@ const assertType = <Expected>(_value: Expected): void => {};
 // make: the derived client keeps the api's shape
 // ---------------------------------------------------------------------------
 
-const calls = Effect.gen(function* () {
+const calls = Effect.fn("calls")(function* () {
   const client = yield* Client.make(Api, { baseUrl: "http://localhost" });
 
   // control: the endpoints the api declares

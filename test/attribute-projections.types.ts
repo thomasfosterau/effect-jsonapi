@@ -124,19 +124,19 @@ const captionMatchesUpdate: Equals<
 // So a caller computing `caption: maybeUndefined` type-checks against both
 // projections, exactly as the issue asks (and would under
 // `exactOptionalPropertyTypes` too, since the value type includes `undefined`).
-declare const maybeCaption: string | undefined;
+declare const optionalCaption: string | undefined;
 const createWithMaybe: typeof Upload.createInput.Type = {
   fileName: "a.png",
   file: bytes,
   secret: "s",
-  caption: maybeCaption,
+  caption: optionalCaption,
 };
 const updateWithMaybe: typeof Upload.updateInput.Type = {
   id: Upload.Id.make("1"),
-  caption: maybeCaption,
+  caption: optionalCaption,
 };
 const addWithMaybe = Atomic.add(Upload, {
-  attributes: { fileName: "a.png", file: bytes, secret: "s", caption: maybeCaption },
+  attributes: { fileName: "a.png", file: bytes, secret: "s", caption: optionalCaption },
 });
 
 // `create: "required"` (the default) is untouched: no `undefined`.
@@ -167,9 +167,9 @@ const mottoUnchanged: Equals<
   typeof Profile.createInput.fields.motto,
   typeof Profile.fields.attributes.fields.motto
 > = true;
-declare const maybeBio: string | undefined;
-const profileCreate: typeof Profile.createInput.Type = { handle: "h", bio: maybeBio };
-const profileAdd = Atomic.add(Profile, { attributes: { handle: "h", bio: maybeBio } });
+declare const optionalBio: string | undefined;
+const profileCreate: typeof Profile.createInput.Type = { handle: "h", bio: optionalBio };
+const profileAdd = Atomic.add(Profile, { attributes: { handle: "h", bio: optionalBio } });
 
 // ---------------------------------------------------------------------------
 // `resource` must be a literal

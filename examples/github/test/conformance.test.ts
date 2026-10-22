@@ -125,11 +125,8 @@ describe("github: JSON:API conformance", () => {
       .sort();
     const known = KNOWN_FAILURES.map(([id]) => id).sort();
 
-    if (failing.join("\n") !== known.join("\n")) {
-      // Print the whole report so a new failure explains itself.
-      console.log(Conformance.format(report));
-    }
-    expect(failing).toEqual(known);
+    // The whole report is the assertion message, so a new failure explains itself.
+    expect(failing, Conformance.format(report)).toEqual(known);
   });
 
   it("every failure names a rule, cites its section and shows the request", () => {

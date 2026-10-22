@@ -872,14 +872,16 @@ describe("Resource.extend", () => {
   });
 
   it("can override the meta", () => {
-    const Flagged = extend(Account, "flagged", { meta: Schema.Struct({ flag: Schema.Boolean }) });
+    const Flagged = extend(Account, "flagged", {
+      meta: Schema.Struct({ isFlagged: Schema.Boolean }),
+    });
     const decoded = Schema.decodeUnknownSync(Flagged)({
       type: "flagged",
       id: "1",
       attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z" },
-      meta: { flag: true },
+      meta: { isFlagged: true },
     });
-    expect(decoded.meta?.flag).toBe(true);
+    expect(decoded.meta?.isFlagged).toBe(true);
   });
 
   it("lets extra fields override the base on key collision", () => {
@@ -1974,7 +1976,7 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
 
 describe("Resource.attribute `resource` option", () => {
   it("accepts the literals and refuses a non-literal boolean", () => {
-    const hidden = Math.random() > 2; // `boolean`, not a literal
+    const hidden: boolean = String(1) === "2"; // `boolean`, not a literal
     // @ts-expect-error -- a non-literal boolean cannot decide the resource-object type
     attribute(Schema.String, { resource: hidden });
     const shown = attribute(Schema.String, { resource: true });

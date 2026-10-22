@@ -654,10 +654,12 @@ export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<Error
   const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined;
   if (response === undefined) return Effect.succeed(Option.none());
   return response.text.pipe(
-    Effect.map(decodeErrorDocument),
     // The body may be unreadable (already consumed, a broken stream): that is
     // still "no document", never a second failure on top of the first.
-    Effect.catchCause(() => Effect.succeed(Option.none<ErrorDocument>())),
+    Effect.matchCause({
+      onFailure: () => Option.none<ErrorDocument>(),
+      onSuccess: decodeErrorDocument,
+    }),
   );
 };
 

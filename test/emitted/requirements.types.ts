@@ -53,7 +53,7 @@ declare const id: never;
 /** Accepts only an effect whose requirements are exactly `never`. */
 const assertNever = <A, E>(_: Effect.Effect<A, E, never>): void => {};
 
-export const generated = Effect.gen(function* () {
+export const generated = Effect.fn("generated")(function* () {
   const client = yield* HttpApiClient.make(Generated, { baseUrl });
   // Paramless endpoints were never affected — they pin the baseline.
   assertNever(client.articles.list({ query: {} }));
@@ -64,7 +64,7 @@ export const generated = Effect.gen(function* () {
   assertNever(client.articles.authorRelationship({ params: { id }, query: {} }));
 });
 
-export const assembled = Effect.gen(function* () {
+export const assembled = Effect.fn("assembled")(function* () {
   const client = yield* HttpApiClient.make(Assembled, { baseUrl });
   assertNever(client.articles.get({ params: { id }, query: {} }));
   assertNever(client.articles.delete({ params: { id } }));
@@ -87,7 +87,7 @@ assertNever(withRequirement);
  * Erasing it to `never` would also satisfy the assertions above, so pin that
  * the id param is still required and still branded.
  */
-export const paramsStillTyped = Effect.gen(function* () {
+export const paramsStillTyped = Effect.fn("paramsStillTyped")(function* () {
   const client = yield* HttpApiClient.make(Generated, { baseUrl });
   // @ts-expect-error `params` is required — erasing it to `never` must fail here
   yield* client.articles.get({ query: {} });

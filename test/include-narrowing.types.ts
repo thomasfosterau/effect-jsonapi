@@ -98,7 +98,7 @@ declare const clientFetch: (request: {
   readonly query: { readonly include?: ReadonlyArray<Resource.IncludePath<typeof Article>> };
 }) => Effect.Effect<FetchDocument>;
 
-const program = Effect.gen(function* () {
+const program = Effect.fn("program")(function* () {
   // Narrowed to Person only
   const include = ["author"] as const;
   const onlyAuthor = yield* clientFetch({ params: { id: "1" }, query: { include } }).pipe(

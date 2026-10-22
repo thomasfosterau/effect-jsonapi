@@ -8,7 +8,7 @@
  * façade synthesises without a server at all, all reduced to one message by one
  * accessor.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Effect, Option } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
@@ -168,10 +168,8 @@ describe("blog client: error documents", () => {
 
   it("the offline façade's own error decodes through the same seam", async () => {
     const document = servedOffline();
-    expect(Option.isSome(document)).toBe(true);
-    expect(Client.errorMessage(Option.getOrThrow(document))).toBe(
-      "This article is not available offline",
-    );
+    assert(Option.isSome(document));
+    expect(Client.errorMessage(document.value)).toBe("This article is not available offline");
 
     // Indistinguishable from the same document arriving over the network.
     const cause = await Effect.runPromise(
