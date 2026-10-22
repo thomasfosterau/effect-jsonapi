@@ -17,7 +17,7 @@ export type Pair = readonly [key: string, value: string];
  * `sort`, `page[*]`, then anything else. The ranks are spaced so a caller
  * can slot a family's pairs into an already-ordered list.
  */
-export const rank = (key: string): number =>
+const rank = (key: string): number =>
   key === "include"
     ? 0
     : key.startsWith("fields[")

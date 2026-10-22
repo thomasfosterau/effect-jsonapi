@@ -1587,6 +1587,27 @@ export const withQuery = (
 /** @internal */
 export const jsonApiAccept: Readonly<Record<string, string>> = { accept: MEDIA_TYPE };
 
+/**
+ * Reads each path with the JSON:API `Accept`, one at a time and in order, and
+ * hands every 2xx answer to `check`. A non-2xx answer is passed over: whether
+ * a read should succeed is another rule's finding.
+ *
+ * @internal
+ */
+export const eachSuccessfulRead = (
+  ctx: Context,
+  targets: ReadonlyArray<{ readonly path: string }>,
+  check: (path: string, observation: Observation) => void,
+): Effect.Effect<void> =>
+  Effect.forEach(
+    targets,
+    ({ path }) =>
+      Effect.map(ctx.request({ url: path, headers: jsonApiAccept }), (observation) => {
+        if (observation.status >= 200 && observation.status < 300) check(path, observation);
+      }),
+    { concurrency: 1, discard: true },
+  );
+
 /** @internal */
 export const atomicMediaType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
 

@@ -106,13 +106,13 @@ const issueMessage = (error: Schema.SchemaError): string =>
 // ---------------------------------------------------------------------------
 
 /** Escapes a wire literal: `\` → `\\`, `,` → `\,`. */
-export const escape = (literal: string): string => literal.replace(/[\\,]/g, (c) => `\\${c}`);
+const escape = (literal: string): string => literal.replace(/[\\,]/g, (c) => `\\${c}`);
 
 /**
  * Unescapes a wire value, splitting it on unescaped commas in a list position.
  * Returns the items, or the reason the value is malformed.
  */
-export const unescape = (
+const unescape = (
   raw: string,
   list: boolean,
 ): { readonly items: ReadonlyArray<string> } | { readonly error: string } => {
@@ -543,7 +543,7 @@ export const compareCodePoints = (a: string, b: string): number => {
 };
 
 /** The total node order of §3.2. */
-export const compareNodes = (a: Prepared, b: Prepared): number => {
+const compareNodes = (a: Prepared, b: Prepared): number => {
   if (a.kind !== b.kind) return a.kind === "condition" ? -1 : 1;
   if (a.kind === "condition" && b.kind === "condition") {
     return (

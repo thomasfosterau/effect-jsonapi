@@ -238,3 +238,32 @@ describe("Document.parsePointer", () => {
     expect(Document.parsePointer("/data/attributes/2/title")).toEqual(Option.none());
   });
 });
+
+// ---------------------------------------------------------------------------
+// Document.Document: data, error or meta-only
+// ---------------------------------------------------------------------------
+
+describe("Document.Document", () => {
+  const Article = Schema.Struct({ type: Schema.Literal("articles"), id: Schema.String });
+  const decode = Schema.decodeUnknownSync(Document.Document(Article));
+
+  it("accepts a data document", () => {
+    expect(decode({ data: { type: "articles", id: "1" } })).toMatchObject({
+      data: { type: "articles", id: "1" },
+    });
+  });
+
+  it("accepts an error document", () => {
+    expect(decode({ errors: [{ status: "404", title: "Not Found" }] })).toMatchObject({
+      errors: [{ status: "404", title: "Not Found" }],
+    });
+  });
+
+  it("accepts a meta-only document", () => {
+    expect(decode({ meta: { total: 0 } })).toMatchObject({ meta: { total: 0 } });
+  });
+
+  it("rejects a document that is none of the three", () => {
+    expect(() => decode({ data: { type: "people", id: "1" } })).toThrow();
+  });
+});

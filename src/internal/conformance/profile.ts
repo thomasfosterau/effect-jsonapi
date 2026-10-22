@@ -42,6 +42,7 @@ import {
   finding,
   type Finding,
   isRecord,
+  eachSuccessfulRead,
   jsonApiAccept,
   noProbeReason,
   type Observation,
@@ -161,32 +162,25 @@ const advertisesProfile: RuleImpl = {
       const targets = grammarEndpoints(ctx);
       if (Arr.isReadonlyArrayEmpty(targets)) return skip(advertisesProfile.rule, NO_GRAMMAR);
       const findings: Array<Finding> = [];
-      yield* Effect.forEach(
-        targets,
-        ({ path }) =>
-          Effect.gen(function* () {
-            const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-            if (observation.status < 200 || observation.status >= 300) return;
-            const header = observation.contentType;
-            const profiles =
-              header === undefined
-                ? []
-                : parseMediaType(header)
-                    .parameters.filter(([name]) => name === "profile")
-                    .flatMap(([, value]) => value.split(" "));
-            if (!profiles.includes(PROFILE_URI)) {
-              findings.push(
-                finding(advertisesProfile.rule, {
-                  detail: `${path} speaks the filter grammar but does not advertise the profile`,
-                  expected: `a \`profile\` parameter containing ${PROFILE_URI}`,
-                  observed: header === undefined ? "no Content-Type" : header,
-                  probe: observation.probe,
-                }),
-              );
-            }
-          }),
-        { concurrency: 1, discard: true },
-      );
+      yield* eachSuccessfulRead(ctx, targets, (path, observation) => {
+        const header = observation.contentType;
+        const profiles =
+          header === undefined
+            ? []
+            : parseMediaType(header)
+                .parameters.filter(([name]) => name === "profile")
+                .flatMap(([, value]) => value.split(" "));
+        if (!profiles.includes(PROFILE_URI)) {
+          findings.push(
+            finding(advertisesProfile.rule, {
+              detail: `${path} speaks the filter grammar but does not advertise the profile`,
+              expected: `a \`profile\` parameter containing ${PROFILE_URI}`,
+              observed: header === undefined ? "no Content-Type" : header,
+              probe: observation.probe,
+            }),
+          );
+        }
+      });
       return settle(advertisesProfile.rule, targets.length, findings);
     }),
 };
@@ -582,28 +576,21 @@ const jsonApiMember: RuleImpl = {
       if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(jsonApiMember.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
-      yield* Effect.forEach(
-        resolved,
-        ({ path }) =>
-          Effect.gen(function* () {
-            const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-            if (observation.status < 200 || observation.status >= 300) return;
-            const body = observation.body;
-            if (!isRecord(body)) return;
-            const jsonapi = body["jsonapi"];
-            if (!isRecord(jsonapi) || jsonapi["version"] !== "1.1") {
-              findings.push(
-                finding(jsonApiMember.rule, {
-                  detail: `${path} answered a document that does not advertise the JSON:API version`,
-                  expected: `jsonapi: { version: "1.1" }`,
-                  observed: jsonapi === undefined ? "no `jsonapi` member" : JSON.stringify(jsonapi),
-                  probe: observation.probe,
-                }),
-              );
-            }
-          }),
-        { concurrency: 1, discard: true },
-      );
+      yield* eachSuccessfulRead(ctx, resolved, (path, observation) => {
+        const body = observation.body;
+        if (!isRecord(body)) return;
+        const jsonapi = body["jsonapi"];
+        if (!isRecord(jsonapi) || jsonapi["version"] !== "1.1") {
+          findings.push(
+            finding(jsonApiMember.rule, {
+              detail: `${path} answered a document that does not advertise the JSON:API version`,
+              expected: `jsonapi: { version: "1.1" }`,
+              observed: jsonapi === undefined ? "no `jsonapi` member" : JSON.stringify(jsonapi),
+              probe: observation.probe,
+            }),
+          );
+        }
+      });
       return settle(jsonApiMember.rule, resolved.length, findings, coverageNote(unresolved));
     }),
 };

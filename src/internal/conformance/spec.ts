@@ -49,6 +49,7 @@ import {
   HOP_CAP,
   identity,
   isRecord,
+  eachSuccessfulRead,
   jsonApiAccept,
   coverageNote,
   noProbeReason,
@@ -141,51 +142,44 @@ const responseMediaType: RuleImpl = {
       if (Arr.isReadonlyArrayEmpty(resolved))
         return skip(responseMediaType.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
-      yield* Effect.forEach(
-        resolved,
-        ({ path }) =>
-          Effect.gen(function* () {
-            const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-            if (observation.status < 200 || observation.status >= 300) return;
-            if (observation.text === "") return;
-            const header = observation.contentType;
-            if (header === undefined) {
-              findings.push(
-                finding(responseMediaType.rule, {
-                  detail: `${path} answered a JSON:API document with no Content-Type`,
-                  expected: MEDIA_TYPE,
-                  observed: describe(observation),
-                  probe: observation.probe,
-                }),
-              );
-              return;
-            }
-            const { base, parameters } = parseMediaType(header);
-            if (base !== MEDIA_TYPE) {
-              findings.push(
-                finding(responseMediaType.rule, {
-                  detail: `${path} answered with a non-JSON:API media type`,
-                  expected: MEDIA_TYPE,
-                  observed: describe(observation),
-                  probe: observation.probe,
-                }),
-              );
-              return;
-            }
-            const illegal = parameters.filter(([name]) => name !== "ext" && name !== "profile");
-            if (Arr.isReadonlyArrayNonEmpty(illegal)) {
-              findings.push(
-                finding(responseMediaType.rule, {
-                  detail: `${path} answered with the media type parameter(s) ${illegal.map(([n]) => n).join(", ")}`,
-                  expected: `${MEDIA_TYPE} with only \`ext\` / \`profile\` parameters`,
-                  observed: describe(observation),
-                  probe: observation.probe,
-                }),
-              );
-            }
-          }),
-        { concurrency: 1, discard: true },
-      );
+      yield* eachSuccessfulRead(ctx, resolved, (path, observation) => {
+        if (observation.text === "") return;
+        const header = observation.contentType;
+        if (header === undefined) {
+          findings.push(
+            finding(responseMediaType.rule, {
+              detail: `${path} answered a JSON:API document with no Content-Type`,
+              expected: MEDIA_TYPE,
+              observed: describe(observation),
+              probe: observation.probe,
+            }),
+          );
+          return;
+        }
+        const { base, parameters } = parseMediaType(header);
+        if (base !== MEDIA_TYPE) {
+          findings.push(
+            finding(responseMediaType.rule, {
+              detail: `${path} answered with a non-JSON:API media type`,
+              expected: MEDIA_TYPE,
+              observed: describe(observation),
+              probe: observation.probe,
+            }),
+          );
+          return;
+        }
+        const illegal = parameters.filter(([name]) => name !== "ext" && name !== "profile");
+        if (Arr.isReadonlyArrayNonEmpty(illegal)) {
+          findings.push(
+            finding(responseMediaType.rule, {
+              detail: `${path} answered with the media type parameter(s) ${illegal.map(([n]) => n).join(", ")}`,
+              expected: `${MEDIA_TYPE} with only \`ext\` / \`profile\` parameters`,
+              observed: describe(observation),
+              probe: observation.probe,
+            }),
+          );
+        }
+      });
       return settle(responseMediaType.rule, resolved.length, findings, coverageNote(unresolved));
     }),
 };
@@ -1069,7 +1063,31 @@ const fieldsOf = (queryKeys: ReadonlyArray<string>): ReadonlyArray<string> =>
     .filter((key) => key.startsWith("fields[") && key.endsWith("]"))
     .map((key) => key.slice("fields[".length, -1));
 
-const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
+type Slot = "primary" | "included";
+
+/** Whether the resource object at `pointer` sits in the document slot `where`. */
+const inSlot = (pointer: string, where: Slot): boolean =>
+  pointer.startsWith("/included") === (where === "included");
+
+/**
+ * The attribute names of the first resource of each type in slot `where`:
+ * only types that actually appear in the slot under test can decide a
+ * projection rule; anything else would be a pass over an empty set.
+ */
+const attributesByType = (body: unknown, where: Slot): Map<string, ReadonlyArray<string>> => {
+  const byType = new Map<string, ReadonlyArray<string>>();
+  for (const { pointer, resource } of resourcesOf(body)) {
+    if (!inSlot(pointer, where)) continue;
+    const type = resource["type"];
+    const attributes = resource["attributes"];
+    if (typeof type === "string" && isRecord(attributes) && !byType.has(type)) {
+      byType.set(type, Object.keys(attributes));
+    }
+  }
+  return byType;
+};
+
+const sparseFieldsets = (where: Slot): RuleImpl => {
   const impl = rule(
     `spec/query/sparse-fieldsets-${where}`,
     "Sparse Fieldsets",
@@ -1112,18 +1130,7 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
                 probes += 1;
                 if (source.status < 200 || source.status >= 300) return;
               }
-              // Only types that actually appear in the slot under test can decide
-              // this rule; anything else would be a pass over an empty set.
-              const byType = new Map<string, ReadonlyArray<string>>();
-              for (const { pointer, resource } of resourcesOf(source.body)) {
-                const inIncluded = pointer.startsWith("/included");
-                if (where === "included" ? !inIncluded : inIncluded) continue;
-                const type = resource["type"];
-                const attributes = resource["attributes"];
-                if (typeof type === "string" && isRecord(attributes) && !byType.has(type)) {
-                  byType.set(type, Object.keys(attributes));
-                }
-              }
+              const byType = attributesByType(source.body, where);
               yield* Effect.forEach(
                 fieldsOf(endpoint.queryKeys),
                 (type) =>
@@ -1136,13 +1143,8 @@ const sparseFieldsets = (where: "primary" | "included"): RuleImpl => {
                     probes += 1;
                     if (observation.status < 200 || observation.status >= 300) return;
                     const subjects = resourcesOf(observation.body).filter(
-                      ({ pointer, resource }) => {
-                        const inIncluded = pointer.startsWith("/included");
-                        return (
-                          (where === "included" ? inIncluded : !inIncluded) &&
-                          resource["type"] === type
-                        );
-                      },
+                      ({ pointer, resource }) =>
+                        inSlot(pointer, where) && resource["type"] === type,
                     );
                     // A projection request that returned no resource of that type in
                     // that slot proves nothing either way.
