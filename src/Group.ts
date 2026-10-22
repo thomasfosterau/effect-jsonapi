@@ -147,7 +147,7 @@ export const make: {
  * const Api = HttpApi.make("blog").add(articles).add(people)
  * ```
  *
- * @since 0.1.0
+ * @since 0.1.0 (`relationshipInclude` since 0.18.0)
  * @category constructors
  */
 export const resource = <
@@ -174,6 +174,7 @@ export const resource = <
   const Filter extends Schema.Struct.Fields | undefined = undefined,
   const GMeta extends Schema.Top = Meta,
   const GIdem extends Idempotency.Option = false,
+  const GRelInclude extends Endpoint.ResourceRelationshipIncludeOption = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: Endpoint.ResourceOptions<
@@ -191,7 +192,8 @@ export const resource = <
     Page,
     Filter,
     GMeta,
-    GIdem
+    GIdem,
+    GRelInclude
   >,
 ): HttpApiGroup.HttpApiGroup<
   Type,
@@ -210,7 +212,8 @@ export const resource = <
     Page,
     Filter,
     GMeta,
-    GIdem
+    GIdem,
+    GRelInclude
   >
 > =>
   make(
@@ -230,7 +233,8 @@ export const resource = <
       Page,
       Filter,
       GMeta,
-      GIdem
+      GIdem,
+      GRelInclude
     >(resource, options),
   );
 

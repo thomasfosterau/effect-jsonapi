@@ -99,6 +99,10 @@ export const endpoints = Endpoint.resource(Article);
 
 // The group constructors and the schema-tier `included` derivation.
 export const group = Group.resource(Article);
+export const groupRelationshipInclude = Group.resource(Article, {
+  relationshipInclude: true,
+  relationships: { comments: { relationshipInclude: { depth: 1 } } },
+});
 export const flat = Group.flat({
   resource: Person,
   list: FlatQuery.listInput({ maxLimit: 100 }),

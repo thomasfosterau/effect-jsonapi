@@ -7,16 +7,19 @@
  * admitting every resource those paths reach, so a handler can return
  * `Handlers.linkage(ids, { included })`. Without `include` the document has no
  * `included` member, exactly as before. The runtime half is
- * `src/Endpoint.relationshipInclude.test.ts`.
+ * `src/Endpoint.relationshipInclude.test.ts`. The last section covers the
+ * same option on the endpoints `Endpoint.resource` / `Group.resource`
+ * generate (#484).
  *
  * This file is type-checked by `tsconfig.json`; the `@ts-expect-error`
  * annotations are the assertions, each paired with a positive control.
  */
 import * as Schema from "effect/Schema";
-import type { HttpApiEndpoint } from "effect/http-api";
+import type { HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import {
   Document,
   Endpoint,
+  Group,
   Handlers,
   Include,
   Relationship,
@@ -186,3 +189,132 @@ assertType<
     ReadonlyArray<typeof Track.Type | typeof Artist.Type> | undefined
   >
 >(true);
+
+// ===========================================================================
+// The relationship endpoints `Endpoint.resource` / `Group.resource` generate
+// (#484): the top-level `relationshipInclude` sets `include` on every one, a
+// relationship's own `relationshipInclude` overrides it, and without either
+// nothing changes. The runtime half is
+// `src/Endpoint.resourceRelationshipInclude.test.ts`.
+// ===========================================================================
+
+// The endpoint named `Name` among a generated tuple's.
+type Named<Endpoints extends ReadonlyArray<unknown>, Name extends string> = Extract<
+  Endpoints[number],
+  { readonly identifier: Name }
+>;
+
+// ---------------------------------------------------------------------------
+// The default: no `?include=` on the generated relationship endpoints
+// ---------------------------------------------------------------------------
+
+const plainResource = Endpoint.resource(Playlist);
+type PlainTracks = Named<typeof plainResource, "tracksRelationship">;
+assertType<HasIncluded<PlainTracks>>(false);
+assertType<HasInclude<PlainTracks>>(false);
+assertType<SuccessOf<PlainTracks>>(Handlers.linkage(trackIds));
+// The top-level `include` still governs only the `related` endpoints.
+const relatedOnly = Endpoint.resource(Playlist, { include: true });
+assertType<HasInclude<Named<typeof relatedOnly, "tracksRelationship">>>(false);
+assertType<HasInclude<Named<typeof relatedOnly, "tracks">>>(true);
+
+// ---------------------------------------------------------------------------
+// Resource-wide `relationshipInclude`
+// ---------------------------------------------------------------------------
+
+const all = Endpoint.resource(Playlist, { relationshipInclude: true });
+type AllTracks = Named<typeof all, "tracksRelationship">;
+type AllCurator = Named<typeof all, "curatorRelationship">;
+type AllPlays = Named<typeof all, "playsRelationship">;
+assertType<Equals<IncludeOf<AllTracks>, ReadonlyArray<"tracks" | "tracks.artist">>>(true);
+assertType<Equals<IncludedOf<AllTracks>, typeof Track.Type | typeof Artist.Type>>(true);
+assertType<Equals<IncludeOf<AllCurator>, ReadonlyArray<"curator" | "curator.label">>>(true);
+assertType<Equals<IncludedOf<AllCurator>, typeof Artist.Type | typeof Label.Type>>(true);
+// A generated handler may now answer with `included`, or without it.
+assertType<SuccessOf<AllTracks>>(Handlers.linkage(trackIds, { included: [track, artist] }));
+assertType<SuccessOf<AllTracks>>(Handlers.linkage(trackIds));
+// `labels` is three hops from the parent: on no depth-2 path.
+const tooDeepResource = Handlers.linkage(trackIds, {
+  included: [
+    track,
+    Label.make({ id: Label.Id.make("2"), attributes: { title: "Acme", founded: 1999 } }),
+  ],
+});
+// @ts-expect-error -- `labels` is not in the endpoint's `included` union
+assertType<SuccessOf<AllTracks>>(tooDeepResource);
+// A `paginated` relationship has no include paths: the setting legalises none.
+assertType<Equals<IncludedOf<AllPlays>, never>>(true);
+
+// A `{ depth }` bound applies to every relationship.
+const deepResource = Endpoint.resource(Playlist, { relationshipInclude: { depth: 3 } });
+assertType<
+  Equals<
+    IncludedOf<Named<typeof deepResource, "tracksRelationship">>,
+    typeof Track.Type | typeof Artist.Type | typeof Label.Type
+  >
+>(true);
+
+// An allow-list or a surface names one relationship's paths: per-relationship
+// only.
+// @ts-expect-error -- `paths` belongs on a relationship's own config
+Endpoint.resource(Playlist, { relationshipInclude: { paths: ["tracks"] } });
+// @ts-expect-error -- a surface belongs on a relationship's own config
+Endpoint.resource(Playlist, { relationshipInclude: surface });
+
+// ---------------------------------------------------------------------------
+// Per-relationship `relationshipInclude`
+// ---------------------------------------------------------------------------
+
+const perRelationship = Endpoint.resource(Playlist, {
+  relationshipInclude: true,
+  relationships: {
+    tracks: { relationshipInclude: { paths: ["tracks"] } },
+    curator: { relationshipInclude: false },
+    plays: { relationshipInclude: true },
+  },
+});
+type PerTracks = Named<typeof perRelationship, "tracksRelationship">;
+assertType<Equals<IncludeOf<PerTracks>, ReadonlyArray<"tracks">>>(true);
+assertType<Equals<IncludedOf<PerTracks>, typeof Track.Type>>(true);
+assertType<HasIncluded<Named<typeof perRelationship, "curatorRelationship">>>(false);
+assertType<HasInclude<Named<typeof perRelationship, "curatorRelationship">>>(false);
+
+// A declared surface over the parent, rooted at the relationship.
+const surfacedResource = Endpoint.resource(Playlist, {
+  relationships: { tracks: { relationshipInclude: surface } },
+});
+type SurfacedTracks = Named<typeof surfacedResource, "tracksRelationship">;
+assertType<Equals<IncludeOf<SurfacedTracks>, ReadonlyArray<"tracks" | "tracks.artist">>>(true);
+assertType<Equals<IncludedOf<SurfacedTracks>, typeof Track.Type | typeof Artist.Type>>(true);
+// Unmentioned relationships keep the top-level default — off here.
+assertType<HasInclude<Named<typeof surfacedResource, "curatorRelationship">>>(false);
+
+// The paths are checked against the relationship they configure.
+Endpoint.resource(Playlist, {
+  // @ts-expect-error -- `curator` is the parent's path, but not rooted at `tracks`
+  relationships: { tracks: { relationshipInclude: { paths: ["curator"] } } },
+});
+Endpoint.resource(Playlist, {
+  // @ts-expect-error -- the surface declares `curator`, which is not rooted at `tracks`
+  relationships: { tracks: { relationshipInclude: offRelationship } },
+});
+// Positive control: a rooted path is accepted.
+Endpoint.resource(Playlist, {
+  relationships: { tracks: { relationshipInclude: { paths: ["tracks.artist"] } } },
+});
+
+// ---------------------------------------------------------------------------
+// `Group.resource` threads the option through
+// ---------------------------------------------------------------------------
+
+const group = Group.resource(Playlist, {
+  relationshipInclude: true,
+  relationships: { curator: { relationshipInclude: false } },
+});
+type GroupEndpoints = HttpApiGroup.Endpoints<typeof group>;
+type GroupTracks = Extract<GroupEndpoints, { readonly identifier: "tracksRelationship" }>;
+assertType<Equals<IncludedOf<GroupTracks>, typeof Track.Type | typeof Artist.Type>>(true);
+assertType<SuccessOf<GroupTracks>>(Handlers.linkage(trackIds, { included: [track, artist] }));
+assertType<HasIncluded<Extract<GroupEndpoints, { readonly identifier: "curatorRelationship" }>>>(
+  false,
+);
