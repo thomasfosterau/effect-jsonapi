@@ -159,7 +159,7 @@ export const resource = <
   const Endpoints extends Endpoint.EndpointsOption<
     Resource<Type, Attributes, Rels, Meta, IdSchema>,
     Meta
-  > = {},
+  > = Record<never, never>,
   const RelationshipsOpt extends Endpoint.RelationshipsOption<
     Resource<Type, Attributes, Rels, Meta, IdSchema>
   > = true,

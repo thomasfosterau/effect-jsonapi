@@ -268,7 +268,7 @@ const makeWire = (
  */
 export const make =
   <Self = never>(identifier?: string) =>
-  <const Tag extends string, const Fields extends Schema.Struct.Fields = {}>(
+  <const Tag extends string, const Fields extends Schema.Struct.Fields = Record<never, never>>(
     tag: Tag,
     config: Config<Fields>,
   ): ApiErrorClass<Self, Tag, Fields> => {

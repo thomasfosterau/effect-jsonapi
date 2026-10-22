@@ -1193,7 +1193,7 @@ export interface DefaultIncluded<Rels extends Relationships> extends Schema.Unio
 export interface Resource<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
-  Rels extends Relationships = {},
+  Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
   IdSchema extends Schema.Codec<any, string> = Id<Type>,
 > extends Schema.Struct<ResourceFields<Type, Attributes, Rels, Meta, IdSchema>> {
@@ -1342,7 +1342,7 @@ export interface Resource<
 export type Parameter<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
-  Rels extends Relationships = {},
+  Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
   IdSchema extends Schema.Codec<any, string> = Id<Type>,
 > = Resource<NoInfer<Type>, Attributes, Rels, Meta, IdSchema> & { readonly type: Type };
@@ -2786,7 +2786,7 @@ const definitions = new WeakMap<object, Definition>();
 export const make = <
   const Type extends string,
   const Attributes extends Schema.Struct.Fields,
-  const Rels extends Relationships = {},
+  const Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
   IdSchema extends Schema.Codec<any, string> = Id<Type>,
 >(
@@ -3292,8 +3292,8 @@ export const extend = <
   const BaseRels extends Relationships,
   BaseMeta extends Schema.Top,
   const Type extends string,
-  const ExtraAttributes extends Schema.Struct.Fields = {},
-  const ExtraRels extends Relationships = {},
+  const ExtraAttributes extends Schema.Struct.Fields = Record<never, never>,
+  const ExtraRels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = BaseMeta,
   BaseId extends Schema.Codec<any, string> = Id<BaseType>,
   const InheritId extends boolean = false,

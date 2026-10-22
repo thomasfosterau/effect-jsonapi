@@ -56,7 +56,7 @@ describe("Resource.filterable / Resource.sortable", () => {
     expect(sortable(Plain)).toEqual([]);
     expectTypeOf<FilterableKeys<typeof Plain>>().toEqualTypeOf<never>();
     expectTypeOf<SortableKeys<typeof Plain>>().toEqualTypeOf<never>();
-    expectTypeOf(filterable(Plain)).toEqualTypeOf<{}>();
+    expectTypeOf(filterable(Plain)).toEqualTypeOf<Record<never, never>>();
     expectTypeOf(sortable(Plain)).toEqualTypeOf<ReadonlyArray<never>>();
   });
 
