@@ -6,7 +6,7 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Cause, Effect, Exit, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
-import { Client } from "@thomasfosterau/effect-jsonapi";
+import { Client, Filter, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
 import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../errors.js";
 import {
@@ -15,6 +15,7 @@ import {
   bugLabel,
   defunkt,
   enhancementLabel,
+  featureIssue,
   GitHubLive,
   helloWorld,
   hubot,
@@ -244,7 +245,9 @@ describe("github example: listing", () => {
       Effect.gen(function* () {
         const client = yield* buildClient;
         return yield* client.issues.list({
-          query: { filter: { state: "open", repository: helloWorld.id } },
+          query: {
+            filter: Filter.and(Filter.eq("state", "open"), Filter.eq("repository", helloWorld.id)),
+          },
         });
       }),
     );
@@ -257,6 +260,33 @@ describe("github example: listing", () => {
       expectTypeOf(issue.attributes.state).toEqualTypeOf<"open" | "closed">();
       expect(issue.attributes.state).toBe("open");
     }
+  });
+
+  it("evaluates an issue filter three-valued: an unassigned issue matches neither eq nor ne", async () => {
+    const ids = (filter: Query.FilterAst<typeof Issue>) =>
+      run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          const document = yield* client.issues.list({ query: { filter } });
+          return document.data.map((issue) => issue.id);
+        }),
+      );
+    // bugIssue is octocat's; featureIssue and lockedIssue are unassigned.
+    expect(await ids(Filter.eq("assignee", octocat.id))).toEqual([bugIssue.id]);
+    expect(await ids(Filter.ne("assignee", octocat.id))).toEqual([]);
+    expect(await ids(Filter.isNull("assignee"))).toEqual([featureIssue.id, lockedIssue.id]);
+    // F-CONS-1: excluded middle does not hold where the field is NULL.
+    const eq = Filter.eq("assignee", octocat.id);
+    expect(await ids(Filter.or(eq, Filter.not(eq)))).toEqual([bugIssue.id]);
+    // F-ORD-1: numbers numerically, dates as ISO-8601 text.
+    expect(await ids(Filter.gt("number", 1000))).toEqual([bugIssue.id, featureIssue.id]);
+    expect(await ids(Filter.lt("createdAt", lockedIssue.attributes.createdAt))).toEqual([
+      bugIssue.id,
+      featureIssue.id,
+    ]);
+    // F-AND-2: the empty groups.
+    expect(await ids(Filter.and())).toHaveLength(3);
+    expect(await ids(Filter.or())).toEqual([]);
   });
 
   it("lists users sorted by login", async () => {

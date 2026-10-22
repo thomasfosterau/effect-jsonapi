@@ -17,7 +17,7 @@
  *   users, like GitHub's global search
  */
 import { Schema } from "effect";
-import { HttpApi } from "effect/http-api";
+import { HttpApi, HttpApiMiddleware } from "effect/http-api";
 import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {
   IssueLocked,
@@ -28,6 +28,17 @@ import {
   UserNotFound,
 } from "./errors.js";
 import { Issue, PullRequest, Repository, User } from "./resources.js";
+
+/**
+ * Advertises the filter grammar's profile on the media type of every answer
+ * from an endpoint that speaks it — `Content-Type: application/vnd.api+json;
+ * profile="…"` (docs/filter-grammar.md §5). The package declares the grammar
+ * but leaves advertising it to the server, since only the server knows that
+ * its handler evaluates §6; `FilterProfileLive` in `handlers.ts` implements it.
+ */
+export class FilterProfile extends HttpApiMiddleware.Service<FilterProfile>()(
+  "github/FilterProfile",
+) {}
 
 /**
  * Typed collection meta carried by list responses.
@@ -113,17 +124,18 @@ export const issues = Group.make(
     errors: [IssueNotFound],
   }),
   // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt
+  // The filter grammar over the issue's declared filter fields: the same
+  // `filter[state]=open` shorthand as a per-key map, plus every operator, `OR`
+  // and `NOT` groups, and `filter[assignee][isnull]=true` for the unassigned.
+  // Its answers advertise the profile (`FilterProfile`), which is what
+  // commits the handler to the profile's three-valued semantics (§6).
   Endpoint.list(Issue, {
     include: true,
     sort: ["number", "createdAt"],
     page: Pagination,
-    filter: {
-      repository: Schema.optionalKey(Schema.String),
-      state: Schema.optionalKey(Schema.Literals(["open", "closed"])),
-      assignee: Schema.optionalKey(Schema.String),
-    },
+    filter: true,
     meta: PageMeta,
-  }),
+  }).middleware(FilterProfile),
   // POST /issues → 201 (repository and author are required relationships)
   Endpoint.create(Issue, {
     errors: [RepositoryNotFound],

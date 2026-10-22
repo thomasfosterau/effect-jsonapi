@@ -5,7 +5,9 @@
  * Handlers receive fully-decoded, typed requests:
  *   - `params.id` is the resource's branded id
  *   - `query.include` / `query.fields` / `query.sort` / `query.page` /
- *     `query.filter` are typed
+ *     `query.filter` are typed — on `GET /issues`, which speaks the filter
+ *     grammar, `query.filter` is one `Filter.Ast` root node, which the
+ *     handler evaluates per the profile's semantics (`evaluate`, below)
  *   - `payload.data.attributes` is the typed create/update payload
  *   - relationship endpoints receive typed linkage payloads
  *
@@ -20,10 +22,20 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import { Effect, Layer } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  Match,
+  Option,
+  Order,
+  Predicate,
+  String as Str,
+} from "effect";
+import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
-import { Document, Handlers, Middleware } from "@thomasfosterau/effect-jsonapi";
-import { Api } from "./api.js";
+import { Document, Filter, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
+import { Api, FilterProfile } from "./api.js";
 import {
   IssueLocked,
   IssueNotFound,
@@ -434,6 +446,162 @@ const paginate = <A>(
 };
 
 // ---------------------------------------------------------------------------
+// The filter grammar's semantics (docs/filter-grammar.md §6)
+// ---------------------------------------------------------------------------
+//
+// The package decodes `GET /issues?filter[…]` into one `Filter.Ast` root node
+// and evaluates none (§6.9): the handler does, against its store. A store
+// that is SQL gets most of §6 for free; this one is an array, so the handler
+// spells §6 out — three truth values, Kleene's connectives, every comparison
+// against NULL UNKNOWN, and the order of each field's JSON value.
+
+/** §6.3: the three truth values. */
+type Truth = "TRUE" | "FALSE" | "UNKNOWN";
+
+/** §6.2 F-ORD-1: every filterable value, and every literal, is a JSON scalar. */
+type Scalar = string | number | boolean;
+
+/** The decoded filter `GET /issues` receives, and the fields it may name. */
+type IssueFilter = Query.FilterAst<typeof Issue>;
+type IssueField = Extract<IssueFilter, { readonly _tag: "Compare" }>["field"];
+
+/** A value in its JSON form, the one F-ORD-1 compares on: a `Date` as its ISO-8601 text. */
+const toJson = (value: Scalar | Date): Scalar =>
+  Predicate.isDate(value) ? value.toISOString() : value;
+
+/**
+ * §6.1 F-EVAL-4: an attribute's JSON value, or a to-one relationship's related
+ * id; NULL for an absent member and for empty linkage (an unassigned issue).
+ */
+const valueOf = (issue: Issue, field: IssueField): Option.Option<Scalar> =>
+  field === "repository" || field === "author" || field === "assignee"
+    ? Option.fromNullishOr(issue.relationships?.[field].data?.id)
+    : Option.some(toJson(issue.attributes[field]));
+
+/** F-ORD-2: strings in code-point order — no locale, no case folding. */
+const codePointOrder = Order.mapInput(Arr.makeOrder(Order.Number), (text: string) =>
+  Arr.map(Array.from(text), (char) => char.codePointAt(0) ?? 0),
+);
+
+/** F-ORD-1: numbers numerically, `false < true`, strings by code point. */
+const compareJson = (value: Scalar, literal: Scalar): number =>
+  Predicate.isString(value) && Predicate.isString(literal)
+    ? codePointOrder(value, literal)
+    : Number(value) - Number(literal);
+
+const truth = (holds: boolean): Truth => (holds ? "TRUE" : "FALSE");
+
+/** F-CMP-2: each operator's relation on a non-NULL value's order. */
+const RELATIONS = {
+  eq: (order: number) => order === 0,
+  ne: (order: number) => order !== 0,
+  lt: (order: number) => order < 0,
+  lte: (order: number) => order <= 0,
+  gt: (order: number) => order > 0,
+  gte: (order: number) => order >= 0,
+} as const satisfies { readonly [Op in Filter.CompareOperator]: (order: number) => boolean };
+
+/** F-CMP-1 / F-CMP-2: UNKNOWN against NULL, else the two-valued relation. */
+const comparison = (
+  op: Filter.CompareOperator,
+  value: Option.Option<Scalar>,
+  literal: Scalar | Date,
+): Truth =>
+  Option.match(
+    Option.map(value, (present) => compareJson(present, toJson(literal))),
+    {
+      onNone: (): Truth => "UNKNOWN",
+      onSome: (order) => truth(RELATIONS[op](order)),
+    },
+  );
+
+/** A fold of `table` over `truths` from `identity`: F-IN-1, and F-AND-1 / F-AND-2. */
+const fold = (
+  table: { readonly [A in Truth]: { readonly [B in Truth]: Truth } },
+  identity: Truth,
+  truths: ReadonlyArray<Truth>,
+): Truth => Arr.reduce(truths, identity, (acc, next) => table[acc][next]);
+
+/** F-LOGIC-1: Kleene's strong connectives. */
+const AND = {
+  TRUE: { TRUE: "TRUE", FALSE: "FALSE", UNKNOWN: "UNKNOWN" },
+  FALSE: { TRUE: "FALSE", FALSE: "FALSE", UNKNOWN: "FALSE" },
+  UNKNOWN: { TRUE: "UNKNOWN", FALSE: "FALSE", UNKNOWN: "UNKNOWN" },
+} as const satisfies { readonly [A in Truth]: { readonly [B in Truth]: Truth } };
+const OR = {
+  TRUE: { TRUE: "TRUE", FALSE: "TRUE", UNKNOWN: "TRUE" },
+  FALSE: { TRUE: "TRUE", FALSE: "FALSE", UNKNOWN: "UNKNOWN" },
+  UNKNOWN: { TRUE: "TRUE", FALSE: "UNKNOWN", UNKNOWN: "UNKNOWN" },
+} as const satisfies { readonly [A in Truth]: { readonly [B in Truth]: Truth } };
+const NOT = { TRUE: "FALSE", FALSE: "TRUE", UNKNOWN: "UNKNOWN" } as const satisfies {
+  readonly [A in Truth]: Truth;
+};
+
+/** F-IN-1: a disjunction of equalities. */
+const membership = (value: Option.Option<Scalar>, literals: ReadonlyArray<Scalar | Date>): Truth =>
+  fold(
+    OR,
+    "FALSE",
+    Arr.map(literals, (literal) => comparison("eq", value, literal)),
+  );
+
+/** §6.3: a filter tree's truth value for one issue. */
+const evaluate = (node: IssueFilter, issue: Issue): Truth =>
+  Match.valueTags(node, {
+    Compare: ({ op, field, value }) => comparison(op, valueOf(issue, field), value),
+    In: ({ field, values }) => membership(valueOf(issue, field), values),
+    // F-IN-2: the negation of F-IN-1.
+    NotIn: ({ field, values }) => NOT[membership(valueOf(issue, field), values)],
+    // F-ISNULL-1 / F-ISNULL-2: total, never UNKNOWN.
+    IsNull: ({ field, negated }) => truth(Option.isNone(valueOf(issue, field)) !== negated),
+    // F-AND-1 / F-AND-2: the folds, `And([])` TRUE and `Or([])` FALSE.
+    And: ({ members }) =>
+      fold(
+        AND,
+        "TRUE",
+        Arr.map(members, (member) => evaluate(member, issue)),
+      ),
+    Or: ({ members }) =>
+      fold(
+        OR,
+        "FALSE",
+        Arr.map(members, (member) => evaluate(member, issue)),
+      ),
+    // F-NOT-1.
+    Not: ({ member }) => NOT[evaluate(member, issue)],
+  });
+
+/**
+ * §6.1 F-EVAL-3: an issue is in the primary data iff the tree is TRUE for it —
+ * FALSE and UNKNOWN both exclude. An absent `filter` is no constraint (F-ERR-3).
+ */
+const matching = (issues: ReadonlyArray<Issue>, filter: Option.Option<IssueFilter>) =>
+  Option.match(filter, {
+    onNone: () => [...issues],
+    onSome: (tree) => Arr.filter(issues, (issue) => evaluate(tree, issue) === "TRUE"),
+  });
+
+/** The media type of an answer from an endpoint speaking the grammar (§5). */
+const PROFILED_MEDIA_TYPE = `application/vnd.api+json; profile="${Filter.PROFILE_URI}"`;
+
+/**
+ * The live {@link FilterProfile}: names the profile on the media type of every
+ * JSON:API answer from the endpoints it is attached to (`GET /issues`).
+ */
+export const FilterProfileLive: Layer.Layer<FilterProfile> = Layer.succeed(
+  FilterProfile,
+  (httpEffect) =>
+    Effect.map(httpEffect, (response) =>
+      Option.exists(
+        Option.fromNullishOr(response.headers["content-type"]),
+        Str.startsWith("application/vnd.api+json"),
+      )
+        ? HttpServerResponse.setHeader(response, "content-type", PROFILED_MEDIA_TYPE)
+        : response,
+    ),
+);
+
+// ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
 
@@ -608,23 +776,9 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       ),
     )
     .handle("list", ({ query }) => {
-      let issues = [...store.issues.values()];
-
-      // filter[repository]=<repository id>
-      const repository = query.filter?.repository;
-      if (repository !== undefined) {
-        issues = issues.filter((issue) => issue.relationships?.repository.data.id === repository);
-      }
-      // filter[state]=open|closed
-      const state = query.filter?.state;
-      if (state !== undefined) {
-        issues = issues.filter((issue) => issue.attributes.state === state);
-      }
-      // filter[assignee]=<user id>
-      const assignee = query.filter?.assignee;
-      if (assignee !== undefined) {
-        issues = issues.filter((issue) => issue.relationships?.assignee.data?.id === assignee);
-      }
+      // filter[state]=open&filter[repository]=1, filter[assignee][isnull]=true,
+      // filter[number][gt]=1000, an `OR` group, … — the grammar, evaluated per §6.
+      const issues = matching([...store.issues.values()], Option.fromUndefinedOr(query.filter));
 
       sortBy(issues, query.sort);
       const { number, page, size, total } = paginate(issues, query.page);
@@ -921,7 +1075,8 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
 /**
  * Everything needed to serve the GitHub-like API: the handlers plus the
- * JSON:API protocol middleware (content negotiation + spec-compliant 400s).
+ * JSON:API protocol middleware (content negotiation + spec-compliant 400s),
+ * and the filter grammar's profile advertisement on `GET /issues`.
  *
  * The middleware is provided *into* the handler groups (not merged alongside
  * them) so that every endpoint's middleware requirement is satisfied.
@@ -932,4 +1087,4 @@ export const GitHubLive = Layer.mergeAll(
   IssuesLive,
   PullsLive,
   SearchLive,
-).pipe(Layer.provideMerge(Middleware.layer));
+).pipe(Layer.provideMerge(Layer.mergeAll(Middleware.layer, FilterProfileLive)));

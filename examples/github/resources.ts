@@ -18,7 +18,7 @@
  *   PullRequest ──reviewers─────────▶ User          `many`
  */
 import { Schema } from "effect";
-import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
+import { Filter, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 export const User = Resource.make("users", {
   attributes: {
     login: Schema.NonEmptyString,
@@ -63,22 +63,27 @@ export const IssueComment = Resource.make("issueComments", {
   },
 });
 
+// Issues are the one collection that speaks the filter grammar (`filter: true`
+// on `GET /issues`, docs/filter-grammar.md): every attribute but `body`, and
+// the three to-one relationships, valued by the related id, are filter fields
+// over the whole operator core (`Filter.able()`; a relationship's `filter:
+// true` is `eq ne in nin isnull`).
 export const Issue = Resource.make("issues", {
   attributes: {
-    number: Schema.Int,
-    title: Schema.NonEmptyString,
+    number: Schema.Int.pipe(Filter.able()),
+    title: Schema.NonEmptyString.pipe(Filter.able()),
     body: Schema.String,
     // Closed attribute set — `state` only ever decodes to one of these.
-    state: Schema.Literals(["open", "closed"]),
-    locked: Schema.Boolean,
-    createdAt: Schema.DateFromString,
+    state: Schema.Literals(["open", "closed"]).pipe(Filter.able()),
+    locked: Schema.Boolean.pipe(Filter.able()),
+    createdAt: Schema.DateFromString.pipe(Filter.able()),
   },
   relationships: {
     // An issue is always opened against a repository, by someone.
-    repository: Relationship.one(() => Repository),
-    author: Relationship.one(() => User),
-    // ... but may be unassigned.
-    assignee: Relationship.optional(() => User),
+    repository: Relationship.one(() => Repository, { filter: true }),
+    author: Relationship.one(() => User, { filter: true }),
+    // ... but may be unassigned: `filter[assignee][isnull]=true` names those.
+    assignee: Relationship.optional(() => User, { filter: true }),
     // Labels are few and bounded: inlined identifiers, manageable through
     // the /issues/:id/relationships/labels endpoints.
     labels: Relationship.many(() => Label),
