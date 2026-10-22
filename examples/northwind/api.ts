@@ -52,6 +52,11 @@ export const PageMeta = Schema.Struct({
 });
 
 /**
+ * The decoded type of the typed collection {@link PageMeta}.
+ */
+export type PageMeta = typeof PageMeta.Type;
+
+/**
  * Offset/limit pagination capped at 100 rows — a shared DoS guard.
  *
  * `Query.Page.offset(...)` is the bounded, configurable variant of the

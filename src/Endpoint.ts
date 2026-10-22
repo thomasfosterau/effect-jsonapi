@@ -4082,6 +4082,14 @@ export const FlatGetQuery: Schema.Struct<typeof Query.includeListField> = Schema
 );
 
 /**
+ * The decoded type of a flat endpoint's {@link FlatGetQuery} `get` query.
+ *
+ * @since 0.17.0
+ * @category models
+ */
+export type FlatGetQuery = typeof FlatGetQuery.Type;
+
+/**
  * Options of {@link flatRelated}.
  *
  * @since 0.16.0

@@ -1039,6 +1039,8 @@ export const validateIncludePaths = (
       }
       return Effect.succeed({ path, segments });
     },
+    // Sequential: the first unsupported path is the one the error reports.
+    { concurrency: 1 },
   );
 
 /**

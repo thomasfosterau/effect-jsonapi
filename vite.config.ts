@@ -99,15 +99,12 @@ export default defineConfig({
       "effect/avoid-object-type": "warn",
       "effect/no-unknown-parameters": "warn",
       "effect/no-unknown-returns": "warn",
+      // One site, and a contract: `ApiError.toDocument(error: object)` takes any
+      // value a framework hook caught and throws on a non-`ApiError.make`
+      // instance (src/ApiError.ts). Narrowing the parameter is a breaking
+      // change to a published signature.
       "effect/no-object-parameters": "warn",
       "effect/prefer-match-over-switch": "warn",
-      "effect/use-console-service": "warn",
-      "effect/require-effect-concurrency": "warn",
-      "effect/use-random-service": "warn",
-      "effect/prefer-duration-constructors": "warn",
-      "effect/effect-promise-vs-trypromise": "warn",
-      "effect/effect-catchall-default": "warn",
-      "effect/avoid-data-tagged-error": "warn",
       // `@ts-expect-error` is the assertion mechanism of the type-level tests
       // (see the `*.types.ts` override below, where it is off); in the sources
       // it marks the `ErrorNoStream` guard effect's endpoint constructors
@@ -117,10 +114,12 @@ export default defineConfig({
       // `Resource.Schema`-style suffixes, `Any` / `AnySpec` shapes and
       // `maybe*` readers cannot be renamed for a lint rule.
       "effect/no-shape-in-symbol-names": "warn",
+      // Four sites left, all published: `Idempotency.Headers` /
+      // `HeadersRequired` and `Query.FilterWireValue` / `FilterRest` already
+      // name an `interface X extends Schema.Struct<…> {}` — the schema's own
+      // type, not its decoded `.Type` — and the rule accepts only a
+      // same-named `type` alias, so satisfying it changes a published type.
       "effect/require-schema-type-alias": "warn",
-      "effect/avoid-schema-suffix": "warn",
-      "effect/require-is-prefix-for-boolean-schema-field": "warn",
-      "effect/maybe-prefix-requires-option": "warn",
       "effect/imperative-loops": "warn",
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-non-null-assertion": "warn",
@@ -135,11 +134,8 @@ export default defineConfig({
       "effect/prefer-effect-is": "warn",
       "effect/avoid-expect-in-if": "warn",
       "effect/effect-run-in-body": "warn",
-      "effect/prefer-effect-fn": "warn",
       "effect/avoid-direct-tag-checks": "warn",
-      "effect/avoid-option-getorthrow": "warn",
       "effect/no-barrel-imports": "warn",
-      "effect/throw-in-effect-gen": "warn",
       "effect/prefer-option-over-null": "warn",
       "typescript/no-explicit-any": "off",
       "typescript/no-empty-object-type": "off",
@@ -286,6 +282,20 @@ export default defineConfig({
           output: [],
         },
       },
+      // The root unit suite under one Istanbul coverage map
+      // (`coverage/coverage-final.json`), which `fallow audit` reads for exact
+      // per-function CRAP scores (`health.coverage` in .fallowrc.json).
+      // Without it fallow estimates every function as uncovered, and any
+      // function with cyclomatic complexity ≥ 5 fails the gate on its own.
+      // Run this before `fallow audit` (the Claude Code PreToolUse fallow gate
+      // runs the audit on `git commit` / `git push` but never refreshes this
+      // map). Depends on `build` because test/entry-points.test.ts walks
+      // `dist/`.
+      "test:coverage": {
+        command: "vp test run --coverage",
+        dependsOn: ["build"],
+        cache: false,
+      },
       // Type-checks AND executes every JSDoc `@example`, and generates the API
       // docs under docs/. Not part of `check`: it is a separate CI step, so a
       // broken example fails visibly on its own line. Depends on `build`
@@ -316,6 +326,13 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "test/**/*.test.ts"],
+    coverage: {
+      provider: "istanbul",
+      reporter: ["text-summary", "json-summary", "json"],
+      reportsDirectory: "./coverage",
+      include: ["src/**/*.ts"],
+      exclude: ["**/*.d.ts", "**/*.test.ts"],
+    },
     ...(process.env.VITEST_MAX_WORKERS
       ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) }
       : {}),
