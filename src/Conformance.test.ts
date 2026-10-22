@@ -19,6 +19,7 @@ import {
   Layer,
   Match,
   MutableHashMap,
+  MutableHashSet,
   Option,
   Predicate,
   Record as Rec,
@@ -206,6 +207,7 @@ const RELATIONSHIP_RULES = [
   "spec/relationships/remove-deletes",
   "spec/relationships/write-response",
   "spec/relationships/absent-related-404",
+  "spec/relationships/remove-absent-succeeds",
 ];
 
 /** A 400 error document whose one error object carries `members` too. */
@@ -3713,6 +3715,7 @@ describe("Conformance: the write fixture", () => {
     "spec/atomic/all-or-nothing",
     "spec/atomic/lid-resolution",
     "spec/atomic/results-order",
+    "spec/atomic/remove-absent-succeeds",
   ];
 
   /**
@@ -6234,6 +6237,136 @@ describe("Conformance: atomic operations processing", () => {
     expect(leftovers(store)).toEqual([]);
   });
 });
+// ---------------------------------------------------------------------------
+// An atomic `remove` naming a resource that does not exist (#477)
+// ---------------------------------------------------------------------------
+
+/**
+ * A canned operations endpoint over a store of posts: an `add` creates one,
+ * and a `remove` from its `tags` answers as `removes` says — 204 by default.
+ */
+describe("Conformance: an atomic remove naming an absent resource", () => {
+  const RULE = "spec/atomic/remove-absent-succeeds";
+  const Tag = Resource.make("tags", { attributes: { name: Schema.String } });
+  const Post = Resource.make("posts", {
+    attributes: { title: Schema.String },
+    relationships: { tags: Relationship.many(() => Tag) },
+  });
+  const removableApi = HttpApi.make("removable")
+    .add(Group.make(Post, Endpoint.get(Post), Endpoint.removeRelationship(Post, "tags")))
+    .add(Group.make("operations", Endpoint.operations([Post])));
+  const unremovableApi = HttpApi.make("unremovable")
+    .add(Group.make(Post, Endpoint.get(Post)))
+    .add(Group.make("operations", Endpoint.operations([Post])));
+
+  const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
+  const Operations = Schema.Struct({
+    "atomic:operations": Schema.Array(
+      Schema.Struct({ op: Schema.String, ref: Schema.optionalKey(Schema.Unknown) }),
+    ),
+  });
+  const decodeOperations = Schema.decodeUnknownOption(Operations);
+
+  type Removes = "204" | "results" | "404" | "403";
+
+  const run = async (
+    removes: Removes = "204",
+    target: typeof verifyCanned = verifyOver(removableApi),
+  ) => {
+    const posts = MutableHashSet.empty<string>();
+    const removals: Array<unknown> = [];
+    let next = 100;
+    const serve = (request: CannedRequest): Canned => {
+      if (request.method !== "POST" || request.path !== "/operations") return { status: 405 };
+      const operation = Option.flatMap(decodeOperations(request.body), (body) =>
+        Arr.head(body["atomic:operations"]),
+      );
+      if (Option.isNone(operation)) return { status: 400, body: { errors: [{ status: "400" }] } };
+      if (operation.value.op === "add") {
+        const id = `${next++}`;
+        MutableHashSet.add(posts, id);
+        return {
+          contentType: atomicType,
+          body: { "atomic:results": [{ data: { type: "posts", id, attributes: { title: "" } } }] },
+        };
+      }
+      removals.push(request.body);
+      return Match.value(removes).pipe(
+        Match.when("results", (): Canned => ({
+          contentType: atomicType,
+          body: { "atomic:results": [{}] },
+        })),
+        Match.when("404", (): Canned => ({ status: 404, body: { errors: [{ status: "404" }] } })),
+        Match.when("403", (): Canned => ({ status: 403, body: { errors: [{ status: "403" }] } })),
+        Match.orElse((): Canned => ({ status: 204 })),
+      );
+    };
+    const report = await target(serve, {
+      only: [RULE],
+      mutating: true,
+      ids: {},
+      writes: {
+        posts: {
+          create: () => ({ type: "posts", attributes: { title: "a post" } }),
+          cleanup: (id) => Effect.sync(() => MutableHashSet.remove(posts, id)),
+        },
+      },
+    });
+    return { outcome: outcomeFor(report, RULE), posts, removals };
+  };
+
+  it.each(["204", "results"] as const)(
+    "passes a remove answered %s, naming absentId under the relationship's type",
+    async (removes) => {
+      const { outcome, posts, removals } = await run(removes);
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 2 });
+      expect(removals).toEqual([
+        {
+          "atomic:operations": [
+            {
+              op: "remove",
+              ref: { type: "posts", id: "100", relationship: "tags" },
+              data: [{ type: "tags", id: "conformance-absent-id-0000" }],
+            },
+          ],
+        },
+      ]);
+      expect(MutableHashSet.size(posts)).toBe(0);
+    },
+  );
+
+  it("fails a remove answered 404", async () => {
+    const { outcome, posts } = await run("404");
+    expect(outcome._tag).toBe("Failed");
+    expect(Predicate.isTagged(outcome, "Failed") ? outcome.findings : []).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /^a `remove` from the `tags` of posts:100 naming tags:conformance-absent-id-0000, which does not exist, answered 404: /,
+        ),
+        expected: "200 OK with `atomic:results`, or 204 No Content",
+      }),
+    ]);
+    expect(MutableHashSet.size(posts)).toBe(0);
+  });
+
+  it("decides nothing on a remove the server forbids", async () => {
+    const { outcome } = await run("403");
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("answered 403 Forbidden"),
+    });
+  });
+
+  it("skips, sending nothing, when no relationship write endpoint shows a to-many relationship", async () => {
+    const { outcome, removals } = await run("204", verifyOver(unremovableApi));
+    expect(outcome).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining('to-many relationship of "posts"'),
+    });
+    expect(removals).toEqual([]);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Pagination links enumerate the collection (#166)
 // ---------------------------------------------------------------------------
@@ -9985,6 +10118,8 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     readonly keepsOnNull?: boolean;
     /** Link a resource that does not exist rather than answer 404. */
     readonly linksAbsent?: boolean;
+    /** Answer a `DELETE` naming a resource that does not exist 404, rather than succeed. */
+    readonly removesAbsent404?: boolean;
   }
 
   const Body = Schema.Struct({
@@ -10071,8 +10206,14 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         Match.when("202", (): Canned => ({ status: 202 })),
         Match.orElse((): Canned => ({ status: 204 })),
       );
-    const absent = (data: Stored["author"] | ReadonlyArray<Identifier>): boolean =>
-      breakage.linksAbsent !== true &&
+    /**
+     * Whether a write of `data` by `method` names a resource that does not
+     * exist and is answered 404: a `PATCH` or `POST` is, unless it
+     * `linksAbsent`; a `DELETE`, already missing it, only when it
+     * `removesAbsent404`.
+     */
+    const absent = (method: string, data: Stored["author"] | ReadonlyArray<Identifier>): boolean =>
+      (method === "DELETE" ? breakage.removesAbsent404 === true : breakage.linksAbsent !== true) &&
       (Array.isArray(data) ? data : data === null ? [] : [data]).some(
         (item: Identifier) => !linkable.includes(`${item.type}:${item.id}`),
       );
@@ -10081,7 +10222,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         onNone: () => refused(400),
         onSome: ({ data }) => {
           if (Array.isArray(data) !== (name === "tags")) return refused(400);
-          if (absent(data)) return refused(404);
+          if (absent(request.method, data)) return refused(404);
           if (breakage.ignores?.includes(request.method) === true) return { status: 204 };
           const before = post[name];
           if (Array.isArray(data)) post.tags = applied(request.method, post.tags, data);
@@ -10185,9 +10326,13 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       probes: 12,
     });
     // The to-one and to-many PATCH and the POST, each linking an absent
-    // resource; the DELETE is not probed.
+    // resource; the DELETE is not probed for the 404.
     expect(outcomeFor(report, "spec/relationships/absent-related-404")).toMatchObject({
       probes: 6,
+    });
+    // The DELETE naming an absent resource instead: create, DELETE, a 204.
+    expect(outcomeFor(report, "spec/relationships/remove-absent-succeeds")).toMatchObject({
+      probes: 2,
     });
     expect(posts.size).toBe(0);
     expect(writes.map((write) => write.disposal)).toEqual(writes.map(() => "cleaned-up"));
@@ -10281,8 +10426,8 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       expect(outcomeFor(report, id)).toMatchObject({
         reason: expect.stringContaining('pass writes["posts"].clientId'),
       });
-    // The relationship rules still ran — 12 creates — and no create carried an id.
-    expect(seen.filter((line) => line === "POST /posts").length).toBe(12);
+    // The relationship rules still ran — 13 creates — and no create carried an id.
+    expect(seen.filter((line) => line === "POST /posts").length).toBe(13);
   });
 
   it.each([
@@ -10321,11 +10466,11 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       _tag: "Passed",
       note: expect.stringContaining('ids["tags"]'),
     });
-    // Nothing is created for a probe that cannot link anything: of the 12
+    // Nothing is created for a probe that cannot link anything: of the 13
     // creates a full run makes, only the three on \`author\` (replace, clear and
-    // the answer to a replace) and the three for the 404 — which link
-    // \`absentId\`, not a sample — remain.
-    expect(seen.filter((line) => line === "POST /posts").length).toBe(6);
+    // the answer to a replace), the three for the 404 and the one for the
+    // absent removal — which name \`absentId\`, not a sample — remain.
+    expect(seen.filter((line) => line === "POST /posts").length).toBe(7);
   });
 
   it('detects a server that answers `{ "data": null }` to a to-one relationship and changes nothing', async () => {
@@ -10370,7 +10515,16 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
 
   it("detects a relationship write answered with a status the specification does not name", async () => {
     const { report } = await run({ responds: "201" });
-    expect(failed(report)).toEqual(["spec/relationships/write-response"]);
+    // The DELETE naming an absent resource answers 201 too.
+    expect(failed(report)).toEqual([
+      "spec/relationships/write-response",
+      "spec/relationships/remove-absent-succeeds",
+    ]);
+    expect(findingsOf(report, "spec/relationships/remove-absent-succeeds")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(/^DELETE \S+\/relationships\/tags answered 201$/),
+      }),
+    ]);
     const findings = findingsOf(report, "spec/relationships/write-response");
     expect(findings).toHaveLength(4);
     expect(findings).toEqual(
@@ -10400,6 +10554,36 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       ),
     ]);
     expect(posts.size).toBe(0);
+  });
+
+  it("detects a server that answers 404 to a DELETE naming a resource that does not exist", async () => {
+    const { report, posts } = await run({ removesAbsent404: true });
+    expect(failed(report)).toEqual(["spec/relationships/remove-absent-succeeds"]);
+    expect(findingsOf(report, "spec/relationships/remove-absent-succeeds")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /^DELETE \S+\/relationships\/tags removing tags:conformance-absent-id-0000, which does not exist, answered 404: /,
+        ),
+        expected: expect.stringMatching(/^202, 204 with no document, or 200/),
+        probe: expect.objectContaining({ method: "DELETE" }),
+      }),
+    ]);
+    expect(posts.size).toBe(0);
+  });
+
+  it("decides nothing on a DELETE naming an absent resource that the server forbids", async () => {
+    const { report } = await run({ forbids: ["DELETE"] });
+    expect(outcomeFor(report, "spec/relationships/remove-absent-succeeds")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("answered 403 Forbidden"),
+    });
+  });
+
+  it("judges a 200 to a DELETE naming an absent resource against the linkage read back", async () => {
+    const conformant = await run({ responds: "linkage" });
+    expect(
+      outcomeFor(conformant.report, "spec/relationships/remove-absent-succeeds"),
+    ).toMatchObject({ _tag: "Passed", probes: 3 });
   });
 
   it("judges a 200's linkage by what the write leaves when there is no relationship GET to read", async () => {

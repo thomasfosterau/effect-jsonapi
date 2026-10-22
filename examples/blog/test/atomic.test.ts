@@ -534,6 +534,60 @@ describe("atomic operations: linkage to an absent resource", () => {
     expect(linked.after).toEqual(linked.before);
   });
 
+  it("a remove naming an unknown tag or comment succeeds, removing the rest", async () => {
+    // #477: a resource that does not exist is already missing from the
+    // relationship, so a `remove` naming one is applied, not refused with a
+    // 404. The article is the request's own, so the shared sample is untouched.
+    const comment = sampleComments[0];
+    assert(comment !== undefined);
+    const { tags, comments } = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const created = yield* client.operations.operations({
+          payload: Atomic.request(
+            Atomic.add(Article, {
+              lid: "a1",
+              attributes: {
+                title: "Removing what is not there",
+                body: "",
+                createdAt: sampleArticle.attributes.createdAt,
+              },
+              relationships: {
+                author: { data: Person.ref(sampleAuthor.id) },
+                tags: { data: [Tag.ref(sampleTag.id)] },
+              },
+            }),
+            Atomic.addToRelationship(Article, { lid: "a1" }, "comments", [Comment.ref(comment.id)]),
+          ),
+        });
+        const added = created["atomic:results"][0]?.data;
+        assert(added !== undefined && added !== null);
+        const id = Article.Id.make(added.id);
+        yield* client.operations.operations({
+          payload: Atomic.request(
+            Atomic.removeFromRelationship(Article, id, "tags", [
+              Tag.ref(sampleTag.id),
+              Tag.ref("does-not-exist"),
+            ]),
+            Atomic.removeFromRelationship(Article, id, "comments", [
+              Comment.ref("does-not-exist"),
+              Comment.ref(comment.id),
+            ]),
+          ),
+        });
+        const article = yield* client.articles.get({ params: { id }, query: {} });
+        const linked = yield* client.articles.commentsRelationship({ params: { id }, query: {} });
+        return {
+          tags: article.data?.relationships?.tags.data,
+          comments: linked.data.map((ref) => ref.id),
+        };
+      }),
+    );
+
+    expect(tags).toEqual([]);
+    expect(comments).toEqual([]);
+  });
+
   it("the 404's error document carries the pointer as source.pointer", () => {
     const encoded = Schema.encodeSync(PersonNotFound.wire)(
       new PersonNotFound({ id: "does-not-exist", pointer: "/atomic:operations/1/data" }),
