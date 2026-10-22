@@ -1,5 +1,6 @@
 /**
- * The refusal of a client-generated id on a create payload (#450).
+ * The refusal of a client-generated id on a create payload (#450) and on an
+ * atomic `add` operation (#464).
  *
  * `Resource.createPayload`'s resource object declares no `id`, and a struct
  * with fields drops a key it doesn't declare, so a `data.id` the client sent
@@ -8,16 +9,20 @@
  * Forbidden in response to an unsupported request to create a resource with
  * a client-generated ID." So the resource object rejects an `id` at
  * `/data/id`, with an issue `Middleware.SchemaErrorsLive` recognises and
- * answers with that 403 rather than the 400 of a malformed payload.
+ * answers with that 403 rather than the 400 of a malformed payload. An atomic
+ * `add` operation's resource object does the same at
+ * `/atomic:operations/N/data/id`: the extension answers a failed operation as
+ * the base specification does (§Processing Errors).
  *
  * @internal
  */
-import { Predicate, Schema, SchemaAST, SchemaIssue } from "effect";
+import { Option, Predicate, Schema, SchemaAST, SchemaIssue } from "effect";
 
 /**
- * The message of the issue a create payload's resource object reports for a
- * client-generated `id`, which `Middleware.SchemaErrorsLive` matches (with
- * the `/data/id` path) to answer 403 Forbidden.
+ * The message of the issue a create payload's or an atomic `add` operation's
+ * resource object reports for a client-generated `id`, which
+ * `Middleware.SchemaErrorsLive` matches (with the `/data/id` or
+ * `/atomic:operations/N/data/id` path) to answer 403 Forbidden.
  *
  * @internal
  */
@@ -68,19 +73,34 @@ export const refusingClientId = <const Fields extends Schema.Struct.Fields>(
   );
 };
 
-// The JSON pointer the refusal names.
+// Where a refused id sits: a create payload's `data.id`, or an atomic `add`
+// operation's, `atomic:operations/N/data/id` (#464).
 const ID_PATH = ["data", "id"] as const;
+const OPERATIONS_MEMBER = "atomic:operations";
 
 /**
- * Whether a payload decode failure's leaf, in the wire names `wireLeaves`
- * reports, is the refusal of a client-generated id.
+ * The JSON pointer of a payload decode failure's leaf, in the wire names
+ * `wireLeaves` reports, when it is the refusal of a client-generated id —
+ * `/data/id` for a create payload, `/atomic:operations/N/data/id` for an
+ * atomic `add` operation — and none when it is any other failure.
  *
  * @internal
  */
-export const isRefusedClientId = (leaf: {
+export const refusedClientIdPointer = (leaf: {
   readonly message: string;
   readonly wire: ReadonlyArray<PropertyKey>;
-}): boolean =>
-  leaf.message === CLIENT_ID_UNSUPPORTED &&
-  leaf.wire.length === ID_PATH.length &&
-  leaf.wire.every((key, index) => key === ID_PATH[index]);
+}): Option.Option<string> => {
+  const { wire } = leaf;
+  const prefix = wire.length - ID_PATH.length;
+  if (
+    leaf.message !== CLIENT_ID_UNSUPPORTED ||
+    !ID_PATH.every((key, index) => wire[prefix + index] === key)
+  ) {
+    return Option.none();
+  }
+  if (prefix === 0) return Option.some("/data/id");
+  const [member, index] = wire;
+  return prefix === 2 && member === OPERATIONS_MEMBER && Predicate.isNumber(index)
+    ? Option.some(`/${OPERATIONS_MEMBER}/${index}/data/id`)
+    : Option.none();
+};

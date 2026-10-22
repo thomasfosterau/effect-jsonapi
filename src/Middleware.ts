@@ -27,7 +27,8 @@
  *     exception, answered with 409 Conflict naming `/data/type`
  *     (§Creating Resources; §Updating Resources), as is a client-generated
  *     `data.id` on a `createPayload`, answered with 403 Forbidden naming
- *     `/data/id` (§Client-Generated IDs). It also rejects, with a 400
+ *     `/data/id` (§Client-Generated IDs), and on an atomic `add`, naming
+ *     `/atomic:operations/N/data/id`. It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
  *     a-z, names an extension's parameter (`ext:param`) or is not a legal
  *     member name (`foo!`, `page.limit`), and that neither the specification
@@ -115,7 +116,7 @@ import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
-import { CLIENT_ID_UNSUPPORTED, isRefusedClientId } from "./internal/refusedClientId.js";
+import { CLIENT_ID_UNSUPPORTED, refusedClientIdPointer } from "./internal/refusedClientId.js";
 import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
 import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
 import { wireLeaves } from "./internal/wireNames.js";
@@ -1227,9 +1228,13 @@ const conflictResponse = (type: string, served: ReadonlyArray<string>) =>
 // The 403 a create answers a client-generated id with when its payload does
 // not support one (§Client-Generated IDs: "A server MUST return 403 Forbidden
 // in response to an unsupported request to create a resource with a
-// client-generated ID"). `Resource.createPayload` reports the id at
-// `/data/id` with the issue `isRefusedClientId` recognises (#450).
-const clientIdResponse = payloadRefusal(Forbidden, CLIENT_ID_UNSUPPORTED, "/data/id");
+// client-generated ID"), at the pointer `refusedClientIdPointer` reads off
+// the issue: `/data/id` for `Resource.createPayload` (#450),
+// `/atomic:operations/N/data/id` for an `Atomic.AddOperation` (#464). The
+// payload decode stops at its first failure, so an atomic request is answered
+// for the first operation that fails, whatever later ones send.
+const clientIdResponse = (pointer: string) =>
+  payloadRefusal(Forbidden, CLIENT_ID_UNSUPPORTED, pointer);
 
 // A payload rejected at `/data/type` on an endpoint that declares the types it
 // serves (`Endpoint.create` / `Endpoint.update`), whose body sent a string
@@ -1268,9 +1273,10 @@ const transformSchemaError = (
   }
   const badRequest = badRequestResponse(kind, schemaErrorDocument(kind, error.cause));
   if (kind !== "Payload") return badRequest;
-  const refused = wireLeaves(error.cause.issue).some(isRefusedClientId)
-    ? clientIdResponse
-    : badRequest;
+  const refused = Option.match(
+    Arr.findFirst(wireLeaves(error.cause.issue), refusedClientIdPointer),
+    { onNone: () => badRequest, onSome: clientIdResponse },
+  );
   return Effect.flatMap(payloadConflict(endpoint, error.cause), (conflict) =>
     Option.isSome(conflict)
       ? conflictResponse(conflict.value.type, conflict.value.served)
@@ -1428,7 +1434,10 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * any endpoint whose payload is `createPayload`. The handler never runs. A
  * `type` or member that fails beside the id is reported instead, with the 409
  * or 400 it earns; a payload of the endpoint's own that declares `data.id`
- * supports client ids, and is not touched (#450).
+ * supports client ids, and is not touched (#450). An atomic `add` operation
+ * carrying an `id` is answered the same way, with the 403 naming
+ * `/atomic:operations/N/data/id`, so no operation is performed (#464); the
+ * decode stops at the first operation that fails, which decides the answer.
  *
  * It also answers a query parameter whose family base name is made only of
  * a-z, and which the endpoint neither declares nor the specification defines

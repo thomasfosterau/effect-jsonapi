@@ -1032,7 +1032,7 @@ Like everything else, the operations a resource supports are **derived** from it
 
 | Derived operation | Wire form |
 | --- | --- |
-| `.add` | `{ op: "add", data: { type, lid?, attributes, relationships } }` — `one` relationships required, `paginated` excluded |
+| `.add` | `{ op: "add", data: { type, lid?, attributes, relationships } }` — no `id` (a client-generated `data.id` is refused with 403, [below](#client-generated-ids-in-an-add)); `one` relationships required, `paginated` excluded |
 | `.update` | `{ op: "update", data: { type, id \| lid, attributes?, relationships? } }` — `paginated` excluded |
 | `.remove` | `{ op: "remove", ref: { type, id \| lid } }` |
 | `.relationships.author.update` (per `one` relationship) | `{ op: "update", ref: { type, id \| lid, relationship }, data: ref }` — never null |
@@ -1125,6 +1125,29 @@ Because the extension uses the JSON:API media type with an `ext` parameter, prov
 
 ```ts
 Layer.provide(Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] }));
+```
+
+#### Client-generated ids in an `add`
+
+An `add` operation's `data` declares no `id`, as `createPayload`'s doesn't, so the default request document does not support client-generated ids. An `add` that sends one is refused rather than having its id dropped: `Middleware.SchemaErrorsLive` answers the whole request with a 403 whose `source.pointer` is `/atomic:operations/N/data/id`, and the handler never runs, so no operation is performed ([#464](https://github.com/thomasfosterau/effect-jsonapi/issues/464); the extension answers a failed operation as the base specification does, and §Client-Generated IDs requires the 403). The decode stops at the first operation that fails, so that operation decides the answer: a malformed operation before it is a 400, one after it is not reached.
+
+To support client ids, pass `Endpoint.operations` a `payload` whose `add` declares an `id`. The handler then receives it, and answering a duplicate with 409 is the handler's to do:
+
+```ts
+const AddArticle = Atomic.AddOperation(Article);
+const AddArticleWithId = Schema.Struct({
+  ...AddArticle.fields,
+  data: Schema.Struct({ ...AddArticle.fields.data.fields, id: Schema.optionalKey(Schema.String) }),
+});
+
+Endpoint.operations([Article], {
+  payload: Schema.Struct({
+    // `AddArticleWithId` first, so an `add` carrying an id decodes through it.
+    "atomic:operations": Schema.Array(
+      Schema.Union([AddArticleWithId, ...Atomic.Operations([Article]).members]),
+    ).check(Schema.isMinLength(1)),
+  }),
+});
 ```
 
 Every endpoint automatically:
@@ -2000,7 +2023,7 @@ const query2 = ListArticles2.pipe(
 | `null` primary `data` only for a single-resource URL that might correspond to a resource but currently doesn't | `DataDocument` is a pure envelope: `DataDocument(R)` is non-null; opt into `data: null` with `Schema.NullOr(R)` / `R.nullable()`. `Endpoint.related` keeps the nullable form for a to-one relationship |
 | Resource objects have `type` and `id`; ids are not interchangeable across types | `Resource` always emits the type tag and a per-type branded id |
 | Create requests may omit `id` and send `lid` | `createPayload` derivation |
-| 403 Forbidden for a create under a client-generated id the server does not support | `createPayload`'s resource object declares no `id` and rejects one at `/data/id`, and `Middleware.SchemaErrorsLive` answers it with a 403 whose `source.pointer` is `/data/id`, before the handler runs; a type or member that fails beside it is answered first, with the 409 or 400 it earns ([#450](https://github.com/thomasfosterau/effect-jsonapi/issues/450)). To support client ids, pass `Endpoint.create` a `payload` whose `data` declares an `id` |
+| 403 Forbidden for a create under a client-generated id the server does not support | `createPayload`'s resource object declares no `id` and rejects one at `/data/id`, and `Middleware.SchemaErrorsLive` answers it with a 403 whose `source.pointer` is `/data/id`, before the handler runs; a type or member that fails beside it is answered first, with the 409 or 400 it earns ([#450](https://github.com/thomasfosterau/effect-jsonapi/issues/450)). An atomic `add` operation's resource object does the same, answered with a 403 whose `source.pointer` is `/atomic:operations/N/data/id` and no operation performed ([#464](https://github.com/thomasfosterau/effect-jsonapi/issues/464)). To support client ids, pass `Endpoint.create` (or `Endpoint.operations`) a `payload` whose `data` (or whose `add`'s `data`) declares an `id` |
 | Update requests require `id`, attributes are partial | `updatePayload` derivation |
 | 409 Conflict for a create or update whose resource object's `type` the endpoint does not serve | `Endpoint.create` / `Endpoint.update` declare the type they serve, and `Middleware.SchemaErrorsLive` answers a string `data.type` naming another with a 409 whose `source.pointer` is `/data/type`; a `type` missing or not a string stays a 400 ([#428](https://github.com/thomasfosterau/effect-jsonapi/issues/428)). An update's `data.id` that differs from `:id` is the handler's 409 (`ResourceHandlers.make` answers it) |
 | Relationships hold at least one of `data` / `links` / `meta` | `one` / `optional` / `many` schemas require resource linkage (`data`); `paginated` schemas require `links.related` |
