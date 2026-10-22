@@ -133,8 +133,7 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
   const relationships = resource["relationships"];
   if (!isRecord(relationships)) return [];
   const out: Array<string> = [];
-  const take = (value: unknown): void => {
-    if (!isRecord(value)) return;
+  const take = (value: Parameters<typeof identity>[0]): void => {
     const key = identity(value);
     if (key !== undefined) out.push(key);
   };
@@ -142,8 +141,8 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
     const relationship = relationships[name];
     if (!isRecord(relationship)) continue;
     const data = relationship["data"];
-    if (Array.isArray(data)) data.forEach(take);
-    else take(data);
+    if (Array.isArray(data)) data.filter(isRecord).forEach(take);
+    else if (isRecord(data)) take(data);
   }
   return out;
 };

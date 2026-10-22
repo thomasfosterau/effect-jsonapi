@@ -187,7 +187,7 @@ describe("Middleware.schemaError", () => {
 });
 
 describe("Middleware.schemaErrorDocument", () => {
-  const failure = <S extends Schema.Top>(schema: S, input: unknown) => {
+  const failure = <S extends Schema.Top>(schema: S, input: Schema.Json) => {
     const result = Schema.decodeUnknownResult(schema as unknown as Schema.Codec<unknown, unknown>)(
       input,
       {

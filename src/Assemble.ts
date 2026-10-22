@@ -640,7 +640,9 @@ type WireValue =
   | ReadonlyArray<WireValue>
   | { readonly [key: string]: WireValue };
 
-const toWireValue = (value: unknown): WireValue => {
+// Generic, not `unknown`: the walk is parametric in what it is handed — any
+// member of a structurally-open resource — and decodes nothing.
+const toWireValue = <A>(value: A): WireValue => {
   if (value instanceof Date) return value.toISOString();
   if (value instanceof URL) return value.href;
   if (Array.isArray(value)) {

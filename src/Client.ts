@@ -212,7 +212,7 @@ export const narrowIncluded: {
     ? // data-first: the document itself
       args[2]
     : // data-last: an identity function over the effect
-      (effect: unknown) => effect) as never;
+      <A>(effect: A) => effect) as never;
 
 // ---------------------------------------------------------------------------
 // Content negotiation (JSON:API §5), client side
@@ -580,8 +580,10 @@ const decodeWireDocument = Schema.decodeUnknownOption(WireDocument);
  * status-only message. That matters because this runs *inside* an error path:
  * a decoder that threw would replace the server's error with its own.
  *
- * Accepts either the raw body text (parsed as JSON here) or an already-parsed
- * JSON value, so it is reachable **off the response path**: a façade that
+ * Accepts the raw body text (parsed as JSON here), an already-parsed JSON
+ * value or an {@link ErrorDocument} already in hand (what
+ * `ApiError.toDocument` renders), so it is reachable **off the response
+ * path**: a façade that
  * synthesises responses locally and never holds an `HttpClientError` calls this
  * directly, decoding through exactly the same seam the network transport uses.
  * That is what makes a façade-served error and a network-served error for the
@@ -608,7 +610,9 @@ const decodeWireDocument = Schema.decodeUnknownOption(WireDocument);
  * @since 0.15.0
  * @category constructors
  */
-export const decodeErrorDocument = (body: unknown): Option.Option<ErrorDocument> =>
+export const decodeErrorDocument = (
+  body: string | Schema.Json | ErrorDocument,
+): Option.Option<ErrorDocument> =>
   // A body that isn't JSON at all, or a decoder that threw on a hostile
   // value, lifts to `None`: there is no document here, and this is an error
   // path already.

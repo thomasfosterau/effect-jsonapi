@@ -218,7 +218,7 @@ describe("operation schemas", () => {
   it("update operation honours the tri-state attribute semantics (set / unset / leave)", () => {
     const Widget = Resource("widgets", { attributes: { note: Schema.NullOr(Schema.String) } });
     const Op = Atomic.UpdateOperation(Widget) as Schema.Codec<any, unknown>;
-    const decode = (attributes: unknown) =>
+    const decode = <A>(attributes: A) =>
       Schema.decodeUnknownSync(Op)({
         op: "update",
         data: { type: "widgets", id: "1", attributes },
@@ -923,7 +923,7 @@ describe("optional create attributes in the add operation", () => {
     expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.bio)["Type"]>().toEqualTypeOf<
       string | undefined
     >();
-    const decode = (attributes: unknown) =>
+    const decode = <A>(attributes: A) =>
       Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "profiles", attributes } }).data
         .attributes;
     expect(decode({ handle: "h" })).toEqual({ handle: "h" });

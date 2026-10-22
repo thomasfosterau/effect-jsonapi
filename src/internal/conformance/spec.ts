@@ -55,6 +55,7 @@ import {
   jsonApiAccept,
   coverageNote,
   noProbeReason,
+  type Body,
   type Observation,
   parseMediaType,
   probeable,
@@ -420,7 +421,7 @@ const unsupportedExtension: RuleImpl = {
  * and including it is a legitimate 400, so guessing would turn a compound-document
  * probe into a spurious finding.
  */
-const includableOf = (body: unknown): ReadonlyArray<string> => {
+const includableOf = (body: Body): ReadonlyArray<string> => {
   if (!isRecord(body)) return [];
   const data = body["data"];
   const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
@@ -488,10 +489,10 @@ const overDocuments =
   (
     impl: Rule,
     options: {
-      readonly applicable?: ((body: unknown) => boolean) | undefined;
+      readonly applicable?: ((body: Body) => boolean) | undefined;
       readonly inapplicable?: string | undefined;
       readonly check: (
-        body: unknown,
+        body: Body,
         observation: Observation,
         where: string,
       ) => ReadonlyArray<Finding>;
@@ -733,7 +734,7 @@ const includedOnInclude: RuleImpl = {
             detail: `${where} answered a request carrying \`include\` with no top-level \`included\` array`,
             expected: "a top-level `included` array, `[]` when nothing is included",
             observed: isRecord(body)
-              ? `top-level members: ${Rec.keys(body).join(", ") || "(none)"}`
+              ? `top-level members: ${Rec.keys({ ...body }).join(", ") || "(none)"}`
               : describe(observation),
             probe: observation.probe,
           }),
@@ -1090,7 +1091,7 @@ const inSlot = (pointer: string, where: Slot): boolean =>
  * only types that actually appear in the slot under test can decide a
  * projection rule; anything else would be a pass over an empty set.
  */
-const attributesByType = (body: unknown, where: Slot): Map<string, ReadonlyArray<string>> => {
+const attributesByType = (body: Body, where: Slot): Map<string, ReadonlyArray<string>> => {
   const byType = new Map<string, ReadonlyArray<string>>();
   for (const { pointer, resource } of resourcesOf(body)) {
     if (!inSlot(pointer, where)) continue;

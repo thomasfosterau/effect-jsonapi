@@ -247,7 +247,7 @@ const articlesApi = (idempotency: Idempotency.Option) =>
   HttpApi.make("blog").add(Group.make(Article, Endpoint.create(Article, { idempotency } as never)));
 
 const articlesLive = (
-  api: unknown,
+  api: HttpApi.Constraint,
   handle: () => Effect.Effect<any, any, any>,
 ): Layer.Layer<any, any, any> =>
   HttpApiBuilder.group(api as never, "articles", (handlers: any) =>

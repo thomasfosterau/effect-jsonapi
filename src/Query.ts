@@ -61,7 +61,7 @@ import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
 import type { AnySurface, SurfaceFor } from "./Include.js";
-import type { Pair as CanonicalPair } from "./internal/canonical.js";
+import type { FlatValue, Pair as CanonicalPair } from "./internal/canonical.js";
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js";
 import {
   CommaSeparated,
@@ -1262,7 +1262,7 @@ export const FilterRest: FilterRest = Schema.Record(FilterKey, FilterWireValue);
 // One issue per offending key, or a `Composite` of them when several keys fail.
 const filterIssues = (
   ast: SchemaAST.AST,
-  input: unknown,
+  input: { readonly [key: string]: unknown },
   issues: ReadonlyArray<SchemaIssue.Issue>,
   options: SchemaAST.ParseOptions,
 ): SchemaIssue.Issue =>
@@ -1307,8 +1307,8 @@ const encodeFilterNode = (
     }),
   );
 
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+const messageOf = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
 
 /**
  * Creates the `filter` codec for one resource: the filter grammar
@@ -1933,7 +1933,8 @@ export const canonicalPairs = <S extends FlatQuerySchema>(
 ): ((decoded: S["Type"]) => ReadonlyArray<Pair>) => {
   const encode = Schema.encodeSync(schema);
   const declared = declaredKeys(schema.ast);
-  return (decoded) => orderPairs(encode(decoded) as { readonly [key: string]: unknown }, declared);
+  return (decoded) =>
+    orderPairs(encode(decoded) as { readonly [key: string]: FlatValue }, declared);
 };
 
 /**

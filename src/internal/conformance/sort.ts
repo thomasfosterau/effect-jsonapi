@@ -37,6 +37,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
+import type * as Schema from "effect/Schema";
 import {
   type Context,
   coverageNote,
@@ -155,10 +156,10 @@ type Key =
 const NULL: Key = { kind: "null" };
 
 /** A resource object's `attributes`, or none when it carries no such record. */
-const attributesOf = (resource: unknown): Readonly<Record<string, unknown>> =>
+const attributesOf = (resource: Schema.Json): Readonly<Record<string, unknown>> =>
   isRecord(resource) && isRecord(resource["attributes"]) ? resource["attributes"] : {};
 
-const keyOf = (resource: unknown, field: string): Key => {
+const keyOf = (resource: Schema.Json, field: string): Key => {
   const value = attributesOf(resource)[field];
   if (Predicate.isNullish(value)) return NULL;
   if (Predicate.isString(value)) return { kind: "string", value };
@@ -212,13 +213,13 @@ const render = (key: Key): string => {
 };
 
 /** The primary data of a resource collection answer, when it is one. */
-const collectionOf = (observation: Observation): Option.Option<ReadonlyArray<unknown>> => {
+const collectionOf = (observation: Observation): Option.Option<ReadonlyArray<Schema.Json>> => {
   const data = isRecord(observation.body) ? observation.body["data"] : undefined;
   return Array.isArray(data) ? Option.some(data) : Option.none();
 };
 
 /** The primary data of a 2xx resource collection answer, when it is one. */
-const servedCollection = (observation: Observation): Option.Option<ReadonlyArray<unknown>> =>
+const servedCollection = (observation: Observation): Option.Option<ReadonlyArray<Schema.Json>> =>
   Option.filter(collectionOf(observation), () => succeeded(observation));
 
 /** What an answer that is not a 2xx resource collection answered, for a note. */
@@ -258,15 +259,15 @@ const undiscriminating = (keys: ReadonlyArray<Key>): Option.Option<string> =>
     );
   });
 
-const keysOf = (data: ReadonlyArray<unknown>, field: string): ReadonlyArray<Key> =>
+const keysOf = (data: ReadonlyArray<Schema.Json>, field: string): ReadonlyArray<Key> =>
   Arr.map(data, (resource) => keyOf(resource, field));
 
 /** The attribute names any resource of `data` carries, each once, in the order first seen. */
-const namesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> =>
+const namesOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<string> =>
   Arr.dedupe(Arr.flatMap(data, (resource) => Rec.keys(attributesOf(resource))));
 
 /** The attributes of `data` whose values are of one JSON scalar type besides NULL. */
-const orderedNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> =>
+const orderedNamesOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<string> =>
   Arr.filter(namesOf(data), (name) => Option.isNone(typeProblem(keysOf(data, name))));
 
 /**
@@ -274,9 +275,9 @@ const orderedNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> =>
  * more: equal under F-ORD-1, or both NULL.
  */
 const tiesOf = (
-  data: ReadonlyArray<unknown>,
+  data: ReadonlyArray<Schema.Json>,
   field: string,
-): ReadonlyArray<ReadonlyArray<unknown>> =>
+): ReadonlyArray<ReadonlyArray<Schema.Json>> =>
   Arr.filter(
     Arr.map(distinctKeys(keysOf(data, field)), (key) =>
       Arr.filter(data, (resource) => compare(keyOf(resource, field), key) === 0),
@@ -289,7 +290,7 @@ const tiesOf = (
  * holding a NULL first — so NULL placement is checked wherever the collection
  * shows one.
  */
-const candidatesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> => {
+const candidatesOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<string> => {
   const usable = Arr.filter(namesOf(data), (name) =>
     Option.isNone(undiscriminating(keysOf(data, name))),
   );
@@ -314,7 +315,7 @@ const sortOf = (terms: ReadonlyArray<Term>): string =>
 
 /** Each resource of `data` as its keys under `terms`, in order: the row `terms` sort it by. */
 const rowsOf = (
-  data: ReadonlyArray<unknown>,
+  data: ReadonlyArray<Schema.Json>,
   terms: ReadonlyArray<Term>,
 ): ReadonlyArray<ReadonlyArray<Key>> =>
   Arr.map(data, (resource) => Arr.map(terms, ({ field }) => keyOf(resource, field)));
@@ -334,7 +335,7 @@ const compareBy =
     );
 
 /** The resource of `data` at `at` as a finding names it: `type:id`, or its position. */
-const labelAt = (data: ReadonlyArray<unknown>, at: number): string =>
+const labelAt = (data: ReadonlyArray<Schema.Json>, at: number): string =>
   Option.match(Option.filter(Arr.get(data, at), isRecord), {
     onNone: () => `/data/${at}`,
     onSome: (resource) => resourceLabel(resource),
@@ -343,7 +344,7 @@ const labelAt = (data: ReadonlyArray<unknown>, at: number): string =>
 /** The first adjacent pair of `data` out of the order `direction` asks for, as a finding. */
 const outOfOrder = (
   observation: Observation,
-  data: ReadonlyArray<unknown>,
+  data: ReadonlyArray<Schema.Json>,
   field: string,
   direction: Direction,
 ): Option.Option<Finding> => {
@@ -410,7 +411,7 @@ const requested = (ctx: Context, budget: Budget, url: string) =>
 /** A sorted request's 2xx resource collection answer. */
 interface Answer {
   readonly observation: Observation;
-  readonly data: ReadonlyArray<unknown>;
+  readonly data: ReadonlyArray<Schema.Json>;
 }
 
 /**
@@ -442,7 +443,7 @@ const sortedRequest = (
   budget: Budget,
   url: string,
   term: string,
-  judge: (observation: Observation, data: ReadonlyArray<unknown>) => Decision,
+  judge: (observation: Observation, data: ReadonlyArray<Schema.Json>) => Decision,
 ) =>
   Effect.map(
     sortedAnswer(ctx, budget, url, term),
@@ -532,7 +533,7 @@ interface Suite<A> {
   /** What the endpoints this rule probes declare, for the skip that finds none. */
   readonly declares: string;
   /** What this rule tries, read off a baseline answer's primary data, best first. */
-  readonly candidates: (data: ReadonlyArray<unknown>) => ReadonlyArray<A>;
+  readonly candidates: (data: ReadonlyArray<Schema.Json>) => ReadonlyArray<A>;
   /** Why a baseline answer of `count` resources offers nothing to try. */
   readonly nothingToTry: (count: number) => string;
   /** A candidate as a note names it. */
@@ -543,7 +544,7 @@ interface Suite<A> {
     ctx: Context,
     budget: Budget,
     at: At,
-    data: ReadonlyArray<unknown>,
+    data: ReadonlyArray<Schema.Json>,
     candidate: A,
   ) => Effect.Effect<Decision>;
   /** What the skip that decides nothing anywhere says could not be observed. */
@@ -614,7 +615,7 @@ const tallyOf = <A>(
   suite: Suite<A>,
   budget: Budget,
   at: At,
-  data: ReadonlyArray<unknown>,
+  data: ReadonlyArray<Schema.Json>,
   candidates: ReadonlyArray<A>,
 ) =>
   Effect.gen(function* () {
@@ -754,7 +755,7 @@ interface Pair {
 }
 
 /** Whether some resources of `data` tie on `first` and differ on `second`. */
-const splits = (data: ReadonlyArray<unknown>, { first, second }: Pair): boolean =>
+const splits = (data: ReadonlyArray<Schema.Json>, { first, second }: Pair): boolean =>
   Arr.some(tiesOf(data, first), (group) => distinctKeys(keysOf(group, second)).length >= 2);
 
 /**
@@ -763,7 +764,7 @@ const splits = (data: ReadonlyArray<unknown>, { first, second }: Pair): boolean 
  * Those whose first attribute also shows two distinct values come first, so
  * an answer ordered by the second term alone can show it too.
  */
-const pairsOf = (data: ReadonlyArray<unknown>): ReadonlyArray<Pair> => {
+const pairsOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<Pair> => {
   const names = orderedNamesOf(data);
   const pairs = Arr.flatMap(names, (first) =>
     Arr.flatMap(names, (second): ReadonlyArray<Pair> => {
@@ -781,7 +782,7 @@ const pairsOf = (data: ReadonlyArray<unknown>): ReadonlyArray<Pair> => {
 /** The first adjacent pair of `data` out of the lexicographic order of `terms`, as a finding. */
 const outOfLexicographicOrder = (
   observation: Observation,
-  data: ReadonlyArray<unknown>,
+  data: ReadonlyArray<Schema.Json>,
   terms: ReadonlyArray<Term>,
 ): Option.Option<Finding> => {
   const order = compareBy(terms);
@@ -879,7 +880,7 @@ const sortMultiField = runSuite<Pair>({
 // ---------------------------------------------------------------------------
 
 /** The attributes a baseline answer could decide S-TIE-1 on: those two resources tie on. */
-const tiedNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> =>
+const tiedNamesOf = (data: ReadonlyArray<Schema.Json>): ReadonlyArray<string> =>
   Arr.take(
     Arr.filter(orderedNamesOf(data), (name) => Arr.isReadonlyArrayNonEmpty(tiesOf(data, name))),
     TRIES_PER_ENDPOINT,
@@ -887,7 +888,7 @@ const tiedNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> =>
 
 /** Each resource of an answer by the identity the kit compares on, with its position and label. */
 const positionsOf = (
-  data: ReadonlyArray<unknown>,
+  data: ReadonlyArray<Schema.Json>,
 ): HashMap.HashMap<string, { readonly at: number; readonly label: string }> =>
   HashMap.fromIterable(
     Arr.flatMap(data, (resource, at) => {
@@ -904,7 +905,7 @@ interface TiedPair {
 }
 
 /** Every pair of identified resources tying on `field` in `data`, in the order listed. */
-const tiedPairsOf = (data: ReadonlyArray<unknown>, field: string): ReadonlyArray<TiedPair> =>
+const tiedPairsOf = (data: ReadonlyArray<Schema.Json>, field: string): ReadonlyArray<TiedPair> =>
   Arr.flatMap(tiesOf(data, field), (group) => {
     const keys = Arr.flatMap(group, (resource) => {
       const key = isRecord(resource) ? identity(resource) : undefined;
@@ -1014,7 +1015,7 @@ const sizeKeyOf = (endpoint: Discovered): Option.Option<string> =>
 /** One page of a sorted walk: the URL it was fetched from and the resources it lists. */
 interface Page {
   readonly url: string;
-  readonly data: ReadonlyArray<unknown>;
+  readonly data: ReadonlyArray<Schema.Json>;
   readonly observation: Observation;
 }
 
@@ -1113,7 +1114,7 @@ const brokenBoundary = (
  */
 const decidePages =
   (sizeKey: string) =>
-  (ctx: Context, budget: Budget, path: string, data: ReadonlyArray<unknown>, field: string) => {
+  (ctx: Context, budget: Budget, path: string, data: ReadonlyArray<Schema.Json>, field: string) => {
     const size = Math.max(1, Math.floor(data.length / 2));
     const url = withQuery(path, [
       ["sort", field],

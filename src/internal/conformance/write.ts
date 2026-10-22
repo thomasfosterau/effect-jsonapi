@@ -949,16 +949,17 @@ export const readEndpointFor = (
       `no single-resource GET endpoint for "${target.key}" with one path parameter to read a write back through`,
   );
 
+/** A JSON object off the wire, as `isRecord` narrows one: members not yet read. */
+type JsonObject = Readonly<Record<string, unknown>>;
+
 /** A server value for an `observed` line, cut to 80 code units; `absent` for no value. */
-const shown = (value: unknown): string => {
+// Generic, not `unknown`: the value is only rendered, never read.
+const shown = <A>(value: A): string => {
   const rendered = value === undefined ? "absent" : Formatter.format(value);
   return rendered.length > 80 ? `${rendered.slice(0, 79)}…` : rendered;
 };
 
-const membersOf = (
-  resource: Readonly<Record<string, unknown>>,
-  member: "attributes" | "relationships",
-): Readonly<Record<string, unknown>> => {
+const membersOf = (resource: JsonObject, member: "attributes" | "relationships"): JsonObject => {
   const members = resource[member];
   return isRecord(members) ? members : {};
 };
@@ -966,12 +967,13 @@ const membersOf = (
 /**
  * A relationship's linkage as one comparable value: `null`, one identity, or
  * a to-many relationship's identities in sorted order — JSON:API gives a
- * to-many linkage no order a read must keep. None when it carries no `data`.
+ * to-many linkage no order a read must keep. None when it carries no `data`
+ * (and, at each call, when the relationship is not an object at all).
  */
-const linkageValue = (relationship: unknown): Option.Option<unknown> => {
-  if (!isRecord(relationship) || !("data" in relationship)) return Option.none();
+const linkageValue = (relationship: JsonObject): Option.Option<unknown> => {
+  if (!("data" in relationship)) return Option.none();
   const data = relationship["data"];
-  const key = (item: unknown) => (isRecord(item) ? (identity(item) ?? shown(item)) : shown(item));
+  const key = <A>(item: A) => (isRecord(item) ? (identity(item) ?? shown(item)) : shown(item));
   if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
   return Option.some(data === null ? null : key(data));
 };
@@ -985,8 +987,8 @@ const linkageValue = (relationship: unknown): Option.Option<unknown> => {
  * @internal
  */
 export const readBackDifferences = (
-  expected: Readonly<Record<string, unknown>>,
-  stored: Readonly<Record<string, unknown>>,
+  expected: JsonObject,
+  stored: JsonObject,
 ): ReadonlyArray<string> => {
   const storedAttributes = membersOf(stored, "attributes");
   const storedRelationships = membersOf(stored, "relationships");
@@ -1002,10 +1004,13 @@ export const readBackDifferences = (
   const relationships = Arr.filterMap(
     Arr.fromRecord(membersOf(expected, "relationships")),
     ([name, relationship]) =>
-      Option.match(linkageValue(relationship), {
+      Option.match(Option.flatMap(Option.liftPredicate(relationship, isRecord), linkageValue), {
         onNone: () => Result.failVoid,
         onSome: (linkage) => {
-          const read = linkageValue(storedRelationships[name]);
+          const read = Option.flatMap(
+            Option.liftPredicate(storedRelationships[name], isRecord),
+            linkageValue,
+          );
           return Option.exists(read, (other) => Equal.equals(linkage, other))
             ? Result.failVoid
             : Result.succeed(
@@ -1029,9 +1034,7 @@ const decodePrimaryResource = Schema.decodeUnknownOption(
  *
  * @internal
  */
-export const primaryResource = (
-  observation: Observation,
-): Option.Option<Readonly<Record<string, unknown>>> =>
+export const primaryResource = (observation: Observation): Option.Option<JsonObject> =>
   decodePrimaryResource(observation.body).pipe(Option.map(({ data }) => data));
 
 /**
@@ -1051,7 +1054,7 @@ export const readBack = (
   type: string,
   id: string,
   what: string,
-  expected: Readonly<Record<string, unknown>>,
+  expected: JsonObject,
 ): Effect.Effect<Verdict> =>
   ctx.request({ url: pathFor(get, id), headers: jsonApiAccept }).pipe(
     Effect.map((observation): Verdict => {

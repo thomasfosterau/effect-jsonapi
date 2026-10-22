@@ -71,11 +71,11 @@ const label = ({ type, id }: Identity): string => `${type}:${id}`;
 const decodeIdentity = Schema.decodeUnknownOption(Identity);
 
 /** One linkage member as a label: an identifier's `type:id`, anything else as it renders. */
-const memberLabel = (item: unknown): string =>
+const memberLabel = (item: Schema.Json): string =>
   Option.match(decodeIdentity(item), { onNone: () => Formatter.format(item), onSome: label });
 
 /** The linkage a read's `data` holds, as sorted labels — none when it is not linkage. */
-const labelsOf = (data: unknown): Option.Option<ReadonlyArray<string>> => {
+const labelsOf = (data: Schema.Json): Option.Option<ReadonlyArray<string>> => {
   if (data === null) return Option.some([]);
   if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, memberLabel), Order.String));
   return isRecord(data) ? Option.some([memberLabel(data)]) : Option.none();

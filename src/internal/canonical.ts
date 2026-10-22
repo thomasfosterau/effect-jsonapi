@@ -6,6 +6,7 @@
  *
  * @internal
  */
+import type { Schema } from "effect";
 import { SchemaAST } from "effect";
 import { compareCodePoints, isFilterKey, keySegments } from "./filter.js";
 
@@ -48,12 +49,19 @@ export const declaredKeys = (ast: SchemaAST.AST): ReadonlyArray<string> => {
     : [];
 };
 
+/**
+ * One encoded member of a flat query: a JSON value, or absent.
+ *
+ * @internal
+ */
+export type FlatValue = Schema.Json | undefined;
+
 // The pairs of one encoded key: a scalar is one pair; an array is one pair
 // per item — the repeated-key spelling `UrlParams.toRecord` decodes back to
 // an array — except `include`, whose comma form is the schema's own encoding
 // of the set (the query schema already joins it; a consumer's flat schema
 // may not have). `undefined` and `null` have no wire form and are omitted.
-const pairsOf = (key: string, value: unknown): ReadonlyArray<Pair> => {
+const pairsOf = (key: string, value: FlatValue): ReadonlyArray<Pair> => {
   if (value === undefined || value === null) return [];
   if (typeof value === "string") return [[key, value]];
   if (Array.isArray(value)) {
@@ -85,7 +93,7 @@ const pairsOf = (key: string, value: unknown): ReadonlyArray<Pair> => {
  * key's items keep their order.
  */
 export const orderPairs = (
-  flat: { readonly [key: string]: unknown },
+  flat: { readonly [key: string]: FlatValue },
   declared: ReadonlyArray<string> = [],
 ): ReadonlyArray<Pair> => {
   const families: Array<Array<Pair>> = [[], [], [], [], [], []];
