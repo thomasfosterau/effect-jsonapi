@@ -351,14 +351,17 @@ export const applied = <E, O extends Option | undefined>(endpoint: E, option: O)
 // Fingerprinting
 // ---------------------------------------------------------------------------
 
+// `Array.isArray` does not narrow a readonly JSON array out of its false branch.
+const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isArray(value);
+
 /** Recursively orders object keys so re-serialisation is stable. */
-const canonicalValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonicalValue);
+const canonicalValue = (value: Schema.Json): Schema.Json => {
+  if (isJsonArray(value)) return value.map(canonicalValue);
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
-      Object.keys(value as Record<string, unknown>)
+      Object.keys(value)
         .sort()
-        .map((key) => [key, canonicalValue((value as Record<string, unknown>)[key])]),
+        .map((key) => [key, canonicalValue(value[key])]),
     );
   }
   return value;

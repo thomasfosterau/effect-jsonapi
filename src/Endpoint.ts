@@ -3534,7 +3534,9 @@ export interface ResourceOptions<
   readonly meta?: GMeta | ((base: Meta) => GMeta);
 }
 
-const pick = (config: Record<string, unknown>, key: string, fallback: unknown): unknown =>
+// An op's own value under `key` when it sets one (even `undefined`), else the
+// top-level default.
+const pick = <V>(config: Readonly<Record<string, V>>, key: string, fallback: NoInfer<V>): V =>
   key in config ? config[key] : fallback;
 
 /**
