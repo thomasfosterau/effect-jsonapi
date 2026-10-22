@@ -4,10 +4,10 @@
  * through the in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Result, Schema } from "effect";
+import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Filter, Query } from "@thomasfosterau/effect-jsonapi";
-import { Api } from "../api.js";
+import { Api, IssuesQuery, SearchQuery } from "../api.js";
 import { IssueLocked, RepositoryNameTaken, RepositoryNotFound, UserNotFound } from "../errors.js";
 import {
   bugComments,
@@ -206,7 +206,9 @@ describe("github example: listing", () => {
     expect(document.data[0]?.attributes.name).toBe(spoonKnife.attributes.name);
     expect(document.data).toHaveLength(2);
     expect(document.meta?.total).toBe(3);
-    expect(document.links?.next).toBe("/repositories?page[number]=2&page[size]=2");
+    expect(document.links?.next).toBe(
+      "/repositories?sort=-stargazerCount&page[number]=2&page[size]=2",
+    );
   });
 
   it("filters repositories by language", async () => {
@@ -315,6 +317,80 @@ describe("github example: listing", () => {
     );
 
     expect(document.data).toEqual([]);
+  });
+});
+
+describe("github example: pagination links carry the request's query (#447)", () => {
+  // A link's query string as the flat record the endpoint's query schema decodes.
+  const searchOf = (link: string): Record<string, string> =>
+    Rec.fromEntries(new URL(link, "https://example.test").searchParams);
+
+  it("`next` on GET /issues keeps `sort`, `filter` and `include`, and continues the order", async () => {
+    const [first, second] = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const first = yield* client.issues.list({
+          query: {
+            include: ["author"],
+            filter: Filter.eq("state", "open"),
+            sort: [{ field: "number", direction: "desc" }],
+            page: { number: 1, size: 1 },
+          },
+        });
+        const next = first.links?.next;
+        assert(Predicate.isString(next));
+        const second = yield* client.issues.list({
+          query: Schema.decodeUnknownSync(IssuesQuery)(searchOf(next)),
+        });
+        return [first, second] as const;
+      }),
+    );
+
+    expect(first.links?.next).toBe(
+      "/issues?include=author&filter[state]=open&sort=-number&page[number]=2&page[size]=1",
+    );
+    expect(first.links?.last).toMatch(
+      /^\/issues\?include=author&filter\[state\]=open&sort=-number&/,
+    );
+    // Following `next` serves the second page of the same query, not the
+    // default order: still open issues, still descending by number.
+    const [top] = first.data;
+    const [next] = second.data;
+    assert.isDefined(top);
+    assert.isDefined(next);
+    expect(next.attributes.state).toBe("open");
+    expect(next.attributes.number).toBeLessThan(top.attributes.number);
+    expect(second.links?.prev).toBe(
+      "/issues?include=author&filter[state]=open&sort=-number&page[number]=1&page[size]=1",
+    );
+  });
+
+  it("`next` on GET /search keeps `fields`, `filter` and `include`", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.search.search({
+          query: {
+            include: ["owner"],
+            fields: { repositories: ["name"] },
+            filter: { q: "o" },
+            page: { offset: 0, limit: 1 },
+          },
+        });
+      }),
+    );
+
+    expect(document.links?.next).toBe(
+      "/search?include=owner&fields[repositories]=name&filter[q]=o&page[offset]=1&page[limit]=1",
+    );
+    const next = document.links?.next;
+    assert(Predicate.isString(next));
+    expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
+      include: ["owner"],
+      fields: { repositories: ["name"] },
+      filter: { q: "o" },
+      page: { offset: 1, limit: 1 },
+    });
   });
 });
 
@@ -762,7 +838,7 @@ describe("github example: heterogeneous search", () => {
 
     expect(document.data).toHaveLength(2);
     expect(document.meta?.total).toBeGreaterThan(2);
-    expect(document.links?.next).toBe("/search?page[offset]=2&page[limit]=2");
+    expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=2&page[limit]=2");
   });
 
   it("supports include across the searched resources' graphs", async () => {

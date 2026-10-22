@@ -23,8 +23,21 @@
  */
 import { Effect, Iterable, Layer } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
-import { Document, Handlers, Middleware } from "@thomasfosterau/effect-jsonapi";
-import { Api } from "./api.js";
+import { Document, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
+import {
+  Api,
+  CategoriesQuery,
+  CustomersQuery,
+  EmployeesQuery,
+  OrderLineItemsQuery,
+  OrderLineItemsRelationshipQuery,
+  OrdersQuery,
+  ProductsQuery,
+  SearchQuery,
+  ShippersQuery,
+  SuppliersQuery,
+  TerritoriesQuery,
+} from "./api.js";
 import {
   CategoryNotFound,
   CustomerNotFound,
@@ -563,7 +576,9 @@ export const CategoriesLive = HttpApiBuilder.group(Api, "categories", (handlers)
       return Effect.succeed(
         Handlers.collection(page, {
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/categories", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/categories", { offset, limit }, total, {
+            query: Query.canonicalPairs(CategoriesQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -590,7 +605,9 @@ export const SuppliersLive = HttpApiBuilder.group(Api, "suppliers", (handlers) =
       return Effect.succeed(
         Handlers.collection(page, {
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/suppliers", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/suppliers", { offset, limit }, total, {
+            query: Query.canonicalPairs(SuppliersQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -612,7 +629,9 @@ export const ShippersLive = HttpApiBuilder.group(Api, "shippers", (handlers) =>
       return Effect.succeed(
         Handlers.collection(page, {
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/shippers", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/shippers", { offset, limit }, total, {
+            query: Query.canonicalPairs(ShippersQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -642,7 +661,9 @@ export const TerritoriesLive = HttpApiBuilder.group(Api, "territories", (handler
       return Effect.succeed(
         Handlers.collection(page, {
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/territories", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/territories", { offset, limit }, total, {
+            query: Query.canonicalPairs(TerritoriesQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -669,7 +690,9 @@ export const CustomersLive = HttpApiBuilder.group(Api, "customers", (handlers) =
       return Effect.succeed(
         Handlers.collection(page, {
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/customers", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/customers", { offset, limit }, total, {
+            query: Query.canonicalPairs(CustomersQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -736,7 +759,9 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
           Handlers.collection(page, {
             included,
             meta: { total },
-            links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total),
+            links: Handlers.offsetPaginationLinks("/products", { offset, limit }, total, {
+              query: Query.canonicalPairs(ProductsQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           }),
         ),
@@ -874,7 +899,9 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
           Handlers.collection(page, {
             included,
             meta: { total },
-            links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total),
+            links: Handlers.offsetPaginationLinks("/employees", { offset, limit }, total, {
+              query: Query.canonicalPairs(EmployeesQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           }),
         ),
@@ -1005,7 +1032,9 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
           Handlers.collection(page, {
             included,
             meta: { total },
-            links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total),
+            links: Handlers.offsetPaginationLinks("/orders", { offset, limit }, total, {
+              query: Query.canonicalPairs(OrdersQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           }),
         ),
@@ -1068,7 +1097,9 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
         return Handlers.collection(page, {
           included,
           meta: { total },
-          links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks(path, { offset, limit }, total, {
+            query: Query.canonicalPairs(OrderLineItemsQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         });
       }),
@@ -1083,7 +1114,9 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
           return Handlers.linkage(page, {
             related: Handlers.relatedLink("orders", order.id, "lineItems"),
             meta: { total },
-            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total),
+            links: Handlers.offsetPaginationLinks(path, { offset, limit }, total, {
+              query: Query.canonicalPairs(OrderLineItemsRelationshipQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           });
         }),
@@ -1155,7 +1188,9 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
         Handlers.collection(page, {
           included,
           meta: { total },
-          links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
+          links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total, {
+            query: Query.canonicalPairs(SearchQuery)(query),
+          }),
           onResource: Handlers.project(query.fields),
           jsonapi: Document.v1_1,
         }),

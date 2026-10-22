@@ -4,10 +4,10 @@
  * through the in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Result, Schema } from "effect";
+import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client } from "@thomasfosterau/effect-jsonapi";
-import { Api } from "../api.js";
+import { Api, ProductsQuery, SearchQuery } from "../api.js";
 import {
   CategoryNotFound,
   CustomerNotFound,
@@ -240,7 +240,7 @@ describe("northwind example: listing & filtering", () => {
       "Chang",
     ]);
     expect(document.meta?.total).toBe(5);
-    expect(document.links?.next).toBe("/products?page[offset]=2&page[limit]=2");
+    expect(document.links?.next).toBe("/products?sort=-unitPrice&page[offset]=2&page[limit]=2");
   });
 
   it("serves a category's products via filter[category]", async () => {
@@ -342,6 +342,81 @@ describe("northwind example: listing & filtering", () => {
     for (const order of document.data) {
       expect(order.attributes.shippedDate).toBeUndefined();
     }
+  });
+});
+
+describe("northwind example: pagination links carry the request's query (#447)", () => {
+  // A link's query string as the flat record the endpoint's query schema decodes.
+  const searchOf = (link: string): Record<string, string> =>
+    Rec.fromEntries(new URL(link, "https://example.test").searchParams);
+
+  it("`next` on GET /products keeps `sort`, `filter` and `include`, and continues the order", async () => {
+    const [first, second] = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const first = yield* client.products.list({
+          query: {
+            include: ["category"],
+            filter: { maxPrice: 20 },
+            sort: [{ field: "unitPrice", direction: "desc" }],
+            page: { offset: 0, limit: 1 },
+          },
+        });
+        const next = first.links?.next;
+        assert(Predicate.isString(next));
+        const second = yield* client.products.list({
+          query: Schema.decodeUnknownSync(ProductsQuery)(searchOf(next)),
+        });
+        return [first, second] as const;
+      }),
+    );
+
+    expect(first.links?.next).toBe(
+      "/products?include=category&filter[maxPrice]=20&sort=-unitPrice&page[offset]=1&page[limit]=1",
+    );
+    expect(first.links?.last).toMatch(
+      /^\/products\?include=category&filter\[maxPrice\]=20&sort=-unitPrice&/,
+    );
+    // Following `next` serves the second page of the same query, not the
+    // default order: still at most 20, still descending by price.
+    const [top] = first.data;
+    const [next] = second.data;
+    assert.isDefined(top);
+    assert.isDefined(next);
+    expect(next.attributes.unitPrice).toBeLessThanOrEqual(20);
+    expect(next.attributes.unitPrice).toBeLessThanOrEqual(top.attributes.unitPrice);
+    expect(next.id).not.toBe(top.id);
+    expect(second.links?.prev).toBe(
+      "/products?include=category&filter[maxPrice]=20&sort=-unitPrice&page[offset]=0&page[limit]=1",
+    );
+  });
+
+  it("`next` on GET /search keeps `fields`, `filter` and `include`", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.search.search({
+          query: {
+            include: ["category"],
+            fields: { products: ["name"] },
+            filter: { q: "a" },
+            page: { offset: 0, limit: 1 },
+          },
+        });
+      }),
+    );
+
+    expect(document.links?.next).toBe(
+      "/search?include=category&fields[products]=name&filter[q]=a&page[offset]=1&page[limit]=1",
+    );
+    const next = document.links?.next;
+    assert(Predicate.isString(next));
+    expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
+      include: ["category"],
+      fields: { products: ["name"] },
+      filter: { q: "a" },
+      page: { offset: 1, limit: 1 },
+    });
   });
 });
 
@@ -760,7 +835,7 @@ describe("northwind example: heterogeneous search", () => {
 
     expect(document.data).toHaveLength(2);
     expect(document.meta?.total).toBeGreaterThan(2);
-    expect(document.links?.next).toBe("/search?page[offset]=2&page[limit]=2");
+    expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=2&page[limit]=2");
   });
 });
 

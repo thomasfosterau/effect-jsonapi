@@ -27,7 +27,7 @@ import {
   RepositoryNotFound,
   UserNotFound,
 } from "./errors.js";
-import { Issue, PullRequest, Repository, User } from "./resources.js";
+import { Issue, IssueComment, PullRequest, Repository, User } from "./resources.js";
 
 /**
  * Advertises the filter grammar's profile on the media type of every answer
@@ -68,6 +68,82 @@ export const Pagination = Query.Page.number({ maxSize: 100 });
  */
 export const SearchPagination = Query.Page.offset({ maxLimit: 100 });
 
+// ---------------------------------------------------------------------------
+// Paginated query schemas
+// ---------------------------------------------------------------------------
+//
+// Each paginated endpoint's query schema is built once, here, and shared with
+// its handler, which spells the pagination links from it:
+// `Handlers.numberPaginationLinks(path, page, total, { query:
+// Query.canonicalPairs(UsersQuery)(query) })`. A link's query and the query
+// the endpoint decodes then come from one schema, so `next` is the same
+// `sort` / `filter` / `include` / `fields` on the next page. A list endpoint
+// takes the schema as its `query`; the related, relationship and search
+// endpoints take no `query` override, so they are handed the same options
+// object the schema is built from and derive the identical schema.
+
+const usersQueryOptions = { sort: ["login", "createdAt"], page: Pagination } as const;
+/** The query `GET /users` decodes. */
+export const UsersQuery = Query.schema(User, usersQueryOptions);
+
+const repositoriesQueryOptions = {
+  include: true,
+  sort: ["stargazerCount", "name", "createdAt"],
+  page: Pagination,
+  filter: {
+    owner: Schema.optionalKey(Schema.String),
+    language: Schema.optionalKey(Schema.String),
+    visibility: Schema.optionalKey(Schema.Literals(["public", "private"])),
+  },
+} as const;
+/** The query `GET /repositories` decodes. */
+export const RepositoriesQuery = Query.schema(Repository, repositoriesQueryOptions);
+
+// The filter grammar over the issue's declared filter fields: the same
+// `filter[state]=open` shorthand as a per-key map, plus every operator, `OR`
+// and `NOT` groups, and `filter[assignee][isnull]=true` for the unassigned.
+const issuesQueryOptions = {
+  include: true,
+  sort: ["number", "createdAt"],
+  page: Pagination,
+  filter: true,
+} as const;
+/** The query `GET /issues` decodes. */
+export const IssuesQuery = Query.schema(Issue, issuesQueryOptions);
+
+const issueCommentsQueryOptions = { include: true, page: Pagination } as const;
+/** The query `GET /issues/:id/comments` decodes. */
+export const IssueCommentsQuery = Query.schema(IssueComment, issueCommentsQueryOptions);
+
+const issueCommentsRelationshipQueryOptions = { page: Pagination } as const;
+/** The query `GET /issues/:id/relationships/comments` decodes. */
+export const IssueCommentsRelationshipQuery = Query.schema(
+  IssueComment,
+  issueCommentsRelationshipQueryOptions,
+);
+
+const pullsQueryOptions = {
+  include: true,
+  sort: ["number", "createdAt"],
+  page: Pagination,
+  filter: {
+    repository: Schema.optionalKey(Schema.String),
+    state: Schema.optionalKey(Schema.Literals(["open", "closed", "merged"])),
+  },
+} as const;
+/** The query `GET /pulls` decodes. */
+export const PullsQuery = Query.schema(PullRequest, pullsQueryOptions);
+
+const searchResources = [Repository, Issue, User] as const;
+const searchQueryOptions = {
+  filter: { q: Schema.String },
+  include: true,
+  fields: true,
+  page: SearchPagination,
+} as const;
+/** The query `GET /search` decodes. */
+export const SearchQuery = Query.schema(searchResources, searchQueryOptions);
+
 export const users = Group.make(
   User,
   // GET /users/:id
@@ -76,8 +152,8 @@ export const users = Group.make(
   }),
   // GET /users?sort=login&page[number]=1&page[size]=30
   Endpoint.list(User, {
-    sort: ["login", "createdAt"],
-    page: Pagination,
+    ...usersQueryOptions,
+    query: UsersQuery,
     meta: PageMeta,
   }),
 );
@@ -92,14 +168,8 @@ export const repositories = Group.make(
   }),
   // GET /repositories?sort=-stargazerCount&filter[language]=TypeScript&page[number]=1&page[size]=30
   Endpoint.list(Repository, {
-    include: true,
-    sort: ["stargazerCount", "name", "createdAt"],
-    page: Pagination,
-    filter: {
-      owner: Schema.optionalKey(Schema.String),
-      language: Schema.optionalKey(Schema.String),
-      visibility: Schema.optionalKey(Schema.Literals(["public", "private"])),
-    },
+    ...repositoriesQueryOptions,
+    query: RepositoriesQuery,
     meta: PageMeta,
   }),
   // POST /repositories → 201
@@ -128,17 +198,13 @@ export const issues = Group.make(
     fields: true,
     errors: [IssueNotFound],
   }),
-  // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt
-  // The filter grammar over the issue's declared filter fields: the same
-  // `filter[state]=open` shorthand as a per-key map, plus every operator, `OR`
-  // and `NOT` groups, and `filter[assignee][isnull]=true` for the unassigned.
-  // Its answers advertise the profile (`FilterProfile`), which is what
-  // commits the handler to the profile's three-valued semantics (§6).
+  // GET /issues?filter[state]=open&filter[repository]=1&sort=-createdAt —
+  // the filter grammar (`IssuesQuery`). Its answers advertise the profile
+  // (`FilterProfile`), which is what commits the handler to the profile's
+  // three-valued semantics (§6).
   Endpoint.list(Issue, {
-    include: true,
-    sort: ["number", "createdAt"],
-    page: Pagination,
-    filter: true,
+    ...issuesQueryOptions,
+    query: IssuesQuery,
     meta: PageMeta,
   }).middleware(FilterProfile),
   // POST /issues → 201 (repository and author are required relationships)
@@ -154,8 +220,7 @@ export const issues = Group.make(
   // the paginated comment feed the `comments` relationship's related link
   // points at
   Endpoint.related(Issue, "comments", {
-    include: true,
-    page: Pagination,
+    ...issueCommentsQueryOptions,
     meta: PageMeta,
     errors: [IssueNotFound],
   }),
@@ -164,7 +229,7 @@ export const issues = Group.make(
   // comment identifiers, paginated: what the `comments` relationship's `self`
   // link points at
   Endpoint.getRelationship(Issue, "comments", {
-    page: Pagination,
+    ...issueCommentsRelationshipQueryOptions,
     errors: [IssueNotFound],
   }),
   // GET /issues/:id/relationships/labels — label identifiers
@@ -199,13 +264,8 @@ export const pulls = Group.make(
   }),
   // GET /pulls?filter[state]=open
   Endpoint.list(PullRequest, {
-    include: true,
-    sort: ["number", "createdAt"],
-    page: Pagination,
-    filter: {
-      repository: Schema.optionalKey(Schema.String),
-      state: Schema.optionalKey(Schema.Literals(["open", "closed", "merged"])),
-    },
+    ...pullsQueryOptions,
+    query: PullsQuery,
     meta: PageMeta,
   }),
 );
@@ -217,13 +277,10 @@ export const pulls = Group.make(
 export const search = Group.make(
   "search",
   // GET /search?filter[q]=hello&include=owner&page[offset]=0&page[limit]=10
-  Endpoint.collection([Repository, Issue, User], {
+  Endpoint.collection(searchResources, {
+    ...searchQueryOptions,
     name: "search",
     path: "/search",
-    filter: { q: Schema.String },
-    include: true,
-    fields: true,
-    page: SearchPagination,
     meta: PageMeta,
   }),
 );
