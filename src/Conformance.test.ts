@@ -2884,6 +2884,25 @@ describe("Conformance: the filter grammar profile", () => {
     expect(outcome.findings.every((found) => found.detail.includes("source.parameter"))).toBe(true);
   });
 
+  it("spells equivalent filters on the first string attribute, escaped (#458)", async () => {
+    // The first attribute is a number: the rule moves on to `name`, and
+    // escapes the comma §2.3 would otherwise read as a list separator.
+    const paths: Array<string> = [];
+    const leading = { ...row, attributes: { priceCents: 1200, name: "Widget, large" } };
+    const report = await verifyGrammar(
+      (request) => {
+        paths.push(decodeURIComponent(request.path));
+        const canned = grammarServe(request);
+        return canned.status === undefined ? { ...canned, body: { data: [leading] } } : canned;
+      },
+      { only: ["profile/filter/spelling-equivalence"] },
+    );
+    expect(outcomeFor(report, "profile/filter/spelling-equivalence")).toMatchObject({
+      _tag: "Passed",
+    });
+    expect(paths).toContain("/products?filter[name]=Widget\\, large");
+  });
+
   it("detects the group form disagreeing with the shorthand it desugars from", async () => {
     const report = await verifyGrammar((request) =>
       request.path.includes("%5Bcondition%5D") || request.path.includes("[condition]")
@@ -2923,7 +2942,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   });
 
   const oracleApi = HttpApi.make("catalog").add(
-    Group.make(Product, Endpoint.list(Product, { filter: true, fields: true })),
+    Group.make(Product, Endpoint.list(Product, { filter: true, fields: true, include: true })),
   );
 
   const decodeFilter = Schema.decodeUnknownOption(Query.Filter(Product));
@@ -3130,25 +3149,63 @@ describe("Conformance: the filter evaluation oracle", () => {
         );
   };
 
-  /** One page of `rows`, by `page[number]`, with a `next` link while more remain. */
-  const pageOf = (query: URLSearchParams, rows: ReadonlyArray<Product>, pageSize?: number) => {
+  /**
+   * The makers a page's rows link to, for `include=maker`: none when
+   * `filtered`, as a server applying the filter to `included` too answers —
+   * a maker carries no field a filter names, so every comparison on it is
+   * UNKNOWN.
+   */
+  const makersOf = (rows: ReadonlyArray<Product>, filtered: boolean) =>
+    filtered
+      ? []
+      : Arr.map(
+          Arr.dedupe(
+            Arr.filterMap(rows, (row) =>
+              Option.match(valueIn(row, "maker"), {
+                onNone: () => Result.failVoid,
+                onSome: (id) => Result.succeed(String(id)),
+              }),
+            ),
+          ),
+          (id) => ({ type: "makers", id }),
+        );
+
+  /**
+   * One page of `rows`, by `page[number]`, with a `next` link while more
+   * remain, and the makers they link to when `include=maker` asks.
+   */
+  const pageOf = (
+    query: URLSearchParams,
+    rows: ReadonlyArray<Product>,
+    pageSize?: number,
+    includedFiltered = false,
+  ) => {
     const size = pageSize ?? rows.length;
     const page = Number(query.get("page[number]") ?? "0");
     const next = new URLSearchParams(query);
     next.set("page[number]", String(page + 1));
+    const data = rows.slice(page * size, (page + 1) * size);
     return {
       jsonapi: { version: "1.1" },
-      data: rows.slice(page * size, (page + 1) * size),
+      data,
+      ...(query.get("include") === "maker" ? { included: makersOf(data, includedFiltered) } : {}),
       links: (page + 1) * size < rows.length ? { next: `/products?${next.toString()}` } : {},
     };
   };
+
+  /** Whether a request carries a `filter[…]` key. */
+  const filters = (query: URLSearchParams): boolean =>
+    Arr.some([...query.keys()], (key) => key.startsWith("filter"));
 
   /**
    * A server for `rows` under `evaluate`: decodes `filter[…]` with the
    * package's codec (a 400 naming nothing in particular when it does not
    * decode), projects `fields[products]` — after filtering, or before when
    * `projectFirst` — and pages by `pageSize` through `links.next` when one is
-   * given.
+   * given. The broken servers' other ways of getting §6.5 wrong: `reshape`
+   * rewrites every row a filtered request answers, `whenEmpty` replaces the
+   * answer to a filtered request that matches nothing, and `includedFiltered`
+   * applies the filter to `included` too.
    */
   const oracleServe =
     (
@@ -3158,6 +3215,9 @@ describe("Conformance: the filter evaluation oracle", () => {
         readonly pageSize?: number;
         readonly contentType?: string;
         readonly projectFirst?: boolean;
+        readonly reshape?: (row: Product) => Product;
+        readonly whenEmpty?: Canned;
+        readonly includedFiltered?: boolean;
       } = {},
     ) =>
     (request: { readonly path: string }): Canned => {
@@ -3165,12 +3225,23 @@ describe("Conformance: the filter evaluation oracle", () => {
       const projected = projectedBy(query);
       const first = options.projectFirst === true;
       const rows = options.rows ?? products;
+      const filtered = filters(query);
       return Option.match(filteredBy(query, evaluate, first ? projected(rows) : rows), {
         onNone: () => badRequest(),
-        onSome: (matched) => ({
-          contentType: options.contentType ?? contentType,
-          body: pageOf(query, first ? matched : projected(matched), options.pageSize),
-        }),
+        onSome: (matched) =>
+          filtered && Arr.isReadonlyArrayEmpty(matched) && options.whenEmpty !== undefined
+            ? options.whenEmpty
+            : {
+                contentType: options.contentType ?? contentType,
+                body: pageOf(
+                  query,
+                  Arr.map(first ? matched : projected(matched), (row) =>
+                    filtered && options.reshape !== undefined ? options.reshape(row) : row,
+                  ),
+                  options.pageSize,
+                  filtered && options.includedFiltered === true,
+                ),
+              },
       });
     };
 
@@ -3217,8 +3288,9 @@ describe("Conformance: the filter evaluation oracle", () => {
     const report = await verifyOracle(oracleServe(threeValued));
     // Two empty groups; ne, gte, lt, lte, gt, nin, isnull twice and excluded
     // middle on `colour`; lt, lte, gt, gte and isnull on `price`, never NULL;
-    // eq, ne, nin and isnull twice on `maker`; and eq beside a fieldset.
-    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 22, note: undefined });
+    // eq, ne, nin and isnull twice on `maker`; the seven §6.5 corollary trees
+    // on `colour` (#458); eq beside a fieldset; and eq beside `include`.
+    expect(outcomeFor(report, RULE)).toMatchObject({ _tag: "Passed", probes: 30, note: undefined });
   });
 
   it("sends the ordering operators at a pivot that splits the sample", async () => {
@@ -3237,7 +3309,15 @@ describe("Conformance: the filter evaluation oracle", () => {
         "/products?filter[maker][eq]=m1",
         "/products?filter[maker][nin]=m1,m2",
         "/products?filter[colour][eq]=red&fields[products]=price",
+        "/products?filter[colour][eq]=red&include=maker",
       ]),
+    );
+    // F-CONS-7: the same canonical form spelt a second way, each member's keys
+    // before the group it names.
+    expect(paths).toContainEqual(
+      expect.stringMatching(
+        /^\/products\?filter\[r4\]\[condition\]\[memberOf\]=r3&.*filter\[r0\]\[group\]\[conjunction\]=OR$/,
+      ),
     );
     expect(paths.filter((path) => path.includes("[maker][lt"))).toEqual([]);
   });
@@ -3262,6 +3342,12 @@ describe("Conformance: the filter evaluation oracle", () => {
       "F-CONS-1",
       "F-EVAL-4 / F-ORD-5 / F-CMP-1",
       "F-EVAL-4 / F-ORD-5 / F-IN-2 / F-IN-3",
+      // #458: De Morgan's `Not` over a group, `Not(In)`, and the respelled
+      // De Morgan tree, each negating an UNKNOWN to TRUE.
+      "F-CONS-2",
+      "F-CONS-2",
+      "F-CONS-3",
+      "F-CONS-7",
     ]);
   });
 
@@ -3346,7 +3432,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   it("walks a paginated collection whole, filtered and unfiltered", async () => {
     expect(
       outcomeFor(await verifyOracle(oracleServe(threeValued, { pageSize: 1 })), RULE),
-    ).toMatchObject({ _tag: "Passed", probes: 22 });
+    ).toMatchObject({ _tag: "Passed", probes: 30 });
     const broken = await verifyOracle(oracleServe(twoValuedNe, { pageSize: 1 }));
     expect(rulesOf(broken)).toEqual(["F-CMP-1"]);
   });
@@ -3361,11 +3447,12 @@ describe("Conformance: the filter evaluation oracle", () => {
       }),
     );
     // The empty groups; the ordering operators on `price`; eq, ne and nin on
-    // `maker`; and eq beside a fieldset — none of which a two-valued server
-    // gets wrong without a NULL to get wrong.
+    // `maker`; the corollaries on `price`; eq beside a fieldset and beside
+    // `include` — none of which a two-valued server gets wrong without a NULL
+    // to get wrong.
     expect(outcomeFor(report, RULE)).toMatchObject({
       _tag: "Passed",
-      probes: 11,
+      probes: 19,
       note: expect.stringContaining(
         "the sample cannot tell three-valued evaluation from two-valued",
       ),
@@ -3399,6 +3486,9 @@ describe("Conformance: the filter evaluation oracle", () => {
     expect(outcome).toMatchObject({
       note: expect.stringContaining("F-EVAL-6 on /products: it declares no `fields[products]`"),
     });
+    expect(outcome).toMatchObject({
+      note: expect.stringContaining("F-CONS-6 on /products: it declares no `include`"),
+    });
   });
 
   it("reads a relationship that shows no linkage as no field at all", async () => {
@@ -3411,6 +3501,147 @@ describe("Conformance: the filter evaluation oracle", () => {
       }),
     );
     expect(paths.filter((path) => path.includes("[maker]"))).toEqual([]);
+  });
+
+  /** `Not(And(…))` read as `And(Not(…), …)`: a negation pushed through a group without flipping it. */
+  const pushedNot: Evaluator = (node, row) =>
+    Predicate.isTagged(node, "Not") &&
+    (Predicate.isTagged(node.member, "And") || Predicate.isTagged(node.member, "Or"))
+      ? threeValued(
+          {
+            ...node.member,
+            members: Arr.map(node.member.members, (member) => ({ _tag: "Not" as const, member })),
+          },
+          row,
+        )
+      : threeValued(node, row);
+
+  /** `Not(In(…))` read as the complement of `in`'s matches, an UNKNOWN negated to TRUE. */
+  const complementedIn: Evaluator = (node, row) =>
+    Predicate.isTagged(node, "Not") && Predicate.isTagged(node.member, "In")
+      ? Option.some(!Option.contains(threeValued(node.member, row), true))
+      : threeValued(node, row);
+
+  /** A negation flag set rather than toggled: `Not(Not(x))` read as `Not(x)`. */
+  const flaggedNot: Evaluator = (node, row) =>
+    Predicate.isTagged(node, "Not") && Predicate.isTagged(node.member, "Not")
+      ? threeValued(node.member, row)
+      : threeValued(node, row);
+
+  it("detects De Morgan's law broken, on the two trees that negate a group (F-CONS-2)", async () => {
+    const report = await verifyOracle(oracleServe(pushedNot));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-CONS-2: Not(And([eq(colour, "red"), IsNull(colour, negated: false)])) on /products answered the wrong resources',
+        observed:
+          'wrongly included: none; wrongly excluded: products:1 (colour: "red"), products:4 (colour: "red")',
+      },
+      {
+        detail:
+          'F-CONS-2: Not(Or([eq(colour, "red"), IsNull(colour, negated: false)])) on /products answered the wrong resources',
+      },
+    ]);
+  });
+
+  it("detects `Not(In)` answering otherwise than `nin` (F-CONS-3)", async () => {
+    const report = await verifyOracle(oracleServe(complementedIn));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-CONS-3: Not(In(colour, ["red", "blue"])) on /products answered the wrong resources',
+        observed: "wrongly included: products:3 (colour: null (NULL)); wrongly excluded: none",
+      },
+    ]);
+  });
+
+  it("detects a double negation answering otherwise than its member (F-CONS-4)", async () => {
+    const report = await verifyOracle(oracleServe(flaggedNot));
+    expect(rulesOf(report)).toEqual(["F-CONS-4"]);
+  });
+
+  it("detects a filtered answer that is not a collection document (F-CONS-5, F-ERR-2)", async () => {
+    const notFound = await verifyOracle(
+      oracleServe(threeValued, {
+        whenEmpty: { status: 404, contentType, body: { errors: [{ status: "404" }] } },
+      }),
+    );
+    // Every tree that matches nothing — `Or([])`, `gt(colour, "red")`,
+    // `isnull=true` on `price`, never NULL, … — and only those.
+    const empty = Arr.length(findingsOf(notFound));
+    expect(empty).toBeGreaterThan(2);
+    expect(rulesOf(notFound)).toEqual(Arr.makeBy(empty, () => "F-CONS-5 / F-ERR-2"));
+    expect(findingsOf(notFound)[0]).toMatchObject({
+      detail: "F-CONS-5 / F-ERR-2: Or([]) on /products did not answer a collection document",
+      observed: expect.stringMatching(/^404 /),
+    });
+    expect(findingsOf(notFound).map(({ detail }) => detail)).toContainEqual(
+      expect.stringContaining("IsNull(price, negated: false) on"),
+    );
+    const nulled = await verifyOracle(
+      oracleServe(threeValued, { whenEmpty: { contentType, body: { data: null } } }),
+    );
+    expect(rulesOf(nulled)).toEqual(Arr.makeBy(empty, () => "F-CONS-5 / F-ERR-2"));
+  });
+
+  it("detects a filter changing the representation of the resources it answers (F-CONS-5)", async () => {
+    const report = await verifyOracle(
+      oracleServe(threeValued, {
+        reshape: (row) => ({
+          ...row,
+          relationships: { maker: { links: { related: `/products/${row.id}/maker` } } },
+        }),
+      }),
+    );
+    const found = findingsOf(report);
+    expect(found.length).toBeGreaterThan(0);
+    expect(rulesOf(report)).toEqual(found.map(() => "F-CONS-5"));
+    expect(found[0]).toMatchObject({
+      detail: "F-CONS-5: And([]) on /products changed the representation of resources it answered",
+      observed: expect.stringMatching(/^changed: products:1 \(relationships\), /),
+    });
+  });
+
+  it("detects a filter applied to `included` (F-CONS-6)", async () => {
+    const report = await verifyOracle(oracleServe(threeValued, { includedFiltered: true }));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-CONS-6: eq(colour, "red") with include=maker on /products left out of `included` resources its primary data links to',
+        observed: "missing from `included`: makers:m1",
+      },
+    ]);
+  });
+
+  it("detects one canonical form answered two ways (F-CONS-7)", async () => {
+    // A server reading the group form in key order: a member whose `memberOf`
+    // names a group it has not read yet is dropped.
+    const inKeyOrder = (request: { readonly path: string }): { readonly path: string } => {
+      const query = queryOf(request);
+      const seen = new Set<string>();
+      const dropped = new Set<string>();
+      for (const [key, value] of query) {
+        const [, id, kind, member] =
+          /^filter\[([^\]]+)\]\[(group|condition)\]\[([^\]]+)\]$/.exec(key) ?? [];
+        if (id === undefined) continue;
+        if (kind === "group") seen.add(id);
+        if (member === "memberOf" && !seen.has(value)) dropped.add(id);
+      }
+      const kept = Arr.filter(
+        [...query],
+        ([key]) => !Arr.some([...dropped], (id) => key.startsWith(`filter[${id}]`)),
+      );
+      return { path: `/products?${new URLSearchParams(kept).toString()}` };
+    };
+    const report = await verifyOracle((request) => oracleServe(threeValued)(inKeyOrder(request)));
+    expect(findingsOf(report)).toMatchObject([
+      {
+        detail:
+          'F-CONS-7: Or([Not(IsNull(colour, negated: false)), Not(eq(colour, "red"))]) respelled (group ids renamed, keys reversed) on /products answered the wrong resources',
+        observed:
+          'wrongly included: none; wrongly excluded: products:1 (colour: "red"), products:2 (colour: "blue"), products:4 (colour: "red")',
+      },
+    ]);
   });
 
   it("decides nothing a server refuses, and nothing for a server that has not negotiated the profile", async () => {
