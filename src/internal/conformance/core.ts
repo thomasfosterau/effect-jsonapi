@@ -33,7 +33,7 @@ import {
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { declaredNames } from "../declaredQuery.js";
-import { idKey, identity, isRecord, linkageOf } from "../linkage.js";
+import { idKey, identity, isLinkageData, isRecord, linkageOf } from "../linkage.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
 // The kit's identity and linkage over arbitrary JSON live beside the shared
@@ -1446,35 +1446,55 @@ export const describe = (observation: Observation): string => {
   return `${observation.status}${type}${excerpt}`;
 };
 
+type Located = {
+  readonly pointer: string;
+  readonly resource: Readonly<Record<string, unknown>>;
+};
+
+/** A document's records under `member` (`data` or `included`), each with its pointer. */
+const locatedIn = (
+  body: Readonly<Record<string, unknown>>,
+  member: "data" | "included",
+): ReadonlyArray<Located> => {
+  const value = body[member];
+  if (isRecord(value)) return [{ pointer: `/${member}`, resource: value }];
+  if (!Array.isArray(value)) return [];
+  return Arr.filterMap(value, (item, index) =>
+    isRecord(item)
+      ? Result.succeed({ pointer: `/${member}/${index}`, resource: item })
+      : Result.failVoid,
+  );
+};
+
 /**
  * Every resource object a document carries, primary and included, paired with
- * the JSON pointer it sits at so a finding can name it.
+ * the JSON pointer it sits at so a finding can name it. Primary data that is
+ * resource linkage — a relationship document's identifiers
+ * ({@link isLinkageData}) — is listed too: an identifier also shows a
+ * `(type, id)` and also needs both as strings. A rule that must not read an
+ * identifier as a resource object takes {@link resourceObjectsOf} instead.
  *
  * @internal
  */
-export const resourcesOf = (
-  body: unknown,
-): ReadonlyArray<{
-  readonly pointer: string;
-  readonly resource: Readonly<Record<string, unknown>>;
-}> => {
+export const resourcesOf = (body: unknown): ReadonlyArray<Located> =>
+  isRecord(body) ? [...locatedIn(body, "data"), ...locatedIn(body, "included")] : [];
+
+/**
+ * The resource objects a document carries, as {@link resourcesOf} lists them
+ * but without a relationship document's primary identifiers (#443): when the
+ * primary data is resource linkage ({@link isLinkageData}), only `included`
+ * holds resource objects, and the full resource for a primary identifier
+ * sitting there duplicates nothing.
+ *
+ * @internal
+ */
+export const resourceObjectsOf = (body: unknown): ReadonlyArray<Located> => {
   if (!isRecord(body)) return [];
-  const out: Array<{ pointer: string; resource: Readonly<Record<string, unknown>> }> = [];
-  const data = body["data"];
-  if (isRecord(data)) {
-    out.push({ pointer: "/data", resource: data });
-  } else if (Array.isArray(data)) {
-    data.forEach((item, index) => {
-      if (isRecord(item)) out.push({ pointer: `/data/${index}`, resource: item });
-    });
-  }
-  const included = body["included"];
-  if (Array.isArray(included)) {
-    included.forEach((item, index) => {
-      if (isRecord(item)) out.push({ pointer: `/included/${index}`, resource: item });
-    });
-  }
-  return out;
+  const primary = locatedIn(body, "data");
+  const included = locatedIn(body, "included");
+  return isLinkageData(Arr.map(primary, ({ resource }) => resource))
+    ? included
+    : [...primary, ...included];
 };
 
 /**
