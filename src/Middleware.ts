@@ -27,8 +27,11 @@
  *     exception, answered with 409 Conflict naming `/data/type`
  *     (§Creating Resources; §Updating Resources). It also rejects, with a 400
  *     naming it, a query parameter whose family base name is made only of
- *     a-z and that neither the specification defines nor the endpoint
- *     declares (JSON:API 1.1 §Query Parameters), and a parameter of one of
+ *     a-z, names an extension's parameter (`ext:param`) or is not a legal
+ *     member name (`foo!`, `page.limit`), and that neither the specification
+ *     defines nor the endpoint declares nor the allow-list admits (JSON:API
+ *     1.1 §Query Parameters; `_`, jQuery's cache-buster, is admitted by
+ *     default), and a parameter of one of
  *     the specification's own families — `include`, `fields[TYPE]`, `sort`,
  *     `page[…]`, `filter[…]` — on an endpoint that does not declare it, or
  *     declares it with an empty vocabulary, or a `page` / `filter` member
@@ -56,7 +59,7 @@
  * built from the constructors whose host has already negotiated,
  * {@link layerHostNegotiated} satisfies the endpoints' negotiation
  * requirement without running §5 twice. {@link checkQueryParameters} is the
- * reserved-query-parameter rule standalone.
+ * query-parameter naming rule standalone.
  *
  * ## Tracing
  *
@@ -117,6 +120,7 @@ import {
   type Family,
   isFamily,
   isFamilyMember,
+  isMemberName,
 } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
 
@@ -143,8 +147,8 @@ import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
  * - `Span.schemaError` — one span per request-validation failure, wrapping
  *   the translation of that failure into a JSON:API 400 document. Attribute:
  *   `jsonapi.request_part` — the request part that failed (`"Params"`,
- *   `"Headers"`, `"Query"` or `"Payload"`; a rejected reserved query
- *   parameter is tagged `"Query"`). A failure to encode the
+ *   `"Headers"`, `"Query"` or `"Payload"`; a query parameter rejected by
+ *   name is tagged `"Query"`). A failure to encode the
  *   *response* is a server error, not a request-validation failure, and
  *   emits no such span.
  *
@@ -588,6 +592,40 @@ const unsupportedDetail = (
 // A family base name made only of a-z is reserved for the specification.
 const RESERVED_BASE_NAME = /^[a-z]+$/;
 
+// JSON:API 1.1 §Extension-Specific Query Parameters: an extension's
+// parameter base name is its namespace (alphanumeric, §Extensions), a colon,
+// and a remainder made only of a-z.
+const EXTENSION_BASE_NAME = /^([A-Za-z0-9]+):[a-z]+$/;
+
+// A percent-encoded octet: an allow-list entry carrying one names a
+// parameter only as it appears before decoding, which the check never sees.
+const PERCENT_ENCODED = /%[0-9A-Fa-f]{2}/;
+
+// How JSON:API 1.1 §Query Parameters classes a family base name: one of the
+// specification's own families; another name made only of a-z, reserved for
+// it; an extension's parameter; an implementation-specific name, a legal
+// member name with a character outside a-z, which is the only kind a server
+// may process without knowing it; or none of these, a name that "does not
+// follow the naming conventions" (`foo!`, `page.limit`, `_`, an empty base
+// name), which the server must answer 400 as it must the reserved ones (#263).
+type BaseNameKind = "family" | "reserved" | "extension" | "implementation" | "illegal";
+
+const kindOf = (base: string): BaseNameKind =>
+  isFamily(base)
+    ? "family"
+    : RESERVED_BASE_NAME.test(base)
+      ? "reserved"
+      : EXTENSION_BASE_NAME.test(base)
+        ? "extension"
+        : isMemberName(base)
+          ? "implementation"
+          : "illegal";
+
+// The allow-list when the options name none: jQuery's `_` cache-buster
+// (`$.ajax({ cache: false })` appends `?_=<timestamp>`), not a legal member
+// name, so otherwise a 400 (owner decision on #263).
+const DEFAULT_ALLOWED: ReadonlyArray<string> = ["_"];
+
 // A parameter's family base name: everything before its first `[` — `page`
 // for `page[limit]`, `foo` for `foo[bar]`, the whole name when unbracketed.
 const baseName = (name: string): string => {
@@ -604,26 +642,34 @@ const baseName = (name: string): string => {
  */
 export interface QueryParameterOptions {
   /**
-   * Family base names made only of a-z that the api accepts on every
-   * endpoint although no endpoint declares them — for a host whose URL space
-   * carries its own lowercase parameters (`lang`, `ref`, …) through to the
-   * api. Each name admits the bare parameter and its bracketed members
-   * (`lang` admits `lang` and `lang[x]`); the endpoint never sees them in its
-   * decoded query, which keeps only what its `query` schema declares — also
-   * when that schema declares nothing (#260).
+   * Family base names the api accepts on every endpoint although no endpoint
+   * declares them and JSON:API 1.1 §Query Parameters would have them answered
+   * 400: a name made only of a-z, which the specification reserves — for a
+   * host whose URL space carries its own lowercase parameters (`lang`, `ref`,
+   * …) through to the api; an extension's parameter (`ext:param`), for an
+   * extension whose query parameters the host processes itself; or a name
+   * that is not a legal member name (`_`, `utm.source`). Each name admits
+   * the bare parameter and its bracketed members (`lang` admits `lang` and
+   * `lang[x]`); the endpoint never sees them in its decoded query, which
+   * keeps only what its `query` schema declares — also when that schema
+   * declares nothing (#260).
    *
-   * JSON:API 1.1 reserves these names for the specification, so accepting one
-   * is a deliberate deviation: prefer renaming the parameter (`langCode`,
-   * `x-lang`) when the host controls it. Defaults to none.
+   * Accepting one is a deliberate deviation: prefer renaming the parameter
+   * (`langCode`, `x-lang`) when the host controls it. Defaults to `["_"]`,
+   * for jQuery's cache-buster (`$.ajax({ cache: false })` appends
+   * `?_=<timestamp>`); a list replaces the default, so list `"_"` too to
+   * keep admitting it, and pass `[]` to admit nothing (#263).
    *
    * An entry that is not such a base name — a bracketed member (`lang[x]`),
-   * a name with any other character (`Lang`, ` lang`), or `""` — is refused
-   * with {@link InvalidAllowedQueryParameter} rather than admitting nothing:
+   * a legal member name with a character outside a-z (`Lang`, `x-trace`), a
+   * percent-encoded spelling (`page%5Bsize%5D`), or `""` — is refused with
+   * {@link InvalidAllowedQueryParameter} rather than admitting nothing:
    * {@link schemaErrorsLayer} and {@link layerWith} throw it when the layer is
    * built, {@link checkQueryParameters} when it is called. List a bracketed
-   * member by its base name (`lang`) and drop an empty entry; a name with any
-   * other character is implementation-specific and never rejected, so it
-   * needs no entry. So is a family the specification defines (`include`,
+   * member by its base name (`lang`), a name as it decodes, and drop an empty
+   * entry; a legal member name with a character outside a-z is
+   * implementation-specific and never rejected, so it needs no entry. So is
+   * a family the specification defines (`include`,
    * `fields`, `sort`, `page`, `filter`), and any bracketed name of one: an
    * endpoint supports a family, or a `fields`, `page` or `filter` member
    * (`page[size]`), by declaring it in its `query` schema, and answers 400
@@ -642,7 +688,7 @@ export interface QueryParameterOptions {
 }
 
 /**
- * Options for {@link schemaErrorsLayer}: the reserved-query-parameter options
+ * Options for {@link schemaErrorsLayer}: the query-parameter options
  * plus the switch for the full-linkage check it runs on every encoded success.
  *
  * @since 0.17.0
@@ -674,8 +720,10 @@ export interface SchemaErrorsOptions extends QueryParameterOptions {
 }
 
 /**
- * An `allowedQueryParameters` entry that is not a family base name made only
- * of the letters a-z, or that names a family the specification defines
+ * An `allowedQueryParameters` entry that is not a family base name the check
+ * would otherwise reject (one made only of the letters a-z, an extension's
+ * parameter, or one that is not a legal member name), or that names a
+ * family the specification defines
  * (`include`, `fields`, `sort`, `page`, `filter`) or a bracketed name of one
  * (`page[size]`, `include[]`, `page[`; see
  * {@link QueryParameterOptions.allowedQueryParameters}). Thrown when
@@ -745,31 +793,48 @@ const familyRefusal = (parameter: string, family: Family): string => {
   );
 };
 
-// Why an allow-list entry is refused, if it is: one that is not a reserved
-// family base name could never match a parameter the check rejects, and one
-// of a family the specification defines would switch off the 400 the
+// The refusal of an allow-list entry the check never rejects.
+const needsNoEntry = (entry: string): string =>
+  `${entry} is a legal member name with a character outside a-z: an ` +
+  "implementation-specific name, which the check never rejects, so it needs no entry.";
+
+// Why an allow-list entry is refused, if it is: one that is not a family
+// base name the check rejects could never match a parameter it rejects, and
+// one of a family the specification defines would switch off the 400 the
 // general rule calls for (owner decision on #261).
 const refusal = (parameter: string): Option.Option<string> => {
   const base = baseName(parameter);
   if (isFamily(base)) return Option.some(familyRefusal(parameter, base));
-  if (RESERVED_BASE_NAME.test(parameter)) return Option.none();
-  return Option.some(
-    `allowedQueryParameters entry "${parameter}" is not a family base name ` +
-      "made only of the letters a-z. " +
-      (parameter === ""
-        ? "An empty entry names no parameter; remove it."
-        : base !== parameter && RESERVED_BASE_NAME.test(base)
-          ? `List its base name "${base}", which admits the bare parameter and ` +
-            "every bracketed member of its family."
-          : "A name with any other character is implementation-specific and never rejected, " +
-            "so it needs no entry."),
-  );
+  const entry = `allowedQueryParameters entry "${parameter}"`;
+  if (parameter === "") {
+    return Option.some(`${entry} is empty. An empty entry names no parameter; remove it.`);
+  }
+  if (PERCENT_ENCODED.test(parameter)) {
+    return Option.some(
+      `${entry} looks percent-encoded, but the allow-list is matched against decoded ` +
+        "parameter names; list the name as it decodes.",
+    );
+  }
+  if (base === "") {
+    return Option.some(
+      `${entry} has an empty family base name, which no entry can admit; remove it.`,
+    );
+  }
+  const kind = kindOf(base);
+  if (kind === "implementation") return Option.some(needsNoEntry(entry));
+  if (base !== parameter) {
+    return Option.some(
+      `${entry} is not a family base name. List its base name "${base}", which admits ` +
+        "the bare parameter and every bracketed member of its family.",
+    );
+  }
+  return Option.none();
 };
 
-// The allow-list, every entry checked to be a reserved family base name the
-// specification does not define.
+// The allow-list, every entry checked to be a family base name the check
+// rejects and the specification does not define.
 const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string> => {
-  const allowed = options?.allowedQueryParameters ?? [];
+  const allowed = options?.allowedQueryParameters ?? DEFAULT_ALLOWED;
   const refused = Arr.findFirst(allowed, (parameter) =>
     Option.map(
       refusal(parameter),
@@ -787,17 +852,45 @@ const allowedBaseNames = (options?: QueryParameterOptions): ReadonlyArray<string
 // `include` / `sort`, which admit no bracketed member (#329) — so only that
 // very name, or a declared prefix of its family (`fields[`, `filter[`: an
 // open record of it), admits it (`declaresName`). A declared name of any
-// other reserved family admits its whole family, as does an allowed base
-// name.
+// other base name the check rejects — reserved, an extension's, or not a
+// legal member name — admits its whole family, as does an allowed base name.
+// An implementation-specific name is always supported.
 const isSupported = (
   name: string,
   declared: ReadonlyArray<string>,
   allowed: ReadonlyArray<string>,
 ): boolean => {
   const base = baseName(name);
-  if (!RESERVED_BASE_NAME.test(base) || allowed.includes(base)) return true;
-  if (isFamily(base)) return declaresName(declared, name);
+  const kind = kindOf(base);
+  if (kind === "implementation" || allowed.includes(base)) return true;
+  if (kind === "family") return declaresName(declared, name);
   return declared.some((entry) => baseName(entry) === base);
+};
+
+// The detail of the 400 for a parameter whose base name is not one of the
+// specification's families.
+const unprocessedDetail = (parameter: string, base: string): string => {
+  const unsupported = `Query parameter "${parameter}" is not supported.`;
+  const extension = EXTENSION_BASE_NAME.exec(base);
+  if (extension !== null) {
+    return (
+      `${unsupported} Its family base name "${base}" names a parameter of the JSON:API ` +
+      `extension with namespace "${extension[1]}", which this server does not process.`
+    );
+  }
+  if (RESERVED_BASE_NAME.test(base)) {
+    return (
+      `${unsupported} JSON:API reserves parameter names made only of the letters a-z for ` +
+      "the specification; an implementation-specific parameter's name must contain at " +
+      "least one other character, such as a capital letter."
+    );
+  }
+  return (
+    `${unsupported} ${base === "" ? "Its family base name is empty, which is" : `Its family base name "${base}" is`} ` +
+    "not a legal JSON:API member name, as an implementation-specific parameter's must be: " +
+    "one that starts and ends with a letter, a digit or a non-ASCII character, and " +
+    'carries "-", "_" or a space only in between.'
+  );
 };
 
 // The check behind `checkQueryParameters`, over an allow-list
@@ -821,11 +914,7 @@ const rejectQueryParameters = (
         Option.map(Option.liftPredicate(baseName(parameter), isFamily), (family) =>
           unsupportedDetail(parameter, family, declared),
         ),
-        () =>
-          `Query parameter "${parameter}" is not supported. JSON:API reserves parameter ` +
-          "names made only of the letters a-z for the specification; an implementation-" +
-          "specific parameter's name must contain at least one other character, such as " +
-          "a capital letter.",
+        () => unprocessedDetail(parameter, baseName(parameter)),
       ),
       source: { parameter },
     })),
@@ -863,7 +952,10 @@ export interface QueryParameterCheck extends QueryParameterOptions {
 /**
  * JSON:API 1.1 §Query Parameters: a query parameter whose family base name is
  * made only of the letters a-z is reserved for the specification, so a server
- * that does not know how to process one MUST answer 400 Bad Request. That
+ * that does not know how to process one MUST answer 400 Bad Request, as it
+ * must one whose name "does not follow the naming conventions" — a base name
+ * that is not a legal member name (`foo!`, `page.limit`, `_`) — or that names
+ * an extension's parameter (`ext:param`) it does not process (#263). That
  * covers a parameter of one of the specification's own families on an
  * endpoint that does not support it, and two sections require the same 400
  * outright: §Inclusion of Related Resources for `include`, and §Sorting for
@@ -877,9 +969,9 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * A parameter is acceptable when its family base name (everything before the
  * first `[`):
  *
- * - contains any character outside a-z (`fooBar`, `x-trace`, `foo_bar`,
- *   `ext:name`) — an implementation-specific or extension parameter, ignored
- *   here as before;
+ * - is a legal member name (§Member Names) containing a character outside
+ *   a-z (`fooBar`, `x-trace`, `foo_bar`, `x1`) — an implementation-specific
+ *   parameter, ignored here;
  * - is the base of a name in `declared` — the only way a family the
  *   specification defines (`include`, `sort`, `page`, `filter`) is
  *   acceptable, since an endpoint that does not declare one does not
@@ -897,11 +989,12 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  *   or `sort` admits only the bare parameter (#329): JSON:API defines no
  *   bracketed member of either, so `include[]` or `sort[title]` is answered
  *   saying so, unless `declared` lists that very name; or
- * - is listed in `allowedQueryParameters`.
+ * - is listed in `allowedQueryParameters`, which defaults to `["_"]` (jQuery's
+ *   cache-buster).
  *
  * Throws {@link InvalidAllowedQueryParameter} for an `allowedQueryParameters`
- * entry that is not a family base name made only of a-z, or that names one
- * of the specification's families or a bracketed name of one.
+ * entry that is not a family base name the check would reject, or that names
+ * one of the specification's families or a bracketed name of one.
  *
  * {@link SchemaErrorsLive} runs this on every request before the endpoint
  * decodes anything, with the names the endpoint's query schema declares.
@@ -912,10 +1005,10 @@ export interface QueryParameterCheck extends QueryParameterOptions {
  * import { Middleware } from "@thomasfosterau/effect-jsonapi"
  *
  * // the names of the request's query parameters, e.g. from `URLSearchParams`
- * const names = new URLSearchParams("q=hello&unknown=1&fooBar=2").keys()
+ * const names = new URLSearchParams("q=hello&unknown=1&fooBar=2&foo!=3&_=4").keys()
  *
  * const document = Middleware.checkQueryParameters(names, { declared: ["q"] })
- * document?.errors[0]?.source // { parameter: "unknown" }
+ * document?.errors.map((error) => error.source) // [{ parameter: "unknown" }, { parameter: "foo!" }]
  * ```
  *
  * @since 0.17.0
@@ -975,7 +1068,8 @@ export class ContentNegotiation extends HttpApiMiddleware.Service<ContentNegotia
  * Converts request validation failures (`HttpApiSchemaError`: malformed
  * params, query, payload or headers) into JSON:API 400 error documents, and
  * rejects reserved all-lowercase query parameters the endpoint does not
- * process, the specification's own families included (see
+ * process, the specification's own families included, and parameters whose
+ * names are not legal member names or name an extension's parameter (see
  * {@link checkQueryParameters}). A failure to encode the
  * handler's response is left a server error, and so is an encoded document
  * that breaks full linkage (see {@link SchemaErrorsLive}).
@@ -1176,14 +1270,16 @@ const checkWireLinkage = (response: HttpServerResponse.HttpServerResponse) =>
 
 /**
  * Creates the live {@link SchemaErrors} implementation, optionally accepting
- * extra all-lowercase query parameters (see
- * {@link QueryParameterOptions.allowedQueryParameters}).
+ * extra query parameters the check would reject — all-lowercase names, an
+ * extension's, illegal member names (see
+ * {@link QueryParameterOptions.allowedQueryParameters}; `_` by default).
  *
  * Before the endpoint decodes anything, every request's query parameter
  * names are checked with {@link checkQueryParameters} against the names the
  * endpoint's query schema declares: a parameter whose family base name is made
- * only of a-z, that is neither one of the specification's families nor
- * declared nor allowed, is answered with the JSON:API 400 naming it in
+ * only of a-z, names an extension's parameter (`ext:param`) or is not a legal
+ * member name (`foo!`), that is neither one of the specification's families
+ * nor declared nor allowed, is answered with the JSON:API 400 naming it in
  * `source.parameter` (JSON:API 1.1 §Query Parameters), and so is a parameter
  * of one of the specification's families — `include`, `fields[TYPE]`,
  * `sort`, `page[…]`, `filter[…]` — the endpoint does not declare with at
@@ -1203,8 +1299,8 @@ const checkWireLinkage = (response: HttpServerResponse.HttpServerResponse) =>
  * fails §5 negotiation is answered with the 400, not the 406 or 415.
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
- * `allowedQueryParameters` entry that is not a family base name made only of
- * a-z, or that names one of the specification's families (`include`,
+ * `allowedQueryParameters` entry that is not a family base name the check
+ * would reject, or that names one of the specification's families (`include`,
  * `fields`, `sort`, `page`, `filter`) or a bracketed name of one
  * (`page[size]`, `include[]`).
  *
@@ -1223,12 +1319,13 @@ const checkWireLinkage = (response: HttpServerResponse.HttpServerResponse) =>
  *
  * const HandlersLive: Layer.Layer<never> = Layer.empty
  *
- * // The host's URL space carries its own `?lang=` through to the api.
+ * // The host's URL space carries its own `?lang=` through to the api; keep
+ * // the default `_` (jQuery's cache-buster) beside it.
  * const ApiLive = Layer.mergeAll(HandlersLive).pipe(
  *   Layer.provideMerge(
  *     Layer.mergeAll(
  *       Middleware.ContentNegotiationPassthrough,
- *       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["lang"] }),
+ *       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["_", "lang"] }),
  *       Middleware.CreatedLocationLive
  *     )
  *   )
@@ -1295,10 +1392,14 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * a-z, and which the endpoint neither declares nor the specification defines
  * (`?unknown=1`, `?foo[bar]=1`), with a 400 naming it in `source.parameter`:
  * JSON:API 1.1 reserves those names for the specification, so a server that
- * does not know how to process one MUST reject it. Implementation-specific
- * names, carrying any other character (`?fooBar=1`, `?x-trace=1`), are
- * ignored as before. {@link schemaErrorsLayer} accepts extra lowercase names
- * a host needs.
+ * does not know how to process one MUST reject it. So is a parameter whose
+ * base name is not a legal member name (`?foo!=1`, `?page.limit=1`) or names
+ * an extension's parameter (`?ext:param=1`), which do not follow the
+ * specification's naming conventions — except `?_=`, jQuery's cache-buster,
+ * which the default allow-list admits (#263). Implementation-specific names,
+ * legal member names carrying a character outside a-z (`?fooBar=1`,
+ * `?x-trace=1`), are ignored as before. {@link schemaErrorsLayer} accepts
+ * extra names a host needs.
  *
  * Likewise an `include` or `sort` parameter on an endpoint whose `query`
  * schema does not declare it — `?include=author` on `Endpoint.get(R)`
@@ -1543,13 +1644,14 @@ export const layer: Layer.Layer<ContentNegotiation | SchemaErrors | CreatedLocat
  * Like {@link layer}, with options — content-negotiation options, required
  * when the api uses JSON:API extensions, and the query-parameter options of
  * {@link schemaErrorsLayer} (`allowedQueryParameters`, for a host that must
- * accept its own all-lowercase parameters, and `checkLinkage`, which turns
- * off the full-linkage check on the encoded response; since 0.17.0).
+ * accept its own all-lowercase, extension or illegally named parameters,
+ * and `checkLinkage`, which turns off the full-linkage check on the encoded
+ * response; since 0.17.0).
  *
  * Throws {@link InvalidAllowedQueryParameter}, when called, for an
- * `allowedQueryParameters` entry that is not a family base name made only of
- * a-z, or that names one of the specification's families or a bracketed
- * name of one.
+ * `allowedQueryParameters` entry that is not a family base name the check
+ * would reject, or that names one of the specification's families or a
+ * bracketed name of one.
  *
  * @example
  * ```ts

@@ -13,8 +13,10 @@ import * as Resource from "./Resource.js";
 
 // JSON:API 1.1 §Query Parameters (#148): a query parameter whose family base
 // name is made only of a-z is reserved for the specification, so one the
-// endpoint does not process is a 400 naming it in `source.parameter`; a name
-// carrying any other character is implementation-specific and still ignored.
+// endpoint does not process is a 400 naming it in `source.parameter`, and so
+// (#263) is one whose base name is not a legal member name or names an
+// extension's parameter; a legal member name carrying a character outside
+// a-z is implementation-specific and still ignored.
 
 const Article = Resource.make("articles", {
   attributes: { title: Resource.attribute(Schema.NonEmptyString, { filter: true }) },
@@ -129,7 +131,7 @@ describe("unknown all-lowercase query parameters (#148)", () => {
     expect(response.body).toEqual({ errors: [rejection("unknown")] });
   });
 
-  it.each(["fooBar=1", "x-trace=1", "foo_bar=1", "fooBar[x]=1", "ext:param=1", "x1=1"])(
+  it.each(["fooBar=1", "x-trace=1", "foo_bar=1", "fooBar[x]=1", "x1=1", "X=1", "été=1"])(
     "still ignores the implementation-specific `?%s`",
     async (query) => {
       const response = await request(`/articles/1?${query}`);
@@ -185,6 +187,138 @@ describe("unknown all-lowercase query parameters (#148)", () => {
   });
 });
 
+describe("illegal and extension query parameter names (#263)", () => {
+  // JSON:API 1.1 §Query Parameters: a name that "does not follow the naming
+  // conventions" is a 400 — a base name that is not a legal member name, or
+  // an extension's parameter the server does not process.
+  it.each([
+    "foo!=1",
+    "page.limit=1",
+    "utm.source[x]=1",
+    "-x=1",
+    "x-=1",
+    "@meta=1",
+    "[x]=1",
+    "[]=1",
+    "a:b:c=1",
+    "ext:Param=1",
+    "%5F%5F=1",
+  ])("rejects `?%s` with a 400 naming the parameter", async (query) => {
+    const parameter = decodeURIComponent(query.slice(0, query.lastIndexOf("=")));
+    const response = await request(`/articles/1?${query}`);
+    expect(response.status).toBe(400);
+    expect(response.contentType).toContain("application/vnd.api+json");
+    expect(response.body).toEqual({ errors: [rejection(parameter)] });
+    expect(response.body.errors[0].detail).toContain("not a legal JSON:API member name");
+  });
+
+  it.each(["ext:param=1", "ext:param[x]=1", "atomic:results=1", "Ns1:x=1"])(
+    "rejects the extension parameter `?%s` with a 400 naming its namespace",
+    async (query) => {
+      const parameter = query.slice(0, query.lastIndexOf("="));
+      const namespace = parameter.slice(0, parameter.indexOf(":"));
+      const response = await request(`/articles/1?${query}`);
+      expect(response.status).toBe(400);
+      expect(response.body).toEqual({ errors: [rejection(parameter)] });
+      expect(response.body.errors[0].detail).toContain(
+        `the JSON:API extension with namespace "${namespace}", which this server does not process`,
+      );
+    },
+  );
+
+  it("names an empty family base name as such", async () => {
+    const response = await request("/articles/1?[x]=1");
+    expect(response.body.errors[0].detail).toContain("Its family base name is empty");
+  });
+
+  it.each(["_=1712345678901", "_[x]=1"])(
+    "admits jQuery's cache-buster `?%s` by default",
+    async (query) => {
+      const response = await request(`/articles/1?${query}`);
+      expect(response.status).toBe(200);
+      expect(response.body.data).toMatchObject({ type: "articles", id: "1" });
+      const hostNegotiated = Layer.mergeAll(
+        Middleware.ContentNegotiationPassthrough,
+        Middleware.SchemaErrorsLive,
+      );
+      expect((await request(`/articles/1?${query}`, hostNegotiated)).status).toBe(200);
+    },
+  );
+
+  it("rejects `?_=` once a list replaces the default", async () => {
+    const strict = await request(
+      "/articles/1?_=1",
+      Middleware.layerWith({ allowedQueryParameters: [] }),
+    );
+    expect(strict.status).toBe(400);
+    expect(strict.body).toEqual({ errors: [rejection("_")] });
+    const lang = Middleware.layerWith({ allowedQueryParameters: ["lang"] });
+    expect((await request("/articles/1?_=1", lang)).status).toBe(400);
+    const both = Middleware.layerWith({ allowedQueryParameters: ["_", "lang"] });
+    expect((await request("/articles/1?_=1&lang=en", both)).status).toBe(200);
+  });
+
+  it("admits an extension parameter or an illegal name the allow-list lists", async () => {
+    const allowing = Middleware.layerWith({ allowedQueryParameters: ["ext:param", "foo!"] });
+    const response = await request("/articles/1?ext:param=1&ext:param[x]=2&foo!=3", allowing);
+    expect(response.status).toBe(200);
+    const other = await request("/articles/1?ext:other=1&foo!=3", allowing);
+    expect(other.status).toBe(400);
+    expect(other.body).toEqual({ errors: [rejection("ext:other")] });
+  });
+
+  it("keeps the bracketed families the specification defines working", async () => {
+    const response = await request(
+      "/articles?filter[title]=Hello&page[limit]=1&page[offset]=0&sort=-title",
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it("answers each offending parameter, illegal, extension and reserved together", async () => {
+    const response = await request("/articles/1?foo!=1&unknown=2&ext:param=3&fooBar=4&_=5");
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      errors: [rejection("foo!"), rejection("unknown"), rejection("ext:param")],
+    });
+  });
+
+  it.each(["_", "ext:param", "foo!", "page.limit", " lang", "@meta"])(
+    "accepts the allow-list entry %j, a base name the check would reject",
+    (entry) => {
+      expect(() => Middleware.schemaErrorsLayer({ allowedQueryParameters: [entry] })).not.toThrow();
+      expect(
+        Middleware.checkQueryParameters([entry], { allowedQueryParameters: [entry] }),
+      ).toBeUndefined();
+      expect(Middleware.checkQueryParameters([entry], { allowedQueryParameters: [] })).toEqual({
+        errors: [expect.objectContaining({ source: { parameter: entry } })],
+      });
+    },
+  );
+
+  it("refuses an entry with an empty family base name", () => {
+    expect(() => Middleware.schemaErrorsLayer({ allowedQueryParameters: ["[odd]"] })).toThrow(
+      'allowedQueryParameters entry "[odd]" has an empty family base name, which no entry can admit; remove it.',
+    );
+  });
+
+  it("names the base name to list for a bracketed extension or illegal entry", () => {
+    expect(() =>
+      Middleware.schemaErrorsLayer({ allowedQueryParameters: ["ext:param[x]"] }),
+    ).toThrow('List its base name "ext:param"');
+    expect(() => Middleware.schemaErrorsLayer({ allowedQueryParameters: ["_[x]"] })).toThrow(
+      'List its base name "_"',
+    );
+  });
+
+  it("is admitted by a hand-built endpoint's own query schema", () => {
+    expect(
+      Middleware.checkQueryParameters(["ext:param", "foo![x]"], {
+        declared: ["ext:param", "foo!"],
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe("allowedQueryParameters", () => {
   const allowing = Middleware.layerWith({ allowedQueryParameters: ["lang"] });
 
@@ -235,10 +369,11 @@ describe("allowedQueryParameters entries", () => {
     "lang[]",
     "Lang",
     "LANG",
-    " lang",
-    "lang ",
     "la ng",
-    "lang\n",
+    "x-trace",
+    "_[x]",
+    "ext:param[x]",
+    "[odd]",
     "",
   ];
 
@@ -357,9 +492,8 @@ describe("allowedQueryParameters entries", () => {
   });
 
   // The allow-list is matched against the decoded parameter names, so a
-  // percent-encoded spelling of a bracket names nothing the check ever sees:
-  // its `%` makes it an implementation-specific name.
-  it("refuses a percent-encoded `page%5Bsize%5D` as a name with any other character", () => {
+  // percent-encoded spelling of a bracket names nothing a client means.
+  it("refuses a percent-encoded `page%5Bsize%5D` as matching no decoded name", () => {
     const build = () =>
       Middleware.schemaErrorsLayer({ allowedQueryParameters: ["page%5Bsize%5D"] });
     expect(build).toThrow(
@@ -368,7 +502,8 @@ describe("allowedQueryParameters entries", () => {
         parameter: "page%5Bsize%5D",
       }),
     );
-    expect(build).toThrow("needs no entry");
+    expect(build).toThrow("looks percent-encoded");
+    expect(build).toThrow("list the name as it decodes");
   });
 
   // Family names are case-sensitive: `Page` is not the specification's
@@ -441,7 +576,7 @@ describe("Middleware.checkQueryParameters", () => {
 
   it("returns undefined when every name is acceptable", () => {
     expect(check([])).toBeUndefined();
-    expect(check(["fooBar", "x-trace", "foo_bar", "ext:name", "x1", "[odd]"])).toBeUndefined();
+    expect(check(["fooBar", "x-trace", "foo_bar", "x1", "_", "_[x]"])).toBeUndefined();
     expect(
       check(["fields[articles]", "page[limit]", "page[offset]", "filter[age][gt]", "filter"], {
         declared: ["fields[articles]", "page[limit]", "page[offset]", "filter", "filter["],
