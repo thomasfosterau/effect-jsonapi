@@ -22,6 +22,7 @@ import {
   Group,
   Handlers,
   Include,
+  Query,
   Relationship,
   Resource,
 } from "@thomasfosterau/effect-jsonapi";
@@ -318,3 +319,90 @@ assertType<SuccessOf<GroupTracks>>(Handlers.linkage(trackIds, { included: [track
 assertType<HasIncluded<Extract<GroupEndpoints, { readonly identifier: "curatorRelationship" }>>>(
   false,
 );
+
+// ---------------------------------------------------------------------------
+// `fields` (#485): sparse fieldsets on the `included` members
+// ---------------------------------------------------------------------------
+
+// The decoded `fields` of an endpoint's query, and its flat `fields[TYPE]` keys.
+type FieldsOf<E> = HttpApiEndpoint.Query<E>["Type"] extends { readonly fields?: infer F }
+  ? NonNullable<F>
+  : never;
+type HasFields<E> = "fields" extends keyof HttpApiEndpoint.Query<E>["Type"] ? true : false;
+
+export const sparseTracks = Endpoint.getRelationship(Playlist, "tracks", {
+  include: true,
+  fields: true,
+});
+// The types the include paths reach — not `playlists`, the parent, which the
+// document never carries, nor `labels`, three hops away.
+assertType<Equals<keyof FieldsOf<typeof sparseTracks>, "tracks" | "artists">>(true);
+assertType<
+  Equals<Endpoint.RelationshipFieldsetTypes<typeof Playlist, "tracks", true>, "tracks" | "artists">
+>(true);
+assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["title"], artists: ["stageName"] });
+// @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
+assertType<FieldsOf<typeof sparseTracks>>({ playlists: ["name"] });
+// @ts-expect-error -- `artist` is a relationship, not an attribute of `tracks`
+assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["artist"] });
+
+// The `included` members admit any subset of their attributes; the primary
+// data is the same identifiers.
+type SparseTrack = Extract<IncludedOf<typeof sparseTracks>, { readonly type: "tracks" }>;
+assertType<
+  Equals<SparseTrack["attributes"], { readonly title?: string; readonly seconds?: number }>
+>(true);
+assertType<Equals<SuccessOf<typeof sparseTracks>["data"], SuccessOf<typeof tracks>["data"]>>(true);
+
+// A handler projecting `query.fields` fits the sparse document, not the strict one.
+declare const requested: FieldsOf<typeof sparseTracks>;
+const projected = Handlers.linkage(trackIds, {
+  included: [track, artist],
+  onResource: Handlers.project(requested),
+});
+assertType<SuccessOf<typeof sparseTracks>>(projected);
+// @ts-expect-error -- `tracks` declares no `fields`: its members' attributes are required
+assertType<SuccessOf<typeof tracks>>(projected);
+
+// `depth` and to-one relationships follow the include paths.
+export const sparseDeep = Endpoint.getRelationship(Playlist, "tracks", {
+  include: { depth: 3 },
+  fields: true,
+});
+assertType<Equals<keyof FieldsOf<typeof sparseDeep>, "tracks" | "artists" | "labels">>(true);
+export const sparseCurator = Endpoint.getRelationship(Playlist, "curator", {
+  include: true,
+  fields: true,
+});
+assertType<Equals<keyof FieldsOf<typeof sparseCurator>, "artists" | "labels">>(true);
+
+// Without `include` nothing is included, so `fields` declares no fieldset.
+export const fieldsOnly = Endpoint.getRelationship(Playlist, "tracks", { fields: true });
+assertType<HasFields<typeof fieldsOnly>>(false);
+assertType<HasIncluded<typeof fieldsOnly>>(false);
+assertType<HasFields<typeof tracks>>(false);
+
+// `Query.schema`'s `fields` allow-list, which `getRelationship` builds its
+// query with: the listed types alone, in the flat (wire) record and the
+// nested one alike.
+const allowListed = Query.schema(Playlist, { include: true, fields: ["tracks", "artists"] });
+type FlatFieldsets<Q extends { readonly Encoded: object }> = Extract<
+  keyof Q["Encoded"],
+  `fields[${string}]`
+>;
+assertType<Equals<FlatFieldsets<typeof allowListed>, "fields[tracks]" | "fields[artists]">>(true);
+assertType<Equals<keyof NonNullable<(typeof allowListed.Type)["fields"]>, "tracks" | "artists">>(
+  true,
+);
+// The parent's own `fields: true` declares its type and its direct targets too.
+const everyType = Query.schema(Playlist, { include: true, fields: true });
+assertType<
+  Equals<
+    FlatFieldsets<typeof everyType>,
+    "fields[playlists]" | "fields[tracks]" | "fields[artists]" | "fields[labels]"
+  >
+>(true);
+// An empty allow-list declares none, as `false` does.
+const noneListed = Query.schema(Playlist, { include: true, fields: [] });
+assertType<Equals<FlatFieldsets<typeof noneListed>, never>>(true);
+assertType<"fields" extends keyof typeof noneListed.Type ? true : false>(false);

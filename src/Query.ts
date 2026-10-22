@@ -87,6 +87,7 @@ import type {
   LegalIncludePaths,
 } from "./internal/includeGraph.js";
 import { includePathsFor } from "./internal/includeGraph.js";
+import type { IncludeArgument } from "./internal/sparse.js";
 import { fieldsetResources } from "./internal/sparse.js";
 import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabulary.js";
 import type {
@@ -1438,11 +1439,19 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted per type — `?fields[articles]=a,b` and
    * `?fields[articles]=a&fields[articles]=b` — and decode to the same set.
    *
+   * Pass an array of wire types instead of `true` to declare `fields[TYPE]`
+   * for those of them alone (an allow-list, as `sort` takes one): a
+   * relationship endpoint's query is built over the parent resource but its
+   * resource objects are only the `included` members, so it declares the
+   * types its include paths reach and not the parent's own (#485). A type
+   * the derivation above does not reach is a programmer error, and throws;
+   * an empty array declares none, as `false` does.
+   *
    * Under the `SchemaErrors` middleware, a `fields[TYPE]` for any other type,
    * or for a type whose resource has no attribute, is a 400 naming it, as is
    * every `fields[TYPE]` on an endpoint without this option (#261).
    */
-  readonly fields?: boolean | undefined;
+  readonly fields?: boolean | ReadonlyArray<string> | undefined;
   /**
    * Enable `?sort=` — `true` allows sorting on every attribute; pass an array
    * of attribute names to restrict the sortable set. Unknown fields produce a 400.
@@ -1520,6 +1529,36 @@ export type FieldsetResources<R extends Any, I = false> = ExpandFamilies<
 >;
 
 /**
+ * The wire types a query's `fields` option declares `fields[TYPE]` for:
+ * every {@link FieldsetResources} type under `fields: true`, those an
+ * allow-list names under an array (`fields: ["comments", "people"]`), and
+ * none otherwise — `false`, absent or a widened `boolean`.
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type FieldsetTypesOf<R extends Any, O extends Options<R>> = [O["fields"]] extends [true]
+  ? FieldsetResources<R, O["include"]>["type"]
+  : O["fields"] extends ReadonlyArray<infer T>
+    ? Extract<FieldsetResources<R, O["include"]>["type"], T>
+    : never;
+
+// The nested `fields` member of a query declaring `fields[TYPE]` for `Types`:
+// one optional fieldset per type, its vocabulary the attributes of every
+// definition sharing that wire type (#362); no member when `Types` is empty.
+type NestedFieldsets<R extends Any, I, Types extends string> = [Types] extends [never]
+  ? {}
+  : {
+      readonly fields: Schema.optionalKey<
+        Schema.Struct<{
+          readonly [TypeName in Types]: Schema.optionalKey<
+            Fieldset<AttributeKeys<Extract<FieldsetResources<R, I>, { type: TypeName }>>>
+          >;
+        }>
+      >;
+    };
+
+/**
  * The nested (decoded) struct fields of a query schema.
  *
  * @since 0.1.0
@@ -1529,19 +1568,7 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true
     ? { readonly include: Schema.optionalKey<Include<R, IncludePathsOf<R, O["include"]>>> }
     : Record<never, never>) &
-    ([O["fields"]] extends [true]
-      ? {
-          readonly fields: Schema.optionalKey<
-            Schema.Struct<{
-              readonly [TypeName in FieldsetResources<R, O["include"]>["type"]]: Schema.optionalKey<
-                Fieldset<
-                  AttributeKeys<Extract<FieldsetResources<R, O["include"]>, { type: TypeName }>>
-                >
-              >;
-            }>
-          >;
-        }
-      : Record<never, never>) &
+    NestedFieldsets<R, O["include"], FieldsetTypesOf<R, O>> &
     (O["sort"] extends true
       ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
       : O["sort"] extends ReadonlyArray<string>
@@ -1569,15 +1596,11 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true
     ? { readonly include: Schema.optionalKey<Repeatable> }
-    : Record<never, never>) &
-    ([O["fields"]] extends [true]
-      ? {
-          readonly [
-            TypeName in FieldsetResources<R, O["include"]>["type"] as `fields[${TypeName}]`
-          ]: Schema.optionalKey<Repeatable>;
-        }
-      : Record<never, never>) &
-    (O["sort"] extends true | ReadonlyArray<string>
+    : Record<never, never>) & {
+    readonly [
+      TypeName in FieldsetTypesOf<R, O> as `fields[${TypeName}]`
+    ]: Schema.optionalKey<Repeatable>;
+  } & (O["sort"] extends true | ReadonlyArray<string>
       ? { readonly sort: Schema.optionalKey<Repeatable> }
       : Record<never, never>) &
     (O["page"] extends Schema.Struct.Fields
@@ -1628,6 +1651,30 @@ export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema
   never,
   never
 > {}
+
+// The runtime `FieldsetTypesOf`, as the resource definitions behind each
+// type: every `fieldsetResources` target under `fields: true`, those whose
+// type an allow-list names under an array, none otherwise. An allow-list
+// naming a type no target has is a programmer error, so it throws.
+const fieldsetTargetsOf = (
+  resources: ReadonlyArray<Any>,
+  includable: ReadonlyArray<string>,
+  fields: Options<Any>["fields"],
+  include?: IncludeArgument,
+): ReadonlyArray<Any> => {
+  if (fields === undefined || fields === false) return [];
+  const targets = fieldsetResources(resources, includable, include);
+  if (fields === true) return targets;
+  const unknown = fields.filter((type) => !targets.some((target) => target.type === type));
+  if (Arr.isReadonlyArrayNonEmpty(unknown)) {
+    // oxlint-disable-next-line effect/avoid-untagged-errors -- a construction-time programmer error, thrown while the api is declared, never an Effect failure
+    throw new Error(
+      `Query.schema: \`fields\` names ${unknown.map((type) => `"${type}"`).join(", ")}, ` +
+        `which the endpoint's response cannot carry; it can carry ${targets.map((target) => `"${target.type}"`).join(", ")}`,
+    );
+  }
+  return targets.filter((target) => fields.includes(target.type));
+};
 
 /**
  * Builds the query schema for a resource (or, for heterogeneous endpoints,
@@ -1692,14 +1739,16 @@ export const schema = <R extends Any, const O extends Options<R>>(
     flatFields.include = Schema.optionalKey(Repeatable);
   }
 
-  if (options.fields === true) {
+  const fieldsetTargets = fieldsetTargetsOf(resources, includable, options.fields, include);
+  if (Arr.isReadonlyArrayNonEmpty(fieldsetTargets)) {
     // The resources, then every type their response can carry in `included`:
     // the runtime mirror of `FieldsetResources`, which the default document
-    // of an endpoint declaring `fields` makes partial over (#322). Definitions
+    // of an endpoint declaring `fields` makes partial over (#322) — or those
+    // of them an allow-list names (`FieldsetTypesOf`, #485). Definitions
     // sharing a wire type share its `fields[TYPE]`, whose vocabulary is the
     // union of their attributes, as `NestedFields` types it (#362).
     const fieldsetFields = Rec.map(
-      Arr.groupBy(fieldsetResources(resources, includable, include), (target) => target.type),
+      Arr.groupBy(fieldsetTargets, (target) => target.type),
       (targets, type) =>
         Schema.optionalKey(fieldsetOf(type, dedupe(targets.flatMap((t) => attributeKeys(t))))),
     );

@@ -649,3 +649,55 @@ describe("`fields[TYPE]` for a type an include path reaches, over HTTP (#311)", 
     },
   );
 });
+
+describe("Query.schema `fields` as an allow-list of types (#485)", () => {
+  it("declares `fields[TYPE]` for the listed types alone, in both records", () => {
+    // `Endpoint.getRelationship`'s query is the parent's, but its document
+    // carries only the types its include paths reach.
+    const query = Query.schema(Article, {
+      include: { paths: ["comments", "comments.author"] },
+      fields: ["comments", "people"],
+    });
+    expectFieldsets(query, ["fields[comments]", "fields[people]"]);
+    // The nested record decodes exactly what the flat one declares…
+    expect(
+      Schema.decodeUnknownSync(query)({
+        include: "comments.author",
+        "fields[comments]": "body",
+        "fields[people]": "name,email",
+      }),
+    ).toEqual({
+      include: ["comments.author"],
+      fields: { comments: ["body"], people: ["name", "email"] },
+    });
+    // …and encodes back to it.
+    expect(Schema.encodeSync(query)({ fields: { comments: ["body"], people: ["name"] } })).toEqual({
+      "fields[comments]": "body",
+      "fields[people]": "name",
+    });
+  });
+
+  it("keeps each listed type's vocabulary", () => {
+    const query = Query.schema(Article, { include: true, fields: ["people"] });
+    expect(() => Schema.decodeUnknownSync(query)({ "fields[people]": "title" })).toThrow();
+  });
+
+  it("declares none for an empty list, as `false` does", () => {
+    const query = Query.schema(Article, { include: true, fields: [] });
+    expectFieldsets(query, []);
+    expect(Schema.decodeUnknownSync(query)({ include: "comments" })).toEqual({
+      include: ["comments"],
+    });
+  });
+
+  it("throws on a type the response cannot carry", () => {
+    // `revisions` is reachable only through paginated relationships; `companies`
+    // is past depth 2.
+    expect(() => Query.schema(Article, { include: true, fields: ["revisions"] })).toThrow(
+      /`fields` names "revisions", which the endpoint's response cannot carry/,
+    );
+    expect(() => Query.schema(Article, { include: true, fields: ["companies"] })).toThrow(
+      /"companies"/,
+    );
+  });
+});

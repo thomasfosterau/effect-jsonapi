@@ -14,10 +14,12 @@
  * schema on the way out. Each of those documents advertises the JSON:API
  * version it implements (`jsonapi: Document.v1_1`); the `Atomic.results` answer
  * to `/operations` and the `ApiError` error documents carry no `jsonapi`
- * member. The reads that declare `fields` — `GET /articles/:id` and `/search` —
- * answer `?fields[TYPE]=` by projecting each resource they carry, primary data
- * and `included` alike, with `onResource: Handlers.project(query.fields)`; the
- * other reads declare no `fields`, so their clients read every attribute as
+ * member. The reads that declare `fields` — `GET /articles/:id`, `/search` and
+ * `GET /articles/:id/relationships/tags` — answer `?fields[TYPE]=` by
+ * projecting each resource they carry, primary data and `included` alike
+ * (only `included` on the relationship endpoint, whose primary data is
+ * identifiers), with `onResource: Handlers.project(query.fields)`; the other
+ * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
 import { Effect, Layer, Match } from "effect";
@@ -68,7 +70,7 @@ export const sampleAuthor: Person = Person.make({
 
 export const sampleTag: Tag = Tag.make({
   id: Tag.Id.make("1"),
-  attributes: { name: "api-design" },
+  attributes: { name: "API design", slug: "api-design" },
 });
 
 export const sampleComments: ReadonlyArray<Comment> = [
@@ -359,6 +361,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
                     const tag = store.tags.get(identifier.id);
                     return tag === undefined ? [] : [tag];
                   }),
+            // `?fields[tags]=…` narrows the `included` tags; projecting an
+            // identifier is a no-op.
+            onResource: Handlers.project(query.fields),
             self: Handlers.relationshipLink("articles", article.id, "tags"),
             jsonapi: Document.v1_1,
           });

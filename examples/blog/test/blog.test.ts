@@ -17,7 +17,7 @@ import {
   sampleTag,
   SearchLive,
 } from "../handlers.js";
-import { Article, Comment, Person, Tag } from "../resources.js";
+import { Article, Comment, Person } from "../resources.js";
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "search"]);
 
@@ -404,9 +404,37 @@ describe("blog example: relationship endpoints", () => {
     // With it, the identifiers stay the primary data and the tags they name are
     // `included` — the same `(type, id)` in both is no duplicate.
     expect(compound.data).toEqual([{ type: "tags", id: sampleTag.id }]);
-    expectTypeOf(compound.included).toEqualTypeOf<ReadonlyArray<Tag> | undefined>();
+    // The endpoint declares `fields` (#485), so an `included` tag's
+    // attributes decode as optional.
+    expectTypeOf<NonNullable<typeof compound.included>[number]["attributes"]>().toEqualTypeOf<{
+      readonly name?: string;
+      readonly slug?: string;
+    }>();
     expect(compound.included).toEqual([sampleTag]);
     expect(compound.links?.self).toBe("/articles/1/relationships/tags");
+  });
+
+  it("GET /articles/:id/relationships/tags?include=tags&fields[tags]=name narrows the included tags", async () => {
+    const sparse = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.tagsRelationship({
+          params: { id: Article.Id.make("1") },
+          query: { include: ["tags"], fields: { tags: ["name"] } },
+        });
+      }),
+    );
+
+    // #485: the fieldset narrows the `included` tags; the identifiers, which
+    // have no fields, are untouched. A client decodes the attributes as
+    // optional, since a fieldset may leave any of them out.
+    expect(sparse.data).toEqual([{ type: "tags", id: sampleTag.id }]);
+    expect(sparse.included).toEqual([
+      { ...sampleTag, attributes: { name: sampleTag.attributes.name } },
+    ]);
+    expectTypeOf<NonNullable<typeof sparse.included>[number]["attributes"]["slug"]>().toEqualTypeOf<
+      string | undefined
+    >();
   });
 
   it("PATCH /articles/:id/relationships/author replaces the author", async () => {

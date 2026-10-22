@@ -340,6 +340,17 @@ describe("Handlers.linkage", () => {
       ).toEqual([person("7")]);
     });
 
+    it("projects a sparse fieldset onto the members, not the identifiers (#485)", () => {
+      // `?include=comments.author&fields[comments]=body&fields[people]=name`:
+      // an identifier has no attributes, so projecting it is a no-op.
+      const doc = Handlers.linkage(ids("5"), {
+        included: [comment("5"), { ...person("9"), attributes: { name: "Ada", email: "a@b" } }],
+        onResource: Handlers.project({ comments: ["body"], people: ["name"] }),
+      });
+      expect(doc.data).toEqual(ids("5"));
+      expect(doc.included).toEqual([comment("5"), { ...person("9"), attributes: { name: "Ada" } }]);
+    });
+
     it("shapes each identifier and each member from its own value", () => {
       // The identifier and the member share `comments:5`; neither is handed
       // the other's transformed value.
