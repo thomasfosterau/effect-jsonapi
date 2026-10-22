@@ -524,12 +524,14 @@ const author = Author.make({
   relationships: { comments: { data: [{ type: "comments", id: comment.id }] } },
 });
 assertType<SuccessOf<typeof flagNode>>(Handlers.data(author, { included: [comment, person] }));
-// The same under `fields: true`. The sparse fieldset types
-// (`Query.FieldsetResources`) do not distribute over a widened `boolean`, so on
-// `flagSparseNode` a depth-2 resource that is neither a member nor a direct
-// target (`people`, trimmed by `fields[people]`) is not admitted as it is under
-// `include: true` (#397). On `flagSparseSearch` `people` is a member, so a
-// sparse person is admitted there.
+// The same under `fields: true`, sparse members included: the sparse fieldset
+// types (`Query.FieldsetResources`) distribute over a widened `boolean` too
+// (#397), so a depth-2 resource that is neither a member nor a direct target
+// (`people`, trimmed by `fields[people]`) is admitted as under `include: true`.
+// `collection` is pinned over `[Article, Revision]`: with `Person` (or
+// `Comment`) as a member a sparse person is admitted anyway, so the pin could
+// not fail.
+const sparsePerson = { ...person, attributes: {} };
 export const flagSparseSearch = Endpoint.collection([Article, Person], {
   name: "search",
   path: "/search",
@@ -537,12 +539,75 @@ export const flagSparseSearch = Endpoint.collection([Article, Person], {
   fields: true,
 });
 export const flagSparseNode = Endpoint.polymorphic(AnyNode, { include: flag, fields: true });
+export const flagSparseList = Endpoint.list(Article, { include: flag, fields: true });
+export const flagSparseRevisions = Endpoint.collection([Article, Revision], {
+  name: "feed",
+  path: "/feed",
+  include: flag,
+  fields: true,
+});
 assertType<SuccessOf<typeof flagSparseSearch>>(
   Handlers.collection([article], { included: [comment, person] }),
 );
 assertType<SuccessOf<typeof flagSparseNode>>(
   Handlers.data(author, { included: [comment, person] }),
 );
+assertType<SuccessOf<typeof flagSparseNode>>(
+  Handlers.data(author, { included: [comment, sparsePerson] }),
+);
+assertType<SuccessOf<typeof flagSparseList>>(
+  Handlers.collection([article], { included: [comment, sparsePerson] }),
+);
+assertType<SuccessOf<typeof flagSparseRevisions>>(
+  Handlers.collection([article], { included: [comment, sparsePerson] }),
+);
+// Positive control: `include: true` admits the same.
+export const sparseNode = Endpoint.polymorphic(AnyNode, { include: true, fields: true });
+assertType<SuccessOf<typeof sparseNode>>(
+  Handlers.data(author, { included: [comment, sparsePerson] }),
+);
+// Negative controls: under `include: false` no path reaches `people`.
+export const offSparseNode = Endpoint.polymorphic(AnyNode, { include: false, fields: true });
+export const offSparseList = Endpoint.list(Article, { include: false, fields: true });
+export const offSparseRevisions = Endpoint.collection([Article, Revision], {
+  name: "feed",
+  path: "/feed",
+  include: false,
+  fields: true,
+});
+assertType<SuccessOf<typeof offSparseNode>>(
+  // @ts-expect-error -- `people` is not a direct target, and no include path is on
+  Handlers.data(author, { included: [comment, sparsePerson] }),
+);
+assertType<SuccessOf<typeof offSparseList>>(
+  // @ts-expect-error -- as above
+  Handlers.collection([article], { included: [comment, sparsePerson] }),
+);
+assertType<SuccessOf<typeof offSparseRevisions>>(
+  // @ts-expect-error -- as above
+  Handlers.collection([article], { included: [comment, sparsePerson] }),
+);
+// The `fields[TYPE]` keys a widened `include` declares are what either value
+// declares: `include: true`'s, which `include: false`'s are a subset of.
+assertType<
+  Equals<
+    Query.FieldsetResources<typeof Article, boolean>["type"],
+    Query.FieldsetResources<typeof Article, true>["type"]
+  >
+>(true);
+assertType<
+  Equals<
+    Query.FieldsetResources<typeof Author | typeof Editor, boolean>["type"],
+    "authors" | "editors" | "comments" | "people"
+  >
+>(true);
+// Negative control: not `include: false`'s alone.
+assertType<
+  Equals<
+    Query.FieldsetResources<typeof Article, boolean>["type"],
+    Query.FieldsetResources<typeof Article, false>["type"]
+  >
+>(false);
 // Negative control: not only the direct targets, which `include: false` gives.
 assertType<Equals<IncludedOf<typeof flagSearch>, IncludedOf<typeof plainSearch>>>(false);
 assertType<Equals<IncludedOf<typeof flagNode>, IncludedOf<typeof plainNode>>>(false);
