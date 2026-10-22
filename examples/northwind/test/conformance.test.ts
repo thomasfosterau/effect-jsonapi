@@ -277,6 +277,13 @@ describe("northwind: JSON:API conformance", () => {
       // `category` / `supplier` PATCH has no relationship GET to read back
       // through, so is not decided.
       "spec/relationships/update-replaces",
+      // #451: the same `shipper` cleared with `{ "data": null }` and read back
+      // empty (a product's `category` / `supplier` are required, so their
+      // payloads admit no `null`); what each order and product relationship
+      // PATCH answered; and the 404 for linking a shipper that does not exist.
+      "spec/relationships/update-to-one-null",
+      "spec/relationships/write-response",
+      "spec/relationships/absent-related-404",
     ];
     expect(
       writeRules.map((id) => report.outcomes.find((outcome) => outcome.rule.id === id)?._tag),

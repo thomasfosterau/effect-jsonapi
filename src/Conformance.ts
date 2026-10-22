@@ -392,10 +392,12 @@ export interface WritePayload extends Core.Payload {}
  * `PATCH` / `POST` / `DELETE` on `/<type>/:id/relationships/<name>` whose type
  * has a `create`, they create a resource, link it to the `ids` sample of a type
  * the endpoint's payload names, and read the linkage back through
- * `GET /<type>/:id/relationships/<name>`. The sample is only linked to, never
- * written to — but a server that stores the inverse of the relationship on the
- * sample (a comment's one article, say) changes it, so give such a type an
- * `ids` sample you can afford to have relinked.
+ * `GET /<type>/:id/relationships/<name>` — a to-one relationship whose payload
+ * admits `null` is also cleared with one. They judge what each write answers
+ * too, and link `absentId` under the related type to want a 404. The sample is
+ * only linked to, never written to — but a server that stores the inverse of
+ * the relationship on the sample (a comment's one article, say) changes it, so
+ * give such a type an `ids` sample you can afford to have relinked.
  *
  * @example
  * ```ts
@@ -771,10 +773,10 @@ export const gaps: ReadonlyArray<Gap> = [
     tracking: ["#116", "#161", "#433", "#458"],
   },
   {
-    area: "Relationship writes beyond the read-back",
+    area: "A relationship removal naming a resource that does not exist",
     reason:
-      "Given a `writes` fixture and `mutating: true`, the kit checks what a create, update and delete answer, the 409s for an unserved `type` and a duplicate client-generated id, what a create under a client-generated id answers (201 or 204, or 403 where unsupported — only for a type whose fixture opts in with `clientId`, since the kit never makes an id up), and that a create, an update and a `PATCH` / `POST` / `DELETE` on `/relationships/…` read back as they should. A relationship write is judged by its read-back alone: what the write itself answers (202, 204, or 200 with the linkage as it now stands) is not checked, nor is a to-one replacement with `null`, nor the 404 for linking a resource that does not exist.",
-    tracking: ["#451"],
+      "Given a `writes` fixture and `mutating: true`, the kit checks what a create, update and delete answer, the 409s for an unserved `type` and a duplicate client-generated id, what a create under a client-generated id answers, reading a create or update back, and every relationship write through `/relationships/…`: a `PATCH` / `POST` / `DELETE` read back (a to-one `PATCH` of `null` included), what each answers (202, 204, or 200 with the linkage as it now stands), and the 404 for a `PATCH` or `POST` linking a resource that does not exist. A `DELETE` naming a resource that does not exist is not probed for that 404: the specification makes a 204 the appropriate answer to a `DELETE` of a member the relationship does not hold, which leaves open whether one naming an absent resource must answer 404 or may answer 204.",
+    tracking: [],
   },
   {
     area: "The Idempotency-Key profile",

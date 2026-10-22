@@ -272,6 +272,12 @@ export interface Discovered {
    * Empty for every other role, and for a payload whose `type` is no literal.
    */
   readonly linkageTypes: ReadonlyArray<string>;
+  /**
+   * For a `relationshipWrite` endpoint, whether every payload schema's `data`
+   * admits `null` — a to-one relationship a `PATCH` may clear. `false` for
+   * every other role, and for a payload whose `data` cannot be read that way.
+   */
+  readonly linkageNullable: boolean;
   /** The first literal path segment — the resource type under the conventional paths. */
   readonly segment: string | undefined;
   readonly params: ReadonlyArray<string>;
@@ -470,6 +476,32 @@ const documentTypes = (ast: SchemaAST.AST): ReadonlyArray<string> => {
   return data === undefined ? [] : identifierTypes(data.type);
 };
 
+/** Whether resource linkage of this schema's wire shape admits `null`. */
+const admitsNull = (ast: SchemaAST.AST): boolean => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return admitsNull(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.some(admitsNull);
+  return SchemaAST.isNull(encoded);
+};
+
+/** Whether a linkage document schema's `data` admits `null`. */
+const documentAdmitsNull = (ast: SchemaAST.AST): boolean => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return documentAdmitsNull(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return encoded.types.some(documentAdmitsNull);
+  if (!SchemaAST.isObjects(encoded)) return false;
+  const data = encoded.propertySignatures.find((signature) => signature.name === "data");
+  return data !== undefined && admitsNull(data.type);
+};
+
+/** Whether every payload of a relationship write endpoint admits `data: null`; `false` for any other role. */
+const declaredNullable = (endpoint: HttpApiEndpoint.Top, role: Role): boolean =>
+  role === "relationshipWrite" &&
+  Arr.match(payloadSchemas(endpoint), {
+    onEmpty: () => false,
+    onNonEmpty: (payloads) => payloads.every((payload) => documentAdmitsNull(payload.ast)),
+  });
+
 /** The resource types a relationship write endpoint's payload links to; none for any other role. */
 const declaredLinkageTypes = (endpoint: HttpApiEndpoint.Top, role: Role): ReadonlyArray<string> =>
   role === "relationshipWrite"
@@ -513,6 +545,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
         role,
         linkage: declaredCardinality(endpoint, role),
         linkageTypes: declaredLinkageTypes(endpoint, role),
+        linkageNullable: declaredNullable(endpoint, role),
         segment: segments.find((segment) => !segment.startsWith(":")),
         params: segments
           .filter((segment) => segment.startsWith(":"))

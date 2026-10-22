@@ -194,8 +194,11 @@ const CLIENT_ID_RULES = [
 /** The relationship mutation rules. */
 const RELATIONSHIP_RULES = [
   "spec/relationships/update-replaces",
+  "spec/relationships/update-to-one-null",
   "spec/relationships/add-appends",
   "spec/relationships/remove-deletes",
+  "spec/relationships/write-response",
+  "spec/relationships/absent-related-404",
 ];
 
 /** A 400 error document whose one error object carries `members` too. */
@@ -9954,10 +9957,21 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     readonly noContent?: boolean;
     /** Overwrite a resource on a create under an id it already holds, rather than 409. */
     readonly overwrites?: boolean;
-    /** Relationship writes of these methods answer 204 and change nothing. */
+    /** Relationship writes of these methods answer 204 and change nothing (but still 404 an absent resource). */
     readonly ignores?: ReadonlyArray<string>;
     /** Relationship writes of these methods answer 403. */
     readonly forbids?: ReadonlyArray<string>;
+    /**
+     * What an accepted relationship write answers: 204 (the default), 200
+     * with the linkage as it now stands, 200 with top-level `meta` alone, 200
+     * with the linkage as it stood before the write, a bare 201, or a 202
+     * (having applied the write all the same).
+     */
+    readonly responds?: "204" | "202" | "linkage" | "meta" | "stale" | "201";
+    /** A `PATCH` of `{ "data": null }` to the to-one `author` answers 204 and changes nothing. */
+    readonly keepsOnNull?: boolean;
+    /** Link a resource that does not exist rather than answer 404. */
+    readonly linksAbsent?: boolean;
   }
 
   const Body = Schema.Struct({
@@ -9998,6 +10012,9 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     return tags.filter((tag) => !data.some((item) => sameIdentifier(item)(tag)));
   };
 
+  /** The resources a relationship write may link to: the `ids` samples the runs pass. */
+  const linkable: ReadonlyArray<string> = ["people:9", "tags:7"];
+
   const mutationServer = (posts: Posts, breakage: Breakage) => {
     let next = 100;
     const resource = (id: string, post: Stored) => ({
@@ -10027,14 +10044,37 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           return created(id, post, data.id);
         },
       });
+    /** What an accepted write to `name` answers, `before` its linkage as the write found it. */
+    const answer = (
+      post: Stored,
+      name: "author" | "tags",
+      before: Stored["author"] | Stored["tags"],
+    ): Canned =>
+      Match.value(breakage.responds ?? "204").pipe(
+        Match.when("linkage", (): Canned => ({ body: { data: post[name] } })),
+        Match.when("meta", (): Canned => ({ body: { meta: { applied: true } } })),
+        Match.when("stale", (): Canned => ({ body: { data: before } })),
+        Match.when("201", (): Canned => ({ status: 201 })),
+        Match.when("202", (): Canned => ({ status: 202 })),
+        Match.orElse((): Canned => ({ status: 204 })),
+      );
+    const absent = (data: Stored["author"] | ReadonlyArray<Identifier>): boolean =>
+      breakage.linksAbsent !== true &&
+      (Array.isArray(data) ? data : data === null ? [] : [data]).some(
+        (item: Identifier) => !linkable.includes(`${item.type}:${item.id}`),
+      );
     const onWrite = (request: CannedRequest, post: Stored, name: "author" | "tags"): Canned =>
       Option.match(decodeLinkage(request.body), {
         onNone: () => refused(400),
         onSome: ({ data }) => {
           if (Array.isArray(data) !== (name === "tags")) return refused(400);
+          if (absent(data)) return refused(404);
+          if (breakage.ignores?.includes(request.method) === true) return { status: 204 };
+          const before = post[name];
           if (Array.isArray(data)) post.tags = applied(request.method, post.tags, data);
-          else post.author = data as Identifier | null;
-          return { status: 204 };
+          else if (data !== null || breakage.keepsOnNull !== true)
+            post.author = data as Identifier | null;
+          return answer(post, name, before);
         },
       });
     const onRelationship = (
@@ -10044,7 +10084,6 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     ): Canned => {
       if (request.method === "GET") return { body: { data: post[name] } };
       if (breakage.forbids?.includes(request.method) === true) return refused(403);
-      if (breakage.ignores?.includes(request.method) === true) return { status: 204 };
       return onWrite(request, post, name);
     };
     return (request: CannedRequest): Canned => {
@@ -10069,11 +10108,12 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       id: () => `client-${++sequence}`,
     },
     ids: Readonly<Record<string, string>> = { people: "9", tags: "7" },
+    verify: typeof verifyCanned = verifyOver(mutationApi),
   ) => {
     const posts: Posts = new Map();
     const seen: Array<string> = [];
     const serve = mutationServer(posts, breakage);
-    const report = await verifyOver(mutationApi)(
+    const report = await verify(
       (request) => {
         seen.push(`${request.method} ${request.path}`);
         return serve(request);
@@ -10111,7 +10151,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
         "spec/status/create-conflict-id",
         ...RELATIONSHIP_RULES,
       ]),
-    ).toEqual(["Passed", "Passed", "Passed", "Passed", "Passed"]);
+    ).toEqual(["Passed", "Passed", ...RELATIONSHIP_RULES.map(() => "Passed")]);
     // The fixture declares client ids supported, so the 403 probe is not run.
     expect(outcomeFor(report, "spec/status/create-client-id-unsupported")).toMatchObject({
       _tag: "Skipped",
@@ -10119,6 +10159,21 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     });
     // Every relationship write endpoint was probed: replace twice (to-one and to-many).
     expect(outcomeFor(report, "spec/relationships/update-replaces")).toMatchObject({
+      probes: 6,
+    });
+    // Clearing `author`, which a fresh post leaves empty: create, read, link
+    // the sample, read, PATCH `null`, read back.
+    expect(outcomeFor(report, "spec/relationships/update-to-one-null")).toMatchObject({
+      probes: 6,
+    });
+    // Every write answers 204, so only the writes are counted (and what
+    // precedes them): PATCH author and tags 2 each, POST 3, DELETE 5.
+    expect(outcomeFor(report, "spec/relationships/write-response")).toMatchObject({
+      probes: 12,
+    });
+    // The to-one and to-many PATCH and the POST, each linking an absent
+    // resource; the DELETE is not probed.
+    expect(outcomeFor(report, "spec/relationships/absent-related-404")).toMatchObject({
       probes: 6,
     });
     expect(posts.size).toBe(0);
@@ -10213,8 +10268,8 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       expect(outcomeFor(report, id)).toMatchObject({
         reason: expect.stringContaining('pass writes["posts"].clientId'),
       });
-    // The relationship rules still ran; no create carried an id.
-    expect(seen.filter((line) => line === "POST /posts").length).toBe(4);
+    // The relationship rules still ran — 12 creates — and no create carried an id.
+    expect(seen.filter((line) => line === "POST /posts").length).toBe(12);
   });
 
   it.each([
@@ -10253,7 +10308,139 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       _tag: "Passed",
       note: expect.stringContaining('ids["tags"]'),
     });
-    // Nothing is created for a probe that cannot link anything.
-    expect(seen.filter((line) => line === "POST /posts").length).toBe(1);
+    // Nothing is created for a probe that cannot link anything: of the 12
+    // creates a full run makes, only the three on \`author\` (replace, clear and
+    // the answer to a replace) and the three for the 404 — which link
+    // \`absentId\`, not a sample — remain.
+    expect(seen.filter((line) => line === "POST /posts").length).toBe(6);
+  });
+
+  it('detects a server that answers `{ "data": null }` to a to-one relationship and changes nothing', async () => {
+    const { report, posts } = await run({ keepsOnNull: true });
+    expect(failed(report)).toEqual(["spec/relationships/update-to-one-null"]);
+    expect(findingsOf(report, "spec/relationships/update-to-one-null")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /^after PATCH \S+\/relationships\/author replacing its linkage with `null`, \S+ reads back \[people:9\]$/,
+        ),
+        expected: "no linkage",
+        probe: expect.objectContaining({ method: "PATCH" }),
+      }),
+    ]);
+    expect(posts.size).toBe(0);
+  });
+
+  it.each(["linkage", "meta"] as const)(
+    "passes a relationship write answered 200 with %s",
+    async (responds) => {
+      const { report } = await run({ responds });
+      expect(failed(report)).toEqual([]);
+      expect(outcomeFor(report, "spec/relationships/write-response")._tag).toBe("Passed");
+    },
+  );
+
+  it("detects a 200 whose linkage is not the relationship as it now stands", async () => {
+    const { report, posts } = await run({ responds: "stale" });
+    expect(failed(report)).toEqual(["spec/relationships/write-response"]);
+    const findings = findingsOf(report, "spec/relationships/write-response");
+    // Each of the four writes answers what the relationship held before it.
+    expect(findings).toEqual(
+      ["PATCH", "PATCH", "POST", "DELETE"].map((method) =>
+        expect.objectContaining({
+          detail: expect.stringMatching(/, but \S+ then reads back /),
+          probe: expect.objectContaining({ method }),
+        }),
+      ),
+    );
+    expect(posts.size).toBe(0);
+  });
+
+  it("detects a relationship write answered with a status the specification does not name", async () => {
+    const { report } = await run({ responds: "201" });
+    expect(failed(report)).toEqual(["spec/relationships/write-response"]);
+    const findings = findingsOf(report, "spec/relationships/write-response");
+    expect(findings).toHaveLength(4);
+    expect(findings).toEqual(
+      findings.map(() =>
+        expect.objectContaining({
+          detail: expect.stringMatching(/answered 201$/),
+          expected: expect.stringMatching(/^202, 204 with no document, or 200/),
+        }),
+      ),
+    );
+  });
+
+  it("detects a server that links a resource that does not exist rather than answer 404", async () => {
+    const { report, posts } = await run({ linksAbsent: true });
+    expect(failed(report)).toEqual(["spec/relationships/absent-related-404"]);
+    expect(
+      findingsOf(report, "spec/relationships/absent-related-404").map((found) => found.detail),
+    ).toEqual([
+      expect.stringMatching(
+        /^PATCH \S+\/relationships\/author linking people:conformance-absent-id-0000, which does not exist, answered 204$/,
+      ),
+      expect.stringMatching(
+        /^PATCH \S+\/relationships\/tags linking tags:conformance-absent-id-0000/,
+      ),
+      expect.stringMatching(
+        /^POST \S+\/relationships\/tags linking tags:conformance-absent-id-0000/,
+      ),
+    ]);
+    expect(posts.size).toBe(0);
+  });
+
+  it("judges a 200's linkage by what the write leaves when there is no relationship GET to read", async () => {
+    // `author` with a PATCH and no GET: the read-back rules cannot decide it.
+    const unread = HttpApi.make("unread").add(
+      Group.make(
+        Post,
+        Endpoint.get(Post),
+        Endpoint.create(Post),
+        Endpoint.updateRelationship(Post, "author"),
+      ),
+    );
+    const conformant = await run({ responds: "linkage" }, "none", undefined, verifyOver(unread));
+    expect(outcomeFor(conformant.report, "spec/relationships/write-response")).toMatchObject({
+      _tag: "Passed",
+      probes: 2,
+    });
+    const { report } = await run({ responds: "stale" }, "none", undefined, verifyOver(unread));
+    expect(failed(report)).toEqual(["spec/relationships/write-response"]);
+    expect(findingsOf(report, "spec/relationships/write-response")).toEqual([
+      expect.objectContaining({
+        detail: expect.stringMatching(
+          /^the 200 to PATCH \S+\/relationships\/author carries no linkage, but the write leaves \[people:9\]$/,
+        ),
+      }),
+    ]);
+  });
+
+  it("passes a 202 as the answer to a relationship write, and reads nothing back after one", async () => {
+    const { report } = await run({ responds: "202" });
+    expect(failed(report)).toEqual([]);
+    expect(outcomeFor(report, "spec/relationships/write-response")._tag).toBe("Passed");
+    const readBacks = [
+      "spec/relationships/update-replaces",
+      "spec/relationships/update-to-one-null",
+      "spec/relationships/add-appends",
+    ];
+    expect(readBacks.map((id) => outcomeFor(report, id))).toEqual(
+      readBacks.map(() =>
+        expect.objectContaining({
+          _tag: "Skipped",
+          reason: expect.stringContaining("answered 202 Accepted"),
+        }),
+      ),
+    );
+  });
+
+  it("decides nothing on a 404 probe the server forbids", async () => {
+    const forbidden = await run({ forbids: ["PATCH", "POST"] });
+    expect(outcomeFor(forbidden.report, "spec/relationships/absent-related-404")).toMatchObject({
+      _tag: "Skipped",
+      reason: expect.stringContaining("answered 403 Forbidden"),
+    });
+    // The DELETE still runs, linked first through a POST the server forbids.
+    expect(outcomeFor(forbidden.report, "spec/relationships/write-response")._tag).toBe("Skipped");
   });
 });
