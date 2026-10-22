@@ -1320,6 +1320,41 @@ describe("Conformance: detects a deliberately broken server", () => {
     expect(await observedWith("spec/document/full-linkage", [twice])).toEqual(["people:8"]);
   });
 
+  // #423: a relationship document's primary data is resource linkage, and
+  // its identifiers are where the full-linkage walk starts.
+  it("walks a relationship document's included members from its primary identifiers", async () => {
+    const reads = HttpApi.make("reads").add(
+      Group.make(Article, Endpoint.get(Article), Endpoint.getRelationship(Article, "author")),
+    );
+    const person = (id: string) => ({
+      type: "people",
+      id,
+      attributes: { firstName: "Dan", lastName: "Gebhardt" },
+    });
+    const serving =
+      (included: ReadonlyArray<unknown>) =>
+      (request: CannedRequest): Canned =>
+        request.path === "/articles/1"
+          ? { body: { data: { type: "articles", id: "1", attributes: {} } } }
+          : request.path === "/articles/1/relationships/author"
+            ? { body: { data: { type: "people", id: "9" }, included } }
+            : { status: 404, body: { errors: [{ status: "404" }] } };
+    const linked = await verifyOver(reads)(serving([person("9")]), {
+      only: ["spec/document/full-linkage"],
+    });
+    expect(outcomeFor(linked, "spec/document/full-linkage")).toMatchObject({
+      _tag: "Passed",
+      probes: 1,
+    });
+    const orphaned = await verifyOver(reads)(serving([person("9"), person("7")]), {
+      only: ["spec/document/full-linkage"],
+    });
+    const outcome = outcomeFor(orphaned, "spec/document/full-linkage");
+    expect(
+      Predicate.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.observed) : [],
+    ).toEqual(["people:7"]);
+  });
+
   broken(
     "a resource object with a non-string id",
     "spec/document/resource-identification",
