@@ -389,6 +389,43 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     ]);
   });
 
+  // A name-only family's synthesised relationships are typed as the by-key
+  // intersection the runtime computes, so its fieldset keys are exact rather
+  // than an open `string` (#363).
+  it("declares exactly the members of a name-only family that is the primary resource", () => {
+    const Photo = Resource.make("photos", { attributes: { url: Schema.String } });
+    const Video = Resource.make("videos", { attributes: { length: Schema.Number } });
+    const Media = Resource.family("media", [Photo, Video]);
+    expectFieldsets(Query.schema(Media, { fields: true }), ["fields[photos]", "fields[videos]"]);
+  });
+
+  it("declares the targets a name-only family's members all share, and no other", () => {
+    const Owner = Resource.make("owners", { attributes: { name: Schema.String } });
+    const Tag = Resource.make("tags", { attributes: { label: Schema.String } });
+    const Song = Resource.make("songs", {
+      attributes: { title: Schema.String },
+      relationships: {
+        owner: Relationship.one(() => Owner),
+        tags: Relationship.many(() => Tag),
+      },
+    });
+    const Clip = Resource.make("clips", {
+      attributes: { duration: Schema.Number },
+      relationships: {
+        owner: Relationship.one(() => Owner),
+        // A different kind: not shared, so `tags` is no target of the family.
+        tags: Relationship.optional(() => Tag),
+      },
+    });
+    const Track = Resource.family("tracks", [Song, Clip]);
+    expect(Rec.keys(Track.relationships)).toEqual(["owner"]);
+    expectFieldsets(Query.schema(Track, { fields: true }), [
+      "fields[clips]",
+      "fields[owners]",
+      "fields[songs]",
+    ]);
+  });
+
   // A base-anchored family's name is its base's real type. The family itself
   // declares nothing, but the base reached in its own right is declared as
   // itself, over its own attributes.
