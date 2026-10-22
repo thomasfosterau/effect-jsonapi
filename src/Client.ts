@@ -470,8 +470,8 @@ export interface MakeOptions extends NegotiationOptions {
    * unchanged.
    *
    * The generated client's *static* error type is `HttpApiClient`'s and
-   * cannot name the class; match at runtime with {@link isErrorResponse} or
-   * `Effect.catchTag("ErrorResponse", …)`.
+   * cannot name the class, so `Effect.catchTag("ErrorResponse", …)` does not
+   * type-check; match at runtime with {@link isErrorResponse}.
    *
    * @since 0.16.0
    */

@@ -137,7 +137,7 @@ Every module is a namespace export of the package root (`import { Resource } fro
 | `Conformance` | The conformance kit: an executable specification a server is driven through. |
 | `MEDIA_TYPE` | The JSON:API media type, `"application/vnd.api+json"`. |
 
-Guide: [Adopting the 0.14 surfaces in an existing api](./docs/guides/adopting-0.14.md).
+Guide: [Adopting the 0.14 surfaces in an existing api](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/guides/adopting-0.14.md).
 
 ## 1. Resources — the single source of truth
 
@@ -154,7 +154,7 @@ const Tag = Resource.make("tags", {
 });
 
 const Comment = Resource.make("comments", {
-  attributes: { body: Schema.NonEmptyString },
+  attributes: { body: Schema.NonEmptyString, postedAt: Schema.DateFromString },
   relationships: {
     author: Relationship.one(() => Person), // a reference, not a string — typos don't compile
   },
@@ -470,17 +470,21 @@ Resource.attributeKeys(Upload); // ["fileName", "contentType"]
 
 An input-only attribute must keep at least one write projection (`resource: false` with both `create: false` and `update: false` declares nothing) and cannot carry a `filter` / `sort` declaration (it is not on the resource object to filter or sort by); `Resource.make` throws on either, naming the attribute. `Resource.attributes(R)` returns the resource-object map, without input-only attributes; `Resource.declaredAttributes(R)` returns the map as declared, and that is what `Resource.extend` inherits — so a subtype of `Upload` accepts `file` at create too.
 
-The common helpers compose from a single `attribute(...)` call, so you can define your own sugar:
+The common shapes are option presets for a single `attribute(...)` call, so you can name your own (`as const` keeps the literals `attribute` reads at the type level):
 
 ```ts
-const computed = <S extends Schema.Top>(s: S) =>
-  Resource.attribute(s, { create: false, update: false });
-const createOnly = <S extends Schema.Top>(s: S) => Resource.attribute(s, { update: false });
-const defaulted = <S extends Schema.Top>(s: S) => Resource.attribute(s, { create: "optional" });
-const optional = <S extends Schema.Top>(s: S) =>
-  Resource.attribute(s, { resource: "optional", create: "optional" });
-const inputOnly = <S extends Schema.Top>(s: S) =>
-  Resource.attribute(s, { resource: false, update: false });
+const computed = { create: false, update: false } as const;
+const createOnly = { update: false } as const;
+const defaulted = { create: "optional" } as const;
+const optional = { resource: "optional", create: "optional" } as const;
+const inputOnly = { resource: false, update: false } as const;
+
+const Upload = Resource.make("uploads", {
+  attributes: {
+    checksum: Resource.attribute(Schema.String, computed),
+    fileName: Resource.attribute(Schema.String, createOnly),
+  },
+});
 ```
 
 ### Flat (command-style) payloads
@@ -1135,7 +1139,7 @@ Every endpoint automatically:
 
 A `POST` whose response is lost leaves the client unable to tell "it didn't happen" from "it happened and I didn't hear" — retrying duplicates, not retrying loses the write. `lid` does not help: it correlates resources **within** one request, and says nothing about whether the request already ran.
 
-Opt an endpoint in and it accepts an `Idempotency-Key` request header ([the profile](./docs/idempotency.md)):
+Opt an endpoint in and it accepts an `Idempotency-Key` request header ([the profile](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/idempotency.md)):
 
 ```ts
 const articles = Group.make(
@@ -1162,11 +1166,12 @@ const ApiLive = Layer.mergeAll(ArticlesLive).pipe(
 
 For the atomic extension, one key covers the **whole request** — the extension's own unit of atomicity — and replays the whole `atomic:results` document, which is what makes a replayed `lid` resolve to the id it resolved to the first time.
 
-JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI and defined in full in [`docs/idempotency.md`](./docs/idempotency.md).
+JSON:API v1.1 specifies no idempotency mechanism. The header name and the three statuses are the [IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/)'s convention; the fingerprint, the replay rule, the key's scope and the retention contract are this package's, published as a profile URI and defined in full in [`docs/idempotency.md`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/idempotency.md).
 
 ## 4. Handlers — typed in, validated out
 
 ```ts
+import { Handlers } from "@thomasfosterau/effect-jsonapi"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 
@@ -1249,28 +1254,30 @@ Per-viewer visibility rides along for free: every hop loads through the same aut
 
 Pagination links are built with `Handlers.offsetPaginationLinks` (for `Page.Offset`) and `Handlers.numberPaginationLinks` (for `Page.Number`), which emit the spec's `first` / `prev` / `next` / `last` top-level links from the request's page parameters and the total count. Pass the request's other query parameters as `{ query: Query.canonicalPairs(listQuery)(query) }` and every link carries them too ([the canonical query string](#the-canonical-query-string)).
 
-To name the value a builder returns — e.g. on a helper that assembles documents outside a handler — use `Handlers.DocumentValue<Data, Included?, Meta?>` (the runtime shape, with an optional `jsonapi` member) or the schema-derived `Document.Value<R, Included?, Meta?>`, instead of hand-rolling the `{ data, included?, links?, meta?, jsonapi? }` envelope.
+To name the value a builder returns — e.g. on a helper that assembles documents outside a handler — use `Handlers.DocumentValue<Data, Included?, Meta?, JsonApi?>` (the runtime shape, with an optional `jsonapi` member) or the schema-derived `Document.Value<R, Included?, Meta?>`, instead of hand-rolling the `{ data, included?, links?, meta?, jsonapi? }` envelope.
 
 To serve it (with `@effect/platform-node`):
 
 ```ts
-import { NodeHttpServer, NodeRuntime } from "@effect/platform-node"
-import { Layer } from "effect"
-import { HttpRouter } from "effect/http"
-import { HttpApiBuilder } from "effect/http-api"
+import { NodeHttpServer, NodeRuntime } from "@effect/platform-node";
+import { Middleware } from "@thomasfosterau/effect-jsonapi";
+import { Layer } from "effect";
+import { createServer } from "node:http";
+import { HttpRouter } from "effect/http";
+import { HttpApiBuilder } from "effect/http-api";
 
 const ApiLive = HttpApiBuilder.layer(Api).pipe(
   Layer.provide(ArticlesLive),
-  Layer.provide(Middleware.layer) // content negotiation, JSON:API 400s, a 201's `Location`
-)
+  Layer.provide(Middleware.layer), // content negotiation, JSON:API 400s, a 201's `Location`
+);
 
-// rc.118 builds a fresh router per entrypoint: serve the API layer through
+// Effect 4's HttpApiBuilder builds a fresh router per entrypoint: serve the API layer through
 // `HttpRouter.serve` (or `toWebHandler`), not through a router you provide.
 HttpRouter.serve(ApiLive).pipe(
-  Layer.provide(NodeHttpServer.layer(...)),
+  Layer.provide(NodeHttpServer.layer(createServer, { port: 3000 })),
   Layer.launch,
-  NodeRuntime.runMain
-)
+  NodeRuntime.runMain,
+);
 ```
 
 If you negotiate content outside `HttpApi` — say in a framework hook that owns the URL — `Middleware.negotiate(headers, options?)` runs the §5 rules standalone, returning the offending `ApiError` (`UnsupportedMediaType` / `NotAcceptable`) or `undefined`, and `ApiError.toDocument(error)` renders any `ApiError` to a JSON:API error-document value:
@@ -1337,6 +1344,7 @@ And to call it — the same definitions drive a fully typed client:
 
 ```ts
 import { Client } from "@thomasfosterau/effect-jsonapi"
+import { Effect } from "effect"
 
 const client = yield* Client.make(Api, { baseUrl: "http://localhost:3000" })
 
@@ -1490,7 +1498,7 @@ const message =
   );
 ```
 
-The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response — a supported entry point, not an internal of the cause-based one — so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](./examples/blog/client.ts).
+The decode is genuinely best-effort: a non-conforming body degrades to `Option.none()` rather than throwing a second error inside the error path. `Client.decodeErrorDocument(body)` is the same decoder reached from a **body** rather than a response — a supported entry point, not an internal of the cause-based one — so a façade that synthesises responses locally and never holds an `HttpClientError` decodes through exactly the same seam as the network transport. That is what makes a façade-served error and a network-served error for the same URL indistinguishable to the client. A worked client is in [`examples/blog/client.ts`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/examples/blog/client.ts).
 
 ### The client helpers: error responses, hydration, page cursors
 
@@ -1506,13 +1514,15 @@ import { Client } from "@thomasfosterau/effect-jsonapi";
 const client = yield * Client.make(Api, { baseUrl: "https://example.test", decodeErrors: true });
 const people =
   yield *
-  client.people
-    .list({ query: { limit: 10, offset: 0 } })
-    .pipe(
-      Effect.catchTag("ErrorResponse", (error) =>
-        Effect.fail(new PageError({ status: error.status, message: error.message })),
-      ),
-    );
+  client.people.list({ query: { page: { offset: 0, limit: 10 } } }).pipe(
+    // The client's static error type cannot name `Client.ErrorResponse`, so
+    // match it at runtime with `Client.isErrorResponse`.
+    Effect.mapError((error) =>
+      Client.isErrorResponse(error)
+        ? new PageError({ status: error.status, message: error.message })
+        : error,
+    ),
+  );
 
 // the page math, from the real unpaged total the server reports
 const total = Client.readTotalCount(people); // meta.totalCount, 0 when absent
@@ -1546,6 +1556,7 @@ A _flat_ contract is one whose list inputs are one struct the rest of the applic
 
 ```ts
 import { FlatQuery, Group, Include, Resource } from "@thomasfosterau/effect-jsonapi";
+import { Schema } from "effect";
 
 const ListPeople = FlatQuery.listInput({ maxLimit: 100 }, { q: Schema.optionalKey(Schema.String) });
 //    { offset: 0, limit: 50, sort?: SortField[], q?: string } once decoded
@@ -1570,7 +1581,7 @@ The documents the endpoints declare are the **wire** form of the resource (`Docu
 `ServerErrors` holds the catalogue an operation fails with (`NotFound`, `Unauthorized`, `Forbidden`, `Redirect`, `HttpError`, `ValidationFailure`), the `JsonapiError` carrier for a one-off, and `fromTaggedError`, which maps any of them — and any `ApiError.make` class, `ApiError.Conflict` and the package's own include / sort errors included — to its error document. `respond` wraps a handler with it:
 
 ```ts
-import { Option } from "effect";
+import { Effect, Option } from "effect";
 import { ServerErrors } from "@thomasfosterau/effect-jsonapi";
 
 const boundary = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -1681,7 +1692,7 @@ const peopleFamily = {
 } satisfies Registry.FamilyFor<typeof peopleGroup>  // every handler's success channel checked
                                                     // against its endpoint's declared document
 
-const { handler } = Registry.webHandler(Api, [peopleFamily, contestsFamily], {
+const { handler } = Registry.webHandler(Api, [peopleFamily, articlesFamily /* built the same way */], {
   respond: boundary,
 })
 // (request: Request, context: Context<User | Database | …>) => Promise<Response>
@@ -1692,6 +1703,7 @@ Every write runs its operation inside `transact`, re-reads the row as the writer
 A committed write the writer can no longer read would otherwise answer 404, and a client retrying a "failed" create duplicates it. `hiddenWrite` names the re-read failures that mean "hidden", and the handler answers those with the resource's identifier instead: `201` / `200` with `{ data: { type, id, meta: { version } } }` and no attributes (attributes and relationships are optional members of a resource object), `version` coming from the operation's write result when it reports one. The group must declare that document, with `hiddenWrites: true`; without it the writes declare the full document alone, and `Registry.FamilyFor` rejects a handler set that could answer anything else:
 
 ```ts
+import { Group, ResourceHandlers } from "@thomasfosterau/effect-jsonapi";
 import { Predicate } from "effect";
 
 const { group } = Group.flat({
@@ -1721,11 +1733,11 @@ Without a `transact`, each operation is its own autocommitted write: an interrup
 | `fields[TYPE]` | `?fields[articles]=title,body` | `{ articles?: ReadonlyArray<"title" \| "body" \| …> }` — closed per-type key sets |
 | `sort` | `?sort=-createdAt,title` | `[{ field: "createdAt", direction: "desc" }, …]` |
 | `page[*]` | `?page[offset]=0&page[limit]=10` | `{ offset?: number, limit?: number }` (`Page.Offset`, `Page.Number`, `Page.Cursor`, or custom) |
-| `filter[*]` | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](./docs/filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
+| `filter[*]` | `?filter[status]=open&filter[age][gt]=18` | `Filter.Ast` — one root node over the declared fields ([the filter grammar](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md), `filter: true`); fails closed on undeclared fields, operators and literals. Or a user-defined schema per key (`filter: { q: … }`) |
 
 Unknown include paths, unknown sparse-fieldset names, unknown sort fields, and — under the grammar — unknown filter fields, undeclared operators and bad literals fail decoding, which the schema-error middleware turns into a spec-compliant **400 JSON:API error document** whose error objects carry `source.parameter` naming the offending key (`filter[age][gt]`, `page[limit]`) — and, where the schema publishes what it would have accepted, the legal vocabulary as `meta`: a rejected `include` path carries `meta.includablePaths` (the endpoint's whole supported set, as `ApiError.UnsupportedIncludePath` does) and an unknown `sort` field `meta.sortableFields`, so a caller that guessed wrong needs no second request. HttpApi decodes a request with `errors: "first"`, so a query yields one error object — except the `filter` family, whose codec reports every offending key together.
 
-Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](./docs/filter-grammar.md) §2). Encoding always emits the single comma form.
+Every comma-separated family also accepts the repeated-key spelling `UrlParams.toRecord` produces for a repeated key — `?sort=-createdAt&sort=title` decodes the same as `?sort=-createdAt,title`, and likewise for `include` and `fields[TYPE]` — in any mix of the two, and `filter[*]` accepts a repeated key at its list-valued positions ([the filter grammar](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md) §2). Encoding always emits the single comma form.
 
 A parameter the endpoint's query does not declare never reaches the handler: decoding drops it, on an endpoint whose query declares no family at all (its decoded `query` is then `{}`) as on any other, and no spelling of one — a bare name next to its bracketed members, empty brackets, deeper nesting — can make the query fail to decode ([#260](https://github.com/thomasfosterau/effect-jsonapi/issues/260)).
 
@@ -1743,6 +1755,7 @@ Filterability is a per-resource property, declared per attribute: which attribut
 
 ```ts
 import { Filter, Relationship, Resource, Sort } from "@thomasfosterau/effect-jsonapi";
+import { Schema } from "effect";
 
 const Product = Resource.make("products", {
   attributes: {
@@ -1796,9 +1809,9 @@ Endpoint.list(Product, { sort: Resource.sortable(Product), page: Query.Page.Offs
 // ?sort=-createdAt,priceCents decodes; ?sort=name is a 400
 ```
 
-What a sorted collection must look like is [§10 of the profile](./docs/filter-grammar.md#10-sort-order), and it is the handler's job to produce it: ascending by each field's JSON value under the filter grammar's own comparison domain (numeric; code-point order for strings — no locale collation; ISO-8601 text for dates), NULLs (an absent attribute or `null`) **last** ascending and first descending, several fields lexicographically in the order given, and — a SHOULD — remaining ties broken by `id`, so the order is the same on every request and offset pagination over it neither repeats nor skips a resource.
+What a sorted collection must look like is [§10 of the profile](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md#10-sort-order), and it is the handler's job to produce it: ascending by each field's JSON value under the filter grammar's own comparison domain (numeric; code-point order for strings — no locale collation; ISO-8601 text for dates), NULLs (an absent attribute or `null`) **last** ascending and first descending, several fields lexicographically in the order given, and — a SHOULD — remaining ties broken by `id`, so the order is the same on every request and offset pagination over it neither repeats nor skips a resource.
 
-`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the grammar in [`docs/filter-grammar.md`](./docs/filter-grammar.md). `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form (`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node, with `field` narrowed to the declared names and every literal decoded through its attribute schema:
+`filter: true` on a list endpoint turns on the `filter` query codec over this declaration — the grammar in [`docs/filter-grammar.md`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md). `filter[f]=v` is `eq`, `filter[f]=a,b` is `in`, `filter[f][gt]=v` any operator, and a Drupal-style group form (`filter[g][group][conjunction]=OR`, `filter[c][condition][path]=…`) spells `OR`, `NOT`, nesting and repeated `(field, operator)` pairs. Handlers receive one decoded, normalised `Filter.Ast` root node, with `field` narrowed to the declared names and every literal decoded through its attribute schema:
 
 ```ts
 Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Query.Page.Offset });
@@ -1815,7 +1828,7 @@ Endpoint.list(Product, { filter: true, sort: Resource.sortable(Product), page: Q
 
 The grammar is a JSON:API **profile**, `Filter.PROFILE_URI` (`https://thomasfosterau.github.io/effect-jsonapi/profiles/filter-grammar/v1`). Advertise it on the media type of responses from endpoints that speak it — `Content-Type: application/vnd.api+json; profile="…"` — clients that do not name it are served the same way, since unknown profiles are ignored, never rejected.
 
-The profile defines what a tree **means**, not only how it is spelled: [§6 of the grammar](./docs/filter-grammar.md#6-semantics) is the normative semantics — three-valued (Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each attribute type, and the line between a 400 and an empty result. Handlers are what evaluate a tree, so that section is the contract they answer to; this package builds, validates and canonicalises trees and evaluates none.
+The profile defines what a tree **means**, not only how it is spelled: [§6 of the grammar](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md#6-semantics) is the normative semantics — three-valued (Kleene) logic, a truth table per operator including every NULL case, the comparison domain of each attribute type, and the line between a 400 and an empty result. Handlers are what evaluate a tree, so that section is the contract they answer to; this package builds, validates and canonicalises trees and evaluates none.
 
 ### The canonical query string
 
@@ -1835,7 +1848,7 @@ canonical(query);
 // → "include=author&fields[articles]=title&filter[status]=open&sort=-createdAt&page[offset]=0&page[limit]=10"
 ```
 
-The order is `include`; `fields[*]` sorted by type; `filter[*]` in [the grammar's canonical order](./docs/filter-grammar.md#33-key-order-and-ids) (shorthand sorted by key, the group form in the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit` — what the link builders emit); then any other key, sorted. Keys and values go through `encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,` alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and `Query.serialise(pairs)` the encoding on its own.
+The order is `include`; `fields[*]` sorted by type; `filter[*]` in [the grammar's canonical order](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/filter-grammar.md#33-key-order-and-ids) (shorthand sorted by key, the group form in the encoder's pre-order); `sort`; `page[*]` in the page strategy's declared order (`offset, limit` — what the link builders emit); then any other key, sorted. Keys and values go through `encodeURIComponent` (spaces `%20`, commas `%2C` — a list's separator and the grammar's `\,` alike), with `[` / `]` left readable in keys; `URLSearchParams` / `UrlParams` decode the result back identically. `Query.canonicalPairs(schema)` is the ordered pair list before serialisation and `Query.serialise(pairs)` the encoding on its own.
 
 The pagination link builders serialise the same way and take the other pairs as an option, so every link carries the full query with its page cursor slotted in:
 
@@ -2075,17 +2088,17 @@ Use `Conformance.assert(report)` as a gate: it fails with a `ContractViolation` 
 - `skip` — rule-id prefixes to leave out, the complement of `only` and matched the same way, by path segment: an entry matches the rule with that id and every rule whose id continues it with `/`, so `skip: ["spec/status/create-location"]` leaves out that rule alone, keeping `spec/status/create-location-matches-self`, and a partial segment (`"spec/content-neg"`) matches nothing. `skip: ["spec/pagination/links-enumerate-collection", "spec/links/"]` leaves out the pagination walk and the link crawl, the rules that make the most requests. It removes rules from what `tiers` and `only` select, and a rule it leaves out is absent from the report, as one `only` does not select is.
 - `requestTimeout` — a `Duration.Input` (`"10 seconds"`) bounding each request, its body included; each redirect hop gets its own. A request still unanswered then is aborted and reads as a lost response naming the timeout, which every rule treats as any transport error. Thirty seconds by default, for `verify` and `verifyWith` alike; `requestTimeout: "Infinity"` (or `Duration.infinity`) turns it off, so the kit waits as long as the transport does. A duration that is not positive, or one `Duration` cannot read (e.g. `"1e3 seconds"`), is a defect.
 
-Full design note, including the coverage ledger and what it would take to close each gap: [`docs/conformance.md`](./docs/conformance.md).
+Full design note, including the coverage ledger and what it would take to close each gap: [`docs/conformance.md`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/conformance.md).
 
 ## Examples
 
-Complete runnable examples (resources, errors, api, in-memory handlers) live in [`examples`](./examples). Each is a **standalone package** in the pnpm workspace — it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you can lift any one out as a starting point. Run them all from the repo root with `vp run -r test:unit`, or a single one with `vp run --filter ./examples/northwind test:unit`.
+Complete runnable examples (resources, errors, api, in-memory handlers) live in [`examples`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples). Each is a **standalone package** in the pnpm workspace — it depends on `@thomasfosterau/effect-jsonapi` and carries its own tests, so you can lift any one out as a starting point. Run them all from the repo root with `vp run -r test:unit`, or a single one with `vp run --filter ./examples/northwind test:unit`.
 
 | Example | What it shows | Test |
 | --- | --- | --- |
-| [`examples/blog`](./examples/blog) | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution | [`blog/test`](./examples/blog/test) |
-| [`examples/github`](./examples/github) | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types | [`github/test`](./examples/github/test) |
-| [`examples/northwind`](./examples/northwind) | A Northwind Traders e-commerce API: categories, suppliers, shippers, customers, territories, employees, products, orders and line items; all four relationship kinds laid out as an acyclic graph (required `category`/`supplier`/`customer`/`employee`, nullable `shipper`, inlined `territories`, a paginated line-item feed); the reverse directions (a category's products, a customer's orders) and the self-referential reporting hierarchy modelled as `filter[…]` collection endpoints; product CRUD with typed numeric price-range filters; offset/limit pagination; territory assignment and order shipping via relationship endpoints; 404/409 domain errors; global catalog search across three resource types | [`northwind/test`](./examples/northwind/test) |
+| [`examples/blog`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples/blog) | The classic JSON:API blog: articles, people, tags, comments; full CRUD; a required (`one`) author, inlined (`many`) tags and a paginated comment feed with attach/detach relationship endpoints; heterogeneous search; an atomic operations endpoint with all-or-nothing semantics and lid resolution | [`blog/test`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples/blog/test) |
+| [`examples/github`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples/github) | A GitHub-like API: users, repositories, issues, issue comments, pull requests, labels; all four relationship kinds (required `owner`/`author`, nullable `assignee`, inlined `labels`, paginated `comments`); issue triage via relationship endpoints (assign/unassign, add/remove/replace labels); 2-hop include paths (`repository.owner`); per-group endpoint subsets; typed filters over closed attribute sets; page-number pagination; 403/404/422 domain errors; global search across three resource types | [`github/test`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples/github/test) |
+| [`examples/northwind`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples/northwind) | A Northwind Traders e-commerce API: categories, suppliers, shippers, customers, territories, employees, products, orders and line items; all four relationship kinds laid out as an acyclic graph (required `category`/`supplier`/`customer`/`employee`, nullable `shipper`, inlined `territories`, a paginated line-item feed); the reverse directions (a category's products, a customer's orders) and the self-referential reporting hierarchy modelled as `filter[…]` collection endpoints; product CRUD with typed numeric price-range filters; offset/limit pagination; territory assignment and order shipping via relationship endpoints; 404/409 domain errors; global catalog search across three resource types | [`northwind/test`](https://github.com/thomasfosterau/effect-jsonapi/tree/trunk/examples/northwind/test) |
 
 ## Metadata
 
@@ -2125,7 +2138,7 @@ The type-only aliases at the package root (`QuerySchema`, `ContentNegotiation`, 
 
 ## Limitations
 
-- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling, pagination links (following `next` must enumerate the collection), resource `self` and relationship `related` links (each followed must answer resource data, a `self` the resource it names, and a `related` should answer the resources its linkage names) the filter grammar profile and its sort order (`?sort=f` and `?sort=-f` must order by `f`'s JSON value, NULLs last ascending). Filter _evaluation_ semantics, the write rules beyond the success responses (conflicts, client-generated ids, relationship mutation) and relationship / top-level `self` links are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](./docs/conformance.md).
+- **Conformance coverage is partial, and says so**: the kit covers content negotiation, document structure, error objects, query-parameter handling, pagination links (following `next` must enumerate the collection), resource `self` and relationship `related` links (each followed must answer resource data, a `self` the resource it names, and a `related` should answer the resources its linkage names) the filter grammar profile and its sort order (`?sort=f` and `?sort=-f` must order by `f`'s JSON value, NULLs last ascending). Filter _evaluation_ semantics, the write rules beyond the success responses (conflicts, client-generated ids, relationship mutation) and relationship / top-level `self` links are declared gaps rather than silent omissions — see `Conformance.gaps` and [`docs/conformance.md`](https://github.com/thomasfosterau/effect-jsonapi/blob/trunk/docs/conformance.md).
 - **Sparse fieldsets are opt-in, not automatic**: `?fields[TYPE]=` is decoded, validated and handed to your handler, and the builders project it when you ask them to — `Handlers.data(article, { included, onResource: Handlers.project(query.fields) })` ([the per-resource transform pass](#the-per-resource-transform-pass-onresource)). Nothing is projected behind your back; the builders don't post-process responses against request state on their own. The default document of an endpoint declaring `fields` admits the projected answer, so its clients read those attributes as optional ([sparse fieldsets and the default document](#sparse-fieldsets-and-the-default-document)). Relationship fields (`?fields[articles]=author`) are out of scope: `Query.Fieldset` is built from the resource's attributes, so a relationship name cannot be requested.
 - **Graph-derived include paths are typed to a depth of 2 hops** (`"comments.author"` works, `"comments.author.employer"` doesn't) — a TypeScript recursion-depth trade-off; `{ depth: 3 }` raises it one hop, and the runtime validation matches the same set. Declaring the surface explicitly with `Include.make` lifts the ceiling altogether (up to `Include.MAX_DEPTH`), because the derivation then recurses over the declaration rather than the graph.
 - **Server-side `included` narrowing is not possible**: a handler's return type cannot depend on the runtime value of `?include=` (that's dependent typing). Client-side narrowing is provided via `Client.narrowIncluded`.
