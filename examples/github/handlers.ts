@@ -35,7 +35,17 @@ import {
 import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Filter, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
-import { Api, FilterProfile } from "./api.js";
+import {
+  Api,
+  FilterProfile,
+  IssueCommentsQuery,
+  IssueCommentsRelationshipQuery,
+  IssuesQuery,
+  PullsQuery,
+  RepositoriesQuery,
+  SearchQuery,
+  UsersQuery,
+} from "./api.js";
 import {
   IssueLocked,
   IssueNotFound,
@@ -620,7 +630,9 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
       return Effect.succeed(
         Handlers.collection(page, {
           meta: { total },
-          links: Handlers.numberPaginationLinks("/users", { number, size }, total),
+          links: Handlers.numberPaginationLinks("/users", { number, size }, total, {
+            query: Query.canonicalPairs(UsersQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -683,7 +695,9 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
               ? undefined
               : page.flatMap((repository) => resolveRepositoryIncluded(repository, query.include)),
           meta: { total },
-          links: Handlers.numberPaginationLinks("/repositories", { number, size }, total),
+          links: Handlers.numberPaginationLinks("/repositories", { number, size }, total, {
+            query: Query.canonicalPairs(RepositoriesQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -790,7 +804,9 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
               ? undefined
               : page.flatMap((issue) => resolveIssueIncluded(issue, query.include)),
           meta: { total },
-          links: Handlers.numberPaginationLinks("/issues", { number, size }, total),
+          links: Handlers.numberPaginationLinks("/issues", { number, size }, total, {
+            query: Query.canonicalPairs(IssuesQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -863,7 +879,9 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
                     })
                   : [],
             meta: { total },
-            links: Handlers.numberPaginationLinks(path, { number, size }, total),
+            links: Handlers.numberPaginationLinks(path, { number, size }, total, {
+              query: Query.canonicalPairs(IssueCommentsQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           });
         }),
@@ -880,7 +898,9 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           return Handlers.linkage(page, {
             related: Handlers.relatedLink("issues", issue.id, "comments"),
             meta: { total },
-            links: Handlers.numberPaginationLinks(path, { number, size }, total),
+            links: Handlers.numberPaginationLinks(path, { number, size }, total, {
+              query: Query.canonicalPairs(IssueCommentsRelationshipQuery)(query),
+            }),
             jsonapi: Document.v1_1,
           });
         }),
@@ -1015,7 +1035,9 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
               ? undefined
               : page.flatMap((pull) => resolvePullIncluded(pull, query.include)),
           meta: { total },
-          links: Handlers.numberPaginationLinks("/pulls", { number, size }, total),
+          links: Handlers.numberPaginationLinks("/pulls", { number, size }, total, {
+            query: Query.canonicalPairs(PullsQuery)(query),
+          }),
           jsonapi: Document.v1_1,
         }),
       );
@@ -1065,7 +1087,9 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
                     : [],
               ),
         meta: { total },
-        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total),
+        links: Handlers.offsetPaginationLinks("/search", { offset, limit }, total, {
+          query: Query.canonicalPairs(SearchQuery)(query),
+        }),
         onResource: Handlers.project(query.fields),
         jsonapi: Document.v1_1,
       }),

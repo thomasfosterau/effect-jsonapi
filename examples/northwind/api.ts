@@ -38,6 +38,7 @@ import {
   Customer,
   Employee,
   Order,
+  OrderItem,
   Product,
   Shipper,
   Supplier,
@@ -66,6 +67,125 @@ export type PageMeta = typeof PageMeta.Type;
  */
 export const Pagination = Query.Page.offset({ maxLimit: 100 });
 
+// ---------------------------------------------------------------------------
+// Paginated query schemas
+// ---------------------------------------------------------------------------
+//
+// Each paginated endpoint's query schema is built once, here, and shared with
+// its handler, which spells the pagination links from it:
+// `Handlers.offsetPaginationLinks(path, page, total, { query:
+// Query.canonicalPairs(CategoriesQuery)(query) })`. A link's query and the
+// query the endpoint decodes then come from one schema, so `next` is the same
+// `sort` / `filter` / `include` / `fields` on the next page. A list endpoint
+// takes the schema as its `query`; the related, relationship and search
+// endpoints take no `query` override, so they are handed the same options
+// object the schema is built from and derive the identical schema.
+
+const categoriesQueryOptions = {
+  sort: ["name"],
+  page: Pagination,
+} as const;
+/** The query `GET /categories` decodes. */
+export const CategoriesQuery = Query.schema(Category, categoriesQueryOptions);
+
+const suppliersQueryOptions = {
+  sort: ["companyName", "country"],
+  page: Pagination,
+  filter: {
+    country: Schema.optionalKey(Schema.String),
+  },
+} as const;
+/** The query `GET /suppliers` decodes. */
+export const SuppliersQuery = Query.schema(Supplier, suppliersQueryOptions);
+
+const shippersQueryOptions = {
+  sort: ["companyName"],
+  page: Pagination,
+} as const;
+/** The query `GET /shippers` decodes. */
+export const ShippersQuery = Query.schema(Shipper, shippersQueryOptions);
+
+const territoriesQueryOptions = {
+  sort: ["description", "region"],
+  page: Pagination,
+  filter: {
+    region: Schema.optionalKey(Schema.String),
+  },
+} as const;
+/** The query `GET /territories` decodes. */
+export const TerritoriesQuery = Query.schema(Territory, territoriesQueryOptions);
+
+const customersQueryOptions = {
+  sort: ["companyName", "country"],
+  page: Pagination,
+  filter: {
+    country: Schema.optionalKey(Schema.String),
+  },
+} as const;
+/** The query `GET /customers` decodes. */
+export const CustomersQuery = Query.schema(Customer, customersQueryOptions);
+
+const productsQueryOptions = {
+  include: true,
+  sort: ["name", "unitPrice", "unitsInStock"],
+  page: Pagination,
+  filter: {
+    category: Schema.optionalKey(Schema.String),
+    supplier: Schema.optionalKey(Schema.String),
+    discontinued: Schema.optionalKey(Schema.Literals(["true", "false"])),
+    minPrice: Schema.optionalKey(Schema.FiniteFromString),
+    maxPrice: Schema.optionalKey(Schema.FiniteFromString),
+  },
+} as const;
+/** The query `GET /products` decodes. */
+export const ProductsQuery = Query.schema(Product, productsQueryOptions);
+
+const employeesQueryOptions = {
+  include: true,
+  sort: ["lastName", "hireDate"],
+  page: Pagination,
+  filter: {
+    manager: Schema.optionalKey(Schema.String),
+  },
+} as const;
+/** The query `GET /employees` decodes. */
+export const EmployeesQuery = Query.schema(Employee, employeesQueryOptions);
+
+const ordersQueryOptions = {
+  include: true,
+  sort: ["orderDate", "requiredDate", "freight"],
+  page: Pagination,
+  filter: {
+    customer: Schema.optionalKey(Schema.String),
+    employee: Schema.optionalKey(Schema.String),
+    shipped: Schema.optionalKey(Schema.Literals(["true", "false"])),
+    country: Schema.optionalKey(Schema.String),
+  },
+} as const;
+/** The query `GET /orders` decodes. */
+export const OrdersQuery = Query.schema(Order, ordersQueryOptions);
+
+const orderLineItemsQueryOptions = { include: true, page: Pagination } as const;
+/** The query `GET /orders/:id/lineItems` decodes. */
+export const OrderLineItemsQuery = Query.schema(OrderItem, orderLineItemsQueryOptions);
+
+const orderLineItemsRelationshipQueryOptions = { page: Pagination } as const;
+/** The query `GET /orders/:id/relationships/lineItems` decodes. */
+export const OrderLineItemsRelationshipQuery = Query.schema(
+  OrderItem,
+  orderLineItemsRelationshipQueryOptions,
+);
+
+const searchResources = [Product, Customer, Supplier] as const;
+const searchQueryOptions = {
+  filter: { q: Schema.String },
+  include: true,
+  fields: true,
+  page: Pagination,
+} as const;
+/** The query `GET /search` decodes. */
+export const SearchQuery = Query.schema(searchResources, searchQueryOptions);
+
 export const categories = Group.make(
   Category,
   // GET /categories/:id
@@ -74,8 +194,8 @@ export const categories = Group.make(
   }),
   // GET /categories?sort=name&page[offset]=0&page[limit]=10
   Endpoint.list(Category, {
-    sort: ["name"],
-    page: Pagination,
+    ...categoriesQueryOptions,
+    query: CategoriesQuery,
     meta: PageMeta,
   }),
 );
@@ -88,11 +208,8 @@ export const suppliers = Group.make(
   }),
   // GET /suppliers?filter[country]=UK&sort=companyName
   Endpoint.list(Supplier, {
-    sort: ["companyName", "country"],
-    page: Pagination,
-    filter: {
-      country: Schema.optionalKey(Schema.String),
-    },
+    ...suppliersQueryOptions,
+    query: SuppliersQuery,
     meta: PageMeta,
   }),
 );
@@ -105,8 +222,8 @@ export const shippers = Group.make(
   }),
   // GET /shippers
   Endpoint.list(Shipper, {
-    sort: ["companyName"],
-    page: Pagination,
+    ...shippersQueryOptions,
+    query: ShippersQuery,
     meta: PageMeta,
   }),
 );
@@ -119,11 +236,8 @@ export const territories = Group.make(
   }),
   // GET /territories?filter[region]=Eastern
   Endpoint.list(Territory, {
-    sort: ["description", "region"],
-    page: Pagination,
-    filter: {
-      region: Schema.optionalKey(Schema.String),
-    },
+    ...territoriesQueryOptions,
+    query: TerritoriesQuery,
     meta: PageMeta,
   }),
 );
@@ -136,11 +250,8 @@ export const customers = Group.make(
   }),
   // GET /customers?filter[country]=Germany&sort=companyName
   Endpoint.list(Customer, {
-    sort: ["companyName", "country"],
-    page: Pagination,
-    filter: {
-      country: Schema.optionalKey(Schema.String),
-    },
+    ...customersQueryOptions,
+    query: CustomersQuery,
     meta: PageMeta,
   }),
 );
@@ -158,16 +269,8 @@ export const products = Group.make(
   // endpoint also serves the reverse "products in a category / from a supplier"
   // lookups via filter[category] / filter[supplier].
   Endpoint.list(Product, {
-    include: true,
-    sort: ["name", "unitPrice", "unitsInStock"],
-    page: Pagination,
-    filter: {
-      category: Schema.optionalKey(Schema.String),
-      supplier: Schema.optionalKey(Schema.String),
-      discontinued: Schema.optionalKey(Schema.Literals(["true", "false"])),
-      minPrice: Schema.optionalKey(Schema.FiniteFromString),
-      maxPrice: Schema.optionalKey(Schema.FiniteFromString),
-    },
+    ...productsQueryOptions,
+    query: ProductsQuery,
     meta: PageMeta,
   }),
   // POST /products → 201 (category and supplier are required relationships)
@@ -205,12 +308,8 @@ export const employees = Group.make(
   }),
   // GET /employees?filter[manager]=2 — an employee's direct reports
   Endpoint.list(Employee, {
-    include: true,
-    sort: ["lastName", "hireDate"],
-    page: Pagination,
-    filter: {
-      manager: Schema.optionalKey(Schema.String),
-    },
+    ...employeesQueryOptions,
+    query: EmployeesQuery,
     meta: PageMeta,
   }),
   // --- Relationship (linkage) endpoints: territory assignment -----------------
@@ -242,15 +341,8 @@ export const orders = Group.make(
   }),
   // GET /orders?filter[customer]=1&filter[shipped]=false&sort=-orderDate
   Endpoint.list(Order, {
-    include: true,
-    sort: ["orderDate", "requiredDate", "freight"],
-    page: Pagination,
-    filter: {
-      customer: Schema.optionalKey(Schema.String),
-      employee: Schema.optionalKey(Schema.String),
-      shipped: Schema.optionalKey(Schema.Literals(["true", "false"])),
-      country: Schema.optionalKey(Schema.String),
-    },
+    ...ordersQueryOptions,
+    query: OrdersQuery,
     meta: PageMeta,
   }),
   // POST /orders → 201 (customer and employee are required relationships)
@@ -267,8 +359,7 @@ export const orders = Group.make(
   // points at, with the line item's product (and, a hop further, its category
   // or supplier) brought in as a compound document
   Endpoint.related(Order, "lineItems", {
-    include: true,
-    page: Pagination,
+    ...orderLineItemsQueryOptions,
     meta: PageMeta,
     errors: [OrderNotFound],
   }),
@@ -277,7 +368,7 @@ export const orders = Group.make(
   // line-item identifiers, paginated: what the `lineItems` relationship's
   // `self` link points at
   Endpoint.getRelationship(Order, "lineItems", {
-    page: Pagination,
+    ...orderLineItemsRelationshipQueryOptions,
     errors: [OrderNotFound],
   }),
   // GET /orders/:id/relationships/shipper — the shipper identifier (or null)
@@ -298,13 +389,10 @@ export const orders = Group.make(
 export const search = Group.make(
   "search",
   // GET /search?filter[q]=chai&include=category&page[offset]=0&page[limit]=10
-  Endpoint.collection([Product, Customer, Supplier], {
+  Endpoint.collection(searchResources, {
+    ...searchQueryOptions,
     name: "search",
     path: "/search",
-    filter: { q: Schema.String },
-    include: true,
-    fields: true,
-    page: Pagination,
     meta: PageMeta,
   }),
 );
