@@ -49,6 +49,7 @@ import {
 import {
   IssueLocked,
   IssueNotFound,
+  LabelNotFound,
   PullRequestNotFound,
   RepositoryNameTaken,
   RepositoryNotFound,
@@ -339,6 +340,18 @@ const loadUnlockedIssue = (id: string): Effect.Effect<Issue, IssueNotFound | Iss
         : Effect.succeed(issue),
     ),
   );
+
+/**
+ * Fails with `LabelNotFound` for the first identifier the store holds no label
+ * for — a relationship write naming a label that does not exist answers 404
+ * (JSON:API §Updating Relationships) rather than linking it.
+ */
+const requireLabels = (
+  identifiers: ReadonlyArray<{ readonly id: string }>,
+): Effect.Effect<void, LabelNotFound> => {
+  const missing = identifiers.find((identifier) => !store.labels.has(identifier.id));
+  return missing === undefined ? Effect.void : Effect.fail(new LabelNotFound({ id: missing.id }));
+};
 
 const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> => {
   const pull = store.pulls.get(id);
@@ -942,6 +955,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
     // PATCH /issues/:id/relationships/labels — replace all labels
     .handle("updateLabelsRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
+        Effect.tap(() => requireLabels(payload.data)),
         Effect.map((issue) => {
           const updated = Issue.make({
             ...issue,
@@ -958,6 +972,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
     // POST /issues/:id/relationships/labels — add labels
     .handle("addLabelsRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
+        Effect.tap(() => requireLabels(payload.data)),
         Effect.map((issue) => {
           const existing = issue.relationships?.labels.data ?? [];
           const known = new Set<string>(existing.map((identifier) => identifier.id));

@@ -24,7 +24,13 @@ import { Effect, Layer, Match } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
-import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js";
+import {
+  ArticleNotFound,
+  CommentNotFound,
+  OperationFailed,
+  PersonNotFound,
+  TitleTaken,
+} from "./errors.js";
 import { Article, Comment, Person, Tag } from "./resources.js";
 
 /**
@@ -124,6 +130,18 @@ export const discardArticle = (id: string): Effect.Effect<void> =>
 const loadArticle = (id: string): Effect.Effect<Article, ArticleNotFound> => {
   const article = store.articles.get(id);
   return article === undefined ? Effect.fail(new ArticleNotFound({ id })) : Effect.succeed(article);
+};
+
+// A relationship write naming a resource the store does not hold answers 404
+// (JSON:API §Updating Relationships) rather than linking it.
+const requirePerson = (id: string): Effect.Effect<void, PersonNotFound> =>
+  store.people.has(id) ? Effect.void : Effect.fail(new PersonNotFound({ id }));
+
+const requireComments = (
+  identifiers: ReadonlyArray<{ readonly id: string }>,
+): Effect.Effect<void, CommentNotFound> => {
+  const missing = identifiers.find((identifier) => !store.comments.has(identifier.id));
+  return missing === undefined ? Effect.void : Effect.fail(new CommentNotFound({ id: missing.id }));
 };
 
 // Resolve the resources referenced by the requested include paths.
@@ -327,6 +345,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     )
     .handle("updateAuthorRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
+        Effect.tap(() => requirePerson(payload.data.id)),
         Effect.map((article) => {
           const updated = Article.make({
             ...article,
@@ -343,6 +362,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     )
     .handle("addCommentsRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
+        Effect.tap(() => requireComments(payload.data)),
         Effect.map((article) => {
           const linked = store.articleComments.get(article.id) ?? [];
           for (const identifier of payload.data) {

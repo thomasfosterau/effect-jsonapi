@@ -13,6 +13,22 @@ export class ArticleNotFound extends ApiError.make<ArticleNotFound>()("ArticleNo
   detail: (e) => `Article ${e.id} not found`,
 }) {}
 
+export class PersonNotFound extends ApiError.make<PersonNotFound>()("PersonNotFound", {
+  status: 404,
+  code: "person_not_found",
+  title: "Person not found",
+  fields: { id: Schema.String },
+  detail: (e) => `Person ${e.id} not found`,
+}) {}
+
+export class CommentNotFound extends ApiError.make<CommentNotFound>()("CommentNotFound", {
+  status: 404,
+  code: "comment_not_found",
+  title: "Comment not found",
+  fields: { id: Schema.String },
+  detail: (e) => `Comment ${e.id} not found`,
+}) {}
+
 export class TitleTaken extends ApiError.make<TitleTaken>()("TitleTaken", {
   status: 409,
   code: "title_taken",

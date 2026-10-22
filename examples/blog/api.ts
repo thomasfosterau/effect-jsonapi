@@ -6,7 +6,13 @@
 import { Schema } from "effect";
 import { HttpApi } from "effect/http-api";
 import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
-import { ArticleNotFound, OperationFailed, TitleTaken } from "./errors.js";
+import {
+  ArticleNotFound,
+  CommentNotFound,
+  OperationFailed,
+  PersonNotFound,
+  TitleTaken,
+} from "./errors.js";
 import { Article, Comment, Person } from "./resources.js";
 
 /**
@@ -115,11 +121,11 @@ export const articles = Group.make(
   }),
   // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
   Endpoint.updateRelationship(Article, "author", {
-    errors: [ArticleNotFound],
+    errors: [ArticleNotFound, PersonNotFound],
   }),
   // POST /articles/:id/relationships/comments — attach existing comments
   Endpoint.addRelationship(Article, "comments", {
-    errors: [ArticleNotFound],
+    errors: [ArticleNotFound, CommentNotFound],
   }),
   // DELETE /articles/:id/relationships/comments — detach comments → 204
   Endpoint.removeRelationship(Article, "comments", {
