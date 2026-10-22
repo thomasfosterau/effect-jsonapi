@@ -232,6 +232,14 @@ export type Role =
   | "operations"
   | "unknown";
 
+/**
+ * How many identifiers a relationship holds: one (a resource identifier or
+ * `null`), many (an array of them), or not shown.
+ *
+ * @internal
+ */
+export type Cardinality = "one" | "many" | "unshown";
+
 /** @internal */
 export interface Discovered {
   readonly group: string;
@@ -239,6 +247,14 @@ export interface Discovered {
   readonly method: string;
   readonly path: string;
   readonly role: Role;
+  /**
+   * For a `relationship` endpoint, the cardinality its success schema
+   * declares: `"one"` when the linkage document's `data` encodes as an
+   * identifier or `null`, `"many"` when it encodes as an array, and
+   * `"unshown"` when the schema cannot be read that way (a hand-built or
+   * `Schema.Unknown` success, say). `"unshown"` for every other role.
+   */
+  readonly linkage: Cardinality;
   /** The first literal path segment — the resource type under the conventional paths. */
   readonly segment: string | undefined;
   readonly params: ReadonlyArray<string>;
@@ -369,6 +385,42 @@ const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
   }
 };
 
+/** The one cardinality every entry shows, or `"unshown"` when they differ or there are none. */
+const agreed = (all: ReadonlyArray<Cardinality>): Cardinality => {
+  const first = all[0];
+  return first !== undefined && all.every((cardinality) => cardinality === first)
+    ? first
+    : "unshown";
+};
+
+/** How many identifiers resource linkage of this schema's wire shape holds. */
+const linkageCardinality = (ast: SchemaAST.AST): Cardinality => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return linkageCardinality(encoded.thunk());
+  if (SchemaAST.isArrays(encoded)) return "many";
+  if (SchemaAST.isNull(encoded) || SchemaAST.isObjects(encoded)) return "one";
+  return SchemaAST.isUnion(encoded) ? agreed(encoded.types.map(linkageCardinality)) : "unshown";
+};
+
+/** How many identifiers a linkage document schema's `data` declares. */
+const documentCardinality = (ast: SchemaAST.AST): Cardinality => {
+  const encoded = SchemaAST.toEncoded(ast);
+  if (SchemaAST.isSuspend(encoded)) return documentCardinality(encoded.thunk());
+  if (SchemaAST.isUnion(encoded)) return agreed(encoded.types.map(documentCardinality));
+  if (!SchemaAST.isObjects(encoded)) return "unshown";
+  const data = encoded.propertySignatures.find((signature) => signature.name === "data");
+  return data === undefined ? "unshown" : linkageCardinality(data.type);
+};
+
+/**
+ * How many identifiers a relationship endpoint's success schemas agree it
+ * answers; `"unshown"` for an endpoint of any other role.
+ */
+const declaredCardinality = (endpoint: HttpApiEndpoint.Top, role: Role): Cardinality =>
+  role === "relationship"
+    ? agreed(Array.from(endpoint.success, (success) => documentCardinality(success.ast)))
+    : "unshown";
+
 /**
  * Walks an `HttpApi` value and classifies every endpoint. Discovery is static —
  * nothing is requested here — so a report can name both the endpoints it probed
@@ -397,12 +449,14 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
       }
       const atomic =
         responseMediaType !== undefined && responseMediaType.includes(ATOMIC_EXTENSION_URI);
+      const role = atomic ? "operations" : roleOf(endpoint.method, segments);
       out.push({
         group,
         name,
         method: endpoint.method,
         path: endpoint.path,
-        role: atomic ? "operations" : roleOf(endpoint.method, segments),
+        role,
+        linkage: declaredCardinality(endpoint, role),
         segment: segments.find((segment) => !segment.startsWith(":")),
         params: segments
           .filter((segment) => segment.startsWith(":"))

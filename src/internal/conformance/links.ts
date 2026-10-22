@@ -38,6 +38,7 @@ import * as Predicate from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
 import {
+  type Cardinality,
   type Context,
   coverageNote,
   describe,
@@ -154,12 +155,18 @@ interface Member {
  * `type` and `id`. Like an answer it cannot identify, it leaves the link not
  * decided, on either rule, rather than weakening or skewing the comparison.
  * `Linkage` is a relationship `self` link's MUST: resource linkage of any
- * identity, as many identifiers as the relationship holds.
+ * identity, as many identifiers as the relationship holds — as its own linkage
+ * shows or, for a relationship without linkage, as the relationship endpoint
+ * the link resolves to declares (`declaredBy` naming that endpoint).
  */
 type Claim =
   | { readonly _tag: "Resource"; readonly member: Member }
   | { readonly _tag: "ResourceData" }
-  | { readonly _tag: "Linkage"; readonly cardinality: Cardinality }
+  | {
+      readonly _tag: "Linkage";
+      readonly cardinality: Cardinality;
+      readonly declaredBy: Option.Option<string>;
+    }
   | { readonly _tag: "ToOne"; readonly member: Member }
   | { readonly _tag: "Empty" }
   | {
@@ -177,13 +184,6 @@ type Claim =
     }
   | { readonly _tag: "Unidentified"; readonly why: string };
 const Claim = Data.taggedEnum<Claim>();
-
-/**
- * How many identifiers a relationship holds, as its linkage shows: one (a
- * resource identifier or `null`), many (an array of them), or — for a
- * relationship without linkage, or with linkage of neither shape — not shown.
- */
-type Cardinality = "one" | "many" | "unshown";
 
 /**
  * What carries a found link, which decides how findings word what it answers:
@@ -285,9 +285,12 @@ const selfLinks = (from: Target, body: unknown): ReadonlyArray<Found> =>
  * claims — or none, for a relationship whose link the rule does not follow.
  */
 const relationshipLinks =
-  (name: "self" | "related", claim: (relationship: JsonObject) => Option.Option<Claim>) =>
+  (
+    name: "self" | "related",
+    claim: (relationship: JsonObject, from: Target, ctx: Context) => Option.Option<Claim>,
+  ) =>
   // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-  (from: Target, body: unknown): ReadonlyArray<Found> =>
+  (from: Target, body: unknown, ctx: Context): ReadonlyArray<Found> =>
     Arr.flatMap(carriersIn(body), ({ pointer, resource, label }) => {
       const relationships = resource["relationships"];
       if (!isRecord(relationships)) return [];
@@ -296,7 +299,7 @@ const relationshipLinks =
         if (!isRecord(relationship)) return Result.fail(undefined);
         const of = `${label}'s \`${quote(key)}\``;
         return Result.map(
-          Result.fromOption(claim(relationship), () => undefined),
+          Result.fromOption(claim(relationship, from, ctx), () => undefined),
           (claimed): Found => ({
             where: `the \`${name}\` link of ${of} (in ${from.url}, at ${pointer})`,
             of,
@@ -332,22 +335,73 @@ const cardinalityOf = (relationship: JsonObject): Cardinality => {
   return data === null || isRecord(data) ? "one" : "unshown";
 };
 
+/** `true` when a URL path's segments fill a declared path's: each literal itself, each `:param` any segment. */
+const fills = (declared: string, path: string): boolean => {
+  const want = declared.split("/").filter((segment) => segment !== "");
+  const got = path.split("/").filter((segment) => segment !== "");
+  return (
+    want.length === got.length &&
+    want.every((segment, index) => segment.startsWith(":") || segment === got[index])
+  );
+};
+
+/**
+ * How many identifiers the relationship endpoint a relationship's `self` link
+ * resolves to declares, and that endpoint as a finding names it — or none when
+ * the link leads to no declared relationship endpoint under the run's base URL
+ * (another origin, an undeclared path), or to ones whose success schemas show
+ * no cardinality or disagree.
+ */
+const declaredLinkage = (
+  relationship: JsonObject,
+  from: Target,
+  ctx: Context,
+): Option.Option<{ readonly cardinality: Cardinality; readonly by: string }> => {
+  const link = linkIn(relationship["links"], "self");
+  if (!Link.$is("Href")(link)) return Option.none();
+  const step = stepTo(link.href, from, ctx.options.baseUrl);
+  // A target under the base URL is sent relative to it; any other is absolute.
+  if (!Step.$is("Follow")(step) || !step.target.url.startsWith("/")) return Option.none();
+  const path = step.target.url.replace(/[?#].*$/, "");
+  const matched = ctx.endpoints.filter(
+    (endpoint) => endpoint.role === "relationship" && fills(endpoint.path, path),
+  );
+  const [first] = matched;
+  return first !== undefined &&
+    first.linkage !== "unshown" &&
+    matched.every(({ linkage }) => linkage === first.linkage)
+    ? Option.some({
+        cardinality: first.linkage,
+        by: `\`${first.group}.${first.name}\` (\`${first.method} ${first.path}\`)`,
+      })
+    : Option.none();
+};
+
 /**
  * Every relationship's own `self` link in a document. With `linked`, only the
  * relationships that carry linkage, each claiming the identifiers it names;
  * otherwise every relationship, each claiming resource linkage of any
- * identity, as many identifiers as its linkage shows it holds (§Fetching
- * Relationships: the answer's primary data "**MUST** match the appropriate
- * value for resource linkage").
+ * identity, as many identifiers as its linkage shows it holds — or, for one
+ * without linkage, as the relationship endpoint its link resolves to declares
+ * (§Fetching Relationships: the answer's primary data "**MUST** match the
+ * appropriate value for resource linkage").
  */
 const relationshipSelfLinks = (linked: boolean) =>
-  relationshipLinks("self", (relationship) =>
-    linked
-      ? "data" in relationship
-        ? Option.some(claimOf(relationship))
-        : Option.none()
-      : Option.some(Claim.Linkage({ cardinality: cardinalityOf(relationship) })),
-  );
+  relationshipLinks("self", (relationship, from, ctx) => {
+    if (linked) return "data" in relationship ? Option.some(claimOf(relationship)) : Option.none();
+    if ("data" in relationship) {
+      return Option.some(
+        Claim.Linkage({ cardinality: cardinalityOf(relationship), declaredBy: Option.none() }),
+      );
+    }
+    return Option.some(
+      Option.match(declaredLinkage(relationship, from, ctx), {
+        onNone: () => Claim.Linkage({ cardinality: "unshown", declaredBy: Option.none() }),
+        onSome: ({ cardinality, by }) =>
+          Claim.Linkage({ cardinality, declaredBy: Option.some(by) }),
+      }),
+    );
+  });
 
 /** `true` when a document carries a `next` or `prev` link: it is one page of a collection. */
 // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
@@ -549,13 +603,11 @@ const HOLDS: Readonly<
 > = {
   one: {
     answer: "to-one linkage (`null` or a resource identifier)",
-    expected:
-      "`null` or a resource identifier as primary data, as the relationship's to-one linkage is",
+    expected: "`null` or a resource identifier as primary data",
   },
   many: {
     answer: "to-many linkage (an array of resource identifiers)",
-    expected:
-      "an array of resource identifiers as primary data, as the relationship's to-many linkage is",
+    expected: "an array of resource identifiers as primary data",
   },
 };
 
@@ -765,11 +817,16 @@ const cardinalityClaimed = (claim: Claim): Cardinality =>
     Unidentified: (): Cardinality => "unshown",
   });
 
+/** Where a claim on a relationship's `self` link got its cardinality, when a declared endpoint gave it. */
+const declaredByOf = (claim: Claim): Option.Option<string> =>
+  Claim.$is("Linkage")(claim) ? claim.declaredBy : Option.none();
+
 /**
  * A relationship `self` link's 2xx answer held to being resource linkage —
  * identifier objects only — of the cardinality the relationship's own linkage
- * shows: a finding (or, for the rule that defers, the link left to the rule
- * that reports it), or none when it is.
+ * shows, or the relationship endpoint the link resolves to declares: a finding
+ * (or, for the rule that defers, the link left to the rule that reports it),
+ * or none when it is.
  */
 const improperLinkage = (
   judging: Judging,
@@ -786,16 +843,27 @@ const improperLinkage = (
           observed,
         }),
       ),
-    onSuccess: (answered) =>
-      claimed === "unshown" || claimed === answered
-        ? Option.none()
-        : Option.some(
-            brokenOrDeferred(judging, found, Option.some(observation), {
-              detail: `answers ${HOLDS[answered].answer} where the relationship is to-${claimed}`,
-              expected: HOLDS[claimed].expected,
-              observed: primaryOf(observation),
-            }),
-          ),
+    onSuccess: (answered) => {
+      if (claimed === "unshown" || claimed === answered) return Option.none();
+      const declaredBy = declaredByOf(found.claim);
+      return Option.some(
+        brokenOrDeferred(judging, found, Option.some(observation), {
+          detail: `answers ${HOLDS[answered].answer} where the relationship is to-${claimed}${Option.match(
+            declaredBy,
+            {
+              onNone: () => "",
+              onSome: (by) => `, as the relationship endpoint ${by} declares`,
+            },
+          )}`,
+          expected: `${HOLDS[claimed].expected}, ${Option.match(declaredBy, {
+            onNone: () => `as the relationship's to-${claimed} linkage is`,
+            onSome: (by) =>
+              `as the success schema of ${by}, the relationship endpoint the link resolves to, declares`,
+          })}`,
+          observed: primaryOf(observation),
+        }),
+      );
+    },
   });
 };
 
@@ -1179,7 +1247,7 @@ const outcomeOf = (
 const dereferencing = (
   judging: Judging,
   what: string,
-  collect: (from: Target, body: Observation["body"]) => ReadonlyArray<Found>,
+  collect: (from: Target, body: Observation["body"], ctx: Context) => ReadonlyArray<Found>,
   searched: Searched = RESOURCE_ENDPOINTS,
 ): RuleImpl => ({
   rule: judging.rule,
@@ -1199,7 +1267,7 @@ const dereferencing = (
             onNone: () => [],
             onSome: ([answer, from]) =>
               succeeded(answer)
-                ? collect(answeredFrom(from, answer), answer.body).filter(available)
+                ? collect(answeredFrom(from, answer), answer.body, ctx).filter(available)
                 : [],
           }),
         ),
