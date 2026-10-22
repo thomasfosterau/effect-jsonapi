@@ -3026,16 +3026,17 @@ export type RelationshipsOption<R extends Any> =
 
 // --- extraction helpers (config objects are captured via `const`) ----------
 
-// The captured config object for CRUD op `Op` (or `{}` when absent / boolean).
+// The captured config object for CRUD op `Op` (or the empty
+// `Record<never, never>` when absent / boolean).
 type ConfigObject<E, Op extends string> = E extends undefined
-  ? {}
+  ? Record<never, never>
   : Op extends keyof E
     ? NonNullable<E[Op]> extends infer V
       ? V extends boolean
-        ? {}
+        ? Record<never, never>
         : V
-      : {}
-    : {};
+      : Record<never, never>
+    : Record<never, never>;
 
 // Field `K` of config object `C`, else fallback `F`.
 type FieldOr<C, K extends string, F> = K extends keyof C ? Exclude<C[K], undefined> : F;
@@ -3049,18 +3050,18 @@ type EmitOp<E, Op extends string> = E extends undefined
       : true
     : true;
 
-// The captured config object for relationship `K` (or `{}`).
+// The captured config object for relationship `K` (or `Record<never, never>`).
 type RelConfigObject<RO, K extends string> = RO extends boolean
-  ? {}
+  ? Record<never, never>
   : RO extends undefined
-    ? {}
+    ? Record<never, never>
     : K extends keyof RO
       ? NonNullable<RO[K]> extends infer V
         ? V extends boolean
-          ? {}
+          ? Record<never, never>
           : V
-        : {}
-      : {};
+        : Record<never, never>
+      : Record<never, never>;
 
 // Whether relationship `K` is emitted.
 type EmitRel<RO, K extends string> = RO extends false
@@ -3822,7 +3823,7 @@ export const resource = <
   Meta extends Schema.Top,
   IdSchema extends Schema.Codec<any, string> = Id<Type>,
   const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> =
-    {},
+    Record<never, never>,
   const RelationshipsOpt extends RelationshipsOption<
     Resource<Type, Attributes, Rels, Meta, IdSchema>
   > = true,

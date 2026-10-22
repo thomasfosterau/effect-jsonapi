@@ -436,7 +436,7 @@ export type ListInputBaseFields = DefaultedPagination & typeof sortField;
  * @since 0.16.0
  * @category constructors
  */
-export const listInput = <const Fields extends Schema.Struct.Fields = {}>(
+export const listInput = <const Fields extends Schema.Struct.Fields = Record<never, never>>(
   options: PaginationOptions,
   extraFields?: Fields,
 ): Schema.Struct<MergedFields<ListInputBaseFields, Fields>> =>

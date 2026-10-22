@@ -381,7 +381,7 @@ const outOfOrder = (
 /** What one candidate's sorted requests decided. */
 type Decision = Data.TaggedEnum<{
   Decided: { readonly findings: ReadonlyArray<Finding>; readonly sawNull: boolean };
-  Refused: {};
+  Refused: Record<never, never>;
   Undecided: { readonly why: string };
 }>;
 

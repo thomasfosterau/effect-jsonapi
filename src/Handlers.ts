@@ -129,7 +129,7 @@ export interface LinksValue {
 export type MetaValue = { readonly [key: string]: unknown };
 
 // Simplifies intersections for readable hover types.
-type Simplify<T> = { readonly [K in keyof T]: T[K] } & {};
+type Simplify<T> = { readonly [K in keyof T]: T[K] } extends infer S ? S : never;
 
 // ---------------------------------------------------------------------------
 // Per-resource transforms
@@ -1188,8 +1188,8 @@ export type DocumentValue<
     readonly data: Data;
     readonly included?: ReadonlyArray<Included>;
     readonly links?: LinksValue;
-  } & ([M] extends [never] ? {} : { readonly meta?: M }) &
-    ([J] extends [never] ? {} : { readonly jsonapi: J })
+  } & ([M] extends [never] ? Record<never, never> : { readonly meta?: M }) &
+    ([J] extends [never] ? Record<never, never> : { readonly jsonapi: J })
 >;
 
 // The primary `data` of a document with the transform applied. `data(null)`
@@ -1708,8 +1708,8 @@ type LinkageDocumentValue<
   { readonly data: Data; readonly links?: LinksValue } & ([Included] extends [never]
     ? unknown
     : { readonly included?: ReadonlyArray<Included> }) &
-    ([M] extends [never] ? {} : { readonly meta?: M }) &
-    ([J] extends [never] ? {} : { readonly jsonapi: J })
+    ([M] extends [never] ? Record<never, never> : { readonly meta?: M }) &
+    ([J] extends [never] ? Record<never, never> : { readonly jsonapi: J })
 >;
 
 // A transform applies to the *identifiers* a linkage document carries, one by

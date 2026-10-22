@@ -98,7 +98,6 @@ export default defineConfig({
       "effect/use-clock-service": "warn",
       "effect/no-known-value-widening": "warn",
       "effect/no-conditional-empty-object-spread": "warn",
-      "effect/avoid-object-type": "warn",
       // One site, and a contract: `ApiError.toDocument(error: object)` takes any
       // value a framework hook caught and throws on a non-`ApiError.make`
       // instance (src/ApiError.ts). Narrowing the parameter is a breaking

@@ -223,7 +223,9 @@ const withPageDefault = (
     ? Schema.optionalKey(leaf)
     : leaf.pipe(Schema.withDecodingDefaultKey(Effect.succeed(fromString ? String(value) : value)));
 
-const offsetPage = <const O extends OffsetPageOptions = {}>(options?: O): OffsetPageFields<O> => {
+const offsetPage = <const O extends OffsetPageOptions = Record<never, never>>(
+  options?: O,
+): OffsetPageFields<O> => {
   const { maxLimit, minLimit = 1, defaultLimit, defaultOffset, fromString = true } = options ?? {};
   const base = fromString ? Schema.FiniteFromString : Schema.Number;
   const offsetLeaf = base.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
@@ -241,7 +243,9 @@ const offsetPage = <const O extends OffsetPageOptions = {}>(options?: O): Offset
   } as OffsetPageFields<O>;
 };
 
-const numberPage = <const O extends NumberPageOptions = {}>(options?: O): NumberPageFields<O> => {
+const numberPage = <const O extends NumberPageOptions = Record<never, never>>(
+  options?: O,
+): NumberPageFields<O> => {
   const { maxSize, minSize = 1, defaultSize, defaultNumber, fromString = true } = options ?? {};
   const base = fromString ? Schema.FiniteFromString : Schema.Number;
   // Page numbers are 1-based.
@@ -397,7 +401,7 @@ type BracketedBase<S> =
       : never;
 
 // The rename mapping a (possibly already-bracketed) schema carries so far.
-type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : {};
+type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : Record<never, never>;
 
 // The mapping one `bracketKeys(prefix, keys)` call itself contributes.
 type PrefixMapping<Prefix extends string, Keys extends ReadonlyArray<PropertyKey>> = {
@@ -870,7 +874,9 @@ export type FlatList<
   Filters extends ReadonlyArray<string>,
   IncludeField extends boolean,
 > = BracketedKeys<
-  Schema.Struct<S["fields"] & (IncludeField extends false ? {} : typeof includeListField)>,
+  Schema.Struct<
+    S["fields"] & (IncludeField extends false ? Record<never, never> : typeof includeListField)
+  >,
   { readonly offset: "page[offset]"; readonly limit: "page[limit]" } & {
     readonly [K in Filters[number]]: `filter[${K}]`;
   }
@@ -1522,7 +1528,7 @@ export type FieldsetResources<R extends Any, I = false> = ExpandFamilies<
 export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true
     ? { readonly include: Schema.optionalKey<Include<R, IncludePathsOf<R, O["include"]>>> }
-    : {}) &
+    : Record<never, never>) &
     ([O["fields"]] extends [true]
       ? {
           readonly fields: Schema.optionalKey<
@@ -1535,20 +1541,20 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
             }>
           >;
         }
-      : {}) &
+      : Record<never, never>) &
     (O["sort"] extends true
       ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
       : O["sort"] extends ReadonlyArray<string>
         ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
-        : {}) &
+        : Record<never, never>) &
     (O["page"] extends Schema.Struct.Fields
       ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> }
-      : {}) &
+      : Record<never, never>) &
     ([O["filter"]] extends [true]
       ? { readonly filter: Schema.optionalKey<FilterAstSchema<R>> }
       : O["filter"] extends Schema.Struct.Fields
         ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
-        : {})
+        : Record<never, never>)
 >;
 
 /**
@@ -1563,24 +1569,24 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
 export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true
     ? { readonly include: Schema.optionalKey<Repeatable> }
-    : {}) &
+    : Record<never, never>) &
     ([O["fields"]] extends [true]
       ? {
           readonly [
             TypeName in FieldsetResources<R, O["include"]>["type"] as `fields[${TypeName}]`
           ]: Schema.optionalKey<Repeatable>;
         }
-      : {}) &
+      : Record<never, never>) &
     (O["sort"] extends true | ReadonlyArray<string>
       ? { readonly sort: Schema.optionalKey<Repeatable> }
-      : {}) &
+      : Record<never, never>) &
     (O["page"] extends Schema.Struct.Fields
       ? {
           readonly [
             K in keyof O["page"] & string as `page[${K}]`
           ]: Schema.optionalKey<Schema.String>;
         }
-      : {}) &
+      : Record<never, never>) &
     ([O["filter"]] extends [true]
       ? { readonly filter: Schema.optionalKey<FilterWireValue> }
       : O["filter"] extends Schema.Struct.Fields
@@ -1589,7 +1595,7 @@ export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
               K in keyof O["filter"] & string as `filter[${K}]`
             ]: Schema.optionalKey<Schema.String>;
           }
-        : {})
+        : Record<never, never>)
 >;
 
 // Resolves to `T` for every concrete query configuration; needed because the
