@@ -2485,6 +2485,18 @@ export const removeRelationship = <
  * `Middleware.layerWith({ extensions: [Atomic.EXTENSION_URI] })` so those
  * requests are accepted.
  *
+ * The default request document does not support client-generated ids: an
+ * `add` operation carrying a `data.id` is answered with 403 Forbidden,
+ * `source.pointer` `/atomic:operations/N/data/id`, and the handler never
+ * runs, so no operation is performed (§Client-Generated IDs, which the
+ * extension's §Processing Errors applies to an operation; #464). To support
+ * them, pass a `payload` whose `add` declares an `id` — the default `add`'s
+ * fields with one more in `data`, placed ahead of the default operations:
+ * `Schema.Struct({ "atomic:operations": Schema.Array(Schema.Union([AddWithId,
+ * ...Atomic.Operations(resources).members])).check(Schema.isMinLength(1)) })`
+ * — and the handler receives it; answering a duplicate with 409 is then the
+ * handler's to do.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -2534,11 +2546,22 @@ export const operations = <
   const Path extends `/${string}` = "/operations",
   DocMeta extends Schema.Top = typeof AnyMeta,
   const Idem extends Idempotency.Option = false,
+  Payload extends Schema.Top = Atomic.RequestDocument<Resources[number]>,
 >(
   resources: Resources,
   options?: CommonOptions<Name, Path, Errors> & {
     /** Override the result document's `meta` schema. */
     readonly meta?: DocMeta;
+    /**
+     * Override the request payload schema. Defaults to
+     * `Atomic.RequestDocument(resources)`, whose `add` operations refuse a
+     * client-generated `data.id` with 403; pass a request document of your
+     * own — one whose `add` declares an `id`, say — to accept what it
+     * declares.
+     *
+     * @since 0.18.0
+     */
+    readonly payload?: Payload;
     /**
      * Declare the `Idempotency-Key` request header and honour it. One key
      * covers the **whole** request — the extension's own unit of atomicity —
@@ -2555,7 +2578,9 @@ export const operations = <
       (options?.path ?? "/operations") as Path,
       {
         headers: Idempotency.headersFor(options?.idempotency) as Idempotency.HeadersFor<Idem>,
-        payload: asJsonApi(Atomic.RequestDocument(resources)),
+        // SAFETY: `Payload` is inferred from `options.payload` when one is
+        // passed, and otherwise defaults to the `Atomic.RequestDocument` built here.
+        payload: asJsonApi((options?.payload ?? Atomic.RequestDocument(resources)) as Payload),
         success: asJsonApiAtomic(
           Atomic.ResultDocument(
             resources,

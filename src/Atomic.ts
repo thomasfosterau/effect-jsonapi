@@ -21,7 +21,10 @@
  * Like create/update payloads, the `relationships` linkage inside `add` /
  * `update` operations covers the non-`paginated` relationships (required `one`
  * relationships must be present when adding); `paginated` relationships are
- * managed through their relationship operations instead.
+ * managed through their relationship operations instead. And like
+ * `createPayload`, an `add` declares no `id`: a client-generated `data.id` is
+ * rejected, and `Middleware.SchemaErrorsLive` answers the request with 403
+ * Forbidden naming `/atomic:operations/N/data/id` (#464).
  *
  * {@link operationsFor} returns this set as a named, introspectable record of
  * schemas; {@link Operations} / {@link RequestDocument} build the request
@@ -59,6 +62,7 @@ import { Schema } from "effect";
 import { AnyMeta, JsonApiObject, TopLevelLinks } from "./Document.js";
 import type { LinksValue, MetaValue, ResourceValue } from "./Handlers.js";
 import { ATOMIC_EXTENSION_URI, ATOMIC_MEDIA_TYPE } from "./internal/media.js";
+import { refusingClientId } from "./internal/refusedClientId.js";
 import {
   closedStruct,
   defaultMaxUndeclaredMemberErrors,
@@ -387,7 +391,10 @@ const updateRelationshipFields = (relationships: Relationships, cap: number): Sc
  * resource to create — no `id` (the server assigns one), an optional `lid` so
  * later operations in the same request can reference it, and relationship
  * linkage that may itself be lid-based (required `one` relationships must be
- * present, `paginated` relationships are excluded).
+ * present, `paginated` relationships are excluded). A client-generated
+ * `data.id` is rejected rather than dropped, which
+ * `Middleware.SchemaErrorsLive` answers with 403 Forbidden naming
+ * `/atomic:operations/N/data/id` (#464).
  *
  * @see {@link https://jsonapi.org/ext/atomic/#auto-id-creating-resources}
  * @since 0.1.0
@@ -407,7 +414,12 @@ export interface AddOperation<R extends Any> extends Schema.Struct<{
 /**
  * Creates the `add` operation schema for a resource. Its `data.attributes` and
  * `data.relationships` members reject, when decoding and when encoding, every
- * member they don't declare, as `createPayload`'s do.
+ * member they don't declare, as `createPayload`'s do. Its `data` rejects an
+ * `id`, when decoding and when encoding, as `createPayload`'s does: the
+ * operation does not support client-generated ids. An `add` that should
+ * accept one spreads these fields into a `data` that declares an `id`, and
+ * passes a request document built from it as `Endpoint.operations`'
+ * `payload`.
  *
  * @since 0.1.0
  * @category schemas
@@ -417,14 +429,19 @@ export const AddOperation = <R extends Any>(resource: R): AddOperation<R> => {
   const { required, struct } = addRelationshipMembers(resource.relationships, cap);
   return Schema.Struct({
     op: Schema.tag("add"),
-    data: Schema.Struct({
-      type: Schema.tag(resource.type),
-      lid: Schema.optionalKey(Schema.String),
-      // From the *declared* map, so input-only attributes (`resource: false`)
-      // are accepted here exactly as in `createPayload`.
-      attributes: closedStruct(createAttributeFields(declaredAttributes(resource)), cap),
-      relationships: required ? struct : Schema.optionalKey(struct),
-    }),
+    // A `data.id` is a client-generated id, which this operation does not
+    // support: rejected at `data/id` rather than dropped, and answered 403 by
+    // `Middleware.SchemaErrorsLive` (#464).
+    data: refusingClientId(
+      Schema.Struct({
+        type: Schema.tag(resource.type),
+        lid: Schema.optionalKey(Schema.String),
+        // From the *declared* map, so input-only attributes (`resource: false`)
+        // are accepted here exactly as in `createPayload`.
+        attributes: closedStruct(createAttributeFields(declaredAttributes(resource)), cap),
+        relationships: required ? struct : Schema.optionalKey(struct),
+      }),
+    ),
     meta: Schema.optionalKey(AnyMeta),
   }) as unknown as AddOperation<R>;
 };
