@@ -101,6 +101,22 @@ assertType<{ readonly type: "people"; readonly id: string } | undefined>(
 );
 
 // ---------------------------------------------------------------------------
+// An empty literal fieldset (`?fields[articles]=`) selects no attribute (#488)
+// ---------------------------------------------------------------------------
+
+const none = Handlers.data(article, { onResource: Handlers.project({ articles: [] }) });
+const noneAttributes: Equals<(typeof none)["data"]["attributes"], Record<never, never>> = true;
+// @ts-expect-error -- `title` was projected off with every other attribute
+assertType<string>(none.data.attributes.title);
+// `relationships` is kept, as at runtime.
+assertType<{ readonly type: "people"; readonly id: string } | undefined>(
+  none.data.relationships?.author.data,
+);
+// A type with no set at all (`undefined`) is untouched, as at runtime.
+const unset = Handlers.project(article, { articles: undefined });
+const unsetIdentity: Equals<typeof unset, typeof Article.Type> = true;
+
+// ---------------------------------------------------------------------------
 // A fieldset only known at runtime projects to an honest *subset*
 // ---------------------------------------------------------------------------
 
@@ -229,6 +245,8 @@ export {
   identityApplies,
   linkage,
   linked,
+  none,
+  noneAttributes,
   page,
   pageSameShape,
   plain,
@@ -238,6 +256,8 @@ export {
   projectedPerson,
   sameShape,
   stamped,
+  unset,
+  unsetIdentity,
   untouched,
   untouchedIdentity,
   withSelfLink,

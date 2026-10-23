@@ -278,19 +278,23 @@ export interface Fields {
 // The attributes a fieldset selects. A selection known only as an *array* of
 // names (a `query.fields` value, whose contents are a runtime fact) can be any
 // subset of them, so every selected attribute becomes optional; a literal
-// tuple is exact.
-type SelectedAttributes<A, Keys> = [Keys] extends [ReadonlyArray<string>]
-  ? [Keys[number]] extends [never]
-    ? A
-    : number extends Keys["length"]
-      ? Simplify<Partial<Pick<A, Extract<keyof A, Keys[number]>>>>
-      : Simplify<Pick<A, Extract<keyof A, Keys[number]>>>
-  : A;
+// tuple is exact, and the empty tuple (`?fields[TYPE]=`, #488) selects none.
+// No set at all (`undefined` alone) selects every attribute, as at runtime.
+type SelectedAttributes<A, Keys> = [Keys] extends [never]
+  ? A
+  : [Keys] extends [ReadonlyArray<string>]
+    ? [Keys[number]] extends [never]
+      ? Record<never, never>
+      : number extends Keys["length"]
+        ? Simplify<Partial<Pick<A, Extract<keyof A, Keys[number]>>>>
+        : Simplify<Pick<A, Extract<keyof A, Keys[number]>>>
+    : A;
 
 /**
  * The type of a resource with a sparse fieldset applied: `attributes` narrowed
  * to the names requested for its type, everything else untouched. A type with
- * no requested set is left exactly as it is.
+ * no requested set is left exactly as it is; an empty requested set (`[]`)
+ * leaves `attributes` empty.
  *
  * @since 0.15.0
  * @category type-level
@@ -334,9 +338,11 @@ const projectResource = (
 ): AnyResourceValue => {
   if (fields === undefined || !Object.hasOwn(fields, resource.type)) return resource;
   const requested = fields[resource.type];
-  // No requested set for this type is the spec's "every field", not "no
-  // field" — and an empty `fields[TYPE]=` is read the same way.
-  if (requested === undefined || Arr.isReadonlyArrayEmpty(requested)) return resource;
+  // No requested set for this type leaves every field. A *present* empty set
+  // (`?fields[TYPE]=`) is the spec's "no fields" (§Sparse Fieldsets: "An empty
+  // value indicates that no fields should be returned") and projects
+  // `attributes` to `{}` like any other set (#488).
+  if (requested === undefined) return resource;
   const attributes = resource.attributes;
   // Resource identifiers (and any resource with no attributes) have nothing
   // to project.
@@ -350,14 +356,19 @@ const projectResource = (
  *
  * Two behaviours make it safe to apply to every resource in a document:
  *
- *   - a type with **no requested set** — absent, or an empty
- *     `?fields[TYPE]=` — is returned unchanged, which is the spec's default of
- *     "every field", not "no field";
+ *   - a type with **no requested set** (`fields[TYPE]` absent) is returned
+ *     unchanged: the spec leaves that type's fields to the server, and every
+ *     field is what it already carries. A requested **empty** set
+ *     (`?fields[TYPE]=`, decoded as `[]`) is the spec's "no fields", not
+ *     "every field", and projects `attributes` to `{}` (#488);
  *   - only `attributes` is projected. `relationships`, `links` and `meta` are
  *     left alone, and a resource identifier (no `attributes` at all) is
  *     returned as is. Relationship fields — `?fields[articles]=author` — are
  *     out of scope: `Query.Fieldset` is built from the resource's attributes,
- *     so a relationship name cannot be requested in the first place.
+ *     so a relationship name cannot be requested in the first place, and
+ *     `relationships` is kept even under an empty set, since dropping it
+ *     would unlink the `included` members it reaches, which the builders'
+ *     full-linkage check and `Middleware.SchemaErrorsLive` answer with a 500.
  *
  * Dual API: `project(fields)` builds the {@link ResourceTransform} the
  * document builders take as `onResource`, which is what applies the fieldset
@@ -391,6 +402,10 @@ const projectResource = (
  * // no requested set for this type → unchanged
  * console.log(Handlers.project(article, { people: ["firstName"] }).attributes)
  * // → { title: "Hi", body: "…" }
+ *
+ * // an empty set (`?fields[articles]=`) → no attributes
+ * console.log(Handlers.project(article, { articles: [] }).attributes)
+ * // → {}
  *
  * // data-last: the hook the builders apply to every resource in the document
  * const document = Handlers.data(article, { onResource: Handlers.project({ articles: ["title"] }) })

@@ -817,6 +817,19 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
     expect(() => decode({ "fields[articles]": ["secret"] })).toThrow();
   });
 
+  // §Sparse Fieldsets: "An empty value indicates that no fields should be
+  // returned", so an empty `fields[TYPE]=` is an empty set, not the absent
+  // parameter (#488) — through the flat wire record and the nested one alike.
+  it("?fields[articles]= decodes to the empty set, distinct from the absent parameter", () => {
+    expect(decode({ "fields[articles]": "" })).toEqual({ fields: { articles: [] } });
+    expect(decode({ "fields[articles]": [""] })).toEqual({ fields: { articles: [] } });
+    expect(decode({})).toEqual({});
+    expect(Schema.decodeUnknownSync(Query.Fieldset(Article))("")).toEqual([]);
+    expect(Schema.encodeSync(query)({ fields: { articles: [] } })).toEqual({
+      "fields[articles]": "",
+    });
+  });
+
   it("encodes both back to the single comma form", () => {
     const encoded = Schema.encodeUnknownSync(query as Schema.Codec<any, any>)({
       sort: [{ field: "createdAt", direction: "desc" }],

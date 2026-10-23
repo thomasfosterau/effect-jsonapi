@@ -1492,6 +1492,19 @@ describe("Conformance: detects a deliberately broken server", () => {
         : canned,
   );
 
+  // #488: an empty `fields[TYPE]=` read as the absent parameter.
+  broken(
+    "an empty sparse fieldset read as every field",
+    "spec/query/sparse-fieldsets-empty",
+    (canned, request) =>
+      /fields\[[a-z]+\]=(&|$)/.test(request.path)
+        ? conformantServe({
+            ...request,
+            path: request.path.replace(/[?&]fields\[[a-z]+\]=(?=&|$)/g, ""),
+          })
+        : canned,
+  );
+
   broken(
     "an unknown query parameter that is not rejected",
     "spec/query/unknown-query-parameter",

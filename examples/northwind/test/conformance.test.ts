@@ -233,6 +233,19 @@ describe("northwind: JSON:API conformance", () => {
     expect(summary.passed).toBeGreaterThan(15);
   });
 
+  it("honours an empty sparse fieldset as no fields, on primary data and `included` alike", () => {
+    // #488: `?fields[TYPE]=` asks for no fields, not every field, and
+    // `Handlers.project` answers it with no attributes.
+    const ids = [
+      "spec/query/sparse-fieldsets-primary",
+      "spec/query/sparse-fieldsets-included",
+      "spec/query/sparse-fieldsets-empty",
+    ];
+    expect(
+      ids.map((id) => `${id}: ${report.outcomes.find((o) => o.rule.id === id)?._tag}`),
+    ).toEqual(ids.map((id) => `${id}: Passed`));
+  });
+
   it("follows every relationship's and document's `self` link to a verdict", () => {
     // #309: the relationship `self` link `Handlers.paginatedRelationship`
     // writes for an order's line items
