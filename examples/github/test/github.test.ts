@@ -589,7 +589,7 @@ describe("github example: writing", () => {
         const after = yield* client.issues.get({ params: { id: bugIssue.id }, query: {} });
         return {
           exit,
-          labels: after.data?.relationships?.labels.data,
+          labels: after.data?.relationships?.labels?.data,
           title: after.data?.attributes.title,
         };
       }),
@@ -750,7 +750,7 @@ describe("github example: issue triage via relationship endpoints", () => {
         });
         // The issue reflects the assignment
         const issue = yield* client.issues.get({ params: { id: bugIssue.id }, query: {} });
-        expect(issue.data?.relationships?.assignee.data?.id).toBe(hubot.id);
+        expect(issue.data?.relationships?.assignee?.data?.id).toBe(hubot.id);
         return linkage;
       }),
     );

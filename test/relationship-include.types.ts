@@ -402,8 +402,10 @@ assertType<
 assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["title"], artists: ["stageName"] });
 // @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
 assertType<FieldsOf<typeof sparseTracks>>({ playlists: ["name"] });
-// @ts-expect-error -- `artist` is a relationship, not an attribute of `tracks`
-assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["artist"] });
+// A relationship is a field too (#494): `tracks`' `artist` may be named.
+assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["title", "artist"] });
+// @ts-expect-error -- `label` is neither an attribute nor a relationship of `tracks`
+assertType<FieldsOf<typeof sparseTracks>>({ tracks: ["label"] });
 
 // The `included` members admit any subset of their attributes; the primary
 // data is the same identifiers.

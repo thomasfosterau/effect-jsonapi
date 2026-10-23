@@ -323,6 +323,21 @@ const includedMember = <A>(
   params.has("include") ? { included: resources } : {};
 
 /**
+ * The article's `relationships` under the request's `fields[articles]`: a
+ * relationship is a field (#494), so `author` is kept only when no fieldset
+ * leaves it out.
+ */
+const articleRelationships = (
+  params: URLSearchParams,
+): {
+  readonly relationships?: { readonly author: { readonly data: { type: string; id: string } } };
+} => {
+  const requested = params.get("fields[articles]");
+  if (requested !== null && !requested.split(",").includes("author")) return {};
+  return { relationships: { author: { data: { type: "people", id: "9" } } } };
+};
+
+/**
  * A correct-enough server: negotiates per §5, answers well-formed documents,
  * projects sparse fieldsets, rejects unknown query parameters and absent ids.
  * The baseline every broken fixture below is one deviation from.
@@ -426,7 +441,7 @@ const conformantServe = (request: {
       title: article.attributes.title,
       body: article.attributes.body,
     }),
-    relationships: { author: { data: { type: "people", id: "9" } } },
+    ...articleRelationships(params),
   };
   const personObject = {
     type: "people",
@@ -1490,6 +1505,29 @@ describe("Conformance: detects a deliberately broken server", () => {
             path: request.path.split("&fields")[0]!.split("?fields")[0]!,
           })
         : canned,
+  );
+
+  // #494: a relationship is a field, so a fieldset that leaves it out drops it.
+  const withAuthor = (body: Record<string, unknown>) => {
+    const data = body["data"];
+    return typeof data === "object" && data !== null && "type" in data && data.type === "articles"
+      ? {
+          ...body,
+          data: { ...data, relationships: { author: { data: { type: "people", id: "9" } } } },
+        }
+      : body;
+  };
+  broken(
+    "a relationship kept under a sparse fieldset that leaves it out",
+    "spec/query/sparse-fieldsets-primary",
+    (canned, request) =>
+      request.path.includes("fields[articles]") ? withData(canned, withAuthor) : canned,
+  );
+  broken(
+    "a relationship kept under an empty sparse fieldset",
+    "spec/query/sparse-fieldsets-empty",
+    (canned, request) =>
+      /fields\[articles\]=(&|$)/.test(request.path) ? withData(canned, withAuthor) : canned,
   );
 
   // #488: an empty `fields[TYPE]=` read as the absent parameter.

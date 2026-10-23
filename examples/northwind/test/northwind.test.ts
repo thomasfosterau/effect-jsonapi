@@ -688,7 +688,7 @@ describe("northwind example: related & relationship endpoints", () => {
           params: { id: Product.Id.make("4") },
           query: {},
         });
-        expect(product.data?.relationships?.category.data?.id).toBe(seafood.id);
+        expect(product.data?.relationships?.category?.data?.id).toBe(seafood.id);
         return linkage;
       }),
     );

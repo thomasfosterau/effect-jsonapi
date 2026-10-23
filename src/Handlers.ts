@@ -10,7 +10,9 @@
  *     resource object per `(type, id)` pair
  *   - full linkage: every included resource must be reachable from the
  *     primary data by following resource linkage — the primary data's
- *     relationships, then other included resources' relationships
+ *     relationships, then other included resources' relationships — except
+ *     through a relationship a sparse fieldset excludes, which the spec
+ *     exempts (`project`)
  *
  * `included` keeps the request's shape: an array — even one that is empty, or
  * that dedup against the primary data empties — emits the member, because a
@@ -263,8 +265,9 @@ export const transform = <F extends TransformLambda>(
 // ---------------------------------------------------------------------------
 
 /**
- * A sparse-fieldset selection: the attribute names requested per resource
- * type. This is the decoded `fields` member of a query schema
+ * A sparse-fieldset selection: the field names — attributes and relationships
+ * (#494) — requested per resource type. This is the decoded `fields` member
+ * of a query schema
  * (`Query.schema(Article, { fields: true })`), so a handler passes
  * `query.fields` straight through.
  *
@@ -290,22 +293,38 @@ type SelectedAttributes<A, Keys> = [Keys] extends [never]
         : Simplify<Pick<A, Extract<keyof A, Keys[number]>>>
     : A;
 
+// The `relationships` a fieldset keeps: the member as narrowed by
+// `SelectedAttributes`, optional because the projection omits it when nothing
+// is left in it, and absent when a literal set keeps none of it.
+type SelectedRelationships<R, Keys> = {
+  readonly [
+    K in keyof R as K extends "relationships"
+      ? [keyof SelectedAttributes<Exclude<R[K], undefined>, Keys>] extends [never]
+        ? never
+        : K
+      : never
+  ]+?: SelectedAttributes<Exclude<R[K], undefined>, Keys>;
+};
+
 /**
- * The type of a resource with a sparse fieldset applied: `attributes` narrowed
- * to the names requested for its type, everything else untouched. A type with
- * no requested set is left exactly as it is; an empty requested set (`[]`)
- * leaves `attributes` empty.
+ * The type of a resource with a sparse fieldset applied: `attributes` and
+ * `relationships` narrowed to the names requested for its type, everything
+ * else untouched. A type with no requested set is left exactly as it is; an
+ * empty requested set (`[]`) leaves `attributes` empty and `relationships`
+ * absent.
  *
- * @since 0.15.0
+ * @since 0.15.0 (`relationships` since 0.18.0)
  * @category type-level
  */
 export type Projected<R, F> = R extends { readonly type: infer T; readonly attributes: infer A }
   ? T extends keyof F
-    ? Simplify<
-        Omit<R, "attributes"> & {
-          readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>>;
-        }
-      >
+    ? [Exclude<F[T], undefined>] extends [never]
+      ? R
+      : Simplify<
+          Omit<R, "attributes" | "relationships"> & {
+            readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>>;
+          } & SelectedRelationships<R, Exclude<F[T], undefined>>
+        >
     : R
   : R;
 
@@ -319,35 +338,92 @@ export interface ProjectLambda<F> extends TransformLambda {
   readonly Out: Projected<this["In"], F>;
 }
 
-const selectAttributes = (
-  attributes: { readonly [key: string]: unknown },
-  requested: ReadonlyArray<string>,
-) => {
-  const selected = new Set<string>(requested);
-  const projected: Record<string, unknown> = {};
-  for (const name of Object.keys(attributes)) {
-    // An own `__proto__` attribute (as `JSON.parse` gives) stays a member.
-    if (selected.has(name)) assign(projected, name, attributes[name]);
+const selectMembers = <V>(
+  members: { readonly [key: string]: V },
+  requested: ReadonlySet<string>,
+): Record<string, V> => {
+  const projected: Record<string, V> = {};
+  for (const name of Object.keys(members)) {
+    // An own `__proto__` member (as `JSON.parse` gives) stays a member.
+    if (requested.has(name)) assign(projected, name, members[name]);
   }
   return projected;
+};
+
+// The set of field names `fields` requests for `type`, or `undefined` when it
+// requests none (the type's fields are the server's to choose).
+const requestedFor = (
+  fields: Fields | undefined,
+  type: string,
+): ReadonlySet<string> | undefined => {
+  if (fields === undefined || !Object.hasOwn(fields, type)) return undefined;
+  const requested = fields[type];
+  return requested === undefined ? undefined : new Set(requested);
 };
 
 const projectResource = (
   resource: AnyResourceValue,
   fields: Fields | undefined,
 ): AnyResourceValue => {
-  if (fields === undefined || !Object.hasOwn(fields, resource.type)) return resource;
-  const requested = fields[resource.type];
   // No requested set for this type leaves every field. A *present* empty set
   // (`?fields[TYPE]=`) is the spec's "no fields" (§Sparse Fieldsets: "An empty
   // value indicates that no fields should be returned") and projects
   // `attributes` to `{}` like any other set (#488).
+  const requested = requestedFor(fields, resource.type);
   if (requested === undefined) return resource;
-  const attributes = resource.attributes;
-  // Resource identifiers (and any resource with no attributes) have nothing
+  const { attributes, relationships } = resource;
+  // Resource identifiers (and any resource with neither member) have nothing
   // to project.
-  if (attributes === undefined) return resource;
-  return { ...resource, attributes: selectAttributes(attributes, requested) };
+  if (attributes === undefined && relationships === undefined) return resource;
+  const { relationships: _relationships, ...rest } = resource;
+  // A relationship is a field (§Resource Object Fields), dropped whole —
+  // `data`, `links` and `meta` alike — when the set does not name it (#494).
+  // A `relationships` member left with nothing in it is omitted.
+  const kept = relationships === undefined ? {} : selectMembers(relationships, requested);
+  return {
+    ...rest,
+    ...(attributes === undefined ? {} : { attributes: selectMembers(attributes, requested) }),
+    ...(Arr.isReadonlyArrayNonEmpty(Object.keys(kept)) ? { relationships: kept } : {}),
+  };
+};
+
+// The fieldset a transform built by `project` applies, and so excludes the
+// relationships of — what the builders' full-linkage check exempts (#494).
+// `compose` and the builders' memoisation carry it to the transform they
+// build.
+const projections = new WeakMap<ResourceTransform<TransformLambda>, Fields>();
+
+// The fieldset `transform` applies, when `project` (or a composition of it)
+// built it.
+const projectionOf = (
+  transform: ResourceTransform<TransformLambda> | undefined,
+): Fields | undefined => (transform === undefined ? undefined : projections.get(transform));
+
+// Registers `transform` as applying `fields`, and hands it back.
+const projecting = <T extends ResourceTransform<TransformLambda>>(
+  transform: T,
+  fields: Fields | undefined,
+): T => {
+  if (fields !== undefined) projections.set(transform, fields);
+  return transform;
+};
+
+// The fieldset two projections in turn apply: a field survives both only when
+// each set that names its type requests it.
+const bothProjections = (
+  first: Fields | undefined,
+  second: Fields | undefined,
+): Fields | undefined => {
+  if (first === undefined || second === undefined) return first ?? second;
+  const types = Arr.dedupe([...Object.keys(first), ...Object.keys(second)]);
+  return Object.fromEntries(
+    types.flatMap((type) => {
+      const a = requestedFor(first, type);
+      const b = requestedFor(second, type);
+      if (a === undefined) return b === undefined ? [] : [[type, [...b]]];
+      return [[type, b === undefined ? [...a] : [...a].filter((name) => b.has(name))]];
+    }),
+  );
 };
 
 /**
@@ -361,14 +437,22 @@ const projectResource = (
  *     field is what it already carries. A requested **empty** set
  *     (`?fields[TYPE]=`, decoded as `[]`) is the spec's "no fields", not
  *     "every field", and projects `attributes` to `{}` (#488);
- *   - only `attributes` is projected. `relationships`, `links` and `meta` are
- *     left alone, and a resource identifier (no `attributes` at all) is
- *     returned as is. Relationship fields — `?fields[articles]=author` — are
- *     out of scope: `Query.Fieldset` is built from the resource's attributes,
- *     so a relationship name cannot be requested in the first place, and
- *     `relationships` is kept even under an empty set, since dropping it
- *     would unlink the `included` members it reaches, which the builders'
- *     full-linkage check and `Middleware.SchemaErrorsLive` answer with a 500.
+ *   - only fields are projected — `attributes` and `relationships`, which
+ *     JSON:API 1.1 counts as fields together (§Resource Object Fields, #494).
+ *     A relationship the set does not name is dropped whole, its `links` and
+ *     `meta` with its `data`, and a `relationships` member left empty is
+ *     omitted, so an empty set drops every relationship. The resource's own
+ *     `links` and `meta` are left alone, and a resource identifier (neither
+ *     member) is returned as is.
+ *
+ * Dropping a relationship can unlink the `included` members only it reached
+ * (`?include=author&fields[articles]=title`). The spec exempts exactly that
+ * case from full linkage (§Compound Documents: "when relationship fields that
+ * would otherwise contain linkage data are excluded due to sparse
+ * fieldsets"), so the transform `project(fields)` builds carries its
+ * fieldset, through {@link compose} too, and the document builders'
+ * full-linkage check follows the linkage of the relationships it excluded as
+ * if it were still there ({@link buildIncluded}).
  *
  * Dual API: `project(fields)` builds the {@link ResourceTransform} the
  * document builders take as `onResource`, which is what applies the fieldset
@@ -394,22 +478,35 @@ const projectResource = (
  *   relationships: { author: { data: { type: "people", id: Person.Id.make("9") } } }
  * })
  *
- * // data-first: one resource, `attributes` only
+ * // data-first: one resource; a relationship is a field too
  * const projected = Handlers.project(article, { articles: ["title"] })
  * console.log(projected.attributes)      // → { title: "Hi" }
- * console.log(projected.relationships)   // → { author: { data: { type: "people", id: "9" } } } — untouched
+ * console.log("relationships" in projected)   // → false — `author` was not requested
+ *
+ * const withAuthor = Handlers.project(article, { articles: ["title", "author"] })
+ * console.log(withAuthor.relationships)  // → { author: { data: { type: "people", id: "9" } } }
  *
  * // no requested set for this type → unchanged
  * console.log(Handlers.project(article, { people: ["firstName"] }).attributes)
  * // → { title: "Hi", body: "…" }
  *
- * // an empty set (`?fields[articles]=`) → no attributes
+ * // an empty set (`?fields[articles]=`) → no attributes, no relationships
  * console.log(Handlers.project(article, { articles: [] }).attributes)
  * // → {}
  *
- * // data-last: the hook the builders apply to every resource in the document
- * const document = Handlers.data(article, { onResource: Handlers.project({ articles: ["title"] }) })
+ * // data-last: the hook the builders apply to every resource in the document.
+ * // `?include=author&fields[articles]=title`: `author` is excluded, so the
+ * // included person is exempt from full linkage (§Compound Documents)
+ * const author = Person.make({
+ *   id: Person.Id.make("9"),
+ *   attributes: { firstName: "Dan", lastName: "Gebhardt" }
+ * })
+ * const document = Handlers.data(article, {
+ *   included: [author],
+ *   onResource: Handlers.project({ articles: ["title"] })
+ * })
  * console.log(document.data.attributes)  // → { title: "Hi" }
+ * console.log(document.included?.length)  // → 1
  * ```
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-sparse-fieldsets}
@@ -425,8 +522,10 @@ export const project: {
 } = ((...args: ReadonlyArray<unknown>) =>
   args.length >= 2
     ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
-    : (resource: AnyResourceValue) =>
-        projectResource(resource, args[0] as Fields | undefined)) as never;
+    : projecting(
+        (resource: AnyResourceValue) => projectResource(resource, args[0] as Fields | undefined),
+        args[0] as Fields | undefined,
+      )) as never;
 
 // ---------------------------------------------------------------------------
 // withMeta — computed per-resource meta
@@ -571,8 +670,10 @@ export const compose = <A extends TransformLambda, B extends TransformLambda>(
   first: ResourceTransform<A>,
   second: ResourceTransform<B>,
 ): ResourceTransform<ComposeLambda<A, B>> =>
-  ((resource: ResourceValue) =>
-    second(first(resource) as ResourceValue)) as unknown as ResourceTransform<ComposeLambda<A, B>>;
+  projecting(
+    (resource: ResourceValue) => second(first(resource) as ResourceValue),
+    bothProjections(projectionOf(first), projectionOf(second)),
+  ) as unknown as ResourceTransform<ComposeLambda<A, B>>;
 
 // ---------------------------------------------------------------------------
 // Compound documents
@@ -589,6 +690,26 @@ const linkageKeys = (resource: ResourceValue): Array<string> =>
       : Arr.map(Array.isArray(linkage) ? linkage : [linkage], key),
   );
 
+// The edges the full-linkage walk follows out of a resource as emitted
+// (`shaped`), given the resource it was shaped from (`original`) and the
+// fieldset the transform applied: the emitted linkage, and the linkage of
+// every relationship of the original the fieldset excludes for its type. The
+// spec waives full linkage "when relationship fields that would otherwise
+// contain linkage data are excluded due to sparse fieldsets" (§Compound
+// Documents, #494), so the walk counts them as the linkage they would
+// otherwise have carried. A relationship the transform dropped for any
+// other reason is not counted.
+const walkKeys = (
+  shaped: ResourceValue,
+  original: ResourceValue,
+  fields: Fields | undefined,
+): Array<string> => {
+  const requested = requestedFor(fields, original.type);
+  if (requested === undefined || original.relationships === undefined) return linkageKeys(shaped);
+  const excluded = Rec.filter(original.relationships, (_, name) => !requested.has(name));
+  return [...linkageKeys(shaped), ...linkageKeys({ ...original, relationships: excluded })];
+};
+
 // Wraps a transform so it runs at most once per `(type, id)`, handing back
 // the same value everywhere that resource appears in the document. A resource
 // offered as both primary data and an `included` member is shaped once, for
@@ -597,13 +718,13 @@ const memoise = <F extends TransformLambda>(
   onResource: ResourceTransform<F>,
 ): ResourceTransform<F> => {
   const shaped = new Map<string, unknown>();
-  return ((resource: ResourceValue) => {
+  return projecting((resource: ResourceValue) => {
     const k = key(resource);
     if (shaped.has(k)) return shaped.get(k);
     const transformed = onResource(resource);
     shaped.set(k, transformed);
     return transformed;
-  }) as ResourceTransform<F>;
+  }, projectionOf(onResource)) as ResourceTransform<F>;
 };
 
 // Applies a transform to every resource of an array, or hands the array back
@@ -653,6 +774,20 @@ const mapResources = <F extends TransformLambda>(
  * (#423). {@link data} and {@link collection} always read their primary data
  * as resource objects.
  *
+ * Under a sparse fieldset the check has one exemption, the spec's own
+ * (§Compound Documents: "when relationship fields that would otherwise
+ * contain linkage data are excluded due to sparse fieldsets"; #494). When
+ * `onResource` is a {@link project} transform (or a {@link compose} of one),
+ * the walk also follows the linkage of every relationship that fieldset
+ * excludes, as each `included` member carried it before the transform: a
+ * member reached only through `author` under
+ * `?include=author&fields[articles]=title` passes. `primary` is read as
+ * passed, so pass it with the relationships its fieldset excludes still on it
+ * when they are what links `included` — or let {@link data} and
+ * {@link collection}, which follow them from the resources they were given,
+ * build the document. A relationship a transform drops for any other reason
+ * is not exempt.
+ *
  * It checks the value it is given, which counts every relationship key a
  * resource carries. Encoding through an endpoint's schema drops a
  * relationship the resource does not declare, so a member linked only through
@@ -701,11 +836,15 @@ export const buildIncluded = <
 // resource objects. `data` and `collection` pass `false`: their primary data
 // is resource objects however bare, and a bare one's included copy is a
 // duplicate to drop, not a member to link.
+// `originals` are the primary resources `primary` was shaped from, in the same
+// order — the relationships a fieldset excluded from them are followed from
+// there (#494) — and `primary` itself when it was not shaped.
 const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   primary: ReadonlyArray<ResourceValue>,
   asLinkage: boolean,
   included: ReadonlyArray<Included>,
   options?: Parameters<typeof buildIncluded<Included, F>>[2],
+  originals: ReadonlyArray<ResourceValue> = primary,
 ): ReadonlyArray<Transformed<F, Included>> => {
   // Dedupe by (type, id), against the primary data as well as within
   // `included`: the one-resource-object-per-pair rule is document-wide.
@@ -724,11 +863,24 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
 
   // Full linkage: every included resource is reachable from the primary data,
   // through its linkage and then through other included members' linkage.
+  // Under a `project` transform's fieldset, a relationship it excluded is
+  // followed as the resource carried it before the transform (#494).
   if (options?.checkLinkage !== false) {
-    const members = HashMap.fromIterable(Arr.map(shaped, (resource) => [key(resource), resource]));
-    const start = seeds(primary, asLinkage, (identifier) => [key(identifier)], linkageKeys);
+    const fields = projectionOf(options?.onResource);
+    const members = HashMap.fromIterable(
+      Arr.map(Arr.zip(shaped, deduped), ([resource, original]) => [
+        key(resource),
+        walkKeys(resource, original, fields),
+      ]),
+    );
+    const start = seeds(
+      Arr.zip(primary, originals),
+      asLinkage,
+      ([identifier]) => [key(identifier)],
+      ([resource, original]) => walkKeys(resource, original, fields),
+    );
     const linked = reachable(start, (k) =>
-      Option.match(HashMap.get(members, k), { onNone: () => [], onSome: linkageKeys }),
+      Option.getOrElse(HashMap.get(members, k), (): ReadonlyArray<string> => []),
     );
     for (const resource of shaped) {
       if (!HashSet.has(linked, key(resource))) {
@@ -1064,8 +1216,10 @@ const resolve = (
  *   still reference is orphaned all the same once the walk cannot reach it: a
  *   cycle of members, or a member that references itself, does not link
  *   itself to the document.
- *   {@link project} and {@link withMeta} leave `relationships` alone;
- *   {@link transform} is unconstrained;
+ *   {@link withMeta} leaves `relationships` alone; {@link project} drops the
+ *   relationships its fieldset does not name, which the check exempts, as
+ *   the spec does (§Compound Documents, #494); {@link transform} is
+ *   unconstrained;
  * - the array is edited: a member taken out can orphan everything reachable
  *   only through it, and a resource added was never reached at all;
  * - the builder is given different primary data from the resources the walk
@@ -1249,7 +1403,8 @@ const buildLinks = (options: {
 // transform runs on them before the document is assembled, and `onResource`
 // is the memoised pass shared with `included` so nothing is shaped twice.
 // `asLinkage` marks `primary` as a relationship document's identifiers, which
-// `included` is seeded from rather than deduplicated against (#423).
+// `included` is seeded from rather than deduplicated against (#423);
+// `originals` are the resources `primary` was shaped from (#494).
 const build = (
   data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue | null,
   primary: ReadonlyArray<ResourceValue>,
@@ -1266,6 +1421,7 @@ const build = (
     | undefined,
   onResource: ResourceTransform<TransformLambda> | undefined,
   asLinkage = false,
+  originals: ReadonlyArray<ResourceValue> = primary,
 ) => {
   const links = options === undefined ? undefined : buildLinks(options);
   // An array — however empty, and however empty dedup against the primary
@@ -1276,10 +1432,13 @@ const build = (
   const included =
     options?.included === undefined
       ? undefined
-      : includedFor(primary, asLinkage, options.included, {
-          checkLinkage: options.checkLinkage,
-          onResource,
-        });
+      : includedFor(
+          primary,
+          asLinkage,
+          options.included,
+          { checkLinkage: options.checkLinkage, onResource },
+          originals,
+        );
   return {
     data,
     ...(included !== undefined ? { included } : {}),
@@ -1444,12 +1603,14 @@ export const data = <
       : onResource === undefined
         ? resource
         : (onResource(resource) as ResourceValue);
-  return build(primary, primary === null ? [] : [primary], options, onResource) as DocumentValue<
-    TransformedData<F, R>,
-    Transformed<F, Included>,
-    M,
-    J
-  >;
+  return build(
+    primary,
+    primary === null ? [] : [primary],
+    options,
+    onResource,
+    false,
+    resource === null ? [] : [resource],
+  ) as DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J>;
 };
 
 /**
@@ -1571,7 +1732,7 @@ export const collection = <
 ): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const primary = mapResources(resources, onResource);
-  return build(primary, primary, options, onResource) as DocumentValue<
+  return build(primary, primary, options, onResource, false, resources) as DocumentValue<
     ReadonlyArray<Transformed<F, R>>,
     Transformed<F, Included>,
     M,

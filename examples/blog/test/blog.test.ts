@@ -102,9 +102,26 @@ describe("blog example: fetching", () => {
     expect(document.included?.map((resource) => resource.attributes)).toEqual([
       { lastName: sampleAuthor.attributes.lastName },
     ]);
-    // Only `attributes` is projected: the relationships are untouched.
-    expect(document.data.relationships?.author.data).toEqual(Person.ref(sampleAuthor.id));
+    // A relationship is a field too (#494): `author` was not requested, so it
+    // is dropped, and the included author it linked is exempt from full
+    // linkage (§Compound Documents).
+    expect(document.data.relationships).toBeUndefined();
     expect(document.jsonapi).toEqual({ version: "1.1" });
+  });
+
+  it("keeps the relationships a fieldset names", async () => {
+    const document = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        return yield* client.articles.get({
+          params: { id: Article.Id.make("1") },
+          query: { include: ["author"], fields: { articles: ["title", "author"] } },
+        });
+      }),
+    );
+    expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
+    expect(Object.keys(document.data.relationships ?? {})).toEqual(["author"]);
+    expect(document.data.relationships?.author?.data).toEqual(Person.ref(sampleAuthor.id));
   });
 
   it("paginated relationships appear as links, never as inline data or includes", async () => {
@@ -484,7 +501,7 @@ describe("blog example: relationship endpoints", () => {
           params: { id: Article.Id.make("1") },
           query: {},
         });
-        expect(article.data?.relationships?.author.data.id).toBe(sampleAuthor.id);
+        expect(article.data?.relationships?.author?.data.id).toBe(sampleAuthor.id);
         return replaced;
       }),
     );
@@ -543,7 +560,7 @@ describe("blog example: relationship endpoints", () => {
         return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
       }),
     );
-    expect(article.data?.relationships?.author.data.id).toBe(sampleAuthor.id);
+    expect(article.data?.relationships?.author?.data.id).toBe(sampleAuthor.id);
   });
 
   it("404s when POSTing a comment that does not exist, linking none of the batch", async () => {

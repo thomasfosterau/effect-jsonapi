@@ -341,14 +341,35 @@ describe("Handlers.linkage", () => {
     });
 
     it("projects a sparse fieldset onto the members, not the identifiers (#485)", () => {
-      // `?include=comments.author&fields[comments]=body&fields[people]=name`:
+      // `?include=comments.author&fields[comments]=body,author&fields[people]=name`:
       // an identifier has no attributes, so projecting it is a no-op.
       const doc = Handlers.linkage(ids("5"), {
         included: [comment("5"), { ...person("9"), attributes: { name: "Ada", email: "a@b" } }],
-        onResource: Handlers.project({ comments: ["body"], people: ["name"] }),
+        onResource: Handlers.project({ comments: ["body", "author"], people: ["name"] }),
       });
       expect(doc.data).toEqual(ids("5"));
       expect(doc.included).toEqual([comment("5"), { ...person("9"), attributes: { name: "Ada" } }]);
+    });
+
+    // §Compound Documents: full linkage is waived "when relationship fields
+    // that would otherwise contain linkage data are excluded due to sparse
+    // fieldsets" (#494).
+    it("exempts a member linked only through a relationship the fieldset excludes", () => {
+      // `?include=comments.author&fields[comments]=body`: `author` goes, and
+      // the person it linked is reachable only through it.
+      const doc = Handlers.linkage(ids("5"), {
+        included: [comment("5"), person("9")],
+        onResource: Handlers.project({ comments: ["body"] }),
+      });
+      const { relationships: _relationships, ...bare } = comment("5");
+      expect(doc.included).toEqual([bare, person("9")]);
+      // A member the excluded relationship never linked still fails.
+      expect(() =>
+        Handlers.linkage(ids("5"), {
+          included: [comment("5"), person("7")],
+          onResource: Handlers.project({ comments: ["body"] }),
+        }),
+      ).toThrow(/full linkage violation: included resource "people:7"/);
     });
 
     it("shapes each identifier and each member from its own value", () => {
@@ -411,16 +432,15 @@ describe("Handlers.project", () => {
     });
   });
 
-  // Relationship fields are out of scope (the vocabulary is the attributes),
-  // and dropping `relationships` would unlink the `included` members it
-  // reaches, which the full-linkage checks reject.
-  it("keeps `relationships`, `links` and `meta` under an empty set", () => {
+  // A relationship is a field (§Resource Object Fields, #494): an empty set
+  // drops every one, and `relationships` with them; the resource's own
+  // `links` and `meta` are no fields, and stay.
+  it("drops every relationship under an empty set, keeping `links` and `meta`", () => {
     const decorated = { ...primaryArticle, links: { self: "/articles/1" }, meta: { views: 3 } };
     expect(Handlers.project(decorated, { articles: [] })).toEqual({
       type: "articles",
       id: "1",
       attributes: {},
-      relationships: { related: { data: [{ type: "articles", id: "2" }] } },
       links: { self: "/articles/1" },
       meta: { views: 3 },
     });
@@ -432,19 +452,46 @@ describe("Handlers.project", () => {
       onResource: Handlers.project({ articles: [] }),
     });
     expect(document.data.attributes).toEqual({});
-    expect(document.data.relationships).toEqual(primaryArticle.relationships);
+    expect("relationships" in document.data).toBe(false);
     expect(document.included?.map((resource) => resource.attributes)).toEqual([{}]);
   });
 
-  it("projects `attributes` only — relationships, links and meta are left alone", () => {
+  it("projects `attributes` and `relationships` to the set — links and meta are left alone", () => {
     const decorated = { ...primaryArticle, links: { self: "/articles/1" }, meta: { views: 3 } };
     expect(Handlers.project(decorated, { articles: ["title"] })).toEqual({
       type: "articles",
       id: "1",
       attributes: { title: "Hi" },
+      links: { self: "/articles/1" },
+      meta: { views: 3 },
+    });
+    expect(Handlers.project(decorated, { articles: ["related"] })).toEqual({
+      type: "articles",
+      id: "1",
+      attributes: {},
       relationships: { related: { data: [{ type: "articles", id: "2" }] } },
       links: { self: "/articles/1" },
       meta: { views: 3 },
+    });
+  });
+
+  it("drops an unrequested relationship whole — its `links` and `meta` with its `data`", () => {
+    const resource = {
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hi" },
+      relationships: {
+        author: { data: { type: "people", id: "9" }, links: { related: "/a" }, meta: { n: 1 } },
+        comments: { links: { related: "/articles/1/comments" }, meta: { count: 2 } },
+      },
+    };
+    expect(Handlers.project(resource, { articles: ["title", "comments"] })).toEqual({
+      type: "articles",
+      id: "1",
+      attributes: { title: "Hi" },
+      relationships: {
+        comments: { links: { related: "/articles/1/comments" }, meta: { count: 2 } },
+      },
     });
   });
 
@@ -598,8 +645,9 @@ describe("the per-resource transform pass", () => {
     expect(Object.keys(document.data.attributes)).toEqual(
       Object.keys(document.included![0]!.attributes),
     );
-    // …and the relationships that carry the linkage survived in both slots
-    expect(document.data.relationships).toEqual(primaryArticle.relationships);
+    // …and the relationship that carried the linkage went with the
+    // fieldset, which exempts the member it linked (#494)
+    expect("relationships" in document.data).toBe(false);
   });
 
   it("applies to a collection's `data` and `included` alike", () => {
@@ -841,6 +889,104 @@ describe("the per-resource transform pass", () => {
     expect(
       Handlers.linkage(null, { onResource: Handlers.withMeta(() => ({ canEdit: true })) }).data,
     ).toBeNull();
+  });
+});
+
+// §Compound Documents: "The only exception to the full linkage requirement is
+// when relationship fields that would otherwise contain linkage data are
+// excluded due to sparse fieldsets requested by the client" (#494).
+describe("the sparse-fieldset exemption from full linkage", () => {
+  // `?include=author&fields[articles]=title`
+  it("passes a member linked only through a relationship the fieldset excludes", () => {
+    const single = Handlers.data(article, {
+      included: [author],
+      onResource: Handlers.project({ articles: ["title"] }),
+    });
+    expect(single.data).toEqual({ type: "articles", id: "1", attributes: { title: "Hello" } });
+    expect(single.included).toEqual([author]);
+    const many = Handlers.collection([article], {
+      included: [author, comment],
+      onResource: Handlers.project({ articles: [] }),
+    });
+    expect(many.included).toEqual([author, comment]);
+  });
+
+  // `?include=comments.author&fields[comments]=body`
+  it("follows an excluded relationship of an `included` member, hops on", () => {
+    // The article reaches the person only through the comment's `author`.
+    const commentOnly = { ...article, relationships: { comments: article.relationships.comments } };
+    const document = Handlers.data(commentOnly, {
+      included: [comment, author],
+      onResource: Handlers.project({ comments: ["body"] }),
+    });
+    expect(document.included).toEqual([
+      { type: "comments", id: "5", attributes: { body: "Nice" } },
+      author,
+    ]);
+    // `people:404` was never linked, by any relationship.
+    expect(() =>
+      Handlers.data(commentOnly, {
+        included: [comment, stranger],
+        onResource: Handlers.project({ comments: ["body"] }),
+      }),
+    ).toThrow(/full linkage violation: included resource "people:404"/);
+  });
+
+  it("still fails a member no relationship links", () => {
+    expect(() =>
+      Handlers.data(article, {
+        included: [author, stranger],
+        onResource: Handlers.project({ articles: ["title"] }),
+      }),
+    ).toThrow(/"people:404"/);
+  });
+
+  it("is carried through `compose`, on either side", () => {
+    const stamp = Handlers.withMeta(() => ({ seen: true }));
+    for (const onResource of [
+      Handlers.compose(stamp, Handlers.project({ articles: ["title"] })),
+      Handlers.compose(Handlers.project({ articles: ["title"] }), stamp),
+      Handlers.compose(
+        Handlers.project({ articles: ["title", "author"] }),
+        Handlers.project({ articles: ["title", "comments"] }),
+      ),
+    ]) {
+      const document = Handlers.data(article, { included: [author, comment], onResource });
+      expect(document.included?.map((member) => `${member.type}:${member.id}`)).toEqual([
+        "people:9",
+        "comments:5",
+      ]);
+    }
+  });
+
+  it("does not cover a relationship a transform drops for any other reason", () => {
+    const stripArticles = Handlers.transform<Handlers.IdentityLambda>((resource) => {
+      if (resource.type !== "articles") return resource;
+      const { relationships: _relationships, ...rest } = resource;
+      return rest;
+    });
+    // A fieldset for another type exempts nothing of `articles`.
+    expect(() =>
+      Handlers.data(article, {
+        included: [author],
+        onResource: Handlers.compose(Handlers.project({ people: ["firstName"] }), stripArticles),
+      }),
+    ).toThrow(/full linkage/);
+  });
+
+  it("`buildIncluded` follows `primary` as passed, and the members as given", () => {
+    const onResource = Handlers.project({ articles: ["title"], comments: ["body"] });
+    // Passed as given, `primary`'s excluded `author` still links the person.
+    expect(Handlers.buildIncluded([article], [author, comment], { onResource })).toEqual([
+      author,
+      { type: "comments", id: "5", attributes: { body: "Nice" } },
+    ]);
+    // Passed projected, it links nothing, so nothing is reachable.
+    expect(() =>
+      Handlers.buildIncluded([Handlers.project(article, { articles: ["title"] })], [author], {
+        onResource,
+      }),
+    ).toThrow(/full linkage/);
   });
 });
 

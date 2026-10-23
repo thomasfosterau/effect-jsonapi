@@ -110,10 +110,36 @@ assertType<
     { readonly name?: string; readonly email?: string }
   >
 >(true);
-// Everything but `attributes` is as declared.
+// Every relationship is optional too: a relationship is a field (#494).
+assertType<
+  Equals<
+    NonNullable<DataOf<typeof get>["relationships"]>,
+    Partial<NonNullable<typeof Article.Type.relationships>>
+  >
+>(true);
+// Everything but `attributes` and `relationships` is as declared.
 assertType<Equals<DataOf<typeof get>["id"], typeof Article.Type.id>>(true);
-assertType<Equals<DataOf<typeof get>["relationships"], typeof Article.Type.relationships>>(true);
+assertType<Equals<DataOf<typeof get>["links"], typeof Article.Type.links>>(true);
 assertType<Equals<IncludedOf<typeof get>["type"], "people" | "tags" | "companies">>(true);
+
+// A fieldset names attributes and relationships alike (#494), and nothing else:
+// not `type` or `id`, which share the namespace but are no fields.
+type FieldsetsOf<E> = HttpApiEndpoint.Query<E>["Type"] extends { readonly fields?: infer F }
+  ? NonNullable<F>
+  : never;
+assertType<FieldsetsOf<typeof get>>({
+  articles: ["title", "author", "tags"],
+  people: ["employer"],
+});
+// @ts-expect-error -- `id` is not a field
+assertType<FieldsetsOf<typeof get>>({ articles: ["id"] });
+// @ts-expect-error -- `employer` is a relationship of `people`, not of `articles`
+assertType<FieldsetsOf<typeof get>>({ articles: ["employer"] });
+
+// A projection that drops every relationship fits too.
+assertType<SuccessOf<typeof get>>(
+  Handlers.data(article, { included: [person], onResource: Handlers.project({ articles: [] }) }),
+);
 
 // `Handlers.project(query.fields)` fits, with no cast.
 assertType<SuccessOf<typeof get>>(projectedArticle);

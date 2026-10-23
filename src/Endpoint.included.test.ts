@@ -506,8 +506,10 @@ describe("a depth-2 include path answered over HTTP (#320)", () => {
         ),
       ),
   );
-  // `fields[people]=name` omits `email` (§Sparse Fieldsets, #322).
-  const projectedPerson = { ...wire.people, attributes: { name: "Ada" } };
+  // `fields[people]=name` omits `email` (§Sparse Fieldsets, #322) and, a
+  // relationship being a field too, `employer` (#494).
+  const { relationships: _employer, ...unrelatedPerson } = wire.people;
+  const projectedPerson = { ...unrelatedPerson, attributes: { name: "Ada" } };
 
   const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Any));
   const serve = async (url: string) => {

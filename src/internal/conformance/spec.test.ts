@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import { unlinkedIncluded } from "../linkage.js";
+import { requestedFieldsets, unlinkedIncluded } from "../linkage.js";
 
 /** A resource identifier object, which a resource object extends. */
 const ref = (type: string, id: string) => ({ type, id });
@@ -177,5 +177,69 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
       included: [...included, ref("people", "unreached")],
     };
     expect(orphans(document)).toEqual(["people:unreached"]);
+  });
+
+  // §Compound Documents: full linkage is waived "when relationship fields that
+  // would otherwise contain linkage data are excluded due to sparse fieldsets"
+  // (#494). The wire cannot show what the excluded relationship linked.
+  describe("the sparse-fieldset exemption", () => {
+    const person = ref("people", "9");
+    const comment = { ...ref("comments", "5"), relationships: { author: one(person) } };
+
+    it("reports nothing once the walk reaches a resource of a type a fieldset names", () => {
+      // `?include=author&fields[articles]=title`: the primary article.
+      const document = {
+        data: { ...ref("articles", "1"), attributes: { title: "Hi" } },
+        included: [person],
+      };
+      expect(orphans(document)).toEqual(["people:9"]);
+      expect(unlinkedIncluded(document, { articles: ["title"] })).toEqual([]);
+      expect(unlinkedIncluded(document, { articles: [] })).toEqual([]);
+      // `?include=comments.author&fields[people]=name`: a member the walk
+      // reaches, whose own relationships the fieldset may have excluded.
+      const linked = {
+        data: { ...ref("articles", "1"), relationships: { comments: one([ref("comments", "5")]) } },
+        included: [comment, person, ref("tags", "3")],
+      };
+      expect(unlinkedIncluded(linked, { people: ["name"] })).toEqual([]);
+    });
+
+    it("still reports when the walk reaches no resource of a type a fieldset names", () => {
+      const document = {
+        data: { ...ref("articles", "1"), attributes: { title: "Hi" } },
+        included: [person],
+      };
+      // `people:9` is unreached, so its own fieldset excludes nothing that
+      // could link it.
+      expect(unlinkedIncluded(document, { people: ["name"] })).toEqual([person]);
+      // A relationship document's identifiers are no resource objects.
+      expect(
+        unlinkedIncluded(
+          { data: [ref("comments", "5")], included: [ref("comments", "6")] },
+          { comments: ["body"] },
+        ),
+      ).toEqual([ref("comments", "6")]);
+    });
+  });
+
+  describe("requestedFieldsets", () => {
+    it("reads every `fields[TYPE]`, comma-separated or repeated, empty as the empty set", () => {
+      expect(
+        requestedFieldsets([
+          ["include", "author"],
+          ["fields[articles]", "title,author"],
+          ["fields[articles]", "body"],
+          ["fields[people]", ""],
+          ["fields", "x"],
+          ["fields[a][b]", "y"],
+        ]),
+      ).toEqual({ articles: ["title", "author", "body"], people: [] });
+    });
+
+    it("keeps a type named `__proto__` as an own member", () => {
+      const fieldsets = requestedFieldsets([["fields[__proto__]", "a"]]);
+      expect(Object.hasOwn(fieldsets, "__proto__")).toBe(true);
+      expect(Object.getPrototypeOf(fieldsets)).toBe(Object.prototype);
+    });
   });
 });

@@ -627,7 +627,7 @@ const fullLinkage: RuleImpl = {
     "Compound Documents",
     "document-compound-documents",
     "MUST NOT",
-    "A compound document MUST NOT include resources that cannot be linked to the primary data: every resource in `included` must be identified by a resource identifier object reachable from the primary data or from another included resource.",
+    "A compound document MUST NOT include resources that cannot be linked to the primary data: every resource in `included` must be identified by a resource identifier object reachable from the primary data or from another included resource — unless relationship fields that would otherwise contain that linkage are excluded by the request's sparse fieldsets.",
   ),
   run: (ctx) =>
     overDocuments(fullLinkage.rule, {
@@ -638,7 +638,9 @@ const fullLinkage: RuleImpl = {
       inapplicable:
         "no endpoint returned a compound document — either none declares `include`, or no resource it returned carries inline relationship linkage to include",
       check: (body, observation, where) => {
-        const orphans = isRecord(body) ? Linkage.unlinkedIncluded(body) : [];
+        // The request's `fields[TYPE]` carry the spec's one exemption (#494).
+        const fields = Linkage.requestedFieldsets(new URLSearchParams(where.split("?")[1] ?? ""));
+        const orphans = isRecord(body) ? Linkage.unlinkedIncluded(body, fields) : [];
         return Arr.isReadonlyArrayEmpty(orphans)
           ? []
           : [
@@ -1098,22 +1100,70 @@ const inSlot = (pointer: string, where: Slot): boolean =>
   pointer.startsWith("/included") === (where === "included");
 
 /**
- * The attribute names of the first resource of each type in slot `where`:
- * only types that actually appear in the slot under test can decide a
- * projection rule; anything else would be a pass over an empty set.
+ * The field names a resource object carries: its `attributes` keys, then its
+ * `relationships` keys — the two are its "fields" together (§Resource Object
+ * Fields, #494).
  */
-const attributesByType = (body: Body, where: Slot): Map<string, ReadonlyArray<string>> => {
+const fieldNamesOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArray<string> => {
+  const attributes = resource["attributes"];
+  const relationships = resource["relationships"];
+  return [
+    ...(isRecord(attributes) ? Object.keys(attributes) : []),
+    ...(isRecord(relationships) ? Object.keys(relationships) : []),
+  ];
+};
+
+/**
+ * The field names of the first resource of each type in slot `where`: only
+ * types that actually appear in the slot under test can decide a projection
+ * rule; anything else would be a pass over an empty set.
+ */
+const fieldsByType = (body: Body, where: Slot): Map<string, ReadonlyArray<string>> => {
   const byType = new Map<string, ReadonlyArray<string>>();
   for (const { pointer, resource } of resourcesOf(body)) {
     if (!inSlot(pointer, where)) continue;
     const type = resource["type"];
-    const attributes = resource["attributes"];
-    if (typeof type === "string" && isRecord(attributes) && !byType.has(type)) {
-      byType.set(type, Object.keys(attributes));
-    }
+    if (typeof type === "string" && !byType.has(type)) byType.set(type, fieldNamesOf(resource));
   }
   return byType;
 };
+
+// What a sparse-fieldset rule's probes of one endpoint add up to.
+interface Tally {
+  readonly findings: Array<Finding>;
+  probes: number;
+  evaluated: number;
+}
+
+/**
+ * Runs a sparse-fieldset rule's `probe` over every read endpoint declaring
+ * `fields[TYPE]`, one at a time, and settles the rule on what they tally:
+ * skipped when no endpoint declares one, or when no probe evaluated anything
+ * (`inapplicable` says why).
+ */
+const overFieldsetEndpoints = (
+  ctx: Context,
+  impl: Rule,
+  inapplicable: string,
+  probe: (
+    target: ReturnType<typeof readable>["resolved"][number],
+    tally: Tally,
+  ) => Effect.Effect<void, never, never>,
+) =>
+  Effect.gen(function* () {
+    const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
+      Arr.isReadonlyArrayNonEmpty(fieldsOf(endpoint.queryKeys)),
+    );
+    if (Arr.isReadonlyArrayEmpty(candidates))
+      return skip(impl, "no endpoint declares `fields[TYPE]`");
+    const tally: Tally = { findings: [], probes: 0, evaluated: 0 };
+    yield* Effect.forEach(candidates, (target) => probe(target, tally), {
+      concurrency: 1,
+      discard: true,
+    });
+    if (tally.evaluated === 0) return skip(impl, inapplicable);
+    return settle(impl, tally.probes, tally.findings);
+  });
 
 const sparseFieldsets = (where: Slot): RuleImpl => {
   const impl = rule(
@@ -1128,157 +1178,60 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
   return {
     rule: impl,
     run: (ctx) =>
-      Effect.gen(function* () {
-        const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
-          Arr.isReadonlyArrayNonEmpty(fieldsOf(endpoint.queryKeys)),
-        );
-        if (Arr.isReadonlyArrayEmpty(candidates))
-          return skip(impl, "no endpoint declares `fields[TYPE]`");
-        const findings: Array<Finding> = [];
-        let probes = 0;
-        let evaluated = 0;
-        yield* Effect.forEach(
-          candidates,
-          ({ endpoint, path }) =>
-            Effect.gen(function* () {
-              // Learn the attribute names this endpoint actually emits, then ask for
-              // exactly the first one: a projection rule needs a field set the
-              // server is known to be able to return. The `included` variant needs a
-              // compound document, so the baseline is taken with `include` on — on a
-              // relationship endpoint, its own relationship (#485).
-              const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
-              probes += 1;
-              let source = baseline;
-              let base = path;
-              if (where === "included") {
-                if (!endpoint.queryKeys.includes("include")) return;
-                const includable = compoundIncludable(endpoint, baseline);
-                if (Arr.isReadonlyArrayEmpty(includable)) return;
-                base = withQuery(path, [["include", includable.join(",")]]);
-                source = yield* ctx.request({ url: base, headers: jsonApiAccept });
-                probes += 1;
-                if (source.status < 200 || source.status >= 300) return;
-              }
-              const byType = attributesByType(source.body, where);
-              yield* Effect.forEach(
-                fieldsOf(endpoint.queryKeys),
-                (type) =>
-                  Effect.gen(function* () {
-                    const attributes = byType.get(type);
-                    if (attributes === undefined || attributes.length < 2) return;
-                    const requested = attributes[0]!;
-                    const url = withQuery(base, [[`fields[${type}]`, requested]]);
-                    const observation = yield* ctx.request({ url, headers: jsonApiAccept });
-                    probes += 1;
-                    if (observation.status < 200 || observation.status >= 300) return;
-                    const subjects = resourcesOf(observation.body).filter(
-                      ({ pointer, resource }) =>
-                        inSlot(pointer, where) && resource["type"] === type,
-                    );
-                    // A projection request that returned no resource of that type in
-                    // that slot proves nothing either way.
-                    if (Arr.isReadonlyArrayEmpty(subjects)) return;
-                    evaluated += 1;
-                    for (const { pointer, resource } of subjects) {
-                      const emitted = resource["attributes"];
-                      if (!isRecord(emitted)) continue;
-                      const extra = Object.keys(emitted).filter((key) => key !== requested);
-                      if (Arr.isReadonlyArrayNonEmpty(extra)) {
-                        findings.push(
-                          finding(impl, {
-                            detail: `\`fields[${type}]=${requested}\` still returned other fields at ${pointer}`,
-                            expected: `only \`${requested}\` in \`attributes\``,
-                            observed: `also returned: ${extra.join(", ")}`,
-                            probe: observation.probe,
-                          }),
-                        );
-                      }
-                    }
-                  }),
-                { concurrency: 1, discard: true },
-              );
-            }),
-          { concurrency: 1, discard: true },
-        );
-        if (evaluated === 0) {
-          return skip(
-            impl,
-            where === "included"
-              ? "no endpoint returned an `included` resource, of a type it declares `fields[TYPE]` for, carrying two or more attributes to project"
-              : "no endpoint returned a primary resource, of a type it declares `fields[TYPE]` for, carrying two or more attributes to project",
-          );
-        }
-        return settle(impl, probes, findings);
-      }),
-  };
-};
-
-// §Sparse Fieldsets: "An empty value indicates that no fields should be
-// returned" — `?fields[TYPE]=` is not the absent parameter, whose fields the
-// server may choose (#488). Judged on `attributes`, as the two rules above
-// are: a resource object of that type in the answer carries none.
-const sparseFieldsetsEmpty: RuleImpl = {
-  rule: rule(
-    "spec/query/sparse-fieldsets-empty",
-    "Sparse Fieldsets",
-    "fetching-sparse-fieldsets",
-    "MUST NOT",
-    "An empty `fields[TYPE]` value indicates that no fields should be returned, so an endpoint MUST NOT include attributes in resource objects of that type in its response.",
-  ),
-  run: (ctx) =>
-    Effect.gen(function* () {
-      const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
-        Arr.isReadonlyArrayNonEmpty(fieldsOf(endpoint.queryKeys)),
-      );
-      if (Arr.isReadonlyArrayEmpty(candidates))
-        return skip(sparseFieldsetsEmpty.rule, "no endpoint declares `fields[TYPE]`");
-      const findings: Array<Finding> = [];
-      let probes = 0;
-      let evaluated = 0;
-      yield* Effect.forEach(
-        candidates,
-        ({ endpoint, path }) =>
+      overFieldsetEndpoints(
+        ctx,
+        impl,
+        where === "included"
+          ? "no endpoint returned an `included` resource, of a type it declares `fields[TYPE]` for, carrying two or more fields to project"
+          : "no endpoint returned a primary resource, of a type it declares `fields[TYPE]` for, carrying two or more fields to project",
+        ({ endpoint, path }, tally) =>
           Effect.gen(function* () {
-            // Only a type the baseline answered with an attribute can show an
-            // empty set honoured or ignored.
+            // Learn the field names (attributes, then relationships, #494) this
+            // endpoint actually emits, then ask for exactly the first one: a
+            // projection rule needs a field set the server is known to be able
+            // to return. The `included` variant needs a compound document, so
+            // the baseline is taken with `include` on — on a relationship
+            // endpoint, its own relationship (#485).
             const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
-            probes += 1;
-            const types = new Set(
-              resourcesOf(baseline.body).flatMap(({ resource }) => {
-                const attributes = resource["attributes"];
-                const type = resource["type"];
-                return typeof type === "string" &&
-                  isRecord(attributes) &&
-                  Arr.isReadonlyArrayNonEmpty(Object.keys(attributes))
-                  ? [type]
-                  : [];
-              }),
-            );
+            tally.probes += 1;
+            let source = baseline;
+            let base = path;
+            if (where === "included") {
+              if (!endpoint.queryKeys.includes("include")) return;
+              const includable = compoundIncludable(endpoint, baseline);
+              if (Arr.isReadonlyArrayEmpty(includable)) return;
+              base = withQuery(path, [["include", includable.join(",")]]);
+              source = yield* ctx.request({ url: base, headers: jsonApiAccept });
+              tally.probes += 1;
+              if (source.status < 200 || source.status >= 300) return;
+            }
+            const byType = fieldsByType(source.body, where);
             yield* Effect.forEach(
-              fieldsOf(endpoint.queryKeys).filter((type) => types.has(type)),
+              fieldsOf(endpoint.queryKeys),
               (type) =>
                 Effect.gen(function* () {
-                  const observation = yield* ctx.request({
-                    url: withQuery(path, [[`fields[${type}]`, ""]]),
-                    headers: jsonApiAccept,
-                  });
-                  probes += 1;
+                  const fields = byType.get(type);
+                  if (fields === undefined || fields.length < 2) return;
+                  const requested = fields[0]!;
+                  const url = withQuery(base, [[`fields[${type}]`, requested]]);
+                  const observation = yield* ctx.request({ url, headers: jsonApiAccept });
+                  tally.probes += 1;
                   if (observation.status < 200 || observation.status >= 300) return;
                   const subjects = resourcesOf(observation.body).filter(
-                    ({ resource }) => resource["type"] === type,
+                    ({ pointer, resource }) => inSlot(pointer, where) && resource["type"] === type,
                   );
+                  // A projection request that returned no resource of that type in
+                  // that slot proves nothing either way.
                   if (Arr.isReadonlyArrayEmpty(subjects)) return;
-                  evaluated += 1;
+                  tally.evaluated += 1;
                   for (const { pointer, resource } of subjects) {
-                    const emitted = resource["attributes"];
-                    if (!isRecord(emitted)) continue;
-                    const names = Object.keys(emitted);
-                    if (Arr.isReadonlyArrayNonEmpty(names)) {
-                      findings.push(
-                        finding(sparseFieldsetsEmpty.rule, {
-                          detail: `\`fields[${type}]=\` (no fields) still returned attributes at ${pointer}`,
-                          expected: "no `attributes` members",
-                          observed: `returned: ${names.join(", ")}`,
+                    const extra = fieldNamesOf(resource).filter((key) => key !== requested);
+                    if (Arr.isReadonlyArrayNonEmpty(extra)) {
+                      tally.findings.push(
+                        finding(impl, {
+                          detail: `\`fields[${type}]=${requested}\` still returned other fields at ${pointer}`,
+                          expected: `only \`${requested}\` among \`attributes\` and \`relationships\``,
+                          observed: `also returned: ${extra.join(", ")}`,
                           probe: observation.probe,
                         }),
                       );
@@ -1288,16 +1241,75 @@ const sparseFieldsetsEmpty: RuleImpl = {
               { concurrency: 1, discard: true },
             );
           }),
-        { concurrency: 1, discard: true },
-      );
-      if (evaluated === 0) {
-        return skip(
-          sparseFieldsetsEmpty.rule,
-          "no endpoint returned a resource, of a type it declares `fields[TYPE]` for, carrying an attribute to project away",
-        );
-      }
-      return settle(sparseFieldsetsEmpty.rule, probes, findings);
-    }),
+      ),
+  };
+};
+
+// §Sparse Fieldsets: "An empty value indicates that no fields should be
+// returned" — `?fields[TYPE]=` is not the absent parameter, whose fields the
+// server may choose (#488). Judged on `attributes` and `relationships`, as the
+// two rules above are (#494): a resource object of that type in the answer
+// carries neither.
+const sparseFieldsetsEmpty: RuleImpl = {
+  rule: rule(
+    "spec/query/sparse-fieldsets-empty",
+    "Sparse Fieldsets",
+    "fetching-sparse-fieldsets",
+    "MUST NOT",
+    "An empty `fields[TYPE]` value indicates that no fields should be returned, so an endpoint MUST NOT include attributes or relationships in resource objects of that type in its response.",
+  ),
+  run: (ctx) =>
+    overFieldsetEndpoints(
+      ctx,
+      sparseFieldsetsEmpty.rule,
+      "no endpoint returned a resource, of a type it declares `fields[TYPE]` for, carrying a field to project away",
+      ({ endpoint, path }, tally) =>
+        Effect.gen(function* () {
+          // Only a type the baseline answered with a field can show an empty
+          // set honoured or ignored.
+          const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+          tally.probes += 1;
+          const types = new Set(
+            resourcesOf(baseline.body).flatMap(({ resource }) => {
+              const type = resource["type"];
+              return typeof type === "string" && Arr.isReadonlyArrayNonEmpty(fieldNamesOf(resource))
+                ? [type]
+                : [];
+            }),
+          );
+          yield* Effect.forEach(
+            fieldsOf(endpoint.queryKeys).filter((type) => types.has(type)),
+            (type) =>
+              Effect.gen(function* () {
+                const observation = yield* ctx.request({
+                  url: withQuery(path, [[`fields[${type}]`, ""]]),
+                  headers: jsonApiAccept,
+                });
+                tally.probes += 1;
+                if (observation.status < 200 || observation.status >= 300) return;
+                const subjects = resourcesOf(observation.body).filter(
+                  ({ resource }) => resource["type"] === type,
+                );
+                if (Arr.isReadonlyArrayEmpty(subjects)) return;
+                tally.evaluated += 1;
+                for (const { pointer, resource } of subjects) {
+                  const names = fieldNamesOf(resource);
+                  if (Arr.isReadonlyArrayNonEmpty(names)) {
+                    tally.findings.push(
+                      finding(sparseFieldsetsEmpty.rule, {
+                        detail: `\`fields[${type}]=\` (no fields) still returned fields at ${pointer}`,
+                        expected: "no `attributes` or `relationships` members",
+                        observed: `returned: ${names.join(", ")}`,
+                        probe: observation.probe,
+                      }),
+                    );
+                  }
+                }
+              }),
+            { concurrency: 1, discard: true },
+          );
+        }),
+    ),
 };
 
 const unsupportedInclude: RuleImpl = {
