@@ -212,7 +212,7 @@ export const narrowIncluded: {
     ? // data-first: the document itself
       args[2]
     : // data-last: an identity function over the effect
-      <A>(effect: A) => effect) as never;
+      <Doc extends AnyDocument, E, Req>(effect: Effect.Effect<Doc, E, Req>) => effect) as never;
 
 // ---------------------------------------------------------------------------
 // Content negotiation (JSON:API §5), client side

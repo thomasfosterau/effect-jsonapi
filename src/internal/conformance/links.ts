@@ -37,6 +37,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Result from "effect/Result";
+import type * as Schema from "effect/Schema";
 import {
   type Cardinality,
   type Context,
@@ -44,9 +45,12 @@ import {
   describe,
   finding,
   type Finding,
+  documentOf,
   identity,
-  isRecord,
+  isJsonArray,
+  isJsonObject,
   noProbeReason,
+  objectIn,
   type Body,
   type Observation,
   type Outcome,
@@ -61,12 +65,14 @@ import {
   skip,
   statusOf,
   succeeded,
+  topLevel,
 } from "./core.js";
 import {
   answeredFrom,
   budgeted,
   counted,
   type Io,
+  documentLink,
   Link,
   linkIn,
   listed,
@@ -135,11 +141,8 @@ const TOP_LEVEL_SELF_DEREFERENCES = "spec/links/top-level-self-dereferences";
 // What a link claims
 // ---------------------------------------------------------------------------
 
-/**
- * A JSON object off the wire, as `isRecord` narrows one.
- */
-// oxlint-disable-next-line effect/no-unsafe-dictionary-type -- the kit reads the server's document as it came, with no schema to parse it by: deciding whether it holds is the point
-type JsonObject = Readonly<Record<string, unknown>>;
+/** A JSON object off the wire, as `isJsonObject` narrows one. */
+type JsonObject = Schema.JsonObject;
 
 /** A resource as the kit compares and names it. */
 interface Member {
@@ -219,9 +222,11 @@ const memberOf = (resource: JsonObject): Option.Option<Member> =>
     : Option.none();
 
 /** The identity of each item of a JSON array, or how many items lack one. */
-const membersOf = (items: ReadonlyArray<unknown>): Result.Result<ReadonlyArray<Member>, number> => {
+const membersOf = (items: Schema.JsonArray): Result.Result<ReadonlyArray<Member>, number> => {
   const members = Arr.filterMap(items, (item) =>
-    isRecord(item) ? Result.fromOption(memberOf(item), () => undefined) : Result.fail(undefined),
+    isJsonObject(item)
+      ? Result.fromOption(memberOf(item), () => undefined)
+      : Result.fail(undefined),
   );
   return members.length === items.length
     ? Result.succeed(members)
@@ -236,14 +241,14 @@ const claimOf = (relationship: JsonObject): Claim => {
     Claim.Unidentified({
       why: `— its linkage names ${counted(count, "item")} without ${NO_IDENTITY}, so there is nothing to hold the answer to`,
     });
-  if (Array.isArray(data)) {
+  if (isJsonArray(data)) {
     return Result.match(membersOf(data), {
       onFailure: unidentified,
       onSuccess: (members) =>
         Claim.ToMany({ members, paged: Link.$is("Href")(linkIn(relationship["links"], "next")) }),
     });
   }
-  return isRecord(data)
+  return isJsonObject(data)
     ? Option.match(memberOf(data), {
         onNone: () => unidentified(1),
         onSome: (member) => Claim.ToOne({ member }),
@@ -290,11 +295,10 @@ const relationshipLinks =
   ) =>
   (from: Target, body: Body, ctx: Context): ReadonlyArray<Found> =>
     Arr.flatMap(carriersIn(body), ({ pointer, resource, label }) => {
-      const relationships = resource["relationships"];
-      if (!isRecord(relationships)) return [];
+      const relationships = objectIn(resource["relationships"]);
       return Arr.filterMap(Rec.keys(relationships), (key) => {
         const relationship = relationships[key];
-        if (!isRecord(relationship)) return Result.fail(undefined);
+        if (!isJsonObject(relationship)) return Result.fail(undefined);
         const of = `${label}'s \`${quote(key)}\``;
         return Result.map(
           Result.fromOption(claim(relationship, from, ctx), () => undefined),
@@ -329,8 +333,8 @@ const relatedLinks = (linked: boolean) =>
 const cardinalityOf = (relationship: JsonObject): Cardinality => {
   if (!("data" in relationship)) return "unshown";
   const data = relationship["data"];
-  if (Array.isArray(data)) return "many";
-  return data === null || isRecord(data) ? "one" : "unshown";
+  if (isJsonArray(data)) return "many";
+  return data === null || isJsonObject(data) ? "one" : "unshown";
 };
 
 /** `true` when a URL path's segments fill a declared path's: each literal itself, each `:param` any segment. */
@@ -402,11 +406,9 @@ const relationshipSelfLinks = (linked: boolean) =>
   });
 
 /** `true` when a document carries a `next` or `prev` link: it is one page of a collection. */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-const pagedDocument = (body: unknown): boolean =>
-  isRecord(body) &&
-  (Link.$is("Href")(linkIn(body["links"], "next")) ||
-    Link.$is("Href")(linkIn(body["links"], "prev")));
+const pagedDocument = (document: JsonObject): boolean =>
+  Link.$is("Href")(linkIn(document["links"], "next")) ||
+  Link.$is("Href")(linkIn(document["links"], "prev"));
 
 /**
  * What a document's top-level `self` link claims: a document of the same
@@ -426,7 +428,7 @@ const documentClaim = (document: JsonObject): Claim => {
       why: `— the document carrying it holds ${counted(count, "item")} without ${NO_IDENTITY}, so there is nothing to hold the answer to`,
     });
   if (data === null) return Claim.Empty();
-  if (Array.isArray(data)) {
+  if (isJsonArray(data)) {
     const paged = pagedDocument(document);
     return Result.match(membersOf(data), {
       // A page is held only to answering a collection, so what it lists is not compared.
@@ -435,7 +437,7 @@ const documentClaim = (document: JsonObject): Claim => {
       onSuccess: (members) => Claim.Collection({ members, paged }),
     });
   }
-  return isRecord(data)
+  return isJsonObject(data)
     ? Option.match(memberOf(data), {
         onNone: () => unidentified(1),
         onSome: (member) => Claim.Resource({ member }),
@@ -451,21 +453,16 @@ const documentClaim = (document: JsonObject): Claim => {
  */
 const topLevelSelfLinks =
   (matching: boolean) =>
-  // oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-  (from: Target, body: unknown): ReadonlyArray<Found> =>
-    isRecord(body)
-      ? [
-          {
-            where: `the top-level \`self\` link of ${from.url}`,
-            of: from.url,
-            name: "self",
-            basis: "document",
-            link: linkIn(body["links"], "self"),
-            from,
-            claim: matching ? documentClaim(body) : Claim.ResourceData(),
-          },
-        ]
-      : [];
+  (from: Target, body: Body): ReadonlyArray<Found> =>
+    Arr.map(Option.toArray(documentOf(body)), (document) => ({
+      where: `the top-level \`self\` link of ${from.url}`,
+      of: from.url,
+      name: "self",
+      basis: "document",
+      link: linkIn(document["links"], "self"),
+      from,
+      claim: matching ? documentClaim(document) : Claim.ResourceData(),
+    }));
 
 // ---------------------------------------------------------------------------
 // Following one link
@@ -491,35 +488,34 @@ interface Judging {
 }
 
 /** A response's primary data as a finding names it. */
-const primaryOf = (observation: Observation): string => {
-  const body = observation.body;
-  if (!isRecord(body) || !("data" in body)) return describe(observation);
-  const data = body["data"];
-  if (isRecord(data)) return quote(resourceLabel(data));
-  return `\`data: ${quote(data)}\``;
-};
+const primaryOf = (observation: Observation): string =>
+  Option.match(dataOf(observation), {
+    onNone: () => describe(observation),
+    onSome: (data) =>
+      isJsonObject(data) ? quote(resourceLabel(data)) : `\`data: ${quote(data)}\``,
+  });
 
-/** The answer's primary data, `undefined` when it has none. */
-// oxlint-disable-next-line effect/no-unknown-returns -- the server's primary data as it came, with no schema to parse it by: judging it is the point
-const dataOf = (observation: Observation): unknown =>
-  isRecord(observation.body) ? observation.body["data"] : undefined;
+/** The answer's primary data, none when it has none. */
+const dataOf = (observation: Observation): Option.Option<Schema.Json> =>
+  topLevel(observation.body, "data");
 
 /**
  * `true` when a JSON value could be a resource object: an object with a string
  * `type`, which every resource object carries (§Resource Objects). Its `id` is
  * left to the rules that compare identities.
  */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-const isResourceObject = (value: unknown): boolean =>
-  isRecord(value) && Predicate.isString(value["type"]);
+const isResourceObject = (value: Schema.Json): boolean =>
+  isJsonObject(value) && Predicate.isString(value["type"]);
 
 /** `true` when an answer's primary data is resource data: a resource object, an array of them, or `null`. */
-const isResourceData = (observation: Observation): boolean => {
-  const data = dataOf(observation);
-  return (
-    data === null || isResourceObject(data) || (Array.isArray(data) && data.every(isResourceObject))
+const isResourceData = (observation: Observation): boolean =>
+  Option.exists(
+    dataOf(observation),
+    (data) =>
+      data === null ||
+      isResourceObject(data) ||
+      (isJsonArray(data) && data.every(isResourceObject)),
   );
-};
 
 /** The members a resource identifier object may carry (§Resource Identifier Objects). */
 const IDENTIFIER_MEMBERS: ReadonlyArray<string> = ["type", "id", "lid", "meta"];
@@ -547,9 +543,8 @@ const ignoredMember = (key: string): boolean => key.startsWith("@") || EXTENSION
  * naming its resource by `lid` alone, since a `lid` stands for a resource not
  * yet assigned an `id`, and what a relationship's `self` answers is stored.
  */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server answered; it has no schema to parse it by
-const notAnIdentifier = (value: unknown): Option.Option<string> => {
-  if (!isRecord(value)) return Option.some(`is ${quote(value)}, not an object`);
+const notAnIdentifier = (value: Schema.Json): Option.Option<string> => {
+  if (!isJsonObject(value)) return Option.some(`is ${quote(value)}, not an object`);
   if (!Predicate.isString(value["type"])) return Option.some("has no string `type`");
   if (!Predicate.isString(value["id"])) {
     return Option.some(
@@ -557,7 +552,9 @@ const notAnIdentifier = (value: unknown): Option.Option<string> => {
     );
   }
   return Arr.match(
-    Rec.keys(value).filter((key) => !IDENTIFIER_MEMBERS.includes(key) && !ignoredMember(key)),
+    Rec.keys(objectIn(value)).filter(
+      (key) => !IDENTIFIER_MEMBERS.includes(key) && !ignoredMember(key),
+    ),
     {
       onEmpty: () => Option.none(),
       onNonEmpty: (extra) =>
@@ -574,11 +571,11 @@ const notAnIdentifier = (value: unknown): Option.Option<string> => {
  * of them — or, when it is not, what it holds instead, as a finding observes it.
  */
 const answeredCardinality = (observation: Observation): Result.Result<"one" | "many", string> => {
-  const body = observation.body;
-  if (!isRecord(body) || !("data" in body)) return Result.fail(describe(observation));
-  const data = body["data"];
+  const primary = dataOf(observation);
+  if (Option.isNone(primary)) return Result.fail(describe(observation));
+  const data = primary.value;
   if (data === null) return Result.succeed("one");
-  if (Array.isArray(data)) {
+  if (isJsonArray(data)) {
     const first = Arr.findFirst(data, (item, index) =>
       Option.map(notAnIdentifier(item), (why) => `/data/${index} ${why}`),
     );
@@ -587,7 +584,7 @@ const answeredCardinality = (observation: Observation): Result.Result<"one" | "m
       onSome: Result.fail,
     });
   }
-  return isRecord(data)
+  return isJsonObject(data)
     ? Option.match(notAnIdentifier(data), {
         onNone: () => Result.succeed("one"),
         onSome: (why) => Result.fail(`/data ${why}`),
@@ -611,7 +608,7 @@ const HOLDS: Readonly<
 
 /** `true` when the related collection a response answers carries a `next` link: it is one page. */
 const pagedAnswer = (observation: Observation): boolean =>
-  isRecord(observation.body) && Link.$is("Href")(linkIn(observation.body["links"], "next"));
+  Link.$is("Href")(documentLink(observation.body, "next"));
 
 /** The labels of `members` whose identity `keys` lacks. */
 const outside = (members: ReadonlyArray<Member>, keys: HashSet.HashSet<string>) =>
@@ -732,8 +729,8 @@ const answeredMembers = (
   observation: Observation,
   expected: string,
 ): Result.Result<ReadonlyArray<Member>, Verdict> => {
-  const data = dataOf(observation);
-  if (!Array.isArray(data)) {
+  const data = Option.filter(dataOf(observation), isJsonArray);
+  if (Option.isNone(data)) {
     return Result.fail(
       broken(rule, found, Option.some(observation), {
         detail: "answers no resource collection as primary data",
@@ -742,7 +739,7 @@ const answeredMembers = (
       }),
     );
   }
-  return Result.mapError(membersOf(data), (count) => unidentifiedAnswer(found, count));
+  return Result.mapError(membersOf(data.value), (count) => unidentifiedAnswer(found, count));
 };
 
 /** A to-many claim held against a 2xx answer of resource data. */
@@ -878,7 +875,10 @@ const judgeCollection = (
 ): Verdict => {
   // A page — either side — can differ from the other in which resources it
   // lists, so only that it answers a collection is held.
-  if (Array.isArray(dataOf(observation)) && (claim.paged || pagedDocument(observation.body))) {
+  if (
+    Option.exists(dataOf(observation), isJsonArray) &&
+    (claim.paged || Option.exists(documentOf(observation.body), pagedDocument))
+  ) {
     return Verdict.Held();
   }
   const expected = "a resource collection as primary data, as the document carrying it has";
@@ -900,7 +900,7 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
   const { rule } = judging;
   const data = dataOf(observation);
   const one = (member: Member, detail: string): Verdict =>
-    isRecord(data) && identity(data) === member.key
+    Option.exists(data, (value) => isJsonObject(value) && identity(value) === member.key)
       ? Verdict.Held()
       : broken(rule, found, Option.some(observation), {
           detail,
@@ -1000,8 +1000,7 @@ const resolve = (
   found: Found,
   baseUrl: string,
 ): Result.Result<Target, Verdict> => {
-  // oxlint-disable-next-line effect/no-unknown-parameters -- quotes whatever JSON a server put where a link belongs
-  const notALink = (value: unknown): Verdict =>
+  const notALink = (value: Schema.Json): Verdict =>
     brokenOrDeferred(judging, found, Option.none(), {
       detail: "is not a link the kit can follow",
       expected: "a URI-reference, a link object with an `href`, or `null`",
@@ -1245,7 +1244,7 @@ const outcomeOf = (
 const dereferencing = (
   judging: Judging,
   what: string,
-  collect: (from: Target, body: Observation["body"], ctx: Context) => ReadonlyArray<Found>,
+  collect: (from: Target, body: Body, ctx: Context) => ReadonlyArray<Found>,
   searched: Searched = RESOURCE_ENDPOINTS,
 ): RuleImpl => ({
   rule: judging.rule,

@@ -133,12 +133,67 @@ export interface Gap {
 // ---------------------------------------------------------------------------
 
 /**
- * A response's parsed JSON body, or `undefined` when it was empty or not JSON:
- * what every rule reads a document from.
+ * A response's parsed JSON body, or `None` when it was empty or not JSON: what
+ * every rule reads a document from.
  *
  * @internal
  */
-export type Body = Schema.Json | undefined;
+export type Body = Option.Option<Schema.Json>;
+
+/**
+ * Whether a JSON value is an object — not an array, `null` or a scalar.
+ *
+ * @internal
+ */
+export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => isRecord(json);
+
+/**
+ * Whether a JSON value is an array.
+ *
+ * @internal
+ */
+export const isJsonArray = (json: Schema.Json): json is Schema.JsonArray => Array.isArray(json);
+
+/**
+ * A JSON value's members when it is an object, else none — what a reader
+ * takes for an absent or malformed `attributes` or `relationships`. Typed as a
+ * record, not `Schema.JsonObject`, so that `Record`'s helpers infer its keys.
+ *
+ * @internal
+ */
+export const objectIn = (json: Schema.Json): Readonly<Record<string, Schema.Json>> =>
+  isJsonObject(json) ? json : {};
+
+/**
+ * A body's document: the body, when it is a JSON object.
+ *
+ * @internal
+ */
+export const documentOf = (body: Body): Option.Option<Schema.JsonObject> =>
+  Option.filter(body, isJsonObject);
+
+/**
+ * One top-level member of a body's document, when the body is a JSON object
+ * that has it.
+ *
+ * @internal
+ */
+export const topLevel = (body: Body, member: string): Option.Option<Schema.Json> =>
+  Option.flatMap(documentOf(body), (document) => Option.fromUndefinedOr(document[member]));
+
+/**
+ * A body's first primary resource: its `data` when that is an object, else the
+ * first object in its `data` array — the resource a rule learns a field or a
+ * relationship from.
+ *
+ * @internal
+ */
+export const firstResourceOf = (body: Body): Option.Option<Schema.JsonObject> =>
+  Option.flatMap(topLevel(body, "data"), (data) =>
+    isJsonArray(data)
+      ? Arr.findFirst(data, isJsonObject)
+      : Option.filter(Option.some(data), isJsonObject),
+  );
 
 /** @internal */
 export interface Observation {
@@ -148,7 +203,7 @@ export interface Observation {
   readonly headers: Readonly<Record<string, string>>;
   readonly contentType: string | undefined;
   readonly text: string;
-  /** The parsed JSON body, or `undefined` when the body was empty or not JSON. */
+  /** The parsed JSON body, or `None` when the body was empty or not JSON. */
   readonly body: Body;
   readonly transportError: string | undefined;
   /**
@@ -871,7 +926,7 @@ const unread = (
   headers: {},
   contentType: undefined,
   text: "",
-  body: undefined,
+  body: Option.none(),
   transportError,
   redirects,
   unfollowed,
@@ -1242,7 +1297,7 @@ const answerOf = (
     const textResult = yield* Effect.result(response.text);
     const text = Result.isSuccess(textResult) ? textResult.success : "";
     const headersOut = headerRecord(response.headers);
-    const body: Body = text === "" ? undefined : Option.getOrUndefined(parseJson(text));
+    const body: Body = text === "" ? Option.none() : parseJson(text);
     return {
       probe,
       status: response.status,
@@ -1561,19 +1616,19 @@ export const describe = (observation: Observation): string => {
 
 type Located = {
   readonly pointer: string;
-  readonly resource: Readonly<Record<string, unknown>>;
+  readonly resource: Schema.JsonObject;
 };
 
 /** A document's records under `member` (`data` or `included`), each with its pointer. */
 const locatedIn = (
-  body: Readonly<Record<string, unknown>>,
+  body: Schema.JsonObject,
   member: "data" | "included",
 ): ReadonlyArray<Located> => {
   const value = body[member];
-  if (isRecord(value)) return [{ pointer: `/${member}`, resource: value }];
+  if (isJsonObject(value)) return [{ pointer: `/${member}`, resource: value }];
   if (!Array.isArray(value)) return [];
   return Arr.filterMap(value, (item, index) =>
-    isRecord(item)
+    isJsonObject(item)
       ? Result.succeed({ pointer: `/${member}/${index}`, resource: item })
       : Result.failVoid,
   );
@@ -1590,7 +1645,10 @@ const locatedIn = (
  * @internal
  */
 export const resourcesOf = (body: Body): ReadonlyArray<Located> =>
-  isRecord(body) ? [...locatedIn(body, "data"), ...locatedIn(body, "included")] : [];
+  Option.match(documentOf(body), {
+    onNone: () => [],
+    onSome: (document) => [...locatedIn(document, "data"), ...locatedIn(document, "included")],
+  });
 
 /**
  * The resource objects a document carries, as {@link resourcesOf} lists them
@@ -1601,14 +1659,17 @@ export const resourcesOf = (body: Body): ReadonlyArray<Located> =>
  *
  * @internal
  */
-export const resourceObjectsOf = (body: Body): ReadonlyArray<Located> => {
-  if (!isRecord(body)) return [];
-  const primary = locatedIn(body, "data");
-  const included = locatedIn(body, "included");
-  return isLinkageData(Arr.map(primary, ({ resource }) => resource))
-    ? included
-    : [...primary, ...included];
-};
+export const resourceObjectsOf = (body: Body): ReadonlyArray<Located> =>
+  Option.match(documentOf(body), {
+    onNone: () => [],
+    onSome: (document) => {
+      const primary = locatedIn(document, "data");
+      const included = locatedIn(document, "included");
+      return isLinkageData(Arr.map(primary, ({ resource }) => resource))
+        ? included
+        : [...primary, ...included];
+    },
+  });
 
 /**
  * A resource as `type:id` for a finding's `observed`, naming the member
@@ -1689,12 +1750,11 @@ export const observing =
     );
 
 /** @internal */
-export const errorObjectsOf = (body: Body): ReadonlyArray<Readonly<Record<string, unknown>>> => {
-  if (!isRecord(body)) return [];
-  const errors = body["errors"];
-  if (!Array.isArray(errors)) return [];
-  return errors.filter(isRecord);
-};
+export const errorObjectsOf = (body: Body): ReadonlyArray<Schema.JsonObject> =>
+  Option.match(topLevel(body, "errors"), {
+    onNone: () => [],
+    onSome: (errors) => (isJsonArray(errors) ? Arr.filter(errors, isJsonObject) : []),
+  });
 
 /**
  * The `source.parameter` of every error object a response's document carries
@@ -1705,7 +1765,7 @@ export const errorObjectsOf = (body: Body): ReadonlyArray<Readonly<Record<string
 export const sourceParametersOf = (observation: Observation): ReadonlyArray<string> =>
   errorObjectsOf(observation.body)
     .map((error) => error["source"])
-    .filter(isRecord)
+    .filter(isJsonObject)
     .map((source) => source["parameter"])
     .filter(Predicate.isString);
 

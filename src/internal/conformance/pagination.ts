@@ -23,6 +23,7 @@ import * as HashSet from "effect/HashSet";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import type * as Schema from "effect/Schema";
 import {
   coverageNote,
   describe,
@@ -30,7 +31,8 @@ import {
   finding,
   type Finding,
   identity,
-  isRecord,
+  isJsonArray,
+  isJsonObject,
   noProbeReason,
   type Observation,
   type Outcome,
@@ -44,6 +46,7 @@ import {
   statusOf,
   succeeded,
   withQuery,
+  topLevel,
 } from "./core.js";
 import {
   answeredFrom,
@@ -51,7 +54,7 @@ import {
   counted,
   type Io,
   Link,
-  linkIn,
+  documentLink,
   listed,
   own,
   quote,
@@ -113,19 +116,18 @@ const unidentified = (count: number): string =>
 const opaque = (page: Page): boolean => Arr.isReadonlyArrayEmpty(page.members) && page.items > 0;
 
 /** The `links` member `name` of a page's document. */
-const linkOf = (page: Page, name: string): Link =>
-  linkIn(isRecord(page.observation.body) ? page.observation.body["links"] : undefined, name);
+const linkOf = (page: Page, name: string): Link => documentLink(page.observation.body, name);
 
 /** A response as a page of the collection, when it is one: 2xx, with `data` an array. */
 const pageOf = (target: Target, observation: Observation): Option.Option<Page> => {
-  const data = isRecord(observation.body) ? observation.body["data"] : undefined;
-  return succeeded(observation) && Array.isArray(data)
+  const data = Option.getOrNull(topLevel(observation.body, "data"));
+  return succeeded(observation) && isJsonArray(data)
     ? Option.some({
         ...answeredFrom(target, observation),
         observation,
         items: data.length,
         members: Arr.filterMap(data, (item) =>
-          isRecord(item)
+          isJsonObject(item)
             ? Result.fromOption(
                 Option.map(Option.fromUndefinedOr(identity(item)), (key) => ({
                   key,
@@ -164,7 +166,7 @@ type End =
   | { readonly _tag: "NotAPage"; readonly from: number; readonly observation: Observation }
   | { readonly _tag: "Unanswered"; readonly from: number; readonly observation: Observation }
   | { readonly _tag: "Opaque"; readonly from: number; readonly items: number }
-  | { readonly _tag: "NotALink"; readonly from: number; readonly value: unknown }
+  | { readonly _tag: "NotALink"; readonly from: number; readonly value: Schema.Json }
   | { readonly _tag: "Offsite"; readonly from: number; readonly to: string }
   | { readonly _tag: "Stalled"; readonly at: number }
   | { readonly _tag: "Overflow"; readonly at: number }

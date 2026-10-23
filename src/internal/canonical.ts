@@ -7,7 +7,7 @@
  * @internal
  */
 import type { Schema } from "effect";
-import { SchemaAST } from "effect";
+import { Option, SchemaAST } from "effect";
 import { compareCodePoints, isFilterKey, keySegments } from "./filter.js";
 
 /** One flat `(key, value)` query pair, both sides un-encoded. */
@@ -50,19 +50,27 @@ export const declaredKeys = (ast: SchemaAST.AST): ReadonlyArray<string> => {
 };
 
 /**
- * One encoded member of a flat query: a JSON value, or absent.
+ * One encoded member of a flat query: a JSON value, or none when it is absent.
  *
  * @internal
  */
-export type FlatValue = Schema.Json | undefined;
+export type FlatValue = Option.Option<Schema.Json>;
+
+/**
+ * An encoded flat query: each key's JSON value, any of them absent.
+ *
+ * @internal
+ */
+export type FlatQuery = Readonly<Partial<Record<string, Schema.Json>>>;
 
 // The pairs of one encoded key: a scalar is one pair; an array is one pair
 // per item — the repeated-key spelling `UrlParams.toRecord` decodes back to
 // an array — except `include`, whose comma form is the schema's own encoding
 // of the set (the query schema already joins it; a consumer's flat schema
-// may not have). `undefined` and `null` have no wire form and are omitted.
-const pairsOf = (key: string, value: FlatValue): ReadonlyArray<Pair> => {
-  if (value === undefined || value === null) return [];
+// may not have). An absent member and `null` have no wire form and are omitted.
+const pairsOf = (key: string, member: FlatValue): ReadonlyArray<Pair> => {
+  if (Option.isNone(member) || member.value === null) return [];
+  const value = member.value;
   if (typeof value === "string") return [[key, value]];
   if (Array.isArray(value)) {
     return key === "include"
@@ -93,12 +101,12 @@ const pairsOf = (key: string, value: FlatValue): ReadonlyArray<Pair> => {
  * key's items keep their order.
  */
 export const orderPairs = (
-  flat: { readonly [key: string]: FlatValue },
+  flat: FlatQuery,
   declared: ReadonlyArray<string> = [],
 ): ReadonlyArray<Pair> => {
   const families: Array<Array<Pair>> = [[], [], [], [], [], []];
   for (const [key, value] of Object.entries(flat)) {
-    families[rank(key)]!.push(...pairsOf(key, value));
+    families[rank(key)]!.push(...pairsOf(key, Option.fromUndefinedOr(value)));
   }
   const [include, fields, filter, sort, page, other] = families as [
     Array<Pair>,

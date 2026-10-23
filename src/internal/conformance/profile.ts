@@ -41,7 +41,9 @@ import {
   type Discovered,
   finding,
   type Finding,
-  isRecord,
+  documentOf,
+  firstResourceOf,
+  isJsonObject,
   eachSuccessfulRead,
   jsonApiAccept,
   noProbeReason,
@@ -53,6 +55,7 @@ import {
   settle,
   skip,
   sourceParametersOf,
+  topLevel,
   withQuery,
 } from "./core.js";
 import {
@@ -132,21 +135,18 @@ const NO_GRAMMAR =
 const learnField = (
   ctx: Context,
   path: string,
-  accepts: Predicate.Predicate<unknown> = () => true,
+  accepts: Predicate.Predicate<Schema.Json> = () => true,
 ) =>
   Effect.gen(function* () {
     const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-    const body = observation.body;
-    if (!isRecord(body)) return undefined;
-    const data = body["data"];
-    const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
-    if (first === undefined) return undefined;
-    const attributes = first["attributes"];
-    if (!isRecord(attributes)) return undefined;
+    const attributes = Option.flatMap(firstResourceOf(observation.body), (first) =>
+      Option.filter(Option.some(first["attributes"]), isJsonObject),
+    );
     return Option.getOrUndefined(
-      Option.map(
-        Arr.findFirst(Object.keys(attributes), (field) => accepts(attributes[field])),
-        (field) => ({ field, value: attributes[field] }),
+      Option.flatMap(attributes, (members) =>
+        Arr.findFirst(Object.entries(members), ([, value]) => accepts(value)).pipe(
+          Option.map(([field, value]) => ({ field, value })),
+        ),
       ),
     );
   });
@@ -410,7 +410,7 @@ const decodeJsonApiProfile = Schema.decodeUnknownOption(
 
 /** The profile URIs an answer's top-level `jsonapi.profile` names. */
 const documentProfiles = (observation: Observation): ReadonlyArray<string> =>
-  Option.match(decodeJsonApiProfile(observation.body), {
+  Option.match(Option.flatMap(observation.body, decodeJsonApiProfile), {
     onNone: () => [],
     onSome: ({ jsonapi }) => Arr.filter(jsonapi.profile, Predicate.isString),
   });
@@ -447,12 +447,12 @@ const advertisedOn = (
     return undecided(
       `${write} answered ${observation.status} with no document, and its media type does not name the profile, so no \`jsonapi\` member could`,
     );
-  const jsonapi = isRecord(observation.body) ? observation.body["jsonapi"] : undefined;
+  const jsonapi = topLevel(observation.body, "jsonapi");
   return decided(requests, [
     finding(rule, {
       detail: `the ${observation.status} ${write}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
       expected: `\`jsonapi.profile\` or the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
-      observed: `jsonapi: ${jsonapi === undefined ? "(none)" : quote(jsonapi)} · Content-Type: ${
+      observed: `jsonapi: ${Option.match(jsonapi, { onNone: () => "(none)", onSome: quote })} · Content-Type: ${
         observation.contentType === undefined ? "(none)" : quote(observation.contentType)
       }`,
       probe: observation.probe,
@@ -587,10 +587,10 @@ const jsonApiMember: RuleImpl = {
         return skip(jsonApiMember.rule, noProbeReason("JSON:API read endpoint", unresolved));
       const findings: Array<Finding> = [];
       yield* eachSuccessfulRead(ctx, resolved, (path, observation) => {
-        const body = observation.body;
-        if (!isRecord(body)) return;
-        const jsonapi = body["jsonapi"];
-        if (!isRecord(jsonapi) || jsonapi["version"] !== "1.1") {
+        const document = documentOf(observation.body);
+        if (Option.isNone(document)) return;
+        const jsonapi = document.value["jsonapi"];
+        if (!isJsonObject(jsonapi) || jsonapi["version"] !== "1.1") {
           findings.push(
             finding(jsonApiMember.rule, {
               detail: `${path} answered a document that does not advertise the JSON:API version`,
@@ -702,14 +702,12 @@ const repeatedKeySpelling: RuleImpl = {
 const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
   Effect.gen(function* () {
     const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
-    const body = observation.body;
     const out: Array<{ readonly key: string; readonly values: ReadonlyArray<string> }> = [];
-    if (!isRecord(body)) return out;
-    const data = body["data"];
-    const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
-    if (first === undefined) return out;
+    const resource = firstResourceOf(observation.body);
+    if (Option.isNone(resource)) return out;
+    const first = resource.value;
     const attributes = first["attributes"];
-    const attributeKeys = isRecord(attributes) ? Object.keys(attributes) : [];
+    const attributeKeys = isJsonObject(attributes) ? Object.keys(attributes) : [];
     const type = first["type"];
     if (
       typeof type === "string" &&
@@ -722,12 +720,12 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
       out.push({ key: "sort", values: [attributeKeys[0]!, attributeKeys[1]!] });
     }
     const relationships = first["relationships"];
-    if (endpoint.queryKeys.includes("include") && isRecord(relationships)) {
+    if (endpoint.queryKeys.includes("include") && isJsonObject(relationships)) {
       // Only relationships carrying inline linkage are includable; a paginated
       // relationship is links-only and `?include=` of it is a legitimate 400.
       const includable = Object.keys(relationships).filter((name) => {
         const relationship = relationships[name];
-        return isRecord(relationship) && "data" in relationship;
+        return isJsonObject(relationship) && "data" in relationship;
       });
       if (includable.length >= 2)
         out.push({ key: "include", values: [includable[0]!, includable[1]!] });

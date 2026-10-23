@@ -35,12 +35,12 @@ const context = (store = MutableHashMap.empty<string, string>()): Core.Context =
     if (probe.method === "POST") {
       const id = `${100 + MutableHashMap.size(store)}`;
       MutableHashMap.set(store, id, "stored");
-      return { status: 201, body: article(id) };
+      return { status: 201, body: Option.some(article(id)) };
     }
     const id = probe.url.replace("/articles/", "");
     return MutableHashMap.has(store, id)
-      ? { status: 200, body: article(id) }
-      : { status: 404, body: { errors: [{ status: "404" }] } };
+      ? { status: 200, body: Option.some(article(id)) }
+      : { status: 404, body: Option.some({ errors: [{ status: "404" }] }) };
   };
   const observed = MutableHashSet.empty<string>();
   const writes: Core.Context["writes"] = [];
@@ -141,6 +141,38 @@ describe("the write fixture's id vetting", () => {
         detail:
           "the create response named `articles:100`, which the kit did not create (a read earlier in this run returned it) — not touched",
       },
+    ]);
+  });
+});
+
+describe("read-back comparison", () => {
+  const stored = {
+    type: "articles",
+    id: "1",
+    attributes: { title: "probe", publishedAt: "2026-01-01T00:00:00.000Z" },
+  };
+
+  it("compares a fixture's members as the JSON the request body carried", () => {
+    // A value with its own JSON form, as a `Date` (its ISO string) has.
+    const publishedAt = { toJSON: () => "2026-01-01T00:00:00.000Z" };
+    const expected = Write.asSent({
+      attributes: { title: "probe", publishedAt, draft: undefined },
+    });
+    expect(expected).toEqual({
+      attributes: { title: "probe", publishedAt: "2026-01-01T00:00:00.000Z" },
+    });
+    expect(Write.readBackDifferences(expected, stored)).toEqual([]);
+  });
+
+  it("names a member read back otherwise, and one not read back at all", () => {
+    expect(
+      Write.readBackDifferences(
+        Write.asSent({ attributes: { title: "other", rating: 5 } }),
+        stored,
+      ),
+    ).toEqual([
+      'attributes.title: "other" · read back "probe"',
+      "attributes.rating: 5 · read back absent",
     ]);
   });
 });

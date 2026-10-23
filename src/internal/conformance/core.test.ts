@@ -604,7 +604,7 @@ describe("undecidedByRedirects (a rule a redirect left undecided)", () => {
     headers: {},
     contentType: undefined,
     text: "",
-    body: undefined,
+    body: Option.none(),
     transportError: undefined,
     redirects: [],
     unfollowed: Option.none(),

@@ -42,7 +42,7 @@ import {
   budgeted,
   counted,
   Link,
-  linkIn,
+  documentLink,
   listed,
   own,
   Step,
@@ -57,6 +57,8 @@ import {
   errorObjectsOf,
   finding,
   type Finding,
+  isJsonArray,
+  isJsonObject,
   isRecord,
   jsonApiAccept,
   type Observation,
@@ -69,9 +71,11 @@ import {
   skip,
   statusOf,
   succeeded,
+  topLevel,
 } from "./core.js";
 import {
   type Adopt,
+  asSent,
   atomicIdentity,
   type Batch,
   buildCreate,
@@ -414,13 +418,13 @@ const byLinkage = (
                           payload.type,
                           id,
                           `its \`add\` linked \`${relink.name}\`, by \`lid\`, to the ${relink.type} resource the request's first operation created`,
-                          {
+                          asSent({
                             relationships: {
                               [relink.name]: relink.to({ type: relink.type, id: ids[0] })[
                                 relink.name
                               ],
                             },
-                          },
+                          }),
                         ),
                         Result.match(readEndpointFor(ctx, linked), {
                           onFailure: (reason) => Effect.succeed(undecided(reason)),
@@ -490,7 +494,7 @@ const byUpdate = (
                     payload.type,
                     ids[0],
                     "the `update` naming it by `lid` requested",
-                    patch,
+                    asSent(patch),
                   ),
               },
             ),
@@ -613,9 +617,9 @@ const listPathFor = (ctx: Context, target: WriteTarget): Result.Result<string, s
   );
 
 /** The resources of `type` a page's `data` lists, each with its id. */
-const pageResources = (data: ReadonlyArray<unknown>, type: string): Listing["resources"] =>
+const pageResources = (data: Schema.JsonArray, type: string): Listing["resources"] =>
   Arr.filterMap(data, (item) =>
-    isRecord(item)
+    isJsonObject(item)
       ? Option.match(
           Option.filter(decodeListed(item), (listed) => listed.type === type),
           {
@@ -655,12 +659,11 @@ const listing = (
         return failed(
           `listing ${target.url} answered ${statusOf(observation)} (${describe(observation)})`,
         );
-      const body = isRecord(observation.body) ? observation.body : {};
-      const data = body["data"];
-      if (!Array.isArray(data)) return failed(`${target.url} did not answer a resource collection`);
-      const resources = [...found, ...pageResources(data, type)];
+      const data = Option.filter(topLevel(observation.body, "data"), isJsonArray);
+      if (Option.isNone(data)) return failed(`${target.url} did not answer a resource collection`);
+      const resources = [...found, ...pageResources(data.value, type)];
       const seen = [...visited, target.href];
-      return Link.$match(linkIn(body["links"], "next"), {
+      return Link.$match(documentLink(observation.body, "next"), {
         Unavailable: () => Effect.succeed(Result.succeed({ resources, requests: io.spent() })),
         Malformed: () => failed(`the \`next\` link on ${target.url} is not a link`),
         Href: ({ href }) =>
@@ -689,7 +692,9 @@ const listing = (
 const leftBehind = (payload: Payload, before: Listing, after: Listing): ReadonlyArray<string> =>
   Arr.filterMap(after.resources, ([id, stored]) =>
     !Arr.some(before.resources, ([held]) => held === id) &&
-    Arr.isReadonlyArrayEmpty(readBackDifferences({ attributes: payload.attributes ?? {} }, stored))
+    Arr.isReadonlyArrayEmpty(
+      readBackDifferences(asSent({ attributes: payload.attributes ?? {} }), stored),
+    )
       ? Result.succeed(id)
       : Result.failVoid,
   );
@@ -836,7 +841,7 @@ const decodeCarried = Schema.decodeUnknownOption(
 const resultTypes = (
   observation: Observation,
 ): Option.Option<ReadonlyArray<Option.Option<string>>> =>
-  Option.map(decodeResults(observation.body), (body) =>
+  Option.map(Option.flatMap(observation.body, decodeResults), (body) =>
     Arr.map(body["atomic:results"], (result) =>
       Option.map(decodeCarried(result), ({ data }) => data.type),
     ),

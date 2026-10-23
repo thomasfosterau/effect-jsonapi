@@ -18,7 +18,15 @@ import * as Formatter from "effect/Formatter";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
-import { type Context, isRecord, jsonApiAccept, type Observation } from "./core.js";
+import type * as Schema from "effect/Schema";
+import {
+  type Body,
+  type Context,
+  isJsonObject,
+  jsonApiAccept,
+  type Observation,
+  topLevel,
+} from "./core.js";
 
 // ---------------------------------------------------------------------------
 // Quoting server values
@@ -37,8 +45,7 @@ const LIST_LIMIT = 10;
  *
  * @internal
  */
-// oxlint-disable-next-line effect/no-unknown-parameters -- quotes whatever JSON a server put where a link belongs; it has no schema to parse it by
-export const quote = (value: unknown): string => {
+export const quote = (value: Schema.Json): string => {
   const text = Predicate.isString(value) ? value : Formatter.format(value);
   if (text.length <= QUOTE_LIMIT) return text;
   // Never split a surrogate pair: a high surrogate the cut would leave last goes too.
@@ -80,7 +87,7 @@ export interface Target {
 export type Link =
   | { readonly _tag: "Unavailable" }
   | { readonly _tag: "Href"; readonly href: string }
-  | { readonly _tag: "Malformed"; readonly value: unknown };
+  | { readonly _tag: "Malformed"; readonly value: Schema.Json };
 
 /** @internal */
 export const Link = Data.taggedEnum<Link>();
@@ -92,14 +99,25 @@ export const Link = Data.taggedEnum<Link>();
  *
  * @internal
  */
-// oxlint-disable-next-line effect/no-unknown-parameters -- reads whatever JSON a server put where a links object belongs; it has no schema to parse it by
-export const linkIn = (links: unknown, name: string): Link => {
-  const value = isRecord(links) ? links[name] : undefined;
+export const linkIn = (links: Schema.Json, name: string): Link => {
+  const value = isJsonObject(links) ? links[name] : undefined;
   if (Predicate.isNullish(value)) return Link.Unavailable();
   if (Predicate.isString(value)) return Link.Href({ href: value });
-  const href = isRecord(value) ? value["href"] : undefined;
+  const href = isJsonObject(value) ? value["href"] : undefined;
   return Predicate.isString(href) ? Link.Href({ href }) : Link.Malformed({ value });
 };
+
+/**
+ * The member `name` of a body's top-level `links`, as {@link linkIn} reads it:
+ * `Unavailable` when the body is not a document or carries no `links`.
+ *
+ * @internal
+ */
+export const documentLink = (body: Body, name: string): Link =>
+  Option.match(topLevel(body, "links"), {
+    onNone: () => Link.Unavailable(),
+    onSome: (links) => linkIn(links, name),
+  });
 
 /**
  * Where a link leads, or why the kit does not follow it.
