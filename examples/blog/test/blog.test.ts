@@ -386,6 +386,40 @@ describe("blog example: relationship endpoints", () => {
     expect(document.meta?.total).toBe(2);
   });
 
+  it("GET /articles/:id/relationships/comments?include=comments.author serves the page's comments and their authors", async () => {
+    // The spec's own example (§Inclusion of Related Resources), on the
+    // paginated `comments` (#483).
+    const [bare, firstPage, secondPage] = await run(
+      Effect.gen(function* () {
+        const client = yield* buildClient;
+        const params = { id: Article.Id.make("1") };
+        return [
+          yield* client.articles.commentsRelationship({ params, query: {} }),
+          yield* client.articles.commentsRelationship({
+            params,
+            query: { include: ["comments.author"], page: { limit: 1 } },
+          }),
+          yield* client.articles.commentsRelationship({
+            params,
+            query: { include: ["comments"], page: { offset: 1, limit: 1 } },
+          }),
+        ] as const;
+      }),
+    );
+
+    // Without `?include=`, linkage only: no `included` member.
+    expect(bare).not.toHaveProperty("included");
+    // With it, the comments on the page — not the whole relationship — and,
+    // for `comments.author`, their author.
+    const [first, second] = sampleComments;
+    assert(first !== undefined && second !== undefined);
+    expect(firstPage.data).toEqual([Comment.ref(first.id)]);
+    expect(firstPage.included).toEqual([first, sampleAuthor]);
+    expect(secondPage.data).toEqual([Comment.ref(second.id)]);
+    expect(secondPage.included).toEqual([second]);
+    expect(firstPage.meta?.total).toBe(2);
+  });
+
   it("GET /articles/:id/relationships/tags?include=tags serves a compound relationship document", async () => {
     const [bare, compound] = await run(
       Effect.gen(function* () {

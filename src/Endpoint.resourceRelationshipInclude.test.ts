@@ -181,14 +181,18 @@ describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
     expect(admitted(editor, editorId)).toEqual(["people", "companies"]);
   });
 
-  it("a `paginated` relationship legalises no path, and does not throw", () => {
+  it("a `paginated` relationship legalises its own name, as a `many` does (#483)", () => {
     const endpoints = Endpoint.resource(Article, {
       relationshipInclude: true,
       page: { offset: Schema.optionalKey(Schema.NumberFromString) },
     });
     const history = named(endpoints, "historyRelationship");
-    expect(accepts(history, "history")).toBe(false);
-    expect(admitted(history, historyIds)).toEqual([]);
+    expect(accepts(history, "history")).toBe(true);
+    expect(admitted(history, historyIds)).toEqual(["revisions"]);
+    // Off by default, as on every other relationship.
+    expect(accepts(named(Endpoint.resource(Article), "historyRelationship"), "history")).toBe(
+      false,
+    );
   });
 
   it("follows a top-level `{ depth }`", () => {
@@ -257,8 +261,33 @@ describe("`Endpoint.resource`'s `relationshipFields` (#489)", () => {
     const editor = named(endpoints, "editorRelationship");
     expect(declaresFieldsets(editor)).toEqual(["people", "companies"]);
     expect(admitsPartial(editor, editorId, "companies")).toBe(true);
-    // A `paginated` relationship has no include paths, so no fieldsets.
-    expect(declaresFieldsets(named(endpoints, "historyRelationship"))).toEqual([]);
+    // A `paginated` relationship's paths are rooted at it, as a `many`'s
+    // are (#483), so it declares the types they reach.
+    expect(declaresFieldsets(named(endpoints, "historyRelationship"))).toEqual(["revisions"]);
+  });
+
+  it("follows a `paginated` relationship's include paths (#483)", () => {
+    // A thread's comments are paginated; on their own relationship endpoint
+    // `comments` and `comments.author` are legal, so both types are declared.
+    const Thread = Resource.make("threads", {
+      attributes: { subject: Schema.String },
+      relationships: { comments: Relationship.paginated(() => Comment) },
+    });
+    const endpoints = Endpoint.resource(Thread, {
+      relationshipInclude: true,
+      relationshipFields: true,
+    });
+    const comments = named(endpoints, "commentsRelationship");
+    expect(accepts(comments, "comments.author")).toBe(true);
+    expect(declaresFieldsets(comments)).toEqual(["comments", "people"]);
+    expect(admitsPartial(comments, commentIds, "comments")).toBe(true);
+    expect(admitsPartial(comments, commentIds, "people")).toBe(true);
+    // Without `relationshipFields`, none.
+    expect(
+      declaresFieldsets(
+        named(Endpoint.resource(Thread, { relationshipInclude: true }), "commentsRelationship"),
+      ),
+    ).toEqual([]);
   });
 
   it("follows each relationship's include paths", () => {

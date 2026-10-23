@@ -1091,6 +1091,12 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
  * members, as {@link resource} applies them to every resource it emits; the
  * identifiers in `data` are left as they are.
  *
+ * A `paginated` relationship's object carries no `data`, so for one hand it
+ * a parent whose `relationships[key]` carries the page being answered
+ * (`{ data: pageIds }`): the identifiers are that page, and the `included`
+ * members — `?include=comments` on a paginated `comments` — must be the
+ * resources on it (and those reached from them), not the whole relationship.
+ *
  * @example
  * ```ts
  * import { Assemble } from "@thomasfosterau/effect-jsonapi"

@@ -172,6 +172,9 @@ describe("blog: JSON:API conformance", () => {
     // kit's compound probe asks it for `?include=tags`. Its primary data is
     // the tag identifiers and its `included` the tags they name: full linkage
     // starts from those identifiers, and a tag in both is no duplicate.
+    // #483: `GET /articles/:id/relationships/comments`, paginated, declares
+    // `include` too, so it is asked for `?include=comments` and answers the
+    // comments on its page.
     // #485: it declares `fields` too, so the `included` variant of the
     // sparse-fieldset rule asks it for `?include=tags&fields[tags]=name`.
     const ids = [

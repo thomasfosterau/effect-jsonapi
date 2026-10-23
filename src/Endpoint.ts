@@ -1854,6 +1854,44 @@ export type RelationshipSuccess<
 // dotted path whose first segment it is.
 type RootedAt<P, Name extends string> = Extract<P, Name | `${Name}.${string}`>;
 
+// Resolves to `T` for every concrete resource definition; needed because the
+// `Omit`-built view below can't be proven to satisfy `Any` while `R` is
+// still generic.
+type AsAny<T> = T extends Any ? T : never;
+
+// The construct signature every schema declares (`Schema.Top`), which a
+// mapped type such as `Omit` drops.
+type ConstructSignature<R> = R extends new (_: never) => infer I ? new (_: never) => I : never;
+
+/**
+ * The resource definition {@link getRelationship} derives its `?include=`
+ * paths over: the parent `R` itself, except that a `paginated` relationship
+ * `Name` reads as a `many` (#483). A `paginated` relationship is never an
+ * include path of its parent, because its linkage is never inlined; but on
+ * its own relationship endpoint the linkage *is* the primary data, so the
+ * resources it names — the current page of them — can be included, and so
+ * can every resource reached from them (JSON:API 1.1: `GET
+ * /articles/1/relationships/comments?include=comments.author`). Only `Name`
+ * is read so: a `paginated` relationship further along a path is still never
+ * crossed.
+ *
+ * Exported so a consumer that emits declarations can name it (#348).
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type RelationshipIncludeBase<R extends Any, Name extends string> =
+  DescriptorOf<R, Name> extends Relationship.Paginated<infer T extends Any>
+    ? AsAny<
+        Omit<R, "relationships"> &
+          ConstructSignature<R> & {
+            readonly relationships: Omit<R["relationships"], Name> & {
+              readonly [K in Name]: Relationship.Many<T>;
+            };
+          }
+      >
+    : R;
+
 /**
  * Constrains the `?include=` paths {@link getRelationship} advertises, as
  * `Query.IncludeOptions` does for the other read endpoints. The paths are the
@@ -1870,7 +1908,9 @@ type RootedAt<P, Name extends string> = Extract<P, Name | `${Name}.${string}`>;
  */
 export interface RelationshipIncludeOptions<R extends Any, Name extends string> {
   /** The exact set of legal paths, each rooted at the relationship. Anything else fails decoding (→ 400). */
-  readonly paths?: ReadonlyArray<RootedAt<IncludePathsTo<R, 3>, Name>>;
+  readonly paths?: ReadonlyArray<
+    RootedAt<IncludePathsTo<RelationshipIncludeBase<R, Name>, 3>, Name>
+  >;
   /** How many hops from the parent resource to derive. Defaults to 2. */
   readonly depth?: IncludeDepth;
   /**
@@ -1906,14 +1946,17 @@ export type RelationshipIncludeOption<R extends Any, Name extends string> =
  * `never` while `include` is off. Under `include: true` on a `comments`
  * relationship whose target has an `author`: `"comments" | "comments.author"`.
  *
- * A `paginated` relationship is never an include path of its parent, so its
- * relationship endpoint legalises none.
+ * The paths are derived over {@link RelationshipIncludeBase}, so a
+ * `paginated` relationship legalises its name and the paths rooted at it as a
+ * `many` would, though it is never an include path of the parent's own read.
  *
  * @since 0.18.0
  * @category type-level
  */
 export type RelationshipIncludePaths<R extends Any, Name extends string, Include> =
-  IncludeEnabled<Include> extends true ? RootedAt<Query.IncludePathsOf<R, Include>, Name> : never;
+  IncludeEnabled<Include> extends true
+    ? RootedAt<Query.IncludePathsOf<RelationshipIncludeBase<R, Name>, Include>, Name>
+    : never;
 
 /**
  * The `included` union of a compound relationship document: every resource
@@ -1929,7 +1972,9 @@ export interface RelationshipIncluded<
   Name extends string,
   Include,
 > extends Schema.Union<
-  ReadonlyArray<ResolveIncludePath<R, RelationshipIncludePaths<R, Name, Include>>>
+  ReadonlyArray<
+    ResolveIncludePath<RelationshipIncludeBase<R, Name>, RelationshipIncludePaths<R, Name, Include>>
+  >
 > {}
 
 /**
@@ -1955,7 +2000,10 @@ type RelationshipIncludedMembers<R extends Any, Name extends string, Include> = 
   readonly included: { readonly members: ReadonlyArray<infer M> };
 }
   ? M
-  : ResolveIncludePath<R, RelationshipIncludePaths<R, Name, Include>>;
+  : ResolveIncludePath<
+      RelationshipIncludeBase<R, Name>,
+      RelationshipIncludePaths<R, Name, Include>
+    >;
 
 /**
  * The wire types `?fields[TYPE]=` can name on a {@link getRelationship} over
@@ -1972,7 +2020,7 @@ type RelationshipIncludedMembers<R extends Any, Name extends string, Include> = 
  * @category type-level
  */
 export type RelationshipFieldsetTypes<R extends Any, Name extends string, Include> = ExpandFamilies<
-  ResolveIncludePath<R, RelationshipIncludePaths<R, Name, Include>>
+  ResolveIncludePath<RelationshipIncludeBase<R, Name>, RelationshipIncludePaths<R, Name, Include>>
 >["type"];
 
 // The `fields` option `getRelationship` hands `Query.schema` over the parent
@@ -1983,17 +2031,23 @@ type RelationshipQueryFields<R extends Any, Name extends string, Include, Fields
   ? ReadonlyArray<RelationshipFieldsetTypes<R, Name, Include>>
   : false;
 
-// The `include` option `getRelationship` hands `Query.schema` over the parent
-// resource: a declared surface as it stands (its paths are all rooted at the
-// relationship), else the rooted paths as an explicit allow-list, else off.
+// The `include` option `getRelationship` hands `Query.schema` over the
+// parent's `RelationshipIncludeBase`: a declared surface as it stands (its
+// paths are all rooted at the relationship; the intersection restates that
+// it is a surface over the base, which is the parent itself wherever a
+// surface can name the relationship), else the rooted paths as an explicit
+// allow-list, else off.
 type RelationshipQueryInclude<R extends Any, Name extends string, Include> = [Include] extends [
   AnySurface,
 ]
-  ? Include
+  ? Include & { readonly resource: RelationshipIncludeBase<R, Name> }
   : IncludeEnabled<Include> extends true
     ? {
         readonly paths: ReadonlyArray<
-          Extract<RelationshipIncludePaths<R, Name, Include>, IncludePathsTo<R, 3>>
+          Extract<
+            RelationshipIncludePaths<R, Name, Include>,
+            IncludePathsTo<RelationshipIncludeBase<R, Name>, 3>
+          >
         >;
       }
     : false;
@@ -2004,12 +2058,32 @@ const rootedAt =
   (path: string): boolean =>
     path === name || path.startsWith(`${name}.`);
 
-// The runtime `RelationshipIncludePaths`: `None` while `include` is off, else
-// the parent's legal paths rooted at the relationship. An explicit allow-list
-// or a surface naming a path outside the relationship is a programmer error
+// The runtime `RelationshipIncludeBase`: the parent, or — when the
+// relationship `name` is `paginated` — a view of it whose `name` is a `many`
+// over the same target, so the include walk crosses it from the parent. The
+// view inherits everything else from the parent through its prototype.
+const relationshipIncludeBase = (resource: Any, name: string): Any => {
+  const descriptor = descriptorFor(resource, name);
+  if (descriptor.kind !== "paginated") return resource;
+  const relationships: Relationships = {
+    ...resource.relationships,
+    [name]: Relationship.many(descriptor.ref),
+  };
+  // An object whose prototype is `resource` is everything `resource` is, its
+  // own `relationships` aside — `RelationshipIncludeBase` at runtime.
+  const view: Any = Object.create(resource, {
+    relationships: { value: relationships, enumerable: true },
+  });
+  return view;
+};
+
+// The runtime `RelationshipIncludePaths`, over the relationship's
+// `RelationshipIncludeBase`: `None` while `include` is off, else the base's
+// legal paths rooted at the relationship. An explicit allow-list or a
+// surface naming a path outside the relationship is a programmer error
 // (also a compile error at the call site), so it throws.
 const relationshipIncludePaths = (
-  resource: Any,
+  base: Any,
   name: string,
   include: IncludeArgument | undefined,
 ): Option.Option<ReadonlyArray<string>> => {
@@ -2019,13 +2093,13 @@ const relationshipIncludePaths = (
     if (Arr.isReadonlyArrayNonEmpty(outside)) {
       throw new Error(
         `Endpoint.getRelationship: include path(s) ${outside.map((path) => `"${path}"`).join(", ")} ` +
-          `are not rooted at the relationship "${name}" of "${resource.type}"`,
+          `are not rooted at the relationship "${name}" of "${base.type}"`,
       );
     }
-    return Option.some(includePathsFor([resource], include));
+    return Option.some(includePathsFor([base], include));
   }
   return Option.some(
-    includePathsFor([resource], include === true ? undefined : include).filter(rootedAt(name)),
+    includePathsFor([base], include === true ? undefined : include).filter(rootedAt(name)),
   );
 };
 
@@ -2288,9 +2362,17 @@ export const related = <
  * {@link RelationshipIncludeOption}), and any other path is a 400. The
  * document's `included` union is every resource those paths reach. Full
  * linkage applies: each `included` member must be reachable from the
- * identifiers (`Handlers.linkage`'s `included` option checks it). A
- * `paginated` relationship is never an include path, so it has none to
- * legalise.
+ * identifiers (`Handlers.linkage`'s `included` option checks it).
+ *
+ * A `paginated` relationship is never an include path of its parent, but on
+ * its own relationship endpoint its linkage is the primary data, so its paths
+ * are derived as if it were a `many` ({@link RelationshipIncludeBase}): its
+ * name and the paths rooted at it, under `true`, `{ depth }` and `{ paths }`
+ * alike. With `page`, the identifiers are one page of the relationship, and
+ * `?include=comments` means the comments *on that page* — full linkage is
+ * checked from the identifiers, so a comment from another page fails it. A
+ * declared `Include.Surface` cannot name a `paginated` relationship
+ * (`Include.make` refuses one), so it is the one option that does not apply.
  *
  * Enable `fields` beside `include` for sparse fieldsets on the `included`
  * members (§Sparse Fieldsets applies to "any endpoint that responds with
@@ -2335,9 +2417,12 @@ export const related = <
  *
  * const articles = Group.make(
  *   Article,
- *   // GET /articles/:id/relationships/comments?page[offset]=0&page[limit]=10
+ *   // GET /articles/:id/relationships/comments?page[offset]=0&page[limit]=10&include=comments.author
+ *   // — `comments` is paginated: the identifiers are one page of it, and
+ *   // `included` the comments on that page and their authors
  *   Endpoint.getRelationship(Article, "comments", {
  *     page: Query.Page.Offset,
+ *     include: true,
  *     errors: [ArticleNotFound]
  *   }),
  *   // GET /articles/:id/relationships/replies?include=replies.author&fields[people]=firstName
@@ -2412,9 +2497,12 @@ export const getRelationship = <
   // SAFETY: every `RelationshipIncludeOption` is an `IncludeArgument` at
   // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
   const include = options?.include as IncludeArgument | undefined;
-  const includable = relationshipIncludePaths(resource, name, include);
+  // The parent, a `paginated` `name` read as a `many` (#483): the paths and
+  // the query derive over it.
+  const base = relationshipIncludeBase(resource, name);
+  const includable = relationshipIncludePaths(base, name, include);
   // Every resource the rooted paths reach from the parent — the target first.
-  const reached = Option.map(includable, (paths) => includedResources([resource], true, paths));
+  const reached = Option.map(includable, (paths) => includedResources([base], true, paths));
   // The wire types `fields` declares: those the reached resources carry, a
   // family's members in its place (`RelationshipFieldsetTypes`). None while
   // `include` or `fields` is off.
@@ -2446,10 +2534,11 @@ export const getRelationship = <
       params: Schema.Struct({ id: resource.Id }),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream); TS7 anchors the overload failure here
       query: Query.schema(
-        // SAFETY: `Parameter` is the resource definition `R` names. The query
-        // is the parent's: its include paths are rooted at the relationship,
-        // and nothing else it declares depends on the resource it is built over.
-        resource as R,
+        // SAFETY: `Parameter` is the resource definition `R` names, and
+        // `base` its `RelationshipIncludeBase`. The query is the parent's:
+        // its include paths are rooted at the relationship, and nothing else
+        // it declares depends on the resource it is built over.
+        base as RelationshipIncludeBase<R, Name>,
         {
           include: Option.match(includable, {
             onNone: () => false,
@@ -3135,9 +3224,8 @@ export interface RelationshipConfig<R extends Any = Any, Name extends string = s
  * parent's rooted at it. An explicit `paths` allow-list or a declared surface
  * names one relationship's paths, so it is per-relationship only.
  *
- * A `paginated` relationship is never an include path of its parent
- * (`Relationship.paginated`), so on its endpoint this legalises no path: the
- * `?include=` parameter is declared but accepts none (any path is a 400).
+ * On a `paginated` relationship's endpoint it legalises that relationship's
+ * name and the paths rooted at it, as on a `many` (see {@link getRelationship}).
  *
  * @since 0.18.0
  * @category models
@@ -3881,8 +3969,8 @@ export interface ResourceOptions<
    * `{ depth }` bound. Defaults to `false`, and is overridable per
    * relationship (`relationships: { comments: { relationshipInclude: … } }`),
    * which also takes a `paths` allow-list or a declared `Include.Surface`. A
-   * `paginated` relationship has no include paths, so its endpoint legalises
-   * none ({@link ResourceRelationshipIncludeOption}).
+   * `paginated` relationship's endpoint legalises its paths as a `many`'s
+   * does ({@link ResourceRelationshipIncludeOption}).
    *
    * @since 0.18.0
    */
@@ -3958,7 +4046,7 @@ const includeOpt = (
 // A generated `getRelationship`'s compound-document options. Each is off
 // unless asked for: the relationship's own `relationshipInclude` /
 // `relationshipFields`, else the top-level one. On a `paginated` relationship
-// `include` legalises no path (`getRelationship` derives none) and never
+// `include` legalises the paths rooted at it, as on a `many` (#483), and never
 // throws; with no include paths `fields` declares no fieldset, so `false`
 // builds exactly the endpoint built without it.
 const compoundOpts = (relConfig: RelationshipConfig, defaults: CompoundDefaults = {}) => ({
@@ -4033,8 +4121,8 @@ const pick = <C extends object, K extends keyof C & string, F>(
  *     errors: [ArticleNotFound],
  *     page: Query.Page.Offset,
  *     // compound relationship documents on the generated relationship
- *     // endpoints: GET /articles/:id/relationships/author?include=author
- *     // (the paginated `comments` has no include paths, so legalises none),
+ *     // endpoints: GET /articles/:id/relationships/author?include=author,
+ *     // and on the paginated `comments`, ?include=comments (the page's),
  *     // with sparse fieldsets on their `included` members: &fields[people]=firstName
  *     relationshipInclude: true,
  *     relationshipFields: true,

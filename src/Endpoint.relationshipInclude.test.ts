@@ -35,7 +35,9 @@ import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import * as Handlers from "./Handlers.js";
 import * as Include from "./Include.js";
+import { unlinkedIncluded } from "./internal/linkage.js";
 import * as Middleware from "./Middleware.js";
+import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
@@ -208,10 +210,13 @@ describe("`getRelationship`'s `?include=` (#439)", () => {
     expect(admitted(endpoint, { type: "people", id: "9" })).toEqual(["people", "companies"]);
   });
 
-  it("a `paginated` relationship is no include path of its parent, so has none", () => {
+  it("a `paginated` relationship's own name is legal on its relationship endpoint (#483)", () => {
+    // Never an include path of the parent's own read…
+    expect(accepts(Endpoint.get(Article, { include: true }), "history")).toBe(false);
+    // …but here its linkage is the primary data, so it can be included.
     const endpoint = Endpoint.getRelationship(Article, "history", { include: true });
-    expect(accepts(endpoint, "history")).toBe(false);
-    expect(admitted(endpoint, [{ type: "revisions", id: "3" }])).toEqual([]);
+    expect(accepts(endpoint, "history")).toBe(true);
+    expect(admitted(endpoint, [{ type: "revisions", id: "3" }])).toEqual(["revisions"]);
   });
 
   it("keeps the `included` `Assemble.relationship` returns", () => {
@@ -324,13 +329,16 @@ describe("`getRelationship`'s `fields` (#485)", () => {
     ).toEqual(["fields[companies]", "fields[people]"]);
   });
 
-  it("declares none without `include`, or on a `paginated` relationship", () => {
+  it("declares none without `include`", () => {
     // Nothing can be included, so no resource object has fields to narrow.
     expect(fieldsets(Endpoint.getRelationship(Article, "comments", { fields: true }))).toEqual([]);
+    expect(fieldsets(Endpoint.getRelationship(Article, "comments", { include: true }))).toEqual([]);
+  });
+
+  it("declares the types a `paginated` relationship's paths reach (#483)", () => {
     expect(
       fieldsets(Endpoint.getRelationship(Article, "history", { include: true, fields: true })),
-    ).toEqual([]);
-    expect(fieldsets(Endpoint.getRelationship(Article, "comments", { include: true }))).toEqual([]);
+    ).toEqual(["fields[revisions]"]);
   });
 
   it("admits `included` members missing attributes, and leaves the identifiers alone", () => {
@@ -547,5 +555,250 @@ describe("a compound relationship document served over HTTP (#439)", () => {
       "spec/query/sparse-fieldsets-included: Passed",
     ]);
     expect(requestedFields).toContainEqual({ comments: ["body"] });
+  });
+});
+
+// #483: on a `paginated` relationship's own endpoint, its name and the paths
+// rooted at it are legal, as on a `many`. A thread's comments are paginated;
+// the comments themselves are those of the article above.
+const Thread = Resource.make("threads", {
+  attributes: { subject: Schema.String },
+  relationships: { comments: Relationship.paginated(() => Comment) },
+});
+// The wire comment `wire.comments` is, under another id.
+const wireComment = (id: string) => ({
+  ...wire.comments,
+  id,
+  relationships: {
+    ...wire.comments.relationships,
+    revisions: { links: { related: `/comments/${id}/revisions` } },
+  },
+});
+const threadComments = [
+  { type: "comments", id: "5" },
+  { type: "comments", id: "6" },
+];
+
+describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)", () => {
+  it("`include: true` legalises the name and the depth-2 paths rooted at it", () => {
+    const endpoint = Endpoint.getRelationship(Thread, "comments", { include: true });
+    expect(accepts(endpoint, "comments")).toBe(true);
+    expect(accepts(endpoint, "comments.author")).toBe(true);
+    // A `paginated` relationship further along is still never crossed, and
+    // depth is still counted from the parent.
+    expect(accepts(endpoint, "comments.revisions")).toBe(false);
+    expect(accepts(endpoint, "comments.author.employer")).toBe(false);
+    expect(admitted(endpoint, threadComments)).toEqual(["comments", "people"]);
+    // The parent's own read still has no path through it.
+    expect(accepts(Endpoint.get(Thread, { include: true }), "comments")).toBe(false);
+  });
+
+  it("follows `depth` and an explicit `paths` allow-list, as on a `many`", () => {
+    const deep = Endpoint.getRelationship(Thread, "comments", { include: { depth: 3 } });
+    expect(accepts(deep, "comments.author.employer")).toBe(true);
+    expect(admitted(deep, threadComments)).toEqual(["comments", "people", "companies"]);
+    const shallow = Endpoint.getRelationship(Thread, "comments", { include: { depth: 1 } });
+    expect(accepts(shallow, "comments")).toBe(true);
+    expect(accepts(shallow, "comments.author")).toBe(false);
+    expect(admitted(shallow, threadComments)).toEqual(["comments"]);
+    const listed = Endpoint.getRelationship(Thread, "comments", {
+      include: { paths: ["comments.author"] },
+    });
+    expect(accepts(listed, "comments.author")).toBe(true);
+    expect(accepts(listed, "comments")).toBe(false);
+    expect(admitted(listed, threadComments)).toEqual(["comments", "people"]);
+    expect(() =>
+      // SAFETY: deliberately ill-typed, to reach the runtime check.
+      Endpoint.getRelationship(Thread, "comments", { include: { paths: ["subject"] } } as never),
+    ).toThrow(/not rooted at the relationship "comments" of "threads"/);
+  });
+
+  it("declares a fieldset for each type the paths reach", () => {
+    const endpoint = Endpoint.getRelationship(Thread, "comments", { include: true, fields: true });
+    expect(fieldsets(endpoint)).toEqual(["fields[comments]", "fields[people]"]);
+    expect(
+      Schema.decodeUnknownSync(queryOf(endpoint))({
+        include: "comments.author",
+        "fields[people]": "name",
+      }),
+    ).toEqual({ include: ["comments.author"], fields: { people: ["name"] } });
+  });
+
+  it("checks full linkage against the page of identifiers, not the whole relationship", () => {
+    // `included` is seeded from the primary data, which is the current page:
+    // a comment on another page is unreachable from it.
+    const page = [Comment.ref(Comment.Id.make("5"))];
+    expect(Handlers.linkage(page, { included: [wire.comments] }).included).toEqual([wire.comments]);
+    const offPage = wireComment("6");
+    expect(() => Handlers.linkage(page, { included: [offPage] })).toThrow();
+    // `Assemble.relationship` reads the linkage off the parent, which for a
+    // `paginated` relationship carries none: hand it the page.
+    const thread = {
+      type: "threads",
+      id: "1",
+      attributes: { subject: "Hello" },
+      relationships: { comments: { data: page, links: { related: "/threads/1/comments" } } },
+    };
+    const document = Assemble.relationship({
+      parent: thread,
+      key: "comments",
+      included: [wire.comments],
+    });
+    expect(document.data).toEqual(page);
+    expect(unlinkedIncluded({ ...document })).toEqual([]);
+    expect(
+      unlinkedIncluded({
+        ...Assemble.relationship({ parent: thread, key: "comments", included: [offPage] }),
+      }),
+    ).toHaveLength(1);
+  });
+});
+
+describe("a paginated compound relationship document served over HTTP (#483)", () => {
+  const Api = HttpApi.make("paginatedRelationshipInclude").add(
+    Group.make(
+      Thread,
+      Endpoint.get(Thread),
+      Endpoint.getRelationship(Thread, "comments", {
+        include: true,
+        fields: true,
+        page: Query.Page.Offset,
+      }),
+    ),
+  );
+
+  const person = Person.make({
+    id: Person.Id.make("9"),
+    attributes: { name: "Ada" },
+    relationships: { employer: { data: Company.ref(Company.Id.make("2")) } },
+  });
+  const comments = ["5", "6"].map((id) =>
+    Comment.make({
+      id: Comment.Id.make(id),
+      attributes: { body: "First", postedAt: "2026-01-01" },
+      relationships: {
+        author: { data: Person.ref(person.id) },
+        revisions: { links: { related: `/comments/${id}/revisions` } },
+      },
+    }),
+  );
+  const thread = Thread.make({
+    id: Thread.Id.make("1"),
+    attributes: { subject: "Hello" },
+    relationships: {
+      comments: {
+        links: {
+          self: "/threads/1/relationships/comments",
+          related: "/threads/1/comments",
+        },
+      },
+    },
+  });
+
+  const ThreadsLive = HttpApiBuilder.group(Api, "threads", (handlers) =>
+    handlers
+      .handle("get", () => Effect.succeed(Handlers.data(thread)))
+      .handle("commentsRelationship", ({ query }) => {
+        // The page of linkage, and — for `?include=` — the comments on it
+        // (and their authors), never the whole relationship.
+        const offset = query.page?.offset ?? 0;
+        const page = comments.slice(offset, offset + (query.page?.limit ?? comments.length));
+        const include = query.include;
+        return Effect.succeed(
+          Handlers.linkage(
+            page.map((comment) => Comment.ref(comment.id)),
+            {
+              included:
+                include === undefined
+                  ? undefined
+                  : [
+                      ...(include.includes("comments") ? page : []),
+                      ...(include.includes("comments.author") ? [...page, person] : []),
+                    ],
+              onResource: Handlers.project(query.fields),
+            },
+          ),
+        );
+      }),
+  );
+
+  const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Any));
+  const serve = async (url: string) => {
+    const appLayer = HttpApiBuilder.layer(Api).pipe(
+      Layer.provide(ThreadsLive),
+      Layer.provide(Middleware.layer),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(new Request(`http://localhost${url}`)).finally(dispose);
+    const text = await response.text();
+    return { status: response.status, body: text === "" ? undefined : decodeJson(text) };
+  };
+
+  it("answers `include=comments.author` with the page's comments and their authors", async () => {
+    const response = await serve(
+      "/threads/1/relationships/comments?include=comments.author&page[limit]=1",
+    );
+    expect(response).toEqual({
+      status: 200,
+      body: { data: [threadComments[0]], included: [wire.comments, wire.people] },
+    });
+    const second = await serve(
+      "/threads/1/relationships/comments?include=comments&page[offset]=1&page[limit]=1",
+    );
+    expect(second).toEqual({
+      status: 200,
+      body: { data: [threadComments[1]], included: [wireComment("6")] },
+    });
+  });
+
+  it("narrows the included members with `fields`", async () => {
+    const response = await serve(
+      "/threads/1/relationships/comments?include=comments&fields[comments]=body&page[limit]=1",
+    );
+    expect(response).toEqual({
+      status: 200,
+      body: { data: [threadComments[0]], included: [narrowed(wire.comments, "body")] },
+    });
+    // An empty fieldset asks for no attributes (#488).
+    const empty = await serve(
+      "/threads/1/relationships/comments?include=comments&fields[comments]=&page[limit]=1",
+    );
+    expect(empty).toEqual({
+      status: 200,
+      body: { data: [threadComments[0]], included: [narrowed(wire.comments)] },
+    });
+  });
+
+  it("answers a path outside the relationship with a 400 naming the legal ones", async () => {
+    const response = await serve("/threads/1/relationships/comments?include=comments.revisions");
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      errors: [
+        {
+          status: "400",
+          source: { parameter: "include" },
+          meta: { includablePaths: ["comments", "comments.author"] },
+        },
+      ],
+    });
+  });
+
+  it("passes the compound-document rules, which the kit probes it for", async () => {
+    const report = await Effect.runPromise(
+      // SAFETY: `ThreadsLive` and `Middleware.layer` provide every service the
+      // router needs; the platform services `verify` names are never used.
+      Conformance.verify(Api, {
+        ids: { threads: "1" },
+        only: ["spec/document/full-linkage", "spec/document/included-on-include"],
+      }).pipe(
+        Effect.provide(Layer.provideMerge(ThreadsLive, Middleware.layer)),
+        Effect.scoped,
+      ) as Effect.Effect<Conformance.Report, never, never>,
+    );
+    expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
+      "spec/document/full-linkage: Passed",
+      "spec/document/included-on-include: Passed",
+    ]);
   });
 });
