@@ -35,13 +35,21 @@ import {
 import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
 import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { declaredNames } from "../declaredQuery.js";
-import { idKey, identity, isLinkageData, isRecord, linkageOf } from "../linkage.js";
+import {
+  idKey,
+  identity,
+  isJsonArray,
+  isJsonObject,
+  isLinkageData,
+  isRecord,
+  linkageOf,
+} from "../linkage.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "../media.js";
 
 // The kit's identity and linkage over arbitrary JSON live beside the shared
 // reachability walk, which the endpoint middleware runs over the encoded
 // document too (#250); the rules keep importing them from here.
-export { idKey, identity, isRecord };
+export { idKey, identity, isJsonArray, isJsonObject, isRecord };
 
 // ---------------------------------------------------------------------------
 // The rule model
@@ -139,20 +147,6 @@ export interface Gap {
  * @internal
  */
 export type Body = Option.Option<Schema.Json>;
-
-/**
- * Whether a JSON value is an object — not an array, `null` or a scalar.
- *
- * @internal
- */
-export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => isRecord(json);
-
-/**
- * Whether a JSON value is an array.
- *
- * @internal
- */
-export const isJsonArray = (json: Schema.Json): json is Schema.JsonArray => Array.isArray(json);
 
 /**
  * A JSON value's members when it is an object, else none — what a reader

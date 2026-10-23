@@ -196,9 +196,14 @@ export type Decoded =
   | { readonly _tag: "Node"; readonly node: Node }
   | { readonly _tag: "Issues"; readonly issues: ReadonlyArray<SchemaIssue.Issue> };
 
-// The offending value is only carried, as the issue's `actual`; nothing here
-// reads it, so it is a type parameter rather than an unparsed `unknown`.
-const pointed = <A>(key: string, message: string, input?: A): SchemaIssue.Issue =>
+/**
+ * A `filter[...]` value as the flat query carries it: one string, or the
+ * strings of a repeated key (`Query.FilterWireValue`).
+ */
+export type WireValue = string | ReadonlyArray<string>;
+
+// The offending value, carried as the issue's `actual`.
+const pointed = (key: string, message: string, input?: WireValue): SchemaIssue.Issue =>
   new SchemaIssue.Pointer([key], new SchemaIssue.InvalidValue({ message }, input));
 
 const quote = JSON.stringify;
@@ -217,15 +222,15 @@ interface Draft {
 }
 
 /**
- * Decodes a record of `filter[...]` keys (string values) to one normalised
- * root node. Every rejection is a `Pointer` at the offending flat key.
+ * Decodes a record of `filter[...]` keys (each a string, or a repeated key's
+ * strings) to one normalised root node. Every rejection is a `Pointer` at the offending flat key.
  */
 export const decodeFilter = (
   fields: FieldCodecs,
-  input: { readonly [key: string]: unknown },
+  input: { readonly [key: string]: WireValue },
 ): Decoded => {
   const issues = new Map<string, SchemaIssue.Issue>();
-  const fail = <A>(key: string, message: string, value?: A): undefined => {
+  const fail = (key: string, message: string, value?: WireValue): undefined => {
     if (!issues.has(key)) issues.set(key, pointed(key, message, value));
     return undefined;
   };
@@ -305,9 +310,6 @@ export const decodeFilter = (
     let raw: string;
     if (typeof value === "string") {
       raw = value;
-    } else if (!Array.isArray(value)) {
-      fail(key, `Expected a string, got ${quote(value)}`, value);
-      continue;
     } else if (segments !== undefined && isListPosition(segments)) {
       // The repeated-key spelling of a comma list: `filter[f]=a&filter[f]=b`
       // is `filter[f]=a,b`. Each occurrence's raw value is preserved as-is —

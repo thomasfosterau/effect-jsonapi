@@ -1248,6 +1248,8 @@ export const FilterWireValue: FilterWireValue = Schema.Union([
   Schema.Array(Schema.String),
 ]);
 
+const isFilterWireValue = Schema.is(FilterWireValue);
+
 // Every key starting `filter[` — well formed or not, so a malformed key
 // (`filter[status]x`) reaches the grammar and is rejected, never silently
 // dropped as an excess property. The bare `filter` key is a flat struct field
@@ -1295,7 +1297,7 @@ const filterIssues = (
 const decodeFilterRecord = (
   fields: FieldCodecs,
   ast: SchemaAST.AST,
-  input: { readonly [key: string]: unknown },
+  input: Parameters<typeof decodeFilter>[1],
   options: SchemaAST.ParseOptions,
 ): Effect.Effect<Node, SchemaIssue.Issue> => {
   const decoded = decodeFilter(fields, input);
@@ -1856,7 +1858,13 @@ export const schema = <R extends Any, const O extends Options<R>>(
           // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
           SchemaTransformation.transformEffect<Values, Values>({
             decode: (flatValues, parseOptions) => {
-              const filterKeys = Rec.filter(flatValues, (_, key) => isFilterKey(key));
+              // The flat struct has already decoded every `filter[...]` key
+              // (and the bare `filter`) as a `FilterWireValue`.
+              const filterKeys = Rec.filter(
+                flatValues,
+                (value, key): value is typeof FilterWireValue.Type =>
+                  isFilterKey(key) && isFilterWireValue(value),
+              );
               const others = Rec.filter(flatValues, (_, key) => !isFilterKey(key));
               const nestedValues = nest(others);
               if (Rec.isEmptyRecord(filterKeys)) return Effect.succeed(nestedValues);

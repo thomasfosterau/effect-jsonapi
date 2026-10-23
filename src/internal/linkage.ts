@@ -20,6 +20,8 @@ import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import type * as Schema from "effect/Schema";
 import { assign } from "./define.js";
 
 /**
@@ -47,6 +49,21 @@ export const reachable = (
 /** @internal */
 export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> =>
   typeof u === "object" && u !== null && !Array.isArray(u);
+
+/**
+ * Whether a JSON value is an array.
+ *
+ * @internal
+ */
+export const isJsonArray = (json: Schema.Json): json is Schema.JsonArray => Array.isArray(json);
+
+/**
+ * Whether a JSON value is an object — not an array, `null` or a scalar.
+ *
+ * @internal
+ */
+export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject =>
+  Predicate.isObject(json);
 
 /**
  * The comparable string `identity` gives a resource with this `type` and `id`.
@@ -179,14 +196,18 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
  * @internal
  */
 export const unlinkedIncluded = (
-  document: Readonly<Record<string, unknown>>,
+  document: Schema.JsonObject,
   fields?: Readonly<Record<string, ReadonlyArray<string>>> | undefined,
-) => {
+): ReadonlyArray<Schema.JsonObject> => {
   const included = document["included"];
-  if (!Array.isArray(included)) return [];
+  if (!isJsonArray(included)) return [];
   const data = document["data"];
-  const primaries = Array.isArray(data) ? Arr.filter(data, isRecord) : isRecord(data) ? [data] : [];
-  const members = Arr.filter(included, isRecord);
+  const primaries = isJsonArray(data)
+    ? Arr.filter(data, isJsonObject)
+    : isJsonObject(data)
+      ? [data]
+      : [];
+  const members = Arr.filter(included, isJsonObject);
   const byIdentity = HashMap.fromIterable(
     Arr.flatMap(members, (resource) =>
       Arr.map(identities(resource), (key) => [key, resource] as const),
@@ -199,7 +220,7 @@ export const unlinkedIncluded = (
   );
   // The exemption: a resource the walk reaches whose type has a fieldset may
   // have had relationships excluded, whose linkage the wire no longer shows.
-  const fieldsetOn = (resource: Readonly<Record<string, unknown>>): boolean => {
+  const fieldsetOn = (resource: Schema.JsonObject): boolean => {
     const type = resource["type"];
     return fields !== undefined && typeof type === "string" && Object.hasOwn(fields, type);
   };
