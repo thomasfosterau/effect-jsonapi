@@ -4,7 +4,7 @@ Releases are automated with [Changesets](https://github.com/changesets/changeset
 
 ## The release flow
 
-1. **Add a changeset with your change.** Run `pnpm changeset`, pick the bump (`patch` / `minor` / `major`) and write a user-facing summary, then commit the generated file alongside your change. (Changes that don't affect the published package — docs, CI, examples — need no changeset.)
+1. **Add a changeset with your change.** Run `pnpm changeset`, pick the bump (pre-1.0: `minor` for a breaking change, `patch` otherwise, never `major`) and write a user-facing summary, then commit the generated file alongside your change. (Changes that don't affect the published package — docs, CI, examples — need no changeset.)
 2. **Merge to `trunk`.** The [`release`](./.github/workflows/release.yml) workflow runs and, while changesets are pending, opens or updates a **"Version Packages"** PR that applies the version bump and rolls the changesets into `CHANGELOG.md`.
 3. **Merge the "Version Packages" PR.** With no changesets left, the workflow publishes the new version to npm via `pnpm publish` and trusted publishing (no provenance while the repository is private — see below), then tags the commit and creates the GitHub release.
 
