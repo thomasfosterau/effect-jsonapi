@@ -42,6 +42,9 @@ import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
 
+// The walk reads a document as JSON, so a typed one is checked as JSON first.
+const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
+
 const Revision = Resource.make("revisions", { attributes: { editedAt: Schema.String } });
 const Company = Resource.make("companies", { attributes: { name: Schema.String } });
 const Person = Resource.make("people", {
@@ -659,7 +662,7 @@ describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)",
       included: [wire.comments],
     });
     expect(document.data).toEqual(page);
-    expect(unlinkedIncluded({ ...document })).toEqual([]);
+    expect(unlinkedIncluded(onWire(document))).toEqual([]);
     expect(() =>
       Assemble.relationship({ parent: thread, key: "comments", included: [offPage] }),
     ).toThrow(/full linkage violation: included resource "comments:6"/);

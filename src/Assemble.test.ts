@@ -13,6 +13,9 @@ import type * as Handlers from "./Handlers.js";
 import { unlinkedIncluded } from "./internal/linkage.js";
 import * as Query from "./Query.js";
 
+// The walk reads a document as JSON, so a typed one is checked as JSON first.
+const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
+
 interface User {
   readonly id: string;
   readonly role: "user" | "editor" | "admin";
@@ -848,10 +851,10 @@ describe("Assemble.relationship", () => {
     const parent = contest("x");
     const document = Assemble.relationship({ parent, key: "candidates" });
     expect(document.included).toEqual([]);
-    expect(unlinkedIncluded({ ...document })).toEqual([]);
+    expect(unlinkedIncluded(onWire(document))).toEqual([]);
     const toOne = Assemble.relationship({ parent: person("p1"), key: "birthPlace" });
     expect(toOne.included).toEqual([]);
-    expect(unlinkedIncluded({ ...toOne })).toEqual([]);
+    expect(unlinkedIncluded(onWire(toOne))).toEqual([]);
     // The children the identifiers name are reachable from them (#423).
     const withChildren = Assemble.relationship({
       parent,
@@ -859,7 +862,7 @@ describe("Assemble.relationship", () => {
       included: [candidate("c-1"), candidate("c-2")],
     });
     expect(ids(withChildren.included)).toEqual(["candidates:c-1", "candidates:c-2"]);
-    expect(unlinkedIncluded({ ...withChildren })).toEqual([]);
+    expect(unlinkedIncluded(onWire(withChildren))).toEqual([]);
   });
 
   // #498: full linkage is checked from the identifiers, as `Handlers.linkage`

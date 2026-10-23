@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import type * as Schema from "effect/Schema";
 import { requestedFieldsets, unlinkedIncluded } from "../linkage.js";
 
 /** A resource identifier object, which a resource object extends. */
@@ -156,7 +157,7 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
   it("follows the later of two members with the same identity", () => {
     const linked = { ...ref("people", "9"), relationships: { manager: one(ref("people", "8")) } };
     const bare = ref("people", "9");
-    const document = (included: ReadonlyArray<unknown>) => ({
+    const document = (included: ReadonlyArray<Schema.Json>) => ({
       data: { ...ref("articles", "1"), relationships: { author: one(ref("people", "9")) } },
       included,
     });

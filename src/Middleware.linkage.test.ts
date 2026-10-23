@@ -26,6 +26,9 @@ import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { SERVER_ERROR } from "./ServerErrors.js";
 
+// The walk reads a document as JSON, so a typed one is checked as JSON first.
+const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
+
 // The issue's reproduction.
 const Person = Resource.make("people", { attributes: { name: Schema.String } });
 const Article = Resource.make("articles", {
@@ -74,7 +77,7 @@ describe("the builders' check sees the value, not the wire (#250)", () => {
       },
       included: [ann],
     });
-    expect(unlinkedIncluded(encoded)).toEqual([ann]);
+    expect(unlinkedIncluded(onWire(encoded))).toEqual([ann]);
   });
 });
 
