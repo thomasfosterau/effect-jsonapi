@@ -355,8 +355,10 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
   /** The current request's viewer, as the application's auth layer produced it. */
   readonly viewer?: V | undefined;
   /**
-   * Sparse fieldsets keyed by resource `type` to the attribute names the
-   * caller wants. Empty / missing means the full resource.
+   * Sparse fieldsets keyed by resource `type` to the field names —
+   * attributes and relationships (#494) — the caller wants. Missing means the
+   * full resource; an empty set, no fields. A relationship a set excludes is
+   * exempt from the full-linkage check (`Handlers.project`).
    */
   readonly fields?: Handlers.Fields | undefined;
   /**
@@ -1059,16 +1061,18 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
   readonly capabilities?: CapabilitiesHook<V> | undefined;
   /**
    * Resources to carry in `included`, typically the related resources the
-   * linkage names. Full linkage applies: each must be reachable from the
-   * primary identifiers.
+   * linkage names. Full linkage applies, and is checked: each must be
+   * reachable from the primary identifiers, or {@link relationship} throws
+   * (#498).
    */
   readonly included?: ReadonlyArray<I> | undefined;
   /**
-   * Sparse fieldsets keyed by resource `type` to the attribute names the
-   * caller wants — the `query.fields` of an `Endpoint.getRelationship`
-   * declaring `fields`. Applied to the `included` members only: the primary
-   * data is resource identifiers, which have no fields to project (#485).
-   * Empty / missing means the full resources.
+   * Sparse fieldsets keyed by resource `type` to the field names —
+   * attributes and relationships (#494) — the caller wants: the
+   * `query.fields` of an `Endpoint.getRelationship` declaring `fields`.
+   * Applied to the `included` members only: the primary data is resource
+   * identifiers, which have no fields to project (#485). Empty / missing
+   * means the full resources.
    *
    * @since 0.18.0
    */
@@ -1081,6 +1085,14 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
  * linkage for `key`, `included` is the extras passed as `included`,
  * deduplicated (empty when none are); `links.related` is the relationship's
  * related link when the parent carries one.
+ *
+ * Full linkage is checked from the identifiers, as `Handlers.linkage` checks
+ * it (`Handlers.buildIncluded`, #498): every `included` member must be
+ * reachable from them, directly or through other members' relationships, or
+ * the call throws — a programming error in the handler, which surfaces as a
+ * defect. The one exemption is the spec's: a relationship `fields` excludes
+ * still counts as the linkage it would otherwise carry (§Compound Documents,
+ * #494), so `?include=comments.author&fields[comments]=body` passes.
  *
  * The parent itself is never in `included`: the primary data names the
  * related resources, not the parent, so it would be reachable only through a
@@ -1128,17 +1140,14 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
 export const relationship = <R extends ResourceLike, I extends ResourceLike = R, V = unknown>(
   input: RelationshipInput<R, I, V>,
 ): RelationshipDocument<R, I> => {
-  const stamp = onResourceFor(input);
-  const emit = (r: ResourceLike): WireResource<ResourceLike> =>
-    stamp(asValue(stringifyLinks(r))) as unknown as WireResource<ResourceLike>;
-  const seen = new Set<string>();
-  const included: Array<WireResource<ResourceLike>> = [];
-  for (const candidate of input.included ?? []) {
-    const key = `${candidate.type}\0${candidate.id}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    included.push(emit(candidate));
-  }
+  // Deduplicated, stamped and projected, and checked for full linkage from
+  // the identifiers, as `Handlers.linkage` checks it (#498) — with the
+  // sparse-fieldset exemption the projection carries (#494).
+  const included = Handlers.buildIncluded(
+    relationshipRefs(input.parent, input.key),
+    (input.included ?? []).map((r) => asValue(stringifyLinks(r))),
+    { onResource: onResourceFor(input) },
+  );
   const rel = readRelationship(input.parent, input.key);
   const related = rel?.links?.related === undefined ? undefined : toLinkString(rel.links.related);
   return {

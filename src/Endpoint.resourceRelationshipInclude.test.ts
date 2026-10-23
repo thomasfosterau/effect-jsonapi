@@ -419,7 +419,18 @@ describe("a `Group.resource` relationship endpoint serving `included` (#484, #48
       "/articles/1/relationships/editor?include=editor,editor.employer&fields[people]=name",
     );
     expect(response.status).toBe(200);
+    // `employer` is not named, so it goes (#494), and the company it linked
+    // is exempt from full linkage (§Compound Documents).
+    const { relationships: _employer, ...person } = wire.people;
     expect(response.body).toEqual({
+      data: editorId,
+      included: [{ ...person, attributes: { name: "Ada" } }, wire.companies],
+    });
+    // Named, it stays.
+    const named = await serve(
+      "/articles/1/relationships/editor?include=editor,editor.employer&fields[people]=name,employer",
+    );
+    expect(named.body).toEqual({
       data: editorId,
       included: [{ ...wire.people, attributes: { name: "Ada" } }, wire.companies],
     });

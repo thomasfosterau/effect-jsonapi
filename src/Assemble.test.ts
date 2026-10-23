@@ -862,6 +862,56 @@ describe("Assemble.relationship", () => {
     expect(unlinkedIncluded({ ...withChildren })).toEqual([]);
   });
 
+  // #498: full linkage is checked from the identifiers, as `Handlers.linkage`
+  // checks it — with the sparse-fieldset exemption (#494).
+  it("throws on an `included` member the identifiers do not reach", () => {
+    expect(() =>
+      Assemble.relationship({ parent: contest("x"), key: "candidates", included: [place] }),
+    ).toThrow(/full linkage violation: included resource "places:place-1"/);
+    // Empty linkage reaches nothing.
+    expect(() =>
+      Assemble.relationship({
+        parent: { type: "t", id: "1", attributes: {}, relationships: { one: { data: null } } },
+        key: "one",
+        included: [place],
+      }),
+    ).toThrow(/full linkage/);
+  });
+
+  it("follows the members' relationships, and exempts the ones `fields` excludes", () => {
+    // `GET /contests/x/relationships/election?include=election.electionEvent`:
+    // the identifier reaches the election, whose `electionEvent` reaches the event.
+    const event = { type: "election-events", id: "event-1", attributes: { name: "2026" } };
+    const linked = Assemble.relationship({
+      parent: contest("x"),
+      key: "election",
+      included: [election, event],
+    });
+    expect(ids(linked.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+    // `fields[elections]=name` excludes `electionEvent`: the event is exempt.
+    const sparse = Assemble.relationship({
+      parent: contest("x"),
+      key: "election",
+      included: [election, event],
+      fields: { elections: ["name"] },
+    });
+    expect(sparse.included[0]).toEqual({
+      type: "elections",
+      id: "election-1",
+      attributes: { name: "House" },
+    });
+    expect(ids(sparse.included)).toEqual(["elections:election-1", "election-events:event-1"]);
+    // An unrelated member is still refused.
+    expect(() =>
+      Assemble.relationship({
+        parent: contest("x"),
+        key: "election",
+        included: [election, place],
+        fields: { elections: ["name"] },
+      }),
+    ).toThrow(/"places:place-1"/);
+  });
+
   it("spells an empty to-one as `data: null`", () => {
     const parent: Assemble.ResourceLike = {
       type: "t",

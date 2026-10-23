@@ -238,3 +238,57 @@ describe("SchemaErrorsLive walks from primary identifiers in a relationship docu
     expect(response.body).toEqual(SERVER_ERROR.toDocument());
   });
 });
+
+// §Compound Documents: full linkage is waived "when relationship fields that
+// would otherwise contain linkage data are excluded due to sparse fieldsets"
+// (#494). The middleware reads `fields[TYPE]` from the request.
+describe("SchemaErrorsLive exempts what the request's sparse fieldsets exclude (#494)", () => {
+  const Api = HttpApi.make("sparseLinkage").add(
+    Group.make(Article, Endpoint.get(Article, { include: true, fields: true })),
+  );
+
+  // `?include=author&fields[articles]=title` as the handler answers it: the
+  // article without its `author`, the person it linked still included.
+  const projected = Handlers.data(
+    { type: "articles", id: "1", attributes: { title: "Hi" } },
+    { included: [ann], checkLinkage: false },
+  );
+
+  const serve = async (query: string) => {
+    const appLayer = HttpApiBuilder.layer(Api).pipe(
+      Layer.provide(
+        HttpApiBuilder.group(Api, "articles", (handlers) =>
+          // SAFETY: the wire document under test, its loose builder type aside.
+          handlers.handle("get", () => Effect.succeed(projected as never)),
+        ),
+      ),
+      Layer.provide(Middleware.layer),
+      Layer.provide(ErrorReporter.layer([])),
+      Layer.provide(platformLayer),
+    );
+    const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
+    const response = await handler(new Request(`http://localhost/articles/1?${query}`)).finally(
+      dispose,
+    );
+    return { status: response.status, body: decodeJson(await response.text()) };
+  };
+
+  it.each([
+    "include=author&fields[articles]=title",
+    "include=author&fields[articles]=",
+    "include=author&fields%5Barticles%5D=title",
+  ])("serves a member the excluded relationship would have linked: %s", async (query) => {
+    const response = await serve(query);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ data: projected.data, included: [ann] });
+  });
+
+  it.each(["include=author", "include=author&fields[people]=name"])(
+    "still answers the orphan with the JSON:API 500 when no fieldset excluded a relationship it reaches: %s",
+    async (query) => {
+      const response = await serve(query);
+      expect(response.status).toBe(500);
+      expect(response.body).toEqual(SERVER_ERROR.toDocument());
+    },
+  );
+});

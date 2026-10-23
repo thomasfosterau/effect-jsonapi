@@ -272,7 +272,7 @@ type SparseIncluded<R extends Any, Include> = SparseUnion<
 // `update`) bind by default — the resource's own `document()` at the effective
 // document `meta`. The default their `success` option replaces. When the
 // endpoint declares `fields` (only `get` can), its resource objects — primary
-// and `included` alike — admit any subset of their attributes (#322).
+// and `included` alike — admit any subset of their fields (#322, #494).
 type DefaultDocument<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
@@ -529,10 +529,11 @@ export const get = <
     readonly include?: Include;
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets. The default success document
-     * then admits any subset of the attributes of every resource type a
-     * fieldset can name, primary and `included` alike, so a handler can answer
-     * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
-     * decodes those attributes as optional. Pass `fields: false` to keep
+     * then admits any subset of the fields — attributes and relationships
+     * (#494) — of every resource type a fieldset can name, primary and
+     * `included` alike, so a handler can answer with
+     * `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
+     * decodes those fields as optional. Pass `fields: false` to keep
      * strict attributes. A `success` override replaces the whole default
      * document: with `include` on or `meta` overridden, it must admit every
      * reachable type in `included` and carry the `meta` itself
@@ -753,10 +754,11 @@ export const list = <
     readonly include?: Include;
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets. The default success document
-     * then admits any subset of the attributes of every resource type a
-     * fieldset can name, primary and `included` alike, so a handler can answer
-     * with `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
-     * decodes those attributes as optional. Pass `fields: false` to keep
+     * then admits any subset of the fields — attributes and relationships
+     * (#494) — of every resource type a fieldset can name, primary and
+     * `included` alike, so a handler can answer with
+     * `Handlers.project(query.fields)` (§Sparse Fieldsets) — and a client
+     * decodes those fields as optional. Pass `fields: false` to keep
      * strict attributes. A `success` override replaces the whole default
      * document: with `include` on or `meta` overridden, it must admit every
      * reachable type in `included` and carry the `meta` itself
@@ -1316,7 +1318,8 @@ export type {
    */
   IncludedResources,
   /**
-   * The resource object of `R` with every attribute optional: what the default
+   * The resource object of `R` with every attribute and relationship optional
+   * (#494): what the default
    * success document of a read endpoint that declares `fields` admits for each
    * resource type a fieldset can name (#322). Part of those endpoints'
    * inferred types, so exported for declaration emit (#348).
@@ -1593,9 +1596,9 @@ export const collection = <
      * non-`paginated` targets (unless `include` is a declared
      * `Include.Surface`) and every type an `include` path reaches. The
      * document's resource objects of those types then admit any subset of
-     * their attributes, so a handler can answer with
-     * `Handlers.project(query.fields)` — and a client decodes those
-     * attributes as optional.
+     * their fields, attributes and relationships alike (#494), so a handler
+     * can answer with `Handlers.project(query.fields)` — and a client
+     * decodes those attributes and relationships as optional.
      */
     readonly fields?: Fields;
     /** Enable `?sort=`: `true` for every attribute of every resource, or an explicit list. */
@@ -1737,9 +1740,9 @@ export const polymorphic = <
      * non-`paginated` targets (unless `include` is a declared
      * `Include.Surface`) and every type an `include` path reaches. The
      * document's resource objects of those types then admit any subset of
-     * their attributes, so a handler can answer with
-     * `Handlers.project(query.fields)` — and a client decodes those
-     * attributes as optional.
+     * their fields, attributes and relationships alike (#494), so a handler
+     * can answer with `Handlers.project(query.fields)` — and a client
+     * decodes those attributes and relationships as optional.
      */
     readonly fields?: Fields;
     /** Override the success document's `meta` schema. */
@@ -1822,9 +1825,9 @@ export type LinkageData<R extends Any, Name extends string> =
  * optional `included` admits {@link RelationshipIncludedOf}; otherwise it has
  * no `included` member. When `Fields` is `true` as well (the endpoint
  * declares `fields`), every `included` member whose type a fieldset names
- * admits any subset of its attributes, so a projected answer encodes
- * (§Sparse Fieldsets). The primary data is identifiers, which carry no
- * attributes to project, so it is unchanged.
+ * admits any subset of its fields, attributes and relationships alike, so a
+ * projected answer encodes (§Sparse Fieldsets). The primary data is
+ * identifiers, which carry no fields to project, so it is unchanged.
  *
  * @since 0.1.0 (`Include` and `Fields` since 0.18.0)
  * @category type-level
@@ -2123,7 +2126,7 @@ export interface LinkagePayload<R extends Any, Name extends string> extends Sche
  *
  * When `Fields` is `true` (the endpoint declares `fields`), the target and
  * every `included` member whose type a fieldset names admit any subset of
- * their attributes, so a projected answer encodes (§Sparse Fieldsets).
+ * their fields, so a projected answer encodes (§Sparse Fieldsets).
  *
  * @since 0.1.0 (`Fields` since 0.17.0)
  * @category type-level
@@ -2270,9 +2273,9 @@ export const related = <
      * non-`paginated` targets (unless `include` is a declared
      * `Include.Surface`) and every type an `include` path reaches. The
      * document's resource objects of those types then admit any subset of
-     * their attributes, so a handler can answer with
-     * `Handlers.project(query.fields)` — and a client decodes those
-     * attributes as optional.
+     * their fields, attributes and relationships alike (#494), so a handler
+     * can answer with `Handlers.project(query.fields)` — and a client
+     * decodes those attributes and relationships as optional.
      */
     readonly fields?: Fields;
     /** Enable `?sort=` over the target's attributes (to-many relationships). */
@@ -2378,7 +2381,7 @@ export const related = <
  * members (§Sparse Fieldsets applies to "any endpoint that responds with
  * resources as primary or included data"): `?fields[TYPE]=` is declared for
  * every type a legal include path reaches ({@link RelationshipFieldsetTypes}),
- * and those members admit any subset of their attributes, so a handler can
+ * and those members admit any subset of their fields, so a handler can
  * answer with `Handlers.linkage(ids, { included, onResource:
  * Handlers.project(query.fields) })`. The primary data is identifiers, which
  * have no fields, so `fields[<target type>]` narrows only the `included`
@@ -2481,9 +2484,9 @@ export const getRelationship = <
     /**
      * Enable `?fields[TYPE]=` sparse fieldsets for the `included` members:
      * every type a legal `include` path reaches. Those members then admit
-     * any subset of their attributes, so a handler can answer with
+     * any subset of their fields, so a handler can answer with
      * `Handlers.project(query.fields)` — and a client decodes those
-     * attributes as optional. The primary identifiers are unaffected, and
+     * attributes and relationships as optional. The primary identifiers are unaffected, and
      * without `include` no type is declared.
      *
      * @since 0.18.0
@@ -3992,7 +3995,8 @@ export interface ResourceOptions<
   readonly relationshipFields?: GRelFields;
   /**
    * Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`, which makes
-   * the attributes of the read endpoints' default documents optional (see
+   * the attributes and relationships of the read endpoints' default
+   * documents optional (see
    * {@link get}); pass `false` to keep them strict.
    */
   readonly fields?: Fields;

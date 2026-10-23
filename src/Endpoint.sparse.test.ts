@@ -113,6 +113,27 @@ const only = <O extends { readonly attributes: Readonly<Record<string, unknown>>
   attributes: Rec.fromEntries(names.map((name) => [name, object.attributes[name]] as const)),
 });
 
+// A wire resource as `Handlers.project` answers a fieldset naming `names`:
+// the attributes and relationships it names (#494), `relationships` omitted
+// when it names none of them.
+const projected = <
+  O extends {
+    readonly attributes: Readonly<Record<string, unknown>>;
+    readonly relationships?: Readonly<Record<string, unknown>>;
+  },
+>(
+  object: O,
+  ...names: ReadonlyArray<(keyof O["attributes"] | keyof NonNullable<O["relationships"]>) & string>
+) => {
+  const { relationships, ...rest } = object;
+  const kept = Rec.filter(relationships ?? {}, (_, name) => names.includes(name));
+  return {
+    ...rest,
+    attributes: Rec.filter(object.attributes, (_, name) => names.includes(name)),
+    ...(Rec.isEmptyRecord(kept) ? {} : { relationships: kept }),
+  };
+};
+
 // An endpoint's success document schema, for decoding wire documents.
 const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>
   // SAFETY: every endpoint under test declares exactly one success schema, a
@@ -148,6 +169,39 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
     expect(admitsPartial(endpoint, partialArticle, many, [partialPerson])).toBe(true);
     // Every attribute present still decodes.
     expect(admitsPartial(endpoint, wire.articles, many, [wire.people])).toBe(true);
+  });
+
+  // A relationship is a field (#494): any subset of them is admitted too, and
+  // so is a resource carrying none, as `Handlers.project` answers an empty set.
+  it.each([
+    ["get", Endpoint.get(Article, { include: true, fields: true }), false],
+    ["list", Endpoint.list(Article, { include: true, fields: true }), true],
+  ] as const)(
+    "%s admits a resource with some or none of its relationships",
+    (_, endpoint, many) => {
+      expect(
+        admitsPartial(endpoint, projected(wire.articles, "title", "author"), many, [
+          projected(wire.people, "name"),
+        ]),
+      ).toBe(true);
+      expect(
+        admitsPartial(endpoint, projected(wire.articles), many, [projected(wire.people)]),
+      ).toBe(true);
+    },
+  );
+
+  it("an endpoint without `fields` still requires every declared relationship", () => {
+    expect(
+      admitsPartial(
+        Endpoint.get(Article),
+        {
+          ...wire.articles,
+          relationships: { author: wire.articles.relationships.author },
+        },
+        false,
+      ),
+    ).toBe(false);
+    expect(admitsPartial(Endpoint.get(Article), wire.articles, false)).toBe(true);
   });
 
   it("a declared `Include.Surface` makes its own union partial", () => {
@@ -649,51 +703,74 @@ describe("a projected answer over HTTP (#322)", () => {
   it.each([
     [
       "/articles/1?fields[articles]=title",
-      { data: only(wire.articles, "title"), included: [wire.people, wire.companies] },
+      { data: projected(wire.articles, "title"), included: [wire.people, wire.companies] },
+    ],
+    // A relationship is a field (#494): named, it is kept; the others go.
+    [
+      "/articles/1?fields[articles]=title,author",
+      {
+        data: projected(wire.articles, "title", "author"),
+        included: [wire.people, wire.companies],
+      },
+    ],
+    [
+      "/articles/1?include=author&fields[articles]=tags&fields[people]=employer",
+      {
+        data: projected(wire.articles, "tags"),
+        included: [projected(wire.people, "employer"), wire.companies],
+      },
     ],
     [
       "/articles/1?include=author.employer&fields[articles]=title&fields[people]=name",
-      { data: only(wire.articles, "title"), included: [only(wire.people, "name"), wire.companies] },
+      {
+        data: projected(wire.articles, "title"),
+        included: [projected(wire.people, "name"), wire.companies],
+      },
     ],
     [
       "/articles?fields[articles]=title,body&fields[people]=email",
-      { data: [only(wire.articles, "title", "body")], included: [only(wire.people, "email")] },
+      {
+        data: [projected(wire.articles, "title", "body")],
+        included: [projected(wire.people, "email")],
+      },
     ],
     [
       "/articles/1/author?fields[people]=name&fields[companies]=name",
-      { data: only(wire.people, "name"), included: [wire.companies] },
+      { data: projected(wire.people, "name"), included: [wire.companies] },
     ],
-    ["/articles/1/tags?fields[tags]=colour", { data: [only(wire.tags, "colour")] }],
+    ["/articles/1/tags?fields[tags]=colour", { data: [projected(wire.tags, "colour")] }],
     [
       "/search?fields[articles]=body&fields[people]=name",
-      { data: [only(wire.articles, "body"), only(wire.people, "name")] },
+      { data: [projected(wire.articles, "body"), projected(wire.people, "name")] },
     ],
-    ["/nodes/7?fields[editors]=note", { data: only(wire.editors, "note") }],
+    ["/nodes/7?fields[editors]=note", { data: projected(wire.editors, "note") }],
     // A family-valued relationship's members are trimmed by their own types (#350).
     [
       "/holders/1?fields[editors]=note",
-      { data: wire.holders, included: [only(wire.editors, "note")] },
+      { data: wire.holders, included: [projected(wire.editors, "note")] },
     ],
     [
       "/holders/1?include=node&fields[holders]=label&fields[editors]=name&fields[reviewers]=note",
-      { data: wire.holders, included: [only(wire.editors, "name")] },
+      { data: projected(wire.holders, "label"), included: [projected(wire.editors, "name")] },
     ],
-    ["/holders/1/node?fields[editors]=name", { data: only(wire.editors, "name") }],
-    // An empty set is "no fields" (#488): no attributes, linkage kept.
+    ["/holders/1/node?fields[editors]=name", { data: projected(wire.editors, "name") }],
+    // An empty set is "no fields" (#488): no attributes and, a relationship
+    // being a field too (#494), no relationships — the `included` members
+    // they linked are exempt from full linkage (§Compound Documents).
     [
       "/articles/1?fields[articles]=",
-      { data: only(wire.articles), included: [wire.people, wire.companies] },
+      { data: projected(wire.articles), included: [wire.people, wire.companies] },
     ],
     [
       "/articles/1?fields[articles]",
-      { data: only(wire.articles), included: [wire.people, wire.companies] },
+      { data: projected(wire.articles), included: [wire.people, wire.companies] },
     ],
     [
       "/articles/1?include=author.employer&fields[articles]=&fields[people]=",
-      { data: only(wire.articles), included: [only(wire.people), wire.companies] },
+      { data: projected(wire.articles), included: [projected(wire.people), wire.companies] },
     ],
-    ["/articles/1/tags?fields[tags]=", { data: [only(wire.tags)] }],
-  ])("answers 200 omitting the excluded attributes: %s", async (url, expected) => {
+    ["/articles/1/tags?fields[tags]=", { data: [projected(wire.tags)] }],
+  ])("answers 200 omitting the excluded fields: %s", async (url, expected) => {
     const response = await serve(url);
     expect(response.status).toBe(200);
     expect(response.body).toEqual(expected);

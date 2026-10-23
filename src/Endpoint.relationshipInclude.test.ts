@@ -269,13 +269,26 @@ const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<strin
     .toSorted();
 
 // A wire resource object with only the named attributes.
-const narrowed = <T extends { readonly attributes: Rec.ReadonlyRecord<string, unknown> }>(
+// A resource narrowed to the fields `names` (attributes and relationships,
+// #494), as `Handlers.project` narrows it: `relationships` omitted when it
+// keeps none.
+const narrowed = <
+  T extends {
+    readonly attributes: Rec.ReadonlyRecord<string, unknown>;
+    readonly relationships?: Rec.ReadonlyRecord<string, unknown>;
+  },
+>(
   resource: T,
   ...names: ReadonlyArray<string>
-) => ({
-  ...resource,
-  attributes: Rec.filter(resource.attributes, (_, key) => names.includes(key)),
-});
+) => {
+  const { relationships, ...rest } = resource;
+  const kept = Rec.filter(relationships ?? {}, (_, key) => names.includes(key));
+  return {
+    ...rest,
+    attributes: Rec.filter(resource.attributes, (_, key) => names.includes(key)),
+    ...(Rec.isEmptyRecord(kept) ? {} : { relationships: kept }),
+  };
+};
 
 describe("`getRelationship`'s `fields` (#485)", () => {
   it("declares a fieldset for each type the include paths reach, and no other", () => {
@@ -632,7 +645,8 @@ describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)",
     const offPage = wireComment("6");
     expect(() => Handlers.linkage(page, { included: [offPage] })).toThrow();
     // `Assemble.relationship` reads the linkage off the parent, which for a
-    // `paginated` relationship carries none: hand it the page.
+    // `paginated` relationship carries none: hand it the page. It checks full
+    // linkage from those identifiers as `Handlers.linkage` does (#498).
     const thread = {
       type: "threads",
       id: "1",
@@ -646,11 +660,9 @@ describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)",
     });
     expect(document.data).toEqual(page);
     expect(unlinkedIncluded({ ...document })).toEqual([]);
-    expect(
-      unlinkedIncluded({
-        ...Assemble.relationship({ parent: thread, key: "comments", included: [offPage] }),
-      }),
-    ).toHaveLength(1);
+    expect(() =>
+      Assemble.relationship({ parent: thread, key: "comments", included: [offPage] }),
+    ).toThrow(/full linkage violation: included resource "comments:6"/);
   });
 });
 

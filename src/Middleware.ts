@@ -118,6 +118,7 @@ import { indexErrorMeta } from "./internal/errorMeta.js";
 import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
 import { CLIENT_ID_UNSUPPORTED, refusedClientIdPointer } from "./internal/refusedClientId.js";
 import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
+import { requestedFieldsets } from "./internal/linkage.js";
 import { unlinkedOnWire, withCreatedLocation } from "./internal/responseBody.js";
 import { wireLeaves } from "./internal/wireNames.js";
 import {
@@ -715,7 +716,9 @@ export interface SchemaErrorsOptions extends QueryParameterOptions {
    * every 2xx document the endpoint encoded with an `included` member, and
    * answers a violation as it answers a response its schema rejects: a
    * defect, reported at `Error` severity, that the client receives as the
-   * opaque JSON:API 500 of `ServerErrors.SERVER_ERROR`.
+   * opaque JSON:API 500 of `ServerErrors.SERVER_ERROR`. A request's sparse
+   * fieldsets exempt what they exclude, as the spec does (see
+   * {@link SchemaErrorsLive}, #494).
    *
    * A builder's own `checkLinkage: false` cannot reach this check — the
    * encoded document carries no trace of the value it came from — so a
@@ -1288,8 +1291,22 @@ const transformSchemaError = (
 // it dies with. The message is the builders' (`Handlers.buildIncluded`), with
 // what the builders could not see: that it is the encoded document that
 // breaks the rule, most often through a relationship the schema drops.
-const checkWireLinkage = (response: HttpServerResponse.HttpServerResponse) =>
-  Arr.match(unlinkedOnWire(response), {
+// A parsed query's `[name, value]` pairs, a repeated parameter's values each
+// its own pair.
+const searchPairs = (
+  params: Readonly<Record<string, string | ReadonlyArray<string>>>,
+): ReadonlyArray<readonly [string, string]> =>
+  Rec.toEntries(params).flatMap(([name, value]) =>
+    Arr.map(Arr.ensure(value), (one) => [name, one] as const),
+  );
+
+// `fields` is the request's sparse fieldsets: a relationship one excludes is
+// exempt from full linkage (§Compound Documents, #494).
+const checkWireLinkage = (
+  response: HttpServerResponse.HttpServerResponse,
+  fields: Parameters<typeof unlinkedOnWire>[1],
+) =>
+  Arr.match(unlinkedOnWire(response, fields), {
     onEmpty: () => Effect.succeed(response),
     onNonEmpty: (orphans) =>
       Effect.die(
@@ -1381,8 +1398,8 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
     // Untraced: the middleware's span surface is `Span.schemaError` alone.
     Effect.fnUntraced(function* (httpEffect, { endpoint }) {
       const declared = declaredFor(endpoint);
+      const params = yield* ParsedSearchParams;
       if (Option.isSome(declared)) {
-        const params = yield* ParsedSearchParams;
         const rejected = rejectQueryParameters(
           Rec.keys(params),
           declared.value,
@@ -1393,7 +1410,11 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
       // The linkage check reads the encoded success only: a defect it dies
       // with passes `catch`, which sees failures alone.
       return yield* Effect.catch(
-        checkLinkage ? Effect.flatMap(httpEffect, checkWireLinkage) : httpEffect,
+        checkLinkage
+          ? Effect.flatMap(httpEffect, (response) =>
+              checkWireLinkage(response, requestedFieldsets(searchPairs(params))),
+            )
+          : httpEffect,
         (error) =>
           HttpApiError.HttpApiSchemaError.is(error)
             ? transformSchemaError(endpoint, error)
@@ -1538,6 +1559,16 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
  * The walk is the conformance kit's `spec/document/full-linkage` rule's, over
  * the bytes the client receives; {@link schemaErrorsLayer} turns it off
  * ({@link SchemaErrorsOptions.checkLinkage}).
+ *
+ * The spec's one exemption is read from the request: full linkage is waived
+ * "when relationship fields that would otherwise contain linkage data are
+ * excluded due to sparse fieldsets" (§Compound Documents, #494). The encoded
+ * document cannot show what an excluded relationship linked, nor which
+ * relationships a type has, so once the walk reaches a resource object of a
+ * type the request's `fields[TYPE]` names, no member is reported:
+ * `?include=author&fields[articles]=title` answers its included author, while
+ * `?include=author` answering the same document is still the 500. The
+ * builders' check is the exact one (`Handlers.buildIncluded`).
  *
  * @since 0.1.0
  * @category layers

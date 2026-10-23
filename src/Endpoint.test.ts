@@ -1847,9 +1847,9 @@ describe("Endpoint include path constraints", () => {
     expectTypeOf<HttpApiEndpoint.Query<typeof group.endpoints.get>["Type"]>().toEqualTypeOf<{
       readonly include?: ReadonlyArray<"author">;
       readonly fields?: {
-        readonly articles?: ReadonlyArray<"title" | "body" | "createdAt">;
+        readonly articles?: ReadonlyArray<"title" | "body" | "createdAt" | "author" | "comments">;
         readonly people?: ReadonlyArray<"firstName" | "lastName">;
-        readonly comments?: ReadonlyArray<"body">;
+        readonly comments?: ReadonlyArray<"body" | "author">;
       };
     }>();
   });

@@ -671,7 +671,7 @@ const isMembers = (source: AnySpec | Any | ReadonlyArray<Any>): source is Readon
  *
  * The resource and members forms give the union of an endpoint that does not
  * declare `fields`. With `fields: true` the default document's `included`
- * members admit any subset of their attributes, while this union's members
+ * members admit any subset of their fields, while this union's members
  * stay strict: it is the union a strict `success` override declares. That is
  * the use it exists for: an endpoint that overrides `success` with a wire
  * variant declares it, so that every path it advertises can still be

@@ -130,9 +130,16 @@ describe("Query.Fieldset", () => {
     expect(() => Schema.decodeUnknownSync(fieldset)("title,publisher")).toThrow();
   });
 
-  it("types the decoded fields as attribute-key literals", () => {
+  it("decodes relationship names, which are fields too (#494)", () => {
+    expect(Schema.decodeUnknownSync(fieldset)("title,author")).toEqual(["title", "author"]);
+    expect(Schema.decodeUnknownSync(fieldset)(["comments"])).toEqual(["comments"]);
+  });
+
+  it("types the decoded fields as attribute- and relationship-key literals", () => {
     type Decoded = typeof fieldset.Type;
-    expectTypeOf<Decoded>().toEqualTypeOf<ReadonlyArray<"title" | "body" | "createdAt">>();
+    expectTypeOf<Decoded>().toEqualTypeOf<
+      ReadonlyArray<"title" | "body" | "createdAt" | "author" | "comments">
+    >();
   });
 });
 
@@ -314,7 +321,7 @@ describe("Query.schema", () => {
       ReadonlyArray<"author" | "comments" | "comments.author"> | undefined
     >();
     expectTypeOf<NonNullable<Decoded["fields"]>["articles"]>().toEqualTypeOf<
-      ReadonlyArray<"title" | "body" | "createdAt"> | undefined
+      ReadonlyArray<"title" | "body" | "createdAt" | "author" | "comments"> | undefined
     >();
     expectTypeOf<NonNullable<Decoded["fields"]>["people"]>().toEqualTypeOf<
       ReadonlyArray<"firstName" | "lastName"> | undefined

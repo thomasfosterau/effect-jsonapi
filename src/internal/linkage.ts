@@ -20,6 +20,7 @@ import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
+import { assign } from "./define.js";
 
 /**
  * Every key reachable from `seeds`: the seeds themselves, then the keys
@@ -164,9 +165,23 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
  * two members with the same identity, the later one's linkage is the one
  * followed.
  *
+ * `fields` is the request's sparse fieldsets, by type (`fields[TYPE]`, each
+ * set as its names), and carries the spec's one exemption: full linkage is
+ * waived "when relationship fields that would otherwise contain linkage data
+ * are excluded due to sparse fieldsets" (§Compound Documents, #494). The wire
+ * cannot show what an excluded relationship would have linked, nor which
+ * relationships a type has, so once the walk reaches a resource object —
+ * primary or `included` — of a type `fields` names, any of its relationships
+ * may be one the fieldset excluded, and no member is reported. Without
+ * `fields`, or when the walk reaches no resource of a type it names, every
+ * unreached member is.
+ *
  * @internal
  */
-export const unlinkedIncluded = (document: Readonly<Record<string, unknown>>) => {
+export const unlinkedIncluded = (
+  document: Readonly<Record<string, unknown>>,
+  fields?: Readonly<Record<string, ReadonlyArray<string>>> | undefined,
+) => {
   const included = document["included"];
   if (!Array.isArray(included)) return [];
   const data = document["data"];
@@ -177,14 +192,55 @@ export const unlinkedIncluded = (document: Readonly<Record<string, unknown>>) =>
       Arr.map(identities(resource), (key) => [key, resource] as const),
     ),
   );
-  const start = seeds(primaries, isLinkageData(primaries), identities, linkageOf);
+  const asLinkage = isLinkageData(primaries);
+  const start = seeds(primaries, asLinkage, identities, linkageOf);
   const linked = reachable(start, (key) =>
     Option.match(HashMap.get(byIdentity, key), { onNone: () => [], onSome: linkageOf }),
   );
+  // The exemption: a resource the walk reaches whose type has a fieldset may
+  // have had relationships excluded, whose linkage the wire no longer shows.
+  const fieldsetOn = (resource: Readonly<Record<string, unknown>>): boolean => {
+    const type = resource["type"];
+    return fields !== undefined && typeof type === "string" && Object.hasOwn(fields, type);
+  };
+  const reached = [
+    ...(asLinkage ? [] : primaries),
+    ...Arr.filter(members, (resource) =>
+      Option.match(Option.fromUndefinedOr(identity(resource)), {
+        onNone: () => false,
+        onSome: (key) => HashSet.has(linked, key),
+      }),
+    ),
+  ];
+  if (Arr.some(reached, fieldsetOn)) return [];
   return Arr.filter(members, (resource) =>
     Option.match(Option.fromUndefinedOr(identity(resource)), {
       onNone: () => true,
       onSome: (key) => !HashSet.has(linked, key),
     }),
   );
+};
+
+/**
+ * The sparse fieldsets a request's query parameters name, by type, for
+ * {@link unlinkedIncluded}: each `fields[TYPE]` parameter's names, split on
+ * commas, a repeated parameter's values merged, an empty value (`fields[TYPE]=`)
+ * the empty set. `pairs` are the query's `[name, value]` pairs, decoded.
+ *
+ * @internal
+ */
+export const requestedFieldsets = (
+  pairs: Iterable<readonly [string, string]>,
+): Readonly<Record<string, ReadonlyArray<string>>> => {
+  // `assign` keeps a `__proto__` type an own member, which `Arr.groupBy`'s
+  // plain assignment would not.
+  const out: Record<string, ReadonlyArray<string>> = {};
+  return Arr.reduce(Arr.fromIterable(pairs), out, (fieldsets, [name, value]) => {
+    const type = /^fields\[([^[\]]*)\]$/.exec(name)?.[1];
+    if (type === undefined) return fieldsets;
+    const names = value.split(",").filter((field) => field !== "");
+    const existing = Object.hasOwn(fieldsets, type) ? fieldsets[type] : undefined;
+    assign(fieldsets, type, existing === undefined ? names : [...existing, ...names]);
+    return fieldsets;
+  });
 };

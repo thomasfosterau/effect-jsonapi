@@ -95,10 +95,19 @@ declare const projectedPerson: Extract<
 assertType<string>(projectedPerson.attributes.firstName);
 assertType<string>(projectedPerson.attributes.lastName);
 
-// …and the transform is not erased: `relationships` survives the projection.
+// …and a relationship is a field (#494): `author` was not requested, so the
+// projection drops it, and `relationships` with it.
+// @ts-expect-error -- no relationship was requested, so there is no `relationships` member
+assertType<unknown>(projected.data.relationships);
+const withAuthor = Handlers.data(article, {
+  onResource: Handlers.project({ articles: ["title", "author"] }),
+});
+// Requested, it survives, exactly as declared.
 assertType<{ readonly type: "people"; readonly id: string } | undefined>(
-  projected.data.relationships?.author.data,
+  withAuthor.data.relationships?.author.data,
 );
+// @ts-expect-error -- …while `body`, not requested, is still gone
+assertType<string>(withAuthor.data.attributes.body);
 
 // ---------------------------------------------------------------------------
 // An empty literal fieldset (`?fields[articles]=`) selects no attribute (#488)
@@ -108,10 +117,9 @@ const none = Handlers.data(article, { onResource: Handlers.project({ articles: [
 const noneAttributes: Equals<(typeof none)["data"]["attributes"], Record<never, never>> = true;
 // @ts-expect-error -- `title` was projected off with every other attribute
 assertType<string>(none.data.attributes.title);
-// `relationships` is kept, as at runtime.
-assertType<{ readonly type: "people"; readonly id: string } | undefined>(
-  none.data.relationships?.author.data,
-);
+// …and no relationship either (#494): `relationships` is omitted, as at runtime.
+// @ts-expect-error -- the empty set drops every relationship
+assertType<unknown>(none.data.relationships);
 // A type with no set at all (`undefined`) is untouched, as at runtime.
 const unset = Handlers.project(article, { articles: undefined });
 const unsetIdentity: Equals<typeof unset, typeof Article.Type> = true;
@@ -136,6 +144,13 @@ const dynamicAttributes: Equals<
 > = true;
 // @ts-expect-error -- and not asserted present
 assertType<string>(dynamic.data.attributes.title);
+// So is each relationship (#494), and the `relationships` member itself,
+// which the projection omits when it keeps none.
+assertType<{ readonly type: "people"; readonly id: string } | undefined>(
+  dynamic.data.relationships?.author?.data,
+);
+// @ts-expect-error -- `author` is not asserted present either
+assertType<unknown>(dynamic.data.relationships?.author.data);
 // the same shape on the included side
 const dynamicSameShape: Equals<
   (typeof dynamic)["data"]["attributes"],

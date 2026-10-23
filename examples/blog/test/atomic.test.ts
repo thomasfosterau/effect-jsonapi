@@ -244,7 +244,7 @@ describe("atomic operations: relationship operations", () => {
     );
 
     expect(document["atomic:results"]).toEqual([{}]);
-    expect(after.data?.relationships?.tags.data).toEqual([]);
+    expect(after.data?.relationships?.tags?.data).toEqual([]);
   });
 
   it("adds to and removes from a `paginated` relationship", async () => {
@@ -391,7 +391,7 @@ describe("atomic operations: linkage to an absent resource", () => {
         return {
           exit,
           articles: list.data.map((article) => article.attributes.title),
-          author: after.data?.relationships?.author.data.id,
+          author: after.data?.relationships?.author?.data.id,
         };
       }),
     );
@@ -446,7 +446,7 @@ describe("atomic operations: linkage to an absent resource", () => {
           }),
         );
         const after = yield* client.articles.get({ params: { id: sampleArticle.id }, query: {} });
-        return { exit, tags: after.data?.relationships?.tags.data };
+        return { exit, tags: after.data?.relationships?.tags?.data };
       }),
     );
 
@@ -578,7 +578,7 @@ describe("atomic operations: linkage to an absent resource", () => {
         const article = yield* client.articles.get({ params: { id }, query: {} });
         const linked = yield* client.articles.commentsRelationship({ params: { id }, query: {} });
         return {
-          tags: article.data?.relationships?.tags.data,
+          tags: article.data?.relationships?.tags?.data,
           comments: linked.data.map((ref) => ref.id),
         };
       }),

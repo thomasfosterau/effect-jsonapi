@@ -116,9 +116,12 @@ const label = (member: {
  * It reads what the wire carries: encoding through the endpoint's schema drops
  * a relationship the resource does not declare, so a member linked only
  * through one is reported here although the builders' check passed it.
+ * `fields` is the request's sparse fieldsets, which carry the spec's
+ * exemption (`Linkage.unlinkedIncluded`, #494).
  */
 export const unlinkedOnWire = (
   response: HttpServerResponse.HttpServerResponse,
+  fields?: Parameters<typeof unlinkedIncluded>[1],
 ): ReadonlyArray<string> => {
   if (response.status < 200 || response.status >= 300) return [];
   const text = bodyText(response);
@@ -127,6 +130,6 @@ export const unlinkedOnWire = (
   if (text === undefined || !text.includes('"included"')) return [];
   return Option.match(parseJson(text), {
     onNone: () => [],
-    onSome: (document) => (isRecord(document) ? unlinkedIncluded(document).map(label) : []),
+    onSome: (document) => (isRecord(document) ? unlinkedIncluded(document, fields).map(label) : []),
   });
 };

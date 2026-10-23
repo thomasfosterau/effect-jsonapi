@@ -18,7 +18,7 @@
  * ```ts skip-type-checking
  * {
  *   include?: ReadonlyArray<"author" | "comments" | "comments.author">   // from the relationship graph
- *   fields?:  { articles?: ReadonlyArray<"title" | "body">, ... }
+ *   fields?:  { articles?: ReadonlyArray<"title" | "body" | "author" | "comments">, ... }
  *   sort?:    ReadonlyArray<{ field: "title" | ..., direction: "asc" | "desc" }>
  *   page?:    { offset?: number, limit?: number }
  *   filter?:  Filter.Ast<{ status: string, age: number }>                 // `filter: true`
@@ -93,13 +93,14 @@ import { vocabularyAnnotation, vocabularyAnnotations } from "./internal/vocabula
 import type {
   Any,
   AttributeKeys,
+  FieldKeys,
   Filterable,
   FilterableKeys,
   IncludeDepth,
   IncludePath,
   IncludePathsTo,
 } from "./Resource.js";
-import { attributeKeys, filterable } from "./Resource.js";
+import { attributeKeys, fieldKeys, filterable } from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -1053,7 +1054,9 @@ export const validateIncludePaths = (
 
 /**
  * The decoded sparse-fieldset schema for one resource type: a comma-separated
- * list of attribute names, validated against the closed attribute set.
+ * list of field names — attributes and relationships, which JSON:API 1.1
+ * counts as fields alike (§Resource Object Fields, #494) — validated against
+ * the closed set of the resource's fields.
  * Accepts both the comma form and the repeated-key spelling (`["title",
  * "body"]`), and any mix of the two.
  *
@@ -1073,15 +1076,21 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @example
  * ```ts
  * import { Schema } from "effect"
- * import { Query, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
+ * const Person = Resource.make("people", { attributes: { name: Schema.String } })
  * const Article = Resource.make("articles", {
- *   attributes: { title: Schema.NonEmptyString, body: Schema.String }
+ *   attributes: { title: Schema.NonEmptyString, body: Schema.String },
+ *   relationships: { author: Relationship.one(() => Person) }
  * })
  *
  * const fieldset = Query.Fieldset(Article)
  * Schema.decodeUnknownSync(fieldset)("title,body")
  * // → ["title", "body"]
+ *
+ * // a relationship is a field too (§Sparse Fieldsets)
+ * Schema.decodeUnknownSync(fieldset)("title,author")
+ * // → ["title", "author"]
  *
  * // the repeated-key spelling (`?fields[articles]=title&fields[articles]=body`,
  * // which `UrlParams.toRecord` surfaces as an array) decodes to the same set
@@ -1092,11 +1101,11 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @since 0.1.0
  * @category constructors
  */
-export const Fieldset = <R extends Any>(resource: R): Fieldset<AttributeKeys<R>> =>
-  fieldsetOf(resource.type, attributeKeys(resource) as ReadonlyArray<AttributeKeys<R>>);
+export const Fieldset = <R extends Any>(resource: R): Fieldset<FieldKeys<R>> =>
+  fieldsetOf(resource.type, fieldKeys(resource));
 
 // The fieldset schema of the wire type `type` over the vocabulary `fields`.
-// `Query.schema` builds one per wire type from the attributes of every
+// `Query.schema` builds one per wire type from the fields of every
 // definition sharing it (#362); `Fieldset` from one definition's.
 const fieldsetOf = <Field extends string>(
   type: string,
@@ -1447,8 +1456,13 @@ export interface Options<R extends Any> {
    * the derivation above does not reach is a programmer error, and throws;
    * an empty array declares none, as `false` does.
    *
+   * A fieldset names attributes and relationships alike, which JSON:API 1.1
+   * counts as fields together (§Resource Object Fields, #494):
+   * `?fields[articles]=title,author` keeps the `author` relationship and
+   * drops every other one.
+   *
    * Under the `SchemaErrors` middleware, a `fields[TYPE]` for any other type,
-   * or for a type whose resource has no attribute, is a 400 naming it, as is
+   * or for a type whose resource has no field, is a 400 naming it, as is
    * every `fields[TYPE]` on an endpoint without this option (#261).
    */
   readonly fields?: boolean | ReadonlyArray<string> | undefined;
@@ -1544,15 +1558,16 @@ export type FieldsetTypesOf<R extends Any, O extends Options<R>> = [O["fields"]]
     : never;
 
 // The nested `fields` member of a query declaring `fields[TYPE]` for `Types`:
-// one optional fieldset per type, its vocabulary the attributes of every
-// definition sharing that wire type (#362); no member when `Types` is empty.
+// one optional fieldset per type, its vocabulary the fields (attributes and
+// relationships, #494) of every definition sharing that wire type (#362); no
+// member when `Types` is empty.
 type NestedFieldsets<R extends Any, I, Types extends string> = [Types] extends [never]
   ? Record<never, never>
   : {
       readonly fields: Schema.optionalKey<
         Schema.Struct<{
           readonly [TypeName in Types]: Schema.optionalKey<
-            Fieldset<AttributeKeys<Extract<FieldsetResources<R, I>, { type: TypeName }>>>
+            Fieldset<FieldKeys<Extract<FieldsetResources<R, I>, { type: TypeName }>>>
           >;
         }>
       >;
@@ -1746,11 +1761,12 @@ export const schema = <R extends Any, const O extends Options<R>>(
     // of an endpoint declaring `fields` makes partial over (#322) — or those
     // of them an allow-list names (`FieldsetTypesOf`, #485). Definitions
     // sharing a wire type share its `fields[TYPE]`, whose vocabulary is the
-    // union of their attributes, as `NestedFields` types it (#362).
+    // union of their fields — attributes and relationships (#494) — as
+    // `NestedFields` types it (#362).
     const fieldsetFields = Rec.map(
       Arr.groupBy(fieldsetTargets, (target) => target.type),
       (targets, type) =>
-        Schema.optionalKey(fieldsetOf(type, dedupe(targets.flatMap((t) => attributeKeys(t))))),
+        Schema.optionalKey(fieldsetOf(type, dedupe(targets.flatMap((t) => fieldKeys(t))))),
     );
     Object.assign(
       flatFields,

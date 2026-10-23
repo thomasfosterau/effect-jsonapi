@@ -1399,6 +1399,31 @@ export type AttributeKeys<R extends Any> = R extends Any
   : never;
 
 /**
+ * The relationship keys of a resource definition, as a union of string
+ * literals. Distributes over unions of resource definitions, as
+ * {@link AttributeKeys} does.
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type RelationshipKeys<R extends Any> = R extends Any
+  ? keyof R["relationships"] & string
+  : never;
+
+/**
+ * The field names of a resource definition: its attributes and its
+ * relationships, which JSON:API 1.1 calls its "fields" together (§Resource
+ * Object Fields). They are the vocabulary of a sparse fieldset
+ * (`?fields[articles]=title,author`). Distributes over unions of resource
+ * definitions, as {@link AttributeKeys} does.
+ *
+ * @see {@link https://jsonapi.org/format/1.1/#document-resource-object-fields}
+ * @since 0.18.0
+ * @category type-level
+ */
+export type FieldKeys<R extends Any> = AttributeKeys<R> | RelationshipKeys<R>;
+
+/**
  * The attribute field map of a resource definition's **resource object** — the
  * `Schema.Struct.Fields` record under its `attributes` member: every declared
  * attribute except the input-only ones (`resource: false`).
@@ -1817,6 +1842,55 @@ export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = Re
  */
 export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<AttributeKeys<R>> =>
   Object.keys(resource.fields.attributes.fields) as unknown as ReadonlyArray<AttributeKeys<R>>;
+
+/**
+ * The relationship keys of a resource definition, at runtime.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.String } })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.String },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * console.log(Resource.relationshipKeys(Article)) // → ["author"]
+ * ```
+ *
+ * @since 0.18.0
+ * @category accessors
+ */
+export const relationshipKeys = <R extends Any>(resource: R): ReadonlyArray<RelationshipKeys<R>> =>
+  // SAFETY: the keys of the descriptor record `RelationshipKeys` reads.
+  Object.keys(resource.relationships) as unknown as ReadonlyArray<RelationshipKeys<R>>;
+
+/**
+ * The field names of a resource definition, at runtime: its attribute keys,
+ * then its relationship keys ({@link FieldKeys}), each once.
+ *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const Person = Resource.make("people", { attributes: { name: Schema.String } })
+ * const Article = Resource.make("articles", {
+ *   attributes: { title: Schema.String },
+ *   relationships: { author: Relationship.one(() => Person) }
+ * })
+ *
+ * console.log(Resource.fieldKeys(Article)) // → ["title", "author"]
+ * ```
+ *
+ * @since 0.18.0
+ * @category accessors
+ */
+export const fieldKeys = <R extends Any>(resource: R): ReadonlyArray<FieldKeys<R>> => [
+  ...new Set<FieldKeys<R>>([...attributeKeys(resource), ...relationshipKeys(resource)]),
+];
 
 /**
  * The attribute field map of a resource definition's **resource object** — the
