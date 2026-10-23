@@ -175,6 +175,8 @@ const Article = Resource.make("articles", {
 });
 ```
 
+A resource's attributes and relationships share one namespace with each other and with `type` and `id` ([§Fields](https://jsonapi.org/format/1.1/#document-resource-object-fields)), so `Resource.make` and `Resource.extend` refuse an attribute or relationship named `type` or `id`, and a name declared as both an attribute and a relationship (including one an extension introduces against its base): a type error at the offending key, and a throw naming it when the definition is built ([#503](https://github.com/thomasfosterau/effect-jsonapi/issues/503)).
+
 ### Relationship kinds
 
 Each relationship declares its cardinality _and_ how its data travels — inline as resource identifiers, or behind a link to a paginated endpoint:
