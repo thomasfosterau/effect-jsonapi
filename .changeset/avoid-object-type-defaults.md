@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-jsonapi": major
+"@thomasfosterau/effect-jsonapi": patch
 ---
 
 The empty-object defaults of the published generics are spelled `Record<never, never>` instead of `{}` (#436), so the `effect/avoid-object-type` lint rule is back at `error`. `Record<never, never>` is the same type as `{}`: it has no keys, `keyof` it is `never` and it is the identity of an intersection, so every resolved type stays as it was. What changes is the text of the published declarations, and so what a consumer's hover and declaration emit print:
@@ -13,4 +13,4 @@ The empty-object defaults of the published generics are spelled `Record<never, n
 - `Endpoint.resource<…, const Endpoints extends EndpointsOption<…> = Record<never, never>, …>` and `Group.resource<…>` likewise
 - the empty branches of `Query.NestedFields`, `Query.FlatFields` and `Query.FlatList`, and of `Handlers.DocumentValue` (`meta` / `jsonapi` absent), are `Record<never, never>` instead of `{}`
 
-**Migration.** Code that omits these type arguments needs no change. Code that names the default explicitly can keep writing `{}`, which is still assignable both ways; to match the published spelling (and pass `effect/avoid-object-type` in your own lint), write `Record<never, never>`. Snapshot or string comparisons of printed types (`.d.ts` emit, hover text) see `Record<never, never>` where they saw `{}`.
+No code needs to change: nothing resolves differently, and code that writes `{}` for one of these type arguments keeps compiling, since the two spellings are assignable both ways. Only the printed types change — `.d.ts` emit and hover text show `Record<never, never>` where they showed `{}` — so a snapshot or string comparison of printed types sees the new spelling. To match it (and pass `effect/avoid-object-type` in your own lint), write `Record<never, never>`.
