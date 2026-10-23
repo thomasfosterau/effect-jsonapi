@@ -2734,6 +2734,58 @@ const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void =
   }
 };
 
+// The compile-time half of `validateFieldNames`: intersected with an
+// `attributes` / `relationships` option, it types each offending key as an
+// error message, so `Resource.make` rejects the field at the call site. A wide
+// record (`string` keys), as `annotate` and `extend` pass internally, is left to
+// the runtime check.
+type ReservedFieldName = "type" | "id";
+
+type CheckFieldNames<Own, Other> = string extends keyof Own
+  ? unknown
+  : {
+      readonly [
+        K in keyof Own & (ReservedFieldName | (string extends keyof Other ? never : keyof Other))
+      ]?: K extends ReservedFieldName
+        ? `JSON:API reserves the field name "${K}": a resource can not have an attribute or relationship named "type" or "id"`
+        : `"${K & string}" is both an attribute and a relationship: JSON:API fields share one namespace`;
+    };
+
+// JSON:API 1.1 §Fields: a resource object's attributes and relationships share
+// one namespace with each other and with `type` and `id`, so no field may be
+// named `type` or `id`, and no name may be both an attribute and a
+// relationship. Refused at definition time, naming the field (#503).
+const reservedFieldNames: ReadonlySet<string> = new Set(["type", "id"]);
+
+const validateFieldNames = (
+  context: string,
+  attributes: Schema.Struct.Fields,
+  relationships: Relationships,
+): void => {
+  for (const key of Object.keys(attributes)) {
+    if (reservedFieldNames.has(key)) {
+      throw new Error(
+        `${context}: attribute "${key}" uses a name JSON:API reserves; ` +
+          'a resource can not have an attribute or relationship named "type" or "id"',
+      );
+    }
+  }
+  for (const key of Object.keys(relationships)) {
+    if (reservedFieldNames.has(key)) {
+      throw new Error(
+        `${context}: relationship "${key}" uses a name JSON:API reserves; ` +
+          'a resource can not have an attribute or relationship named "type" or "id"',
+      );
+    }
+    if (Object.hasOwn(attributes, key)) {
+      throw new Error(
+        `${context}: "${key}" is declared as both an attribute and a relationship; ` +
+          "JSON:API fields share one namespace, so rename one of them",
+      );
+    }
+  }
+};
+
 // ---------------------------------------------------------------------------
 // The Resource constructor
 // ---------------------------------------------------------------------------
@@ -2872,8 +2924,13 @@ export const make = <
      * resource's id brand. Defaults to the auto-derived {@link Id} for `type`.
      */
     readonly id?: IdSchema | undefined;
-    readonly attributes: Attributes;
-    readonly relationships?: Rels;
+    /**
+     * The attribute schemas. No attribute may be named `type` or `id`, nor share
+     * a name with a relationship (JSON:API 1.1 §Fields): a type error where the
+     * keys are known, and a throw when the resource is built.
+     */
+    readonly attributes: Attributes & CheckFieldNames<Attributes, Record<never, never>>;
+    readonly relationships?: Rels & CheckFieldNames<Rels, Attributes>;
     readonly meta?: Meta;
     /**
      * Resource-level metadata, stamped onto the definition as Effect schema
@@ -2910,6 +2967,8 @@ export const make = <
     options.maxUndeclaredMemberErrors ?? defaultMaxUndeclaredMemberErrors,
   );
   const relationships = (options.relationships ?? {}) as Rels;
+  // No field named `type` / `id`, and no attribute and relationship sharing a name.
+  validateFieldNames(`Resource.make("${type}")`, options.attributes, relationships);
   const meta = (options.meta ?? AnyMeta) as Meta;
   const id = (options.id ?? Id(type)) as IdSchema;
   const identifier = Identifier(type, id);
@@ -3033,7 +3092,7 @@ export const make = <
   const updateInput = closedStruct(
     {
       ...(updateAttributeFields(options.attributes) as Record<string, Schema.Top>),
-      // `id` last so the resource id always wins over any (spec-forbidden) `id` attribute.
+      // No attribute may be named `id` (`validateFieldNames`), so this is the resource id.
       id,
     },
     maxUndeclaredMemberErrors,
@@ -3376,8 +3435,9 @@ export const extend = <
   base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
   options?: {
-    readonly attributes?: ExtraAttributes;
-    readonly relationships?: ExtraRels;
+    readonly attributes?: ExtraAttributes & CheckFieldNames<ExtraAttributes, BaseRels>;
+    readonly relationships?: ExtraRels &
+      CheckFieldNames<ExtraRels, ExtendedAttributes<BaseAttributes, ExtraAttributes>>;
     readonly meta?: Meta;
     /**
      * The id schema for this resource, exactly as {@link make}'s `id` option:
@@ -3435,12 +3495,17 @@ export const extend = <
           Schema.brand<`${Type}Id`>(`${type}Id` as Parameters<typeof Schema.brand<`${Type}Id`>>[0]),
         )
       : undefined);
+  // The *declared* map, so the base's input-only attributes are inherited too
+  // (the resource-object fields would have dropped them).
+  const attributes = { ...base.declaredAttributes, ...options?.attributes };
+  const relationships = { ...base.relationships, ...options?.relationships };
+  // Checked here too, so a clash an extension introduces names the call that
+  // introduced it.
+  validateFieldNames(`Resource.extend("${type}")`, attributes, relationships);
   return make(type, {
     id,
-    // The *declared* map, so the base's input-only attributes are inherited too
-    // (the resource-object fields would have dropped them).
-    attributes: { ...base.declaredAttributes, ...options?.attributes },
-    relationships: { ...base.relationships, ...options?.relationships },
+    attributes,
+    relationships,
     meta: (options?.meta ?? base.fields.meta.schema) as Meta,
     // Resource-level annotations are inherited like attributes and
     // relationships are, the child's own keys winning.

@@ -16,6 +16,7 @@ import {
   directTargets,
   extend,
   family,
+  fieldKeys,
   filterable,
   Identifier,
   make as Resource,
@@ -2269,5 +2270,63 @@ describe("Resource.attributeDescriptors", () => {
     expect(attributeDescriptors(Fam).map((descriptor) => descriptor.key)).toEqual(
       attributeKeys(Fam),
     );
+  });
+});
+
+// JSON:API 1.1 §Fields (#503). The definitions are widened to `string`-keyed
+// records so the compile-time half of the check (asserted in
+// `test/reserved-field-names.types.ts`) steps aside and the throw is reached.
+describe("field names", () => {
+  const fields = (record: Record<string, Schema.Top>): Schema.Struct.Fields => record;
+  const rels = (record: Relationship.Relationships): Relationship.Relationships => record;
+
+  it.each(["type", "id"])("rejects an attribute named %s", (name) => {
+    expect(() => Resource("things", { attributes: fields({ [name]: Schema.String }) })).toThrow(
+      `Resource.make("things"): attribute "${name}" uses a name JSON:API reserves`,
+    );
+  });
+
+  it.each(["type", "id"])("rejects a relationship named %s", (name) => {
+    expect(() =>
+      Resource("things", {
+        attributes: {},
+        relationships: rels({ [name]: Relationship.one(() => Person) }),
+      }),
+    ).toThrow(`Resource.make("things"): relationship "${name}" uses a name JSON:API reserves`);
+  });
+
+  it("rejects an attribute and a relationship sharing a name", () => {
+    expect(() =>
+      Resource("articles", {
+        attributes: fields({ author: Schema.String }),
+        relationships: rels({ author: Relationship.one(() => Person) }),
+      }),
+    ).toThrow(
+      `Resource.make("articles"): "author" is declared as both an attribute and a relationship`,
+    );
+  });
+
+  it("rejects a clash an extension introduces, naming extend", () => {
+    const Base = Resource("bases", {
+      attributes: { title: Schema.String },
+      relationships: { author: Relationship.one(() => Person) },
+    });
+    expect(() =>
+      extend(Base, "children", { attributes: fields({ author: Schema.String }) }),
+    ).toThrow(
+      `Resource.extend("children"): "author" is declared as both an attribute and a relationship`,
+    );
+    expect(() => extend(Base, "children", { attributes: fields({ id: Schema.String }) })).toThrow(
+      `Resource.extend("children"): attribute "id" uses a name JSON:API reserves`,
+    );
+    // overriding like with like is still allowed
+    expect(
+      fieldKeys(
+        extend(Base, "children", {
+          attributes: { title: Schema.NonEmptyString },
+          relationships: { author: Relationship.optional(() => Person) },
+        }),
+      ),
+    ).toEqual(["title", "author"]);
   });
 });
