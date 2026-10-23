@@ -28,6 +28,7 @@ import {
   describe,
   errorObjectsOf,
   finding,
+  isJsonObject,
   isRecord,
   type Observation,
   type Outcome,
@@ -120,7 +121,7 @@ const decodeFirstResult = Schema.decodeUnknownOption(
 
 /** Whether the first `atomic:results` entry is a result object with no `data`. */
 const firstResultBare = (observation: Observation): boolean =>
-  Option.match(decodeFirstResult(observation.body), {
+  Option.match(Option.flatMap(observation.body, decodeFirstResult), {
     onNone: () => false,
     onSome: (body) => {
       const first = body["atomic:results"][0];
@@ -356,7 +357,7 @@ const conflictIdRule = (channel: Channel, impl: Rule, see: string): RuleImpl => 
 const errorPointers = (observation: Observation): ReadonlyArray<string> =>
   Arr.filterMap(errorObjectsOf(observation.body), (error) => {
     const source = error["source"];
-    return isRecord(source) && Predicate.isString(source["pointer"])
+    return isJsonObject(source) && Predicate.isString(source["pointer"])
       ? Result.succeed(source["pointer"])
       : Result.failVoid;
   });

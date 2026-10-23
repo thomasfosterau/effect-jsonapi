@@ -118,7 +118,7 @@ describe("Conformance: Report.samples (#319)", () => {
           headers: {},
           contentType: undefined,
           text: "",
-          body: undefined,
+          body: Option.none(),
           transportError: undefined,
           redirects: [],
           unfollowed: Option.none(),

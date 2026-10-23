@@ -45,7 +45,9 @@ import {
   finding,
   type Finding,
   identity,
-  isRecord,
+  isJsonArray,
+  isJsonObject,
+  objectIn,
   jsonApiAccept,
   type Observation,
   resolvePath,
@@ -57,12 +59,13 @@ import {
   statusOf,
   succeeded,
   withQuery,
+  topLevel,
 } from "./core.js";
 import {
   answeredFrom,
   counted,
   Link,
-  linkIn,
+  documentLink,
   listed,
   own,
   quote,
@@ -156,8 +159,8 @@ type Key =
 const NULL: Key = { kind: "null" };
 
 /** A resource object's `attributes`, or none when it carries no such record. */
-const attributesOf = (resource: Schema.Json): Readonly<Record<string, unknown>> =>
-  isRecord(resource) && isRecord(resource["attributes"]) ? resource["attributes"] : {};
+const attributesOf = (resource: Schema.Json): Readonly<Record<string, Schema.Json>> =>
+  isJsonObject(resource) ? objectIn(resource["attributes"]) : {};
 
 const keyOf = (resource: Schema.Json, field: string): Key => {
   const value = attributesOf(resource)[field];
@@ -214,8 +217,7 @@ const render = (key: Key): string => {
 
 /** The primary data of a resource collection answer, when it is one. */
 const collectionOf = (observation: Observation): Option.Option<ReadonlyArray<Schema.Json>> => {
-  const data = isRecord(observation.body) ? observation.body["data"] : undefined;
-  return Array.isArray(data) ? Option.some(data) : Option.none();
+  return Option.filter(topLevel(observation.body, "data"), isJsonArray);
 };
 
 /** The primary data of a 2xx resource collection answer, when it is one. */
@@ -336,7 +338,7 @@ const compareBy =
 
 /** The resource of `data` at `at` as a finding names it: `type:id`, or its position. */
 const labelAt = (data: ReadonlyArray<Schema.Json>, at: number): string =>
-  Option.match(Option.filter(Arr.get(data, at), isRecord), {
+  Option.match(Option.filter(Arr.get(data, at), isJsonObject), {
     onNone: () => `/data/${at}`,
     onSome: (resource) => resourceLabel(resource),
   });
@@ -892,7 +894,7 @@ const positionsOf = (
 ): HashMap.HashMap<string, { readonly at: number; readonly label: string }> =>
   HashMap.fromIterable(
     Arr.flatMap(data, (resource, at) => {
-      const key = isRecord(resource) ? identity(resource) : undefined;
+      const key = isJsonObject(resource) ? identity(resource) : undefined;
       return key === undefined ? [] : [[key, { at, label: labelAt(data, at) }] as const];
     }),
   );
@@ -908,7 +910,7 @@ interface TiedPair {
 const tiedPairsOf = (data: ReadonlyArray<Schema.Json>, field: string): ReadonlyArray<TiedPair> =>
   Arr.flatMap(tiesOf(data, field), (group) => {
     const keys = Arr.flatMap(group, (resource) => {
-      const key = isRecord(resource) ? identity(resource) : undefined;
+      const key = isJsonObject(resource) ? identity(resource) : undefined;
       return key === undefined ? [] : [key];
     });
     const key = Option.match(Arr.head(group), {
@@ -1042,8 +1044,7 @@ const walkSorted = (
     const at = pages.length;
     const stop = (why: string): Effect.Effect<Walked> =>
       Effect.succeed({ pages, cut: Option.some(why) });
-    const body = Arr.lastNonEmpty(pages).observation.body;
-    const next = linkIn(isRecord(body) ? body["links"] : undefined, "next");
+    const next = documentLink(Arr.lastNonEmpty(pages).observation.body, "next");
     if (Link.$is("Unavailable")(next)) return Effect.succeed({ pages, cut: Option.none() });
     if (!Link.$is("Href")(next)) return stop(`page ${at}'s \`next\` is not a link`);
     const to = stepTo(next.href, from, ctx.options.baseUrl);

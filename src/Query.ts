@@ -61,7 +61,7 @@ import * as ApiError from "./ApiError.js";
 import type { Ast, Node } from "./Filter.js";
 import { Ast as AstSchema, PROFILE_URI } from "./Filter.js";
 import type { AnySurface, SurfaceFor } from "./Include.js";
-import type { FlatValue, Pair as CanonicalPair } from "./internal/canonical.js";
+import type { FlatQuery, Pair as CanonicalPair } from "./internal/canonical.js";
 import { declaredKeys, orderPairs, serialise as serialisePairs } from "./internal/canonical.js";
 import {
   CommaSeparated,
@@ -2004,8 +2004,7 @@ export const canonicalPairs = <S extends FlatQuerySchema>(
 ): ((decoded: S["Type"]) => ReadonlyArray<Pair>) => {
   const encode = Schema.encodeSync(schema);
   const declared = declaredKeys(schema.ast);
-  return (decoded) =>
-    orderPairs(encode(decoded) as { readonly [key: string]: FlatValue }, declared);
+  return (decoded) => orderPairs(encode(decoded) as FlatQuery, declared);
 };
 
 /**

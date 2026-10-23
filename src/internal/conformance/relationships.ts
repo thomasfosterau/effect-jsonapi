@@ -29,7 +29,9 @@ import {
   describe,
   type Discovered,
   finding,
-  isRecord,
+  documentOf,
+  isJsonArray,
+  isJsonObject,
   jsonApiAccept,
   type Observation,
   type Outcome,
@@ -37,6 +39,7 @@ import {
   type RuleImpl,
   statusOf,
   succeeded,
+  topLevel,
 } from "./core.js";
 import {
   decided,
@@ -77,8 +80,8 @@ const memberLabel = (item: Schema.Json): string =>
 /** The linkage a read's `data` holds, as sorted labels — none when it is not linkage. */
 const labelsOf = (data: Schema.Json): Option.Option<ReadonlyArray<string>> => {
   if (data === null) return Option.some([]);
-  if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, memberLabel), Order.String));
-  return isRecord(data) ? Option.some([memberLabel(data)]) : Option.none();
+  if (isJsonArray(data)) return Option.some(Arr.sort(Arr.map(data, memberLabel), Order.String));
+  return isJsonObject(data) ? Option.some([memberLabel(data)]) : Option.none();
 };
 
 const shown = (labels: ReadonlyArray<string>): string =>
@@ -175,7 +178,7 @@ const readLinkage = (
             `reading ${url} ${what} answered ${statusOf(observation)} (${describe(observation)})`,
           ),
         );
-      const data = isRecord(observation.body) ? labelsOf(observation.body["data"]) : Option.none();
+      const data = Option.flatMap(topLevel(observation.body, "data"), labelsOf);
       return Result.fromOption(data, () =>
         undecided(`reading ${url} ${what} answered no resource linkage (${describe(observation)})`),
       );
@@ -659,15 +662,16 @@ const judge200 = (
       finding(impl, { detail, expected: RESPONSES, observed, probe: answer.probe }),
     ]);
   const the200 = `the 200 to ${answer.probe.method} ${answer.probe.url}`;
-  const body = answer.body;
-  if (!isRecord(body)) return Effect.succeed(broken(`${the200} carried no document`));
+  const document = documentOf(answer.body);
+  if (Option.isNone(document)) return Effect.succeed(broken(`${the200} carried no document`));
+  const body = document.value;
   if ("errors" in body)
     return Effect.succeed(
       broken(`${the200} carries \`errors\` — an error document is no answer to a successful write`),
     );
   if (!("data" in body))
     return Effect.succeed(
-      isRecord(body["meta"])
+      isJsonObject(body["meta"])
         ? decided(requests, [])
         : broken(
             `${the200} carries neither the relationship's linkage nor a top-level \`meta\` object`,
@@ -912,8 +916,7 @@ const judgeRemoveAbsent = (
   if (
     answer.status === 200 &&
     Option.isNone(plan.read) &&
-    isRecord(answer.body) &&
-    "data" in answer.body
+    Option.exists(documentOf(answer.body), (document) => "data" in document)
   )
     return Effect.succeed(
       undecided(

@@ -57,8 +57,10 @@ import {
   finding,
   type Finding,
   identity,
-  isRecord,
+  isJsonArray,
+  isJsonObject,
   type Body,
+  objectIn,
   type Observation,
   parseMediaType,
   probeable,
@@ -69,6 +71,7 @@ import {
   settle,
   skip,
   statusOf,
+  topLevel,
   withQuery,
 } from "./core.js";
 import {
@@ -76,7 +79,7 @@ import {
   counted,
   type Io,
   Link,
-  linkIn,
+  documentLink,
   listed,
   own,
   quote,
@@ -150,7 +153,7 @@ const locatedUnder = (body: Body, prefix: string): ReadonlyArray<ResourceObject>
 
 /** The primary resources of a collection document, when it is one. */
 const primaryOf = (observation: Observation): Option.Option<ReadonlyArray<ResourceObject>> =>
-  isRecord(observation.body) && Array.isArray(observation.body["data"])
+  Option.exists(topLevel(observation.body, "data"), isJsonArray)
     ? Option.some(locatedUnder(observation.body, "/data/"))
     : Option.none();
 
@@ -164,7 +167,7 @@ const nextOf = (
   observation: Observation,
 ): Result.Result<Option.Option<Target>, string> => {
   const on = `the \`next\` link on ${at.target.url}`;
-  const next = linkIn(isRecord(observation.body) ? observation.body["links"] : undefined, "next");
+  const next = documentLink(observation.body, "next");
   if (Link.$is("Unavailable")(next)) return Result.succeed(Option.none());
   if (!Link.$is("Href")(next)) return Result.fail(`${on} is not a link`);
   const step = stepTo(next.href, at.target, baseUrl);
@@ -281,7 +284,9 @@ const linkageOf = (relationship: ResourceObject): Option.Option<Json | Null> => 
   if (!("data" in relationship)) return Option.none();
   const data = relationship["data"];
   if (data === null) return Option.some(NULL);
-  return isRecord(data) && Predicate.isString(data["id"]) ? Option.some(data["id"]) : Option.none();
+  return isJsonObject(data) && Predicate.isString(data["id"])
+    ? Option.some(data["id"])
+    : Option.none();
 };
 
 /**
@@ -291,11 +296,11 @@ const linkageOf = (relationship: ResourceObject): Option.Option<Json | Null> => 
  */
 const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
   Option.map(Option.fromUndefinedOr(identity(resource)), (key) => {
-    const attributes = isRecord(resource["attributes"]) ? resource["attributes"] : {};
+    const attributes = objectIn(resource["attributes"]);
     const relationships = Rec.filterMap(
-      isRecord(resource["relationships"]) ? resource["relationships"] : {},
+      objectIn(resource["relationships"]),
       (relationship, name): Result.Result<Json | Null, void> =>
-        name in attributes || !isRecord(relationship)
+        name in attributes || !isJsonObject(relationship)
           ? Result.failVoid
           : Option.match(linkageOf(relationship), {
               onNone: () => Result.failVoid,
@@ -851,9 +856,9 @@ const reshaped = (
 /** The resource identifiers a resource's relationship `name` shows linkage to. */
 const linkedThrough = (resource: ResourceObject, name: string): ReadonlyArray<ResourceObject> => {
   const relationships = resource["relationships"];
-  const relationship = isRecord(relationships) ? relationships[name] : undefined;
-  const data: unknown = isRecord(relationship) ? relationship["data"] : undefined;
-  return Arr.filter(Array.isArray(data) ? data : [data], isRecord);
+  const relationship = isJsonObject(relationships) ? relationships[name] : null;
+  const data = isJsonObject(relationship) ? relationship["data"] : null;
+  return Arr.filter(isJsonArray(data) ? data : [data], isJsonObject);
 };
 
 /**
@@ -1088,9 +1093,7 @@ const sparseFamily = (
 const linkedRelationships = (candidates: ReadonlyArray<Candidate>): ReadonlyArray<string> =>
   Arr.filter(
     Arr.dedupe(
-      Arr.flatMap(candidates, ({ resource }) =>
-        isRecord(resource["relationships"]) ? Rec.keys(resource["relationships"]) : [],
-      ),
+      Arr.flatMap(candidates, ({ resource }) => Rec.keys(objectIn(resource["relationships"]))),
     ),
     (name) =>
       Arr.some(candidates, ({ resource }) =>

@@ -49,12 +49,17 @@ import {
   finding,
   type Finding,
   HOP_CAP,
+  documentOf,
+  firstResourceOf,
   identity,
+  isJsonArray,
+  isJsonObject,
   isRecord,
   eachSuccessfulRead,
   jsonApiAccept,
   coverageNote,
   noProbeReason,
+  objectIn,
   type Body,
   type Observation,
   parseMediaType,
@@ -70,12 +75,14 @@ import {
   sourceParametersOf,
   statusOf,
   succeeded,
+  topLevel,
   withQuery,
   type Outcome,
   type Payload,
 } from "./core.js";
 import {
   type Accepted,
+  asSent,
   Created,
   buildUpdate,
   decided,
@@ -421,18 +428,18 @@ const unsupportedExtension: RuleImpl = {
  * and including it is a legitimate 400, so guessing would turn a compound-document
  * probe into a spurious finding.
  */
-const includableOf = (body: Body): ReadonlyArray<string> => {
-  if (!isRecord(body)) return [];
-  const data = body["data"];
-  const first = Array.isArray(data) ? data.find(isRecord) : isRecord(data) ? data : undefined;
-  if (first === undefined) return [];
-  const relationships = first["relationships"];
-  if (!isRecord(relationships)) return [];
-  return Object.keys(relationships).filter((name) => {
-    const relationship = relationships[name];
-    return isRecord(relationship) && "data" in relationship;
+const includableOf = (body: Body): ReadonlyArray<string> =>
+  Option.match(firstResourceOf(body), {
+    onNone: () => [],
+    onSome: (first) => {
+      const relationships = first["relationships"];
+      if (!isJsonObject(relationships)) return [];
+      return Object.keys(relationships).filter((name) => {
+        const relationship = relationships[name];
+        return isJsonObject(relationship) && "data" in relationship;
+      });
+    },
   });
-};
 
 /**
  * The include path a relationship endpoint's compound probe asks for: its
@@ -500,10 +507,10 @@ const overDocuments =
   (
     impl: Rule,
     options: {
-      readonly applicable?: ((body: Body) => boolean) | undefined;
+      readonly applicable?: ((body: Schema.Json) => boolean) | undefined;
       readonly inapplicable?: string | undefined;
       readonly check: (
-        body: Body,
+        body: Schema.Json,
         observation: Observation,
         where: string,
       ) => ReadonlyArray<Finding>;
@@ -519,10 +526,11 @@ const overDocuments =
       const findings: Array<Finding> = [];
       let evaluated = 0;
       for (const { observation, where } of documents) {
-        if (observation.body === undefined) continue;
-        if (options.applicable !== undefined && !options.applicable(observation.body)) continue;
+        if (Option.isNone(observation.body)) continue;
+        const body = observation.body.value;
+        if (options.applicable !== undefined && !options.applicable(body)) continue;
         evaluated += 1;
-        findings.push(...options.check(observation.body, observation, where));
+        findings.push(...options.check(body, observation, where));
       }
       if (evaluated === 0) {
         return skip(
@@ -665,10 +673,10 @@ const noDuplicateResources: RuleImpl = {
   ),
   run: (ctx) =>
     overDocuments(noDuplicateResources.rule, {
-      applicable: (body) => resourceObjectsOf(body).length > 1,
+      applicable: (body) => resourceObjectsOf(Option.some(body)).length > 1,
       inapplicable: "no endpoint returned a document carrying more than one resource object",
       check: (body, observation, where) => {
-        const resources = resourceObjectsOf(body);
+        const resources = resourceObjectsOf(Option.some(body));
         const seen = new Map<string, string>();
         const duplicates: Array<string> = [];
         for (const { pointer, resource } of resources) {
@@ -740,15 +748,17 @@ const includedOnInclude: RuleImpl = {
         succeeded(observation),
       );
       const findings = Arr.flatMap(answered, ({ observation, where }) => {
-        const body = observation.body;
-        if (isRecord(body) && Array.isArray(body["included"])) return [];
+        const document = documentOf(observation.body);
+        if (Option.exists(document, (body) => isJsonArray(body["included"]))) return [];
         return [
           finding(includedOnInclude.rule, {
             detail: `${where} answered a request carrying \`include\` with no top-level \`included\` array`,
             expected: "a top-level `included` array, `[]` when nothing is included",
-            observed: isRecord(body)
-              ? `top-level members: ${Rec.keys({ ...body }).join(", ") || "(none)"}`
-              : describe(observation),
+            observed: Option.match(document, {
+              onNone: () => describe(observation),
+              onSome: (body) =>
+                `top-level members: ${Rec.keys({ ...body }).join(", ") || "(none)"}`,
+            }),
             probe: observation.probe,
           }),
         ];
@@ -775,11 +785,11 @@ const resourceIdentification: RuleImpl = {
   ),
   run: (ctx) =>
     overDocuments(resourceIdentification.rule, {
-      applicable: (body) => Arr.isReadonlyArrayNonEmpty(resourcesOf(body)),
+      applicable: (body) => Arr.isReadonlyArrayNonEmpty(resourcesOf(Option.some(body))),
       inapplicable: "no endpoint returned a document carrying a resource object",
       check: (body, observation, where) => {
         const findings: Array<Finding> = [];
-        for (const { pointer, resource } of resourcesOf(body)) {
+        for (const { pointer, resource } of resourcesOf(Option.some(body))) {
           const type = resource["type"];
           if (typeof type !== "string" || type === "") {
             findings.push(
@@ -918,11 +928,9 @@ const errorDocumentShape: RuleImpl = {
       const findings: Array<Finding> = [];
       for (const observation of observations) {
         if (observation.status === 404 && observation.text === "") continue;
-        const body = observation.body;
+        const errors = topLevel(observation.body, "errors");
         if (
-          !isRecord(body) ||
-          !Array.isArray(body["errors"]) ||
-          Arr.isReadonlyArrayEmpty(body["errors"])
+          !Option.exists(errors, (list) => isJsonArray(list) && Arr.isReadonlyArrayNonEmpty(list))
         ) {
           findings.push(
             finding(errorDocumentShape.rule, {
@@ -999,7 +1007,7 @@ const errorSourceDiscrimination: RuleImpl = {
       const sources = observations.flatMap((observation) =>
         errorObjectsOf(observation.body)
           .map((error) => error["source"])
-          .filter(isRecord)
+          .filter(isJsonObject)
           .map((source) => ({ source, observation })),
       );
       if (Arr.isReadonlyArrayEmpty(sources)) {
@@ -1455,15 +1463,16 @@ const noEndpointWhere = (claim: string, opaque: ReadonlyArray<string>): string =
     : `no ${claim}, and ${opaque.join(", ")} cannot say: ${opaque.length === 1 ? "its query's" : "their queries'"} parameter names cannot be enumerated`;
 
 /** The attribute names the first resource object of a collection carries. */
-const attributeNamesOf = (data: ReadonlyArray<unknown>): ReadonlyArray<string> => {
-  const attributes = data.find(isRecord)?.["attributes"];
-  return isRecord(attributes) ? Rec.keys(attributes) : [];
-};
+const attributeNamesOf = (data: Schema.JsonArray): ReadonlyArray<string> =>
+  Option.match(Arr.findFirst(data, isJsonObject), {
+    onNone: () => [],
+    onSome: (first) => Rec.keys(objectIn(first["attributes"])),
+  });
 
 /** The attribute names the first primary resource object of a response carries. */
 const primaryAttributeNamesOf = (observation: Observation): ReadonlyArray<string> => {
-  const data = isRecord(observation.body) ? observation.body["data"] : undefined;
-  return attributeNamesOf(Array.isArray(data) ? data : [data]);
+  const data = Option.getOrNull(topLevel(observation.body, "data"));
+  return attributeNamesOf(isJsonArray(data) ? data : [data]);
 };
 
 /**
@@ -1767,8 +1776,8 @@ const sortUnsupportedEndpoint: RuleImpl = refusalRule({
   // is passed over for the next candidate.
   queryFrom: (baseline) => {
     if (!succeeded(baseline)) return Result.fail(statusOf(baseline));
-    const data = isRecord(baseline.body) ? baseline.body["data"] : undefined;
-    return Array.isArray(data)
+    const data = Option.getOrNull(topLevel(baseline.body, "data"));
+    return isJsonArray(data)
       ? Result.succeed([
           "sort",
           Option.getOrElse(Arr.head(attributeNamesOf(data)), () => "notASortableField"),
@@ -2171,7 +2180,7 @@ const decodeSelfLink = Schema.decodeUnknownOption(
 
 /** The URL of the primary resource's `links.self`, whichever way it is spelled. */
 const selfLink = (observation: Observation): Option.Option<string> =>
-  decodeSelfLink(observation.body).pipe(
+  Option.flatMap(observation.body, decodeSelfLink).pipe(
     Option.map(({ data }) =>
       Predicate.isString(data.links.self) ? data.links.self : data.links.self.href,
     ),
@@ -2289,21 +2298,15 @@ const judgeWriteSuccess = (
     Match.orElse(otherwise),
   );
 
-/** The members a 200 update document without primary data is judged by. */
-interface DocumentWithoutData {
-  readonly meta?: unknown;
-  readonly errors?: unknown;
-}
-
 /**
  * What is wrong with a 200 update document that carries no primary data, if
  * anything: it must carry a top-level `meta` object, and no `errors`.
  */
-const withoutData = (body: DocumentWithoutData): Option.Option<string> => {
+const withoutData = (body: Schema.JsonObject): Option.Option<string> => {
   if ("errors" in body)
     return Option.some("carries `errors` — an error document is no answer to a successful update");
   if (!("meta" in body)) return Option.some("carries neither primary data nor a top-level `meta`");
-  if (!isRecord(body.meta))
+  if (!isJsonObject(body["meta"]))
     return Option.some("carries no primary data and a top-level `meta` that is not an object");
   return Option.none();
 };
@@ -2321,7 +2324,8 @@ const updateFindings = (
     "update",
     broken,
     () => {
-      if (!isRecord(observation.body))
+      const document = documentOf(observation.body);
+      if (Option.isNone(document))
         return broken(
           `the 200 updating ${type}:${id} carried no response document`,
           "a JSON:API document",
@@ -2331,8 +2335,8 @@ const updateFindings = (
       // so it carries `meta` (one of `data` / `errors` / `meta` is required, and
       // `errors` is no answer to a success); when it carries `data`, that is
       // the resource.
-      if (!Predicate.hasProperty(observation.body, "data"))
-        return Option.match(withoutData(observation.body), {
+      if (!("data" in document.value))
+        return Option.match(withoutData(document.value), {
           onNone: () => [],
           onSome: (problem) =>
             broken(
@@ -2442,10 +2446,12 @@ const judgeDelete = (observation: Observation): ReadonlyArray<Finding> => {
     "DELETE",
     broken,
     () => {
-      const members = isRecord(observation.body)
-        ? Arr.map(Arr.fromRecord(observation.body), ([member]) => member)
-        : [];
-      return isRecord(observation.body) && Arr.every(members, metaOnly)
+      const document = documentOf(observation.body);
+      const members = Option.match(document, {
+        onNone: () => [],
+        onSome: (body) => Arr.map(Arr.fromRecord({ ...body }), ([member]) => member),
+      });
+      return Option.isSome(document) && Arr.every(members, metaOnly)
         ? []
         : broken(
             "a 200 DELETE response carried members other than `meta`",
@@ -2596,13 +2602,10 @@ const updateStated = (
   id: string,
   patch: Omit<Payload, "type">,
   observation: Observation,
-): Result.Result<
-  { readonly what: string; readonly expected: Readonly<Record<string, unknown>> },
-  string
-> => {
+): Result.Result<{ readonly what: string; readonly expected: Schema.JsonObject }, string> => {
   const request = {
     what: `the update requested (answered ${observation.status})`,
-    expected: patch,
+    expected: asSent(patch),
   };
   if (observation.status === 204) return Result.succeed(request);
   if (observation.status === 202)
@@ -2613,7 +2616,7 @@ const updateStated = (
     return Result.fail(
       `the server did not accept the update of ${type}:${id} (${describe(observation)}) — see spec/status/update-response`,
     );
-  if (!isRecord(observation.body) || !Predicate.hasProperty(observation.body, "data"))
+  if (!Option.exists(documentOf(observation.body), (document) => "data" in document))
     return Result.succeed(request);
   return Result.fromOption(
     Option.filter(

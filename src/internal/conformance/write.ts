@@ -38,6 +38,7 @@ import {
   Option,
   Order,
   Predicate,
+  Record as Rec,
   Result,
   Schema,
 } from "effect";
@@ -53,9 +54,11 @@ import {
   type Fixture,
   identity,
   idKey,
+  isJsonArray,
+  isJsonObject,
   isLive,
-  isRecord,
   jsonApiAccept,
+  objectIn,
   type Observation,
   type Outcome,
   type Payload,
@@ -66,6 +69,7 @@ import {
   skip,
   statusOf,
   succeeded,
+  topLevel,
   type WriteRecord,
 } from "./core.js";
 
@@ -126,7 +130,7 @@ export const refusedOnKeyGrounds = (
   errorObjectsOf(observation.body).some((error) => {
     const source = error["source"];
     return (
-      isRecord(source) &&
+      isJsonObject(source) &&
       Predicate.isString(source["header"]) &&
       source["header"].toLowerCase() === IDEMPOTENCY_HEADER
     );
@@ -376,7 +380,7 @@ const decodeAtomicResults = Schema.decodeUnknownOption(
  * @internal
  */
 export const primaryIdentity = (observation: Observation): Option.Option<Identity> =>
-  decodePrimary(observation.body).pipe(Option.map(({ data }) => data));
+  Option.flatMap(observation.body, decodePrimary).pipe(Option.map(({ data }) => data));
 
 /**
  * The resource the first `atomic:results` entry identifies.
@@ -384,7 +388,7 @@ export const primaryIdentity = (observation: Observation): Option.Option<Identit
  * @internal
  */
 export const atomicIdentity = (observation: Observation): Option.Option<Identity> =>
-  decodeAtomicResults(observation.body).pipe(
+  Option.flatMap(observation.body, decodeAtomicResults).pipe(
     Option.flatMap((body) => Arr.head(body["atomic:results"])),
     Option.flatMap(decodePrimary),
     Option.map(({ data }) => data),
@@ -718,7 +722,7 @@ export type Adopt = (target: WriteTarget, payload: Payload, id: string, found: s
 export const atomicIdentities = (
   observation: Observation,
 ): ReadonlyArray<Option.Option<Identity>> =>
-  Option.match(decodeAtomicResults(observation.body), {
+  Option.match(Option.flatMap(observation.body, decodeAtomicResults), {
     onNone: () => [],
     onSome: (body) =>
       Arr.map(body["atomic:results"], (result) =>
@@ -949,20 +953,37 @@ export const readEndpointFor = (
       `no single-resource GET endpoint for "${target.key}" with one path parameter to read a write back through`,
   );
 
-/** A JSON object off the wire, as `isRecord` narrows one: members not yet read. */
-type JsonObject = Readonly<Record<string, unknown>>;
+/** A JSON object off the wire, as `isJsonObject` narrows one. */
+type JsonObject = Schema.JsonObject;
 
-/** A server value for an `observed` line, cut to 80 code units; `absent` for no value. */
-// Generic, not `unknown`: the value is only rendered, never read.
-const shown = <A>(value: A): string => {
-  const rendered = value === undefined ? "absent" : Formatter.format(value);
-  return rendered.length > 80 ? `${rendered.slice(0, 79)}…` : rendered;
+const encodeSent = Schema.encodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const decodeSent = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.JsonObject));
+
+/**
+ * A fixture's members as the server received them: the JSON its request body
+ * carried, which `JSON.stringify` wrote — a `Date` as the string it was sent
+ * as, an `undefined` member absent. Empty when they are not JSON at all, which
+ * the request carrying them could not have been sent with.
+ *
+ * @internal
+ */
+export const asSent = (members: Omit<Payload, "type">): JsonObject =>
+  Option.getOrElse(Option.flatMap(encodeSent(members), decodeSent), () => ({}));
+
+/** A server value for an `observed` line, cut to 80 code units. */
+const rendered = (value: Schema.Json): string => {
+  const text = Formatter.format(value);
+  return text.length > 80 ? `${text.slice(0, 79)}…` : text;
 };
 
-const membersOf = (resource: JsonObject, member: "attributes" | "relationships"): JsonObject => {
-  const members = resource[member];
-  return isRecord(members) ? members : {};
-};
+/** A member for an `observed` line: `absent` when there is none. */
+const shown = (value: Option.Option<Schema.Json>): string =>
+  Option.match(value, { onNone: () => "absent", onSome: rendered });
+
+const membersOf = (
+  resource: JsonObject,
+  member: "attributes" | "relationships",
+): Readonly<Record<string, Schema.Json>> => objectIn(resource[member]);
 
 /**
  * A relationship's linkage as one comparable value: `null`, one identity, or
@@ -970,11 +991,12 @@ const membersOf = (resource: JsonObject, member: "attributes" | "relationships")
  * to-many linkage no order a read must keep. None when it carries no `data`
  * (and, at each call, when the relationship is not an object at all).
  */
-const linkageValue = (relationship: JsonObject): Option.Option<unknown> => {
+const linkageValue = (relationship: JsonObject): Option.Option<Schema.Json> => {
   if (!("data" in relationship)) return Option.none();
   const data = relationship["data"];
-  const key = <A>(item: A) => (isRecord(item) ? (identity(item) ?? shown(item)) : shown(item));
-  if (Array.isArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
+  const key = (item: Schema.Json): string =>
+    isJsonObject(item) ? (identity(item) ?? rendered(item)) : rendered(item);
+  if (isJsonArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
   return Option.some(data === null ? null : key(data));
 };
 
@@ -998,25 +1020,25 @@ export const readBackDifferences = (
       Equal.equals(value, storedAttributes[name])
         ? Result.failVoid
         : Result.succeed(
-            `attributes.${name}: ${shown(value)} · read back ${shown(storedAttributes[name])}`,
+            `attributes.${name}: ${rendered(value)} · read back ${shown(Rec.get(storedAttributes, name))}`,
           ),
   );
   const relationships = Arr.filterMap(
     Arr.fromRecord(membersOf(expected, "relationships")),
     ([name, relationship]) =>
-      Option.match(Option.flatMap(Option.liftPredicate(relationship, isRecord), linkageValue), {
+      Option.match(Option.flatMap(Option.liftPredicate(relationship, isJsonObject), linkageValue), {
         onNone: () => Result.failVoid,
         onSome: (linkage) => {
           const read = Option.flatMap(
-            Option.liftPredicate(storedRelationships[name], isRecord),
+            Option.filter(Rec.get(storedRelationships, name), isJsonObject),
             linkageValue,
           );
           return Option.exists(read, (other) => Equal.equals(linkage, other))
             ? Result.failVoid
             : Result.succeed(
-                `relationships.${name}.data: ${shown(linkage)} · read back ${Option.match(read, {
+                `relationships.${name}.data: ${rendered(linkage)} · read back ${Option.match(read, {
                   onNone: () => "no linkage",
-                  onSome: shown,
+                  onSome: rendered,
                 })}`,
               );
         },
@@ -1025,17 +1047,13 @@ export const readBackDifferences = (
   return [...attributes, ...relationships];
 };
 
-const decodePrimaryResource = Schema.decodeUnknownOption(
-  Schema.Struct({ data: Schema.Record(Schema.String, Schema.Unknown) }),
-);
-
 /**
  * A response document's primary data, when it is one resource object.
  *
  * @internal
  */
 export const primaryResource = (observation: Observation): Option.Option<JsonObject> =>
-  decodePrimaryResource(observation.body).pipe(Option.map(({ data }) => data));
+  Option.filter(topLevel(observation.body, "data"), isJsonObject);
 
 /**
  * Reads `type:id` back through `get` and judges it against `expected` — what
