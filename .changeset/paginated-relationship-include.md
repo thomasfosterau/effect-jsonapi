@@ -1,5 +1,0 @@
----
-"@thomasfosterau/effect-jsonapi": minor
----
-
-`Endpoint.getRelationship`'s `include` now works on a `paginated` relationship (#483). Its linkage is the endpoint's primary data, so the relationship's own name and the paths rooted at it (`comments`, `comments.author`) are legal there, derived as for a `many` under `include: true`, `{ depth }` and `{ paths }`, and the `included` union and the `fields[TYPE]` types follow. This makes the spec's example `GET /articles/1/relationships/comments?include=comments.author` work when `comments` is paginated. Before, the parameter accepted no path at all. The same applies to `relationshipInclude` on `Endpoint.resource` / `Group.resource`. Full linkage is checked from the identifiers, so `included` holds the resources on the page being answered, not the whole relationship. The new `Endpoint.RelationshipIncludeBase` type names the resource the paths are derived over. A paginated relationship is still never an include path of its parent's own read, and a declared `Include.Surface` still cannot name one.
