@@ -679,6 +679,20 @@ describe("a projected answer over HTTP (#322)", () => {
       { data: wire.holders, included: [only(wire.editors, "name")] },
     ],
     ["/holders/1/node?fields[editors]=name", { data: only(wire.editors, "name") }],
+    // An empty set is "no fields" (#488): no attributes, linkage kept.
+    [
+      "/articles/1?fields[articles]=",
+      { data: only(wire.articles), included: [wire.people, wire.companies] },
+    ],
+    [
+      "/articles/1?fields[articles]",
+      { data: only(wire.articles), included: [wire.people, wire.companies] },
+    ],
+    [
+      "/articles/1?include=author.employer&fields[articles]=&fields[people]=",
+      { data: only(wire.articles), included: [only(wire.people), wire.companies] },
+    ],
+    ["/articles/1/tags?fields[tags]=", { data: [only(wire.tags)] }],
   ])("answers 200 omitting the excluded attributes: %s", async (url, expected) => {
     const response = await serve(url);
     expect(response.status).toBe(200);

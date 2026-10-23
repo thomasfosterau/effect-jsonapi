@@ -1213,6 +1213,93 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
   };
 };
 
+// §Sparse Fieldsets: "An empty value indicates that no fields should be
+// returned" — `?fields[TYPE]=` is not the absent parameter, whose fields the
+// server may choose (#488). Judged on `attributes`, as the two rules above
+// are: a resource object of that type in the answer carries none.
+const sparseFieldsetsEmpty: RuleImpl = {
+  rule: rule(
+    "spec/query/sparse-fieldsets-empty",
+    "Sparse Fieldsets",
+    "fetching-sparse-fieldsets",
+    "MUST NOT",
+    "An empty `fields[TYPE]` value indicates that no fields should be returned, so an endpoint MUST NOT include attributes in resource objects of that type in its response.",
+  ),
+  run: (ctx) =>
+    Effect.gen(function* () {
+      const candidates = readable(ctx).resolved.filter(({ endpoint }) =>
+        Arr.isReadonlyArrayNonEmpty(fieldsOf(endpoint.queryKeys)),
+      );
+      if (Arr.isReadonlyArrayEmpty(candidates))
+        return skip(sparseFieldsetsEmpty.rule, "no endpoint declares `fields[TYPE]`");
+      const findings: Array<Finding> = [];
+      let probes = 0;
+      let evaluated = 0;
+      yield* Effect.forEach(
+        candidates,
+        ({ endpoint, path }) =>
+          Effect.gen(function* () {
+            // Only a type the baseline answered with an attribute can show an
+            // empty set honoured or ignored.
+            const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
+            probes += 1;
+            const types = new Set(
+              resourcesOf(baseline.body).flatMap(({ resource }) => {
+                const attributes = resource["attributes"];
+                const type = resource["type"];
+                return typeof type === "string" &&
+                  isRecord(attributes) &&
+                  Arr.isReadonlyArrayNonEmpty(Object.keys(attributes))
+                  ? [type]
+                  : [];
+              }),
+            );
+            yield* Effect.forEach(
+              fieldsOf(endpoint.queryKeys).filter((type) => types.has(type)),
+              (type) =>
+                Effect.gen(function* () {
+                  const observation = yield* ctx.request({
+                    url: withQuery(path, [[`fields[${type}]`, ""]]),
+                    headers: jsonApiAccept,
+                  });
+                  probes += 1;
+                  if (observation.status < 200 || observation.status >= 300) return;
+                  const subjects = resourcesOf(observation.body).filter(
+                    ({ resource }) => resource["type"] === type,
+                  );
+                  if (Arr.isReadonlyArrayEmpty(subjects)) return;
+                  evaluated += 1;
+                  for (const { pointer, resource } of subjects) {
+                    const emitted = resource["attributes"];
+                    if (!isRecord(emitted)) continue;
+                    const names = Object.keys(emitted);
+                    if (Arr.isReadonlyArrayNonEmpty(names)) {
+                      findings.push(
+                        finding(sparseFieldsetsEmpty.rule, {
+                          detail: `\`fields[${type}]=\` (no fields) still returned attributes at ${pointer}`,
+                          expected: "no `attributes` members",
+                          observed: `returned: ${names.join(", ")}`,
+                          probe: observation.probe,
+                        }),
+                      );
+                    }
+                  }
+                }),
+              { concurrency: 1, discard: true },
+            );
+          }),
+        { concurrency: 1, discard: true },
+      );
+      if (evaluated === 0) {
+        return skip(
+          sparseFieldsetsEmpty.rule,
+          "no endpoint returned a resource, of a type it declares `fields[TYPE]` for, carrying an attribute to project away",
+        );
+      }
+      return settle(sparseFieldsetsEmpty.rule, probes, findings);
+    }),
+};
+
 const unsupportedInclude: RuleImpl = {
   rule: rule(
     "spec/query/unsupported-include-path",
@@ -2702,6 +2789,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   errorStatusMatches,
   sparseFieldsets("primary"),
   sparseFieldsets("included"),
+  sparseFieldsetsEmpty,
   unknownQueryParameter,
   illegalParameterName,
   unsupportedExtensionParameter,

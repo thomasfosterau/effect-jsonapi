@@ -397,8 +397,43 @@ describe("Handlers.project", () => {
     // absent entirely…
     expect(Handlers.project(relatedArticle, { people: ["firstName"] })).toBe(relatedArticle);
     expect(Handlers.project(relatedArticle, undefined)).toBe(relatedArticle);
-    // …present but empty (`?fields[articles]=`): still "every field", not "no field"
-    expect(Handlers.project(relatedArticle, { articles: [] })).toBe(relatedArticle);
+    // …or present with no set for this type
+    expect(Handlers.project(relatedArticle, { articles: undefined })).toBe(relatedArticle);
+  });
+
+  // §Sparse Fieldsets: "An empty value indicates that no fields should be
+  // returned" — an empty `?fields[articles]=` is not the absent parameter (#488).
+  it("projects an empty requested set to no attributes", () => {
+    expect(Handlers.project(relatedArticle, { articles: [] })).toEqual({
+      type: "articles",
+      id: "2",
+      attributes: {},
+    });
+  });
+
+  // Relationship fields are out of scope (the vocabulary is the attributes),
+  // and dropping `relationships` would unlink the `included` members it
+  // reaches, which the full-linkage checks reject.
+  it("keeps `relationships`, `links` and `meta` under an empty set", () => {
+    const decorated = { ...primaryArticle, links: { self: "/articles/1" }, meta: { views: 3 } };
+    expect(Handlers.project(decorated, { articles: [] })).toEqual({
+      type: "articles",
+      id: "1",
+      attributes: {},
+      relationships: { related: { data: [{ type: "articles", id: "2" }] } },
+      links: { self: "/articles/1" },
+      meta: { views: 3 },
+    });
+  });
+
+  it("applies an empty set to the primary data and `included` alike", () => {
+    const document = Handlers.data(primaryArticle, {
+      included: [relatedArticle],
+      onResource: Handlers.project({ articles: [] }),
+    });
+    expect(document.data.attributes).toEqual({});
+    expect(document.data.relationships).toEqual(primaryArticle.relationships);
+    expect(document.included?.map((resource) => resource.attributes)).toEqual([{}]);
   });
 
   it("projects `attributes` only — relationships, links and meta are left alone", () => {
