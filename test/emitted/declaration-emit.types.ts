@@ -105,7 +105,8 @@ export const endpoints = Endpoint.resource(Article);
 export const group = Group.resource(Article);
 export const groupRelationshipInclude = Group.resource(Article, {
   relationshipInclude: true,
-  relationships: { comments: { relationshipInclude: { depth: 1 } } },
+  relationships: { comments: { relationshipInclude: { depth: 1 }, relationshipFields: false } },
+  relationshipFields: true,
 });
 export const flat = Group.flat({
   resource: Person,

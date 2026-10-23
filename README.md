@@ -907,7 +907,7 @@ const issues = Group.resource(Issue, {
 });
 ```
 
-Defaults emit all five CRUD operations and every relationship's endpoints with `include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their semantics are application-defined), as do compound relationship documents (`relationshipInclude`), and `errors` is applied to every generated endpoint. Every default is overridable, globally or per endpoint / relationship — see `Endpoint.ResourceOptions`.
+Defaults emit all five CRUD operations and every relationship's endpoints with `include` / `fields` / `sort` enabled; `page` and `filter` stay opt-in (their semantics are application-defined), as do compound relationship documents (`relationshipInclude`) and their sparse fieldsets (`relationshipFields`), and `errors` is applied to every generated endpoint. Every default is overridable, globally or per endpoint / relationship — see `Endpoint.ResourceOptions`.
 
 For finer control — adding a heterogeneous `search`, dropping or replacing an individual endpoint — `Endpoint.resource` returns the same endpoints as a plain tuple to spread into `Group.make`:
 
@@ -1015,12 +1015,16 @@ Endpoint.getRelationship(Article, "tags", { include: true, fields: true });
 
 The relationship endpoints `Endpoint.resource` / `Group.resource` generate leave `include` off unless asked. `relationshipInclude` sets it for all of them — `true` or a `{ depth }` bound, each relationship's paths rooted at it — and a relationship's own `relationshipInclude` overrides that, taking any of the forms above (a `{ paths }` allow-list or a declared surface names one relationship's paths, so those are per-relationship only). It is separate from the top-level `include`, which governs `get`, `list` and the `related` endpoints. On a `paginated` relationship a resource-wide setting legalises nothing: the parameter is declared, and any path is a 400.
 
+`relationshipFields` is their `fields: true` the same way, pairing with `relationshipInclude` as `fields` pairs with `include`: `true` at the top level for every generated `getRelationship`, a relationship's own `relationshipFields` overriding it. Each endpoint then declares `fields[TYPE]` for the types its own include paths reach, and its handler's `included` members admit any subset of their attributes, so it answers with `onResource: Handlers.project(query.fields)`; an endpoint without include paths declares none. It is off by default and independent of the top-level `fields`, which governs `get`, `list` and the `related` endpoints ([#489](https://github.com/thomasfosterau/effect-jsonapi/issues/489)).
+
 ```ts
 const articles = Group.resource(Article, {
   relationshipInclude: true, // every getRelationship endpoint: ?include=<name>…
+  relationshipFields: true, // …&fields[TYPE]=… for each type those paths reach
   relationships: {
     comments: { relationshipInclude: { paths: ["comments.author"] } }, // this one: exactly these
     tags: { relationshipInclude: false }, // this one: off
+    author: { relationshipFields: false }, // this one: ?include= but no fieldsets
   },
 });
 ```

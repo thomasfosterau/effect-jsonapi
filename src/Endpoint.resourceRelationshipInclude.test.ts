@@ -2,7 +2,8 @@
  * Compound relationship documents on generated endpoints (#484):
  * `Endpoint.resource` / `Group.resource` thread `relationshipInclude` — the
  * top-level default and each relationship's override — into the `include`
- * option of the `getRelationship` endpoints they generate.
+ * option of the `getRelationship` endpoints they generate — and
+ * `relationshipFields` likewise into their `fields` option (#489).
  *
  * The type-level half is the `Endpoint.resource` section of
  * `test/relationship-include.types.ts`.
@@ -30,7 +31,7 @@ import * as Resource from "./Resource.js";
 const Revision = Resource.make("revisions", { attributes: { editedAt: Schema.String } });
 const Company = Resource.make("companies", { attributes: { name: Schema.String } });
 const Person = Resource.make("people", {
-  attributes: { name: Schema.String },
+  attributes: { name: Schema.String, email: Schema.String },
   relationships: { employer: Relationship.one(() => Company) },
 });
 const Comment = Resource.make("comments", {
@@ -57,7 +58,7 @@ const wire = {
   people: {
     type: "people",
     id: "9",
-    attributes: { name: "Ada" },
+    attributes: { name: "Ada", email: "ada@example.com" },
     relationships: { employer: { data: { type: "companies", id: "2" } } },
   },
   companies: { type: "companies", id: "2", attributes: { name: "Acme" } },
@@ -98,18 +99,54 @@ const admitted = (
     ),
   );
 
-// Whether a relationship endpoint's query decodes `?include=<paths>` into an
-// `include` (a query that declares none drops the key).
-const accepts = (endpoint: HttpApiEndpoint.Top, paths: string): boolean => {
+// Whether a relationship endpoint's query decodes the wire `input` into a
+// value with the member `key` (a query that declares no such family drops it).
+const decodesInto = (
+  endpoint: HttpApiEndpoint.Top,
+  input: Rec.ReadonlyRecord<string, string>,
+  key: string,
+): boolean => {
   // SAFETY: every endpoint under test declares a query codec.
   const query = endpoint.query as Schema.Codec<unknown, unknown>;
-  const decoded = Schema.decodeUnknownExit(query)({ include: paths });
+  const decoded = Schema.decodeUnknownExit(query)(input);
   return (
     Exit.isSuccess(decoded) &&
     // SAFETY: a query codec decodes to a struct.
-    Rec.has(decoded.value as Rec.ReadonlyRecord<string, unknown>, "include")
+    Rec.has(decoded.value as Rec.ReadonlyRecord<string, unknown>, key)
   );
 };
+
+// Whether a relationship endpoint's query accepts `?include=<paths>`.
+const accepts = (endpoint: HttpApiEndpoint.Top, paths: string): boolean =>
+  decodesInto(endpoint, { include: paths }, "include");
+
+// The types whose `fields[TYPE]` a relationship endpoint's query declares: a
+// fieldset naming one of the type's attributes decodes into `fields`.
+const fieldsetAttribute: Rec.ReadonlyRecord<WireType | "articles", string> = {
+  articles: "title",
+  comments: "body",
+  people: "name",
+  companies: "name",
+  revisions: "editedAt",
+};
+const declaresFieldsets = (endpoint: HttpApiEndpoint.Top): ReadonlyArray<string> =>
+  Rec.keys(fieldsetAttribute).filter((type) =>
+    decodesInto(endpoint, { [`fields[${type}]`]: fieldsetAttribute[type] }, "fields"),
+  );
+
+// Whether a relationship endpoint's success document admits an `included`
+// member with none of its attributes — a sparse fieldset's answer.
+const admitsPartial = (
+  endpoint: HttpApiEndpoint.Top,
+  data: Identifier | ReadonlyArray<Identifier>,
+  type: WireType,
+): boolean =>
+  Exit.isSuccess(
+    Schema.decodeUnknownExit(successOf(endpoint))(
+      { data, included: [{ ...wire[type], attributes: {} }] },
+      { onExcessProperty: "error" },
+    ),
+  );
 
 const commentIds = [{ type: "comments", id: "5" }];
 const editorId = { type: "people", id: "9" };
@@ -191,19 +228,101 @@ describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
   });
 });
 
-describe("a `Group.resource` relationship endpoint serving `included` (#484)", () => {
+describe("`Endpoint.resource`'s `relationshipFields` (#489)", () => {
+  it.each([
+    ["no options", Endpoint.resource(Article)],
+    ["`relationshipInclude` alone", Endpoint.resource(Article, { relationshipInclude: true })],
+    [
+      "a top-level `fields`",
+      Endpoint.resource(Article, { relationshipInclude: true, fields: true }),
+    ],
+  ])("is off by default, under %s", (_, endpoints) => {
+    const comments = named(endpoints, "commentsRelationship");
+    expect(declaresFieldsets(comments)).toEqual([]);
+    expect(admitsPartial(comments, commentIds, "comments")).toBe(false);
+    // The `related` endpoints keep their own `fields`.
+    expect(declaresFieldsets(named(endpoints, "comments"))).toContain("comments");
+  });
+
+  it("`true` declares a fieldset for every type the include paths reach", () => {
+    const endpoints = Endpoint.resource(Article, {
+      relationshipInclude: true,
+      relationshipFields: true,
+    });
+    const comments = named(endpoints, "commentsRelationship");
+    // Not `articles`: the parent is no resource object of the document.
+    expect(declaresFieldsets(comments)).toEqual(["comments", "people"]);
+    expect(admitsPartial(comments, commentIds, "comments")).toBe(true);
+    expect(admitsPartial(comments, commentIds, "people")).toBe(true);
+    const editor = named(endpoints, "editorRelationship");
+    expect(declaresFieldsets(editor)).toEqual(["people", "companies"]);
+    expect(admitsPartial(editor, editorId, "companies")).toBe(true);
+    // A `paginated` relationship has no include paths, so no fieldsets.
+    expect(declaresFieldsets(named(endpoints, "historyRelationship"))).toEqual([]);
+  });
+
+  it("follows each relationship's include paths", () => {
+    const endpoints = Endpoint.resource(Article, {
+      relationshipInclude: { depth: 3 },
+      relationshipFields: true,
+      relationships: { comments: { relationshipInclude: { paths: ["comments"] } } },
+    });
+    expect(declaresFieldsets(named(endpoints, "commentsRelationship"))).toEqual(["comments"]);
+    expect(declaresFieldsets(named(endpoints, "editorRelationship"))).toEqual([
+      "people",
+      "companies",
+    ]);
+  });
+
+  it("a relationship's own `relationshipFields` overrides the top-level one", () => {
+    const endpoints = Endpoint.resource(Article, {
+      relationshipInclude: true,
+      relationshipFields: true,
+      relationships: { editor: { relationshipFields: false } },
+    });
+    expect(declaresFieldsets(named(endpoints, "commentsRelationship"))).toEqual([
+      "comments",
+      "people",
+    ]);
+    const editor = named(endpoints, "editorRelationship");
+    expect(declaresFieldsets(editor)).toEqual([]);
+    expect(admitsPartial(editor, editorId, "people")).toBe(false);
+  });
+
+  it("a relationship can opt in alone", () => {
+    const endpoints = Endpoint.resource(Article, {
+      relationshipInclude: true,
+      relationships: { editor: { relationshipFields: true } },
+    });
+    expect(declaresFieldsets(named(endpoints, "editorRelationship"))).toEqual([
+      "people",
+      "companies",
+    ]);
+    expect(declaresFieldsets(named(endpoints, "commentsRelationship"))).toEqual([]);
+  });
+
+  it("declares none without `relationshipInclude`", () => {
+    const endpoints = Endpoint.resource(Article, { relationshipFields: true });
+    const comments = named(endpoints, "commentsRelationship");
+    expect(declaresFieldsets(comments)).toEqual([]);
+    expect(admitted(comments, commentIds)).toEqual([]);
+  });
+});
+
+describe("a `Group.resource` relationship endpoint serving `included` (#484, #489)", () => {
   const Api = HttpApi.make("resourceRelationshipInclude").add(
     Group.resource(Article, {
       endpoints: { get: false, list: false, create: false, update: false, delete: false },
       relationships: { comments: false, history: false },
       relationshipInclude: true,
+      relationshipFields: true,
     }),
   );
 
   const company = Company.make({ id: Company.Id.make("2"), attributes: { name: "Acme" } });
   const person = Person.make({
     id: Person.Id.make("9"),
-    attributes: { name: "Ada" },
+    attributes: { name: "Ada", email: "ada@example.com" },
     relationships: { employer: { data: Company.ref(company.id) } },
   });
 
@@ -211,7 +330,8 @@ describe("a `Group.resource` relationship endpoint serving `included` (#484)", (
     handlers
       .handle("editor", () => Effect.succeed(Handlers.data(person)))
       // The generated handler's document admits `included` now that
-      // `relationshipInclude` is on.
+      // `relationshipInclude` is on, and projected members now that
+      // `relationshipFields` is.
       .handle("editorRelationship", ({ query }) =>
         Effect.succeed(
           Handlers.linkage(Person.ref(person.id), {
@@ -222,6 +342,7 @@ describe("a `Group.resource` relationship endpoint serving `included` (#484)", (
                     ...(query.include.includes("editor") ? [person] : []),
                     ...(query.include.includes("editor.employer") ? [company] : []),
                   ],
+            onResource: Handlers.project(query.fields),
           }),
         ),
       )
@@ -261,6 +382,24 @@ describe("a `Group.resource` relationship endpoint serving `included` (#484)", (
 
   it("answers a path outside the relationship with a 400", async () => {
     const response = await serve("/articles/1/relationships/editor?include=comments");
+    expect(response.status).toBe(400);
+  });
+
+  it("narrows the `included` members to `fields[TYPE]`", async () => {
+    const response = await serve(
+      "/articles/1/relationships/editor?include=editor,editor.employer&fields[people]=name",
+    );
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      data: editorId,
+      included: [{ ...wire.people, attributes: { name: "Ada" } }, wire.companies],
+    });
+  });
+
+  it("answers a fieldset for the parent's type with a 400", async () => {
+    const response = await serve(
+      "/articles/1/relationships/editor?include=editor&fields[articles]=title",
+    );
     expect(response.status).toBe(400);
   });
 });
