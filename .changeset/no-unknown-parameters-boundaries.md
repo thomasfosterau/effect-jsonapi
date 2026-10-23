@@ -1,5 +1,5 @@
 ---
-"@thomasfosterau/effect-jsonapi": major
+"@thomasfosterau/effect-jsonapi": minor
 ---
 
 The two published functions that took an `unknown` parameter now have signatures that satisfy `effect/no-unknown-parameters` (#436), and the lint rule is back at `error`:

@@ -84,7 +84,7 @@ This project uses [Changesets](https://github.com/changesets/changesets) to mana
 pnpm changeset
 ```
 
-Pick the appropriate bump (`patch` / `minor` / `major`) and write a user-facing summary. The changeset file is committed alongside your change; releases are published automatically when the "Version Packages" PR is merged into `trunk`. See [PUBLISHING.md](./PUBLISHING.md) for the full release flow and one-time maintainer setup.
+Pick the appropriate bump and write a user-facing summary. While the package is pre-1.0, a breaking change is `minor` and everything else `patch`; never pick `major`, which would release 1.0.0 — that is the owner's call. The changeset file is committed alongside your change; releases are published automatically when the "Version Packages" PR is merged into `trunk`. See [PUBLISHING.md](./PUBLISHING.md) for the full release flow and one-time maintainer setup.
 
 ## Git hooks
 
