@@ -91,10 +91,33 @@ export interface RelationshipObject {
 }
 
 /**
+ * A value a resource member can hold before it goes on the wire: a JSON
+ * value, plus the runtime values {@link toWireSafeResource} coerces the way
+ * `JSON.stringify` would — a `Date` (its ISO string), a `URL` (its href), an
+ * object with a `toJSON` method (what that returns) and `undefined` (dropped
+ * from an object, `null` in an array).
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export type RuntimeValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | Date
+  | URL
+  | { readonly toJSON: (key: string) => RuntimeValue }
+  | ReadonlyArray<RuntimeValue>
+  | { readonly [key: string]: RuntimeValue };
+
+/**
  * The minimum shape every resource an application hands the assembler
- * exposes. Relationship values are `unknown` so a mapper's own relationship
- * types fit without a cast; the assembler reads them structurally
- * ({@link relationshipRefs}). The `?: T | undefined` members admit an
+ * exposes. `attributes`, `relationships` and `meta` hold {@link RuntimeValue}s,
+ * so a mapper's own relationship types fit without a cast; the assembler
+ * reads relationships structurally ({@link relationshipRefs}). The
+ * `?: T | undefined` members admit an
  * explicit `undefined` under `exactOptionalPropertyTypes`, so a caller
  * forwards possibly-absent members without a conditional spread.
  *
@@ -104,10 +127,10 @@ export interface RelationshipObject {
 export interface ResourceLike {
   readonly type: string;
   readonly id: string;
-  readonly attributes: { readonly [key: string]: unknown };
-  readonly relationships?: { readonly [key: string]: unknown } | undefined;
+  readonly attributes: { readonly [key: string]: RuntimeValue };
+  readonly relationships?: { readonly [key: string]: RuntimeValue } | undefined;
   readonly links?: { readonly self?: LinkLike | undefined } | undefined;
-  readonly meta?: { readonly [key: string]: unknown } | undefined;
+  readonly meta?: { readonly [key: string]: RuntimeValue } | undefined;
 }
 
 /**
@@ -517,6 +540,10 @@ const toLinkString = (value: LinkLike): string => {
   return typeof value.href === "string" ? value.href : value.href.href;
 };
 
+// A bare identifier (`{ type, id }`) standing in for a relationship object;
+// read as one, as `readRelationship` always has, without checking the members.
+const isBareRef = (value: object): value is Ref => "type" in value && "id" in value;
+
 /**
  * Reads a `relationships[key]` value as a relationship object. Bare
  * identifier shapes (`{ type, id }`, an identifier array) are tolerated.
@@ -526,7 +553,7 @@ const readRelationship = (resource: ResourceLike, key: string): RelationshipObje
   if (value === null || typeof value !== "object") return undefined;
   if (Array.isArray(value)) return { data: value as ReadonlyArray<Ref> };
   if ("data" in value) return value as RelationshipObject;
-  if ("type" in value && "id" in value) return { data: value as Ref };
+  if (isBareRef(value)) return { data: value };
   return undefined;
 };
 
@@ -625,45 +652,47 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
   return out as WireResource<R>;
 };
 
-/**
- * A value in wire form: a JSON value, whose leaves may include one JSON has
- * no spelling for (`undefined`, a `bigint`, a `symbol`, a function) — passed
- * through untouched by {@link toWireValue} for the serialiser to judge.
- */
+/** A value in wire form: a JSON value, or `undefined` for a dropped member. */
 type WireValue =
   | string
   | number
   | boolean
   | null
   | undefined
-  | bigint
-  | symbol
-  | Function
   | ReadonlyArray<WireValue>
   | { readonly [key: string]: WireValue };
 
-// Generic, not `unknown`: the walk is parametric in what it is handed — any
-// member of a structurally-open resource — and decodes nothing.
-const toWireValue = <A>(value: A): WireValue => {
+/** An object a value's `toJSON` stands in for. */
+type ToJson = Extract<RuntimeValue, { readonly toJSON: unknown }>;
+
+const hasToJson = (value: object): value is ToJson =>
+  "toJSON" in value && typeof value.toJSON === "function";
+
+const toWireValue = (value: RuntimeValue): WireValue => {
   if (value instanceof Date) return value.toISOString();
   if (value instanceof URL) return value.href;
-  if (Array.isArray(value)) {
+  if (isRuntimeArray(value)) {
     return value.map((entry) => (entry === undefined ? null : toWireValue(entry)));
   }
-  if (value !== null && typeof value === "object") {
-    const toJson = (value as { readonly toJSON?: unknown }).toJSON;
-    if (typeof toJson === "function") return toWireValue(toJson.call(value));
-    const out: { [key: string]: WireValue } = {};
-    for (const [key, entry] of Object.entries(value)) {
-      // An own `__proto__` member (as `JSON.parse` gives) stays a member.
-      if (entry !== undefined) assign(out, key, toWireValue(entry));
-    }
-    return out;
+  if (value === null || typeof value !== "object") return value;
+  if (hasToJson(value)) return toWireValue(value.toJSON(""));
+  const out: { [key: string]: WireValue } = {};
+  for (const [key, entry] of Object.entries(value)) {
+    // An own `__proto__` member (as `JSON.parse` gives) stays a member.
+    if (entry !== undefined) assign(out, key, toWireValue(entry));
   }
-  // SAFETY: what is left is not an object — a JSON primitive or one of the
-  // leaves `WireValue` names.
-  return value as WireValue;
+  return out;
 };
+
+// `Array.isArray` narrows a `ReadonlyArray` member of a union to `any[]`.
+const isRuntimeArray = (value: RuntimeValue): value is ReadonlyArray<RuntimeValue> =>
+  Array.isArray(value);
+
+// A resource's members as one record: spreading widens the declared members
+// to an object type the walk accepts, and copies every own member at runtime.
+const members = (resource: ResourceLike): { readonly [key: string]: RuntimeValue } => ({
+  ...resource,
+});
 
 /**
  * Deep-coerces runtime-only values to their wire form — `Date` → ISO string,
@@ -697,7 +726,7 @@ export const toWireSafeResource = <R extends ResourceLike>(resource: R): R =>
   // SAFETY: the walk keeps every member of the resource, coercing only the
   // runtime-only leaves above; the signature promises `R` by design, since the
   // response encoder reads the coerced members as their own wire forms.
-  toWireValue(resource) as unknown as R;
+  toWireValue(members(resource)) as unknown as R;
 
 // ---------------------------------------------------------------------------
 // The pipeline
