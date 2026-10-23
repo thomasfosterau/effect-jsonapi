@@ -18,7 +18,8 @@ import { BlogLive, discardArticle } from "../handlers.js";
  * The rules this example is known to break, each with the issue tracking it.
  * Remove an entry when its issue is fixed; the test will tell you to. The read
  * rules have been clean since #169: the handlers of the reads that declare
- * `fields` (`GET /articles/:id` and `/search`) project `?fields[TYPE]=` with
+ * `fields` (`GET /articles/:id`, `/search` and, since #485,
+ * `GET /articles/:id/relationships/tags`) project `?fields[TYPE]=` with
  * `onResource: Handlers.project(query.fields)` and stamp `jsonapi:
  * Document.v1_1` on every `Handlers.data` / `collection` / `linkage` document
  * (the `Atomic.results` answer carries none). The write rules have been clean
@@ -158,10 +159,13 @@ describe("blog: JSON:API conformance", () => {
     // kit's compound probe asks it for `?include=tags`. Its primary data is
     // the tag identifiers and its `included` the tags they name: full linkage
     // starts from those identifiers, and a tag in both is no duplicate.
+    // #485: it declares `fields` too, so the `included` variant of the
+    // sparse-fieldset rule asks it for `?include=tags&fields[tags]=name`.
     const ids = [
       "spec/document/full-linkage",
       "spec/document/no-duplicate-resources",
       "spec/document/included-on-include",
+      "spec/query/sparse-fieldsets-included",
     ];
     expect(
       ids.map((id) => `${id}: ${report.outcomes.find((o) => o.rule.id === id)?._tag}`),

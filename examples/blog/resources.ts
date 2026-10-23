@@ -24,6 +24,8 @@ export const Person = Resource.make("people", {
 export const Tag = Resource.make("tags", {
   attributes: {
     name: Schema.NonEmptyString,
+    // A second attribute, so `?fields[tags]=name` has something to leave out.
+    slug: Schema.NonEmptyString,
   },
 });
 

@@ -1063,6 +1063,17 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
    * primary identifiers.
    */
   readonly included?: ReadonlyArray<I> | undefined;
+  /**
+   * Sparse fieldsets keyed by resource `type` to the attribute names the
+   * caller wants — the `query.fields` of an `Endpoint.getRelationship`
+   * declaring `fields`. Applied to the `included` members only: the primary
+   * data is resource identifiers, which have no fields to project (#485).
+   * Empty / missing means the full resources.
+   *
+   * @since 0.18.0
+   */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as `Options.fields` spells it
+  readonly fields?: Handlers.Fields | undefined;
 }
 
 /**
@@ -1076,6 +1087,10 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
  * child linking back to it and the document would fail full linkage (#444).
  * A client that needs the post-mutation parent fetches it.
  *
+ * Pass `fields` to apply a request's sparse fieldsets to the `included`
+ * members, as {@link resource} applies them to every resource it emits; the
+ * identifiers in `data` are left as they are.
+ *
  * @example
  * ```ts
  * import { Assemble } from "@thomasfosterau/effect-jsonapi"
@@ -1087,9 +1102,21 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
  * const document = Assemble.relationship({ parent: list, key: "items" })
  * console.log(document.data, document.included.length, document.links?.related)
  * // → [ { type: "books", id: "b1" } ] 0 https://example.test/lists/1/items
+ *
+ * // `?include=items&fields[books]=title`: the identifiers as they are, the
+ * // included book narrowed to its title
+ * const book = { type: "books", id: "b1", attributes: { title: "Dune", pages: 412 } }
+ * const sparse = Assemble.relationship({
+ *   parent: list,
+ *   key: "items",
+ *   included: [book],
+ *   fields: { books: ["title"] }
+ * })
+ * console.log(sparse.data, sparse.included[0]?.attributes)
+ * // → [ { type: "books", id: "b1" } ] { title: "Dune" }
  * ```
  *
- * @since 0.16.0
+ * @since 0.16.0 (`fields` since 0.18.0)
  * @category constructors
  */
 export const relationship = <R extends ResourceLike, I extends ResourceLike = R, V = unknown>(

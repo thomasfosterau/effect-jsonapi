@@ -444,6 +444,20 @@ const relationshipIncludable = (path: string): ReadonlyArray<string> =>
   Arr.fromNullishOr(/\/relationships\/([^/:][^/]*)$/.exec(path)?.[1]);
 
 /**
+ * The include paths an endpoint's compound probe asks for: its own
+ * relationship on a relationship endpoint ({@link relationshipIncludable}),
+ * else the relationships with inline linkage its bare response shows
+ * ({@link includableOf}).
+ */
+const compoundIncludable = (
+  endpoint: { readonly role: string; readonly path: string },
+  bare: Observation,
+): ReadonlyArray<string> =>
+  endpoint.role === "relationship"
+    ? relationshipIncludable(endpoint.path)
+    : includableOf(bare.body);
+
+/**
  * Every document the api will hand the kit for its read endpoints: a bare probe
  * per endpoint, plus a compound probe wherever `include` is declared and a
  * relationship with inline linkage can be learned from the bare response — or,
@@ -463,10 +477,7 @@ const documentProbes = (ctx: Context) =>
           const bare = yield* ctx.request({ url: path, headers: jsonApiAccept });
           out.push({ where: path, observation: bare });
           if (!endpoint.queryKeys.includes("include")) return;
-          const includable =
-            endpoint.role === "relationship"
-              ? relationshipIncludable(endpoint.path)
-              : includableOf(bare.body);
+          const includable = compoundIncludable(endpoint, bare);
           if (Arr.isReadonlyArrayEmpty(includable)) return;
           const url = withQuery(path, [["include", includable.join(",")]]);
           const compound = yield* ctx.request({ url, headers: jsonApiAccept });
@@ -1133,14 +1144,15 @@ const sparseFieldsets = (where: Slot): RuleImpl => {
               // Learn the attribute names this endpoint actually emits, then ask for
               // exactly the first one: a projection rule needs a field set the
               // server is known to be able to return. The `included` variant needs a
-              // compound document, so the baseline is taken with `include` on.
+              // compound document, so the baseline is taken with `include` on — on a
+              // relationship endpoint, its own relationship (#485).
               const baseline = yield* ctx.request({ url: path, headers: jsonApiAccept });
               probes += 1;
               let source = baseline;
               let base = path;
               if (where === "included") {
                 if (!endpoint.queryKeys.includes("include")) return;
-                const includable = includableOf(baseline.body);
+                const includable = compoundIncludable(endpoint, baseline);
                 if (Arr.isReadonlyArrayEmpty(includable)) return;
                 base = withQuery(path, [["include", includable.join(",")]]);
                 source = yield* ctx.request({ url: base, headers: jsonApiAccept });

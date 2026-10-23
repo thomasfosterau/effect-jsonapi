@@ -1,6 +1,7 @@
 /**
  * Compound relationship documents (#439): `Endpoint.getRelationship` with
- * `include` accepts `?include=` and serves `included` beside the linkage.
+ * `include` accepts `?include=` and serves `included` beside the linkage —
+ * and, with `fields` (#485), `?fields[TYPE]=` narrows those members.
  *
  * JSON:API 1.1 §Inclusion of Related Resources: "related resources can be
  * requested from a relationship endpoint: `GET
@@ -11,12 +12,19 @@
  *
  * The paths are the parent resource's, rooted at the relationship. The
  * type-level half is `test/relationship-include.types.ts`.
+ *
+ * §Sparse Fieldsets "applies to any endpoint that responds with resources as
+ * primary or included data". A relationship document's primary data is
+ * resource identifiers, which have no fields, so a fieldset narrows only its
+ * `included` members, and the types it can name are those the include paths
+ * reach — never the parent's own, which the document does not carry.
  */
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
@@ -39,7 +47,8 @@ const Person = Resource.make("people", {
   relationships: { employer: Relationship.one(() => Company) },
 });
 const Comment = Resource.make("comments", {
-  attributes: { body: Schema.String },
+  // Two attributes, so a sparse fieldset has one to leave out.
+  attributes: { body: Schema.String, postedAt: Schema.String },
   relationships: {
     author: Relationship.one(() => Person),
     // Paginated: never an include path.
@@ -60,7 +69,7 @@ const wire = {
   comments: {
     type: "comments",
     id: "5",
-    attributes: { body: "First" },
+    attributes: { body: "First", postedAt: "2026-01-01" },
     relationships: {
       author: { data: { type: "people", id: "9" } },
       revisions: { links: { related: "/comments/5/revisions" } },
@@ -227,12 +236,143 @@ describe("`getRelationship`'s `?include=` (#439)", () => {
   });
 });
 
+// An attribute of each type of the graph, the parent's included.
+const firstAttribute = {
+  articles: "title",
+  comments: "body",
+  people: "name",
+  companies: "name",
+  revisions: "editedAt",
+};
+
+// The `fields[TYPE]` parameters, among every type of the graph, an
+// endpoint's query decodes into a `fields` member (one it does not declare is
+// dropped; `Middleware` answers it with a 400, as the HTTP cases below show).
+const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<string> =>
+  Rec.toEntries(firstAttribute)
+    .filter(([type, attribute]) => {
+      const decoded = Schema.decodeUnknownExit(queryOf(endpoint))({
+        [`fields[${type}]`]: attribute,
+      });
+      return (
+        Exit.isSuccess(decoded) &&
+        Predicate.hasProperty(decoded.value, "fields") &&
+        Predicate.hasProperty(decoded.value.fields, type)
+      );
+    })
+    .map(([type]) => `fields[${type}]`)
+    .toSorted();
+
+// A wire resource object with only the named attributes.
+const narrowed = <T extends { readonly attributes: Rec.ReadonlyRecord<string, unknown> }>(
+  resource: T,
+  ...names: ReadonlyArray<string>
+) => ({
+  ...resource,
+  attributes: Rec.filter(resource.attributes, (_, key) => names.includes(key)),
+});
+
+describe("`getRelationship`'s `fields` (#485)", () => {
+  it("declares a fieldset for each type the include paths reach, and no other", () => {
+    // Not `articles`: the parent is no resource object of this document.
+    // Not `companies`: past depth 2. Not `revisions`: behind `paginated`.
+    const endpoint = Endpoint.getRelationship(Article, "comments", {
+      include: true,
+      fields: true,
+    });
+    expect(fieldsets(endpoint)).toEqual(["fields[comments]", "fields[people]"]);
+    // Positive control: the parent's own read declares its type.
+    expect(fieldsets(Endpoint.get(Article, { fields: true }))).toContain("fields[articles]");
+    const decoded = Schema.decodeUnknownSync(queryOf(endpoint))({
+      include: "comments.author",
+      "fields[comments]": "body",
+      "fields[people]": "name",
+    });
+    expect(decoded).toEqual({
+      include: ["comments.author"],
+      fields: { comments: ["body"], people: ["name"] },
+    });
+  });
+
+  it("follows the include option: `depth`, an allow-list, a surface, a to-one", () => {
+    expect(
+      fieldsets(
+        Endpoint.getRelationship(Article, "comments", { include: { depth: 3 }, fields: true }),
+      ),
+    ).toEqual(["fields[comments]", "fields[companies]", "fields[people]"]);
+    expect(
+      fieldsets(
+        Endpoint.getRelationship(Article, "comments", { include: { depth: 1 }, fields: true }),
+      ),
+    ).toEqual(["fields[comments]"]);
+    expect(
+      fieldsets(
+        Endpoint.getRelationship(Article, "comments", {
+          include: { paths: ["comments"] },
+          fields: true,
+        }),
+      ),
+    ).toEqual(["fields[comments]"]);
+    const surface = Include.make(Article, {
+      comments: Include.nested(Comment, { author: Person }),
+    });
+    expect(
+      fieldsets(Endpoint.getRelationship(Article, "comments", { include: surface, fields: true })),
+    ).toEqual(["fields[comments]", "fields[people]"]);
+    expect(
+      fieldsets(Endpoint.getRelationship(Article, "editor", { include: true, fields: true })),
+    ).toEqual(["fields[companies]", "fields[people]"]);
+  });
+
+  it("declares none without `include`, or on a `paginated` relationship", () => {
+    // Nothing can be included, so no resource object has fields to narrow.
+    expect(fieldsets(Endpoint.getRelationship(Article, "comments", { fields: true }))).toEqual([]);
+    expect(
+      fieldsets(Endpoint.getRelationship(Article, "history", { include: true, fields: true })),
+    ).toEqual([]);
+    expect(fieldsets(Endpoint.getRelationship(Article, "comments", { include: true }))).toEqual([]);
+  });
+
+  it("admits `included` members missing attributes, and leaves the identifiers alone", () => {
+    const sparse = Endpoint.getRelationship(Article, "comments", { include: true, fields: true });
+    const strict = Endpoint.getRelationship(Article, "comments", { include: true });
+    const document = { data: commentIds, included: [narrowed(wire.comments, "body")] };
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(successOf(sparse))(document))).toBe(true);
+    expect(Exit.isSuccess(Schema.decodeUnknownExit(successOf(strict))(document))).toBe(false);
+    // The union is unchanged otherwise: the same types, and still none
+    // without `include`.
+    expect(admitted(sparse, commentIds)).toEqual(["comments", "people"]);
+    expect(
+      admitted(Endpoint.getRelationship(Article, "comments", { fields: true }), commentIds),
+    ).toEqual([]);
+  });
+
+  it("`Assemble.relationship` applies `fields` to the `included` members only", () => {
+    const endpoint = Endpoint.getRelationship(Article, "comments", { include: true, fields: true });
+    const document = Assemble.relationship({
+      parent: {
+        type: "articles",
+        id: "1",
+        attributes: { title: "Hello" },
+        relationships: { comments: { data: commentIds } },
+      },
+      key: "comments",
+      included: [wire.comments, wire.people],
+      fields: { comments: ["body"], articles: [] },
+    });
+    expect(Schema.encodeUnknownSync(successOf(endpoint))(document)).toMatchObject({
+      data: commentIds,
+      included: [narrowed(wire.comments, "body"), wire.people],
+    });
+  });
+});
+
 describe("a compound relationship document served over HTTP (#439)", () => {
   const Api = HttpApi.make("relationshipInclude").add(
     Group.make(
       Article,
       Endpoint.get(Article),
-      Endpoint.getRelationship(Article, "comments", { include: true }),
+      Endpoint.getRelationship(Article, "comments", { include: true, fields: true }),
       Endpoint.getRelationship(Article, "editor"),
     ),
   );
@@ -244,7 +384,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
   });
   const comment = Comment.make({
     id: Comment.Id.make("5"),
-    attributes: { body: "First" },
+    attributes: { body: "First", postedAt: "2026-01-01" },
     relationships: {
       author: { data: Person.ref(person.id) },
       revisions: { links: { related: "/comments/5/revisions" } },
@@ -263,12 +403,17 @@ describe("a compound relationship document served over HTTP (#439)", () => {
 
   // Every `include` the relationship endpoint was asked for, in order.
   const requested: Array<ReadonlyArray<string> | undefined> = [];
+  // Every fieldset it was asked for, in order (#485).
+  const requestedFields: Array<Handlers.Fields> = [];
 
   const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     handlers
       .handle("get", () => Effect.succeed(Handlers.data(article)))
       .handle("commentsRelationship", ({ query }) =>
-        Effect.sync(() => requested.push(query.include)).pipe(
+        Effect.sync(() => {
+          requested.push(query.include);
+          if (query.fields !== undefined) requestedFields.push(query.fields);
+        }).pipe(
           Effect.as(
             Handlers.linkage([Comment.ref(comment.id)], {
               included:
@@ -278,6 +423,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
                       ...(Arr.isReadonlyArrayNonEmpty(query.include) ? [comment] : []),
                       ...(query.include.includes("comments.author") ? [person] : []),
                     ],
+              onResource: Handlers.project(query.fields),
             }),
           ),
         ),
@@ -297,6 +443,17 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     const text = await response.text();
     return { status: response.status, body: text === "" ? undefined : decodeJson(text) };
   };
+
+  // The kit's verdicts on the rules `only` names, run against this api.
+  const verify = (only: ReadonlyArray<string>) =>
+    Effect.runPromise(
+      // SAFETY: `ArticlesLive` and `Middleware.layer` provide every service the
+      // router needs; the platform services `verify` names are never used.
+      Conformance.verify(Api, { ids: { articles: "1" }, only }).pipe(
+        Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
+        Effect.scoped,
+      ) as Effect.Effect<Conformance.Report, never, never>,
+    );
 
   it("answers `include=comments.author` with the comments and their authors", async () => {
     const response = await serve("/articles/1/relationships/comments?include=comments.author");
@@ -341,21 +498,11 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     // The kit's compound probe asks a relationship endpoint declaring `include`
     // for its own relationship: `?include=comments` (#439).
     requested.length = 0;
-    const report = await Effect.runPromise(
-      // SAFETY: `ArticlesLive` and `Middleware.layer` provide every service the
-      // router needs; the platform services `verify` names are never used.
-      Conformance.verify(Api, {
-        ids: { articles: "1" },
-        only: [
-          "spec/document/full-linkage",
-          "spec/document/no-duplicate-resources",
-          "spec/document/included-on-include",
-        ],
-      }).pipe(
-        Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
-        Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
-    );
+    const report = await verify([
+      "spec/document/full-linkage",
+      "spec/document/no-duplicate-resources",
+      "spec/document/included-on-include",
+    ]);
     // `no-duplicate-resources` needs two resource objects in one document to
     // compare, which `?include=comments` (one comment) does not give it, so
     // it may skip; it must not fail on the identifier the member shares.
@@ -365,5 +512,40 @@ describe("a compound relationship document served over HTTP (#439)", () => {
       "spec/document/included-on-include: Passed",
     ]);
     expect(requested).toContainEqual(["comments"]);
+  });
+
+  it("answers `fields[comments]` by narrowing the included comments alone (#485)", async () => {
+    const response = await serve(
+      "/articles/1/relationships/comments?include=comments.author&fields[comments]=body",
+    );
+    expect(response).toEqual({
+      status: 200,
+      body: { data: commentIds, included: [narrowed(wire.comments, "body"), wire.people] },
+    });
+  });
+
+  it("answers a fieldset for the parent's type with a 400 (#485)", async () => {
+    // The parent is no resource object of a relationship document.
+    const response = await serve("/articles/1/relationships/comments?fields[articles]=title");
+    expect(response.status).toBe(400);
+    expect(response.body).toMatchObject({
+      errors: [{ status: "400", source: { parameter: "fields[articles]" } }],
+    });
+  });
+
+  it("passes the sparse-fieldset rule on its `included` members, which the kit probes it for", async () => {
+    // #485: the only endpoint declaring `fields`, so the rule can only be
+    // judged here: `?include=comments&fields[comments]=body`.
+    requestedFields.length = 0;
+    const report = await verify([
+      "spec/query/sparse-fieldsets-primary",
+      "spec/query/sparse-fieldsets-included",
+    ]);
+    // Its primary data is identifiers, which carry no attributes to project.
+    expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
+      "spec/query/sparse-fieldsets-primary: Skipped",
+      "spec/query/sparse-fieldsets-included: Passed",
+    ]);
+    expect(requestedFields).toContainEqual({ comments: ["body"] });
   });
 });

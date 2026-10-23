@@ -98,10 +98,11 @@ import * as Relationship from "./Relationship.js";
 import type { Relationships } from "./Relationship.js";
 import type {
   DeclaresSurface,
+  ExpandFamilies,
   IncludedResources,
   IncludeEnabled,
 } from "./internal/includeGraph.js";
-import { includedResources, includePathsFor } from "./internal/includeGraph.js";
+import { expandFamilies, includedResources, includePathsFor } from "./internal/includeGraph.js";
 import type {
   IncludeArgument,
   ResourceStruct,
@@ -1819,9 +1820,13 @@ export type LinkageData<R extends Any, Name extends string> =
  * whose `data` member matches the relationship's kind. When `Include` turns
  * `?include=` on ({@link getRelationship}), it is a compound document whose
  * optional `included` admits {@link RelationshipIncludedOf}; otherwise it has
- * no `included` member.
+ * no `included` member. When `Fields` is `true` as well (the endpoint
+ * declares `fields`), every `included` member whose type a fieldset names
+ * admits any subset of its attributes, so a projected answer encodes
+ * (§Sparse Fieldsets). The primary data is identifiers, which carry no
+ * attributes to project, so it is unchanged.
  *
- * @since 0.1.0 (`Include` since 0.18.0)
+ * @since 0.1.0 (`Include` and `Fields` since 0.18.0)
  * @category type-level
  */
 export type RelationshipSuccess<
@@ -1829,10 +1834,20 @@ export type RelationshipSuccess<
   Name extends string,
   DocMeta extends Schema.Top,
   Include = false,
+  Fields = false,
 > = LinkageDocument<
   AsSchema<LinkageData<R, Name>>,
   DocMeta,
-  AsSchema<RelationshipIncludedOf<R, Name, Include>>
+  AsSchema<
+    [Fields] extends [true]
+      ? IncludeEnabled<Include> extends true
+        ? SparseUnion<
+            RelationshipIncludedMembers<R, Name, Include>,
+            RelationshipFieldsetTypes<R, Name, Include>
+          >
+        : typeof Schema.Never
+      : RelationshipIncludedOf<R, Name, Include>
+  >
 >;
 
 // The paths of `P` rooted at the relationship `Name`: `Name` itself and every
@@ -1932,6 +1947,41 @@ export type RelationshipIncludedOf<R extends Any, Name extends string, Include> 
       ? U
       : RelationshipIncluded<R, Name, Include>
     : typeof Schema.Never;
+
+// The members of a compound relationship document's `included` union
+// (`RelationshipIncludedOf`): a declared surface's own, else every resource a
+// legal path reaches from the parent.
+type RelationshipIncludedMembers<R extends Any, Name extends string, Include> = Include extends {
+  readonly included: { readonly members: ReadonlyArray<infer M> };
+}
+  ? M
+  : ResolveIncludePath<R, RelationshipIncludePaths<R, Name, Include>>;
+
+/**
+ * The wire types `?fields[TYPE]=` can name on a {@link getRelationship} over
+ * `R`'s relationship `Name` that declares `fields`: every type a legal
+ * {@link RelationshipIncludePaths} path reaches — the relationship's target
+ * and every resource further along each path, a `Resource.family` replaced
+ * by its members — and no other. The primary data is resource identifiers,
+ * to which a sparse fieldset does not apply, so the parent's own type is not
+ * among them unless a path reaches it; `never` while `include` is off. Under
+ * `include: true` on a `comments` relationship whose target has an `author`:
+ * `"comments" | "people"`.
+ *
+ * @since 0.18.0
+ * @category type-level
+ */
+export type RelationshipFieldsetTypes<R extends Any, Name extends string, Include> = ExpandFamilies<
+  ResolveIncludePath<R, RelationshipIncludePaths<R, Name, Include>>
+>["type"];
+
+// The `fields` option `getRelationship` hands `Query.schema` over the parent
+// resource: the types the rooted paths reach as an allow-list, else off.
+type RelationshipQueryFields<R extends Any, Name extends string, Include, Fields> = [
+  Fields,
+] extends [true]
+  ? ReadonlyArray<RelationshipFieldsetTypes<R, Name, Include>>
+  : false;
 
 // The `include` option `getRelationship` hands `Query.schema` over the parent
 // resource: a declared surface as it stands (its paths are all rooted at the
@@ -2242,6 +2292,18 @@ export const related = <
  * `paginated` relationship is never an include path, so it has none to
  * legalise.
  *
+ * Enable `fields` beside `include` for sparse fieldsets on the `included`
+ * members (§Sparse Fieldsets applies to "any endpoint that responds with
+ * resources as primary or included data"): `?fields[TYPE]=` is declared for
+ * every type a legal include path reaches ({@link RelationshipFieldsetTypes}),
+ * and those members admit any subset of their attributes, so a handler can
+ * answer with `Handlers.linkage(ids, { included, onResource:
+ * Handlers.project(query.fields) })`. The primary data is identifiers, which
+ * have no fields, so `fields[<target type>]` narrows only the `included`
+ * members of that type, and the parent's own type has no fieldset unless a
+ * path reaches it. Without `include` nothing can be included, so `fields`
+ * declares none.
+ *
  * @example
  * ```ts
  * import { Schema } from "effect"
@@ -2278,10 +2340,12 @@ export const related = <
  *     page: Query.Page.Offset,
  *     errors: [ArticleNotFound]
  *   }),
- *   // GET /articles/:id/relationships/replies?include=replies.author — a
- *   // compound relationship document: `replies` and `replies.author` are legal
+ *   // GET /articles/:id/relationships/replies?include=replies.author&fields[people]=firstName
+ *   // — a compound relationship document: `replies` and `replies.author` are
+ *   // legal, and `fields[comments]` / `fields[people]` narrow its `included`
  *   Endpoint.getRelationship(Article, "replies", {
  *     include: true,
+ *     fields: true,
  *     errors: [ArticleNotFound]
  *   })
  * )
@@ -2289,7 +2353,8 @@ export const related = <
  *
  * @see {@link https://jsonapi.org/format/1.1/#fetching-relationships}
  * @see {@link https://jsonapi.org/format/1.1/#fetching-includes}
- * @since 0.1.0 (`include` since 0.18.0)
+ * @see {@link https://jsonapi.org/format/1.1/#fetching-sparse-fieldsets}
+ * @since 0.1.0 (`include` and `fields` since 0.18.0)
  * @category constructors
  */
 export const getRelationship = <
@@ -2308,6 +2373,7 @@ export const getRelationship = <
     Resource<Type, Attributes, Rels, Meta, IdSchema>,
     Name
   > = false,
+  const Fields extends boolean = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   name: Name,
@@ -2327,6 +2393,17 @@ export const getRelationship = <
      * @since 0.18.0
      */
     readonly include?: Include;
+    /**
+     * Enable `?fields[TYPE]=` sparse fieldsets for the `included` members:
+     * every type a legal `include` path reaches. Those members then admit
+     * any subset of their attributes, so a handler can answer with
+     * `Handlers.project(query.fields)` — and a client decodes those
+     * attributes as optional. The primary identifiers are unaffected, and
+     * without `include` no type is declared.
+     *
+     * @since 0.18.0
+     */
+    readonly fields?: Fields;
   },
 ) => {
   type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
@@ -2336,20 +2413,31 @@ export const getRelationship = <
   // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
   const include = options?.include as IncludeArgument | undefined;
   const includable = relationshipIncludePaths(resource, name, include);
-  // A declared surface's own union, else every resource the rooted paths
-  // reach from the parent — the target first. Absent while `include` is off,
-  // so the document has no `included` member.
-  const included = Option.map(includable, (paths) =>
-    isSurface(include)
-      ? include.included
-      : Schema.Union(includedResources([resource], true, paths)),
-  );
+  // Every resource the rooted paths reach from the parent — the target first.
+  const reached = Option.map(includable, (paths) => includedResources([resource], true, paths));
+  // The wire types `fields` declares: those the reached resources carry, a
+  // family's members in its place (`RelationshipFieldsetTypes`). None while
+  // `include` or `fields` is off.
+  const fieldsetNames =
+    options?.fields === true
+      ? Option.match(reached, {
+          onNone: () => [],
+          onSome: (resources) => Arr.dedupe(expandFamilies(resources).map((r) => r.type)),
+        })
+      : [];
+  // A declared surface's own union, else the reached resources'. Absent while
+  // `include` is off, so the document has no `included` member; with `fields`,
+  // every member a fieldset names is partial (#485).
+  const included = Option.map(reached, (resources) => {
+    const union = isSurface(include) ? include.included : Schema.Union(resources);
+    return options?.fields === true ? sparseUnion(union, fieldsetNames) : union;
+  });
   // SAFETY: `linkageData` mirrors `LinkageData` kind by kind, and `included`
-  // mirrors `RelationshipIncludedOf`.
+  // mirrors `RelationshipSuccess`'s `included` union.
   const success = LinkageDocument(linkageData(descriptor, target), {
     meta: (options?.meta ?? AnyMeta) as DocMeta,
     included: Option.getOrUndefined(included),
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta, Include>;
+  }) as unknown as RelationshipSuccess<R, Name, DocMeta, Include, Fields>;
 
   return HttpApiEndpoint.get(
     (options?.name ?? `${name}Relationship`) as EndpointName,
@@ -2367,13 +2455,15 @@ export const getRelationship = <
             onNone: () => false,
             onSome: (paths) => (isSurface(include) ? include : { paths }),
           }),
-          fields: false,
+          // An allow-list: the query is the parent's, whose own fieldset
+          // types (the parent, its direct targets) the document never carries.
+          fields: options?.fields === true ? fieldsetNames : false,
           sort: false,
           page: options?.page,
           filter: undefined,
         } as {
           readonly include: RelationshipQueryInclude<R, Name, Include>;
-          readonly fields: false;
+          readonly fields: RelationshipQueryFields<R, Name, Include, Fields>;
           readonly sort: false;
           readonly page: PageFields;
           readonly filter: undefined;
@@ -3821,7 +3911,9 @@ const relationshipConfig = (
 
 // A generated `getRelationship`'s `include` option: absent while it is off,
 // so the endpoint is exactly the one built without it.
-const includeOpt = (include: unknown): Record<string, unknown> =>
+const includeOpt = (
+  include: IncludeArgument | undefined,
+): { readonly include?: IncludeArgument } =>
   include === undefined || include === false ? {} : { include };
 
 // An op's own value under `key` when it sets one (even `undefined`), else the
@@ -4146,7 +4238,13 @@ export const resource = <
       // Off unless asked for: the relationship's own `relationshipInclude`,
       // else the top-level one. On a `paginated` relationship it legalises
       // no path (`getRelationship` derives none), and never throws.
-      const relationshipInclude = pick(relConfig, "relationshipInclude", gRelInclude);
+      // SAFETY: a `RelationshipConfig`'s `relationshipInclude` is a
+      // `RelationshipIncludeOption` and the top-level one a
+      // `ResourceRelationshipIncludeOption`; each is an `IncludeArgument` at
+      // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
+      const relationshipInclude = pick(relConfig, "relationshipInclude", gRelInclude) as
+        | IncludeArgument
+        | undefined;
       endpoints.push(
         getRelationship(
           resource,

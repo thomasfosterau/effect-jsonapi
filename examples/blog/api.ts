@@ -120,12 +120,16 @@ export const articles = Group.make(
     page: Pagination,
     errors: [ArticleNotFound],
   }),
-  // GET /articles/:id/relationships/tags?include=tags — a compound relationship
-  // document: the tag identifiers as `data`, the tags themselves in `included`.
-  // Include paths are the article's, rooted at `tags`; the paginated
-  // `comments` relationship is never an include path, so it has none.
+  // GET /articles/:id/relationships/tags?include=tags&fields[tags]=name — a
+  // compound relationship document: the tag identifiers as `data`, the tags
+  // themselves in `included`. Include paths are the article's, rooted at
+  // `tags`; the paginated `comments` relationship is never an include path,
+  // so it has none. `fields` declares `fields[tags]` alone — the one type
+  // those paths reach — and narrows only the `included` tags: the
+  // identifiers have no fields to project.
   Endpoint.getRelationship(Article, "tags", {
     include: true,
+    fields: true,
     errors: [ArticleNotFound],
   }),
   // PATCH /articles/:id/relationships/author — replace the author (never null: `one`)
