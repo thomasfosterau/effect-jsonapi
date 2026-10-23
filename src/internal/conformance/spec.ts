@@ -648,7 +648,7 @@ const fullLinkage: RuleImpl = {
       check: (body, observation, where) => {
         // The request's `fields[TYPE]` carry the spec's one exemption (#494).
         const fields = Linkage.requestedFieldsets(new URLSearchParams(where.split("?")[1] ?? ""));
-        const orphans = isRecord(body) ? Linkage.unlinkedIncluded(body, fields) : [];
+        const orphans = isJsonObject(body) ? Linkage.unlinkedIncluded(body, fields) : [];
         return Arr.isReadonlyArrayEmpty(orphans)
           ? []
           : [

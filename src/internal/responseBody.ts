@@ -15,7 +15,7 @@ import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
-import { isRecord, unlinkedIncluded } from "./linkage.js";
+import { isJsonObject, unlinkedIncluded } from "./linkage.js";
 
 /**
  * The response text of a body whose bytes are already settled — everything the
@@ -95,16 +95,21 @@ export const withCreatedLocation = (
 
 // One member of a label: a string as itself, anything else through
 // `Formatter.format`, since parsed JSON can put an object with its own
-// `toString` member there and `String` would throw on it.
-const part = <A>(value: A): string => (Predicate.isString(value) ? value : Formatter.format(value));
+// `toString` member there and `String` would throw on it. A member the object
+// lacks reads as `undefined` at runtime (the index signature does not say so),
+// which `Formatter.format` shows as such.
+const part = (value: Schema.Json): string =>
+  Predicate.isString(value) ? value : Formatter.format(value);
+
+// The body text as a JSON value, for the linkage walk. Stricter than
+// `parseJson` (a non-finite number is not JSON), which costs nothing here: the
+// router writes these bodies with `JSON.stringify`, which never emits one.
+const parseJsonValue = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 
 // A member as `type:id` (or `type:lid`) for the violation message, as the
 // document builders name one.
-const label = (member: {
-  readonly type?: unknown;
-  readonly id?: unknown;
-  readonly lid?: unknown;
-}): string => `${part(member.type)}:${part(member.id ?? member.lid)}`;
+const label = (member: Schema.JsonObject): string =>
+  `${part(member["type"])}:${part(member["id"] ?? member["lid"])}`;
 
 /**
  * The `included` members of a 2xx response's encoded document that its primary
@@ -128,8 +133,9 @@ export const unlinkedOnWire = (
   // Cheap pre-filter: a document with no `included` member can't violate it,
   // so most responses are never parsed a second time.
   if (text === undefined || !text.includes('"included"')) return [];
-  return Option.match(parseJson(text), {
+  return Option.match(parseJsonValue(text), {
     onNone: () => [],
-    onSome: (document) => (isRecord(document) ? unlinkedIncluded(document, fields).map(label) : []),
+    onSome: (document) =>
+      isJsonObject(document) ? unlinkedIncluded(document, fields).map(label) : [],
   });
 };
