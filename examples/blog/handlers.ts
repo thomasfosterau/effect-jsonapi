@@ -23,6 +23,7 @@
  * required.
  */
 import { Effect, Layer, Match } from "effect";
+import * as Arr from "effect/Array";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
@@ -173,6 +174,28 @@ const articleComments = (articleId: string): Array<Comment> =>
     return comment === undefined ? [] : [comment];
   });
 
+// One offset page of an article's comments, shared by the related collection
+// and the relationship endpoint: the page, the bounds it was cut at and the
+// collection's total.
+const articleCommentPage = (
+  articleId: string,
+  request: { readonly offset?: number; readonly limit?: number } | undefined,
+) => {
+  const all = articleComments(articleId);
+  const total = all.length;
+  const offset = request?.offset ?? 0;
+  const limit = request?.limit ?? total;
+  return { page: all.slice(offset, offset + limit), offset, limit, total };
+};
+
+// The authors of some comments, for `include=author` / `include=comments.author`.
+const commentAuthors = (comments: ReadonlyArray<Comment>): Array<Person> =>
+  comments.flatMap((comment) => {
+    const authorId = comment.relationships?.author.data.id;
+    const author = authorId === undefined ? undefined : store.people.get(authorId);
+    return author === undefined ? [] : [author];
+  });
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -304,21 +327,14 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("comments", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          const all = articleComments(article.id);
-          const total = all.length;
-          const offset = query.page?.offset ?? 0;
-          const limit = query.page?.limit ?? total;
-          const page = all.slice(offset, offset + limit);
+          const { page, offset, limit, total } = articleCommentPage(article.id, query.page);
           const path = Handlers.relatedLink("articles", article.id, "comments");
           return Handlers.collection(page, {
             included:
               query.include === undefined
                 ? undefined
                 : query.include.includes("author")
-                  ? page.flatMap((comment) => {
-                      const author = store.people.get(comment.relationships!.author.data.id);
-                      return author === undefined ? [] : [author];
-                    })
+                  ? commentAuthors(page)
                   : [],
             meta: { total },
             links: Handlers.offsetPaginationLinks(path, { offset, limit }, total, {
@@ -333,16 +349,28 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("commentsRelationship", ({ params, query }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          const all = articleComments(article.id).map((comment) => Comment.ref(comment.id));
-          const total = all.length;
-          const offset = query.page?.offset ?? 0;
-          const limit = query.page?.limit ?? total;
-          return Handlers.linkage(all.slice(offset, offset + limit), {
-            self: Handlers.relationshipLink("articles", article.id, "comments"),
-            related: Handlers.relatedLink("articles", article.id, "comments"),
-            meta: { total },
-            jsonapi: Document.v1_1,
-          });
+          const { page, total } = articleCommentPage(article.id, query.page);
+          const include = query.include;
+          return Handlers.linkage(
+            page.map((comment) => Comment.ref(comment.id)),
+            {
+              // `undefined` without `?include=` (no `included` member). With it,
+              // the comments on *this page*, never the whole relationship —
+              // `Handlers.linkage` checks full linkage from the page's
+              // identifiers — and, for `comments.author`, their authors.
+              included:
+                include === undefined
+                  ? undefined
+                  : [
+                      ...(Arr.isReadonlyArrayNonEmpty(include) ? page : []),
+                      ...(include.includes("comments.author") ? commentAuthors(page) : []),
+                    ],
+              self: Handlers.relationshipLink("articles", article.id, "comments"),
+              related: Handlers.relatedLink("articles", article.id, "comments"),
+              meta: { total },
+              jsonapi: Document.v1_1,
+            },
+          );
         }),
       ),
     )

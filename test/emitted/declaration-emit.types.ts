@@ -53,6 +53,12 @@ const Article = Resource.make("articles", {
     comments: Relationship.many(() => Comment),
   },
 });
+// A paginated relationship, whose own endpoint derives its paths over
+// `Endpoint.RelationshipIncludeBase` (#483).
+const Thread = Resource.make("threads", {
+  attributes: { subject: Schema.String },
+  relationships: { comments: Relationship.paginated(() => Comment) },
+});
 const Node = Resource.make("nodes", { attributes: { label: Schema.String } });
 const Editor = Resource.extend(Node, "editors", { inheritId: true });
 const Reviewer = Resource.extend(Node, "reviewers", { inheritId: true });
@@ -94,6 +100,13 @@ export const getRelationshipInclude = Endpoint.getRelationship(Article, "comment
 export const getRelationshipFields = Endpoint.getRelationship(Article, "comments", {
   include: true,
   fields: true,
+});
+export const getPaginatedRelationshipFields = Endpoint.getRelationship(Thread, "comments", {
+  include: true,
+  fields: true,
+});
+export const groupPaginatedRelationshipInclude = Group.resource(Thread, {
+  relationshipInclude: { depth: 3 },
 });
 export const updateRelationship = Endpoint.updateRelationship(Article, "comments");
 export const addRelationship = Endpoint.addRelationship(Article, "comments");

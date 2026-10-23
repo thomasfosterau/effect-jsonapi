@@ -1776,7 +1776,9 @@ const applyToLinkage = (
  * `included` is no duplicate), and full linkage is checked from the
  * identifiers themselves — each member must be one the linkage names or be
  * reachable from one through other members' relationships. Empty linkage
- * (`null`, `[]`) reaches nothing, so any member then fails the check.
+ * (`null`, `[]`) reaches nothing, so any member then fails the check. On a
+ * `paginated` relationship the identifiers are one page, so the check holds
+ * `included` to that page: a resource only another page names fails it.
  *
  * As with {@link data}, `jsonapi` is only emitted, and only narrows into the
  * return type, when you pass it — see {@link data} for why it is opt-in.

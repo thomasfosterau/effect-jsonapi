@@ -36,6 +36,9 @@ type Equals<A, B> =
 
 const Play = Resource.make("plays", {
   attributes: { playedAt: Schema.String, seconds: Schema.Number },
+  // Reached through the paginated `plays` on its own relationship endpoint
+  // (#483). Declared before `Track`, so behind a thunk.
+  relationships: { track: Relationship.one(() => Track) },
 });
 const Label = Resource.make("labels", {
   attributes: { title: Schema.String, founded: Schema.Number },
@@ -170,10 +173,52 @@ assertType<SuccessOf<typeof curator>>(
   Handlers.linkage(Artist.ref(artist.id), { included: [artist] }),
 );
 
-// A `paginated` relationship is no include path of its parent: none is legal.
+// A `paginated` relationship is no include path of its parent, but on its
+// own relationship endpoint its linkage is the primary data, so its name and
+// the paths rooted at it are legal (#483) — as for a `many`.
 export const plays = Endpoint.getRelationship(Playlist, "plays", { include: true });
-assertType<Equals<Endpoint.RelationshipIncludePaths<typeof Playlist, "plays", true>, never>>(true);
-assertType<Equals<IncludedOf<typeof plays>, never>>(true);
+assertType<
+  Equals<Endpoint.RelationshipIncludePaths<typeof Playlist, "plays", true>, "plays" | "plays.track">
+>(true);
+assertType<Equals<IncludeOf<typeof plays>, ReadonlyArray<"plays" | "plays.track">>>(true);
+assertType<Equals<IncludedOf<typeof plays>, typeof Play.Type | typeof Track.Type>>(true);
+const play = Play.make({
+  id: Play.Id.make("7"),
+  attributes: { playedAt: "2026-01-01", seconds: 30 },
+  relationships: { track: { data: Track.ref(track.id) } },
+});
+assertType<SuccessOf<typeof plays>>(
+  Handlers.linkage([Play.ref(play.id)], { included: [play, track] }),
+);
+// `artists` is three hops from the parent: on no depth-2 path.
+// @ts-expect-error -- `artists` is not in the endpoint's `included` union
+assertType<SuccessOf<typeof plays>>(Handlers.linkage([Play.ref(play.id)], { included: [artist] }));
+// …but `{ depth }`, counted from the parent as for a `many`, reaches it.
+export const deepPlays = Endpoint.getRelationship(Playlist, "plays", { include: { depth: 3 } });
+assertType<
+  Equals<IncludeOf<typeof deepPlays>, ReadonlyArray<"plays" | "plays.track" | "plays.track.artist">>
+>(true);
+assertType<
+  Equals<IncludedOf<typeof deepPlays>, typeof Play.Type | typeof Track.Type | typeof Artist.Type>
+>(true);
+export const shallowPlays = Endpoint.getRelationship(Playlist, "plays", {
+  include: { depth: 1 },
+});
+assertType<Equals<IncludeOf<typeof shallowPlays>, ReadonlyArray<"plays">>>(true);
+assertType<Equals<IncludedOf<typeof shallowPlays>, typeof Play.Type>>(true);
+// An allow-list of paths rooted at the relationship, as for a `many`.
+export const listedPlays = Endpoint.getRelationship(Playlist, "plays", {
+  include: { paths: ["plays.track.artist"] },
+});
+assertType<Equals<IncludeOf<typeof listedPlays>, ReadonlyArray<"plays.track.artist">>>(true);
+assertType<
+  Equals<IncludedOf<typeof listedPlays>, typeof Play.Type | typeof Track.Type | typeof Artist.Type>
+>(true);
+// @ts-expect-error -- `tracks` is the parent's path, but not rooted at `plays`
+Endpoint.getRelationship(Playlist, "plays", { include: { paths: ["tracks"] } });
+// The parent's other include paths still never cross `plays`.
+// @ts-expect-error -- `plays` is no include path of the parent's own read
+Endpoint.get(Playlist, { include: { paths: ["plays"] } });
 
 // ---------------------------------------------------------------------------
 // `Document.LinkageDocument`'s `included`
@@ -243,8 +288,9 @@ const tooDeepResource = Handlers.linkage(trackIds, {
 });
 // @ts-expect-error -- `labels` is not in the endpoint's `included` union
 assertType<SuccessOf<AllTracks>>(tooDeepResource);
-// A `paginated` relationship has no include paths: the setting legalises none.
-assertType<Equals<IncludedOf<AllPlays>, never>>(true);
+// A `paginated` relationship's paths are rooted at it, as a `many`'s are (#483).
+assertType<Equals<IncludeOf<AllPlays>, ReadonlyArray<"plays" | "plays.track">>>(true);
+assertType<Equals<IncludedOf<AllPlays>, typeof Play.Type | typeof Track.Type>>(true);
 
 // A `{ depth }` bound applies to every relationship.
 const deepResource = Endpoint.resource(Playlist, { relationshipInclude: { depth: 3 } });
@@ -279,6 +325,19 @@ assertType<Equals<IncludeOf<PerTracks>, ReadonlyArray<"tracks">>>(true);
 assertType<Equals<IncludedOf<PerTracks>, typeof Track.Type>>(true);
 assertType<HasIncluded<Named<typeof perRelationship, "curatorRelationship">>>(false);
 assertType<HasInclude<Named<typeof perRelationship, "curatorRelationship">>>(false);
+assertType<
+  Equals<
+    IncludeOf<Named<typeof perRelationship, "playsRelationship">>,
+    ReadonlyArray<"plays" | "plays.track">
+  >
+>(true);
+Endpoint.resource(Playlist, {
+  relationships: { plays: { relationshipInclude: { paths: ["plays.track"] } } },
+});
+Endpoint.resource(Playlist, {
+  // @ts-expect-error -- `tracks` is not rooted at `plays`
+  relationships: { plays: { relationshipInclude: { paths: ["tracks"] } } },
+});
 
 // A declared surface over the parent, rooted at the relationship.
 const surfacedResource = Endpoint.resource(Playlist, {
@@ -375,6 +434,22 @@ export const sparseCurator = Endpoint.getRelationship(Playlist, "curator", {
   fields: true,
 });
 assertType<Equals<keyof FieldsOf<typeof sparseCurator>, "artists" | "labels">>(true);
+// A `paginated` relationship declares the types its rooted paths reach (#483).
+export const sparsePlays = Endpoint.getRelationship(Playlist, "plays", {
+  include: true,
+  fields: true,
+});
+assertType<Equals<keyof FieldsOf<typeof sparsePlays>, "plays" | "tracks">>(true);
+assertType<
+  Equals<Endpoint.RelationshipFieldsetTypes<typeof Playlist, "plays", true>, "plays" | "tracks">
+>(true);
+assertType<FieldsOf<typeof sparsePlays>>({ plays: ["seconds"], tracks: ["title"] });
+// @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
+assertType<FieldsOf<typeof sparsePlays>>({ playlists: ["name"] });
+type SparsePlay = Extract<IncludedOf<typeof sparsePlays>, { readonly type: "plays" }>;
+assertType<
+  Equals<SparsePlay["attributes"], { readonly playedAt?: string; readonly seconds?: number }>
+>(true);
 
 // Without `include` nothing is included, so `fields` declares no fieldset.
 export const fieldsOnly = Endpoint.getRelationship(Playlist, "tracks", { fields: true });
@@ -442,8 +517,11 @@ assertType<
 >(true);
 // @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
 assertType<FieldsOf<SparseResourceTracks>>({ playlists: ["name"] });
-// A `paginated` relationship has no include paths, so no fieldset.
-assertType<HasFields<Named<typeof sparseResource, "playsRelationship">>>(false);
+// A `paginated` relationship's paths are rooted at it, as a `many`'s are
+// (#483), so it declares the types they reach.
+assertType<
+  Equals<keyof FieldsOf<Named<typeof sparseResource, "playsRelationship">>, "plays" | "tracks">
+>(true);
 
 // Per relationship: an override off, an opt-in alone, and the paths it follows.
 const perRelationshipFields = Endpoint.resource(Playlist, {

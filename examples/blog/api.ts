@@ -115,16 +115,20 @@ export const articles = Group.make(
     errors: [ArticleNotFound],
   }),
   // --- Relationship (linkage) endpoints ---------------------------------------
-  // GET /articles/:id/relationships/comments — comment identifiers, paginated
+  // GET /articles/:id/relationships/comments?include=comments.author — comment
+  // identifiers, paginated, and (with `?include=`) the comments on the page and
+  // their authors: the spec's own example. `comments` is paginated, so it is
+  // no include path of the article, but on its own relationship endpoint its
+  // name and the paths rooted at it are legal (#483).
   Endpoint.getRelationship(Article, "comments", {
     page: Pagination,
+    include: true,
     errors: [ArticleNotFound],
   }),
   // GET /articles/:id/relationships/tags?include=tags&fields[tags]=name — a
   // compound relationship document: the tag identifiers as `data`, the tags
   // themselves in `included`. Include paths are the article's, rooted at
-  // `tags`; the paginated `comments` relationship is never an include path,
-  // so it has none. `fields` declares `fields[tags]` alone — the one type
+  // `tags`. `fields` declares `fields[tags]` alone — the one type
   // those paths reach — and narrows only the `included` tags: the
   // identifiers have no fields to project.
   Endpoint.getRelationship(Article, "tags", {
