@@ -406,3 +406,87 @@ assertType<
 const noneListed = Query.schema(Playlist, { include: true, fields: [] });
 assertType<Equals<FlatFieldsets<typeof noneListed>, never>>(true);
 assertType<"fields" extends keyof typeof noneListed.Type ? true : false>(false);
+
+// ---------------------------------------------------------------------------
+// `relationshipFields` on the endpoints `Endpoint.resource` / `Group.resource`
+// generate (#489): the top-level default sets `fields` on every generated
+// `getRelationship`, a relationship's own overrides it, and without either
+// nothing changes. The runtime half is
+// `src/Endpoint.resourceRelationshipInclude.test.ts`.
+// ---------------------------------------------------------------------------
+
+// The default: no fieldsets, strict members — even under the top-level
+// `fields`, which governs `get`, `list` and the `related` endpoints.
+const includeOnly = Endpoint.resource(Playlist, { relationshipInclude: true, fields: true });
+type IncludeOnlyTracks = Named<typeof includeOnly, "tracksRelationship">;
+assertType<HasFields<IncludeOnlyTracks>>(false);
+// @ts-expect-error -- `relationshipFields` is off: the members' attributes are required
+assertType<SuccessOf<IncludeOnlyTracks>>(projected);
+assertType<HasFields<Named<typeof includeOnly, "tracks">>>(true);
+
+const sparseResource = Endpoint.resource(Playlist, {
+  relationshipInclude: true,
+  relationshipFields: true,
+});
+type SparseResourceTracks = Named<typeof sparseResource, "tracksRelationship">;
+assertType<Equals<keyof FieldsOf<SparseResourceTracks>, "tracks" | "artists">>(true);
+assertType<
+  Equals<keyof FieldsOf<Named<typeof sparseResource, "curatorRelationship">>, "artists" | "labels">
+>(true);
+// The generated handler admits partial `included` members: a projected answer.
+assertType<SuccessOf<SparseResourceTracks>>(projected);
+assertType<SuccessOf<SparseResourceTracks>>(Handlers.linkage(trackIds));
+type SparseResourceTrack = Extract<IncludedOf<SparseResourceTracks>, { readonly type: "tracks" }>;
+assertType<
+  Equals<SparseResourceTrack["attributes"], { readonly title?: string; readonly seconds?: number }>
+>(true);
+// @ts-expect-error -- `playlists` is the parent's type: no resource object of this document
+assertType<FieldsOf<SparseResourceTracks>>({ playlists: ["name"] });
+// A `paginated` relationship has no include paths, so no fieldset.
+assertType<HasFields<Named<typeof sparseResource, "playsRelationship">>>(false);
+
+// Per relationship: an override off, an opt-in alone, and the paths it follows.
+const perRelationshipFields = Endpoint.resource(Playlist, {
+  relationshipInclude: true,
+  relationships: {
+    tracks: { relationshipInclude: { paths: ["tracks"] }, relationshipFields: true },
+    curator: { relationshipFields: false },
+  },
+});
+assertType<
+  Equals<keyof FieldsOf<Named<typeof perRelationshipFields, "tracksRelationship">>, "tracks">
+>(true);
+assertType<HasFields<Named<typeof perRelationshipFields, "curatorRelationship">>>(false);
+const overridden = Endpoint.resource(Playlist, {
+  relationshipInclude: true,
+  relationshipFields: true,
+  relationships: { tracks: { relationshipFields: false } },
+});
+assertType<HasFields<Named<typeof overridden, "tracksRelationship">>>(false);
+assertType<HasFields<Named<typeof overridden, "curatorRelationship">>>(true);
+
+// Without `relationshipInclude` nothing is included, so no fieldset.
+const fieldsWithoutInclude = Endpoint.resource(Playlist, { relationshipFields: true });
+assertType<HasFields<Named<typeof fieldsWithoutInclude, "tracksRelationship">>>(false);
+assertType<HasIncluded<Named<typeof fieldsWithoutInclude, "tracksRelationship">>>(false);
+
+// The option is a boolean.
+// @ts-expect-error -- `relationshipFields` takes no allow-list
+Endpoint.resource(Playlist, { relationshipFields: ["tracks"] });
+
+// `Group.resource` threads it through.
+const sparseGroup = Group.resource(Playlist, {
+  relationshipInclude: true,
+  relationshipFields: true,
+  relationships: { curator: { relationshipFields: false } },
+});
+type SparseGroupEndpoints = HttpApiGroup.Endpoints<typeof sparseGroup>;
+type SparseGroupTracks = Extract<
+  SparseGroupEndpoints,
+  { readonly identifier: "tracksRelationship" }
+>;
+assertType<Equals<keyof FieldsOf<SparseGroupTracks>, "tracks" | "artists">>(true);
+assertType<SuccessOf<SparseGroupTracks>>(projected);
+assertType<
+  HasFields<Extract<SparseGroupEndpoints, { readonly identifier: "curatorRelationship" }>>
+>(false);

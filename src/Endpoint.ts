@@ -3090,12 +3090,12 @@ export interface EndpointsOption<R extends Any, Meta extends Schema.Top> {
  * Per-relationship configuration for a relationship's generated endpoints.
  *
  * `include`, `fields` and `sort` configure the `related` endpoint, whose
- * paths are its target's; `relationshipInclude` configures the
- * `getRelationship` endpoint, whose paths are the parent's rooted at the
- * relationship (see {@link getRelationship}), overriding
- * {@link ResourceOptions}' `relationshipInclude`.
+ * paths are its target's; `relationshipInclude` and `relationshipFields`
+ * configure the `getRelationship` endpoint, whose paths are the parent's
+ * rooted at the relationship (see {@link getRelationship}), overriding
+ * {@link ResourceOptions}' options of the same names.
  *
- * @since 0.1.0 (`relationshipInclude` since 0.18.0)
+ * @since 0.1.0 (`relationshipInclude` and `relationshipFields` since 0.18.0)
  * @category models
  */
 export interface RelationshipConfig<R extends Any = Any, Name extends string = string> {
@@ -3114,6 +3114,16 @@ export interface RelationshipConfig<R extends Any = Any, Name extends string = s
    * @since 0.18.0
    */
   readonly relationshipInclude?: RelationshipIncludeOption<R, Name>;
+  /**
+   * The `fields` option of this relationship's generated `getRelationship`
+   * endpoint: `true` declares `?fields[TYPE]=` for every type its include
+   * paths reach and makes those `included` members partial. Overrides the
+   * top-level `relationshipFields`; `false` turns it off here. Without
+   * `relationshipInclude` nothing is included, so it declares no fieldset.
+   *
+   * @since 0.18.0
+   */
+  readonly relationshipFields?: boolean;
 }
 
 /**
@@ -3526,6 +3536,12 @@ type RelRelationshipInclude<R extends Any, K extends string, RC, GRelInclude> =
       ? I
       : false
     : false;
+// The `fields` option a generated `getRelationship` takes: the relationship's
+// own `relationshipFields`, else the top-level one.
+type RelRelationshipFields<RC, GRelFields extends boolean> =
+  FieldOr<RC, "relationshipFields", GRelFields> extends boolean
+    ? FieldOr<RC, "relationshipFields", GRelFields>
+    : GRelFields;
 type RelPage<RC, GPage extends Schema.Struct.Fields | undefined> =
   FieldOr<RC, "page", GPage> extends Schema.Struct.Fields | undefined
     ? FieldOr<RC, "page", GPage>
@@ -3598,6 +3614,7 @@ type GeneratedRelationships<
   GSort,
   GPage extends Schema.Struct.Fields | undefined,
   GRelInclude = false,
+  GRelFields extends boolean = false,
 > =
   | {
       readonly [K in RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>]: EmitRel<
@@ -3639,7 +3656,8 @@ type GeneratedRelationships<
                     K,
                     RelConfigObject<RO, K>,
                     GRelInclude
-                  >
+                  >,
+                  RelRelationshipFields<RelConfigObject<RO, K>, GRelFields>
                 >
               >
             | ReturnType<
@@ -3720,6 +3738,7 @@ export type ResourceEndpoint<
   GMeta,
   GIdem extends Idempotency.Option = false,
   GRelInclude extends ResourceRelationshipIncludeOption = false,
+  GRelFields extends boolean = false,
 > =
   | GeneratedGet<Type, Attributes, Rels, Meta, IdSchema, Endpoints, Errors, Include, Fields, GMeta>
   | GeneratedList<
@@ -3752,7 +3771,8 @@ export type ResourceEndpoint<
       Fields,
       Sort,
       Page,
-      GRelInclude
+      GRelInclude,
+      GRelFields
     >;
 
 /**
@@ -3780,6 +3800,7 @@ export type ResourceEndpoints<
   GMeta,
   GIdem extends Idempotency.Option = false,
   GRelInclude extends ResourceRelationshipIncludeOption = false,
+  GRelFields extends boolean = false,
 > = NonEmpty<
   ResourceEndpoint<
     Type,
@@ -3797,7 +3818,8 @@ export type ResourceEndpoints<
     Filter,
     GMeta,
     GIdem,
-    GRelInclude
+    GRelInclude,
+    GRelFields
   >
 >;
 
@@ -3833,6 +3855,7 @@ export interface ResourceOptions<
   GMeta extends Schema.Top,
   GIdem extends Idempotency.Option = false,
   GRelInclude extends ResourceRelationshipIncludeOption = false,
+  GRelFields extends boolean = false,
 > {
   /** Which CRUD endpoints to emit and how to configure each. Defaults to all five. */
   readonly endpoints?: Endpoints;
@@ -3864,6 +3887,21 @@ export interface ResourceOptions<
    * @since 0.18.0
    */
   readonly relationshipInclude?: GRelInclude;
+  /**
+   * Enable `?fields[TYPE]=` sparse fieldsets on every generated
+   * `getRelationship` endpoint's `included` members, as
+   * {@link getRelationship}'s `fields` does: each type that relationship's
+   * include paths reach gets a fieldset, and its members admit any subset of
+   * their attributes, so a handler can answer with `Handlers.project`. It
+   * pairs with `relationshipInclude` as `fields` pairs with `include` (an
+   * endpoint without include paths declares no fieldset). Defaults to
+   * `false` — independent of the top-level `fields`, which governs `get`,
+   * `list` and the `related` endpoints — and is overridable per relationship
+   * (`relationships: { comments: { relationshipFields: … } }`).
+   *
+   * @since 0.18.0
+   */
+  readonly relationshipFields?: GRelFields;
   /**
    * Enable `?fields[TYPE]=` sparse fieldsets. Defaults to `true`, which makes
    * the attributes of the read endpoints' default documents optional (see
@@ -3898,16 +3936,17 @@ export interface ResourceOptions<
 // when it is omitted (`false`), else its config object (`{}` when it is
 // absent or `true`).
 const relationshipConfig = (
-  relMap: Readonly<Record<string, unknown>>,
+  relMap: RelationshipsMap,
   name: string,
-): Option.Option<Record<string, unknown>> => {
+): Option.Option<RelationshipConfig> => {
   const value = relMap[name];
   if (value === false) return Option.none();
-  // SAFETY: a non-boolean `RelationshipsOption` entry is a `RelationshipConfig`.
-  return Option.some(
-    value === undefined || value === true ? {} : (value as Record<string, unknown>),
-  );
+  return Option.some(value === undefined || value === true ? {} : value);
 };
+
+// The `relationships` map as `resource` reads it at runtime: each entry a
+// shorthand or a `RelationshipConfig`, whatever relationship it names.
+type RelationshipsMap = Readonly<Record<string, boolean | RelationshipConfig | undefined>>;
 
 // A generated `getRelationship`'s `include` option: absent while it is off,
 // so the endpoint is exactly the one built without it.
@@ -3916,10 +3955,31 @@ const includeOpt = (
 ): { readonly include?: IncludeArgument } =>
   include === undefined || include === false ? {} : { include };
 
+// A generated `getRelationship`'s compound-document options. Each is off
+// unless asked for: the relationship's own `relationshipInclude` /
+// `relationshipFields`, else the top-level one. On a `paginated` relationship
+// `include` legalises no path (`getRelationship` derives none) and never
+// throws; with no include paths `fields` declares no fieldset, so `false`
+// builds exactly the endpoint built without it.
+const compoundOpts = (relConfig: RelationshipConfig, defaults: CompoundDefaults = {}) => ({
+  ...includeOpt(pick(relConfig, "relationshipInclude", defaults.relationshipInclude)),
+  fields: pick(relConfig, "relationshipFields", defaults.relationshipFields) === true,
+});
+
+// The top-level options `compoundOpts` falls back to, whatever `resource`'s
+// type arguments.
+interface CompoundDefaults {
+  readonly relationshipInclude?: ResourceRelationshipIncludeOption;
+  readonly relationshipFields?: boolean;
+}
+
 // An op's own value under `key` when it sets one (even `undefined`), else the
 // top-level default.
-const pick = <V>(config: Readonly<Record<string, V>>, key: string, fallback: NoInfer<V>): V =>
-  key in config ? config[key] : fallback;
+const pick = <C extends object, K extends keyof C & string, F>(
+  config: C,
+  key: K,
+  fallback: F,
+): C[K] | F => (key in config ? config[key] : fallback);
 
 /**
  * Generates the entire JSON:API endpoint set for a resource definition — the
@@ -3937,8 +3997,9 @@ const pick = <V>(config: Readonly<Record<string, V>>, key: string, fallback: NoI
  *   - enables `include`, `fields` and `sort` (derived from the graph & attributes)
  *   - leaves `page` and `filter` off (their semantics are application-defined)
  *   - applies `errors` to every generated endpoint, overridable per endpoint / relationship
- *   - leaves `include` off on the `getRelationship` endpoints (turn it on with
- *     `relationshipInclude`, top-level or per relationship)
+ *   - leaves `include` and `fields` off on the `getRelationship` endpoints
+ *     (turn them on with `relationshipInclude` and `relationshipFields`,
+ *     top-level or per relationship)
  *
  * @example
  * ```ts
@@ -3973,8 +4034,10 @@ const pick = <V>(config: Readonly<Record<string, V>>, key: string, fallback: NoI
  *     page: Query.Page.Offset,
  *     // compound relationship documents on the generated relationship
  *     // endpoints: GET /articles/:id/relationships/author?include=author
- *     // (the paginated `comments` has no include paths, so legalises none)
+ *     // (the paginated `comments` has no include paths, so legalises none),
+ *     // with sparse fieldsets on their `included` members: &fields[people]=firstName
  *     relationshipInclude: true,
+ *     relationshipFields: true,
  *     // per-endpoint config overrides the top-level defaults:
  *     endpoints: {
  *       create: { errors: [TitleTaken] },
@@ -3986,7 +4049,7 @@ const pick = <V>(config: Readonly<Record<string, V>>, key: string, fallback: NoI
  * const Api = HttpApi.make("blog").add(articles)
  * ```
  *
- * @since 0.1.0 (`relationshipInclude` since 0.18.0)
+ * @since 0.1.0 (`relationshipInclude` and `relationshipFields` since 0.18.0)
  * @category constructors
  */
 export const resource = <
@@ -4012,6 +4075,7 @@ export const resource = <
   const GMeta extends Schema.Top = Meta,
   const GIdem extends Idempotency.Option = false,
   const GRelInclude extends ResourceRelationshipIncludeOption = false,
+  const GRelFields extends boolean = false,
 >(
   resource: Parameter<Type, Attributes, Rels, Meta, IdSchema>,
   options?: ResourceOptions<
@@ -4030,7 +4094,8 @@ export const resource = <
     Filter,
     GMeta,
     GIdem,
-    GRelInclude
+    GRelInclude,
+    GRelFields
   >,
 ): ResourceEndpoints<
   Type,
@@ -4048,10 +4113,10 @@ export const resource = <
   Filter,
   GMeta,
   GIdem,
-  GRelInclude
+  GRelInclude,
+  GRelFields
 > => {
   const gInclude = options?.include ?? true;
-  const gRelInclude: unknown = options?.relationshipInclude;
   const gFields = options?.fields ?? true;
   const gSort = options?.sort ?? true;
   const gPage = options?.page;
@@ -4204,8 +4269,11 @@ export const resource = <
 
   if (relationshipsOpt !== false) {
     // `true` configures nothing per relationship: every one is emitted.
+    // SAFETY: a `RelationshipsOption` map's entries are shorthands or
+    // `RelationshipConfig`s over this resource, each of which is a
+    // `RelationshipConfig` over any.
     const relMap =
-      typeof relationshipsOpt === "object" ? (relationshipsOpt as Record<string, unknown>) : {};
+      typeof relationshipsOpt === "object" ? (relationshipsOpt as RelationshipsMap) : {};
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
     for (const name of Object.keys(relationships)) {
       const captured = relationshipConfig(relMap, name);
@@ -4235,23 +4303,13 @@ export const resource = <
           } as never,
         ),
       );
-      // Off unless asked for: the relationship's own `relationshipInclude`,
-      // else the top-level one. On a `paginated` relationship it legalises
-      // no path (`getRelationship` derives none), and never throws.
-      // SAFETY: a `RelationshipConfig`'s `relationshipInclude` is a
-      // `RelationshipIncludeOption` and the top-level one a
-      // `ResourceRelationshipIncludeOption`; each is an `IncludeArgument` at
-      // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
-      const relationshipInclude = pick(relConfig, "relationshipInclude", gRelInclude) as
-        | IncludeArgument
-        | undefined;
       endpoints.push(
         getRelationship(
           resource,
           name as never,
           {
             ...(toMany && page !== undefined ? { page } : {}),
-            ...includeOpt(relationshipInclude),
+            ...compoundOpts(relConfig, options),
             ...errorOpt,
           } as never,
         ),
@@ -4280,7 +4338,8 @@ export const resource = <
     Filter,
     GMeta,
     GIdem,
-    GRelInclude
+    GRelInclude,
+    GRelFields
   >;
 };
 
