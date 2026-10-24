@@ -1147,7 +1147,11 @@ describe("Query.validateIncludePaths", () => {
       Effect.flip(Query.validateIncludePaths(["comments.author.employer"], options)),
     );
     expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-    expect(thrown).toMatchObject({ path: "comments.author.employer", maxDepth: 2 });
+    expect(thrown).toMatchObject({
+      path: "comments.author.employer",
+      maxDepth: 2,
+      includablePaths: options.includable,
+    });
   });
 
   it("checks depth before membership: an over-deep, non-includable path fails as depth, not membership", () => {

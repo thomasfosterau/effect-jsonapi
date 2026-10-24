@@ -312,6 +312,12 @@ describe("Assemble.resource", () => {
       Effect.flip(Assemble.resource(person("p1"), { include: ["a.b.c.d"], includable: ["a"] })),
     );
     expect(deep).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+    // The 400 names the legal paths, as the membership error does (#512).
+    expect(ApiError.toDocument(deep).errors[0]?.meta).toEqual({
+      path: "a.b.c.d",
+      maxDepth: 3,
+      includablePaths: ["a"],
+    });
     const shallow = Effect.runSync(
       Effect.flip(
         Assemble.resource(person("p1"), { include: ["a.b"], includable: ["a"], depth: 1 }),
