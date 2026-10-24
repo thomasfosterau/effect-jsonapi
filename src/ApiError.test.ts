@@ -288,10 +288,11 @@ describe("query-parameter errors", () => {
     );
   });
 
-  it("UnsupportedIncludeDepth encodes source.parameter, the requested path and the depth cap", () => {
+  it("UnsupportedIncludeDepth encodes source.parameter, the requested path, the depth cap and the includable set", () => {
     const error = new ApiError.UnsupportedIncludeDepth({
       path: "comments.author.employer",
       maxDepth: 2,
+      includablePaths: ["author", "comments", "comments.author"],
     });
     const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(error);
     expect(wire).toEqual({
@@ -300,21 +301,43 @@ describe("query-parameter errors", () => {
           status: "400",
           code: "unsupported.include-depth",
           title: "Unsupported Include Depth",
-          detail: 'Include path "comments.author.employer" exceeds the maximum include depth of 2',
+          detail:
+            'Include path "comments.author.employer" exceeds the maximum include depth of 2; supported paths: author, comments, comments.author',
           source: { parameter: "include" },
-          meta: { path: "comments.author.employer", maxDepth: 2 },
+          meta: {
+            path: "comments.author.employer",
+            maxDepth: 2,
+            includablePaths: ["author", "comments", "comments.author"],
+          },
         },
       ],
     });
   });
 
   it("UnsupportedIncludeDepth meta round-trips through the wire schema", () => {
-    const original = new ApiError.UnsupportedIncludeDepth({ path: "a.b.c", maxDepth: 2 });
+    const original = new ApiError.UnsupportedIncludeDepth({
+      path: "a.b.c",
+      maxDepth: 2,
+      includablePaths: ["a", "a.b"],
+    });
     const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(original);
     const decoded = Schema.decodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(wire);
     expect(decoded).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
     expect(decoded.path).toBe("a.b.c");
     expect(decoded.maxDepth).toBe(2);
+    expect(decoded.includablePaths).toEqual(["a", "a.b"]);
+  });
+
+  it("UnsupportedIncludeDepth's detail says (none) for an empty includable set", () => {
+    const error = new ApiError.UnsupportedIncludeDepth({
+      path: "a.b",
+      maxDepth: 1,
+      includablePaths: [],
+    });
+    const wire = Schema.encodeUnknownSync(ApiError.UnsupportedIncludeDepth.wire)(error);
+    expect(wire.errors[0]?.detail).toBe(
+      'Include path "a.b" exceeds the maximum include depth of 1; supported paths: (none)',
+    );
   });
 
   it("UnsupportedSortField encodes source.parameter, the requested field and the sortable set", () => {
