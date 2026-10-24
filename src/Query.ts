@@ -1014,7 +1014,11 @@ export interface ValidateIncludePathsOptions {
  *   includable: ["author", "comments"],
  *   maxDepth: 2
  * }).pipe(Effect.flip, Effect.runSync)
- * // → UnsupportedIncludeDepth({ path: "comments.author.employer", maxDepth: 2 })
+ * // → UnsupportedIncludeDepth({
+ * //     path: "comments.author.employer",
+ * //     maxDepth: 2,
+ * //     includablePaths: ["author", "comments"]
+ * //   })
  * ```
  *
  * @since 0.15.0
@@ -1038,7 +1042,11 @@ export const validateIncludePaths = (
       const segments = path.split(".");
       if (segments.length > options.maxDepth) {
         return Effect.fail(
-          new ApiError.UnsupportedIncludeDepth({ path, maxDepth: options.maxDepth }),
+          new ApiError.UnsupportedIncludeDepth({
+            path,
+            maxDepth: options.maxDepth,
+            includablePaths: options.includable,
+          }),
         );
       }
       if (!options.includable.includes(path)) {
