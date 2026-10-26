@@ -62,7 +62,7 @@ catalog:
   # (#205). Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.55.0
+  "@effect/tsgo": 0.57.0
   "@mpsuesser/oxlint-plugin-effect": ^0.6.0
   "@types/node": ^26.4.1
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
@@ -97,7 +97,7 @@ catalog:
   # every resolution to the catalog singleton. 1.3.0 carries oxlint 1.88.0 and
   # oxlint-tsgolint 7.0.2004, both in @effect/tsgo 0.55.0's components table,
   # and vitest 5.0.5. Releases up to 1.0.0 are affected by GHSA-587h-7wmj-h5pm.
-  vite-plus: 1.3.0
+  vite-plus: 1.4.0
   vite: npm:@voidzero-dev/vite-plus-core@1.3.0
   vitest: 5.0.5
 
