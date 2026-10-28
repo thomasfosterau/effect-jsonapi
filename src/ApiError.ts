@@ -492,19 +492,27 @@ export class UnsupportedIncludePath extends make<UnsupportedIncludePath>()(
  * told about the cap, not told its path doesn't exist. A validator checking
  * both should check depth first — see {@link Query.validateIncludePaths}.
  *
+ * `meta.includablePaths` carries the endpoint's whole supported set, as on
+ * {@link UnsupportedIncludePath}, so a caller that over-nested a path learns
+ * which paths it may retry with.
+ *
  * @example
  * ```ts
  * import { ApiError } from "@thomasfosterau/effect-jsonapi"
  *
- * const error = new ApiError.UnsupportedIncludeDepth({ path: "author.employer.address", maxDepth: 2 })
+ * const error = new ApiError.UnsupportedIncludeDepth({
+ *   path: "author.employer.address",
+ *   maxDepth: 2,
+ *   includablePaths: ["author", "author.employer"]
+ * })
  * ApiError.toDocument(error)
  * // → { errors: [{
  * //      status: "400",
  * //      code: "unsupported.include-depth",
  * //      title: "Unsupported Include Depth",
- * //      detail: "Include path \"author.employer.address\" exceeds the maximum include depth of 2",
+ * //      detail: "Include path \"author.employer.address\" exceeds the maximum include depth of 2; supported paths: author, author.employer",
  * //      source: { parameter: "include" },
- * //      meta: { path: "author.employer.address", maxDepth: 2 }
+ * //      meta: { path: "author.employer.address", maxDepth: 2, includablePaths: ["author", "author.employer"] }
  * //    }] }
  * ```
  *
@@ -520,8 +528,13 @@ export class UnsupportedIncludeDepth extends make<UnsupportedIncludeDepth>()(
     fields: {
       path: Schema.String,
       maxDepth: Schema.Number,
+      includablePaths: Schema.Array(Schema.String),
     },
-    detail: (e) => `Include path "${e.path}" exceeds the maximum include depth of ${e.maxDepth}`,
+    detail: (e) =>
+      `Include path "${e.path}" exceeds the maximum include depth of ${e.maxDepth}; supported paths: ${Arr.match(
+        e.includablePaths,
+        { onEmpty: () => "(none)", onNonEmpty: (paths) => paths.join(", ") },
+      )}`,
     source: { parameter: "include" },
   },
 ) {}
