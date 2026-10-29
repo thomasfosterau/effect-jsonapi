@@ -36,8 +36,7 @@ describe("Filter", () => {
     expectTypeOf(Filter.Op.eq).toEqualTypeOf<"eq">();
     expectTypeOf(Filter.Op.in).toEqualTypeOf<"in">();
     expectTypeOf<(typeof Filter.Op)[keyof typeof Filter.Op]>().toEqualTypeOf<Filter.Operator>();
-    // @ts-expect-error a typo is a compile error
-    void Filter.Op.eqq;
+    // a typo is a compile error: test/rejected-calls.types.ts
   });
 
   it("narrows to the relationship subset, itself a schema", () => {
@@ -94,8 +93,9 @@ describe("Filter", () => {
       expect(() => Filter.able(["eq", "like" as never])).toThrow(
         /declares filter operator "like"; expected one of eq, ne, lt, lte, gt, gte, in, nin, isnull/,
       );
-      // @ts-expect-error an operator outside the core is a compile error
-      expect(() => Filter.able(["between"])).toThrow();
+      // also a compile error (test/rejected-calls.types.ts)
+      // SAFETY: deliberately ill-typed, to reach the definition-time check.
+      expect(() => Filter.able(["between" as never])).toThrow();
     });
 
     it("records an explicit literal codec, checked against the schema", () => {
@@ -114,8 +114,7 @@ describe("Filter", () => {
       expectTypeOf<(typeof point)[Filter.MarkerKey]>().toEqualTypeOf<
         Filter.Marker<"eq", { readonly x: number; readonly y: number }>
       >();
-      // @ts-expect-error a literal codec for another type does not fit the schema
-      void Schema.String.pipe(Filter.able(["eq"], { literal: PointFromString }));
+      // a literal codec for another type does not fit: test/rejected-calls.types.ts
     });
   });
 });
@@ -167,12 +166,8 @@ describe("Filter AST", () => {
     const tree: Filter.Ast<Fields> = Filter.and(Filter.gt("age", 18), Filter.eq("status", "open"));
     expectTypeOf(tree).toMatchTypeOf<Filter.Ast<Fields>>();
     expectTypeOf(Filter.not(Filter.or())).toMatchTypeOf<Filter.Not<Fields>>();
-    // @ts-expect-error an undeclared field is not a node of the tree
-    const bad: Filter.Ast<Fields> = Filter.eq("title", "x");
-    void bad;
-    // @ts-expect-error a literal of the wrong type is not a node of the tree
-    const badLiteral: Filter.Ast<Fields> = Filter.eq("age", "18");
-    void badLiteral;
+    // an undeclared field, or a literal of the wrong type, is not a node of
+    // the tree: test/rejected-calls.types.ts
     // the untyped Node admits anything
     expectTypeOf(Filter.eq("anything", new Date())).toMatchTypeOf<Filter.Node>();
     expectTypeOf<Filter.Node>().toEqualTypeOf<Filter.Ast>();

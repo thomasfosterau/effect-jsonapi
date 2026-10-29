@@ -91,10 +91,8 @@ describe("Resource.filterable / Resource.sortable", () => {
     expectTypeOf(declared.priceCents.literal.Encoded).toEqualTypeOf<string>();
     expectTypeOf(declared.supplier.literal.Type).toEqualTypeOf<typeof Supplier.Id.Type>();
     expectTypeOf(sortable(Product)).toEqualTypeOf<ReadonlyArray<"priceCents" | "updatedAt">>();
-    // @ts-expect-error an undeclared attribute is not a filterable key
-    expectTypeOf<FilterOperators<typeof Product, "name">>();
-    // @ts-expect-error an undeclared relationship is not a filterable key
-    expectTypeOf<FilterOperators<typeof Product, "maker">>();
+    // undeclared attributes and relationships are not filterable keys:
+    // test/rejected-calls.types.ts
   });
 
   it("rejects an attribute operator outside the closed core at definition time", () => {
@@ -928,14 +926,9 @@ describe("Resource.filterable / Resource.sortable", () => {
       expectTypeOf(filterable(R).sugared.literal.Type).toEqualTypeOf<string>();
       expectTypeOf(filterable(R).readOnly.literal.Type).toEqualTypeOf<string>();
       expectTypeOf(filterable(R).piped).toEqualTypeOf(filterable(R).sugared);
-      // @ts-expect-error a codec narrower than the attribute does not fit (pipeable form)
-      void Status.pipe(Filter.able(["eq"], { literal: Narrow }));
-      // @ts-expect-error a codec narrower than the attribute does not fit (sugar)
-      void attribute(Status, { filter: ["eq"], filterLiteral: Narrow });
-      // @ts-expect-error a codec narrower than the attribute does not fit (read-only sugar)
-      void readOnlyAttribute(Status, { filter: ["eq"], filterLiteral: Narrow });
-      // @ts-expect-error a codec for another type does not fit (sugar)
-      void attribute(Schema.Number, { filter: ["eq"], filterLiteral: Wide });
+      // a codec narrower than the attribute, or for another type, does not fit
+      // in any spelling: test/rejected-calls.types.ts
+      expect(Narrow).toBeDefined();
       // without an override the literal type is still the attribute's own
       expectTypeOf(
         filterable(Resource("own", { attributes: { s: attribute(Status, { filter: true }) } })).s
@@ -991,17 +984,18 @@ describe("Resource.filterable / Resource.sortable", () => {
     it("refuses the sugar on a schema already declared, rather than overriding it", () => {
       const filterDeclared = Schema.Number.pipe(Filter.able(["eq"]));
       const sortDeclared = Schema.Number.pipe(Sort.able());
-      // a compile error at the `schema` argument, and a definition-time throw
-      // @ts-expect-error a schema already Filter.able cannot take the `filter` sugar
-      expect(() => attribute(filterDeclared, { filter: ["gt"] })).toThrow(
+      // a compile error at the `schema` argument (test/rejected-calls.types.ts),
+      // and a definition-time throw, reached here through a widened schema
+      // SAFETY: widened on purpose, to reach the definition-time check.
+      expect(() => attribute(filterDeclared as Schema.Top, { filter: ["gt"] })).toThrow(
         /Resource\.attribute: the schema is already Filter\.able/,
       );
-      // @ts-expect-error a schema already Sort.able cannot take the `sort` sugar
-      expect(() => attribute(sortDeclared, { sort: true })).toThrow(
+      // SAFETY: widened on purpose, to reach the definition-time check.
+      expect(() => attribute(sortDeclared as Schema.Top, { sort: true })).toThrow(
         /Resource\.attribute: the schema is already Sort\.able/,
       );
-      // @ts-expect-error nor can readOnlyAttribute
-      expect(() => readOnlyAttribute(filterDeclared, { filter: true })).toThrow(
+      // SAFETY: widened on purpose, to reach the definition-time check.
+      expect(() => readOnlyAttribute(filterDeclared as Schema.Top, { filter: true })).toThrow(
         /already Filter\.able/,
       );
       // through a NullOr wrapper too

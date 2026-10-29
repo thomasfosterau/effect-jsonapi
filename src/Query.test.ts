@@ -1107,15 +1107,7 @@ describe("Query.canonical", () => {
     expectTypeOf(pairs).parameter(0).toEqualTypeOf<typeof query.Type>();
     expectTypeOf(canonical).returns.toEqualTypeOf<string>();
     expectTypeOf(pairs).returns.toEqualTypeOf<ReadonlyArray<Query.Pair>>();
-    const rejected = () => {
-      // @ts-expect-error — `limit` is a number once decoded
-      canonical({ page: { limit: "10" } });
-      // @ts-expect-error — not a legal include path
-      canonical({ include: ["publisher"] });
-      // @ts-expect-error — `filter` is the escape-hatch struct, not a tree
-      canonical({ filter: { status: "open" } });
-    };
-    expect(rejected).toBeTypeOf("function");
+    // the values it rejects are asserted in test/rejected-calls.types.ts
   });
 });
 
