@@ -22,8 +22,7 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import { Effect, Layer, Match } from "effect";
-import * as Arr from "effect/Array";
+import { Array as Arr, Effect, Layer, Match, Order } from "effect";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
@@ -226,12 +225,15 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
 
       // sort=-createdAt,title
       for (const term of [...(query.sort ?? [])].reverse()) {
-        const direction = term.direction === "desc" ? -1 : 1;
-        articles.sort((a, b) => {
+        const ascending = Order.make<(typeof articles)[number]>((a, b) => {
           const left = a.attributes[term.field];
           const right = b.attributes[term.field];
-          return (left < right ? -1 : left > right ? 1 : 0) * direction;
+          return left < right ? -1 : left > right ? 1 : 0;
         });
+        articles = Arr.sort(
+          articles,
+          term.direction === "desc" ? Order.flip(ascending) : ascending,
+        );
       }
 
       // page[offset]=0&page[limit]=10

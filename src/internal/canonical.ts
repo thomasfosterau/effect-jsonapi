@@ -7,8 +7,8 @@
  * @internal
  */
 import type { Schema } from "effect";
-import { Option, SchemaAST } from "effect";
-import { compareCodePoints, isFilterKey, keySegments } from "./filter.js";
+import { Array as Arr, Option, SchemaAST } from "effect";
+import { compareCodePoints, isFilterKey, keySegments, orderOf } from "./filter.js";
 
 /** One flat `(key, value)` query pair, both sides un-encoded. */
 export type Pair = readonly [key: string, value: string];
@@ -116,15 +116,22 @@ export const orderPairs = (
     Array<Pair>,
     Array<Pair>,
   ];
-  fields.sort(byKey);
-  if (!filter.some(([key]) => isGroupFormKey(key))) filter.sort(byKey);
+  const keyOrder = orderOf(byKey);
   const position = (key: string): number => {
     const index = declared.indexOf(key);
     return index === -1 ? Number.POSITIVE_INFINITY : index;
   };
-  page.sort((a, b) => position(a[0]) - position(b[0]) || byKey(a, b));
-  other.sort(byKey);
-  return [...include, ...fields, ...filter, ...sort, ...page, ...other];
+  return [
+    ...include,
+    ...Arr.sort(fields, keyOrder),
+    ...(filter.some(([key]) => isGroupFormKey(key)) ? filter : Arr.sort(filter, keyOrder)),
+    ...sort,
+    ...Arr.sort(
+      page,
+      orderOf<Pair>((a, b) => position(a[0]) - position(b[0]) || byKey(a, b)),
+    ),
+    ...Arr.sort(other, keyOrder),
+  ];
 };
 
 // RFC 3986 percent-encoding (`encodeURIComponent`: spaces are `%20`, never

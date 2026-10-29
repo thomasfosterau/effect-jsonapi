@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Order, Schema } from "effect";
 import * as Endpoint from "./Endpoint.js";
 import * as Handlers from "./Handlers.js";
 import * as Include from "./Include.js";
@@ -485,7 +485,9 @@ describe("feeding the resolver", () => {
     // same declaration — which is the whole point: nothing the resolver hoists
     // can be stripped on encode for want of an arm.
     const admitted = surface.included.members.map((member) => member.type);
-    expect([...new Set(resolved?.map((r) => r.type))].sort()).toEqual([...admitted].sort());
+    expect(Arr.sort([...new Set(resolved?.map((r) => r.type))], Order.String)).toEqual(
+      Arr.sort([...admitted], Order.String),
+    );
     // …and the union is not simply wide enough to admit anything.
     expect(admitted).not.toContain("tags");
   });

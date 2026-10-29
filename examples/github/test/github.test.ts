@@ -4,7 +4,17 @@
  * through the in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Effect,
+  Exit,
+  Order,
+  Predicate,
+  Record as Rec,
+  Result,
+  Schema,
+} from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Filter, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, IssuesQuery, SearchQuery } from "../api.js";
@@ -131,7 +141,7 @@ describe("github example: fetching", () => {
       }),
     );
 
-    const types = document.included?.map((resource) => resource.type).sort();
+    const types = Arr.sort(document.included?.map((resource) => resource.type) ?? [], Order.String);
     // repository (intermediate), its owner + the issue's author (deduplicated users), the labels
     expect(types).toEqual(["labels", "repositories", "users", "users"]);
   });
@@ -242,7 +252,10 @@ describe("github example: listing", () => {
       }),
     );
 
-    const names = document.data.map((repository) => repository.attributes.name).sort();
+    const names = Arr.sort(
+      document.data.map((repository) => repository.attributes.name),
+      Order.String,
+    );
     expect(names).toEqual(["Hello-World", "Spoon-Knife"]);
   });
 
@@ -703,8 +716,8 @@ describe("github example: related resource endpoints", () => {
 
     // Three comments by two distinct users → two deduplicated includes
     expect(document.data).toHaveLength(3);
-    const authors = document.included?.map((resource) => resource.id).sort();
-    expect(authors).toEqual([octocat.id, defunkt.id].sort());
+    const authors = Arr.sort(document.included?.map((resource) => resource.id) ?? [], Order.String);
+    expect(authors).toEqual(Arr.sort([octocat.id, defunkt.id], Order.String));
   });
 
   it("issues with no comments serve an empty related collection", async () => {
@@ -850,9 +863,12 @@ describe("github example: issue triage via relationship endpoints", () => {
           params: { id: issueId },
           payload: { data: [Label.ref(enhancementLabel.id)] },
         });
-        expect(added.data.map((identifier) => identifier.id).sort()).toEqual(
-          [bugLabel.id, enhancementLabel.id].sort(),
-        );
+        expect(
+          Arr.sort(
+            added.data.map((identifier) => identifier.id),
+            Order.String,
+          ),
+        ).toEqual(Arr.sort([bugLabel.id, enhancementLabel.id], Order.String));
 
         // Adding an already-present label is a no-op (spec: MUST NOT add it again)
         const addedTwice = yield* client.issues.addLabelsRelationship({
@@ -914,7 +930,7 @@ describe("github example: heterogeneous search", () => {
       }),
     );
 
-    const types = [...new Set(document.data.map((result) => result.type))].sort();
+    const types = Arr.sort([...new Set(document.data.map((result) => result.type))], Order.String);
     expect(types).toEqual(["issues", "repositories", "users"]);
 
     // the union is discriminated by the `type` tag; the endpoint declares

@@ -4,7 +4,17 @@
  * through the in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Effect,
+  Exit,
+  Order as Ord,
+  Predicate,
+  Record as Rec,
+  Result,
+  Schema,
+} from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client } from "@thomasfosterau/effect-jsonapi";
 import { Api, ProductsQuery, SearchQuery } from "../api.js";
@@ -102,10 +112,9 @@ describe("northwind example: fetching", () => {
       }),
     );
 
-    expect(document.included?.map((resource) => resource.type).sort()).toEqual([
-      "categories",
-      "suppliers",
-    ]);
+    expect(Arr.sort(document.included?.map((resource) => resource.type) ?? [], Ord.String)).toEqual(
+      ["categories", "suppliers"],
+    );
   });
 
   it("omits `included` when the request carries no `include` (#232)", async () => {
@@ -198,8 +207,16 @@ describe("northwind example: fetching", () => {
     // Three orders, three salespeople; only Nancy (10248) and Andrew (10250)
     // have territories.
     const keys = document.included?.map((resource) => `${resource.type}:${resource.id}`) ?? [];
-    expect(keys.filter((key) => key.startsWith("territories:")).sort()).toEqual(
-      [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"].sort(),
+    expect(
+      Arr.sort(
+        keys.filter((key) => key.startsWith("territories:")),
+        Ord.String,
+      ),
+    ).toEqual(
+      Arr.sort(
+        [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"],
+        Ord.String,
+      ),
     );
     expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
     expect(new Set(keys).size).toBe(keys.length);
@@ -267,9 +284,10 @@ describe("northwind example: listing & filtering", () => {
       }),
     );
 
-    const prices = document.data
-      .map((product) => product.attributes.unitPrice)
-      .sort((a, b) => a - b);
+    const prices = Arr.sort(
+      document.data.map((product) => product.attributes.unitPrice),
+      Ord.Number,
+    );
     expect(prices).toEqual([10, 18, 19]);
   });
 
@@ -736,7 +754,12 @@ describe("northwind example: related & relationship endpoints", () => {
           params: { id: employeeId },
           payload: { data: [Territory.ref(westboro.id), Territory.ref(boston.id)] },
         });
-        expect(assigned.data.map((ref) => ref.id).sort()).toEqual([westboro.id, boston.id].sort());
+        expect(
+          Arr.sort(
+            assigned.data.map((ref) => ref.id),
+            Ord.String,
+          ),
+        ).toEqual(Arr.sort([westboro.id, boston.id], Ord.String));
 
         // assigning an already-present territory is a no-op
         const assignedAgain = yield* client.employees.addTerritoriesRelationship({
@@ -792,7 +815,7 @@ describe("northwind example: heterogeneous search", () => {
       }),
     );
 
-    const types = [...new Set(document.data.map((result) => result.type))].sort();
+    const types = Arr.sort([...new Set(document.data.map((result) => result.type))], Ord.String);
     expect(types).toEqual(["customers", "products", "suppliers"]);
 
     // The endpoint declares `fields`, so a client reads each attribute as

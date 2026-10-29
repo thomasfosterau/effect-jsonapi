@@ -9,7 +9,7 @@
  * off this list.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Predicate } from "effect";
+import { Array as Arr, Effect, Order, Predicate } from "effect";
 import { HttpApiTest } from "effect/http-api";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
@@ -204,11 +204,16 @@ describe("northwind: JSON:API conformance", () => {
   });
 
   it("breaks exactly the rules that are already filed", () => {
-    const failing = report.outcomes
-      .filter((outcome) => Predicate.isTagged(outcome, "Failed"))
-      .map((outcome) => outcome.rule.id)
-      .sort();
-    const known = KNOWN_FAILURES.map(([id]) => id).sort();
+    const failing = Arr.sort(
+      report.outcomes
+        .filter((outcome) => Predicate.isTagged(outcome, "Failed"))
+        .map((outcome) => outcome.rule.id),
+      Order.String,
+    );
+    const known = Arr.sort(
+      KNOWN_FAILURES.map(([id]) => id),
+      Order.String,
+    );
 
     // The whole report is the assertion message, so a new failure explains itself.
     expect(failing, Conformance.format(report)).toEqual(known);

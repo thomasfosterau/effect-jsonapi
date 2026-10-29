@@ -28,7 +28,7 @@
  * @since 0.16.0
  */
 import type * as Context from "effect/Context";
-import { Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
+import { Array as Arr, Effect, FileSystem, Layer, Option, Order, Path, Schema } from "effect";
 import type { HttpServerResponse } from "effect/http";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
@@ -197,8 +197,8 @@ export const checkFamily = (api: ApiLike, family: Family): void => {
       message: `API family "${family.group}" has no group in the HttpApi`,
     });
   }
-  const endpointNames = Object.keys(group.endpoints).sort();
-  const handlerNames = Object.keys(family.handlers).sort();
+  const endpointNames = Arr.sort(Object.keys(group.endpoints), Order.String);
+  const handlerNames = Arr.sort(Object.keys(family.handlers), Order.String);
   if (endpointNames.join(",") !== handlerNames.join(",")) {
     throw new FamilyMismatch({
       group: family.group,

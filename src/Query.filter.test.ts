@@ -4,6 +4,7 @@ import {
   Effect,
   Layer,
   Match,
+  Order,
   Predicate,
   Result,
   Schema,
@@ -408,7 +409,7 @@ describe("Query.Filter: normal form", () => {
     expect(decode({ "filter[title][in]": "\u{1F600},！" })).toEqual(
       Filter.isIn("title", ["！", "\u{1F600}"]),
     );
-    expect(["\u{1F600}", "！"].sort()).toEqual(["\u{1F600}", "！"]);
+    expect(Arr.sort(["\u{1F600}", "！"], Order.String)).toEqual(["\u{1F600}", "！"]);
   });
 
   it("decode returns normal form, and encode normalises a hand-built tree", () => {

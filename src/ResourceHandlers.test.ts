@@ -7,7 +7,19 @@
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Order,
+  Schema,
+} from "effect";
 import * as ApiError from "./ApiError.js";
 import type * as Assemble from "./Assemble.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -859,7 +871,7 @@ describe("readOnly", () => {
       listQuery: peopleListQuery as ResourceHandlers.ListQuery<ListInput>,
       linkBase: Effect.succeed("https://example.test"),
     });
-    expect(Object.keys(handlers).sort()).toEqual(["get", "list"]);
+    expect(Arr.sort(Object.keys(handlers), Order.String)).toEqual(["get", "list"]);
     const document = await Effect.runPromise(handlers.get({ params: { id: ids(1) } }));
     expect(document.data.id).toBe(ids(1));
     expect(document.data).not.toHaveProperty("meta");
