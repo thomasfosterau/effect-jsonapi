@@ -1018,16 +1018,15 @@ export interface WireOptions<TM extends Schema.Top = never> {
 }
 
 const isStructLike = (
-  schema: unknown,
+  schema: Schema.Top,
 ): schema is Schema.Top & { readonly fields: { readonly [key: string]: Schema.Top } } =>
-  Schema.isSchema(schema) &&
   typeof (schema as { readonly fields?: unknown }).fields === "object" &&
   (schema as { readonly fields?: unknown }).fields !== null;
 
 const isUnionLike = (
-  schema: unknown,
+  schema: Schema.Top,
 ): schema is Schema.Top & { readonly members: ReadonlyArray<Schema.Top> } =>
-  Schema.isSchema(schema) && Array.isArray((schema as { readonly members?: unknown }).members);
+  Array.isArray((schema as { readonly members?: unknown }).members);
 
 /** The `_tag` of a schema's AST node, when it exposes one. */
 const astTag = (schema: Schema.Top): string | undefined =>
@@ -1214,7 +1213,7 @@ export const wire = <S extends Schema.Top, TM extends Schema.Top = never>(
     ) as unknown as WireSchema<S, TM>;
   }
   if (!isStructLike(schema)) return schema as unknown as WireSchema<S, TM>;
-  const fields: { [key: string]: Schema.Top } = { ...schema.fields };
+  const fields = { ...schema.fields };
   // `Resource.make` declares both blocks with `Schema.optionalKey`, so each is
   // unwrapped before its members are reachable and re-wrapped after.
   const links = fields["links"];

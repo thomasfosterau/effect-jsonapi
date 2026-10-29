@@ -129,7 +129,7 @@ export type WireResource<R extends ResourceLike> = Document.Wire<R> & {
  * @since 0.16.0
  * @category constants
  */
-export const JSONAPI_MEMBER: { readonly version: "1.1" } = { version: "1.1" };
+export const JSONAPI_MEMBER = { version: "1.1" } as const;
 
 /**
  * A single-resource document as {@link resource} assembles it, with the

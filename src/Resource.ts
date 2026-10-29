@@ -731,7 +731,7 @@ const isInputOnly = (field: Schema.Top): boolean => descriptorOf(field)?.resourc
 // kept as declared (a plain schema, or the descriptor's resource-object field —
 // the base schema, or an `optionalKey` of it for `resource: "optional"`). Used
 // by `make` for the resource `Schema.Struct`.
-const resourceAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+const resourceAttributeFields = (fields: Schema.Struct.Fields) => {
   const result: Record<string, Schema.Top> = {};
   for (const [key, field] of Object.entries(fields)) {
     if (isInputOnly(field as Schema.Top)) continue;
@@ -767,7 +767,7 @@ const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
  * @since 0.5.0
  * @category utils
  */
-export const createAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+export const createAttributeFields = (fields: Schema.Struct.Fields) => {
   const result: Record<string, Schema.Top> = {};
   for (const [key, field] of Object.entries(fields)) {
     const descriptor = descriptorOf(field as Schema.Top);
@@ -793,7 +793,7 @@ export const createAttributeFields = (fields: Schema.Struct.Fields): Record<stri
  * @since 0.5.0
  * @category utils
  */
-export const updateAttributeFields = (fields: Schema.Struct.Fields): Record<string, Schema.Top> => {
+export const updateAttributeFields = (fields: Schema.Struct.Fields) => {
   const result: Record<string, Schema.Top> = {};
   for (const [key, field] of Object.entries(fields)) {
     const descriptor = descriptorOf(field as Schema.Top);
@@ -2522,7 +2522,7 @@ const filterableFields = (
   type: string,
   fields: Schema.Struct.Fields,
   relationships: Relationships,
-): Record<string, RuntimeFilterable> => {
+) => {
   const result: Record<string, RuntimeFilterable> = {};
   for (const [key, field] of Object.entries(fields)) {
     const declared = declarationOf(field as Schema.Top, Filter.AnnotationId, isFilterAnnotation);

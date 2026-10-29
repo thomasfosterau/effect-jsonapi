@@ -353,13 +353,7 @@ const maxUndeclaredMemberErrorsOf = (operation: string, resource: Any): number =
   );
 
 // Runtime construction of the add / update operation relationship members.
-const addRelationshipMembers = (
-  relationships: Relationships,
-  cap: number,
-): {
-  readonly struct: Schema.Top;
-  readonly required: boolean;
-} => {
+const addRelationshipMembers = (relationships: Relationships, cap: number) => {
   const fields: Record<string, Schema.Top> = {};
   let required = false;
   for (const [key, descriptor] of Object.entries(relationships)) {
@@ -1326,6 +1320,17 @@ export const removeFromRelationship = <R extends Any, const K extends ToManyName
   }) as ToManyRelationshipOperation<"remove", R, K, ToManyTarget<R, K>>["Type"];
 
 /**
+ * The value {@link request} builds: an `atomic:operations` document holding
+ * the given operations, in order.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface RequestValue<Ops extends ReadonlyArray<unknown>> {
+  readonly "atomic:operations": Ops;
+}
+
+/**
  * Builds an `atomic:operations` request document value from operation values.
  *
  * @example
@@ -1368,7 +1373,7 @@ export const request = <
   const Ops extends ReadonlyArray<{ readonly op: "add" | "update" | "remove" }>,
 >(
   ...ops: Ops
-): { readonly "atomic:operations": Ops } => ({ "atomic:operations": ops });
+): RequestValue<Ops> => ({ "atomic:operations": ops });
 
 // ---------------------------------------------------------------------------
 // Handler-side helpers
@@ -1386,13 +1391,35 @@ export interface ResultValue {
 }
 
 /**
+ * The type of {@link emptyResult}: a result object that carries no `data`.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface EmptyResult {
+  readonly data?: never;
+}
+
+/**
  * An empty result object — for operations that complete without returning
  * data (relationship updates, removals).
  *
  * @since 0.1.0
  * @category constructors
  */
-export const emptyResult: { readonly data?: never } = {};
+export const emptyResult: EmptyResult = {};
+
+/**
+ * The value {@link result} builds: one result object, with its `data` and an
+ * optional `meta`.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface ResultEntry<R, M extends MetaValue = never> {
+  readonly data: R;
+  readonly meta?: M;
+}
 
 /**
  * Builds one result object value.
@@ -1410,11 +1437,22 @@ export const emptyResult: { readonly data?: never } = {};
 export const result = <const R extends ResourceValue | null, const M extends MetaValue = never>(
   data: R,
   meta?: M,
-): { readonly data: R; readonly meta?: M } =>
+): ResultEntry<R, M> =>
   ({
     data,
     ...definedMember("meta", meta),
-  }) as { readonly data: R; readonly meta?: M };
+  }) as ResultEntry<R, M>;
+
+/**
+ * The value {@link results} builds: an `atomic:results` document holding one
+ * entry per operation, in request order.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface ResultsValue<Entries extends ReadonlyArray<ResultValue>> {
+  readonly "atomic:results": Entries;
+}
 
 /**
  * Builds an `atomic:results` document value: one entry per operation, in
@@ -1470,12 +1508,12 @@ export const results = <const Entries extends ReadonlyArray<ResultValue>>(
     readonly meta?: MetaValue;
     readonly links?: LinksValue;
   },
-): { readonly "atomic:results": Entries } =>
+): ResultsValue<Entries> =>
   ({
     "atomic:results": entries,
     ...definedMember("meta", options?.meta),
     ...definedMember("links", options?.links),
-  }) as { readonly "atomic:results": Entries };
+  }) as ResultsValue<Entries>;
 
 /**
  * The JSON Pointer to the operation at `index` in a request document — for
@@ -1637,19 +1675,20 @@ const targetsResourceImpl = (operation: { readonly op: string }, resource: Any):
  * @since 0.1.0
  * @category guards
  */
-export const targetsResource: {
-  <R extends Any>(resource: R): (operation: unknown) => operation is ResourceOperationTarget<R>;
-  <Op extends { readonly op: string }, R extends Any>(
-    operation: Op,
-    resource: R,
-  ): operation is TargetsResource<Op, R>;
-} = ((...args: ReadonlyArray<unknown>) =>
-  isOperationValue(args[0])
+export function targetsResource<R extends Any>(
+  resource: R,
+): (operation: unknown) => operation is ResourceOperationTarget<R>;
+export function targetsResource<Op extends { readonly op: string }, R extends Any>(
+  operation: Op,
+  resource: R,
+): operation is TargetsResource<Op, R>;
+export function targetsResource(...args: ReadonlyArray<unknown>) {
+  return isOperationValue(args[0])
     ? // data-first: (operation, resource)
       targetsResourceImpl(args[0], args[1] as Any)
     : // data-last: (resource) => (operation) => ...
-      (operation: { readonly op: string }) =>
-        targetsResourceImpl(operation, args[0] as Any)) as never;
+      (operation: { readonly op: string }) => targetsResourceImpl(operation, args[0] as Any);
+}
 
 /**
  * What an operation that targets relationship `K` of resource `R` looks like:
@@ -1771,20 +1810,20 @@ const targetsRelationshipImpl = (
  * @since 0.1.0
  * @category guards
  */
-export const targetsRelationship: {
-  <R extends Any, const K extends RelationshipName<R>>(
-    resource: R,
-    relationship: K,
-  ): (operation: unknown) => operation is RelationshipOperationTarget<R, K>;
-  <Op extends { readonly op: string }, R extends Any, const K extends RelationshipName<R>>(
-    operation: Op,
-    resource: R,
-    relationship: K,
-  ): operation is TargetsRelationship<Op, R, K>;
-} = ((...args: ReadonlyArray<unknown>) =>
-  isOperationValue(args[0])
+export function targetsRelationship<R extends Any, const K extends RelationshipName<R>>(
+  resource: R,
+  relationship: K,
+): (operation: unknown) => operation is RelationshipOperationTarget<R, K>;
+export function targetsRelationship<
+  Op extends { readonly op: string },
+  R extends Any,
+  const K extends RelationshipName<R>,
+>(operation: Op, resource: R, relationship: K): operation is TargetsRelationship<Op, R, K>;
+export function targetsRelationship(...args: ReadonlyArray<unknown>) {
+  return isOperationValue(args[0])
     ? // data-first: (operation, resource, relationship)
       targetsRelationshipImpl(args[0], args[1] as Any, args[2] as string)
     : // data-last: (resource, relationship) => (operation) => ...
       (operation: { readonly op: string }) =>
-        targetsRelationshipImpl(operation, args[0] as Any, args[1] as string)) as never;
+        targetsRelationshipImpl(operation, args[0] as Any, args[1] as string);
+}

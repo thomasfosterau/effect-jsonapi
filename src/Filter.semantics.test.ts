@@ -134,14 +134,14 @@ describe("filter profile §6.3.1 — the comparison truth table", () => {
     { relation: "V > L", value: 3 },
   ] as const;
 
-  const expected: { readonly [op in Filter.CompareOperator]: readonly [Truth, Truth, Truth] } = {
+  const expected = {
     eq: ["FALSE", "TRUE", "FALSE"],
     ne: ["TRUE", "FALSE", "TRUE"],
     lt: ["TRUE", "FALSE", "FALSE"],
     lte: ["TRUE", "TRUE", "FALSE"],
     gt: ["FALSE", "FALSE", "TRUE"],
     gte: ["FALSE", "TRUE", "TRUE"],
-  };
+  } satisfies { readonly [op in Filter.CompareOperator]: readonly [Truth, Truth, Truth] };
 
   const node = (op: Filter.CompareOperator): Filter.Node => ({
     _tag: "Compare",

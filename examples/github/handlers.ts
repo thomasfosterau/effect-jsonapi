@@ -452,16 +452,19 @@ const sortBy = <A extends { readonly attributes: any }>(
   return items;
 };
 
-// Apply `?page[number]=&page[size]=` pagination.
-const paginate = <A>(
-  items: ReadonlyArray<A>,
-  page: { readonly number?: number; readonly size?: number } | undefined,
-): {
+// One page of a collection, with the collection's size and the window it shows.
+interface Page<A> {
   readonly page: ReadonlyArray<A>;
   readonly total: number;
   readonly number: number;
   readonly size: number;
-} => {
+}
+
+// Apply `?page[number]=&page[size]=` pagination.
+const paginate = <A>(
+  items: ReadonlyArray<A>,
+  page: { readonly number?: number; readonly size?: number } | undefined,
+): Page<A> => {
   const total = items.length;
   const size = page?.size ?? Math.max(total, 1);
   const number = page?.number ?? 1;

@@ -342,7 +342,7 @@ export interface ProjectLambda<F> extends TransformLambda {
 const selectMembers = <V>(
   members: { readonly [key: string]: V },
   requested: ReadonlySet<string>,
-): Record<string, V> => {
+) => {
   const projected: Record<string, V> = {};
   for (const name of Object.keys(members)) {
     // An own `__proto__` member (as `JSON.parse` gives) stays a member.
@@ -520,19 +520,21 @@ const bothProjections = (
  * @since 0.15.0
  * @category constructors
  */
-export const project: {
-  <const F extends Fields>(fields: F | undefined): ResourceTransform<ProjectLambda<F>>;
-  <R extends ResourceValue, const F extends Fields>(
-    resource: R,
-    fields: F | undefined,
-  ): Projected<R, F>;
-} = ((...args: ReadonlyArray<unknown>) =>
-  args.length >= 2
+export function project<const F extends Fields>(
+  fields: F | undefined,
+): ResourceTransform<ProjectLambda<F>>;
+export function project<R extends ResourceValue, const F extends Fields>(
+  resource: R,
+  fields: F | undefined,
+): Projected<R, F>;
+export function project(...args: ReadonlyArray<unknown>) {
+  return args.length >= 2
     ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
     : projecting(
         (resource: AnyResourceValue) => projectResource(resource, args[0] as Fields | undefined),
         args[0] as Fields | undefined,
-      )) as never;
+      );
+}
 
 // ---------------------------------------------------------------------------
 // withMeta — computed per-resource meta

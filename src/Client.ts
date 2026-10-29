@@ -195,24 +195,24 @@ export type NarrowedDocument<Doc, Included extends Any> = Omit<Doc, "included"> 
  * @since 0.1.0
  * @category combinators
  */
-export const narrowIncluded: {
-  <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(
-    resource: R,
-    include: Paths,
-  ): <Doc extends AnyDocument, E, Req>(
-    effect: Effect.Effect<Doc, E, Req>,
-  ) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>;
-  <R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>, Doc extends AnyDocument>(
-    resource: R,
-    include: Paths,
-    document: Doc,
-  ): NarrowedDocument<Doc, IncludedFor<R, Paths>>;
-} = ((...args: ReadonlyArray<unknown>) =>
-  args.length >= 3
+export function narrowIncluded<R extends Any, const Paths extends ReadonlyArray<IncludePath<R>>>(
+  resource: R,
+  include: Paths,
+): <Doc extends AnyDocument, E, Req>(
+  effect: Effect.Effect<Doc, E, Req>,
+) => Effect.Effect<NarrowedDocument<Doc, IncludedFor<R, Paths>>, E, Req>;
+export function narrowIncluded<
+  R extends Any,
+  const Paths extends ReadonlyArray<IncludePath<R>>,
+  Doc extends AnyDocument,
+>(resource: R, include: Paths, document: Doc): NarrowedDocument<Doc, IncludedFor<R, Paths>>;
+export function narrowIncluded(...args: ReadonlyArray<unknown>) {
+  return args.length >= 3
     ? // data-first: the document itself
       args[2]
     : // data-last: an identity function over the effect
-      <Doc extends AnyDocument, E, Req>(effect: Effect.Effect<Doc, E, Req>) => effect) as never;
+      <Doc extends AnyDocument, E, Req>(effect: Effect.Effect<Doc, E, Req>) => effect;
+}
 
 // ---------------------------------------------------------------------------
 // Content negotiation (JSON:API §5), client side
@@ -1138,6 +1138,22 @@ export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
 };
 
 /**
+ * What {@link hydrate} returns for a document over resource `R`: the index of
+ * its `included` resources, and the `related` and `walk` readers over its
+ * primary data.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface Hydrated<R extends Any> {
+  readonly index: IncludedIndex;
+  readonly related: <const K extends RelationshipName<R>>(key: K) => Related<R, K>;
+  readonly walk: <const P extends IncludePathsTo<R, 3>>(
+    path: P,
+  ) => ReadonlyArray<PathTarget<R, P>["Type"]>;
+}
+
+/**
  * The hydrated view of one document: its `included` indexed once, and
  * {@link related} / {@link walk} bound to the resource definition and the
  * index, so a component resolves each arm with a key or a path alone.
@@ -1186,13 +1202,7 @@ export const hydrate = <R extends Any>(
     readonly data: LinkedResource | null;
     readonly included?: ReadonlyArray<IncludedResource> | undefined;
   },
-): {
-  readonly index: IncludedIndex;
-  readonly related: <const K extends RelationshipName<R>>(key: K) => Related<R, K>;
-  readonly walk: <const P extends IncludePathsTo<R, 3>>(
-    path: P,
-  ) => ReadonlyArray<PathTarget<R, P>["Type"]>;
-} => {
+): Hydrated<R> => {
   const index = indexIncluded(document.included);
   const data = document.data ?? undefined;
   return {

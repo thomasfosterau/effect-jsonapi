@@ -702,7 +702,7 @@ const shorthand = (root: Prepared): ReadonlyArray<readonly [string, string]> | u
  * The canonical flat pairs of a normalised tree, in canonical order: the
  * shorthand when it round-trips, the group form with pre-order ids otherwise.
  */
-export const encodeFilter = (root: Prepared): Record<string, string> => {
+export const encodeFilter = (root: Prepared) => {
   const pairs: Array<readonly [string, string]> = [];
   const short = shorthand(root);
   if (short !== undefined) {

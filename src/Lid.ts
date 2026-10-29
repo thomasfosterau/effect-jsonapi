@@ -149,6 +149,12 @@ export interface LidMap {
   ) => ResolvedLinkage<R>;
 }
 
+// A reference with its `lid` swapped for the server-assigned `id`.
+interface ResolvedRef {
+  readonly type: string;
+  readonly id: string;
+}
+
 /**
  * Creates an empty {@link LidMap}.
  *
@@ -193,7 +199,7 @@ export interface LidMap {
 export const make = (): LidMap => {
   const ids = new Map<string, string>();
 
-  const resolveRef = (ref: RefValue): { readonly type: string; readonly id: string } => {
+  const resolveRef = (ref: RefValue): ResolvedRef => {
     if ("id" in ref) return ref;
     const id = ids.get(ref.lid);
     if (id === undefined) throw new UnknownLidError(ref.lid);

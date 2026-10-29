@@ -245,6 +245,12 @@ export interface Unfollowed {
   readonly why: string;
 }
 
+// A media type split into its lowercased base and its parameters, in order.
+interface ParsedMediaType {
+  readonly base: string;
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
+}
+
 /**
  * Splits a media type into its lowercased base and its parameters, with quoted
  * parameter values unquoted.
@@ -254,12 +260,7 @@ export interface Unfollowed {
  *
  * @internal
  */
-export const parseMediaType = (
-  header: string,
-): {
-  readonly base: string;
-  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
-} => {
+export const parseMediaType = (header: string): ParsedMediaType => {
   const [first, ...rest] = header.split(";");
   return {
     base: (first ?? "").trim().toLowerCase(),
@@ -808,9 +809,7 @@ export interface Context {
 /** A response body as JSON, or `None` when it is not JSON. */
 const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
 
-const headerRecord = (
-  headers: Readonly<Record<string, string | undefined>>,
-): Readonly<Record<string, string>> => {
+const headerRecord = (headers: Readonly<Record<string, string | undefined>>) => {
   const out: Record<string, string> = {};
   for (const key of Object.keys(headers)) {
     const value = headers[key];
@@ -1780,7 +1779,7 @@ export const withQuery = (
 };
 
 /** @internal */
-export const jsonApiAccept: Readonly<Record<string, string>> = { accept: MEDIA_TYPE };
+export const jsonApiAccept = { accept: MEDIA_TYPE } as const;
 
 /**
  * Reads each path with the JSON:API `Accept`, one at a time and in order, and
@@ -1806,19 +1805,19 @@ export const eachSuccessfulRead = (
 /** @internal */
 export const atomicMediaType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
 
+// The endpoints a rule can probe, and why it could not build a URL for the rest.
+interface Probeable {
+  readonly resolved: ReadonlyArray<{ readonly endpoint: Discovered; readonly path: string }>;
+  readonly unresolved: ReadonlyArray<string>;
+}
+
 /**
  * The endpoints a rule can probe for a given role, in discovery order, already
  * filtered to the ones whose URL resolves.
  *
  * @internal
  */
-export const probeable = (
-  ctx: Context,
-  roles: ReadonlyArray<Role>,
-): {
-  readonly resolved: ReadonlyArray<{ readonly endpoint: Discovered; readonly path: string }>;
-  readonly unresolved: ReadonlyArray<string>;
-} => {
+export const probeable = (ctx: Context, roles: ReadonlyArray<Role>): Probeable => {
   const resolved: Array<{ endpoint: Discovered; path: string }> = [];
   const unresolved: Array<string> = [];
   for (const endpoint of ctx.endpoints) {

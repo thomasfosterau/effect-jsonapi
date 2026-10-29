@@ -25,8 +25,7 @@ describe("Filter", () => {
     expect(Filter.isOperator("")).toBe(false);
     expect(Filter.isOperator(1)).toBe(false);
     expect(Filter.isOperator(undefined)).toBe(false);
-    const value: unknown = "gt";
-    if (Filter.isOperator(value)) expectTypeOf(value).toEqualTypeOf<Filter.Operator>();
+    expectTypeOf(Filter.isOperator).guards.toEqualTypeOf<Filter.Operator>();
   });
 
   it("spells the operators as typed constants", () => {
