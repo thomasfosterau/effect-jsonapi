@@ -457,6 +457,21 @@ describe("ApiError.toDocument", () => {
   });
 
   it("throws when given a value that is not an ApiError instance", () => {
-    expect(() => ApiError.toDocument({ notAnError: true })).toThrow();
+    // SAFETY: deliberately ill-typed, to reach the runtime check.
+    expect(() => ApiError.toDocument({ notAnError: true } as never)).toThrow();
+  });
+
+  it("brands every make() instance, and isApiError recognises exactly those", () => {
+    class Teapot extends ApiError.make<Teapot>()("Teapot", { status: 418 }) {}
+    expect(ApiError.isApiError(new Teapot())).toBe(true);
+    expect(ApiError.isApiError(new ApiError.Forbidden({}))).toBe(true);
+    expect(ApiError.isApiError(new Error("boom"))).toBe(false);
+    expect(ApiError.isApiError({ _tag: "NotFound" })).toBe(false);
+    expect(ApiError.isApiError(null)).toBe(false);
+    // the brand is never an encoded field
+    expect(ApiError.toDocument(new Teapot()).errors[0]).not.toHaveProperty("meta");
+    // a decoded error is an instance, so it carries the brand too
+    const decoded = Schema.decodeUnknownSync(Teapot.wire)(ApiError.toDocument(new Teapot()));
+    expect(ApiError.isApiError(decoded)).toBe(true);
   });
 });

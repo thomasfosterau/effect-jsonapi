@@ -30,7 +30,7 @@
  * @since 0.1.0
  */
 import type { Cause } from "effect";
-import { Array as Arr, Schema, SchemaTransformation } from "effect";
+import { Array as Arr, Predicate, Schema, SchemaTransformation } from "effect";
 import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
@@ -48,6 +48,66 @@ export const WireDocument = ErrorDocument(ErrorObject);
 type WireDocumentType = typeof WireDocument.Type;
 
 /**
+ * The brand every {@link make} error instance carries, which
+ * {@link isApiError} and {@link Any} recognise.
+ *
+ * @since 0.20.0
+ * @category symbols
+ */
+export const TypeId: unique symbol = Symbol.for("@thomasfosterau/effect-jsonapi/ApiError");
+
+/**
+ * The type of {@link TypeId}.
+ *
+ * @since 0.20.0
+ * @category symbols
+ */
+export type TypeId = typeof TypeId;
+
+/**
+ * An instance of any {@link make} error class: a tagged, yieldable error that
+ * carries the {@link TypeId} brand, and so encodes to a JSON:API error
+ * document through its class's `wire` schema ({@link toDocument}).
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ * import { strictEqual } from "node:assert"
+ *
+ * const error: ApiError.Any = new ApiError.Conflict({ detail: "Title taken" })
+ * strictEqual(ApiError.toDocument(error).errors[0]?.status, "409")
+ * ```
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface Any extends Cause.YieldableError {
+  readonly _tag: string;
+  readonly [TypeId]: TypeId;
+}
+
+/**
+ * Whether a value is an instance of a {@link make} error class: the guard a
+ * framework hook uses on a value it caught before rendering it with
+ * {@link toDocument}.
+ *
+ * @example
+ * ```ts
+ * import { ApiError } from "@thomasfosterau/effect-jsonapi"
+ * import { strictEqual } from "node:assert"
+ *
+ * const caught: unknown = new ApiError.Forbidden({})
+ * strictEqual(ApiError.isApiError(caught), true)
+ * strictEqual(ApiError.isApiError(new Error("boom")), false)
+ * ```
+ *
+ * @since 0.20.0
+ * @category guards
+ */
+export const isApiError = (input: unknown): input is Any =>
+  Predicate.hasProperty(input, TypeId) && input[TypeId] === TypeId;
+
+/**
  * The endpoint error schema derived from an error class: decodes a JSON:API
  * error document into an instance of the class (and back).
  *
@@ -59,7 +119,7 @@ export interface Wire<
   Tag extends string,
   Fields extends Schema.Struct.Fields,
 > extends Schema.decodeTo<
-  Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError>,
+  Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Any>,
   typeof WireDocument,
   never,
   never
@@ -76,7 +136,7 @@ export interface ApiErrorClass<
   Self,
   Tag extends string,
   Fields extends Schema.Struct.Fields,
-> extends Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Cause.YieldableError> {
+> extends Schema.Class<Self, Schema.TaggedStruct<Tag, Fields>, Any> {
   /** The HTTP status this error responds with. */
   readonly status: number;
   /** The JSON:API error `code` (application-specific identifier). */
@@ -300,6 +360,11 @@ export const make =
       static readonly status = config.status;
       static readonly code = code;
       static readonly title = config.title;
+      // The brand `isApiError` and `Any` recognise, on the prototype so it is
+      // never an own (encoded) field of the instance.
+      get [TypeId](): TypeId {
+        return TypeId;
+      }
       static get wire() {
         // `this` is the user's final class, so decoded errors are `instanceof` it.
         return makeWire(this as unknown as { new (...args: Array<any>): any }, {
@@ -326,18 +391,27 @@ export const make =
  * `HttpApi` — the same encoding the endpoint middleware applies, reachable on
  * its own.
  *
+ * It takes an {@link Any}, so a value a hook caught is narrowed with
+ * {@link isApiError} first. (Before 0.20.0 it took any `object` and threw at
+ * runtime on a non-`ApiError`; it still throws on a value that fakes the
+ * brand without a `wire` schema.)
+ *
  * @example
  * ```ts
  * import { ApiError } from "@thomasfosterau/effect-jsonapi"
  *
  * const body = ApiError.toDocument(new ApiError.BadRequest({ detail: "bad query" }))
  * // → { errors: [{ status: "400", code: "bad_request", title: "Bad Request", detail: "bad query" }] }
+ *
+ * const caught: unknown = new ApiError.Forbidden({})
+ * if (ApiError.isApiError(caught)) console.log(ApiError.toDocument(caught).errors[0]?.status)
+ * // → 403
  * ```
  *
  * @since 0.3.0
  * @category utils
  */
-export const toDocument = (error: object): typeof WireDocument.Type => {
+export const toDocument = (error: Any): typeof WireDocument.Type => {
   const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire;
   if (wire === undefined || !Schema.isSchema(wire)) {
     throw new Error(

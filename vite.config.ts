@@ -106,11 +106,6 @@ export default defineConfig({
       "effect/no-runtime-typeof": "warn",
       "effect/use-clock-service": "warn",
       "effect/no-known-value-widening": "warn",
-      // One site, and a contract: `ApiError.toDocument(error: object)` takes any
-      // value a framework hook caught and throws on a non-`ApiError.make`
-      // instance (src/ApiError.ts). Narrowing the parameter is a breaking
-      // change to a published signature.
-      "effect/no-object-parameters": "warn",
       // Naming rules. This is a published API whose names are its contract:
       // `Resource.Schema`-style suffixes, `Any` / `AnySpec` shapes and
       // `maybe*` readers cannot be renamed for a lint rule.
