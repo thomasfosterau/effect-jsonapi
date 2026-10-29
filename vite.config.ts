@@ -110,12 +110,6 @@ export default defineConfig({
       // `Resource.Schema`-style suffixes, `Any` / `AnySpec` shapes and
       // `maybe*` readers cannot be renamed for a lint rule.
       "effect/no-shape-in-symbol-names": "warn",
-      // Four sites left, all published: `Idempotency.Headers` /
-      // `HeadersRequired` and `Query.FilterWireValue` / `FilterRest` already
-      // name an `interface X extends Schema.Struct<…> {}` — the schema's own
-      // type, not its decoded `.Type` — and the rule accepts only a
-      // same-named `type` alias, so satisfying it changes a published type.
-      "effect/require-schema-type-alias": "warn",
       "effect/imperative-loops": "warn",
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-non-null-assertion": "warn",

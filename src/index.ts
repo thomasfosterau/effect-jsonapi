@@ -468,21 +468,21 @@ export type {
 
 export type {
   /**
-   * `Idempotency.Headers`, at the package root so declaration emit can name
-   * it: the request headers of a write endpoint that accepts an
+   * `Idempotency.HeadersSchema`, at the package root so declaration emit can
+   * name it: the request-headers schema of a write endpoint that accepts an
    * `idempotency-key`.
    *
    * Type-only alias, kept at the root for declaration emit (#348) and
    * superseded by the module's subpath export (#385).
-   * It names only the type: for the value, use `Idempotency.Headers`.
+   * It names only the schema type: for the value, use `Idempotency.Headers`.
    *
-   * @deprecated Use `Idempotency.Headers`, or import `Headers` from
+   * @deprecated Use `Idempotency.HeadersSchema`, or import `HeadersSchema` from
    * `@thomasfosterau/effect-jsonapi/Idempotency` instead; once this alias is removed,
    * declaration emit names it through that subpath.
    * @since 0.17.0
    * @category schemas
    */
-  Headers as IdempotencyHeaders,
+  HeadersSchema as IdempotencyHeaders,
   /**
    * `Idempotency.KeyInProgress`, at the package root so declaration emit can
    * name it: an idempotency middleware error, in the error channel of a client

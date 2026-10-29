@@ -1236,25 +1236,38 @@ export interface Filter<R extends Any> extends Schema.Codec<
 /**
  * The wire value of one `filter` family key: a string, or — from a repeated
  * key — an array of strings, which the codec then rejects (only `include` is
- * repeatable). Kept open at this level so the rejection names the key.
+ * repeatable). Kept open at this level so the rejection names the key. The
+ * schema type of {@link FilterWireValue}.
  *
- * @since 0.13.0
+ * Before 0.20.0 this was the type named `FilterWireValue`; `FilterWireValue`
+ * now names the decoded value, `typeof FilterWireValue.Type`.
+ *
+ * @since 0.20.0
  * @category models
  */
-export interface FilterWireValue extends Schema.Union<
+export interface FilterWireValueSchema extends Schema.Union<
   readonly [Schema.String, Schema.$Array<Schema.String>]
 > {}
 
 /**
- * The runtime {@link FilterWireValue} schema.
+ * The runtime {@link FilterWireValueSchema} schema.
  *
  * @since 0.13.0
  * @category schemas
  */
-export const FilterWireValue: FilterWireValue = Schema.Union([
+export const FilterWireValue: FilterWireValueSchema = Schema.Union([
   Schema.String,
   Schema.Array(Schema.String),
 ]);
+
+/**
+ * The decoded wire value of one `filter` family key: a string, or an array of
+ * strings.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export type FilterWireValue = typeof FilterWireValue.Type;
 
 const isFilterWireValue = Schema.is(FilterWireValue);
 
@@ -1272,18 +1285,32 @@ const FilterKey = Schema.TemplateLiteral(["filter[", Schema.String]);
  * be well formed, so that a malformed one is a 400 naming it rather than an
  * ignored excess property.
  *
- * @since 0.13.0
+ * The schema type of {@link FilterRest}.
+ *
+ * Before 0.20.0 this was the type named `FilterRest`; `FilterRest` now names
+ * the decoded record, `typeof FilterRest.Type`.
+ *
+ * @since 0.20.0
  * @category models
  */
-export interface FilterRest extends Schema.$Record<typeof FilterKey, FilterWireValue> {}
+export interface FilterRestSchema extends Schema.$Record<typeof FilterKey, FilterWireValueSchema> {}
 
 /**
- * The runtime {@link FilterRest} record schema.
+ * The runtime {@link FilterRestSchema} record schema.
  *
  * @since 0.13.0
  * @category schemas
  */
-export const FilterRest: FilterRest = Schema.Record(FilterKey, FilterWireValue);
+export const FilterRest: FilterRestSchema = Schema.Record(FilterKey, FilterWireValue);
+
+/**
+ * The decoded wire side of the filter family: every `filter[…]` key, valued by
+ * a {@link FilterWireValue}.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export type FilterRest = typeof FilterRest.Type;
 
 // One issue per offending key, or a `Composite` of them when several keys fail.
 const filterIssues = (
@@ -1636,7 +1663,7 @@ export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
         }
       : Record<never, never>) &
     ([O["filter"]] extends [true]
-      ? { readonly filter: Schema.optionalKey<FilterWireValue> }
+      ? { readonly filter: Schema.optionalKey<FilterWireValueSchema> }
       : O["filter"] extends Schema.Struct.Fields
         ? {
             readonly [
@@ -1660,7 +1687,7 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never;
  * @category type-level
  */
 export type FlatSchema<R extends Any, O extends Options<R>> = [O["filter"]] extends [true]
-  ? Schema.StructWithRest<Schema.Struct<AsFields<FlatFields<R, O>>>, readonly [FilterRest]>
+  ? Schema.StructWithRest<Schema.Struct<AsFields<FlatFields<R, O>>>, readonly [FilterRestSchema]>
   : Schema.Struct<AsFields<FlatFields<R, O>>>;
 
 /**
@@ -1870,7 +1897,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
               // (and the bare `filter`) as a `FilterWireValue`.
               const filterKeys = Rec.filter(
                 flatValues,
-                (value, key): value is typeof FilterWireValue.Type =>
+                (value, key): value is FilterWireValue =>
                   isFilterKey(key) && isFilterWireValue(value),
               );
               const others = Rec.filter(flatValues, (_, key) => !isFilterKey(key));
