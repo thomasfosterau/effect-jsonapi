@@ -465,7 +465,9 @@ describe("ApiError.toDocument", () => {
     class Teapot extends ApiError.make<Teapot>()("Teapot", { status: 418 }) {}
     expect(ApiError.isApiError(new Teapot())).toBe(true);
     expect(ApiError.isApiError(new ApiError.Forbidden({}))).toBe(true);
-    expect(ApiError.isApiError(new Error("boom"))).toBe(false);
+    // a tagged error that is not an ApiError.make class
+    class Plain extends Schema.TaggedError<Plain>()("Plain", {}) {}
+    expect(ApiError.isApiError(new Plain())).toBe(false);
     expect(ApiError.isApiError({ _tag: "NotFound" })).toBe(false);
     expect(ApiError.isApiError(null)).toBe(false);
     // the brand is never an encoded field
