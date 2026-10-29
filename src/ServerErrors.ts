@@ -339,15 +339,19 @@ interface ApiErrorConstructor {
 }
 
 /** An instance of any `ApiError.make` class, recognised by its constructor's statics. */
-const isApiError = (error: unknown): error is { readonly constructor: ApiErrorConstructor } => {
-  if (!Predicate.isObject(error)) return false;
+const isApiError = (
+  error: unknown,
+): error is ApiError.Any & { readonly constructor: ApiErrorConstructor } => {
+  if (!ApiError.isApiError(error)) return false;
   const ctor: Partial<ApiErrorConstructor> | undefined = (
     error as { readonly constructor?: Partial<ApiErrorConstructor> }
   ).constructor;
   return ctor !== undefined && Predicate.isNumber(ctor.status) && Schema.isSchema(ctor.wire);
 };
 
-const apiErrorToJsonapi = (error: { readonly constructor: ApiErrorConstructor }): JsonapiError =>
+const apiErrorToJsonapi = (
+  error: ApiError.Any & { readonly constructor: ApiErrorConstructor },
+): JsonapiError =>
   new JsonapiError({
     status: error.constructor.status,
     errors: ApiError.toDocument(error).errors,

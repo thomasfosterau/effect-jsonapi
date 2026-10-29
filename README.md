@@ -1397,6 +1397,13 @@ if (error) {
 }
 ```
 
+`toDocument` takes an `ApiError.Any`, the type of every `ApiError.make` instance. A hook that caught an arbitrary value narrows it with `ApiError.isApiError` first:
+
+```ts
+const render = (caught: unknown) =>
+  ApiError.isApiError(caught) ? ApiError.toDocument(caught) : undefined;
+```
+
 `Middleware.schemaError(part)` is the other half: the JSON:API **400** a request-validation failure produces, standalone. It's the same value the `SchemaErrors` middleware raises inside `HttpApi`, so a hook that decodes requests with its own schemas answers byte-identically to an `Endpoint`-built api:
 
 ```ts
