@@ -6,7 +6,7 @@
  * `METHOD /path -> statuses` list `OpenApi.fromApi` renders, which is what a
  * consuming application's contract snapshot pins.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, expect, it } from "vite-plus/test";
 import { Array as Arr, Exit, Option, Schema } from "effect";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
@@ -299,5 +299,57 @@ describe("the wire contract", () => {
         }).group,
       );
     expect(render(api(true))).toEqual(render(api(false)));
+  });
+});
+
+describe("Group.flat / flatReadOnly `toManyMeta` (#513)", () => {
+  const Count = Schema.Struct({ totalCount: Schema.Number });
+  const Part = Resource.make("parts", { attributes: { name: Schema.String } });
+  const Kit = Resource.make("kits", {
+    attributes: { name: Schema.String },
+    relationships: { parts: Relationship.many(() => Part) },
+  });
+  const kit = (meta: Schema.Json) => ({
+    type: "kits",
+    id: "1",
+    attributes: { name: "k" },
+    relationships: { parts: { data: [], meta } },
+  });
+  const successOf = (group: GroupLike, name: string): Schema.Codec<unknown> => {
+    const [success] = endpointOf(group, name).success;
+    assert.isDefined(success, `${name} declares a success schema`);
+    return success;
+  };
+
+  it("narrows the to-many meta in every document the group declares", () => {
+    const { group } = Group.flat({
+      resource: Kit,
+      list: ListWidgets,
+      create: Create,
+      update: Schema.Struct({ id: Kit.Id }),
+      toManyMeta: Count,
+    });
+    Arr.forEach(["get", "create", "update"], (name) => {
+      const success = successOf(group, name);
+      expect(decode(success)({ data: kit({ totalCount: 2 }) })).toBeDefined();
+      expect(() => decode(success)({ data: kit({ totalCount: "2" }) })).toThrow();
+    });
+    const list = successOf(group, "list");
+    const page = (meta: Schema.Json) => ({
+      data: [kit(meta)],
+      links: { first: "/kits", last: "/kits", prev: null, next: null, self: "/kits" },
+      meta: { totalCount: 1 },
+    });
+    expect(decode(list)(page({ totalCount: 2 }))).toBeDefined();
+    expect(() => decode(list)(page({ totalCount: "2" }))).toThrow();
+  });
+
+  it("does the same for a read-only group, and leaves the meta open without it", () => {
+    const narrowed = Group.flatReadOnly({ resource: Kit, list: ListWidgets, toManyMeta: Count });
+    expect(() =>
+      decode(successOf(narrowed.group, "get"))({ data: kit({ totalCount: "2" }) }),
+    ).toThrow();
+    const open = Group.flatReadOnly({ resource: Kit, list: ListWidgets });
+    expect(decode(successOf(open.group, "get"))({ data: kit({ totalCount: "2" }) })).toBeDefined();
   });
 });

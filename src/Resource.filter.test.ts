@@ -228,10 +228,10 @@ describe("Resource.filterable / Resource.sortable", () => {
       expectTypeOf(filterable(Article).author.literal.Encoded).toEqualTypeOf<string>();
       // the relationship descriptor carries the declaration at the type level
       expectTypeOf(Article.relationships.author).toEqualTypeOf<
-        Relationship.One<typeof Person, true, undefined>
+        Relationship.one<typeof Person, true>
       >();
       expectTypeOf(Article.relationships.reviewer).toEqualTypeOf<
-        Relationship.Optional<typeof Person, false, undefined>
+        Relationship.optional<typeof Person>
       >();
       // existing descriptor matches still hold with the widened default
       expectTypeOf(Article.relationships.author).toMatchTypeOf<Relationship.One<typeof Person>>();

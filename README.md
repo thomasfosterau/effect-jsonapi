@@ -229,6 +229,22 @@ Resource.relationships(Article).author.key; // "authorId" (`undefined` when none
 
 The key is a **storage** fact, not a wire one: the document, the query grammar and the endpoints are unchanged, and on the wire `author` stays linkage, never an attribute. It must be non-empty, must not be an attribute name of the resource, and must not repeat across its to-one relationships; `Resource.make` (and `Resource.extend`) refuse a violation at definition time. The paginated `order` and the to-one `key` are the two storage-facing declarations a relationship carries.
 
+Every relationship object may carry a `meta` member, which defaults to an open record. Every constructor takes a `meta` schema that types it instead. The schema then flows into the resource schema, its documents, `Document.wire` and the flat groups, and so into the endpoints' OpenAPI and their typed clients. A common case is a to-many arm whose linkage is capped per parent and so needs its true count:
+
+```ts
+const Contest = Resource.make("contests", {
+  attributes: { name: Schema.String },
+  relationships: {
+    ballots: Relationship.many(() => Ballot, {
+      meta: Schema.Struct({ totalCount: Schema.Number }),
+    }),
+  },
+});
+// relationships.ballots.meta: { readonly totalCount: number } | undefined
+```
+
+Because the declaration lives in the resource, what `Assemble` and `ResourceHandlers` build over the resource's own type already fits the documents the endpoints declare. For a family whose **every** to-many arm carries the same meta, `Document.wire(schema, { toManyMeta })` and `Group.flat` / `Group.flatReadOnly({ …, toManyMeta })` narrow it at the call site instead. That covers every `many` and `paginated` arm, in the primary data and in `included`, and leaves to-one arms alone.
+
 Everything below is **derived** — never assembled by hand:
 
 | Derived | What it is |
