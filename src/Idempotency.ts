@@ -213,23 +213,51 @@ export const Key: Key = Schema.String.pipe(
 ) as Key;
 
 /**
+ * The schema type of {@link Headers}: the request headers of an endpoint that
+ * *accepts* a key.
+ *
+ * Before 0.20.0 this was the type named `Headers`; `Headers` now names the
+ * decoded headers, `typeof Headers.Type`.
+ *
+ * @since 0.20.0
+ * @category schemas
+ */
+export interface HeadersSchema extends Schema.Struct<{
+  readonly "idempotency-key": Schema.optionalKey<Key>;
+}> {}
+
+/**
  * The request headers of an endpoint that *accepts* a key: `idempotency-key`,
  * optional. A write without one is processed normally and recorded nowhere.
  *
  * @since 0.15.0
  * @category schemas
  */
-export interface Headers extends Schema.Struct<{
-  readonly "idempotency-key": Schema.optionalKey<Key>;
-}> {}
+export const Headers: HeadersSchema = Schema.Struct({
+  "idempotency-key": Schema.optionalKey(Key),
+});
 
 /**
- * The request headers of an endpoint that accepts a key. See {@link Headers}.
+ * The decoded request headers of an endpoint that accepts a key.
  *
- * @since 0.15.0
+ * @since 0.20.0
+ * @category models
+ */
+export type Headers = typeof Headers.Type;
+
+/**
+ * The schema type of {@link HeadersRequired}: the request headers of an
+ * endpoint that *requires* a key.
+ *
+ * Before 0.20.0 this was the type named `HeadersRequired`; `HeadersRequired`
+ * now names the decoded headers, `typeof HeadersRequired.Type`.
+ *
+ * @since 0.20.0
  * @category schemas
  */
-export const Headers: Headers = Schema.Struct({ "idempotency-key": Schema.optionalKey(Key) });
+export interface HeadersRequiredSchema extends Schema.Struct<{
+  readonly "idempotency-key": Key;
+}> {}
 
 /**
  * The request headers of an endpoint that *requires* a key. A write without
@@ -240,16 +268,15 @@ export const Headers: Headers = Schema.Struct({ "idempotency-key": Schema.option
  * @since 0.15.0
  * @category schemas
  */
-export interface HeadersRequired extends Schema.Struct<{ readonly "idempotency-key": Key }> {}
+export const HeadersRequired: HeadersRequiredSchema = Schema.Struct({ "idempotency-key": Key });
 
 /**
- * The request headers of an endpoint that requires a key. See
- * {@link HeadersRequired}.
+ * The decoded request headers of an endpoint that requires a key.
  *
- * @since 0.15.0
- * @category schemas
+ * @since 0.20.0
+ * @category models
  */
-export const HeadersRequired: HeadersRequired = Schema.Struct({ "idempotency-key": Key });
+export type HeadersRequired = typeof HeadersRequired.Type;
 
 // ---------------------------------------------------------------------------
 // The endpoint option
@@ -277,8 +304,8 @@ export type Option = boolean | "required";
 export type HeadersFor<O> = [O] extends [false | undefined]
   ? never
   : [O] extends ["required"]
-    ? HeadersRequired
-    : Headers;
+    ? HeadersRequiredSchema
+    : HeadersSchema;
 
 /**
  * The endpoint type an {@link Option} produces: the endpoint as declared, plus
