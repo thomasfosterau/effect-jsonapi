@@ -442,12 +442,17 @@ const sortBy = <A extends { readonly attributes: any }>(
   sort: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }> | undefined,
 ): Array<A> => {
   for (const term of [...(sort ?? [])].reverse()) {
-    const direction = term.direction === "desc" ? -1 : 1;
-    items.sort((a, b) => {
+    const ascending = Order.make<A>((a, b) => {
       const left = a.attributes[term.field];
       const right = b.attributes[term.field];
-      return (left < right ? -1 : left > right ? 1 : 0) * direction;
+      return left < right ? -1 : left > right ? 1 : 0;
     });
+    // In place, as callers expect: each pass is a stable sort by one term.
+    items.splice(
+      0,
+      items.length,
+      ...Arr.sort(items, term.direction === "desc" ? Order.flip(ascending) : ascending),
+    );
   }
   return items;
 };

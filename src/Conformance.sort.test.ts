@@ -16,6 +16,7 @@ import * as Group from "./Group.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
+import { orderOf } from "./internal/filter.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 
 const RULE = "profile/sort/ordering";
@@ -126,13 +127,16 @@ const ordered = (
       sign: flip * (sorter.oneDirection === true ? (terms[0]?.sign ?? sign) : sign),
     }),
   );
-  const sorted = [...rows].sort((a, b) => {
-    for (const { field, sign } of applied) {
-      const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
-      if (order !== 0) return order;
-    }
-    return ascending(a.id, b.id);
-  });
+  const sorted = Arr.sort(
+    rows,
+    orderOf<(typeof rows)[number]>((a, b) => {
+      for (const { field, sign } of applied) {
+        const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
+        if (order !== 0) return order;
+      }
+      return ascending(a.id, b.id);
+    }),
+  );
   return reversed ? sorted.reverse() : sorted;
 };
 
@@ -276,9 +280,14 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
 
   it("fails a server that ignores `sort` over a collection with no NULL", async () => {
     // Already in ascending order of `rank`, so only the descending request shows it ignored.
-    const tasks = [...TASKS]
-      .map((task) => ({ ...task, attributes: { rank: task.attributes["rank"] } }))
-      .sort((a, b) => ascending(valueOf(a, "rank"), valueOf(b, "rank")));
+    const ranked = TASKS.map((task) => ({
+      ...task,
+      attributes: { rank: task.attributes["rank"] },
+    }));
+    const tasks = Arr.sort(
+      ranked,
+      orderOf<(typeof ranked)[number]>((a, b) => ascending(valueOf(a, "rank"), valueOf(b, "rank"))),
+    );
     const { outcome } = await run(serve({ ...profileSorter, ignores: true }, tasks));
     expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
       "`?sort=-rank` lists tasks:2 (1) before tasks:1 (2)",

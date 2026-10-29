@@ -229,7 +229,10 @@ const graphFrom = (entry: string, dir: string): Graph => {
   };
   walk(entry, []);
   return {
-    modules: [...modules].map((file) => path.relative(dir, file)).sort(),
+    modules: Arr.sort(
+      [...modules].map((file) => path.relative(dir, file)),
+      Order.String,
+    ),
     externals,
   };
 };
@@ -300,10 +303,12 @@ const SCHEMA_MODULES = namespacesOf(path.join(SRC, "schema.ts"));
 const HTTP_MODULES = PUBLIC_MODULES.filter((module) => !SCHEMA_MODULES.includes(module));
 
 const httpSurface = (graph: Graph): ReadonlyArray<string> =>
-  [...graph.externals.entries()]
-    .filter(([specifier]) => isHttpSurface(specifier))
-    .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`)
-    .sort();
+  Arr.sort(
+    [...graph.externals.entries()]
+      .filter(([specifier]) => isHttpSurface(specifier))
+      .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`),
+    Order.String,
+  );
 
 /**
  * The timeout for the cases that load modules rather than read them: the
@@ -326,11 +331,11 @@ describe("schema-only entry point", () => {
   });
 
   it("declares `effect` as its only external", () => {
-    expect([...schema.externals.keys()].sort()).toEqual(["effect"]);
+    expect(Arr.sort([...schema.externals.keys()], Order.String)).toEqual(["effect"]);
   });
 
   it("reaches exactly the modules assigned to the schema tier", () => {
-    expect(schema.modules).toEqual([...SCHEMA_TIER].sort());
+    expect(schema.modules).toEqual(Arr.sort([...SCHEMA_TIER], Order.String));
   });
 
   /**
@@ -374,7 +379,9 @@ describe("schema-only entry point", () => {
     // Every tier module except the schema barrel itself: the two entry points
     // are peers, so the root reaches the modules, not the other entry point.
     const tierModules = SCHEMA_TIER.filter((module) => module !== "schema.ts");
-    expect(root.modules).toEqual([...tierModules, ...HTTP_TIER, "index.ts"].sort());
+    expect(root.modules).toEqual(
+      Arr.sort([...tierModules, ...HTTP_TIER, "index.ts"], Order.String),
+    );
   });
 });
 
@@ -432,7 +439,7 @@ describe("module subpaths", () => {
 describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
   it("still exports every namespace, unchanged", async () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
-    expect(Object.keys(index).sort()).toEqual([
+    expect(Arr.sort(Object.keys(index), Order.String)).toEqual([
       "ApiError",
       "Assemble",
       "Atomic",

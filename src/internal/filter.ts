@@ -9,6 +9,7 @@ import {
   Array as Arr,
   Match,
   Option,
+  Order,
   Predicate,
   Record as Rec,
   Result,
@@ -578,8 +579,18 @@ const compareNodes = (a: Prepared, b: Prepared): number => {
   return 0;
 };
 
+/**
+ * The {@link Order.Order} of a numeric comparator (negative, zero or
+ * positive), for `Arr.sort`.
+ */
+export const orderOf = <A>(compare: (a: A, b: A) => number): Order.Order<A> =>
+  Order.make((a, b) => {
+    const c = compare(a, b);
+    return c < 0 ? -1 : c > 0 ? 1 : 0;
+  });
+
 const sortedUnique = <A>(items: ReadonlyArray<A>, compare: (a: A, b: A) => number): Array<A> => {
-  const sorted = [...items].sort(compare);
+  const sorted = Arr.sort(items, orderOf(compare));
   return sorted.filter((item, index) => index === 0 || compare(sorted[index - 1]!, item) !== 0);
 };
 
@@ -695,7 +706,10 @@ const shorthand = (root: Prepared): ReadonlyArray<readonly [string, string]> | u
   // A key names one condition; two conditions on the same key (the same field
   // and operator, or a bare `eq` next to a bare `in`) need the group form.
   if (new Set(pairs.map(([key]) => key)).size !== pairs.length) return undefined;
-  return [...pairs].sort(([a], [b]) => compareCodePoints(a, b));
+  return Arr.sort(
+    pairs,
+    orderOf<(typeof pairs)[number]>(([a], [b]) => compareCodePoints(a, b)),
+  );
 };
 
 /**

@@ -12,7 +12,7 @@
  * not hold.
  */
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Option, Order, Schema } from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {
@@ -94,7 +94,7 @@ describe("1. Include.make replaces IncludeSpec / nested / includablePaths / incl
       page: Query.Page.Offset,
       relationships: false,
     });
-    expect(Object.keys(group.endpoints).sort()).toEqual([
+    expect(Arr.sort(Object.keys(group.endpoints), Order.String)).toEqual([
       "create",
       "delete",
       "get",

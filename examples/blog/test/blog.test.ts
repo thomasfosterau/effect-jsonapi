@@ -4,7 +4,17 @@
  * in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Predicate, Record as Rec, Result, Schema } from "effect";
+import {
+  Array as Arr,
+  Cause,
+  Effect,
+  Exit,
+  Order,
+  Predicate,
+  Record as Rec,
+  Result,
+  Schema,
+} from "effect";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
 import { Api, SearchQuery } from "../api.js";
@@ -81,7 +91,7 @@ describe("blog example: fetching", () => {
       }),
     );
 
-    const types = document.included?.map((resource) => resource.type).sort();
+    const types = Arr.sort(document.included?.map((resource) => resource.type) ?? [], Order.String);
     expect(types).toEqual(["people", "tags"]);
   });
 
@@ -534,8 +544,16 @@ describe("blog example: relationship endpoints", () => {
           params: { id: articleId },
           payload: { data: [Comment.ref(sampleComments[0]!.id)] },
         });
-        expect(afterAdd.data.map((identifier) => identifier.id).sort()).toEqual(
-          sampleComments.map((comment) => comment.id).sort(),
+        expect(
+          Arr.sort(
+            afterAdd.data.map((identifier) => identifier.id),
+            Order.String,
+          ),
+        ).toEqual(
+          Arr.sort(
+            sampleComments.map((comment) => comment.id),
+            Order.String,
+          ),
         );
       }),
     );
@@ -626,7 +644,7 @@ describe("blog example: heterogeneous search", () => {
       }),
     );
 
-    const types = [...new Set(document.data.map((result) => result.type))].sort();
+    const types = Arr.sort([...new Set(document.data.map((result) => result.type))], Order.String);
     expect(types).toEqual(["articles", "people"]);
 
     // the union is discriminated by the `type` tag; the endpoint declares

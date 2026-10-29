@@ -52,7 +52,16 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
-import { Effect, Layer, Option, Predicate, Schema, SchemaTransformation } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  Option,
+  Order,
+  Predicate,
+  Schema,
+  SchemaTransformation,
+} from "effect";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
 import type * as ServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -386,9 +395,7 @@ const canonicalValue = (value: Schema.Json): Schema.Json => {
   if (isJsonArray(value)) return value.map(canonicalValue);
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, canonicalValue(value[key])]),
+      Arr.sort(Object.keys(value), Order.String).map((key) => [key, canonicalValue(value[key])]),
     );
   }
   return value;
@@ -442,7 +449,7 @@ export interface Fingerprinted {
 export const canonical = (request: Fingerprinted): string => {
   const [path, ...rest] = request.url.split("?");
   const query = rest.join("?");
-  const pairs = query === "" ? [] : query.split("&").sort();
+  const pairs = query === "" ? [] : Arr.sort(query.split("&"), Order.String);
   const body =
     request.body === ""
       ? request.body

@@ -6,7 +6,7 @@
  * error seam's 404 / 409 through the flat presets end to end.
  */
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Array as Arr, Context, Effect, Layer, Option, Order, Schema } from "effect";
 import { HttpServerResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -97,7 +97,9 @@ describe("registry ↔ contract", () => {
     for (const [identifier, group] of Object.entries(Api.groups)) {
       const family = families.find((f) => f.group === identifier);
       expect(family, identifier).toBeDefined();
-      expect(Object.keys(family!.handlers).sort()).toEqual(Object.keys(group.endpoints).sort());
+      expect(Arr.sort(Object.keys(family!.handlers), Order.String)).toEqual(
+        Arr.sort(Object.keys(group.endpoints), Order.String),
+      );
       expect(() => Registry.checkFamily(Api, family!)).not.toThrow();
       for (const endpoint of Object.keys(group.endpoints)) {
         expect(Option.isSome(Registry.handlerFor(families, identifier, endpoint))).toBe(true);

@@ -100,7 +100,7 @@
  *
  * @since 0.1.0
  */
-import { Effect, Option, Schema } from "effect";
+import { Array as Arr, Effect, Option, Order, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiGroup } from "effect/http-api";
 import { HttpApiClient } from "effect/http-api";
@@ -1475,9 +1475,14 @@ export const pageWindow = (cursor: PageCursor, total: number, siblings = 1): Pag
   const current = Math.min(pageCount, Math.floor(offset / limit) + 1);
   const wanted = [
     ...new Set(
-      [1, pageCount, ...Array.from({ length: siblings * 2 + 1 }, (_, i) => current - siblings + i)]
-        .filter((n) => n >= 1 && n <= pageCount)
-        .sort((a, b) => a - b),
+      Arr.sort(
+        [
+          1,
+          pageCount,
+          ...Array.from({ length: siblings * 2 + 1 }, (_, i) => current - siblings + i),
+        ].filter((n) => n >= 1 && n <= pageCount),
+        Order.Number,
+      ),
     ),
   ];
   const items = wanted.flatMap((n, i): ReadonlyArray<PageWindowItem> => {

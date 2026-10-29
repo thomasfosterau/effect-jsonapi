@@ -112,7 +112,6 @@ export default defineConfig({
       "effect/avoid-any": "warn",
       "effect/avoid-untagged-errors": "warn",
       "effect/avoid-direct-json": "warn",
-      "effect/prefer-arr-sort": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/effect-run-in-body": "warn",
       "effect/no-barrel-imports": "warn",

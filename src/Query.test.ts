@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Effect, Layer, Schema } from "effect";
+import { Array as Arr, Effect, Layer, Order, Schema } from "effect";
 import { HttpRouter, UrlParams } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -549,7 +549,7 @@ describe("Query.bracketPageKeys", () => {
 
   it("renames only the page cursor's encoded keys, leaving other fields flat", () => {
     const wire = Query.bracketPageKeys(ListArticles);
-    expect(Object.keys(wire.from.fields).sort()).toEqual([
+    expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual([
       "authorId",
       "page[limit]",
       "page[offset]",
@@ -598,8 +598,8 @@ describe("Query.bracketPageKeys", () => {
     // decoded cursor under `page`, this leaves it flat. The wire keys match.
     const composed = Query.schema(Article, { page: Query.Page.Offset });
     const standalone = Query.bracketPageKeys(Schema.Struct(Query.Page.Offset));
-    expect(Object.keys(standalone.from.fields).sort()).toEqual(
-      Object.keys(composed.from.fields).sort(),
+    expect(Arr.sort(Object.keys(standalone.from.fields), Order.String)).toEqual(
+      Arr.sort(Object.keys(composed.from.fields), Order.String),
     );
     expect(
       Schema.decodeUnknownSync(composed)({ "page[offset]": "20", "page[limit]": "10" }),
@@ -619,7 +619,7 @@ describe("Query.bracketKeys", () => {
 
   it("renames only the given keys under the given prefix, leaving the rest flat", () => {
     const wire = ListArticles.pipe(Query.bracketKeys("filter", ["status"]));
-    expect(Object.keys(wire.from.fields).sort()).toEqual([
+    expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual([
       "authorId",
       "filter[status]",
       "limit",
@@ -638,8 +638,8 @@ describe("Query.bracketKeys", () => {
   it("reproduces bracketPageKeys' exact behaviour", () => {
     const wire = ListArticles.pipe(Query.bracketKeys("page", ["offset", "limit"]));
     const viaBracketPageKeys = Query.bracketPageKeys(ListArticles);
-    expect(Object.keys(wire.from.fields).sort()).toEqual(
-      Object.keys(viaBracketPageKeys.from.fields).sort(),
+    expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual(
+      Arr.sort(Object.keys(viaBracketPageKeys.from.fields), Order.String),
     );
     const encoded = { "page[offset]": 20, "page[limit]": 10, authorId: "9", status: "open" };
     expect(Schema.decodeUnknownSync(wire)(encoded)).toEqual(
@@ -654,7 +654,7 @@ describe("Query.bracketKeys", () => {
     );
 
     it("bracket-keys every family applied so far, not just the last one", () => {
-      expect(Object.keys(wire.from.fields).sort()).toEqual([
+      expect(Arr.sort(Object.keys(wire.from.fields), Order.String)).toEqual([
         "filter[authorId]",
         "filter[status]",
         "page[limit]",
@@ -701,8 +701,8 @@ describe("Query.bracketKeys", () => {
         Query.bracketKeys("filter", ["authorId", "status"]),
         Query.bracketKeys("page", ["offset", "limit"]),
       );
-      expect(Object.keys(reversed.from.fields).sort()).toEqual(
-        Object.keys(wire.from.fields).sort(),
+      expect(Arr.sort(Object.keys(reversed.from.fields), Order.String)).toEqual(
+        Arr.sort(Object.keys(wire.from.fields), Order.String),
       );
     });
   });
