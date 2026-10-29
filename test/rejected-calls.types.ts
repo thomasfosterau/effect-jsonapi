@@ -15,7 +15,8 @@
  * Every `@ts-expect-error` annotation below is an assertion: an unused one is
  * itself a compile error.
  */
-import { Schema, SchemaGetter } from "effect";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
 import {
   Atomic,
   Endpoint,
@@ -124,8 +125,10 @@ const PointFromString = Schema.String.pipe(
     encode: SchemaGetter.transform((p: typeof Point.Type) => `${p.x}:${p.y}`),
   }),
 );
-// @ts-expect-error a literal codec for another type does not fit the schema
-export const foreignLiteral = Schema.String.pipe(Filter.able(["eq"], { literal: PointFromString }));
+// A thunk, so the binding is not itself an exported schema constant.
+export const foreignLiteral = () =>
+  // @ts-expect-error a literal codec for another type does not fit the schema
+  Schema.String.pipe(Filter.able(["eq"], { literal: PointFromString }));
 
 type Fields = { readonly age: number; readonly status: "open" | "done" };
 // @ts-expect-error an undeclared field is not a node of the tree
