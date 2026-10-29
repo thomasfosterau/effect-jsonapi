@@ -51,6 +51,7 @@ import type { SchemaAST, Types } from "effect";
 import {
   Array as Arr,
   Effect,
+  Predicate,
   Record as Rec,
   Result,
   Schema,
@@ -1336,7 +1337,7 @@ const decodeFilterRecord = (
   options: SchemaAST.ParseOptions,
 ): Effect.Effect<Node, SchemaIssue.Issue> => {
   const decoded = decodeFilter(fields, input);
-  if (decoded._tag === "Issues")
+  if (Predicate.isTagged(decoded, "Issues"))
     return Effect.fail(filterIssues(ast, input, decoded.issues, options));
   return Effect.fromResult(
     Result.try({

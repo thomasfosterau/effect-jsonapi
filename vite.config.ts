@@ -115,7 +115,6 @@ export default defineConfig({
       "effect/prefer-arr-sort": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/effect-run-in-body": "warn",
-      "effect/avoid-direct-tag-checks": "warn",
       "effect/no-barrel-imports": "warn",
       "effect/prefer-option-over-null": "warn",
       "typescript/no-explicit-any": "off",

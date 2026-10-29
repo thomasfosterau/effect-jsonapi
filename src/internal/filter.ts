@@ -5,7 +5,16 @@
  *
  * @internal
  */
-import { Array as Arr, Match, Option, Record as Rec, Schema, SchemaIssue } from "effect";
+import {
+  Array as Arr,
+  Match,
+  Option,
+  Predicate,
+  Record as Rec,
+  Result,
+  Schema,
+  SchemaIssue,
+} from "effect";
 import type { Compare, Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 
@@ -279,7 +288,7 @@ export const decodeFilter = (
     const values: Array<unknown> = [];
     for (const item of items) {
       const result = decode(item);
-      if (result._tag === "Failure") {
+      if (Result.isFailure(result)) {
         return fail(
           keys.value,
           `Invalid literal ${quote(item)} for field ${quote(field)}: ${issueMessage(result.failure)}`,
@@ -599,7 +608,7 @@ export const prepare = (
       };
     }),
     Match.tag("In", "NotIn", (node): Prepared => {
-      check(node.field, node._tag === "In" ? "in" : "nin");
+      check(node.field, Predicate.isTagged(node, "In") ? "in" : "nin");
       if (Arr.isReadonlyArrayEmpty(node.values))
         throw new InvalidFilter({ message: `A ${node._tag} node needs at least one value` });
       const items = sortedUnique(
@@ -614,7 +623,7 @@ export const prepare = (
           values: items.map((item) => item.value) as [unknown, ...Array<unknown>],
         },
         field: node.field,
-        op: node._tag === "In" ? "in" : "nin",
+        op: Predicate.isTagged(node, "In") ? "in" : "nin",
         value: items.map((item) => item.wire).join(","),
         arity: items.length,
       };
@@ -638,7 +647,7 @@ export const prepare = (
       return {
         kind: "group",
         node: { _tag: node._tag, members: members.map((member) => member.node) },
-        conjunction: node._tag === "And" ? "AND" : "OR",
+        conjunction: Predicate.isTagged(node, "And") ? "AND" : "OR",
         members,
       };
     }),

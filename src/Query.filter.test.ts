@@ -1,5 +1,15 @@
 import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Match, Schema, SchemaGetter, SchemaIssue } from "effect";
+import {
+  Array as Arr,
+  Effect,
+  Layer,
+  Match,
+  Predicate,
+  Result,
+  Schema,
+  SchemaGetter,
+  SchemaIssue,
+} from "effect";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -59,7 +69,7 @@ const failures = (
   record: Record<string, unknown>,
 ): ReadonlyArray<{ readonly key: string; readonly message: string }> => {
   const result = Schema.decodeUnknownResult(codec)(record);
-  if (result._tag === "Success") throw new Error("expected the decode to fail");
+  if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
   return SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
     key: String(issue.path?.[0]),
     message: issue.message,
@@ -661,7 +671,7 @@ describe("Query.Filter: rejections name the offending key", () => {
       [eq("body", "x"), /Unknown filter field "body"/],
     ] as const) {
       const result = encoded(tree);
-      assert(result._tag === "Failure");
+      assert(Result.isFailure(result));
       expect(result.failure.message).toMatch(message);
     }
     // …so a URL the codec emits always decodes back
@@ -985,42 +995,53 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
     const has = (predicate: (n: Filter.Node) => boolean): boolean => {
       const visit = (n: Filter.Node): boolean =>
         predicate(n) ||
-        (n._tag === "And" || n._tag === "Or"
+        (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")
           ? n.members.some(visit)
-          : n._tag === "Not"
+          : Predicate.isTagged(n, "Not")
             ? visit(n.member)
             : false);
       return trees.some(visit);
     };
-    expect(has((n) => (n._tag === "And" || n._tag === "Or") && n.members.length === 1)).toBe(true);
-    expect(has((n) => n._tag === "Not" && n.member._tag === "Not")).toBe(true);
-    expect(
-      has((n) => (n._tag === "And" || n._tag === "Or") && Arr.isReadonlyArrayEmpty(n.members)),
-    ).toBe(true);
     expect(
       has(
         (n) =>
-          (n._tag === "And" || n._tag === "Or") &&
-          new Set(
-            n.members
-              .filter((m) => m._tag === "Compare")
-              .map((m) => `${m.field}/${(m as Filter.Compare).op}`),
-          ).size < n.members.filter((m) => m._tag === "Compare").length,
+          (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")) && n.members.length === 1,
+      ),
+    ).toBe(true);
+    expect(has((n) => Predicate.isTagged(n, "Not") && Predicate.isTagged(n.member, "Not"))).toBe(
+      true,
+    );
+    expect(
+      has(
+        (n) =>
+          (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")) &&
+          Arr.isReadonlyArrayEmpty(n.members),
       ),
     ).toBe(true);
     expect(
       has(
         (n) =>
-          (n._tag === "In" || n._tag === "NotIn") &&
+          (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")) &&
+          new Set(
+            n.members
+              .filter((m) => Predicate.isTagged(m, "Compare"))
+              .map((m) => `${m.field}/${(m as Filter.Compare).op}`),
+          ).size < n.members.filter((m) => Predicate.isTagged(m, "Compare")).length,
+      ),
+    ).toBe(true);
+    expect(
+      has(
+        (n) =>
+          (Predicate.isTagged(n, "In") || Predicate.isTagged(n, "NotIn")) &&
           n.values.some((v) => typeof v === "string" && /[,\\]/.test(v)),
       ),
     ).toBe(true);
     expect(
       has(
         (n) =>
-          n._tag === "Not" &&
-          n.member._tag === "Or" &&
-          n.member.members.some((m) => m._tag === "And"),
+          Predicate.isTagged(n, "Not") &&
+          Predicate.isTagged(n.member, "Or") &&
+          n.member.members.some((m) => Predicate.isTagged(m, "And")),
       ),
     ).toBe(true);
   });
@@ -1291,7 +1312,7 @@ describe("Query.schema with filter: true", () => {
         [`filter[${name}]`]: "x",
         "page[limit]": "5",
       });
-      if (result._tag === "Success") throw new Error("expected the decode to fail");
+      if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
       expect(
         SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
           key: String(issue.path?.[0]),
@@ -1341,7 +1362,7 @@ describe("Query.schema with filter: true", () => {
       "filter[age][gt]": "abc",
       "page[limit]": "1",
     });
-    assert(result._tag === "Failure");
+    assert(Result.isFailure(result));
     expect(
       SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((i) => i.path),
     ).toEqual([["filter[age][gt]"]]);
@@ -1350,7 +1371,7 @@ describe("Query.schema with filter: true", () => {
   it("rejects a malformed or bare filter key instead of dropping it", () => {
     for (const key of ["filter[status]x", "filter[", "filter"]) {
       const result = Schema.decodeUnknownResult(query)({ [key]: "open", "page[limit]": "1" });
-      assert(result._tag === "Failure");
+      assert(Result.isFailure(result));
       const [issue] = SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues;
       expect(issue?.path).toEqual([key]);
       expect(issue?.message).toMatch(/^Malformed filter key/);

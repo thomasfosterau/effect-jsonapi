@@ -1329,7 +1329,9 @@ export const summarise = (report: Report): Summary => ReportFormat.summarise(rep
  * @category accessors
  */
 export const findings = (report: Report): ReadonlyArray<Finding> =>
-  report.outcomes.flatMap((outcome) => (outcome._tag === "Failed" ? outcome.findings : []));
+  report.outcomes.flatMap((outcome) =>
+    Predicate.isTagged(outcome, "Failed") ? outcome.findings : [],
+  );
 
 /**
  * Fails with the report's first {@link ContractViolation}, or succeeds with the

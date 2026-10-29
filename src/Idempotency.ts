@@ -52,7 +52,7 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
-import { Effect, Layer, Option, Schema, SchemaTransformation } from "effect";
+import { Effect, Layer, Option, Predicate, Schema, SchemaTransformation } from "effect";
 import { HttpServerRequest } from "effect/http/HttpServerRequest";
 import type * as ServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -861,9 +861,15 @@ export const layer = (store: Store): Layer.Layer<Middleware> =>
         const attempt: Attempt = { key, fingerprint: print, request };
 
         const claim = yield* store.claim(attempt);
-        if (claim._tag !== "Claimed") {
+        // A key already seen: a different request under it is a mismatch;
+        // the same one is still in flight, or replays its recorded response.
+        if (Predicate.isTagged(claim, "InProgress")) {
+          return yield* Effect.fail(
+            claim.fingerprint !== print ? new KeyMismatch() : new KeyInProgress(),
+          );
+        }
+        if (Predicate.isTagged(claim, "Completed")) {
           if (claim.fingerprint !== print) return yield* Effect.fail(new KeyMismatch());
-          if (claim._tag === "InProgress") return yield* Effect.fail(new KeyInProgress());
           return replay(claim.response);
         }
 

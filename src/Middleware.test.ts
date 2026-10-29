@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Effect, ErrorReporter, Layer, Schema, SchemaIssue, Tracer } from "effect";
+import { Effect, ErrorReporter, Layer, Result, Schema, SchemaIssue, Tracer } from "effect";
 import { HttpRouter } from "effect/http";
 import {
   HttpApi,
@@ -194,7 +194,7 @@ describe("Middleware.schemaErrorDocument", () => {
         errors: "all",
       },
     );
-    if (result._tag === "Success") throw new Error("expected a failure");
+    if (Result.isSuccess(result)) throw new Error("expected a failure");
     return result.failure;
   };
   // The error-object `source` members these cases assert on.

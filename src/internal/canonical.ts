@@ -44,7 +44,7 @@ const isGroupFormKey = (key: string): boolean => (keySegments(key)?.length ?? 0)
  */
 export const declaredKeys = (ast: SchemaAST.AST): ReadonlyArray<string> => {
   const encoded = SchemaAST.toEncoded(ast);
-  return encoded._tag === "Objects"
+  return SchemaAST.isObjects(encoded)
     ? encoded.propertySignatures.map((signature) => String(signature.name))
     : [];
 };

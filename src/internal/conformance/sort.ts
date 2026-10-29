@@ -570,10 +570,10 @@ const sortable = <A>(ctx: Context, suite: Suite<A>) => {
   }));
   return {
     resolved: Arr.flatMap(resolutions, ({ endpoint, resolution }) =>
-      resolution._tag === "Resolved" ? [{ endpoint, path: resolution.path }] : [],
+      Predicate.isTagged(resolution, "Resolved") ? [{ endpoint, path: resolution.path }] : [],
     ),
     unresolved: Arr.flatMap(resolutions, ({ resolution }) =>
-      resolution._tag === "Unresolved" ? [resolution.reason] : [],
+      Predicate.isTagged(resolution, "Unresolved") ? [resolution.reason] : [],
     ),
   };
 };
