@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Schema } from "effect";
+import { AnyMeta } from "./Document.js";
 import * as Relationship from "./Relationship.js";
 import {
   annotate,
@@ -427,5 +428,69 @@ describe("Relationship.one / optional `key` (#509)", () => {
     expect(() => extend(Pet, "cats", { attributes: { ownerId: Schema.String } })).toThrow(
       /Resource\.extend\("cats"\): relationship "owner" declares storage key "ownerId", which is also an attribute/,
     );
+  });
+});
+
+describe("relationship `meta` (#513)", () => {
+  const Count = Schema.Struct({ totalCount: Schema.Number });
+  const Ballot = Resource("ballots", { attributes: { label: Schema.String } });
+  const Contest = Resource("contests", {
+    attributes: { name: Schema.String },
+    relationships: {
+      ballots: Relationship.many(() => Ballot, { meta: Count }),
+      history: Relationship.paginated(() => Ballot, { meta: Count }),
+      winner: Relationship.optional(() => Ballot, {
+        meta: Schema.Struct({ margin: Schema.Number }),
+      }),
+      chair: Relationship.one(() => Ballot),
+    },
+  });
+  const wire = (relationships: { readonly [key: string]: Schema.Json }) => ({
+    type: "contests",
+    id: "1",
+    attributes: { name: "Senate" },
+    relationships: {
+      chair: { data: { type: "ballots", id: "9" } },
+      ballots: { data: [] },
+      history: { links: { related: "/contests/1/history" } },
+      winner: { data: null },
+      ...relationships,
+    },
+  });
+
+  it("records the declared schema on the descriptor, AnyMeta by default", () => {
+    expect(relationshipsOf(Contest).ballots.meta).toBe(Count);
+    expect(relationshipsOf(Contest).chair.meta).toBe(AnyMeta);
+    expect(Relationship.many(() => Ballot).meta).toBe(AnyMeta);
+  });
+
+  it("types and decodes each relationship object's meta by it", () => {
+    const decoded = Schema.decodeUnknownSync(Contest)(
+      wire({
+        ballots: { data: [], meta: { totalCount: 3 } },
+        history: { links: { related: "/contests/1/history" }, meta: { totalCount: 9 } },
+        winner: { data: null, meta: { margin: 0.5 } },
+      }),
+    );
+    expect(decoded.relationships?.ballots?.meta?.totalCount).toBe(3);
+    expect(decoded.relationships?.history?.meta?.totalCount).toBe(9);
+    expect(decoded.relationships?.winner?.meta?.margin).toBe(0.5);
+    expectTypeOf(decoded.relationships?.ballots?.meta).exclude<undefined>().toEqualTypeOf<{
+      readonly totalCount: number;
+    }>();
+    expect(() =>
+      Schema.decodeUnknownSync(Contest)(wire({ ballots: { data: [], meta: { totalCount: "3" } } })),
+    ).toThrow();
+    // the default stays the open record
+    expect(
+      Schema.decodeUnknownSync(Contest)(
+        wire({ chair: { data: { type: "ballots", id: "9" }, meta: { x: 1 } } }),
+      ).relationships?.chair?.meta,
+    ).toEqual({ x: 1 });
+  });
+
+  it("survives Resource.extend", () => {
+    const Runoff = extend(Contest, "runoffs", { attributes: { round: Schema.Number } });
+    expect(relationshipsOf(Runoff).ballots.meta).toBe(Count);
   });
 });

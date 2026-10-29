@@ -983,20 +983,20 @@ type ToManyMetaRelationship<R, Meta> = R extends object
 /**
  * The schema {@link wire} returns: `S` with its links as strings, on both
  * sides — a plain codec whose `Type` is `Wire<S["Type"]>` — and, given a
- * `toManyMeta` schema `TM`, every to-many relationship's `meta` typed by it
- * ({@link WithToManyMeta}).
+ * `toManyMeta` schema `TM` (`never` when none is), every to-many
+ * relationship's `meta` typed by it ({@link WithToManyMeta}).
  *
  * @since 0.16.0
  * @category models
  */
 export interface WireSchema<
   S extends Schema.Top,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 > extends Schema.Codec<
-  TM extends Schema.Top ? WithToManyMeta<Wire<S["Type"]>, TM["Type"]> : Wire<S["Type"]>,
-  TM extends Schema.Top ? WithToManyMeta<Wire<S["Encoded"]>, TM["Encoded"]> : Wire<S["Encoded"]>,
-  S["DecodingServices"] | (TM extends Schema.Top ? TM["DecodingServices"] : never),
-  S["EncodingServices"] | (TM extends Schema.Top ? TM["EncodingServices"] : never)
+  [TM] extends [never] ? Wire<S["Type"]> : WithToManyMeta<Wire<S["Type"]>, TM["Type"]>,
+  [TM] extends [never] ? Wire<S["Encoded"]> : WithToManyMeta<Wire<S["Encoded"]>, TM["Encoded"]>,
+  S["DecodingServices"] | TM["DecodingServices"],
+  S["EncodingServices"] | TM["EncodingServices"]
 > {}
 
 /**
@@ -1005,7 +1005,7 @@ export interface WireSchema<
  * @since 0.20.0
  * @category models
  */
-export interface WireOptions<TM extends Schema.Top | undefined = undefined> {
+export interface WireOptions<TM extends Schema.Top = never> {
   /**
    * The schema every **to-many** relationship object's `meta` member is
    * narrowed to, overriding what each relationship declared (`Relationship.many`
@@ -1013,6 +1013,7 @@ export interface WireOptions<TM extends Schema.Top | undefined = undefined> {
    * family whose every to-many arm carries the same meta, such as
    * `{ totalCount }`. To-one relationships keep their own.
    */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes
   readonly toManyMeta?: TM | undefined;
 }
 
@@ -1102,17 +1103,26 @@ const isToManyRelationship = (fields: { readonly [key: string]: Schema.Top }): b
  */
 const wireRelationship = (
   relationship: Schema.Top,
-  toManyMeta: Schema.Top | undefined,
+  toManyMeta: Option.Option<Schema.Top>,
 ): Schema.Top => {
   const [inner, rewrap] = splitOptionality(relationship);
   if (!isStructLike(inner)) return relationship;
-  const fields: { [key: string]: Schema.Top } = { ...inner.fields };
-  const links = fields["links"];
-  if (links !== undefined) fields["links"] = wireLinkBlock(links);
-  const narrowed = toManyMeta !== undefined && isToManyRelationship(inner.fields);
-  if (narrowed) fields["meta"] = Schema.optionalKey(toManyMeta);
-  if (links === undefined && !narrowed) return relationship;
-  return rewrap(Schema.Struct(fields));
+  const links = Option.fromUndefinedOr(inner.fields["links"]);
+  const narrowing = Option.filter(toManyMeta, () => isToManyRelationship(inner.fields));
+  if (Option.isNone(links) && Option.isNone(narrowing)) return relationship;
+  return rewrap(
+    Schema.Struct({
+      ...inner.fields,
+      ...Option.match(links, {
+        onNone: () => ({}),
+        onSome: (block) => ({ links: wireLinkBlock(block) }),
+      }),
+      ...Option.match(narrowing, {
+        onNone: () => ({}),
+        onSome: (meta) => ({ meta: Schema.optionalKey(meta) }),
+      }),
+    }),
+  );
 };
 
 /**
@@ -1187,7 +1197,7 @@ const wireRelationship = (
  * @since 0.16.0
  * @category constructors
  */
-export const wire = <S extends Schema.Top, TM extends Schema.Top | undefined = undefined>(
+export const wire = <S extends Schema.Top, TM extends Schema.Top = never>(
   schema: S,
   options?: WireOptions<TM>,
 ): WireSchema<S, TM> => {
@@ -1195,10 +1205,12 @@ export const wire = <S extends Schema.Top, TM extends Schema.Top | undefined = u
   // schema differs from `S` only in its link fields (and, with `toManyMeta`,
   // its to-many relationships' `meta`), which `Wire` / `WithToManyMeta`
   // mirror at the type level.
-  const toManyMeta: Schema.Top | undefined = options?.toManyMeta;
+  const toManyMeta = Option.fromUndefinedOr(options?.toManyMeta);
   if (isUnionLike(schema)) {
     return Schema.Union(
-      schema.members.map((member) => wire(member, { toManyMeta })),
+      schema.members.map((member) =>
+        wire(member, { toManyMeta: Option.getOrUndefined(toManyMeta) }),
+      ),
     ) as unknown as WireSchema<S, TM>;
   }
   if (!isStructLike(schema)) return schema as unknown as WireSchema<S, TM>;

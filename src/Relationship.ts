@@ -817,9 +817,9 @@ const makeManySchema = <R extends Any, M extends Schema.Top>(
     meta: Schema.optionalKey(metaOf(descriptor)),
   });
 
-const makePaginatedSchema = <M extends Schema.Top>(
-  descriptor: Paginated<Any, Order<Any> | undefined, M>,
-): PaginatedSchema<M> =>
+const makePaginatedSchema = <M extends Schema.Top>(descriptor: {
+  readonly meta: M;
+}): PaginatedSchema<M> =>
   Schema.Struct({
     links: PaginatedRelationshipLinks,
     meta: Schema.optionalKey(metaOf(descriptor)),

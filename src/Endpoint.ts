@@ -4448,10 +4448,7 @@ export const resource = <
  * @since 0.16.0
  * @category models
  */
-export interface FlatDocumentOptions<
-  Included extends Schema.Top,
-  TM extends Schema.Top | undefined = undefined,
-> {
+export interface FlatDocumentOptions<Included extends Schema.Top, TM extends Schema.Top = never> {
   /**
    * The union of resource schemas an `?include=` walk over this endpoint can
    * hoist (`Include.make(...).included`), declared so the compound `included`
@@ -4465,6 +4462,7 @@ export interface FlatDocumentOptions<
    *
    * @since 0.20.0
    */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes
   readonly toManyMeta?: TM | undefined;
 }
 
@@ -4497,7 +4495,7 @@ export interface FlatDocumentOptions<
 export const ResourceDocument = <
   S extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,
@@ -4585,7 +4583,7 @@ export const CommittedDocument = <F extends Schema.Struct.Fields>(resource: {
 export const WriteDocument = <
   S extends Schema.Top & StructIdentified,
   Included extends Schema.Top = typeof Schema.Never,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,
@@ -4604,7 +4602,7 @@ type StructIdentified = { readonly identifier: { readonly fields: Schema.Struct.
 type WriteDocumentMembers<
   S extends Schema.Top & StructIdentified,
   Included extends Schema.Top,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 > = readonly [
   DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>>,
   DataDocument<Schema.Struct<S["identifier"]["fields"]>>,
@@ -4619,7 +4617,7 @@ type WriteDocumentMembers<
 export interface WriteDocument<
   S extends Schema.Top & StructIdentified,
   Included extends Schema.Top = typeof Schema.Never,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 > extends Schema.Union<WriteDocumentMembers<S, Included, TM>> {}
 
 /**
@@ -4656,7 +4654,7 @@ export const RelatedDocument = <
 export const FlatCollectionDocument = <
   S extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 >(
   resource: S,
   options?: FlatDocumentOptions<Included, TM>,

@@ -273,7 +273,7 @@ export interface FlatReadOnlyOptions<
   List extends Query.FlatListStruct,
   Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface | undefined,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 > {
   readonly resource: R;
   /** The flat `List<X>` input (the page cursor plus the family's own filters). */
@@ -295,6 +295,7 @@ export interface FlatReadOnlyOptions<
    *
    * @since 0.20.0
    */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes
   readonly toManyMeta?: TM | undefined;
 }
 
@@ -312,7 +313,7 @@ export interface FlatOptions<
   Create extends Schema.Top,
   Update extends Schema.Top,
   Hidden extends boolean = false,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 > extends FlatReadOnlyOptions<R, List, Filters, Surface, TM> {
   /** The flat `Create<X>` command input (attributes plus relationship ids) — not the JSON:API envelope. */
   readonly create: Create;
@@ -344,7 +345,7 @@ const flatWire = <
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface | undefined,
-  TM extends Schema.Top | undefined,
+  TM extends Schema.Top,
 >(
   options: FlatReadOnlyOptions<R, List, Filters, Surface, TM>,
 ) => {
@@ -403,7 +404,7 @@ export const flatReadOnly = <
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
   Surface extends AnySurface | undefined = undefined,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 >(
   options: FlatReadOnlyOptions<
     Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -476,7 +477,7 @@ export const flat = <
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
   Surface extends AnySurface | undefined = undefined,
   const Hidden extends boolean = false,
-  TM extends Schema.Top | undefined = undefined,
+  TM extends Schema.Top = never,
 >(
   options: FlatOptions<
     Parameter<Type, Attributes, Rels, Meta, IdSchema>,
