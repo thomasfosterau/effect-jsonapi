@@ -294,16 +294,13 @@ describe("Relationship.paginated `order`", () => {
   });
 
   it("orders only by the related resource's attributes, or its id", () => {
-    // @ts-expect-error -- "note" is Revision's, but "title" is not
-    Relationship.paginated(() => Revision, { order: [{ field: "title", direction: "asc" }] });
+    // an attribute the related resource lacks, or a direction that isn't one,
+    // is a compile error: test/rejected-calls.types.ts
     // the negative control: a real attribute of the *related* resource compiles
     expect(
       Relationship.paginated(() => Revision, { order: [{ field: "note", direction: "asc" }] })
         .order,
     ).toEqual([{ field: "note", direction: "asc" }]);
-
-    // @ts-expect-error -- "sideways" is not a direction
-    Relationship.paginated(() => Revision, { order: [{ field: "id", direction: "sideways" }] });
   });
 
   it("refuses an order that declares nothing, or orders twice by one field", () => {

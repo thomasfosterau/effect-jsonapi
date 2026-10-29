@@ -1173,10 +1173,9 @@ describe("Resource.extend inheritId (subtype ids)", () => {
 
   it("default extend keeps an independent brand — child id is NOT a base id", () => {
     const Admin = extend(Account, "admins", { attributes: { level: Schema.Int } });
-    const adminId = Admin.Id.make("1");
-    // @ts-expect-error a default-extended admin id is not assignable to an account id
-    const asAccount: typeof Account.Id.Type = adminId;
-    expect(asAccount).toBe("1");
+    // not assignable to an account id: test/rejected-calls.types.ts
+    expectTypeOf<typeof Admin.Id.Type>().not.toMatchTypeOf<typeof Account.Id.Type>();
+    expect(Admin.Id.make("1")).toBe("1");
   });
 
   it("inheritId makes the child id a subtype of the base id (assignable, not vice-versa)", () => {
@@ -1186,9 +1185,7 @@ describe("Resource.extend inheritId (subtype ids)", () => {
     const asAccount: typeof Account.Id.Type = managerId;
     expect(asAccount).toBe("1");
     // ...but an account id is NOT a manager id
-    // @ts-expect-error an account id lacks the managers brand
-    const asManager: typeof Manager.Id.Type = Account.Id.make("2");
-    expect(asManager).toBe("2");
+    expectTypeOf<typeof Account.Id.Type>().not.toMatchTypeOf<typeof Manager.Id.Type>();
   });
 
   it("inheritId is transitive through an extend chain", () => {
@@ -1237,9 +1234,7 @@ describe("Resource.extend custom id injection", () => {
     const asAdmin: typeof Admin.Id.Type = AdminId.make("1");
     expect(asAdmin).toBe("1");
     // ...and the subtype id is neither the base's auto id nor the auto `adminsId`
-    // @ts-expect-error a consumer-branded admin id is not an account id
-    const asAccount: typeof Account.Id.Type = Admin.Id.make("1");
-    expect(asAccount).toBe("1");
+    expectTypeOf<typeof Admin.Id.Type>().not.toMatchTypeOf<typeof Account.Id.Type>();
   });
 
   it("still inherits the base's attributes and relationships", () => {
@@ -1296,9 +1291,7 @@ describe("Resource.extend custom id injection", () => {
     expect(attributeKeys(SuperAdmin)).toEqual(["email", "level", "scope"]);
     expect(SuperAdmin.ref("7")).toEqual({ type: "superadmins", id: "7" });
     // a super-admin id is the consumer's brand only — not an admin id
-    // @ts-expect-error SuperAdminId is not AdminId
-    const asAdmin: typeof Admin.Id.Type = SuperAdmin.Id.make("7");
-    expect(asAdmin).toBe("7");
+    expectTypeOf<typeof SuperAdmin.Id.Type>().not.toMatchTypeOf<typeof Admin.Id.Type>();
   });
 
   it("a chain from a custom-id subtype may still inherit or mint a default id", () => {
@@ -1310,9 +1303,10 @@ describe("Resource.extend custom id injection", () => {
   });
 
   it("rejects `id` together with `inheritId: true` — at the type level and at definition time", () => {
+    // a compile error too: test/rejected-calls.types.ts
     expect(() =>
-      // @ts-expect-error `id` and `inheritId: true` are contradictory
-      extend(Account, "contradictory", { id: AdminId, inheritId: true }),
+      // SAFETY: deliberately ill-typed, to reach the definition-time check.
+      extend(Account, "contradictory", { id: AdminId, inheritId: true } as never),
     ).toThrow("Resource.extend: `id` and `inheritId: true` are contradictory");
     // `inheritId: false` alongside `id` is redundant but not contradictory
     const Explicit = extend(Account, "explicit", { id: AdminId, inheritId: false });
@@ -1987,9 +1981,7 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
 
 describe("Resource.attribute `resource` option", () => {
   it("accepts the literals and refuses a non-literal boolean", () => {
-    const hidden: boolean = String(1) === "2"; // `boolean`, not a literal
-    // @ts-expect-error -- a non-literal boolean cannot decide the resource-object type
-    attribute(Schema.String, { resource: hidden });
+    // a non-literal boolean is refused at compile time: test/rejected-calls.types.ts
     const shown = attribute(Schema.String, { resource: true });
     const optional = attribute(Schema.String, { resource: "optional" });
     const inputOnly = attribute(Schema.String, { resource: false });

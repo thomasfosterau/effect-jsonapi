@@ -753,22 +753,9 @@ describe("type-level guarantees", () => {
     const removeOp = Atomic.remove(Comment, "5");
     expectTypeOf(removeOp.op).toEqualTypeOf<"remove">();
 
-    // relationship constructors only accept declared relationship keys
-    // @ts-expect-error -- "publisher" is not a relationship of Article
-    Atomic.updateRelationship(Article, "1", "publisher", null);
-
-    // to-many constructors only accept to-many keys
-    // @ts-expect-error -- "author" is a to-one relationship
-    Atomic.addToRelationship(Article, "1", "author", []);
-
-    // required (`one`) to-one relationships can't be set to null
-    // @ts-expect-error -- Comment.author is required
-    Atomic.updateRelationship(Comment, "5", "author", null);
-  });
-
-  it("add data attributes are required and typed", () => {
-    // @ts-expect-error -- missing attributes
-    Atomic.add(Article, {});
+    // The calls these constructors reject at compile time (an undeclared or
+    // wrong-kind relationship key, null for a required to-one, missing
+    // attributes) are asserted in test/rejected-calls.types.ts.
   });
 });
 

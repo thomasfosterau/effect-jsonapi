@@ -499,21 +499,19 @@ describe("relationship endpoint conventions", () => {
     // `comments` is to-many — fine.
     Endpoint.addRelationship(Article, "comments");
     Endpoint.removeRelationship(Article, "comments");
-    // @ts-expect-error -- `author` is to-one; the spec defines POST only for to-many
-    Endpoint.addRelationship(Article, "author");
-    // @ts-expect-error -- `author` is to-one; the spec defines DELETE only for to-many
-    Endpoint.removeRelationship(Article, "author");
+    // `author` (to-one) is a compile error for both: test/rejected-calls.types.ts.
   });
 
   it("relationship names must exist on the resource", () => {
-    // Unknown names are compile errors *and* descriptive construction errors.
+    // Unknown names are compile errors (test/rejected-calls.types.ts) *and*
+    // descriptive construction errors.
     expect(() =>
-      // @ts-expect-error -- `publisher` is not a relationship of Article
-      Endpoint.related(Article, "publisher"),
+      // SAFETY: deliberately ill-typed, to reach the construction-time check.
+      Endpoint.related(Article, "publisher" as never),
     ).toThrow(/Unknown relationship "publisher"/);
     expect(() =>
-      // @ts-expect-error -- `publisher` is not a relationship of Article
-      Endpoint.getRelationship(Article, "publisher"),
+      // SAFETY: deliberately ill-typed, to reach the construction-time check.
+      Endpoint.getRelationship(Article, "publisher" as never),
     ).toThrow(/Unknown relationship "publisher"/);
   });
 

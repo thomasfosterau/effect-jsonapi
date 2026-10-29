@@ -103,11 +103,6 @@ export default defineConfig({
       // instance (src/ApiError.ts). Narrowing the parameter is a breaking
       // change to a published signature.
       "effect/no-object-parameters": "warn",
-      // `@ts-expect-error` is the assertion mechanism of the type-level tests
-      // (see the `*.types.ts` override below, where it is off); in the sources
-      // it marks the `ErrorNoStream` guard effect's endpoint constructors
-      // cannot prove for a generic error list (src/Endpoint.ts).
-      "effect/avoid-ts-ignore": "warn",
       // Naming rules. This is a published API whose names are its contract:
       // `Resource.Schema`-style suffixes, `Any` / `AnySpec` shapes and
       // `maybe*` readers cannot be renamed for a lint rule.
@@ -143,6 +138,22 @@ export default defineConfig({
         files: ["**/*.types.ts"],
         rules: {
           "eslint/no-unused-vars": "off",
+          "effect/avoid-ts-ignore": "off",
+        },
+      },
+      // effect's `HttpApiEndpoint` constructors guard their `error` option with
+      // a conditional type (`ErrorNoStream`) that no generic error list can
+      // satisfy: TypeScript defers a conditional type over a type parameter,
+      // and `ErrorNoStream` is not exported, so no local type or helper can
+      // prove it either (#436). Our error wires never stream, so each
+      // constructor call in this file carries an expect-error directive on
+      // the `error:` property (and, under TS7, on the properties the failed
+      // overload anchors at: AGENTS.md). Every other file, colocated tests
+      // included, is held to `avoid-ts-ignore` at `error`; a compile-time
+      // negative assertion goes in a `test/*.types.ts` file.
+      {
+        files: ["src/Endpoint.ts"],
+        rules: {
           "effect/avoid-ts-ignore": "off",
         },
       },

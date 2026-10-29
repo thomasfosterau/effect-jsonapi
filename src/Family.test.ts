@@ -121,9 +121,7 @@ describe("family as a relationship target", () => {
   it("types the linkage as the union of member identifier types", () => {
     type ToData = NonNullable<NonNullable<(typeof Edge.Type)["relationships"]>["to"]["data"]>;
     expectTypeOf<ToData["type"]>().toEqualTypeOf<"people" | "organisations">();
-    // @ts-expect-error the family name is not a member linkage type
-    const bad: ToData = { type: "nodes", id: "1" };
-    expect(bad).toBeDefined();
+    // the family name is not a member linkage type: test/rejected-calls.types.ts
   });
 
   it("works as optional / many / paginated targets", () => {
