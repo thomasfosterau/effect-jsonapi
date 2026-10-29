@@ -1555,14 +1555,14 @@ export const isRelationshipOperation = <Op extends { readonly op: string }>(
 };
 
 /**
- * The structural shape of operations that target resource `R` itself: `add` /
- * `update` operations carry it in `data.type`; `remove` operations in
+ * What an operation that targets resource `R` itself looks like: `add` /
+ * `update` operations carry `R`'s type in `data.type`; `remove` operations in
  * `ref.type` (with no `relationship` member).
  *
- * @since 0.1.0
+ * @since 0.20.0
  * @category type-level
  */
-export type ResourceOperationShape<R extends Any> =
+export type ResourceOperationTarget<R extends Any> =
   | { readonly data: { readonly type: R["type"] } }
   | {
       readonly op: "remove";
@@ -1576,7 +1576,7 @@ export type ResourceOperationShape<R extends Any> =
  * @since 0.1.0
  * @category type-level
  */
-export type TargetsResource<Op, R extends Any> = Extract<Op, ResourceOperationShape<R>>;
+export type TargetsResource<Op, R extends Any> = Extract<Op, ResourceOperationTarget<R>>;
 
 const targetsResourceImpl = (operation: { readonly op: string }, resource: Any): boolean => {
   if (isRelationshipOperation(operation)) return false;
@@ -1638,7 +1638,7 @@ const targetsResourceImpl = (operation: { readonly op: string }, resource: Any):
  * @category guards
  */
 export const targetsResource: {
-  <R extends Any>(resource: R): (operation: unknown) => operation is ResourceOperationShape<R>;
+  <R extends Any>(resource: R): (operation: unknown) => operation is ResourceOperationTarget<R>;
   <Op extends { readonly op: string }, R extends Any>(
     operation: Op,
     resource: R,
@@ -1652,15 +1652,40 @@ export const targetsResource: {
         targetsResourceImpl(operation, args[0] as Any)) as never;
 
 /**
- * The structural shape of operations that target relationship `K` of resource
- * `R`: their `ref` names the resource type and the relationship.
+ * What an operation that targets relationship `K` of resource `R` looks like:
+ * its `ref` names the resource type and the relationship.
  *
+ * @since 0.20.0
+ * @category type-level
+ */
+export type RelationshipOperationTarget<R extends Any, K extends string> = {
+  readonly ref: { readonly type: R["type"]; readonly relationship: K };
+};
+
+/**
+ * The former name of {@link ResourceOperationTarget}.
+ *
+ * @deprecated Use `Atomic.ResourceOperationTarget`; this alias is removed in
+ * the next minor release.
  * @since 0.1.0
  * @category type-level
  */
-export type RelationshipOperationShape<R extends Any, K extends string> = {
-  readonly ref: { readonly type: R["type"]; readonly relationship: K };
-};
+// oxlint-disable-next-line effect/no-shape-in-symbol-names -- deprecated alias kept for one minor release (#436); removed with it
+export type ResourceOperationShape<R extends Any> = ResourceOperationTarget<R>;
+
+/**
+ * The former name of {@link RelationshipOperationTarget}.
+ *
+ * @deprecated Use `Atomic.RelationshipOperationTarget`; this alias is removed
+ * in the next minor release.
+ * @since 0.1.0
+ * @category type-level
+ */
+// oxlint-disable-next-line effect/no-shape-in-symbol-names -- deprecated alias kept for one minor release (#436); removed with it
+export type RelationshipOperationShape<
+  R extends Any,
+  K extends string,
+> = RelationshipOperationTarget<R, K>;
 
 /**
  * The operations of `Op` that target relationship `K` of resource `R`.
@@ -1670,7 +1695,7 @@ export type RelationshipOperationShape<R extends Any, K extends string> = {
  */
 export type TargetsRelationship<Op, R extends Any, K extends string> = Extract<
   Op,
-  RelationshipOperationShape<R, K>
+  RelationshipOperationTarget<R, K>
 >;
 
 const targetsRelationshipImpl = (
@@ -1750,7 +1775,7 @@ export const targetsRelationship: {
   <R extends Any, const K extends RelationshipName<R>>(
     resource: R,
     relationship: K,
-  ): (operation: unknown) => operation is RelationshipOperationShape<R, K>;
+  ): (operation: unknown) => operation is RelationshipOperationTarget<R, K>;
   <Op extends { readonly op: string }, R extends Any, const K extends RelationshipName<R>>(
     operation: Op,
     resource: R,

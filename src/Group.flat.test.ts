@@ -79,13 +79,13 @@ describe("Group.flat", () => {
   });
 
   it("maps the endpoints onto the JSON:API verbs and paths", () => {
-    const shape = (name: string) =>
+    const route = (name: string) =>
       `${endpointOf(group, name).method} ${endpointOf(group, name).path}`;
-    expect(shape("list")).toBe("GET /widgets");
-    expect(shape("get")).toBe("GET /widgets/:id");
-    expect(shape("create")).toBe("POST /widgets");
-    expect(shape("update")).toBe("PATCH /widgets/:id");
-    expect(shape("delete")).toBe("DELETE /widgets/:id");
+    expect(route("list")).toBe("GET /widgets");
+    expect(route("get")).toBe("GET /widgets/:id");
+    expect(route("create")).toBe("POST /widgets");
+    expect(route("update")).toBe("PATCH /widgets/:id");
+    expect(route("delete")).toBe("DELETE /widgets/:id");
   });
 
   it("declares the 409 on `update` and nowhere else", () => {

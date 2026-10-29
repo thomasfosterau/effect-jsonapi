@@ -106,10 +106,6 @@ export default defineConfig({
       "effect/no-runtime-typeof": "warn",
       "effect/use-clock-service": "warn",
       "effect/no-known-value-widening": "warn",
-      // Naming rules. This is a published API whose names are its contract:
-      // `Resource.Schema`-style suffixes, `Any` / `AnySpec` shapes and
-      // `maybe*` readers cannot be renamed for a lint rule.
-      "effect/no-shape-in-symbol-names": "warn",
       "effect/imperative-loops": "warn",
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-non-null-assertion": "warn",

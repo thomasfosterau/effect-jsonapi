@@ -438,9 +438,9 @@ const requiresIdempotencyKey = (ast: SchemaAST.AST): boolean => {
 };
 
 const roleOf = (method: string, segments: ReadonlyArray<string>): Role => {
-  const shape = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
+  const pattern = segments.map((segment) => (segment.startsWith(":") ? "P" : "L")).join("");
   const literals = segments.filter((segment) => !segment.startsWith(":"));
-  return Match.value(`${method} ${shape}`).pipe(
+  return Match.value(`${method} ${pattern}`).pipe(
     Match.when("GET L", (): Role => "collection"),
     Match.when("GET LP", (): Role => "resource"),
     Match.when("POST L", (): Role => "create"),

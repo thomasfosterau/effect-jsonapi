@@ -908,7 +908,7 @@ const errorProbes = (ctx: Context) =>
     return out.filter((observation) => observation.status >= 400);
   });
 
-const errorDocumentShape: RuleImpl = {
+const errorDocumentStructure: RuleImpl = {
   rule: rule(
     "spec/errors/error-document-shape",
     "Errors",
@@ -921,7 +921,7 @@ const errorDocumentShape: RuleImpl = {
       const observations = yield* errorProbes(ctx);
       if (Arr.isReadonlyArrayEmpty(observations)) {
         return skip(
-          errorDocumentShape.rule,
+          errorDocumentStructure.rule,
           "no error response could be provoked without mutating the target",
         );
       }
@@ -933,7 +933,7 @@ const errorDocumentShape: RuleImpl = {
           !Option.exists(errors, (list) => isJsonArray(list) && Arr.isReadonlyArrayNonEmpty(list))
         ) {
           findings.push(
-            finding(errorDocumentShape.rule, {
+            finding(errorDocumentStructure.rule, {
               detail: `a ${observation.status} response was not a JSON:API error document`,
               expected: "`{ errors: [ … ] }` with at least one error object",
               observed: describe(observation),
@@ -942,7 +942,7 @@ const errorDocumentShape: RuleImpl = {
           );
         }
       }
-      return settle(errorDocumentShape.rule, observations.length, findings);
+      return settle(errorDocumentStructure.rule, observations.length, findings);
     }),
 };
 
@@ -2798,7 +2798,7 @@ export const rules: ReadonlyArray<RuleImpl> = [
   includedOnInclude,
   resourceIdentification,
   jsonApiObject,
-  errorDocumentShape,
+  errorDocumentStructure,
   errorMemberTypes,
   errorSourceDiscrimination,
   errorStatusMatches,
