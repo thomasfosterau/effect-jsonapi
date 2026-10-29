@@ -178,7 +178,9 @@ const runOver =
 const verifyCanned = verifyOver(api);
 
 const failed = (report: Conformance.Report): ReadonlyArray<string> =>
-  report.outcomes.filter((outcome) => outcome._tag === "Failed").map((outcome) => outcome.rule.id);
+  report.outcomes
+    .filter((outcome) => Predicate.isTagged(outcome, "Failed"))
+    .map((outcome) => outcome.rule.id);
 
 const outcomeFor = (report: Conformance.Report, id: string): Conformance.Outcome => {
   const found = report.outcomes.find((outcome) => outcome.rule.id === id);
@@ -767,7 +769,7 @@ describe("Conformance: discovery and selection", () => {
       only: ["spec/document/top-level-members"],
     });
     const partial = outcomeFor(documents, "spec/document/top-level-members");
-    assert(partial._tag === "Passed");
+    assert(Predicate.isTagged(partial, "Passed"));
     expect(partial.note).toContain("not probed");
     expect(partial.note).toContain(`ids["articles"]`);
 
@@ -784,7 +786,7 @@ describe("Conformance: discovery and selection", () => {
       }),
     );
     const skipped = outcomeFor(none, "spec/document/top-level-members");
-    assert(skipped._tag === "Skipped");
+    assert(Predicate.isTagged(skipped, "Skipped"));
     expect(skipped.reason).toContain(`ids["articles"]`);
   });
 
@@ -1156,7 +1158,7 @@ const broken = (
     const report = await verifyCanned((request) => mutate(conformantServe(request), request));
     expect(failed(report)).toContain(id);
     const outcome = outcomeFor(report, id);
-    assert(outcome._tag === "Failed");
+    assert(Predicate.isTagged(outcome, "Failed"));
     expect(outcome.findings.length).toBeGreaterThan(0);
     // A finding always says what it wanted and what it got.
     for (const found of outcome.findings) {
@@ -2899,7 +2901,7 @@ describe("Conformance: the filter grammar profile", () => {
       }),
     );
     for (const outcome of report.outcomes) {
-      assert(outcome._tag === "Skipped");
+      assert(Predicate.isTagged(outcome, "Skipped"));
       expect(outcome.reason).toContain("filter: true");
     }
   });
@@ -2933,7 +2935,7 @@ describe("Conformance: the filter grammar profile", () => {
         : grammarServe(request),
     );
     const outcome = outcomeFor(report, "profile/filter/rejections");
-    assert(outcome._tag === "Failed");
+    assert(Predicate.isTagged(outcome, "Failed"));
     expect(outcome.findings.some((found) => found.detail.includes("outside the core"))).toBe(true);
   });
 
@@ -2944,7 +2946,7 @@ describe("Conformance: the filter grammar profile", () => {
       return { ...canned, body: { errors: [{ status: "400", title: "Bad Request" }] } };
     });
     const outcome = outcomeFor(report, "profile/filter/rejections");
-    assert(outcome._tag === "Failed");
+    assert(Predicate.isTagged(outcome, "Failed"));
     expect(outcome.findings.every((found) => found.detail.includes("source.parameter"))).toBe(true);
   });
 

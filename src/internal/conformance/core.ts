@@ -1824,7 +1824,8 @@ export const probeable = (
   for (const endpoint of ctx.endpoints) {
     if (!roles.includes(endpoint.role)) continue;
     const resolution = resolvePath(endpoint, ctx.options);
-    if (resolution._tag === "Resolved") resolved.push({ endpoint, path: resolution.path });
+    if (Predicate.isTagged(resolution, "Resolved"))
+      resolved.push({ endpoint, path: resolution.path });
     else unresolved.push(resolution.reason);
   }
   return { resolved, unresolved };

@@ -693,10 +693,10 @@ interface RuntimeAttributeConfig {
 // definition of "nullable" the runtime shares: `isNullable`, `nonNullableBase`
 // and the declaration readers all go through it.
 const nullableBaseAst = (ast: SchemaAST.AST): SchemaAST.AST | undefined =>
-  ast._tag === "Union" &&
+  SchemaAST.isUnion(ast) &&
   ast.types.length === 2 &&
-  ast.types.some((member) => member._tag === "Null")
-    ? ast.types.find((member) => member._tag !== "Null")
+  ast.types.some((member) => SchemaAST.isNull(member))
+    ? ast.types.find((member) => !SchemaAST.isNull(member))
     : undefined;
 
 // Whether a schema is a two-member `Schema.NullOr(...)` union, at runtime.
@@ -750,7 +750,7 @@ const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
   if (wrapped === undefined) return undefined;
   const ast = wrapped.ast;
   const admitsUndefined =
-    ast._tag === "Union" && ast.types.some((member) => member._tag === "Undefined");
+    SchemaAST.isUnion(ast) && ast.types.some((member) => SchemaAST.isUndefined(member));
   return admitsUndefined ? undefined : wrapped;
 };
 
@@ -2435,7 +2435,7 @@ const annotationAt = <A>(
 ): Declared<A> => {
   const own = ownAnnotationAt(ast, id, is);
   if (own.kind !== "absent") return own;
-  if (ast._tag === "Suspend") return annotationAt(ast.thunk(), id, is);
+  if (SchemaAST.isSuspend(ast)) return annotationAt(ast.thunk(), id, is);
   const base = nullableBaseAst(ast);
   return base === undefined ? absent : annotationAt(base, id, is);
 };

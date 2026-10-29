@@ -7,7 +7,7 @@
  * that cannot show what a rule checks leaves it `Skipped`, never passed.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Schema } from "effect";
+import { Array as Arr, Effect, Predicate, Schema } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import * as Conformance from "./Conformance.js";
@@ -230,7 +230,7 @@ const run = async (
 
 const findingsOf = (outcome: Conformance.Outcome) => {
   expect(outcome._tag).toBe("Failed");
-  return outcome._tag === "Failed" ? outcome.findings : [];
+  return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
 };
 
 describe("Conformance: sort order (filter-grammar §10)", () => {
@@ -325,7 +325,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
 
   it("passes over an attribute the server refuses to sort by, and notes NULL placement went unobserved", async () => {
     const { outcome, sent } = await run(serve({ ...profileSorter, refuses: ["due"] }));
-    assert(outcome._tag === "Passed");
+    assert(Predicate.isTagged(outcome, "Passed"));
     expect(outcome.note).toBe(
       "NULL placement (S-ORD-3) not observed: no attribute decided held a NULL in its answers",
     );
@@ -364,7 +364,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
 
   it("skips when the server refuses every attribute", async () => {
     const { outcome } = await run(serve({ ...profileSorter, refuses: ["title", "rank", "due"] }));
-    assert(outcome._tag === "Skipped");
+    assert(Predicate.isTagged(outcome, "Skipped"));
     expect(outcome.reason).toBe(
       "no attribute's order could be observed: /tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there); /projects/1/tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there)",
     );
@@ -376,7 +376,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
         ? { status: 503, body: { errors: [{ status: "503" }] } }
         : serve(profileSorter)(path);
     const { outcome } = await run(failing);
-    assert(outcome._tag === "Skipped");
+    assert(Predicate.isTagged(outcome, "Skipped"));
     expect(outcome.reason).toContain("`due`: `?sort=due` answered 503");
   });
 
