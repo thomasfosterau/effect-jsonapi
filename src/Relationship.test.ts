@@ -1,7 +1,12 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import { Schema } from "effect";
 import * as Relationship from "./Relationship.js";
-import { make as Resource } from "./Resource.js";
+import {
+  annotate,
+  extend,
+  make as Resource,
+  relationships as relationshipsOf,
+} from "./Resource.js";
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -331,5 +336,96 @@ describe("Relationship.paginated `order`", () => {
     expect(Schema.decodeUnknownSync(schema)({ links: { related: "/pages/1/revisions" } })).toEqual({
       links: { related: "/pages/1/revisions" },
     });
+  });
+});
+
+describe("Relationship.one / optional `key` (#509)", () => {
+  const Owner = Resource("owners", { attributes: { name: Schema.NonEmptyString } });
+
+  it("records the declared storage key on the descriptor, typed", () => {
+    const Pet = Resource("pets", {
+      attributes: { name: Schema.NonEmptyString },
+      relationships: {
+        owner: Relationship.one(() => Owner, { key: "ownerId" }),
+        sitter: Relationship.optional(() => Owner, { key: "sitterId", filter: ["eq", "isnull"] }),
+      },
+    });
+    expect(relationshipsOf(Pet).owner.key).toBe("ownerId");
+    expect(relationshipsOf(Pet).sitter.key).toBe("sitterId");
+    expect(relationshipsOf(Pet).sitter.filter).toEqual(["eq", "isnull"]);
+    expectTypeOf(relationshipsOf(Pet).owner.key).toEqualTypeOf<"ownerId">();
+    expectTypeOf(relationshipsOf(Pet).sitter.key).toEqualTypeOf<"sitterId">();
+  });
+
+  it("is `undefined` when none is declared", () => {
+    expect(Relationship.one(() => Owner).key).toBeUndefined();
+    expect(Relationship.optional(() => Owner, { filter: true }).key).toBeUndefined();
+    expectTypeOf(Relationship.one(() => Owner).key).toEqualTypeOf<undefined>();
+  });
+
+  it("is a storage fact: the wire schema is unchanged", () => {
+    const Keyed = Resource("keyed", {
+      attributes: { name: Schema.String },
+      relationships: { owner: Relationship.one(() => Owner, { key: "ownerId" }) },
+    });
+    const wire = {
+      type: "keyed",
+      id: "1",
+      attributes: { name: "n" },
+      relationships: { owner: { data: { type: "owners", id: "9" } } },
+    };
+    const decoded = Schema.decodeUnknownSync(Keyed)(wire);
+    expect(decoded.relationships?.owner.data.id).toBe("9");
+    // the key is never an attribute of the resource object
+    expect(decoded.attributes).toStrictEqual({ name: "n" });
+  });
+
+  it("refuses an empty key when the relationship is declared", () => {
+    expect(() => Relationship.one(() => Owner, { key: "" })).toThrow(
+      /Relationship\.one: `key` is empty/,
+    );
+    expect(() => Relationship.optional(() => Owner, { key: "" })).toThrow(
+      /Relationship\.optional: `key` is empty/,
+    );
+  });
+
+  it("refuses, at Resource.make, a key that is an attribute name", () => {
+    expect(() =>
+      Resource("clash", {
+        attributes: { ownerId: Schema.String },
+        relationships: { owner: Relationship.one(() => Owner, { key: "ownerId" }) },
+      }),
+    ).toThrow(
+      /Resource\.make\("clash"\): relationship "owner" declares storage key "ownerId", which is also an attribute/,
+    );
+  });
+
+  it("refuses, at Resource.make, a key two to-one relationships share", () => {
+    expect(() =>
+      Resource("shared", {
+        attributes: { name: Schema.String },
+        relationships: {
+          owner: Relationship.one(() => Owner, { key: "personId" }),
+          sitter: Relationship.optional(() => Owner, { key: "personId" }),
+        },
+      }),
+    ).toThrow(
+      /relationships "owner" and "sitter" both declare storage key "personId"; each to-one relationship needs its own stored field/,
+    );
+  });
+
+  it("survives Resource.extend and Resource.annotate, and is checked against what extend adds", () => {
+    const Pet = Resource("pets", {
+      attributes: { name: Schema.NonEmptyString },
+      relationships: { owner: Relationship.one(() => Owner, { key: "ownerId" }) },
+    });
+    const Dog = extend(Pet, "dogs", { attributes: { breed: Schema.String } });
+    expect(relationshipsOf(Dog).owner.key).toBe("ownerId");
+    expectTypeOf(relationshipsOf(Dog).owner.key).toEqualTypeOf<"ownerId">();
+    const Labelled = annotate(Pet, { title: "Pet" });
+    expect(relationshipsOf(Labelled).owner.key).toBe("ownerId");
+    expect(() => extend(Pet, "cats", { attributes: { ownerId: Schema.String } })).toThrow(
+      /Resource\.extend\("cats"\): relationship "owner" declares storage key "ownerId", which is also an attribute/,
+    );
   });
 });

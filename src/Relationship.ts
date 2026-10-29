@@ -114,13 +114,29 @@ export const filterOperators: typeof FilterOperator.literals = FilterOperator.li
 export type FilterDeclaration = boolean | ReadonlyArray<FilterOperator>;
 
 /**
+ * A to-one relationship's storage key: the name of the field on the declaring
+ * resource's stored row that holds the related resource's id (`"authorId"`
+ * for `author: Relationship.one(() => Person, { key: "authorId" })`), or
+ * `undefined` when none is declared. See {@link one}.
+ *
+ * @since 0.20.0
+ * @category type-level
+ */
+export type StorageKey = string | undefined;
+
+/**
  * A required to-one relationship: linkage is always a single resource
- * identifier, never `null`. `F` records its `filter` declaration.
+ * identifier, never `null`. `F` records its `filter` declaration and `K` its
+ * storage {@link StorageKey} (`undefined` when none is declared).
  *
  * @since 0.1.0
  * @category models
  */
-export interface One<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
+export interface One<
+  R extends Any,
+  F extends FilterDeclaration = FilterDeclaration,
+  K extends StorageKey = StorageKey,
+> {
   readonly kind: "one";
   readonly ref: () => R;
   /**
@@ -130,16 +146,31 @@ export interface One<R extends Any, F extends FilterDeclaration = FilterDeclarat
    */
   readonly "~target": R;
   readonly filter: F;
+  /**
+   * The name of the field on the declaring resource's stored row that holds
+   * the related resource's id (a foreign key such as `authorId`), or
+   * `undefined` when the relationship declares none. A storage fact, not a
+   * wire one: it changes nothing in the document, the query grammar or the
+   * endpoints. Read by derivations from the resource definition into storage.
+   *
+   * @since 0.20.0
+   */
+  readonly key: K;
 }
 
 /**
  * An optional (nullable) to-one relationship: linkage is a single resource
- * identifier or `null`. `F` records its `filter` declaration.
+ * identifier or `null`. `F` records its `filter` declaration and `K` its
+ * storage {@link StorageKey} (`undefined` when none is declared).
  *
  * @since 0.1.0
  * @category models
  */
-export interface Optional<R extends Any, F extends FilterDeclaration = FilterDeclaration> {
+export interface Optional<
+  R extends Any,
+  F extends FilterDeclaration = FilterDeclaration,
+  K extends StorageKey = StorageKey,
+> {
   readonly kind: "optional";
   readonly ref: () => R;
   /**
@@ -149,6 +180,16 @@ export interface Optional<R extends Any, F extends FilterDeclaration = FilterDec
    */
   readonly "~target": R;
   readonly filter: F;
+  /**
+   * The name of the field on the declaring resource's stored row that holds
+   * the related resource's id (a foreign key such as `authorId`), or
+   * `undefined` when the relationship declares none. A storage fact, not a
+   * wire one: it changes nothing in the document, the query grammar or the
+   * endpoints. Read by derivations from the resource definition into storage.
+   *
+   * @since 0.20.0
+   */
+  readonly key: K;
 }
 
 /**
@@ -238,7 +279,11 @@ export interface Paginated<R extends Any, O extends Order<R> | undefined = Order
  * @since 0.15.0
  * @category type-level
  */
-export interface one<R extends Any, F extends FilterDeclaration = false> extends One<R, F> {}
+export interface one<
+  R extends Any,
+  F extends FilterDeclaration = false,
+  K extends StorageKey = undefined,
+> extends One<R, F, K> {}
 
 /**
  * The type of `Relationship.optional(ref)` — {@link Optional} with the
@@ -248,10 +293,11 @@ export interface one<R extends Any, F extends FilterDeclaration = false> extends
  * @since 0.15.0
  * @category type-level
  */
-export interface optional<R extends Any, F extends FilterDeclaration = false> extends Optional<
-  R,
-  F
-> {}
+export interface optional<
+  R extends Any,
+  F extends FilterDeclaration = false,
+  K extends StorageKey = undefined,
+> extends Optional<R, F, K> {}
 
 /**
  * The type of `Relationship.many(ref)` — {@link Many}, named to read like the
@@ -326,6 +372,40 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>;
 // ---------------------------------------------------------------------------
 
 /**
+ * The options {@link one} and {@link optional} take.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface ToOneOptions<
+  F extends FilterDeclaration = FilterDeclaration,
+  K extends StorageKey = StorageKey,
+> {
+  /** Make the relationship a filterable field of its resource (see {@link one}). */
+  readonly filter?: F;
+  /**
+   * The relationship's storage {@link StorageKey}: the field of the declaring
+   * resource's stored row that holds the related id. A non-empty string,
+   * distinct from every attribute name and from every other to-one
+   * relationship's key on the same resource; `Resource.make` refuses a
+   * violation at definition time.
+   */
+  readonly key?: K;
+}
+
+// An empty key names no field: refused when the relationship is declared.
+// The checks that need the whole resource (an attribute or another to-one
+// relationship with the same key) run in `Resource.make`.
+const storageKey = <K extends StorageKey>(constructor: string, key: K): K => {
+  if (key === "") {
+    throw new Error(
+      `${constructor}: \`key\` is empty; name the stored field that holds the related id, or omit the option`,
+    );
+  }
+  return key;
+};
+
+/**
  * Declares a required to-one relationship: `data` is always a resource
  * identifier, never `null`. Required in create payloads.
  *
@@ -340,10 +420,22 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>;
  * declaration is read by `Resource.filterable`; the literal codec is the
  * target's `Id` schema, resolved lazily.
  *
+ * Pass `key` to declare the relationship's storage key: the field of the
+ * declaring resource's stored row that holds the related id (a foreign key,
+ * `authorId`). It is a storage fact, not a wire one — on the wire the
+ * relationship stays linkage, never an attribute — read off the descriptor
+ * (`Resource.relationships(Article).author.key`) by a derivation into storage
+ * or a sync engine, so the fact is declared once, beside the relationship. It
+ * must be non-empty, must not be an attribute name of the resource, and must
+ * not repeat across the resource's to-one relationships; `Resource.make`
+ * refuses a violation at definition time. Without it the descriptor's `key` is
+ * `undefined`.
+ *
  * @example
  * ```ts
  * import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  * import { Schema } from "effect"
+ * import { strictEqual } from "node:assert"
  *
  * const Person = Resource.make("people", {
  *   attributes: { name: Schema.NonEmptyString }
@@ -351,10 +443,13 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>;
  *
  * const Article = Resource.make("articles", {
  *   attributes: { title: Schema.NonEmptyString },
- *   relationships: { author: Relationship.one(() => Person, { filter: ["eq", "in"] }) }
+ *   relationships: {
+ *     author: Relationship.one(() => Person, { filter: ["eq", "in"], key: "authorId" })
+ *   }
  * })
  *
  * Resource.filterable(Article).author.operators // ["eq", "in"]
+ * strictEqual(Resource.relationships(Article).author.key, "authorId")
  * ```
  *
  * @since 0.1.0
@@ -366,18 +461,27 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>;
 // defaults to `false`.
 // The cast on each constructor's result is for the descriptors' phantom
 // `~target` member, which is type-level only and has no runtime counterpart.
-export const one = <R extends Any, const F extends FilterDeclaration = false>(
+export const one = <
+  R extends Any,
+  const F extends FilterDeclaration = false,
+  const K extends StorageKey = undefined,
+>(
   ref: () => R,
-  options?: { readonly filter?: F },
-): One<R, NoInfer<F>> =>
-  ({ kind: "one", ref, filter: options?.filter ?? false }) as unknown as One<R, NoInfer<F>>;
+  options?: ToOneOptions<F, K>,
+): One<R, NoInfer<F>, NoInfer<K>> =>
+  ({
+    kind: "one",
+    ref,
+    filter: options?.filter ?? false,
+    key: storageKey("Relationship.one", options?.key),
+  }) as unknown as One<R, NoInfer<F>, NoInfer<K>>;
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
  * identifier or `null`.
  *
- * Takes the same `filter` option as {@link one}; `isnull` is the natural
- * operator here (`?filter[assignee][isnull]=true`).
+ * Takes the same `filter` and `key` options as {@link one}; `isnull` is the
+ * natural filter operator here (`?filter[assignee][isnull]=true`).
  *
  * @example
  * ```ts
@@ -399,14 +503,20 @@ export const one = <R extends Any, const F extends FilterDeclaration = false>(
  * @since 0.1.0
  * @category constructors
  */
-export const optional = <R extends Any, const F extends FilterDeclaration = false>(
+export const optional = <
+  R extends Any,
+  const F extends FilterDeclaration = false,
+  const K extends StorageKey = undefined,
+>(
   ref: () => R,
-  options?: { readonly filter?: F },
-): Optional<R, NoInfer<F>> =>
-  ({ kind: "optional", ref, filter: options?.filter ?? false }) as unknown as Optional<
-    R,
-    NoInfer<F>
-  >;
+  options?: ToOneOptions<F, K>,
+): Optional<R, NoInfer<F>, NoInfer<K>> =>
+  ({
+    kind: "optional",
+    ref,
+    filter: options?.filter ?? false,
+    key: storageKey("Relationship.optional", options?.key),
+  }) as unknown as Optional<R, NoInfer<F>, NoInfer<K>>;
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
