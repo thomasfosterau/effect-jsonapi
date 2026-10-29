@@ -8,12 +8,12 @@
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
  * assertions.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 type Equals<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
-const assertTrue = <T extends true>(): T | undefined => undefined;
+const assertTrue = <T extends true>(): T[] => [];
 
 const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
 

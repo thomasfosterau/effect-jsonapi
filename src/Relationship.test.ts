@@ -380,7 +380,7 @@ describe("Relationship.one / optional `key` (#509)", () => {
     const decoded = Schema.decodeUnknownSync(Keyed)(wire);
     expect(decoded.relationships?.owner.data.id).toBe("9");
     // the key is never an attribute of the resource object
-    expect(Object.keys(decoded.attributes)).toEqual(["name"]);
+    expect(decoded.attributes).toStrictEqual({ name: "n" });
   });
 
   it("refuses an empty key when the relationship is declared", () => {
