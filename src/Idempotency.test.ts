@@ -10,6 +10,7 @@ import * as Idempotency from "./Idempotency.js";
 import * as Middleware from "./Middleware.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { definedMember } from "./internal/members.js";
 
 const Article = Resource("articles", {
   attributes: { title: Schema.NonEmptyString, body: Schema.String },
@@ -229,9 +230,9 @@ const server = (options: {
           method: init.method ?? "POST",
           headers: {
             "content-type": init.contentType ?? MEDIA_TYPE,
-            ...(init.key !== undefined ? { "idempotency-key": init.key } : {}),
+            ...definedMember("idempotency-key", init.key),
           },
-          ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+          ...definedMember("body", init.body === undefined ? undefined : JSON.stringify(init.body)),
         }),
       );
       return {

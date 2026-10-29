@@ -41,6 +41,7 @@ import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
+import { definedMember } from "./internal/members.js";
 
 // The walk reads a document as JSON, so a typed one is checked as JSON first.
 const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
@@ -289,7 +290,7 @@ const narrowed = <
   return {
     ...rest,
     attributes: Rec.filter(resource.attributes, (_, key) => names.includes(key)),
-    ...(Rec.isEmptyRecord(kept) ? {} : { relationships: kept }),
+    ...definedMember("relationships", Rec.isEmptyRecord(kept) ? undefined : kept),
   };
 };
 

@@ -128,6 +128,7 @@ import type {
   ToManyName,
 } from "./Resource.js";
 import { directTargets } from "./Resource.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -1664,7 +1665,7 @@ const polymorphicDocument = (
     : reachableIncluded(family.members, options?.include);
   if (options?.fields !== true) {
     return family.document({
-      ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+      ...definedMember("meta", options?.meta),
       // The family's own default union unless `include` declares a surface
       // or reaches further.
       ...Option.match(reachable, {
@@ -4300,8 +4301,8 @@ export const resource = <
         include: pick(listOp.config, "include", gInclude),
         fields: pick(listOp.config, "fields", gFields),
         sort: pick(listOp.config, "sort", gSort),
-        ...(page !== undefined ? { page } : {}),
-        ...(filter !== undefined ? { filter } : {}),
+        ...definedMember("page", page),
+        ...definedMember("filter", filter),
         ...queryOpt(listOp.config),
         ...commonOpts(listOp.config, true),
         ...successOpt(listOp.config),
@@ -4319,8 +4320,8 @@ export const resource = <
   };
 
   const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> => ({
-    ...(config.payload !== undefined ? { payload: config.payload } : {}),
-    ...(config.payloadMediaType !== undefined ? { payloadMediaType: config.payloadMediaType } : {}),
+    ...definedMember("payload", config.payload),
+    ...definedMember("payloadMediaType", config.payloadMediaType),
   });
 
   const createOp = opConfig("create");
@@ -4390,7 +4391,8 @@ export const resource = <
           {
             include,
             fields,
-            ...(toMany ? { sort: relatedSort, ...(page !== undefined ? { page } : {}) } : {}),
+            ...definedMember("sort", toMany ? relatedSort : undefined),
+            ...definedMember("page", toMany ? page : undefined),
             ...errorOpt,
           } as never,
         ),
@@ -4400,7 +4402,7 @@ export const resource = <
           resource,
           name as never,
           {
-            ...(toMany && page !== undefined ? { page } : {}),
+            ...definedMember("page", toMany ? page : undefined),
             ...compoundOpts(relConfig, options),
             ...errorOpt,
           } as never,

@@ -53,6 +53,7 @@ import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
 import { isLinkageData, reachable, seeds } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
+import { definedMember } from "./internal/members.js";
 
 /**
  * The top-level `jsonapi` object *value* (`{ version?, ext?, profile?, meta? }`).
@@ -382,8 +383,14 @@ const projectResource = (
   const kept = relationships === undefined ? {} : selectMembers(relationships, requested);
   return {
     ...rest,
-    ...(attributes === undefined ? {} : { attributes: selectMembers(attributes, requested) }),
-    ...(Arr.isReadonlyArrayNonEmpty(Object.keys(kept)) ? { relationships: kept } : {}),
+    ...definedMember(
+      "attributes",
+      attributes === undefined ? undefined : selectMembers(attributes, requested),
+    ),
+    ...definedMember(
+      "relationships",
+      Arr.isReadonlyArrayNonEmpty(Object.keys(kept)) ? kept : undefined,
+    ),
   };
 };
 
@@ -1441,10 +1448,10 @@ const build = (
         );
   return {
     data,
-    ...(included !== undefined ? { included } : {}),
-    ...(links !== undefined ? { links } : {}),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-    ...(options?.jsonapi !== undefined ? { jsonapi: options.jsonapi } : {}),
+    ...definedMember("included", included),
+    ...definedMember("links", links),
+    ...definedMember("meta", options?.meta),
+    ...definedMember("jsonapi", options?.jsonapi),
   };
 };
 
@@ -1905,8 +1912,8 @@ const linkageLinks = (
   options?.self === undefined && options?.related === undefined
     ? options?.links
     : {
-        ...(options.self !== undefined ? { self: options.self } : {}),
-        ...(options.related !== undefined ? { related: options.related } : {}),
+        ...definedMember("self", options.self),
+        ...definedMember("related", options.related),
         ...options.links,
       };
 

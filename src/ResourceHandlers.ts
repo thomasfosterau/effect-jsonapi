@@ -40,6 +40,7 @@ import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
 import * as Query from "./Query.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // The operations
@@ -521,15 +522,11 @@ export const readOnly = <
   // function, and nothing about it varies by request.
   const linkPairs = Query.canonicalPairs(config.listQuery);
   const assemble = {
-    ...(capabilities === undefined ? {} : { capabilities }),
-    ...(include === undefined
-      ? {}
-      : {
-          includable: include.includable,
-          targets: include.targets,
-          depth: include.depth,
-          concurrency: include.concurrency,
-        }),
+    ...definedMember("capabilities", capabilities),
+    ...definedMember("includable", include?.includable),
+    ...definedMember("targets", include?.targets),
+    ...definedMember("depth", include?.depth),
+    ...definedMember("concurrency", include?.concurrency),
   };
 
   const list = Effect.fn(`api.${segment}.list`)(function* ({ query }: { readonly query: TQuery }) {
@@ -751,7 +748,7 @@ export const make = <
         }
         if (cache !== undefined) yield* cache.set(result.id, reread.value);
         return yield* Assemble.resource(reread.value, {
-          ...(capabilities === undefined ? {} : { capabilities }),
+          ...definedMember("capabilities", capabilities),
           viewer: yield* viewer,
         });
       }),
@@ -1027,7 +1024,10 @@ export const related = <
         offset,
         limit,
         baseUrl: `${base}/${config.segment}/${params.id}/${config.key}`,
-        ...(linkPairs === undefined || query === undefined ? {} : { query: linkPairs(query) }),
+        ...definedMember(
+          "query",
+          linkPairs === undefined || query === undefined ? undefined : linkPairs(query),
+        ),
       },
       { ...capabilities, viewer: yield* viewer },
     );

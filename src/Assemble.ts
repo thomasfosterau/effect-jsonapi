@@ -50,6 +50,7 @@ import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
 import { assign } from "./internal/define.js";
 import * as Query from "./Query.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Shapes
@@ -570,8 +571,11 @@ const wireRelationshipLinks = (value: RelationshipObject): RelationshipObject =>
     ...value,
     links: {
       ...links,
-      ...(links.related === undefined ? {} : { related: toLinkString(links.related) }),
-      ...(links.self === undefined ? {} : { self: toLinkString(links.self) }),
+      ...definedMember(
+        "related",
+        links.related === undefined ? undefined : toLinkString(links.related),
+      ),
+      ...definedMember("self", links.self === undefined ? undefined : toLinkString(links.self)),
     },
   };
 };
@@ -603,11 +607,15 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
   const relationships = resource.relationships;
   const out: ResourceLike = {
     ...resource,
-    ...(self === undefined ? {} : { links: { ...resource.links, self: toLinkString(self) } }),
-    ...(relationships === undefined
-      ? {}
-      : {
-          relationships: Object.fromEntries(
+    ...definedMember(
+      "links",
+      self === undefined ? undefined : { ...resource.links, self: toLinkString(self) },
+    ),
+    ...definedMember(
+      "relationships",
+      relationships === undefined
+        ? undefined
+        : Object.fromEntries(
             Object.entries(relationships).map(([key, value]) => [
               key,
               // SAFETY: a relationship value is read only for its `links`
@@ -618,7 +626,7 @@ export const stringifyLinks = <R extends ResourceLike>(resource: R): WireResourc
                 : wireRelationshipLinks(value as RelationshipObject),
             ]),
           ),
-        }),
+    ),
   };
   // The honest assertion: the value differs from `R` only in the link fields
   // just coerced, which `Document.Wire` mirrors at the type level.
@@ -820,11 +828,12 @@ export const resource = <
   return walk([wired], options).pipe(
     Effect.map((included) => {
       const built = Handlers.data(asValue(wired), {
-        ...(wired.links?.self === undefined ? {} : { self: wired.links.self }),
+        ...definedMember("self", wired.links?.self),
         // An empty walk keeps the key: the request carried `include` (#232).
-        ...(included === undefined
-          ? {}
-          : { included: included.map((r) => asValue(stringifyLinks(r))) }),
+        ...definedMember(
+          "included",
+          included === undefined ? undefined : included.map((r) => asValue(stringifyLinks(r))),
+        ),
         onResource: onResourceFor(options),
       });
       return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<R>;
@@ -1153,7 +1162,7 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
   return {
     data: rel?.data ?? null,
     included: included as unknown as ReadonlyArray<WireResource<I>>,
-    ...(related === undefined || related === "" ? {} : { links: { related } }),
+    ...definedMember("links", related === undefined || related === "" ? undefined : { related }),
     jsonapi: JSONAPI_MEMBER,
   };
 };

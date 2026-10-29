@@ -12,6 +12,7 @@ import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
 import { unlinkedIncluded } from "./internal/linkage.js";
 import * as Query from "./Query.js";
+import { definedMember } from "./internal/members.js";
 
 // The walk reads a document as JSON, so a typed one is checked as JSON first.
 const onWire = Schema.decodeUnknownSync(Schema.JsonObject);
@@ -89,9 +90,10 @@ const candidate = (id: string, party?: string): Assemble.ResourceLike => ({
   type: "candidates",
   id,
   attributes: {},
-  ...(party === undefined
-    ? {}
-    : { relationships: { party: { data: { type: "parties", id: party } } } }),
+  ...definedMember(
+    "relationships",
+    party === undefined ? undefined : { party: { data: { type: "parties", id: party } } },
+  ),
 });
 const party = (id: string): Assemble.ResourceLike => ({ type: "parties", id, attributes: {} });
 

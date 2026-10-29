@@ -18,6 +18,7 @@ import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
+import { definedMember } from "./internal/members.js";
 
 /**
  * Drops every `undefined` member of a payload's `attributes`. In-process — and
@@ -190,7 +191,10 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => ({
           data: article,
-          ...(query.include?.includes("author") ? { included: [samplePerson] } : {}),
+          ...definedMember(
+            "included",
+            query.include?.includes("author") ? [samplePerson] : undefined,
+          ),
         })),
       ),
     )
@@ -1379,7 +1383,7 @@ describe("HTTP round-trip with a flat write payload", () => {
               ...article,
               attributes: {
                 ...article.attributes,
-                ...(payload.title !== undefined ? { title: payload.title } : {}),
+                ...definedMember("title", payload.title),
               },
             }),
           })),
