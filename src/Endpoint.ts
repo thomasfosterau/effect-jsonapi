@@ -4448,7 +4448,10 @@ export const resource = <
  * @since 0.16.0
  * @category models
  */
-export interface FlatDocumentOptions<Included extends Schema.Top> {
+export interface FlatDocumentOptions<
+  Included extends Schema.Top,
+  TM extends Schema.Top | undefined = undefined,
+> {
   /**
    * The union of resource schemas an `?include=` walk over this endpoint can
    * hoist (`Include.make(...).included`), declared so the compound `included`
@@ -4456,6 +4459,13 @@ export interface FlatDocumentOptions<Included extends Schema.Top> {
    * encoder strips whatever the handler resolved.
    */
   readonly included?: Included | undefined;
+  /**
+   * The schema every to-many relationship object's `meta` is narrowed to, in
+   * the primary data and `included` alike (`Document.wire`'s `toManyMeta`).
+   *
+   * @since 0.20.0
+   */
+  readonly toManyMeta?: TM | undefined;
 }
 
 /**
@@ -4487,16 +4497,19 @@ export interface FlatDocumentOptions<Included extends Schema.Top> {
 export const ResourceDocument = <
   S extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
+  TM extends Schema.Top | undefined = undefined,
 >(
   resource: S,
-  options?: FlatDocumentOptions<Included>,
-): DataDocument<WireSchema<S>, WireSchema<Included>> =>
+  options?: FlatDocumentOptions<Included, TM>,
+): DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>> =>
   asJsonApi(
     DataDocument(
-      wire(resource),
-      options?.included === undefined ? undefined : { included: wire(options.included) },
+      wire(resource, { toManyMeta: options?.toManyMeta }),
+      options?.included === undefined
+        ? undefined
+        : { included: wire(options.included, { toManyMeta: options.toManyMeta }) },
     ),
-  ) as DataDocument<WireSchema<S>, WireSchema<Included>>;
+  ) as DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>>;
 
 /**
  * The `success:` document of a committed flat `create` / `update` whose
@@ -4572,12 +4585,13 @@ export const CommittedDocument = <F extends Schema.Struct.Fields>(resource: {
 export const WriteDocument = <
   S extends Schema.Top & StructIdentified,
   Included extends Schema.Top = typeof Schema.Never,
+  TM extends Schema.Top | undefined = undefined,
 >(
   resource: S,
-  options?: FlatDocumentOptions<Included>,
-): WriteDocument<S, Included> =>
+  options?: FlatDocumentOptions<Included, TM>,
+): WriteDocument<S, Included, TM> =>
   asJsonApi(
-    Schema.Union<WriteDocumentMembers<S, Included>>([
+    Schema.Union<WriteDocumentMembers<S, Included, TM>>([
       ResourceDocument(resource, options),
       CommittedDocument(resource),
     ]),
@@ -4590,8 +4604,9 @@ type StructIdentified = { readonly identifier: { readonly fields: Schema.Struct.
 type WriteDocumentMembers<
   S extends Schema.Top & StructIdentified,
   Included extends Schema.Top,
+  TM extends Schema.Top | undefined = undefined,
 > = readonly [
-  DataDocument<WireSchema<S>, WireSchema<Included>>,
+  DataDocument<WireSchema<S, TM>, WireSchema<Included, TM>>,
   DataDocument<Schema.Struct<S["identifier"]["fields"]>>,
 ];
 
@@ -4604,7 +4619,8 @@ type WriteDocumentMembers<
 export interface WriteDocument<
   S extends Schema.Top & StructIdentified,
   Included extends Schema.Top = typeof Schema.Never,
-> extends Schema.Union<WriteDocumentMembers<S, Included>> {}
+  TM extends Schema.Top | undefined = undefined,
+> extends Schema.Union<WriteDocumentMembers<S, Included, TM>> {}
 
 /**
  * The `success:` document of a §7.4 related-resource fetch of a **to-one**
@@ -4640,16 +4656,19 @@ export const RelatedDocument = <
 export const FlatCollectionDocument = <
   S extends Schema.Top,
   Included extends Schema.Top = typeof Schema.Never,
+  TM extends Schema.Top | undefined = undefined,
 >(
   resource: S,
-  options?: FlatDocumentOptions<Included>,
-): CollectionDocument<WireSchema<S>, WireSchema<Included>> =>
+  options?: FlatDocumentOptions<Included, TM>,
+): CollectionDocument<WireSchema<S, TM>, WireSchema<Included, TM>> =>
   asJsonApi(
     CollectionDocument(
-      wire(resource),
-      options?.included === undefined ? undefined : { included: wire(options.included) },
+      wire(resource, { toManyMeta: options?.toManyMeta }),
+      options?.included === undefined
+        ? undefined
+        : { included: wire(options.included, { toManyMeta: options.toManyMeta }) },
     ),
-  ) as CollectionDocument<WireSchema<S>, WireSchema<Included>>;
+  ) as CollectionDocument<WireSchema<S, TM>, WireSchema<Included, TM>>;
 
 /**
  * The endpoint (and handler) name of a flat §7.4 related-resource fetch —

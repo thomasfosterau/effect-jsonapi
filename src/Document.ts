@@ -954,18 +954,67 @@ export type Wire<T> = T extends URL
             : T;
 
 /**
+ * `T` (a resource object type, or a union of them) with every **to-many**
+ * relationship object's `meta` member typed `Meta` — what {@link wire}'s
+ * `toManyMeta` option does to the schema. A relationship object is to-many
+ * when its `data` is an array (`Relationship.many`) or it has no `data` at
+ * all (`Relationship.paginated`); to-one relationships, and every member's
+ * optionality, are untouched.
+ *
+ * @since 0.20.0
+ * @category type-level
+ */
+export type WithToManyMeta<T, Meta> = T extends object
+  ? { [K in keyof T]: K extends "relationships" ? ToManyMetaRelationships<T[K], Meta> : T[K] }
+  : T;
+
+type ToManyMetaRelationships<Rs, Meta> = Rs extends object
+  ? { [K in keyof Rs]: ToManyMetaRelationship<Rs[K], Meta> }
+  : Rs;
+
+type ToManyMetaRelationship<R, Meta> = R extends object
+  ? "data" extends keyof R
+    ? R["data" & keyof R] extends ReadonlyArray<unknown>
+      ? { [K in keyof R]: K extends "meta" ? Meta : R[K] }
+      : R
+    : { [K in keyof R]: K extends "meta" ? Meta : R[K] }
+  : R;
+
+/**
  * The schema {@link wire} returns: `S` with its links as strings, on both
- * sides — a plain codec whose `Type` is `Wire<S["Type"]>`.
+ * sides — a plain codec whose `Type` is `Wire<S["Type"]>` — and, given a
+ * `toManyMeta` schema `TM`, every to-many relationship's `meta` typed by it
+ * ({@link WithToManyMeta}).
  *
  * @since 0.16.0
  * @category models
  */
-export interface WireSchema<S extends Schema.Top> extends Schema.Codec<
-  Wire<S["Type"]>,
-  Wire<S["Encoded"]>,
-  S["DecodingServices"],
-  S["EncodingServices"]
+export interface WireSchema<
+  S extends Schema.Top,
+  TM extends Schema.Top | undefined = undefined,
+> extends Schema.Codec<
+  TM extends Schema.Top ? WithToManyMeta<Wire<S["Type"]>, TM["Type"]> : Wire<S["Type"]>,
+  TM extends Schema.Top ? WithToManyMeta<Wire<S["Encoded"]>, TM["Encoded"]> : Wire<S["Encoded"]>,
+  S["DecodingServices"] | (TM extends Schema.Top ? TM["DecodingServices"] : never),
+  S["EncodingServices"] | (TM extends Schema.Top ? TM["EncodingServices"] : never)
 > {}
+
+/**
+ * The options {@link wire} takes.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface WireOptions<TM extends Schema.Top | undefined = undefined> {
+  /**
+   * The schema every **to-many** relationship object's `meta` member is
+   * narrowed to, overriding what each relationship declared (`Relationship.many`
+   * / `paginated`'s `meta` option, or the open `AnyMeta` record) — for a
+   * family whose every to-many arm carries the same meta, such as
+   * `{ totalCount }`. To-one relationships keep their own.
+   */
+  readonly toManyMeta?: TM | undefined;
+}
 
 const isStructLike = (
   schema: unknown,
@@ -1037,12 +1086,33 @@ const wireLinkBlock = (links: Schema.Top): Schema.Top => {
   );
 };
 
-/** A relationship object (`{ data, links, meta }`) with its `links` block wired. */
-const wireRelationship = (relationship: Schema.Top): Schema.Top => {
+/**
+ * Whether a relationship object's schema is to-many: its `data` is an array
+ * (`many`), or it has none (`paginated`).
+ */
+const isToManyRelationship = (fields: { readonly [key: string]: Schema.Top }): boolean => {
+  const data = fields["data"];
+  return data === undefined || astTag(splitOptionality(data)[0]) === "Arrays";
+};
+
+/**
+ * A relationship object (`{ data, links, meta }`) with its `links` block
+ * wired and, when `toManyMeta` is given and the relationship is to-many, its
+ * `meta` narrowed to it.
+ */
+const wireRelationship = (
+  relationship: Schema.Top,
+  toManyMeta: Schema.Top | undefined,
+): Schema.Top => {
   const [inner, rewrap] = splitOptionality(relationship);
-  const links = isStructLike(inner) ? inner.fields["links"] : undefined;
-  if (links === undefined || !isStructLike(inner)) return relationship;
-  return rewrap(Schema.Struct({ ...inner.fields, links: wireLinkBlock(links) }));
+  if (!isStructLike(inner)) return relationship;
+  const fields: { [key: string]: Schema.Top } = { ...inner.fields };
+  const links = fields["links"];
+  if (links !== undefined) fields["links"] = wireLinkBlock(links);
+  const narrowed = toManyMeta !== undefined && isToManyRelationship(inner.fields);
+  if (narrowed) fields["meta"] = Schema.optionalKey(toManyMeta);
+  if (links === undefined && !narrowed) return relationship;
+  return rewrap(Schema.Struct(fields));
 };
 
 /**
@@ -1057,6 +1127,11 @@ const wireRelationship = (relationship: Schema.Top): Schema.Top => {
  * optionality of every member are untouched, and a union (a polymorphic
  * `included` whitelist) wires each member. A schema that is not a struct
  * passes through unchanged.
+ *
+ * Pass `toManyMeta` to narrow every **to-many** relationship object's `meta`
+ * at the call site (the second example), overriding what each relationship
+ * declared — the per-relationship spelling is
+ * `Relationship.many(ref, { meta })`. To-one relationships keep their own.
  *
  * @example
  * ```ts
@@ -1079,17 +1154,54 @@ const wireRelationship = (relationship: Schema.Top): Schema.Top => {
  * // → string
  * ```
  *
+ * @example
+ * ```ts
+ * import { Schema } from "effect"
+ * import { Document, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
+ * import { strictEqual, throws } from "node:assert"
+ *
+ * const Ballot = Resource.make("ballots", { attributes: { label: Schema.String } })
+ * const Contest = Resource.make("contests", {
+ *   attributes: { name: Schema.String },
+ *   relationships: { ballots: Relationship.many(() => Ballot) }
+ * })
+ *
+ * const Wire = Document.wire(Contest, {
+ *   toManyMeta: Schema.Struct({ totalCount: Schema.Number })
+ * })
+ * const contest = {
+ *   type: "contests",
+ *   id: "1",
+ *   attributes: { name: "Senate" },
+ *   relationships: { ballots: { data: [], meta: { totalCount: 42 } } }
+ * }
+ * strictEqual(Schema.decodeUnknownSync(Wire)(contest).relationships?.ballots.meta?.totalCount, 42)
+ * throws(() =>
+ *   Schema.decodeUnknownSync(Wire)({
+ *     ...contest,
+ *     relationships: { ballots: { data: [], meta: { totalCount: "many" } } }
+ *   })
+ * )
+ * ```
+ *
  * @since 0.16.0
  * @category constructors
  */
-export const wire = <S extends Schema.Top>(schema: S): WireSchema<S> => {
+export const wire = <S extends Schema.Top, TM extends Schema.Top | undefined = undefined>(
+  schema: S,
+  options?: WireOptions<TM>,
+): WireSchema<S, TM> => {
   // The casts are the honest assertion this function makes: the rebuilt
-  // schema differs from `S` only in its link fields, which `Wire` mirrors at
-  // the type level.
+  // schema differs from `S` only in its link fields (and, with `toManyMeta`,
+  // its to-many relationships' `meta`), which `Wire` / `WithToManyMeta`
+  // mirror at the type level.
+  const toManyMeta: Schema.Top | undefined = options?.toManyMeta;
   if (isUnionLike(schema)) {
-    return Schema.Union(schema.members.map(wire)) as unknown as WireSchema<S>;
+    return Schema.Union(
+      schema.members.map((member) => wire(member, { toManyMeta })),
+    ) as unknown as WireSchema<S, TM>;
   }
-  if (!isStructLike(schema)) return schema as unknown as WireSchema<S>;
+  if (!isStructLike(schema)) return schema as unknown as WireSchema<S, TM>;
   const fields: { [key: string]: Schema.Top } = { ...schema.fields };
   // `Resource.make` declares both blocks with `Schema.optionalKey`, so each is
   // unwrapped before its members are reachable and re-wrapped after.
@@ -1102,11 +1214,14 @@ export const wire = <S extends Schema.Top>(schema: S): WireSchema<S> => {
       fields["relationships"] = rewrap(
         Schema.Struct(
           Object.fromEntries(
-            Object.entries(inner.fields).map(([key, field]) => [key, wireRelationship(field)]),
+            Object.entries(inner.fields).map(([key, field]) => [
+              key,
+              wireRelationship(field, toManyMeta),
+            ]),
           ),
         ),
       );
     }
   }
-  return Schema.Struct(fields) as unknown as WireSchema<S>;
+  return Schema.Struct(fields) as unknown as WireSchema<S, TM>;
 };

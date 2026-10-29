@@ -273,6 +273,7 @@ export interface FlatReadOnlyOptions<
   List extends Query.FlatListStruct,
   Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface | undefined,
+  TM extends Schema.Top | undefined = undefined,
 > {
   readonly resource: R;
   /** The flat `List<X>` input (the page cursor plus the family's own filters). */
@@ -285,6 +286,16 @@ export interface FlatReadOnlyOptions<
    * enforce. Omit for a family that serves no walk.
    */
   readonly include?: Surface;
+  /**
+   * The schema every to-many relationship object's `meta` is narrowed to in
+   * the group's documents, primary data and `included` alike — the per-call
+   * override of what each relationship declared with `Relationship.many` /
+   * `paginated`'s `meta` option (see `Document.wire`). For a family whose
+   * every to-many arm carries the same meta, such as `{ totalCount }`.
+   *
+   * @since 0.20.0
+   */
+  readonly toManyMeta?: TM | undefined;
 }
 
 /**
@@ -301,7 +312,8 @@ export interface FlatOptions<
   Create extends Schema.Top,
   Update extends Schema.Top,
   Hidden extends boolean = false,
-> extends FlatReadOnlyOptions<R, List, Filters, Surface> {
+  TM extends Schema.Top | undefined = undefined,
+> extends FlatReadOnlyOptions<R, List, Filters, Surface, TM> {
   /** The flat `Create<X>` command input (attributes plus relationship ids) — not the JSON:API envelope. */
   readonly create: Create;
   /** The flat `Update<X>` command input, keyed by the required `id`. */
@@ -332,13 +344,15 @@ const flatWire = <
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>>,
   Surface extends AnySurface | undefined,
+  TM extends Schema.Top | undefined,
 >(
-  options: FlatReadOnlyOptions<R, List, Filters, Surface>,
+  options: FlatReadOnlyOptions<R, List, Filters, Surface, TM>,
 ) => {
   const included = options.include?.included;
+  const toManyMeta = options.toManyMeta;
   return {
-    document: Endpoint.ResourceDocument(options.resource, { included }),
-    collection: Endpoint.FlatCollectionDocument(options.resource, { included }),
+    document: Endpoint.ResourceDocument(options.resource, { included, toManyMeta }),
+    collection: Endpoint.FlatCollectionDocument(options.resource, { included, toManyMeta }),
     listQuery: Query.flatList(options.list, { filters: options.filters }),
   };
 };
@@ -389,12 +403,14 @@ export const flatReadOnly = <
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
   Surface extends AnySurface | undefined = undefined,
+  TM extends Schema.Top | undefined = undefined,
 >(
   options: FlatReadOnlyOptions<
     Parameter<Type, Attributes, Rels, Meta, IdSchema>,
     List,
     Filters,
-    Surface
+    Surface,
+    TM
   >,
 ) => {
   const { collection, document, listQuery } = flatWire(options);
@@ -460,6 +476,7 @@ export const flat = <
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
   Surface extends AnySurface | undefined = undefined,
   const Hidden extends boolean = false,
+  TM extends Schema.Top | undefined = undefined,
 >(
   options: FlatOptions<
     Parameter<Type, Attributes, Rels, Meta, IdSchema>,
@@ -468,7 +485,8 @@ export const flat = <
     Surface,
     Create,
     Update,
-    Hidden
+    Hidden,
+    TM
   >,
 ) => {
   const { collection, document, listQuery } = flatWire(options);
@@ -484,7 +502,10 @@ export const flat = <
   // oxlint-disable-next-line effect/casting-awareness -- a ternary can't narrow a generic conditional type (`Success`); the SAFETY comment above is why the branch matches
   const success = (
     options.hiddenWrites === true
-      ? Endpoint.WriteDocument(options.resource, { included: options.include?.included })
+      ? Endpoint.WriteDocument(options.resource, {
+          included: options.include?.included,
+          toManyMeta: options.toManyMeta,
+        })
       : document
   ) as Success;
   const write = { payloadMediaType: FLAT_PAYLOAD_MEDIA_TYPE, success } as const;

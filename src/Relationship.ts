@@ -127,7 +127,8 @@ export type StorageKey = string | undefined;
 /**
  * A required to-one relationship: linkage is always a single resource
  * identifier, never `null`. `F` records its `filter` declaration and `K` its
- * storage {@link StorageKey} (`undefined` when none is declared).
+ * storage {@link StorageKey} (`undefined` when none is declared); `M` is the
+ * schema of its relationship object's `meta`.
  *
  * @since 0.1.0
  * @category models
@@ -136,6 +137,7 @@ export interface One<
   R extends Any,
   F extends FilterDeclaration = FilterDeclaration,
   K extends StorageKey = StorageKey,
+  M extends Schema.Top = Schema.Top,
 > {
   readonly kind: "one";
   readonly ref: () => R;
@@ -156,12 +158,21 @@ export interface One<
    * @since 0.20.0
    */
   readonly key: K;
+  /**
+   * The schema of the relationship object's `meta` member: the one declared
+   * with the constructor's `meta` option, or `Document.AnyMeta` (an open
+   * record) when none is.
+   *
+   * @since 0.20.0
+   */
+  readonly meta: M;
 }
 
 /**
  * An optional (nullable) to-one relationship: linkage is a single resource
  * identifier or `null`. `F` records its `filter` declaration and `K` its
- * storage {@link StorageKey} (`undefined` when none is declared).
+ * storage {@link StorageKey} (`undefined` when none is declared); `M` is the
+ * schema of its relationship object's `meta`.
  *
  * @since 0.1.0
  * @category models
@@ -170,6 +181,7 @@ export interface Optional<
   R extends Any,
   F extends FilterDeclaration = FilterDeclaration,
   K extends StorageKey = StorageKey,
+  M extends Schema.Top = Schema.Top,
 > {
   readonly kind: "optional";
   readonly ref: () => R;
@@ -190,16 +202,25 @@ export interface Optional<
    * @since 0.20.0
    */
   readonly key: K;
+  /**
+   * The schema of the relationship object's `meta` member: the one declared
+   * with the constructor's `meta` option, or `Document.AnyMeta` (an open
+   * record) when none is.
+   *
+   * @since 0.20.0
+   */
+  readonly meta: M;
 }
 
 /**
  * A to-many relationship with inline linkage: an array of resource
- * identifiers (possibly empty).
+ * identifiers (possibly empty). `M` is the schema of its relationship
+ * object's `meta`.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Many<R extends Any> {
+export interface Many<R extends Any, M extends Schema.Top = Schema.Top> {
   readonly kind: "many";
   readonly ref: () => R;
   /**
@@ -208,6 +229,14 @@ export interface Many<R extends Any> {
    * never present on the descriptor value.
    */
   readonly "~target": R;
+  /**
+   * The schema of the relationship object's `meta` member: the one declared
+   * with the constructor's `meta` option, or `Document.AnyMeta` (an open
+   * record) when none is.
+   *
+   * @since 0.20.0
+   */
+  readonly meta: M;
 }
 
 /**
@@ -239,12 +268,17 @@ export type Order<R extends Any> = ReadonlyArray<Sort.Term<AttributeKeys<R> | "i
  * An unbounded to-many relationship with *no* inline linkage: the relationship
  * object carries only a required `related` link pointing at a paginated
  * collection endpoint. `O` records its declared canonical {@link Order}
- * (`undefined` when none is declared).
+ * (`undefined` when none is declared); `M` is the schema of its relationship
+ * object's `meta`.
  *
  * @since 0.1.0
  * @category models
  */
-export interface Paginated<R extends Any, O extends Order<R> | undefined = Order<R> | undefined> {
+export interface Paginated<
+  R extends Any,
+  O extends Order<R> | undefined = Order<R> | undefined,
+  M extends Schema.Top = Schema.Top,
+> {
   readonly kind: "paginated";
   readonly ref: () => R;
   /**
@@ -260,6 +294,14 @@ export interface Paginated<R extends Any, O extends Order<R> | undefined = Order
    * @since 0.15.0
    */
   readonly order: O;
+  /**
+   * The schema of the relationship object's `meta` member: the one declared
+   * with the constructor's `meta` option, or `Document.AnyMeta` (an open
+   * record) when none is.
+   *
+   * @since 0.20.0
+   */
+  readonly meta: M;
 }
 
 /**
@@ -283,7 +325,8 @@ export interface one<
   R extends Any,
   F extends FilterDeclaration = false,
   K extends StorageKey = undefined,
-> extends One<R, F, K> {}
+  M extends Schema.Top = typeof AnyMeta,
+> extends One<R, F, K, M> {}
 
 /**
  * The type of `Relationship.optional(ref)` — {@link Optional} with the
@@ -297,7 +340,8 @@ export interface optional<
   R extends Any,
   F extends FilterDeclaration = false,
   K extends StorageKey = undefined,
-> extends Optional<R, F, K> {}
+  M extends Schema.Top = typeof AnyMeta,
+> extends Optional<R, F, K, M> {}
 
 /**
  * The type of `Relationship.many(ref)` — {@link Many}, named to read like the
@@ -306,7 +350,7 @@ export interface optional<
  * @since 0.15.0
  * @category type-level
  */
-export interface many<R extends Any> extends Many<R> {}
+export interface many<R extends Any, M extends Schema.Top = typeof AnyMeta> extends Many<R, M> {}
 
 /**
  * The type of `Relationship.paginated(ref)` — {@link Paginated} with the
@@ -324,7 +368,8 @@ export interface many<R extends Any> extends Many<R> {}
 export interface paginated<
   R extends Any,
   O extends Order<R> | undefined = undefined,
-> extends Paginated<R, O> {}
+  M extends Schema.Top = typeof AnyMeta,
+> extends Paginated<R, O, M> {}
 
 /**
  * Any relationship descriptor.
@@ -380,7 +425,8 @@ export type Linkable<R extends Any> = One<R> | Optional<R> | Many<R>;
 export interface ToOneOptions<
   F extends FilterDeclaration = FilterDeclaration,
   K extends StorageKey = StorageKey,
-> {
+  M extends Schema.Top = Schema.Top,
+> extends MetaOptions<M> {
   /** Make the relationship a filterable field of its resource (see {@link one}). */
   readonly filter?: F;
   /**
@@ -391,6 +437,24 @@ export interface ToOneOptions<
    * violation at definition time.
    */
   readonly key?: K;
+}
+
+/**
+ * The `meta` option every relationship constructor takes: the schema of the
+ * relationship object's `meta` member, which the resource schema, its
+ * documents, `Document.wire` and so the endpoints and their OpenAPI and
+ * client types then carry, in place of the open `Document.AnyMeta` record.
+ *
+ * @since 0.20.0
+ * @category models
+ */
+export interface MetaOptions<M extends Schema.Top = Schema.Top> {
+  /**
+   * The schema of the relationship object's `meta` member, such as
+   * `Schema.Struct({ totalCount: Schema.Number })` for a to-many arm whose
+   * linkage is capped per parent. Defaults to `Document.AnyMeta`.
+   */
+  readonly meta?: M;
 }
 
 // An empty key names no field: refused when the relationship is declared.
@@ -465,16 +529,18 @@ export const one = <
   R extends Any,
   const F extends FilterDeclaration = false,
   const K extends StorageKey = undefined,
+  M extends Schema.Top = typeof AnyMeta,
 >(
   ref: () => R,
-  options?: ToOneOptions<F, K>,
-): One<R, NoInfer<F>, NoInfer<K>> =>
+  options?: ToOneOptions<F, K, M>,
+): One<R, NoInfer<F>, NoInfer<K>, NoInfer<M>> =>
   ({
     kind: "one",
     ref,
     filter: options?.filter ?? false,
     key: storageKey("Relationship.one", options?.key),
-  }) as unknown as One<R, NoInfer<F>, NoInfer<K>>;
+    meta: options?.meta ?? AnyMeta,
+  }) as unknown as One<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
 
 /**
  * Declares an optional (nullable) to-one relationship: `data` is a resource
@@ -507,16 +573,18 @@ export const optional = <
   R extends Any,
   const F extends FilterDeclaration = false,
   const K extends StorageKey = undefined,
+  M extends Schema.Top = typeof AnyMeta,
 >(
   ref: () => R,
-  options?: ToOneOptions<F, K>,
-): Optional<R, NoInfer<F>, NoInfer<K>> =>
+  options?: ToOneOptions<F, K, M>,
+): Optional<R, NoInfer<F>, NoInfer<K>, NoInfer<M>> =>
   ({
     kind: "optional",
     ref,
     filter: options?.filter ?? false,
     key: storageKey("Relationship.optional", options?.key),
-  }) as unknown as Optional<R, NoInfer<F>, NoInfer<K>>;
+    meta: options?.meta ?? AnyMeta,
+  }) as unknown as Optional<R, NoInfer<F>, NoInfer<K>, NoInfer<M>>;
 
 /**
  * Declares a to-many relationship with inline linkage: `data` is an array of
@@ -540,8 +608,11 @@ export const optional = <
  * @since 0.1.0
  * @category constructors
  */
-export const many = <R extends Any>(ref: () => R): Many<R> =>
-  ({ kind: "many", ref }) as unknown as Many<R>;
+export const many = <R extends Any, M extends Schema.Top = typeof AnyMeta>(
+  ref: () => R,
+  options?: MetaOptions<M>,
+): Many<R, NoInfer<M>> =>
+  ({ kind: "many", ref, meta: options?.meta ?? AnyMeta }) as unknown as Many<R, NoInfer<M>>;
 
 /**
  * Declares an unbounded to-many relationship with no inline linkage: the
@@ -590,10 +661,14 @@ export const many = <R extends Any>(ref: () => R): Many<R> =>
 // `NoInfer` keeps `O` from being inferred off the *contextual* return type (the
 // `Relationships` record of a `Resource.make` call widens it); it is inferred
 // from `options.order` alone, and defaults to `undefined` — no declared order.
-export const paginated = <R extends Any, const O extends Order<R> | undefined = undefined>(
+export const paginated = <
+  R extends Any,
+  const O extends Order<R> | undefined = undefined,
+  M extends Schema.Top = typeof AnyMeta,
+>(
   ref: () => R,
-  options?: { readonly order?: O },
-): Paginated<R, NoInfer<O>> => {
+  options?: { readonly order?: O } & MetaOptions<M>,
+): Paginated<R, NoInfer<O>, NoInfer<M>> => {
   const order = options?.order;
   if (order !== undefined) {
     if (Arr.isReadonlyArrayEmpty(order)) {
@@ -611,10 +686,12 @@ export const paginated = <R extends Any, const O extends Order<R> | undefined = 
       seen.add(term.field);
     }
   }
-  return { kind: "paginated", ref, order: order as NoInfer<O> } as unknown as Paginated<
-    R,
-    NoInfer<O>
-  >;
+  return {
+    kind: "paginated",
+    ref,
+    order: order as NoInfer<O>,
+    meta: options?.meta ?? AnyMeta,
+  } as unknown as Paginated<R, NoInfer<O>, NoInfer<M>>;
 };
 
 // ---------------------------------------------------------------------------
@@ -660,10 +737,13 @@ export const isToMany = (descriptor: Descriptor): descriptor is ToMany<Any> =>
  * @since 0.1.0
  * @category models
  */
-export interface OneSchema<R extends Any> extends Schema.Struct<{
+export interface OneSchema<
+  R extends Any,
+  M extends Schema.Top = typeof AnyMeta,
+> extends Schema.Struct<{
   readonly data: Schema.suspend<R["identifier"]>;
   readonly links: Schema.optionalKey<typeof RelationshipLinks>;
-  readonly meta: Schema.optionalKey<typeof AnyMeta>;
+  readonly meta: Schema.optionalKey<M>;
 }> {}
 
 /**
@@ -673,10 +753,13 @@ export interface OneSchema<R extends Any> extends Schema.Struct<{
  * @since 0.1.0
  * @category models
  */
-export interface OptionalSchema<R extends Any> extends Schema.Struct<{
+export interface OptionalSchema<
+  R extends Any,
+  M extends Schema.Top = typeof AnyMeta,
+> extends Schema.Struct<{
   readonly data: Schema.NullOr<Schema.suspend<R["identifier"]>>;
   readonly links: Schema.optionalKey<typeof RelationshipLinks>;
-  readonly meta: Schema.optionalKey<typeof AnyMeta>;
+  readonly meta: Schema.optionalKey<M>;
 }> {}
 
 /**
@@ -686,10 +769,13 @@ export interface OptionalSchema<R extends Any> extends Schema.Struct<{
  * @since 0.1.0
  * @category models
  */
-export interface ManySchema<R extends Any> extends Schema.Struct<{
+export interface ManySchema<
+  R extends Any,
+  M extends Schema.Top = typeof AnyMeta,
+> extends Schema.Struct<{
   readonly data: Schema.$Array<Schema.suspend<R["identifier"]>>;
   readonly links: Schema.optionalKey<typeof RelationshipLinks>;
-  readonly meta: Schema.optionalKey<typeof AnyMeta>;
+  readonly meta: Schema.optionalKey<M>;
 }> {}
 
 /**
@@ -699,37 +785,51 @@ export interface ManySchema<R extends Any> extends Schema.Struct<{
  * @since 0.1.0
  * @category models
  */
-export interface PaginatedSchema extends Schema.Struct<{
+export interface PaginatedSchema<M extends Schema.Top = typeof AnyMeta> extends Schema.Struct<{
   readonly links: typeof PaginatedRelationshipLinks;
-  readonly meta: Schema.optionalKey<typeof AnyMeta>;
+  readonly meta: Schema.optionalKey<M>;
 }> {}
 
-const makeOneSchema = <R extends Any>(descriptor: One<R>): OneSchema<R> =>
+const makeOneSchema = <R extends Any, M extends Schema.Top>(
+  descriptor: One<R, FilterDeclaration, StorageKey, M>,
+): OneSchema<R, M> =>
   Schema.Struct({
     data: Schema.suspend(() => descriptor.ref().identifier as R["identifier"]),
     links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta),
+    meta: Schema.optionalKey(metaOf(descriptor)),
   });
 
-const makeOptionalSchema = <R extends Any>(descriptor: Optional<R>): OptionalSchema<R> =>
+const makeOptionalSchema = <R extends Any, M extends Schema.Top>(
+  descriptor: Optional<R, FilterDeclaration, StorageKey, M>,
+): OptionalSchema<R, M> =>
   Schema.Struct({
     data: Schema.NullOr(Schema.suspend(() => descriptor.ref().identifier as R["identifier"])),
     links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta),
+    meta: Schema.optionalKey(metaOf(descriptor)),
   });
 
-const makeManySchema = <R extends Any>(descriptor: Many<R>): ManySchema<R> =>
+const makeManySchema = <R extends Any, M extends Schema.Top>(
+  descriptor: Many<R, M>,
+): ManySchema<R, M> =>
   Schema.Struct({
     data: Schema.Array(Schema.suspend(() => descriptor.ref().identifier as R["identifier"])),
     links: Schema.optionalKey(RelationshipLinks),
-    meta: Schema.optionalKey(AnyMeta),
+    meta: Schema.optionalKey(metaOf(descriptor)),
   });
 
-const makePaginatedSchema = (_descriptor: Paginated<Any>): PaginatedSchema =>
+const makePaginatedSchema = <M extends Schema.Top>(
+  descriptor: Paginated<Any, Order<Any> | undefined, M>,
+): PaginatedSchema<M> =>
   Schema.Struct({
     links: PaginatedRelationshipLinks,
-    meta: Schema.optionalKey(AnyMeta),
+    meta: Schema.optionalKey(metaOf(descriptor)),
   });
+
+// A descriptor built before relationship `meta` was declarable (or by hand)
+// carries no `meta`; it reads as the open record it always had.
+const metaOf = <M extends Schema.Top>(descriptor: { readonly meta: M }): M =>
+  // SAFETY: `M` defaults to `typeof AnyMeta` wherever the descriptor carries none.
+  (descriptor.meta ?? AnyMeta) as M;
 
 /**
  * The resource a relationship descriptor points at — the return type of its
@@ -761,11 +861,20 @@ export type TargetOf<D extends Descriptor> = D["~target"];
  * @category type-level
  */
 export type SchemaFor<D extends Descriptor> = {
-  readonly one: OneSchema<TargetOf<D>>;
-  readonly optional: OptionalSchema<TargetOf<D>>;
-  readonly many: ManySchema<TargetOf<D>>;
-  readonly paginated: PaginatedSchema;
+  readonly one: OneSchema<TargetOf<D>, MetaOf<D>>;
+  readonly optional: OptionalSchema<TargetOf<D>, MetaOf<D>>;
+  readonly many: ManySchema<TargetOf<D>, MetaOf<D>>;
+  readonly paginated: PaginatedSchema<MetaOf<D>>;
 }[D["kind"]];
+
+/**
+ * The schema of a relationship descriptor's `meta` member: the one its
+ * constructor's `meta` option declared, or `Document.AnyMeta`.
+ *
+ * @since 0.20.0
+ * @category type-level
+ */
+export type MetaOf<D extends Descriptor> = D["meta"];
 
 /**
  * Creates the wire schema for a relationship descriptor.
