@@ -698,7 +698,7 @@ const linkageKeys = (resource: ResourceValue): Array<string> =>
   );
 
 // The edges the full-linkage walk follows out of a resource as emitted
-// (`shaped`), given the resource it was shaped from (`original`) and the
+// (`mapped`), given the resource it was shaped from (`original`) and the
 // fieldset the transform applied: the emitted linkage, and the linkage of
 // every relationship of the original the fieldset excludes for its type. The
 // spec waives full linkage "when relationship fields that would otherwise
@@ -707,14 +707,14 @@ const linkageKeys = (resource: ResourceValue): Array<string> =>
 // otherwise have carried. A relationship the transform dropped for any
 // other reason is not counted.
 const walkKeys = (
-  shaped: ResourceValue,
+  mapped: ResourceValue,
   original: ResourceValue,
   fields: Fields | undefined,
 ): Array<string> => {
   const requested = requestedFor(fields, original.type);
-  if (requested === undefined || original.relationships === undefined) return linkageKeys(shaped);
+  if (requested === undefined || original.relationships === undefined) return linkageKeys(mapped);
   const excluded = Rec.filter(original.relationships, (_, name) => !requested.has(name));
-  return [...linkageKeys(shaped), ...linkageKeys({ ...original, relationships: excluded })];
+  return [...linkageKeys(mapped), ...linkageKeys({ ...original, relationships: excluded })];
 };
 
 // Wraps a transform so it runs at most once per `(type, id)`, handing back
@@ -724,12 +724,12 @@ const walkKeys = (
 const memoise = <F extends TransformLambda>(
   onResource: ResourceTransform<F>,
 ): ResourceTransform<F> => {
-  const shaped = new Map<string, unknown>();
+  const mapped = new Map<string, unknown>();
   return projecting((resource: ResourceValue) => {
     const k = key(resource);
-    if (shaped.has(k)) return shaped.get(k);
+    if (mapped.has(k)) return mapped.get(k);
     const transformed = onResource(resource);
-    shaped.set(k, transformed);
+    mapped.set(k, transformed);
     return transformed;
   }, projectionOf(onResource)) as ResourceTransform<F>;
 };
@@ -866,7 +866,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   }
 
   // One transform pass over the survivors.
-  const shaped = mapResources(deduped, options?.onResource);
+  const mapped = mapResources(deduped, options?.onResource);
 
   // Full linkage: every included resource is reachable from the primary data,
   // through its linkage and then through other included members' linkage.
@@ -875,7 +875,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   if (options?.checkLinkage !== false) {
     const fields = projectionOf(options?.onResource);
     const members = HashMap.fromIterable(
-      Arr.map(Arr.zip(shaped, deduped), ([resource, original]) => [
+      Arr.map(Arr.zip(mapped, deduped), ([resource, original]) => [
         key(resource),
         walkKeys(resource, original, fields),
       ]),
@@ -889,7 +889,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
     const linked = reachable(start, (k) =>
       Option.getOrElse(HashMap.get(members, k), (): ReadonlyArray<string> => []),
     );
-    for (const resource of shaped) {
+    for (const resource of mapped) {
       if (!HashSet.has(linked, key(resource))) {
         throw new Error(
           `JSON:API full linkage violation: included resource "${resource.type}:${resource.id}" ` +
@@ -900,7 +900,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
     }
   }
 
-  return shaped as ReadonlyArray<Transformed<F, Included>>;
+  return mapped as ReadonlyArray<Transformed<F, Included>>;
 };
 
 // ---------------------------------------------------------------------------

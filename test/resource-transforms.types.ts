@@ -85,7 +85,7 @@ type IncludedArticle = Extract<
   NonNullable<(typeof projected)["included"]>[number],
   { readonly type: "articles" }
 >;
-const sameShape: Equals<PrimaryArticle["attributes"], IncludedArticle["attributes"]> = true;
+const sameAttributes: Equals<PrimaryArticle["attributes"], IncludedArticle["attributes"]> = true;
 
 // A type with no requested set is untouched, in either slot.
 declare const projectedPerson: Extract<
@@ -152,7 +152,7 @@ assertType<{ readonly type: "people"; readonly id: string } | undefined>(
 // @ts-expect-error -- `author` is not asserted present either
 assertType<unknown>(dynamic.data.relationships?.author.data);
 // the same shape on the included side
-const dynamicSameShape: Equals<
+const dynamicSameAttributes: Equals<
   (typeof dynamic)["data"]["attributes"],
   NonNullable<(typeof dynamic)["included"]>[number]["attributes"]
 > = true;
@@ -199,7 +199,7 @@ const page = Handlers.collection([article], {
   included: [related],
   onResource: Handlers.project({ articles: ["title"] }),
 });
-const pageSameShape: Equals<
+const pageSameAttributes: Equals<
   (typeof page)["data"][number]["attributes"],
   NonNullable<(typeof page)["included"]>[number]["attributes"]
 > = true;
@@ -252,7 +252,7 @@ export {
   composedIncluded,
   dynamic,
   dynamicAttributes,
-  dynamicSameShape,
+  dynamicSameAttributes,
   empty,
   emptyIsNull,
   emptyLinkage,
@@ -263,13 +263,13 @@ export {
   none,
   noneAttributes,
   page,
-  pageSameShape,
+  pageSameAttributes,
   plain,
   plainIdentity,
   projected,
   projectedIncluded,
   projectedPerson,
-  sameShape,
+  sameAttributes,
   stamped,
   unset,
   unsetIdentity,

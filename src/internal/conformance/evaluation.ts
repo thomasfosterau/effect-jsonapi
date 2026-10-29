@@ -130,7 +130,7 @@ type Walked = Data.TaggedEnum<{
   /** The first page was not a 200. */
   Refused: { readonly observation: Observation };
   /** The first page was a 200 carrying no collection document. */
-  Shapeless: { readonly observation: Observation };
+  NotACollection: { readonly observation: Observation };
   /** The walk stopped short, so the collection is not known whole. */
   Undecided: { readonly why: string };
 }>;
@@ -199,7 +199,7 @@ const arrive = (
   if (Option.isNone(data))
     return Result.fail(
       Option.isNone(at.first)
-        ? Walked.Shapeless({ observation })
+        ? Walked.NotACollection({ observation })
         : Walked.Undecided({ why: `${at.target.url} answered no collection document` }),
     );
   const first = Option.getOrElse(at.first, () => observation);
@@ -227,7 +227,7 @@ const arrive = (
  * Every primary resource of the collection at `url`, its `next` links followed
  * from the first page: a filtered collection is compared whole, never one page
  * of it. A first page that is not a 200 is `Refused`, and a 200 that is no
- * collection document `Shapeless`; anything that stops the
+ * collection document `NotACollection`; anything that stops the
  * walk short — the budget, a lost or failed page, a `next` that leaves the
  * origin or leads back — leaves it undecided.
  */
@@ -816,7 +816,7 @@ const REPRESENTATION = ["attributes", "relationships", "links", "meta"] as const
  * the filter alone is held to it: a fieldset changes the representation by
  * design, and an `include` may add the linkage it follows.
  */
-const reshaped = (
+const representationChanged = (
   path: string,
   candidates: ReadonlyArray<Candidate>,
   probe: Probe,
@@ -907,14 +907,14 @@ const unincluded = (
  * 404 where the fold matches nothing — or none when the answer decides
  * nothing (a 400 refusal, say).
  */
-const misshapen = (
+const collectionMismatch = (
   path: string,
   candidates: ReadonlyArray<Candidate>,
   probe: Probe,
   observation: Observation,
-  shapeless: boolean,
+  notACollection: boolean,
 ): Option.Option<Finding> =>
-  shapeless ||
+  notACollection ||
   (observation.status === 404 && Arr.isReadonlyArrayEmpty(expectedOf(candidates, probe)))
     ? Option.some(
         finding(rule, {
@@ -939,23 +939,23 @@ const judge = (
     Walked.$match({
       Undecided: ({ why }) => Judged.Undecided({ why: `${probe.rules} on ${path}: ${why}` }),
       Refused: ({ observation }) =>
-        Option.match(misshapen(path, candidates, probe, observation, false), {
+        Option.match(collectionMismatch(path, candidates, probe, observation, false), {
           onSome: (found) => Judged.Decided({ findings: [found] }),
           onNone: () =>
             Judged.Undecided({
               why: `${probe.rules} on ${path}: ${described(probe)} answered ${statusOf(observation)}`,
             }),
         }),
-      Shapeless: ({ observation }) =>
+      NotACollection: ({ observation }) =>
         Judged.Decided({
-          findings: Arr.fromOption(misshapen(path, candidates, probe, observation, true)),
+          findings: Arr.fromOption(collectionMismatch(path, candidates, probe, observation, true)),
         }),
       Walked: ({ first, resources, included }) => {
         const got = answeredOf(resources);
         return Judged.Decided({
           findings: [
             ...compared(path, candidates, probe, first, got),
-            ...reshaped(path, candidates, probe, first, got),
+            ...representationChanged(path, candidates, probe, first, got),
             ...unincluded(path, probe, first, got, included),
           ],
         });
@@ -1243,7 +1243,7 @@ const judgeCollection = (
       Undecided: ({ why }) => Effect.succeed(undecided(`${path}: ${why}`)),
       Refused: ({ observation }) =>
         Effect.succeed(undecided(`${path} answered ${statusOf(observation)} unfiltered`)),
-      Shapeless: () => Effect.succeed(undecided(`${path} answered no collection document`)),
+      NotACollection: () => Effect.succeed(undecided(`${path} answered no collection document`)),
       Walked: ({ first, resources }) => judgeWalked(io, ctx, endpoint, path, first, resources),
     }),
   );

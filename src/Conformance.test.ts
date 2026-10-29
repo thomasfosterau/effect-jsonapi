@@ -3269,7 +3269,7 @@ describe("Conformance: the filter evaluation oracle", () => {
    * package's codec (a 400 naming nothing in particular when it does not
    * decode), projects `fields[products]` — after filtering, or before when
    * `projectFirst` — and pages by `pageSize` through `links.next` when one is
-   * given. The broken servers' other ways of getting §6.5 wrong: `reshape`
+   * given. The broken servers' other ways of getting §6.5 wrong: `rewrite`
    * rewrites every row a filtered request answers, `whenEmpty` replaces the
    * answer to a filtered request that matches nothing, and `includedFiltered`
    * applies the filter to `included` too.
@@ -3282,7 +3282,7 @@ describe("Conformance: the filter evaluation oracle", () => {
         readonly pageSize?: number;
         readonly contentType?: string;
         readonly projectFirst?: boolean;
-        readonly reshape?: (row: Product) => Product;
+        readonly rewrite?: (row: Product) => Product;
         readonly whenEmpty?: Canned;
         readonly includedFiltered?: boolean;
       } = {},
@@ -3303,7 +3303,7 @@ describe("Conformance: the filter evaluation oracle", () => {
                 body: pageOf(
                   query,
                   Arr.map(first ? matched : projected(matched), (row) =>
-                    filtered && options.reshape !== undefined ? options.reshape(row) : row,
+                    filtered && options.rewrite !== undefined ? options.rewrite(row) : row,
                   ),
                   options.pageSize,
                   filtered && options.includedFiltered === true,
@@ -3654,7 +3654,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   it("detects a filter changing the representation of the resources it answers (F-CONS-5)", async () => {
     const report = await verifyOracle(
       oracleServe(threeValued, {
-        reshape: (row) => ({
+        rewrite: (row) => ({
           ...row,
           relationships: { maker: { links: { related: `/products/${row.id}/maker` } } },
         }),
