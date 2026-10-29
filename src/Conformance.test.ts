@@ -43,6 +43,7 @@ import * as Registry from "./Registry.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { ATOMIC_EXTENSION_URI, MEDIA_TYPE } from "./internal/media.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // A tiny api, used for endpoint discovery by both the real and canned targets
@@ -3251,7 +3252,10 @@ describe("Conformance: the filter evaluation oracle", () => {
     return {
       jsonapi: { version: "1.1" },
       data,
-      ...(query.get("include") === "maker" ? { included: makersOf(data, includedFiltered) } : {}),
+      ...definedMember(
+        "included",
+        query.get("include") === "maker" ? makersOf(data, includedFiltered) : undefined,
+      ),
       links: (page + 1) * size < rows.length ? { next: `/products?${next.toString()}` } : {},
     };
   };

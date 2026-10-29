@@ -12,6 +12,7 @@ import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import { attribute, filterable, make as Resource, readOnlyAttribute } from "./Resource.js";
 import type { FilterableKeys } from "./Resource.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Fixture: every literal kind the grammar types, plus a filterable relationship
@@ -719,11 +720,11 @@ describe("Query.Filter: rejections name the offending key", () => {
       [`filter[${id}][condition][path]`]: path,
       [`filter[${id}][condition][operator]`]: operator,
       [`filter[${id}][condition][value]`]: value,
-      ...(memberOf === undefined ? {} : { [`filter[${id}][condition][memberOf]`]: memberOf }),
+      ...definedMember(`filter[${id}][condition][memberOf]`, memberOf),
     });
     const group = (id: string, conjunction: string, memberOf?: string) => ({
       [`filter[${id}][group][conjunction]`]: conjunction,
-      ...(memberOf === undefined ? {} : { [`filter[${id}][group][memberOf]`]: memberOf }),
+      ...definedMember(`filter[${id}][group][memberOf]`, memberOf),
     });
 
     it("names the member's own key for a bad path, operator or value", () => {

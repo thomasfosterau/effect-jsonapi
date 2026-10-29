@@ -456,9 +456,13 @@ export const parsePointer = (value: string): Option.Option<PointerMember> => {
   const [kind, name] = rest as [string, string];
   if (name === "") return Option.none();
   if (kind === "attributes")
-    return Option.some({ _tag: "attribute", name, ...(index !== undefined ? { index } : {}) });
+    return Option.some(
+      index === undefined ? { _tag: "attribute", name } : { _tag: "attribute", name, index },
+    );
   if (kind === "relationships") {
-    return Option.some({ _tag: "relationship", name, ...(index !== undefined ? { index } : {}) });
+    return Option.some(
+      index === undefined ? { _tag: "relationship", name } : { _tag: "relationship", name, index },
+    );
   }
   return Option.none();
 };

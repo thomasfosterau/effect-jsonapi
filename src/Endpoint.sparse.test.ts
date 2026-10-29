@@ -30,6 +30,7 @@ import * as Middleware from "./Middleware.js";
 import * as Relationship from "./Relationship.js";
 import { platformLayer } from "./Registry.js";
 import * as Resource from "./Resource.js";
+import { definedMember } from "./internal/members.js";
 
 const Company = Resource.make("companies", { attributes: { name: Schema.String } });
 const Person = Resource.make("people", {
@@ -130,7 +131,7 @@ const projected = <
   return {
     ...rest,
     attributes: Rec.filter(object.attributes, (_, name) => names.includes(name)),
-    ...(Rec.isEmptyRecord(kept) ? {} : { relationships: kept }),
+    ...definedMember("relationships", Rec.isEmptyRecord(kept) ? undefined : kept),
   };
 };
 

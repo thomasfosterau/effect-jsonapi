@@ -39,6 +39,7 @@ import * as ApiError from "./ApiError.js";
 import * as Document from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { issueLeaves, pathToJsonPointer as toPointer } from "./internal/schemaExt.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // The catalogue
@@ -184,7 +185,7 @@ export class JsonapiError extends Schema.TaggedError<JsonapiError>()("JsonapiErr
   toDocument(requestId?: string): ErrorDocument {
     return {
       errors: this.errors,
-      ...(requestId === undefined ? {} : { meta: { requestId } }),
+      ...definedMember("meta", requestId === undefined ? undefined : { requestId }),
       jsonapi: { version: "1.1" },
     };
   }
@@ -279,7 +280,7 @@ export const schemaIssueToErrors = (
       status,
       code: leaf._tag,
       detail: formatIssue(describedBy),
-      ...(pointer === "" ? {} : { source: { pointer } }),
+      ...definedMember("source", pointer === "" ? undefined : { pointer }),
     };
   });
 };

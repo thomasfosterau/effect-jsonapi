@@ -86,6 +86,7 @@ import {
   Ref,
   updateAttributeFields,
 } from "./Resource.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Extension constants
@@ -1036,7 +1037,7 @@ export const add = <R extends Any>(
   ({
     op: "add",
     data: { type: resource.type, ...data },
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...definedMember("meta", options?.meta),
   }) as AddOperation<R>["Type"];
 
 /**
@@ -1082,7 +1083,7 @@ export const update = <R extends Any>(
   ({
     op: "update",
     data: { type: resource.type, ...data },
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...definedMember("meta", options?.meta),
   }) as UpdateOperation<R>["Type"];
 
 /**
@@ -1127,7 +1128,7 @@ export const remove = <R extends Any>(
   ({
     op: "remove",
     ref: targetRef(resource.type, target),
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...definedMember("meta", options?.meta),
   }) as RemoveOperation<R>["Type"];
 
 /**
@@ -1218,7 +1219,7 @@ export const updateRelationship = <R extends Any, const K extends RelationshipNa
     op: "update",
     ref: { ...targetRef(resource.type, target), relationship },
     data,
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...definedMember("meta", options?.meta),
   }) as UpdateRelationshipValue<R, K>;
 
 /**
@@ -1274,7 +1275,7 @@ export const addToRelationship = <R extends Any, const K extends ToManyName<R>>(
     op: "add",
     ref: { ...targetRef(resource.type, target), relationship },
     data,
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...definedMember("meta", options?.meta),
   }) as ToManyRelationshipOperation<"add", R, K, ToManyTarget<R, K>>["Type"];
 
 /**
@@ -1321,7 +1322,7 @@ export const removeFromRelationship = <R extends Any, const K extends ToManyName
     op: "remove",
     ref: { ...targetRef(resource.type, target), relationship },
     data,
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
+    ...definedMember("meta", options?.meta),
   }) as ToManyRelationshipOperation<"remove", R, K, ToManyTarget<R, K>>["Type"];
 
 /**
@@ -1412,7 +1413,7 @@ export const result = <const R extends ResourceValue | null, const M extends Met
 ): { readonly data: R; readonly meta?: M } =>
   ({
     data,
-    ...(meta !== undefined ? { meta } : {}),
+    ...definedMember("meta", meta),
   }) as { readonly data: R; readonly meta?: M };
 
 /**
@@ -1472,8 +1473,8 @@ export const results = <const Entries extends ReadonlyArray<ResultValue>>(
 ): { readonly "atomic:results": Entries } =>
   ({
     "atomic:results": entries,
-    ...(options?.meta !== undefined ? { meta: options.meta } : {}),
-    ...(options?.links !== undefined ? { links: options.links } : {}),
+    ...definedMember("meta", options?.meta),
+    ...definedMember("links", options?.links),
   }) as { readonly "atomic:results": Entries };
 
 /**

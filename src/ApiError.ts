@@ -35,6 +35,7 @@ import { HttpApiSchema } from "effect/http-api";
 import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { asJsonApi } from "./internal/httpMedia.js";
+import { definedMember } from "./internal/members.js";
 
 /**
  * The wire document schema every {@link make} error encodes to.
@@ -204,18 +205,19 @@ const makeWire = (
                 {
                   status: String(options.status),
                   code: options.code,
-                  ...(options.title !== undefined ? { title: options.title } : {}),
-                  ...(detail !== undefined ? { detail } : {}),
-                  ...(source !== undefined ? { source } : {}),
-                  ...(Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
-                    ? {
-                        meta: Object.fromEntries(
+                  ...definedMember("title", options.title),
+                  ...definedMember("detail", detail),
+                  ...definedMember("source", source),
+                  ...definedMember(
+                    "meta",
+                    Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
+                      ? Object.fromEntries(
                           options.fieldKeys.flatMap((key) =>
                             fields[key] === undefined ? [] : [[key, fields[key]]],
                           ),
-                        ),
-                      }
-                    : {}),
+                        )
+                      : undefined,
+                  ),
                 },
               ],
             };

@@ -29,6 +29,15 @@ const cacheInputs = [
   { pattern: "pnpm-lock.yaml", base: "workspace" as const },
 ];
 
+/**
+ * Vitest's worker cap, from `VITEST_MAX_WORKERS` when it is set (a loaded or
+ * memory-bound machine); otherwise Vitest's own default.
+ */
+const workerOptions: { maxWorkers?: number } = {};
+if (process.env.VITEST_MAX_WORKERS) {
+  workerOptions.maxWorkers = Number(process.env.VITEST_MAX_WORKERS);
+}
+
 export default defineConfig({
   // Staged-file checks run by `vp staged` (pre-commit).
   staged: {
@@ -97,7 +106,6 @@ export default defineConfig({
       "effect/no-runtime-typeof": "warn",
       "effect/use-clock-service": "warn",
       "effect/no-known-value-widening": "warn",
-      "effect/no-conditional-empty-object-spread": "warn",
       // One site, and a contract: `ApiError.toDocument(error: object)` takes any
       // value a framework hook caught and throws on a non-`ApiError.make`
       // instance (src/ApiError.ts). Narrowing the parameter is a breaking
@@ -327,9 +335,7 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: ["**/*.d.ts", "**/*.test.ts"],
     },
-    ...(process.env.VITEST_MAX_WORKERS
-      ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) }
-      : {}),
+    ...workerOptions,
   },
   // The published JavaScript: one ESM entry per `package.json` export — the
   // root barrel, the schema barrel and every public module (`src/[A-Z]*.ts`,

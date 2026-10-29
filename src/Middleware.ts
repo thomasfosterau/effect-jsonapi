@@ -130,6 +130,7 @@ import {
   isMemberName,
 } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
+import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -507,10 +508,10 @@ export const schemaErrorDocument = (
     errors: errors.map(({ detail, source, meta }) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
-      ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
+      ...definedMember("title", BadRequest.title),
       detail,
-      ...(source !== undefined ? { source } : {}),
-      ...(meta !== undefined ? { meta } : {}),
+      ...definedMember("source", source),
+      ...definedMember("meta", meta),
     })),
   };
 };
@@ -919,7 +920,7 @@ const rejectQueryParameters = (
     errors: rejected.map((parameter) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
-      ...(BadRequest.title !== undefined ? { title: BadRequest.title } : {}),
+      ...definedMember("title", BadRequest.title),
       detail: Option.getOrElse(
         Option.map(Option.liftPredicate(baseName(parameter), isFamily), (family) =>
           unsupportedDetail(parameter, family, declared),
