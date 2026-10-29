@@ -213,6 +213,22 @@ Resource.relationships(Article).comments.order; // the declared terms
 
 Each term names an attribute of the **related** resource, or its `id`; anything else is a compile error, and an empty or repeating order is refused at definition time.
 
+A to-one relationship is stored as a foreign key on the row that declares it, and every derivation from a resource definition into storage (a table, a sync engine's node graph) needs that key's name. `one` and `optional` take it as `key`, so it is declared once, beside the relationship:
+
+```ts
+const Article = Resource.make("articles", {
+  attributes: { title: Schema.NonEmptyString },
+  relationships: {
+    author: Relationship.one(() => Person, { key: "authorId" }),
+    editor: Relationship.optional(() => Person, { key: "editorId", filter: ["eq", "isnull"] }),
+  },
+});
+
+Resource.relationships(Article).author.key; // "authorId" (`undefined` when none is declared)
+```
+
+The key is a **storage** fact, not a wire one: the document, the query grammar and the endpoints are unchanged, and on the wire `author` stays linkage, never an attribute. It must be non-empty, must not be an attribute name of the resource, and must not repeat across its to-one relationships; `Resource.make` (and `Resource.extend`) refuse a violation at definition time. The paginated `order` and the to-one `key` are the two storage-facing declarations a relationship carries.
+
 Everything below is **derived** — never assembled by hand:
 
 | Derived | What it is |
@@ -283,7 +299,7 @@ const Comment: Comment = Resource.make("comments", {
 });
 ```
 
-The lowercase `Relationship.one` / `optional` / `many` / `paginated` **types** used in the annotation mirror the constructors of the same name, defaults included (`one` and `optional` default to not filterable, `paginated` to no declared `order`, exactly as the constructors do). A resource definition is invariant in its relationship record, so the annotation has to name the type the constructor produced; these are that type. A relationship that declares a `filter` or an `order` names it too, as the `const` tuple the constructor infers: `Relationship.one<Article, readonly ["eq", "in"]>`.
+The lowercase `Relationship.one` / `optional` / `many` / `paginated` **types** used in the annotation mirror the constructors of the same name, defaults included (`one` and `optional` default to not filterable, `paginated` to no declared `order`, exactly as the constructors do). A resource definition is invariant in its relationship record, so the annotation has to name the type the constructor produced; these are that type. A relationship that declares a `filter` or an `order` names it too, as the `const` tuple the constructor infers: `Relationship.one<Article, readonly ["eq", "in"]>`; a to-one storage `key` is the third parameter: `Relationship.one<Article, false, "articleId">`.
 
 Self-references work the same way (`parent: Relationship.optional<Category>` on `Category`), and all four relationship kinds may take part in a cycle.
 
@@ -411,7 +427,7 @@ Resource.attributeDescriptors(Article);
 //  { key: "draftBody", …, resource: false }]  // input-only: declared, never on the resource object
 ```
 
-**What belongs in an annotation, and what doesn't.** Annotations are for vocabulary JSON:API has no opinion about — a storage table or column name, a sync-engine node kind, an admin-UI label — so that foreign vocabulary stays out of this package. Metadata that _is_ JSON:API's business gets a declaration instead, because the package has to act on it: filterability is `Filter.able`, sortability is `Sort.able`, and a paginated relationship's [canonical order](#relationship-kinds) is `Relationship.paginated(ref, { order })` — without a stable order the pagination links that relationship advertises are unsound, which is a defect in the document itself. A storage column name, by contrast, has no wire representation at all: two servers that disagree about it serve byte-identical JSON:API documents. That is the test — if changing it changes nothing a client can observe, it is an annotation.
+**What belongs in an annotation, and what doesn't.** Annotations are for vocabulary JSON:API has no opinion about — a storage table or column name, a sync-engine node kind, an admin-UI label — so that foreign vocabulary stays out of this package. Metadata that _is_ JSON:API's business gets a declaration instead, because the package has to act on it: filterability is `Filter.able`, sortability is `Sort.able`, and a paginated relationship's [canonical order](#relationship-kinds) is `Relationship.paginated(ref, { order })` — without a stable order the pagination links that relationship advertises are unsound, which is a defect in the document itself. A storage column name, by contrast, has no wire representation at all: two servers that disagree about it serve byte-identical JSON:API documents. That is the test — if changing it changes nothing a client can observe, it is an annotation. The one exception is a to-one relationship's [storage `key`](#relationship-kinds): every derivation into storage needs it and would otherwise re-declare it beside the resource, where the two declarations could drift, so it is a first-class slot on `Relationship.one` / `optional` rather than an annotation.
 
 ### Read-only & per-attribute projections
 

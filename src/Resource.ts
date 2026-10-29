@@ -2784,6 +2784,37 @@ const validateFieldNames = (
       );
     }
   }
+  validateStorageKeys(context, attributes, relationships);
+};
+
+// A to-one relationship's storage key (#509) names a field of the stored row
+// the resource's attributes do not, so it may not be an attribute name, and
+// two to-one relationships can not share one column. Refused at definition
+// time, naming both declarations.
+const validateStorageKeys = (
+  context: string,
+  attributes: Schema.Struct.Fields,
+  relationships: Relationships,
+): void => {
+  const claimed = new Map<string, string>();
+  for (const [name, descriptor] of Object.entries(relationships)) {
+    if (!Relationship.isToOne(descriptor) || descriptor.key === undefined) continue;
+    const key = descriptor.key;
+    if (Object.hasOwn(attributes, key)) {
+      throw new Error(
+        `${context}: relationship "${name}" declares storage key "${key}", which is also an attribute; ` +
+          "a storage key names the stored field that holds the related id, so it can not be an attribute",
+      );
+    }
+    const other = claimed.get(key);
+    if (other !== undefined) {
+      throw new Error(
+        `${context}: relationships "${other}" and "${name}" both declare storage key "${key}"; ` +
+          "each to-one relationship needs its own stored field",
+      );
+    }
+    claimed.set(key, name);
+  }
 };
 
 // ---------------------------------------------------------------------------
