@@ -33,10 +33,9 @@ const cacheInputs = [
  * Vitest's worker cap, from `VITEST_MAX_WORKERS` when it is set (a loaded or
  * memory-bound machine); otherwise Vitest's own default.
  */
-const workerOptions: { maxWorkers?: number } = {};
-if (process.env.VITEST_MAX_WORKERS) {
-  workerOptions.maxWorkers = Number(process.env.VITEST_MAX_WORKERS);
-}
+const workerOptions = process.env.VITEST_MAX_WORKERS
+  ? { maxWorkers: Number(process.env.VITEST_MAX_WORKERS) }
+  : {};
 
 export default defineConfig({
   // Staged-file checks run by `vp staged` (pre-commit).
@@ -105,7 +104,6 @@ export default defineConfig({
       "effect/no-unsafe-dictionary-type": "warn",
       "effect/no-runtime-typeof": "warn",
       "effect/use-clock-service": "warn",
-      "effect/no-known-value-widening": "warn",
       "effect/imperative-loops": "warn",
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-non-null-assertion": "warn",

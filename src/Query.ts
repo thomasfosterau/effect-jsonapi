@@ -486,7 +486,7 @@ export const bracketKeys =
       schema as { readonly [BRACKETED]?: BracketedState<Schema.Struct<Schema.Struct.Fields>> }
     )[BRACKETED];
     const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>);
-    const mapping: Record<string, string> = { ...state?.mapping };
+    const mapping = { ...state?.mapping };
     for (const key of keys) mapping[key] = `${prefix}[${key}]`;
     const wire = struct.pipe(Schema.encodeKeys(mapping));
     return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
@@ -825,9 +825,9 @@ export type IncludeList = typeof IncludeList.Type;
  * @since 0.16.0
  * @category models
  */
-export const includeListField: { readonly include: Schema.optionalKey<typeof IncludeList> } = {
+export const includeListField = {
   include: Schema.optionalKey(IncludeList),
-};
+} as const;
 
 /**
  * The struct shape {@link flatList} accepts: a flat list input carrying the

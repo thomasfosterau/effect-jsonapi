@@ -682,9 +682,8 @@ export const isNull = <const Field extends string>(
  * @since 0.13.0
  * @category constructors
  */
-export const and = <const Members extends ReadonlyArray<Node>>(
-  ...members: Members
-): { readonly _tag: "And"; readonly members: Members } => ({ _tag: "And", members });
+export const and = <const Members extends ReadonlyArray<Node>>(...members: Members) =>
+  ({ _tag: "And", members }) as const;
 
 /**
  * A disjunction of any number of members.
@@ -692,9 +691,8 @@ export const and = <const Members extends ReadonlyArray<Node>>(
  * @since 0.13.0
  * @category constructors
  */
-export const or = <const Members extends ReadonlyArray<Node>>(
-  ...members: Members
-): { readonly _tag: "Or"; readonly members: Members } => ({ _tag: "Or", members });
+export const or = <const Members extends ReadonlyArray<Node>>(...members: Members) =>
+  ({ _tag: "Or", members }) as const;
 
 /**
  * The negation of one member.
@@ -702,12 +700,8 @@ export const or = <const Members extends ReadonlyArray<Node>>(
  * @since 0.13.0
  * @category constructors
  */
-export const not = <const Member extends Node>(
-  member: Member,
-): { readonly _tag: "Not"; readonly member: Member } => ({
-  _tag: "Not",
-  member,
-});
+export const not = <const Member extends Node>(member: Member) =>
+  ({ _tag: "Not", member }) as const;
 
 // ---------------------------------------------------------------------------
 // Normal form (design §3.2)

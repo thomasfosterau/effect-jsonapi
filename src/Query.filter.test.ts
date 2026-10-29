@@ -923,9 +923,11 @@ const filterGenerator = (seed: number) => {
   const int = (max: number): number => Math.floor(random() * max);
   const pick = <A>(items: ReadonlyArray<A>): A => items[int(items.length)]!;
 
-  const literal: {
+  // One random literal generator per filterable attribute.
+  type LiteralGenerators = {
     readonly [K in FilterableKeys<typeof Article>]: () => string | number | boolean | Date;
-  } = {
+  };
+  const literal: LiteralGenerators = {
     status: () => pick(["open", "done", "archived"]),
     age: () => int(2001) - 1000 + pick([0, 0.5, 0.25, 0.125]),
     priority: () => int(21) - 10,

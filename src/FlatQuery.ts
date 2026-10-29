@@ -131,21 +131,18 @@ export type RequiredPagination = {
  * @since 0.16.0
  * @category constructors
  */
-export const pagination: {
-  (options: PaginationOptions & { readonly defaultLimit: false }): RequiredPagination;
-  (options: PaginationOptions): DefaultedPagination;
-} = ((options: PaginationOptions) => {
+export function pagination(
+  options: PaginationOptions & { readonly defaultLimit: false },
+): RequiredPagination;
+export function pagination(options: PaginationOptions): DefaultedPagination;
+export function pagination(options: PaginationOptions): RequiredPagination | DefaultedPagination {
   const limit = pageLimit(options.maxLimit);
   if (options.defaultLimit === false) return { offset: PageOffset, limit };
   return {
     offset: PageOffset.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
     limit: limit.pipe(Schema.withDecodingDefaultKey(Effect.succeed(options.defaultLimit ?? 50))),
   };
-}) as {
-  (options: PaginationOptions & { readonly defaultLimit: false }): RequiredPagination;
-  (options: PaginationOptions): DefaultedPagination;
-};
-
+}
 // ---------------------------------------------------------------------------
 // Sort
 // ---------------------------------------------------------------------------
@@ -288,9 +285,9 @@ export type SortParam = typeof SortParam.Type;
  * @since 0.16.0
  * @category models
  */
-export const sortField: { readonly sort: Schema.optional<typeof SortParam> } = {
+export const sortField = {
   sort: Schema.optional(SortParam),
-};
+} as const;
 
 // ---------------------------------------------------------------------------
 // Id lists
@@ -388,9 +385,9 @@ export const IdList: Schema.Codec<
  * @since 0.16.0
  * @category models
  */
-export const idListField: { readonly ids: Schema.optional<typeof IdList> } = {
+export const idListField = {
   ids: Schema.optional(IdList),
-};
+} as const;
 
 // ---------------------------------------------------------------------------
 // List inputs

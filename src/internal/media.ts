@@ -103,6 +103,14 @@ const unquote = (value: string): string =>
  */
 const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
 
+// One media range of an `Accept` / `Content-Type` value: its lowercased base,
+// its parameters in order, and its `q` weight (`undefined` when malformed).
+interface MediaRange {
+  readonly base: string;
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
+  readonly weight: number | undefined;
+}
+
 /**
  * Splits one media type entry into its (lowercased) base type, its media type
  * parameters, and its weight.
@@ -125,13 +133,7 @@ const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
  *
  * @internal
  */
-export const parseMediaType = (
-  entry: string,
-): {
-  readonly base: string;
-  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
-  readonly weight: number | undefined;
-} => {
+export const parseMediaType = (entry: string): MediaRange => {
   const [first, ...rest] = entry.split(";");
   const parameters: Array<readonly [name: string, value: string]> = [];
   let weight: number | undefined = 1;

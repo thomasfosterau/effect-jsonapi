@@ -317,6 +317,13 @@ type DefaultCollection<
       DocMeta
     >;
 
+// The `meta` and `included` schemas `documentOptions` resolves, each present
+// only when the caller declared it.
+interface DocumentSchemas {
+  meta?: Schema.Top;
+  included?: Schema.Top;
+}
+
 // The document options a read endpoint's default document is built with: the
 // `meta` override, plus the `included` union when the `include` option is a
 // declared surface or turns the parameter on (`IncludedOf`). Absent keys stay
@@ -329,8 +336,8 @@ const documentOptions = (
         readonly include?: IncludeArgument;
       }
     | undefined,
-): { readonly meta?: Schema.Top; readonly included?: Schema.Top } => {
-  const out: { meta?: Schema.Top; included?: Schema.Top } = {};
+): DocumentSchemas => {
+  const out: DocumentSchemas = {};
   if (options?.meta !== undefined) out.meta = options.meta;
   if (isSurface(options?.include)) out.included = options.include.included;
   const reachable = reachableIncluded([resource], options?.include);
@@ -2027,6 +2034,16 @@ export type RelationshipFieldsetTypes<R extends Any, Name extends string, Includ
   ResolveIncludePath<RelationshipIncludeBase<R, Name>, RelationshipIncludePaths<R, Name, Include>>
 >["type"];
 
+// The query options `getRelationship` builds over the parent: its include
+// and fieldset vocabulary, no sort, the caller's pagination and no filter.
+type RelationshipQueryOptions<R extends Any, Name extends string, Include, Fields, PageFields> = {
+  readonly include: RelationshipQueryInclude<R, Name, Include>;
+  readonly fields: RelationshipQueryFields<R, Name, Include, Fields>;
+  readonly sort: false;
+  readonly page: PageFields;
+  readonly filter: undefined;
+};
+
 // The `fields` option `getRelationship` hands `Query.schema` over the parent
 // resource: the types the rooted paths reach as an allow-list, else off.
 type RelationshipQueryFields<R extends Any, Name extends string, Include, Fields> = [
@@ -2554,13 +2571,7 @@ export const getRelationship = <
           sort: false,
           page: options?.page,
           filter: undefined,
-        } as {
-          readonly include: RelationshipQueryInclude<R, Name, Include>;
-          readonly fields: RelationshipQueryFields<R, Name, Include, Fields>;
-          readonly sort: false;
-          readonly page: PageFields;
-          readonly filter: undefined;
-        },
+        } as RelationshipQueryOptions<R, Name, Include, Fields, PageFields>,
       ),
       success: asJsonApi(success),
       // @ts-expect-error effect ErrorNoStream guard is unprovable for a generic Errors (our error wires never stream)
@@ -4074,6 +4085,13 @@ const pick = <C extends object, K extends keyof C & string, F>(
   fallback: F,
 ): C[K] | F => (key in config ? config[key] : fallback);
 
+// Whether `Endpoint.resource` emits one CRUD endpoint, with the options the caller
+// gave it.
+interface OpConfig {
+  readonly emit: boolean;
+  readonly config: Record<string, unknown>;
+}
+
 /**
  * Generates the entire JSON:API endpoint set for a resource definition — the
  * full CRUD surface plus, for every relationship, the `related` and linkage
@@ -4230,9 +4248,7 @@ export const resource = <
       : value;
 
   // Emit + captured config for a CRUD op.
-  const opConfig = (
-    op: CrudOperation,
-  ): { readonly emit: boolean; readonly config: Record<string, unknown> } => {
+  const opConfig = (op: CrudOperation): OpConfig => {
     if (endpointsOpt === undefined) return { emit: true, config: {} };
     const value = endpointsOpt[op];
     if (value === undefined || value === true) return { emit: true, config: {} };
@@ -4241,10 +4257,7 @@ export const resource = <
   };
 
   // The shared name / path / errors (and, optionally, meta) overrides of an op.
-  const commonOpts = (
-    config: Record<string, unknown>,
-    withMeta: boolean,
-  ): Record<string, unknown> => {
+  const commonOpts = (config: Record<string, unknown>, withMeta: boolean) => {
     const out: Record<string, unknown> = {};
     const errors = pick(config, "errors", gErrors);
     if (errors !== undefined) out.errors = errors;
@@ -4319,7 +4332,7 @@ export const resource = <
     return idempotency !== undefined ? { idempotency } : {};
   };
 
-  const payloadOpt = (config: Record<string, unknown>): Record<string, unknown> => ({
+  const payloadOpt = (config: Record<string, unknown>) => ({
     ...definedMember("payload", config.payload),
     ...definedMember("payloadMediaType", config.payloadMediaType),
   });

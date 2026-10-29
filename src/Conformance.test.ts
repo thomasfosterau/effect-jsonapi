@@ -330,11 +330,7 @@ const includedMember = <A>(
  * relationship is a field (#494), so `author` is kept only when no fieldset
  * leaves it out.
  */
-const articleRelationships = (
-  params: URLSearchParams,
-): {
-  readonly relationships?: { readonly author: { readonly data: { type: string; id: string } } };
-} => {
+const articleRelationships = (params: URLSearchParams) => {
   const requested = params.get("fields[articles]");
   if (requested !== null && !requested.split(",").includes("author")) return {};
   return { relationships: { author: { data: { type: "people", id: "9" } } } };
@@ -2814,10 +2810,10 @@ describe("Conformance: the filter grammar profile", () => {
       body: { errors: [{ status: "400", title: "Bad Request", source: { parameter } }] },
     });
 
-    const declared: Readonly<Record<string, ReadonlyArray<string>>> = {
-      name: ["eq", "ne"],
-      priceCents: ["eq", "gt", "lt"],
-    };
+    const declared = HashMap.fromIterable<string, ReadonlyArray<string>>([
+      ["name", ["eq", "ne"]],
+      ["priceCents", ["eq", "gt", "lt"]],
+    ]);
     const conditions = new Map<string, { path?: string; operator?: string; value?: string }>();
 
     for (const key of new Set(raw.keys())) {
@@ -2840,7 +2836,7 @@ describe("Conformance: the filter grammar profile", () => {
       // Shorthand: filter[field] or filter[field][op]. Anything deeper is a 400.
       if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments)) return reject(key);
       const field = segments[0]!;
-      const operators = declared[field];
+      const operators = Option.getOrUndefined(HashMap.get(declared, field));
       if (operators === undefined) return reject(key);
       const operator = segments.length === 2 ? segments[1]! : "eq";
       if (!operators.includes(operator)) return reject(key);
@@ -2855,7 +2851,7 @@ describe("Conformance: the filter grammar profile", () => {
       ) {
         return reject(`filter[${id}][condition][operator]`);
       }
-      const operators = declared[condition.path];
+      const operators = Option.getOrUndefined(HashMap.get(declared, condition.path));
       if (operators === undefined || !operators.includes(condition.operator)) {
         return reject(`filter[${id}][condition][operator]`);
       }
@@ -3685,7 +3681,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   it("detects one canonical form answered two ways (F-CONS-7)", async () => {
     // A server reading the group form in key order: a member whose `memberOf`
     // names a group it has not read yet is dropped.
-    const inKeyOrder = (request: { readonly path: string }): { readonly path: string } => {
+    const inKeyOrder = (request: { readonly path: string }) => {
       const query = queryOf(request);
       const seen = new Set<string>();
       const dropped = new Set<string>();

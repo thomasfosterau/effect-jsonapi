@@ -162,9 +162,7 @@ const bracketKey = /^([^[\]]+)\[([^[\]]+)\]$/;
  * struct then drops whichever spelling it doesn't declare. Every key is
  * written as an own property, so `__proto__` is an ordinary name here.
  */
-export const nest = <V>(flat: {
-  readonly [key: string]: V;
-}): Record<string, V | Record<string, V>> => {
+export const nest = <V>(flat: { readonly [key: string]: V }) => {
   const nested: Record<string, V | Record<string, V>> = {};
   // Whether a bare key holds `name`, wherever it sits in `flat`.
   const holdsBare = (name: string): boolean =>
@@ -191,7 +189,7 @@ export const nest = <V>(flat: {
 /**
  * Inverse of {@link nest}: flattens nested groups back to bracket keys.
  */
-export const flatten = (nested: { readonly [key: string]: unknown }): Record<string, unknown> => {
+export const flatten = (nested: { readonly [key: string]: unknown }) => {
   const flat: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(nested)) {
     if (value === undefined) continue;

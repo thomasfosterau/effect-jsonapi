@@ -79,22 +79,25 @@ import type { AttributeKeys, Id, Parameter, Resource } from "./Resource.js";
  * @since 0.1.0
  * @category constructors
  */
-export const make: {
-  <const Type extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>>(
-    resource: { readonly type: Type },
-    ...endpoints: Endpoints
-  ): HttpApiGroup.HttpApiGroup<Type, Endpoints[number]>;
-  <const Name extends string, const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>>(
-    name: Name,
-    ...endpoints: Endpoints
-  ): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>;
-} = (
+export function make<
+  const Type extends string,
+  const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>,
+>(
+  resource: { readonly type: Type },
+  ...endpoints: Endpoints
+): HttpApiGroup.HttpApiGroup<Type, Endpoints[number]>;
+export function make<
+  const Name extends string,
+  const Endpoints extends NonEmptyReadonlyArray<HttpApiEndpoint.Top>,
+>(name: Name, ...endpoints: Endpoints): HttpApiGroup.HttpApiGroup<Name, Endpoints[number]>;
+export function make(
   nameOrResource: string | { readonly type: string },
   ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>
-) =>
-  HttpApiGroup.make(typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type).add(
-    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
-  ) as never;
+) {
+  return HttpApiGroup.make(
+    typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type,
+  ).add(...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>));
+}
 
 /**
  * Generates a complete `HttpApiGroup` from a resource definition — the group is
