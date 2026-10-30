@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Predicate from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import { requestedFieldsets, unlinkedIncluded } from "../linkage.js";
 
@@ -12,11 +13,14 @@ type Identifier = { readonly type: string } & ({ readonly id: string } | { reado
 /** A to-one or to-many relationship whose resource linkage is `linkage`. */
 const one = (linkage: Identifier | ReadonlyArray<Identifier>) => ({ data: linkage });
 
+/** A member's `type` / `id` / `lid` as text; anything but a string shows as `?`. */
+const text = (value: Schema.Json | undefined): string => (Predicate.isString(value) ? value : "?");
+
 /** The `type:id` (or `type:lid`) of each member the kit reports, in order. */
 const orphans = (document: Parameters<typeof unlinkedIncluded>[0]) =>
   Arr.map(
     unlinkedIncluded(document),
-    (resource) => `${String(resource["type"])}:${String(resource["id"] ?? resource["lid"])}`,
+    (resource) => `${text(resource["type"])}:${text(resource["id"] ?? resource["lid"])}`,
   );
 
 describe("unlinkedIncluded (spec/document/full-linkage)", () => {
@@ -151,7 +155,7 @@ describe("unlinkedIncluded (spec/document/full-linkage)", () => {
     };
     // A non-record member is not a resource object, so it is not reported; a
     // record with no identity can never be reached, so it is.
-    expect(orphans(document)).toEqual(["comments:5", "undefined:7"]);
+    expect(orphans(document)).toEqual(["comments:5", "?:7"]);
   });
 
   it("follows the later of two members with the same identity", () => {

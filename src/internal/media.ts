@@ -68,7 +68,7 @@ export const baseMediaType = (entry: string): string =>
  * @category constructors
  * @internal
  */
-export const mediaTypeWith = (extensions?: ReadonlyArray<string> | undefined): string =>
+export const mediaTypeWith = (extensions?: ReadonlyArray<string>): string =>
   extensions === undefined || Arr.isReadonlyArrayEmpty(extensions)
     ? MEDIA_TYPE
     : `${MEDIA_TYPE};ext="${extensions.join(" ")}"`;

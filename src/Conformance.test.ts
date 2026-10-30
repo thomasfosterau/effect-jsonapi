@@ -3025,7 +3025,7 @@ describe("Conformance: the filter evaluation oracle", () => {
     readonly maker?: ReturnType<typeof linkage> | { readonly links: { readonly related: string } };
   }
 
-  interface Product {
+  interface ProductRow {
     readonly type: "products";
     readonly id: string;
     readonly attributes: Attributes;
@@ -3033,7 +3033,11 @@ describe("Conformance: the filter evaluation oracle", () => {
     readonly relationships?: Relationships;
   }
 
-  const product = (id: string, attributes: Attributes, maker: Option.Option<string>): Product => ({
+  const product = (
+    id: string,
+    attributes: Attributes,
+    maker: Option.Option<string>,
+  ): ProductRow => ({
     type: "products",
     id,
     attributes,
@@ -3042,7 +3046,7 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   // `price` is never NULL and orders differently as text (`"100" < "20"`);
   // `colour` and `maker` are NULL on products:3 alone.
-  const products: ReadonlyArray<Product> = [
+  const products: ReadonlyArray<ProductRow> = [
     product("1", { price: 10, name: "Widget", colour: "red" }, Option.some("m1")),
     product("2", { price: 5, name: "Gadget", colour: "blue" }, Option.some("m2")),
     product("3", { price: 100, name: "Gizmo", colour: null }, Option.none()),
@@ -3050,13 +3054,13 @@ describe("Conformance: the filter evaluation oracle", () => {
   ];
 
   /** A server's reading of a tree for one resource: `None` is UNKNOWN. */
-  type Evaluator = (node: Filter.Node, row: Product) => Option.Option<boolean>;
+  type Evaluator = (node: Filter.Node, row: ProductRow) => Option.Option<boolean>;
 
   /**
    * A resource's value for a field — an attribute's, or a to-one
    * relationship's related id — `None` when it is `null` or absent.
    */
-  const valueIn = (row: Product, field: string): Option.Option<Scalar> =>
+  const valueIn = (row: ProductRow, field: string): Option.Option<Scalar> =>
     field === "maker"
       ? Option.flatMap(Option.fromUndefinedOr(row.relationships?.maker), (maker) =>
           "data" in maker ? Option.fromNullishOr(maker.data?.id) : Option.none(),
@@ -3181,7 +3185,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   const contentType = `${MEDIA_TYPE};profile="${Filter.PROFILE_URI}"`;
 
   /** A row with only the fields `fields[products]` names. */
-  const project = (row: Product, names: ReadonlyArray<string>): Product => ({
+  const project = (row: ProductRow, names: ReadonlyArray<string>): ProductRow => ({
     type: row.type,
     id: row.id,
     attributes: Rec.filter(row.attributes, (_, name) => Arr.contains(names, name)),
@@ -3191,7 +3195,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   /** `rows` with only the fields a request's `fields[products]` names, if it names any. */
   const projectedBy =
     (query: URLSearchParams) =>
-    (rows: ReadonlyArray<Product>): ReadonlyArray<Product> =>
+    (rows: ReadonlyArray<ProductRow>): ReadonlyArray<ProductRow> =>
       Option.match(Option.fromNullishOr(query.get("fields[products]")), {
         onNone: () => rows,
         onSome: (names) => Arr.map(rows, (row) => project(row, names.split(","))),
@@ -3201,8 +3205,8 @@ describe("Conformance: the filter evaluation oracle", () => {
   const filteredBy = (
     query: URLSearchParams,
     evaluate: Evaluator,
-    rows: ReadonlyArray<Product>,
-  ): Option.Option<ReadonlyArray<Product>> => {
+    rows: ReadonlyArray<ProductRow>,
+  ): Option.Option<ReadonlyArray<ProductRow>> => {
     const record = Rec.fromEntries(Arr.filter([...query], ([key]) => key.startsWith("filter")));
     return Rec.isEmptyRecord(record)
       ? Option.some(rows)
@@ -3217,7 +3221,7 @@ describe("Conformance: the filter evaluation oracle", () => {
    * a maker carries no field a filter names, so every comparison on it is
    * UNKNOWN.
    */
-  const makersOf = (rows: ReadonlyArray<Product>, filtered: boolean) =>
+  const makersOf = (rows: ReadonlyArray<ProductRow>, filtered: boolean) =>
     filtered
       ? []
       : Arr.map(
@@ -3238,7 +3242,7 @@ describe("Conformance: the filter evaluation oracle", () => {
    */
   const pageOf = (
     query: URLSearchParams,
-    rows: ReadonlyArray<Product>,
+    rows: ReadonlyArray<ProductRow>,
     pageSize?: number,
     includedFiltered = false,
   ) => {
@@ -3276,11 +3280,11 @@ describe("Conformance: the filter evaluation oracle", () => {
     (
       evaluate: Evaluator,
       options: {
-        readonly rows?: ReadonlyArray<Product>;
+        readonly rows?: ReadonlyArray<ProductRow>;
         readonly pageSize?: number;
         readonly contentType?: string;
         readonly projectFirst?: boolean;
-        readonly rewrite?: (row: Product) => Product;
+        readonly rewrite?: (row: ProductRow) => ProductRow;
         readonly whenEmpty?: Canned;
         readonly includedFiltered?: boolean;
       } = {},

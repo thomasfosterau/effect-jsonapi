@@ -65,6 +65,15 @@ const encode = (ast: Ast): Record<string, string> =>
 const canonical = (record: Record<string, unknown>): ReadonlyArray<readonly [string, string]> =>
   Object.entries(encode(decode(record)));
 
+// The first segment of a Standard Schema issue path, as text: a segment is a
+// property key or a `{ key }` object.
+const firstKey = (
+  path: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }> | undefined,
+): string => {
+  const segment = path?.[0];
+  return String(Predicate.isObject(segment) ? segment.key : segment);
+};
+
 // The offending keys of a failed decode, in order, with their messages.
 const failures = (
   record: Record<string, unknown>,
@@ -72,7 +81,7 @@ const failures = (
   const result = Schema.decodeUnknownResult(codec)(record);
   if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
   return SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
-    key: String(issue.path?.[0]),
+    key: firstKey(issue.path),
     message: issue.message,
   }));
 };
@@ -1318,7 +1327,7 @@ describe("Query.schema with filter: true", () => {
       if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
       expect(
         SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
-          key: String(issue.path?.[0]),
+          key: firstKey(issue.path),
           message: issue.message,
         })),
       ).toEqual([{ key: `filter[${name}]`, message: `Unknown filter field "${name}"` }]);

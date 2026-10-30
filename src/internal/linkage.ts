@@ -197,7 +197,7 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
  */
 export const unlinkedIncluded = (
   document: Schema.JsonObject,
-  fields?: Readonly<Record<string, ReadonlyArray<string>>> | undefined,
+  fields?: Readonly<Record<string, ReadonlyArray<string>>>,
 ): ReadonlyArray<Schema.JsonObject> => {
   const included = document["included"];
   if (!isJsonArray(included)) return [];

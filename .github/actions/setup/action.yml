@@ -22,11 +22,15 @@ description: Set up Node.js and pnpm, restore the package cache, install depende
 inputs:
   node-version:
     description: >-
-      The Node.js version to set up. Defaults to `latest`, the newest stable
-      release: CI and Release both run on it, the one Node line every
-      repository in the programme tests on (#211).
+      The Node.js version to set up. Defaults to `*` with `check-latest`
+      (below), the newest STABLE release from setup-node's manifest: CI and
+      Release both run on it, the one Node line every repository in the
+      programme tests on (#211). Never `latest`: setup-node resolves it to the
+      first entry of the nodejs.org index, pre-releases included
+      (`v27.0.0-alpha` since 2026-10-29), so CI would test, and Release
+      publish, on an alpha (#535).
     required: false
-    default: latest
+    default: "*"
   run-prepare:
     description: >-
       "false" skips the repository's `prepare` step (git hooks + the
@@ -48,6 +52,9 @@ runs:
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
+        # Resolve `*` against the stable manifest each run, not a cached older
+        # release on the runner image.
+        check-latest: true
         cache: pnpm
 
     # --ignore-scripts blocks dependency lifecycle scripts; --frozen-lockfile

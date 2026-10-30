@@ -78,7 +78,10 @@ describe("schemaIssueToErrors", () => {
         { pointer: "/data/attributes/seats" },
       ]),
     );
-    expect(errors.map((e) => e.code).toSorted()).toEqual(["InvalidValue", "MissingKey"]);
+    expect(errors.map((e) => e.code).toSorted((a, b) => (a ?? "").localeCompare(b ?? ""))).toEqual([
+      "InvalidValue",
+      "MissingKey",
+    ]);
   });
 
   it("handles array index paths", () => {
