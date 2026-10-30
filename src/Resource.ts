@@ -2415,7 +2415,7 @@ const ownAnnotationAt = <A>(
   is: (found: unknown) => found is A,
 ): Declared<A> => {
   const candidates = [
-    ...(ast.checks ?? []).map((check) => check.annotations?.[id]).reverse(),
+    ...Arr.reverse((ast.checks ?? []).map((check) => check.annotations?.[id])),
     ast.annotations?.[id],
   ];
   const found = candidates.find((candidate) => candidate !== undefined);

@@ -5214,7 +5214,7 @@ describe("Conformance: the write fixture", () => {
         },
       },
     }));
-    const [stuck] = writes.filter((write) => write.disposal === "cleanup-failed");
+    const stuck = writes.find((write) => write.disposal === "cleanup-failed");
     expect(stuck?.detail).toBe("FixtureBroke: a\nb");
     // The second line hangs under the entry, as a rule's message does, rather
     // than starting at the margin where it would read as a line of its own.
@@ -6998,7 +6998,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
     let asked = 0;
     const server = recording((request) =>
       decodeURIComponent(request.path) === "/tags" && ++asked === 2
-        ? { body: { data: [...ROWS].reverse().map(tag), links: {} } }
+        ? { body: { data: ROWS.toReversed().map(tag), links: {} } }
         : repeating(request),
     );
     const reason = await skipReason(server.serve);

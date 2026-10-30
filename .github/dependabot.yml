@@ -11,20 +11,31 @@
 #   (`@typescript/native`, by gitHead) and that `oxlint`, and hard-errors in
 #   `pnpm install` on an unsupported pairing; `typescript` is the TS6 half of
 #   the 6/7 split; `@vitest/coverage-istanbul` must equal vite-plus's vitest;
-#   the Effect lint plugin is wired into the same `vp lint`. Read the comment
-#   on `@effect/tsgo` in pnpm-workspace.yaml before merging one of these PRs.
+#   the Effect lint plugin (`@enfect/oxlint`) is wired into the same `vp lint`.
+#   Read the comment on `@effect/tsgo` in pnpm-workspace.yaml before merging
+#   one of these PRs.
 # - `effect` — the Effect release line is a lockstep-versioned singleton set.
 # - `docgen` — `@effect/docgen` executes the examples under `tsx`, a peer.
 # - `changesets`, `fallow` — each moves as one unit.
 # - `minor-and-patch` — every other minor/patch update in one PR; majors
 #   outside the sets above stay individual.
 #
-# Not bumpable here: the transitive floors under `overrides` in
-# pnpm-workspace.yaml (`js-yaml`, `launch-editor`, `shell-quote`) — raise or
-# drop them by hand (AGENTS.md → Common pitfalls).
+# Moved by hand, in the toolchain PR (Dependabot cannot bump them):
+# - the `vite` catalog entry, an npm alias
+#   (`npm:@voidzero-dev/vite-plus-core@<v>`) that must equal `vite-plus`;
+# - the `typescript` (`npm:@typescript/typescript6@…`) and
+#   `@typescript/native` (`npm:typescript@…`) aliases, only to a pairing the
+#   new `@effect/tsgo`'s `components` table lists;
+# - the transitive floors under `overrides` in pnpm-workspace.yaml
+#   (`js-yaml`, `launch-editor`, `shell-quote`) — raise or drop them by hand
+#   (AGENTS.md → Common pitfalls). The `vite@*` / `vitest@*` / `effect`
+#   overrides point at `catalog:` and follow their entries.
 #
-# `cooldown` mirrors pnpm-workspace.yaml's `minimumReleaseAge` (1 day), with
-# first-party packages exempt as `minimumReleaseAgeExclude` exempts them.
+# `cooldown` is 1 day: pnpm-workspace.yaml's `minimumReleaseAge` is 480
+# minutes (8 hours), and Dependabot's cooldown takes whole days only, so the
+# shortest setting is longer than pnpm's guard and a Dependabot PR never
+# proposes a version pnpm would still refuse. First-party packages are exempt
+# as `minimumReleaseAgeExclude` exempts them.
 version: 2
 updates:
   - package-ecosystem: "npm"
@@ -57,7 +68,7 @@ updates:
           - "@typescript/native"
           - "typescript"
           - "@typescript/typescript6"
-          - "@mpsuesser/oxlint-plugin-effect"
+          - "@enfect/oxlint"
         update-types: ["major", "minor", "patch"]
       effect:
         applies-to: version-updates
