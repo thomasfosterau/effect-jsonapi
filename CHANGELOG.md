@@ -1,5 +1,70 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.20.0
+
+### Minor Changes
+
+- 9ce813f: **Breaking:** `ApiError.toDocument` takes an `ApiError.Any` instead of any `object` (#436).
+  
+  `ApiError.Any` is the type of every `ApiError.make` error instance: a yieldable tagged error carrying the new `ApiError.TypeId` brand, which every `make` class now puts on its prototype. The new `ApiError.isApiError(value)` guard recognises the brand, so a framework hook that caught an arbitrary value narrows it before rendering it.
+  
+  **Migration:** a call that passes an `ApiError.make` instance compiles unchanged. A call that passes a wider value (`unknown`, `object`, `Error`) narrows it first:
+  
+  ```ts skip-type-checking
+  // before
+  const body = ApiError.toDocument(caught);
+  // after
+  if (ApiError.isApiError(caught)) {
+    const body = ApiError.toDocument(caught);
+  }
+  ```
+  
+  `toDocument` still throws at runtime on a value that carries the brand without a `wire` schema.
+- 73affe5: `ApiError.UnsupportedIncludeDepth` now carries the endpoint's legal include paths as `meta.includablePaths`, as `UnsupportedIncludePath` already does, so a caller that over-nested a `?include=` path learns which paths it may retry with (#512). `Query.validateIncludePaths` — and so `Assemble`, `ResourceHandlers` and `Handlers.resolveIncluded` — fills it from the `includable` set it already receives, and the error's `detail` now ends with the supported paths.
+  
+  **Breaking for direct construction:** `new ApiError.UnsupportedIncludeDepth({ path, maxDepth })` now requires `includablePaths: ReadonlyArray<string>`. Pass the same allow-list you validated against (or `[]`). On the wire the change is additive: `meta` gains one member.
+- 5fcdb0a: Name the shapes a few constructors return, so the `effect/no-known-value-widening` lint rule is back at `error` (#436). These are new exported types; each one has the same structure as the inline type it replaces:
+  
+  - `Atomic.RequestValue<Ops>` for `Atomic.request`.
+  - `Atomic.EmptyResult` for `Atomic.emptyResult`.
+  - `Atomic.ResultEntry<R, M>` for `Atomic.result`.
+  - `Atomic.ResultsValue<Entries>` for `Atomic.results`.
+  - `Client.Hydrated<R>` for `Client.hydrate`.
+  
+  `Atomic.targetsResource`, `Atomic.targetsRelationship`, `Client.narrowIncluded`, `FlatQuery.pagination`, `Group.make` and `Handlers.project` are now overloaded function declarations rather than constants with an overloaded type. Their call signatures are unchanged.
+- fe7436e: **Deprecated:** `Atomic.ResourceOperationShape` and `Atomic.RelationshipOperationShape` are renamed `Atomic.ResourceOperationTarget` and `Atomic.RelationshipOperationTarget` (#436). The old names remain as deprecated aliases for one minor release.
+  
+  **Migration:** replace `Atomic.ResourceOperationShape<R>` with `Atomic.ResourceOperationTarget<R>`, and `Atomic.RelationshipOperationShape<R, K>` with `Atomic.RelationshipOperationTarget<R, K>`. The types are identical.
+- 66cfb43: A relationship object's `meta` can be typed (#513).
+  
+  - **Per relationship (the source of truth).** `Relationship.one`, `optional`, `many` and `paginated` take a `meta` schema (`Relationship.many(() => Ballot, { meta: Schema.Struct({ totalCount: Schema.Number }) })`). It types the relationship object's `meta` in the resource schema, and so in its documents, `Document.wire`, `Endpoint.ResourceDocument` / `FlatCollectionDocument` / `WriteDocument`, `Group.flat` / `flatReadOnly`, the endpoints' OpenAPI and the typed client. The descriptor records the schema as `meta` (`Document.AnyMeta`, the old open record, when none is declared), and `Relationship.MetaOf<D>` reads it. What `Assemble` and `ResourceHandlers` build over the resource's own type then fits those documents without a cast.
+  - **Per call (an override).** `Document.wire(schema, { toManyMeta })`, the flat document helpers' `toManyMeta` option, and `Group.flat` / `flatReadOnly({ …, toManyMeta })` narrow **every** to-many relationship's `meta` (`many` and `paginated`, in the primary data and `included`) at the call site. To-one relationships keep their own. `Document.WithToManyMeta<T, Meta>` is the type-level counterpart.
+  
+  The model types gain a type parameter for the schema: `Relationship.One` / `Optional` take it fourth, `Many` second and `Paginated` third. On the uppercase types it defaults to the wide `Schema.Top`. On the lowercase annotation types (`Relationship.one<…>`, `many<R, M>`, …) it defaults to `typeof Document.AnyMeta`, as the constructors do. `Relationship.OneSchema` / `OptionalSchema` / `ManySchema` / `PaginatedSchema` take the meta schema too, defaulting to `typeof Document.AnyMeta`.
+  
+  **Migration:** a type-level test that pins a constructed descriptor with exact equality against an uppercase model type (`Relationship.One<typeof Person, true, undefined>`) should name the lowercase annotation type instead (`Relationship.one<typeof Person, true>`), which carries the constructor's defaults. Assignability is unchanged.
+- b5733e2: `Relationship.one` and `Relationship.optional` take a `key` option: the to-one relationship's storage key, which is the field on the declaring resource's stored row that holds the related id (`Relationship.one(() => Person, { key: "authorId" })`) (#509). The key is recorded on the descriptor, typed as the literal you pass, and read back with `Resource.relationships(R).author.key`; it is `undefined` when none is declared. It is a storage fact only: documents, the query grammar and endpoints are unchanged. `Resource.make` and `Resource.extend` refuse, at definition time, an empty key, a key that is also an attribute name, and a key that two to-one relationships share. The key survives `Resource.extend` and `Resource.annotate`.
+  
+  The lowercase annotation types gain a third parameter for it (`Relationship.one<Person, false, "authorId">`, defaulting to `undefined`), and `Relationship.One` / `Optional` gain one too (defaulting to the new `Relationship.StorageKey`). Downstream derivations, such as legation's `NodeBridge` (legation#220), can read the key from the descriptor instead of guessing `${name}Id`; they should raise their `effect-jsonapi` floor to the release this ships in.
+  
+  A type-level test that pins a constructed descriptor with exact equality against the uppercase model types now names the key as well, because the uppercase defaults are wide (as `F`'s already was): `Relationship.One<typeof Person, true, undefined>` rather than `Relationship.One<typeof Person, true>`. Assignability to `Relationship.One<R>`, `ToOne<R>` and `Descriptor` is unchanged.
+- 9818e8e: **Breaking:** four published schema types are renamed, and their old names now name the decoded value (#436).
+  
+  | Before (schema type) | After (schema type) | The old name now means |
+  | --- | --- | --- |
+  | `Idempotency.Headers` | `Idempotency.HeadersSchema` | `typeof Idempotency.Headers.Type` |
+  | `Idempotency.HeadersRequired` | `Idempotency.HeadersRequiredSchema` | `typeof Idempotency.HeadersRequired.Type` |
+  | `Query.FilterWireValue` | `Query.FilterWireValueSchema` | `typeof Query.FilterWireValue.Type` |
+  | `Query.FilterRest` | `Query.FilterRestSchema` | `typeof Query.FilterRest.Type` |
+  
+  The values (`Idempotency.Headers`, `Query.FilterRest`, …) are unchanged. Each name's type is now the decoded type, as for every other exported schema constant in the package. The deprecated root alias `IdempotencyHeaders` still names the schema type (now `Idempotency.HeadersSchema`).
+  
+  **Migration:** where a type annotation names one of these as a _schema_ (`const h: Idempotency.Headers = …`, `Schema.optionalKey<Query.FilterWireValue>`), add the `Schema` suffix. Where it meant the decoded value, which used to be spelled `typeof Query.FilterWireValue.Type`, you can now write the bare name.
+
+### Patch Changes
+
+- f3b1d07: Drop a redundant `| undefined` from two optional parameters in the shipped internal declarations (`mediaTypeWith`, `unlinkedIncluded`); the types are unchanged. Found by the newly enabled type-aware lint.
+
 ## 0.19.0
 
 ### Minor Changes
