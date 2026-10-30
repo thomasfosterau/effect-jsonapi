@@ -1,8 +1,11 @@
 # Composite setup shared by every workflow that needs the toolchain: pnpm +
 # Node.js, the pnpm store cache (keyed on pnpm-lock.yaml by setup-node), and a
 # frozen-lockfile install. `vp` and the dev bins (`tsc`, `docgen`, `tsx`) land
-# in node_modules/.bin, which this adds to PATH so later steps invoke them
-# directly. Copied in shape from effect-drizzle-ext (the library reference).
+# in node_modules/.bin; later steps reach `vp` through `pnpm exec vp …`, and
+# `vp run` puts node_modules/.bin on its tasks' PATH. Nothing is written to
+# `GITHUB_PATH`: an environment-file write is how one step's output steers
+# every later step's binaries (zizmor `github-env`, #532). Copied in shape
+# from effect-drizzle-ext (the library reference).
 #
 # Install scripts: `pnpm install --ignore-scripts` blocks DEPENDENCY lifecycle
 # scripts (a common supply-chain attack vector) from running in CI — see
@@ -59,7 +62,3 @@ runs:
       if: inputs.run-prepare == 'true'
       shell: bash
       run: pnpm run prepare
-
-    - name: Expose the local bins
-      shell: bash
-      run: echo "$PWD/node_modules/.bin" >> "$GITHUB_PATH"

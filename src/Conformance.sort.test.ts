@@ -137,7 +137,7 @@ const ordered = (
       return ascending(a.id, b.id);
     }),
   );
-  return reversed ? sorted.reverse() : sorted;
+  return reversed ? sorted.toReversed() : sorted;
 };
 
 /**

@@ -224,7 +224,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       }
 
       // sort=-createdAt,title
-      for (const term of [...(query.sort ?? [])].reverse()) {
+      for (const term of (query.sort ?? []).toReversed()) {
         const ascending = Order.make<(typeof articles)[number]>((a, b) => {
           const left = a.attributes[term.field];
           const right = b.attributes[term.field];

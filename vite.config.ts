@@ -12,7 +12,7 @@
 
 import { fileURLToPath } from "node:url";
 import { recommended } from "@effect/tsgo/oxlint-presets";
-import effect from "@mpsuesser/oxlint-plugin-effect";
+import effect from "@enfect/oxlint";
 import { defineConfig } from "vite-plus";
 
 /**
@@ -59,8 +59,16 @@ export default defineConfig({
   lint: {
     ignorePatterns: ["**/dist/**", "**/node_modules/**", "**/coverage/**"],
     extends: [recommended, effect.configs.recommended],
+    // oxlint's default plugins (eslint, typescript, unicorn, oxc) plus the
+    // `import`, `promise` and `vitest` rule sets; `correctness`, `suspicious`
+    // and `perf` run at `error` across all of them (#532). The handful of
+    // their rules that cut across this library's conventions are off below,
+    // each with its reason.
+    plugins: ["eslint", "typescript", "unicorn", "oxc", "import", "promise", "vitest"],
     categories: {
       correctness: "error",
+      suspicious: "error",
+      perf: "error",
     },
     rules: {
       "eslint/no-unused-vars": [
@@ -92,7 +100,9 @@ export default defineConfig({
       // `require-safety-comment-for-type-assertion`, 626 `casting-awareness`,
       // 489 `prefer-option-over-null`, 326 `avoid-native-object-helpers` and
       // 237 `avoid-non-null-assertion` the largest. Per-rule remainder and the
-      // order to pay it down in: #436.
+      // order to pay it down in: #436. The move to @enfect/oxlint 0.9.0 (#532),
+      // the same rules under the same `effect/` names plus
+      // `no-cause-in-http-response` (no sites), left the count unchanged.
       "effect/require-safety-comment-for-type-assertion": "warn",
       "effect/no-chained-type-assertions": "warn",
       // This rule and `no-known-value-widening` only check the built-in
@@ -119,6 +129,41 @@ export default defineConfig({
       "typescript/ban-ts-comment": "off",
       "unicorn/no-empty-file": "off",
       "vite-plus/prefer-vite-plus-imports": "error",
+
+      // ---- `suspicious` / `perf` / plugin rules this library opts out of ----
+      // Effect code builds its handlers, layers and schema transformations
+      // as closures over their arguments; hoisting each one out of its
+      // factory would scatter one definition across a module.
+      "unicorn/consistent-function-scoping": "off",
+      // The module-as-namespace convention (`Option`, `Schema`, `Query`, …)
+      // and the generic `R` / `A` / `E` parameters mean names deliberately
+      // recur in nested scopes.
+      "eslint/no-shadow": "off",
+      // `_tag` is Effect's discriminant and `_`-prefixed bindings are the
+      // unused-on-purpose convention `no-unused-vars` above honours.
+      "eslint/no-underscore-dangle": "off",
+      // Conditional members are spread in (`...definedMember(…)`) so an
+      // absent one stays absent under `exactOptionalPropertyTypes`; the
+      // copies are small, immutable error and fixture objects.
+      "oxc/no-map-spread": "off",
+      // `Effect.catch(effect, f)` takes two arguments; the rule reads every
+      // `.catch` as `Promise#catch`.
+      "promise/valid-params": "off",
+      // `expect(value, message)` is Vitest API, and the suites assert through
+      // helpers (`expectReject`, `assertFails`, …) the rule cannot see into.
+      "vitest/valid-expect": "off",
+      "vitest/expect-expect": "off",
+      // Test titles are computed (`it(name, …)` in table-driven helpers).
+      "vitest/valid-title": "off",
+      // Many `toThrow()` assertions pin only that a sync decode throws; the
+      // message is Effect's, not ours, and checking it would test Effect.
+      "vitest/require-to-throw-message": "off",
+      // The Effect preset's `avoid-native-object-helpers` counts every native
+      // `Set` as debt, so trading a short constant array for one would add a
+      // site there (#436) to clear one here.
+      "unicorn/prefer-set-has": "off",
+      // Reports prose comments that mention `expect(` as commented-out tests.
+      "vitest/no-commented-out-tests": "off",
     },
     overrides: [
       // Type-level tests exist to be *checked*, not run: every binding is a
@@ -198,6 +243,17 @@ export default defineConfig({
           "effect/use-command-executor-service": "off",
           "effect/avoid-native-fetch": "off",
           "effect/effect-promise-vs-trypromise": "off",
+        },
+      },
+      // Tests that send requests one after another on purpose (a case per
+      // malformed key, each answer checked before the next is sent), and the
+      // prototype-pollution probes that define a member on Object.prototype
+      // to prove the codecs ignore it.
+      {
+        files: ["**/*.test.ts"],
+        rules: {
+          "eslint/no-await-in-loop": "off",
+          "eslint/no-extend-native": "off",
         },
       },
       // The consumer project test/declaration-emit.test.ts compiles lives in

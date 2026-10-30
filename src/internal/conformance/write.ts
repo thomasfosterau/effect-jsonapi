@@ -230,7 +230,7 @@ const usableFixture = (key: string, fixture: Fixture): Result.Result<Usable, str
         ),
         clientId: Option.map(Option.fromUndefinedOr(fixture.clientId), (clientId) => ({
           supported: clientId.supported,
-          id: () => clientId.id.call(clientId),
+          id: () => clientId.id(),
         })),
       }),
   });

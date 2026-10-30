@@ -176,7 +176,7 @@ const ErrorDocument = Schema.fromJsonString(
 const errorsOf = (text: string) => Schema.decodeUnknownSync(ErrorDocument)(text).errors;
 
 const polluted = (): boolean =>
-  Object.prototype.hasOwnProperty.call(Object.prototype, "polluted") || Reflect.has({}, "polluted");
+  Object.hasOwn(Object.prototype, "polluted") || Reflect.has({}, "polluted");
 
 // A body is spelled as text so an own `__proto__` key survives to the server
 // exactly as a client's JSON would carry it (`JSON.parse` makes it an own key).

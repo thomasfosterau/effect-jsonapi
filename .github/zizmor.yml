@@ -1,0 +1,8 @@
+# zizmor (`uvx zizmor --offline .github`) configuration.
+rules:
+  # The owner's supply-chain policy is pnpm's `minimumReleaseAge: 480` (8 hours,
+  # pnpm-workspace.yaml); Dependabot's cooldown takes whole days only, so 1 day
+  # is the shortest setting that never proposes a version pnpm still refuses.
+  dependabot-cooldown:
+    config:
+      days: 1

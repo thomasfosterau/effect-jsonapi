@@ -46,6 +46,7 @@ jobs:
       - name: Checkout
         # The Changesets action pushes the version branch, so it needs the
         # checkout's git credentials (the ephemeral, job-scoped GITHUB_TOKEN).
+        # zizmor: ignore[artipacked] -- the persisted token is what the push uses.
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Installs with --ignore-scripts (dependency install scripts never run in
@@ -63,7 +64,7 @@ jobs:
           run-prepare: "false"
 
       - name: Build
-        run: vp run build
+        run: pnpm exec vp run build
 
       # When changesets are pending, this opens/updates a "Version Packages" PR
       # (via `pnpm run version`). Once that PR is merged (no changesets remain),

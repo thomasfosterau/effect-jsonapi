@@ -4395,7 +4395,7 @@ export const resource = <
       const page = pick(relConfig, "page", gPage);
       const errors = pick(relConfig, "errors", gErrors);
       const errorOpt = errors !== undefined ? { errors } : {};
-      const relatedSort = sortOpt === false ? false : true;
+      const relatedSort = sortOpt !== false;
 
       endpoints.push(
         related(
