@@ -1365,7 +1365,7 @@ export const skip = (rule: Rule, reason: string): Skipped => ({ _tag: "Skipped",
  * message falls back to {@link UNRENDERABLE}.
  */
 const errorMessage = (error: Error): string =>
-  error.message === "" ? `${error.name}` : `${error.name}: ${error.message}`;
+  `${error.name}${error.message === "" ? "" : `: ${error.message}`}`;
 
 /** The longest `Errored.message`, in UTF-16 code units, the marker included. */
 const MESSAGE_LIMIT = 500;

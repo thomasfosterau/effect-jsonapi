@@ -84,8 +84,8 @@ The same split explains why filtering has two forms with different flat encoding
 
 ## Commands
 
-- `pnpm install` — dependencies, the Vite+ git hooks (pre-commit runs `vp staged`: format + lint on staged files) and, through the root `prepare` script, the Effect-patched `tsc` / `oxlint` binaries. There is **no pre-push hook** — run the gates yourself.
-- `vp check` — format + lint (Oxfmt + Oxlint). `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
+- `pnpm install` — dependencies, the Vite+ git hooks (pre-commit runs `vp staged`: format with fixes, then lint without, on staged files) and, through the root `prepare` script, the Effect-patched `tsc` / `oxlint` binaries. There is **no pre-push hook** — run the gates yourself.
+- `vp check` — format + lint (Oxfmt + Oxlint); the lint is type-aware through oxlint-tsgolint (`typeAware` + `typeCheck` in `vite.config.ts`), reading each file's nearest `tsconfig.json`, so it never depends on `dist/`. `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
 - `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
 - `vp run docgen` — build `dist/`, then type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.

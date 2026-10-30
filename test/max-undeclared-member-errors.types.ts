@@ -35,14 +35,14 @@ export const Open = Resource.make("open", {
 });
 
 // An explicit `undefined`, as a caller forwarding its own optional option.
-export const forwarded = (cap?: number | undefined) =>
+export const forwarded = (cap?: number) =>
   Resource.make("forwarded", { attributes, maxUndeclaredMemberErrors: cap });
 
 // @ts-expect-error -- the cap is a number, not a numeric string
 export const stringCap = Resource.make("strings", { attributes, maxUndeclaredMemberErrors: "12" });
 
 export const Extended = Resource.extend(Capped, "extended", { maxUndeclaredMemberErrors: 4 });
-export const extendForwarded = (cap?: number | undefined) =>
+export const extendForwarded = (cap?: number) =>
   Resource.extend(Capped, "extended", { maxUndeclaredMemberErrors: cap });
 export const extendString = Resource.extend(Capped, "extended", {
   // @ts-expect-error -- `extend` takes the same option, with the same type

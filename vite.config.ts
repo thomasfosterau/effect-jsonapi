@@ -38,9 +38,18 @@ const workerOptions = process.env.VITEST_MAX_WORKERS
   : {};
 
 export default defineConfig({
-  // Staged-file checks run by `vp staged` (pre-commit).
+  // Staged-file checks run by `vp staged` (pre-commit): format with fixes,
+  // then lint WITHOUT fixes. `vp check --fix` would also apply the autofixes
+  // of the type-aware rules, even those at `warn` (`no-unnecessary-type-
+  // assertion` and friends), to the staged files at commit time, so the
+  // commit would differ from the tree the gates verified (#535). The lint
+  // step tolerates a commit that stages only files oxlint does not read
+  // (Markdown, JSON, YAML).
   staged: {
-    "*.{js,mjs,ts,json,md,yml,yaml}": "vp check --fix",
+    "*.{js,mjs,ts,json,md,yml,yaml}": [
+      "vp check --fix --no-lint",
+      "vp check --no-fmt --no-error-on-unmatched-pattern",
+    ],
   },
   fmt: {
     // CHANGELOG.md is written by `changeset version`; the generated API docs
@@ -57,8 +66,19 @@ export default defineConfig({
     ],
   },
   lint: {
-    ignorePatterns: ["**/dist/**", "**/node_modules/**", "**/coverage/**"],
+    // test/emitted/ is type-checked against the BUILT declarations
+    // (`typecheck:dist`, tsconfig.dist.json). tsgolint would read it under the
+    // root tsconfig.json, which excludes it, so it resolves the package through
+    // `exports` to `dist/`: it would fail on a clean tree and pass after a
+    // build, a lint result that depends on build output (#535).
+    ignorePatterns: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "test/emitted/**"],
     extends: [recommended, effect.configs.recommended],
+    // Type-aware rules and a full type check through oxlint-tsgolint (bundled
+    // with vite-plus, patched by `effect-tsgo patch --oxlint`), so `vp check`
+    // also catches what only type information shows (#535). tsgolint reads
+    // each file's nearest tsconfig.json: the root one maps the package name to
+    // `src/` (as do the examples'), so the result does not depend on `dist/`.
+    options: { typeAware: true, typeCheck: true },
     // oxlint's default plugins (eslint, typescript, unicorn, oxc) plus the
     // `import`, `promise` and `vitest` rule sets; `correctness`, `suspicious`
     // and `perf` run at `error` across all of them (#532). The handful of
@@ -124,6 +144,39 @@ export default defineConfig({
       "effect/effect-run-in-body": "warn",
       "effect/no-barrel-imports": "warn",
       "effect/prefer-option-over-null": "warn",
+      // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
+      // `typeAware` turned these on. Each sits at `warn` with its count on
+      // adoption (`vp lint`, 2026-10-30); the same rules as the Effect block
+      // above: flip one back (delete its line) when its count reaches zero.
+      // The per-rule plan is #536.
+      // 563 sites: the type-level `as` narrowings `casting-awareness` and
+      // `require-safety-comment-for-type-assertion` already count.
+      "typescript/no-unsafe-type-assertion": "warn",
+      // 236 sites. Autofixable, but each removal needs review: the assertions
+      // in the conditional-type machinery can be load-bearing for the emitted
+      // declarations, which this check does not see.
+      "typescript/no-unnecessary-type-assertion": "warn",
+      // 66 sites (19 in src/), mostly explicit `Schema` / `Effect` type arguments.
+      "typescript/no-unnecessary-type-arguments": "warn",
+      // 63 sites, 59 of them in tests (most in the type-level tests under test/).
+      "typescript/no-unnecessary-type-parameters": "warn",
+      // 43 sites, 39 in src/ (most in Resource.ts's mapped types).
+      "typescript/no-generated-empty-object-type": "warn",
+      // 1 site: `pairsOf` in src/internal/canonical.ts stringifies a JSON
+      // object member as `[object Object]`. A JSON object has no flat wire
+      // form; picking one (omit it, or fail) is a behaviour change (#536).
+      "typescript/no-base-to-string": "warn",
+      // `@effect/tsgo`'s preset sets its rules at `warn`; the `correctness` /
+      // `suspicious` categories above raised these three to `error`. Back at
+      // the preset's level, counted: 106 sites (94 in tests and examples),
+      // and 24 (all in tests and examples). The tsc gate leaves both off.
+      "effecttsgo/any-unknown-in-error-context": "warn",
+      "effecttsgo/unsafe-effect-type-assertion": "warn",
+      // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
+      // surface this library is built on (`effect/http`, `effect/http-api`,
+      // much of it `@stability unstable`) does not flood the gates (#205):
+      // 917 sites, none actionable here. Off in lint for the same reason.
+      "effecttsgo/unstable-api-usage": "off",
       "typescript/no-explicit-any": "off",
       "typescript/no-empty-object-type": "off",
       "typescript/ban-ts-comment": "off",
@@ -166,6 +219,16 @@ export default defineConfig({
       "vitest/no-commented-out-tests": "off",
     },
     overrides: [
+      // `strict-effect-provide` flags `Effect.provide` outside an
+      // application's entry point. A test and an example program ARE their
+      // own entry points: providing the layers is what they are for. No site
+      // in src/ (78 in tests and examples on adoption, #535).
+      {
+        files: ["**/*.test.ts", "examples/**"],
+        rules: {
+          "effecttsgo/strict-effect-provide": "off",
+        },
+      },
       // Type-level tests exist to be *checked*, not run: every binding is a
       // compile-time assertion that no runtime code reads.
       {
@@ -266,12 +329,6 @@ export default defineConfig({
         },
       },
     ],
-    // Type-aware linting is intentionally disabled: type checking stays the
-    // `typecheck` tasks' job (native tsc, Effect-patched).
-    options: {
-      typeAware: false,
-      typeCheck: false,
-    },
     jsPlugins: [
       {
         name: "vite-plus",

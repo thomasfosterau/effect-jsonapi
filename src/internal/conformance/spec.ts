@@ -757,7 +757,7 @@ const includedOnInclude: RuleImpl = {
             observed: Option.match(document, {
               onNone: () => describe(observation),
               onSome: (body) =>
-                `top-level members: ${Rec.keys({ ...body }).join(", ") || "(none)"}`,
+                `top-level members: ${Arr.map(Arr.fromRecord(body), ([member]) => member).join(", ") || "(none)"}`,
             }),
             probe: observation.probe,
           }),
@@ -2449,7 +2449,7 @@ const judgeDelete = (observation: Observation): ReadonlyArray<Finding> => {
       const document = documentOf(observation.body);
       const members = Option.match(document, {
         onNone: () => [],
-        onSome: (body) => Arr.map(Arr.fromRecord({ ...body }), ([member]) => member),
+        onSome: (body) => Arr.map(Arr.fromRecord(body), ([member]) => member),
       });
       return Option.isSome(document) && Arr.every(members, metaOnly)
         ? []

@@ -272,7 +272,7 @@ export const format = (
     const outcomes = report.outcomes.filter((outcome) => outcome.rule.tier === tier);
     if (Arr.isReadonlyArrayEmpty(outcomes)) continue;
     const tierSummary = summarise(outcomes);
-    out.push(`${TIER_TITLE[tier].toUpperCase()}`);
+    out.push(TIER_TITLE[tier].toUpperCase());
     out.push(
       `  ${tierSummary.failed} failed${died(tierSummary.errored)} · ${tierSummary.passed} passed · ${tierSummary.skipped} not checked`,
     );

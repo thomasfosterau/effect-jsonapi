@@ -1,7 +1,8 @@
 name: CI
 
-# ONE job on ONE Node.js line, the latest stable release (`node-version:
-# latest` in .github/actions/setup), like every other repository in the
+# ONE job on ONE Node.js line, the latest stable release (`node-version: "*"`
+# with `check-latest` in .github/actions/setup; never `latest`, which can
+# resolve to a pre-release, #535), like every other repository in the
 # programme (#211). The pipeline's task graph lives in vite.config.ts (the
 # root `check` aggregate), not in GitHub Actions `needs:`. Copied in shape
 # from effect-drizzle-ext (the library reference); the docgen step is this

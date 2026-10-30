@@ -30,7 +30,7 @@ Every command on its own; the ordered pre-push run is [AGENTS.md → Verificatio
 
 | Command | Description |
 | --- | --- |
-| `vp check` | Format check + lint (oxfmt + oxlint, configured in `vite.config.ts`). `vp check --fix` applies both. Distinct from `vp run check`. |
+| `vp check` | Format check + lint (oxfmt + oxlint, configured in `vite.config.ts`). Type-aware through oxlint-tsgolint (`typeAware` + `typeCheck`). `vp check --fix` applies both. Distinct from `vp run check`. |
 | `vp fmt` / `vp lint` | Either half on its own. |
 | `vp run check` | The type gate: sources, colocated tests and `test/*.types.ts` (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first), and every example. |
 | `vp run typecheck` | One of the above on its own; `vp run --filter ./examples/blog check` for one example. |
@@ -47,7 +47,7 @@ Every command on its own; the ordered pre-push run is [AGENTS.md → Verificatio
 
 - TypeScript throughout, compiled under `tsconfig.base.json` — `strict`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`, `erasableSyntaxOnly` — by the native TypeScript 7 compiler.
 - Formatting is enforced by oxfmt through `vp fmt`; the house style is oxfmt's defaults (semicolons, double quotes, trailing commas, print width 100, Markdown prose unwrapped). The pre-commit hook formats staged files; don't fight it.
-- Linting is enforced by oxlint through `vp lint`: the `@effect/tsgo` presets plus `@enfect/oxlint`'s recommended set (the Effect and anti-slop rules under `effect/`), with oxlint's `correctness`, `suspicious` and `perf` categories over the `typescript`, `unicorn`, `oxc`, `import`, `promise` and `vitest` plugins. The `warn` tier is a staged rollout; see [AGENTS.md → Common pitfalls](AGENTS.md#common-pitfalls).
+- Linting is enforced by oxlint through `vp lint`: the `@effect/tsgo` presets plus `@enfect/oxlint`'s recommended set (the Effect and anti-slop rules under `effect/`), with oxlint's `correctness`, `suspicious` and `perf` categories over the `typescript`, `unicorn`, `oxc`, `import`, `promise` and `vitest` plugins, type-aware through oxlint-tsgolint. The `warn` tier is a staged rollout; see [AGENTS.md → Common pitfalls](AGENTS.md#common-pitfalls).
 - Use Effect's `Schema` patterns; derive everything from a single resource definition where possible.
 - Document public APIs with JSDoc (see [Documentation](#documentation)).
 
@@ -88,11 +88,11 @@ Pick the appropriate bump and write a user-facing summary. While the package is 
 
 ## Git hooks
 
-Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pre-commit) is committed. **pre-commit** runs `vp staged` (format + lint on staged files). There is no pre-push hook.
+Hooks are managed by Vite+; the editable [.vite-hooks/pre-commit](.vite-hooks/pre-commit) is committed. **pre-commit** runs `vp staged`: `vp check --fix --no-lint` then `vp check --no-fmt --no-error-on-unmatched-pattern` on staged files, so it formats but never applies a lint autofix the gates did not see. There is no pre-push hook.
 
 ## CI expectations
 
-[ci.yml](.github/workflows/ci.yml) runs one job on every push and pull request, on the latest stable Node.js (`node-version: latest`; Release uses the same setup): the gates in [AGENTS.md → Verification](AGENTS.md#verification), build first, plus `pnpm audit --audit-level high`. The job name is the check name the `Default` ruleset on `trunk` requires, `Lint, type-check, build & test`, so renaming it blocks every PR. Installs are `pnpm install --frozen-lockfile --ignore-scripts` followed by an explicit `pnpm run prepare` (the composite action in `.github/actions/setup` explains the exception). [release.yml](.github/workflows/release.yml) runs the Changesets action on `trunk` pushes only (so never for a Dependabot branch) under the protected `release` environment. Every workflow is hardened: `permissions: {}` at the top with per-job grants, SHA-pinned actions, `persist-credentials: false` except where the Release job pushes, no secrets in anything a pull request can trigger, `pnpm exec vp …` rather than a `GITHUB_PATH` write, and `uvx zizmor --offline .github` clean.
+[ci.yml](.github/workflows/ci.yml) runs one job on every push and pull request, on the latest stable Node.js (`node-version: "*"` with `check-latest: true`, never `latest`, which can resolve to a pre-release; Release uses the same setup): the gates in [AGENTS.md → Verification](AGENTS.md#verification), build first, plus `pnpm audit --audit-level high`. The job name is the check name the `Default` ruleset on `trunk` requires, `Lint, type-check, build & test`, so renaming it blocks every PR. Installs are `pnpm install --frozen-lockfile --ignore-scripts` followed by an explicit `pnpm run prepare` (the composite action in `.github/actions/setup` explains the exception). [release.yml](.github/workflows/release.yml) runs the Changesets action on `trunk` pushes only (so never for a Dependabot branch) under the protected `release` environment. Every workflow is hardened: `permissions: {}` at the top with per-job grants, SHA-pinned actions, `persist-credentials: false` except where the Release job pushes, no secrets in anything a pull request can trigger, `pnpm exec vp …` rather than a `GITHUB_PATH` write, and `uvx zizmor --offline .github` clean.
 
 ## Pre-PR checklist
 
