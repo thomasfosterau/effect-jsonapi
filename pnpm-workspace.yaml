@@ -77,7 +77,7 @@ catalog:
   # consumers may resolve is the `catalogs.peers` range, whose floor is
   # verified separately.
   effect: 4.0.5
-  fallow: 3.37.0
+  fallow: 3.38.1
   # The runtime `@effect/docgen` executes examples under (a peer of docgen 4.x,
   # `>=4.19.3 <5.0.0`).
   tsx: ^4.23.13
