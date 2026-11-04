@@ -140,7 +140,7 @@ The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that versi
 
 ## Agent sessions
 
-The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) runs `vp install --frozen-lockfile` (which applies the tsgo patch) and links `vp`, `tsx` and `fallow` onto PATH for non-interactive shells. It hydrates no secrets; every gate runs offline. The `@enfect/claude` plugin (Effect guidance, skills and post-write pattern checks) is the Effect companion to the lint preset. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate before `git commit` / `git push` (run `vp run test:coverage` first; the gate reads that map).
+The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) runs `vp install --frozen-lockfile` (which applies the tsgo patch) and links `vp`, `tsx` and `fallow` onto PATH for non-interactive shells. It hydrates no secrets; every gate runs offline. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate before `git commit` / `git push` (run `vp run test:coverage` first; the gate reads that map).
 
 ## Documentation surfaces
 
