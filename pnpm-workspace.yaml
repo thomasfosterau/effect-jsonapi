@@ -78,8 +78,9 @@ catalog:
   # verified separately.
   effect: 4.0.5
   fallow: 3.38.1
-  # The runtime `@effect/docgen` executes examples under (a peer of docgen 4.x,
-  # `>=4.19.3 <5.0.0`).
+  # Only for `@effect/docgen`: the runtime it executes examples under (a peer
+  # of docgen 4.x, `>=4.19.3 <5.0.0`), whose binary it spawns itself. Scripts
+  # run with `vpx`, never `tsx`.
   tsx: ^4.23.13
   # TypeScript 6/7 side-by-side: TS7 (the native Go compiler) ships no JS API
   # until 7.1, so JS-API consumers (@effect/language-service, the tsdown
