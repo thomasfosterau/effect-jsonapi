@@ -22,7 +22,7 @@ Setup, commands and checklists for `@thomasfosterau/effect-jsonapi`; conventions
 
 3. Run the gates listed in [AGENTS.md → Verification](AGENTS.md#verification), in that order.
 
-Agent sessions and the devcontainer are provisioned by the SessionStart hook; see [AGENTS.md → Agent sessions](AGENTS.md#agent-sessions).
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions; see [AGENTS.md → Agent sessions](AGENTS.md#agent-sessions).
 
 ## Development workflow
 
