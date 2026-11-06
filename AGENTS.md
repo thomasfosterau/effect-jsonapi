@@ -136,7 +136,7 @@ Issues are the backlog: when you find work you can't do now, file an issue rathe
 
 **IMPORTANT:** Never guess at an Effect API. Read the installed package before writing Effect code: its declarations (`node_modules/effect/dist/*.d.ts`), its sources (`node_modules/effect/src`), and the guides it ships for agents (`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`).
 
-The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
+The pinned version is the `effect` entry in `pnpm-workspace.yaml`. The published `effect` peer (`catalogs.peers`) is `^4.0.0`; raise it only when a dependency requires it, naming the dependency in the catalog comment. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
 
 ## Agent sessions
 

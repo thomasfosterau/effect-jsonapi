@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) imple
 pnpm add @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`>=4.0.0-rc.118`). Node.js 22 or newer is required.
+`effect` is a peer dependency (`^4.0.0`). Node.js 22 or newer is required.
 
 ## Overview
 
