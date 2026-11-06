@@ -1,24 +1,22 @@
 # Dependabot version updates. The `npm` entry at `/` reads the pnpm workspace
 # (the library and every `examples/*` app) and its catalogs.
 #
-# `groups` collect the dependencies that MUST move together, so no lockstep
-# set can drift one package at a time. Dependabot puts a dependency in the
-# FIRST group that matches it, so the groups run specific → general and use
-# `exclude-patterns` where a broader pattern would steal a member:
+# `groups` exist only for sets that MUST move together (exact cross-pins or a
+# hard compatibility table), so updating one member alone breaks the install
+# or the build; every other dependency gets its own PR. Dependabot puts a
+# dependency in the FIRST group that matches it, so `exclude-patterns` keeps a
+# package out of a broader group that would otherwise claim it:
 #
-# - `toolchain` — `vite-plus` pins the `oxlint`, `oxfmt` and `vitest` it carries
-#   (and `vite` is its aliased core); `@effect/tsgo` patches the native `tsc`
-#   (`@typescript/native`, by gitHead) and that `oxlint`, and hard-errors in
-#   `pnpm install` on an unsupported pairing; `typescript` is the TS6 half of
-#   the 6/7 split; `@vitest/coverage-istanbul` must equal vite-plus's vitest;
-#   the Effect lint plugin (`@enfect/oxlint`) is wired into the same `vp lint`.
-#   Read the comment on `@effect/tsgo` in pnpm-workspace.yaml before merging
-#   one of these PRs.
-# - `effect` — the Effect release line is a lockstep-versioned singleton set.
-# - `docgen` — `@effect/docgen` executes the examples under `tsx`, a peer.
-# - `changesets`, `fallow` — each moves as one unit.
-# - `minor-and-patch` — every other minor/patch update in one PR; majors
-#   outside the sets above stay individual.
+# - `toolchain` — `vite-plus` pins the `oxlint`, `oxfmt` and `vitest` it carries;
+#   `@effect/tsgo` patches the native `tsc` and that `oxlint`, and hard-errors
+#   in `pnpm install` on an unsupported pairing; `@vitest/coverage-istanbul`
+#   must equal vite-plus's vitest. Read the comment on `@effect/tsgo` in
+#   pnpm-workspace.yaml before merging one of these PRs. (`@enfect/oxlint`
+#   ranges its oxlint plugin API, so it moves on its own.)
+# - `effect` — the Effect release line (`effect` + `@effect/*`), one train,
+#   with `@effect/docgen`: it depends on `@effect/platform-node` at its own
+#   release, so docgen 4.0.x crashes on effect 4.1 (`effect/Crypto` is gone)
+#   and must move with `effect`. `@effect/tsgo` is toolchain.
 #
 # Moved by hand, in the toolchain PR (Dependabot cannot bump them):
 # - the `vite` catalog entry, an npm alias
@@ -53,23 +51,16 @@ updates:
       exclude:
         - "@thomasfosterau/*"
     groups:
+      # vite-plus pins vitest/oxlint exactly; @effect/tsgo's patch supports only listed oxlint versions.
       toolchain:
         applies-to: version-updates
         patterns:
           - "vite-plus"
-          - "vite"
-          - "@voidzero-dev/*"
           - "vitest"
           - "@vitest/*"
-          - "oxlint"
-          - "oxfmt"
-          - "oxlint-tsgolint"
           - "@effect/tsgo"
-          - "@typescript/native"
-          - "typescript"
-          - "@typescript/typescript6"
-          - "@enfect/oxlint"
         update-types: ["major", "minor", "patch"]
+      # One release train; @effect/docgen runs on @effect/platform-node at its own release.
       effect:
         applies-to: version-updates
         patterns:
@@ -77,29 +68,7 @@ updates:
           - "@effect/*"
         exclude-patterns:
           - "@effect/tsgo"
-          - "@effect/docgen"
         update-types: ["major", "minor", "patch"]
-      docgen:
-        applies-to: version-updates
-        patterns:
-          - "@effect/docgen"
-          - "tsx"
-        update-types: ["major", "minor", "patch"]
-      changesets:
-        applies-to: version-updates
-        patterns:
-          - "@changesets/*"
-        update-types: ["major", "minor", "patch"]
-      fallow:
-        applies-to: version-updates
-        patterns:
-          - "fallow"
-        update-types: ["major", "minor", "patch"]
-      minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -112,7 +81,3 @@ updates:
       prefix: "chore"
     cooldown:
       default-days: 1
-    groups:
-      github-actions:
-        patterns:
-          - "*"

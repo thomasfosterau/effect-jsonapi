@@ -65,7 +65,8 @@ catalog:
   "@effect/tsgo": 0.63.0
   # The Effect lint preset (`effect.configs.recommended` in vite.config.ts):
   # 74 `effect/` rules, including the anti-slop set. Replaced
-  # @mpsuesser/oxlint-plugin-effect (#532); moves with the toolchain group.
+  # @mpsuesser/oxlint-plugin-effect (#532). It ranges its oxlint plugin API
+  # (`@oxlint/plugins ^1.85.0`), so Dependabot moves it on its own.
   "@enfect/oxlint": 0.9.0
   "@types/node": ^26.4.1
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
