@@ -67,7 +67,7 @@ catalog:
   # 74 `effect/` rules, including the anti-slop set. Replaced
   # @mpsuesser/oxlint-plugin-effect (#532). It ranges its oxlint plugin API
   # (`@oxlint/plugins ^1.85.0`), so Dependabot moves it on its own.
-  "@enfect/oxlint": 0.9.0
+  "@enfect/oxlint": 0.10.0
   "@types/node": ^26.4.1
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a
