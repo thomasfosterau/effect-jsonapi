@@ -22,7 +22,7 @@ Setup, commands and checklists for `@thomasfosterau/effect-jsonapi`; conventions
 
 3. Run the gates listed in [AGENTS.md → Verification](AGENTS.md#verification), in that order.
 
-Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions; see [AGENTS.md → Agent sessions](AGENTS.md#agent-sessions).
+Open in a Codespace or Dev Container: `.devcontainer/` provisions it with the same hook as agent sessions; see [AGENTS.md → Agent sessions](AGENTS.md#agent-sessions). The `Dev Container` workflow (`.github/workflows/devcontainer.yml`) builds it in CI whenever its inputs change; to try a change locally, `pnpm dlx @devcontainers/cli@0.89.0 up --workspace-folder .` (needs Docker).
 
 ## Development workflow
 
