@@ -90,7 +90,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
 - `vp run docgen` — build `dist/`, then type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
 - `vp run test:coverage` — the root suite under one Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads for exact per-function CRAP scores (`health.coverage` in `.fallowrc.json`). Without it fallow scores every function as uncovered.
-- `fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
+- `vp exec fallow audit --base origin/trunk` — change-set review (dead code, complexity, duplication); not a CI gate.
 - `pnpm changeset` — add a changeset.
 
 Invoke everything through `vp` (`vp exec` instead of `npx`; `vp run <task>` instead of bare `pnpm run`). CI installs as `pnpm install --frozen-lockfile --ignore-scripts` and then runs `pnpm run prepare` explicitly (see `.github/actions/setup`).
@@ -105,7 +105,7 @@ Before you report work as done, run the gates below in order and quote each comm
 4. `vp run check`
 5. `vp run -r test:unit`
 6. `vp run docgen`
-7. `vp run test:coverage`, then `fallow audit --base origin/trunk` — the PreToolUse fallow gate reads the coverage map on disk and never refreshes it.
+7. `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk` — the PreToolUse fallow gate reads the coverage map on disk and never refreshes it.
 8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
 
 None needs a credential, a database, a browser or Docker. CI also runs `pnpm audit --audit-level high`.
@@ -140,7 +140,7 @@ The pinned version is the `effect` entry in `pnpm-workspace.yaml`. In that versi
 
 ## Agent sessions
 
-The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) runs `vp install --frozen-lockfile` (which applies the tsgo patch) and links `vp`, `tsx` and `fallow` onto PATH for non-interactive shells. It hydrates no secrets; every gate runs offline. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate before `git commit` / `git push` (run `vp run test:coverage` first; the gate reads that map).
+The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) installs the global Vite+ CLI at the catalog's `vite-plus` pin with the official installer (npm-provenance and SHA-512 checked; it needs `vite.plus` and `viteplus.dev` on the environment's allowlist), links `vp` and `vpx` into `~/.local/bin`, and runs `vp install --frozen-lockfile` (which applies the tsgo patch). The global `vp` delegates to each checkout's own `vite-plus`, worktrees included. Everything else goes through Vite+: `vp exec fallow …` for fallow, `vpx <file>.ts` for scripts (`tsx` is installed only because docgen runs it itself). Nothing else is put on PATH; if the installer can't run, `vp` falls back to this checkout's `node_modules` copy. It hydrates no secrets; every gate runs offline. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate (through `vp exec fallow`) before `git commit` / `git push` (run `vp run test:coverage` first; the gate reads that map). The gate runs only in this checkout and its `.claude/worktrees/*`; for any other tree it skips the audit with a notice without running that tree's tooling.
 
 ## Documentation surfaces
 
