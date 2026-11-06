@@ -108,21 +108,19 @@ catalog:
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
-# `4.0.0-rc.118` peer would reject a consumer on rc.117). `pnpm publish`
+# `4.0.0` peer would reject a consumer on 4.0.1). `pnpm publish`
 # replaces `catalog:peers` with these ranges in the published manifest — which
 # is why the release publishes with pnpm, not npm.
 #
-# The `effect` floor is the oldest release the sources compile against, open
-# at the top per the shared Effect-floor policy (#115). rc.113 renamed
-# `SchemaTransformation.transformOrFail` to `transformEffect` with no overlap
-# release, so rc.112 and rc.113+ cannot both be admitted (#171). rc.118 removed
-# every `effect/unstable/*` path with no compat export (`effect/unstable/httpapi`
-# became `effect/http-api`), so no earlier release resolves the emitted
-# declarations (#193). Raising the floor means re-running the gate against the
-# new floor, not only the pin.
+# The `effect` peer is `^4.0.0` (owner policy): raise it only when a
+# dependency requires a newer `effect`, naming that dependency and its range
+# here; the package's own code uses the 4.0 API instead. The package has no
+# runtime dependency, so nothing forces more. Raising the floor means
+# re-running the gates with the catalog pin set to the new floor, not only the
+# pin.
 catalogs:
   peers:
-    effect: ">=4.0.0-rc.118"
+    effect: ^4.0.0
 
 overrides:
   # `effect` MUST be a singleton (see the header): force every resolution to
