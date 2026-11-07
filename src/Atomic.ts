@@ -1702,31 +1702,6 @@ export type RelationshipOperationTarget<R extends Any, K extends string> = {
 };
 
 /**
- * The former name of {@link ResourceOperationTarget}.
- *
- * @deprecated Use `Atomic.ResourceOperationTarget`; this alias is removed in
- * the next minor release.
- * @since 0.1.0
- * @category type-level
- */
-// oxlint-disable-next-line effect/no-shape-in-symbol-names -- deprecated alias kept for one minor release (#436); removed with it
-export type ResourceOperationShape<R extends Any> = ResourceOperationTarget<R>;
-
-/**
- * The former name of {@link RelationshipOperationTarget}.
- *
- * @deprecated Use `Atomic.RelationshipOperationTarget`; this alias is removed
- * in the next minor release.
- * @since 0.1.0
- * @category type-level
- */
-// oxlint-disable-next-line effect/no-shape-in-symbol-names -- deprecated alias kept for one minor release (#436); removed with it
-export type RelationshipOperationShape<
-  R extends Any,
-  K extends string,
-> = RelationshipOperationTarget<R, K>;
-
-/**
  * The operations of `Op` that target relationship `K` of resource `R`.
  *
  * @since 0.1.0
