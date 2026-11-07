@@ -1,5 +1,35 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.21.0
+
+### Minor Changes
+
+- 54d2a90: `Assemble.edgePage` takes the request's other query pairs as `input.query` (`Query.canonicalPairs(listQuery)(query)`), as `Assemble.Pagination.query` already does for `Assemble.collection` (#569). Every pagination link of an edge page then carries them, so a filtered or sorted edge page's `next` keeps its `filter[…]` and `sort`. Without it, links are built as before.
+- 7dce771: The resource id can be declared filterable (#556). Pipe the schema passed as `Resource.make`'s `id` option through `Filter.able` — `id: Schema.String.pipe(Filter.able(["eq", "in"]))` — and `Resource.filterable` reports it under the key `id`, with the id schema as its literal codec, so `filter[id]=…`, `filter[id][in]=…` and the group form decode and encode through `Query.schema(R, { filter: true })` / `Query.Filter(R)`. `Resource.FilterableKeys`, `FilterOperators` and `Filterable` name it at the type level.
+  
+  This restores what an `id` attribute declared before 0.19.0, now that JSON:API's reserved field names are refused: an attribute named `id` is still an error. The default derived id is not filterable, and nothing changes for a resource whose id schema carries no declaration. `Resource.extend` with `inheritId: true` inherits the base id's declaration, at runtime and in the types.
+- 7f25503: `Negotiation.make` checks JSON:API extensions, and a parameterised alternate can win (#566).
+  
+  - **New `extensions` option.** It lists the extension URIs the api supports (e.g. `[Atomic.EXTENSION_URI]`), as `Middleware`'s `extensions` does. When it is given, a JSON:API instance whose `ext` names a URI outside the list is not clean: a read with no clean instance left answers `406`, and a write answers `415` (JSON:API §5). When it is omitted, `ext` URIs are not checked, as before. Pass `[]` for an api with no extension.
+  - **Fix:** an alternate's own media-type parameters no longer stop it winning. `Accept: text/markdown;charset=utf-8` on a Markdown alternate's path now negotiates `text/markdown` instead of falling back to the host's representation. The ext/profile-only rule applies to JSON:API instances alone.
+- f325068: **Breaking:** the deprecated aliases `Atomic.ResourceOperationShape` and `Atomic.RelationshipOperationShape` are removed (#525). They were renamed in 0.20.0 and kept as deprecated aliases for one minor release.
+  
+  **Migration:** replace `Atomic.ResourceOperationShape<R>` with `Atomic.ResourceOperationTarget<R>`, and `Atomic.RelationshipOperationShape<R, K>` with `Atomic.RelationshipOperationTarget<R, K>`. The types are identical.
+
+### Patch Changes
+
+- 4e4a824: `Query.canonical` / `Query.canonicalPairs` (and so the `self` and pagination links built from them) omit a flat query member whose encoded value is a JSON object, as they already omit `null` (#536). A JSON object has no flat wire form; before, it was written as `key=[object Object]`.
+- 48b5b51: The published package now includes `CHANGELOG.md` (#557), so the release notes can be read from `node_modules`. No code changes.
+- 16d48ed: Struct-level checks render the same way under every `effect` 4.x (#530). The development pin moves to `effect` 4.1.2; the `effect` peer range stays `^4.0.0`.
+  
+  - **`Middleware.schemaErrorDocument` / the `SchemaErrors` middleware:** a check on a request part's struct that names a `message` of its own and points its failure at a property is now a 400 naming that property's wire parameter in `source.parameter`, with the check's message as `detail` (for example `source: { parameter: "page[size]" }, detail: "not nine"`). Before, it was reported whole as the generic `Request query failed validation`. This follows effect 4.1's formatter, which carries a check's message down to the property it points to, and it now holds under effect 4.0.x as well. A check that rejects the whole value is unchanged.
+  - **`ServerErrors.schemaIssueToErrors`:** the `detail` of a struct-level check that points at a field is the check's message alone. Under effect 4.1 it would otherwise end with the path (`Passwords must match\n  at ["confirm"]`), which the error already carries as `source.pointer`.
+- f639827: Take the pure Schema helpers from `@thomasfosterau/effect-ext` (#552) instead of keeping local copies. This adds the package's first runtime dependency, `@thomasfosterau/effect-ext` `^0.1.0`. Only its `Bounded`, `Ids`, `Issues` and `TriState` subpaths are imported, and they import only `effect`'s core.
+  
+  `FlatQuery`'s `PageOffset`, `pageLimit`, `pagination`, `Uuid`, `idList`, `IdList`, `DEFAULT_MAX_ID_LIST`, `SLUG_PATTERN`, `slug`, `Slug` and `suppliedValue`, and `ServerErrors.pathToJsonPointer`, now delegate to effect-ext. Their names, option objects and declared types stay the same, and so do their decoded values, error messages and JSON Schema. No declaration names effect-ext. The `/schema` entry point and the schema-tier subpaths still never reach `effect/http` or `effect/http-api`; they now also resolve those effect-ext subpaths.
+  
+  `ServerErrors.schemaIssueToErrors` keeps its own issue walk, because effect-ext's `Issues.pointers` formats a struct-level check's `message` differently.
+
 ## 0.20.1
 
 ### Patch Changes
