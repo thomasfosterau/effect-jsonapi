@@ -296,12 +296,9 @@ export default defineConfig({
           "effect/avoid-node-imports": "off",
           "effect/avoid-sync-fs": "off",
           "effect/avoid-process-env": "off",
-          "effect/use-console-service": "off",
           "effect/use-filesystem-service": "off",
           "effect/use-path-service": "off",
           "effect/use-command-executor-service": "off",
-          "effect/avoid-native-fetch": "off",
-          "effect/effect-promise-vs-trypromise": "off",
         },
       },
       // Tests that send requests one after another on purpose (a case per
