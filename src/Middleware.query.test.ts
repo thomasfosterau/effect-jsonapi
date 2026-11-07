@@ -1440,7 +1440,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
             description: "rejects a page size above 10, and the size 7 whole",
           },
         ),
-        // A check with a message of its own is reported whole, under it.
+        // A check with a message of its own: its message, at the property.
         Schema.makeFilter(
           ({ count }) => (count === 9 ? { path: ["count"], issue: "nine" } : undefined),
           {
@@ -1742,11 +1742,17 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
         "/include-or-inc?inc=nope",
         [includable("paths")],
       ],
-      // Neither names a property, so each is the generic rejection, as
-      // before: the formatter reports a check with a message of its own
-      // whole, at the struct, never at the property it points to.
+      // A check that rejects the whole query names no property, so it is the
+      // generic rejection, as before.
       ["a struct check that rejects the whole query", "/checked-rename?page[size]=7", [whole]],
-      ["a struct check with a message of its own", "/checked-rename?page[size]=9", [whole]],
+      // Since effect 4.1 the formatter carries a check's own message down to
+      // the property it points to, so the rejection names the wire
+      // parameter, with the check's message (#530).
+      [
+        "a struct check with a message of its own",
+        "/checked-rename?page[size]=9",
+        [rejected("page[size]", "not nine")],
+      ],
     ] as const)("%s", async (_, url, errors) => {
       const response = await serve(url);
       expect(response.status).toBe(400);

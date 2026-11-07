@@ -33,7 +33,7 @@
  * @since 0.16.0
  */
 import { pathToJsonPointer as toPointer } from "@thomasfosterau/effect-ext/Issues";
-import { Effect, Match, Option, Predicate, Schema } from "effect";
+import { Array as Arr, Effect, Match, Option, Predicate, Schema } from "effect";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
@@ -218,12 +218,26 @@ export const pathToJsonPointer: (path: ReadonlyArray<PropertyKey>) => string = t
 /** The pointer prefix a flat attribute-keyed input maps onto. */
 const ATTRIBUTES_PREFIX: ReadonlyArray<PropertyKey> = ["data", "attributes"];
 
+// Effect's default formatter renders a whole issue tree, paths included: the
+// `detail` of an error object that carries no pointer of its own.
+const formatDefault = SchemaIssue.makeFormatterDefault();
+const formatStandard = SchemaIssue.makeFormatterStandardSchemaV1();
+
 /**
- * Effect's default issue formatter. An issue node has no `toString` of its
- * own — `String(issue)` renders `[object Object]` — so every `detail` drawn
- * from a schema issue goes through this.
+ * A leaf's message as Effect's formatters render it. An issue node has no
+ * `toString` of its own — `String(issue)` renders `[object Object]` — so every
+ * `detail` drawn from a schema issue goes through this. It reads the Standard
+ * Schema formatter's message, not the default formatter's text: since effect
+ * 4.1 the default formatter appends the path (`\n  at ["confirm"]`) to a check
+ * that points at a field, which the error carries as `source.pointer` (#530).
+ * Every leaf below one node shares its message here (a check's own, or the
+ * leaf's), so the first is the one.
  */
-const formatIssue = SchemaIssue.makeFormatterDefault();
+const leafMessage = (issue: SchemaIssue.Issue): string =>
+  Option.getOrElse(
+    Option.map(Arr.head(formatStandard(issue).issues), ({ message }) => message),
+    () => formatDefault(issue),
+  );
 
 /**
  * Options of {@link schemaIssueToErrors}.
@@ -246,8 +260,8 @@ export interface SchemaIssueOptions {
 /**
  * One JSON:API error object per leaf of an Effect Schema issue tree:
  * `source.pointer` from the accumulated path (under `prefix`), `code` from
- * the leaf's `_tag`, `detail` from its message as Effect's default issue
- * formatter (`SchemaIssue.makeFormatterDefault`) renders it — for a failed
+ * the leaf's `_tag`, `detail` from its message as Effect's issue formatters
+ * render it, without the path the default formatter appends — for a failed
  * check, the check's own message.
  *
  * This is the seam for a decode a handler runs itself (a form body, a
@@ -280,7 +294,7 @@ export const schemaIssueToErrors = (
     return {
       status,
       code: leaf._tag,
-      detail: formatIssue(describedBy),
+      detail: leafMessage(describedBy),
       ...definedMember("source", pointer === "" ? undefined : { pointer }),
     };
   });
@@ -471,7 +485,7 @@ export const fromTaggedError: (cause: unknown) => Option.Option<JsonapiError> =
             Option.match(decodeValidationIssue(issue), {
               onNone: () => ({
                 ...VALIDATION,
-                detail: SchemaIssue.isIssue(issue) ? formatIssue(issue) : String(issue),
+                detail: SchemaIssue.isIssue(issue) ? formatDefault(issue) : String(issue),
               }),
               onSome: validationIssueToError,
             }),

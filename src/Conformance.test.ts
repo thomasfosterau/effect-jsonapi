@@ -2399,8 +2399,9 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
         expect.objectContaining({
           _tag: "Skipped",
           reason: expect.stringContaining(
-            // The URL the transport ended at is named as it sent it, brackets encoded.
-            `1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET ${url} answered ${followed(url.replaceAll("[", "%5B").replaceAll("]", "%5D"))})`,
+            // The URL the transport ended at is named as it sent it: since
+            // effect 4.1 the HTTP client leaves the brackets unencoded (#530).
+            `1 of 2 requests the rule sent were answered by a redirect the kit does not follow or read (GET ${url} answered ${followed(url)})`,
           ),
         }),
       ),
