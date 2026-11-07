@@ -1086,7 +1086,7 @@ export const DEFAULT_REQUEST_TIMEOUT: Duration.Duration = Duration.seconds(30);
 export const requestTimeoutOf = (
   given: Option.Option<Duration.Input>,
 ): Effect.Effect<Option.Option<Duration.Duration>> => {
-  if (Option.isNone(given)) return Effect.succeed(Option.some(DEFAULT_REQUEST_TIMEOUT));
+  if (Option.isNone(given)) return Effect.succeedSome(DEFAULT_REQUEST_TIMEOUT);
   const input = given.value;
   const timeout = Duration.fromInput(input);
   if (Option.isSome(timeout) && Duration.isPositive(timeout.value)) {

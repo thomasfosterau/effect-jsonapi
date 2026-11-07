@@ -461,7 +461,7 @@ export const assertIdMatchesPath = (
 
 const identityTransact: Transact<never, never, never> = (effect) => effect;
 
-const none = Effect.succeed(undefined);
+const none = Effect.undefined;
 
 /**
  * Builds the `list` / `get` handlers for a read-only resource, keyed by the

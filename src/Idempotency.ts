@@ -871,12 +871,10 @@ export const layer = (store: Store): Layer.Layer<Middleware> =>
         // A key already seen: a different request under it is a mismatch;
         // the same one is still in flight, or replays its recorded response.
         if (Predicate.isTagged(claim, "InProgress")) {
-          return yield* Effect.fail(
-            claim.fingerprint !== print ? new KeyMismatch() : new KeyInProgress(),
-          );
+          return yield* claim.fingerprint !== print ? new KeyMismatch() : new KeyInProgress();
         }
         if (Predicate.isTagged(claim, "Completed")) {
-          if (claim.fingerprint !== print) return yield* Effect.fail(new KeyMismatch());
+          if (claim.fingerprint !== print) return yield* new KeyMismatch();
           return replay(claim.response);
         }
 

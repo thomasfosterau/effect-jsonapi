@@ -358,9 +358,8 @@ describe("github example: pagination links carry the request's query (#447)", ()
         });
         const next = first.links?.next;
         assert(Predicate.isString(next));
-        const second = yield* client.issues.list({
-          query: Schema.decodeUnknownSync(IssuesQuery)(searchOf(next)),
-        });
+        const query = yield* Schema.decodeUnknownEffect(IssuesQuery)(searchOf(next));
+        const second = yield* client.issues.list({ query });
         return [first, second] as const;
       }),
     );

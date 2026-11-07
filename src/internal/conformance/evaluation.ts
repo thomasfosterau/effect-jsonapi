@@ -989,15 +989,14 @@ const judgeFields = (
   Arr.matchLeft(fields, {
     onEmpty: () => Effect.succeed<ReadonlyArray<Judged>>([]),
     onNonEmpty: (field, rest) =>
-      Effect.flatMap(
+      Effect.filterOrElse(
         judgeAll(io, ctx, path, candidates, probesOf(field)),
+        (judged) => Arr.some(judged, Judged.$is("Decided")),
         (judged): Effect.Effect<ReadonlyArray<Judged>> =>
-          Arr.some(judged, Judged.$is("Decided"))
-            ? Effect.succeed(judged)
-            : Effect.map(judgeFields(io, ctx, path, candidates, rest, probesOf), (after) => [
-                ...judged,
-                ...after,
-              ]),
+          Effect.map(judgeFields(io, ctx, path, candidates, rest, probesOf), (after) => [
+            ...judged,
+            ...after,
+          ]),
       ),
   });
 

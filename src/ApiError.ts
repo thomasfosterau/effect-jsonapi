@@ -232,61 +232,60 @@ const makeWire = (
     }),
   ) as unknown as typeof WireDocument;
 
-  const wire = strictDocument
-    .pipe(
-      Schema.decodeTo(
-        klass as unknown as Schema.Top,
-        SchemaTransformation.transform<unknown, WireDocumentType>({
-          // document -> class encoded form ({ _tag, ...fields }). A field the
-          // document's `meta` does not carry is left absent (not `undefined`),
-          // so an optional field decodes from a document another server wrote
-          // without `meta`; a `detail` field falls back to the error object's
-          // own `detail` — the source-bearing 400s of the schema-error
-          // middleware carry it there and nowhere else.
-          decode: (doc) => {
-            const first = doc.errors[0];
-            const meta = first?.meta ?? {};
-            const fields: Record<string, unknown> = {};
-            for (const key of options.fieldKeys) {
-              if (key in meta) fields[key] = meta[key];
-              else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail;
-            }
-            return { _tag: options.tag, ...fields };
-          },
-          // class encoded form -> document. An optional field the instance
-          // leaves absent stays out of `meta` (an `undefined` member is not
-          // JSON), mirroring `decode` above.
-          encode: (encoded) => {
-            const fields = encoded as Record<string, unknown>;
-            const detail = options.detail?.(fields);
-            const source = options.source?.(fields);
-            return {
-              errors: [
-                {
-                  status: String(options.status),
-                  code: options.code,
-                  ...definedMember("title", options.title),
-                  ...definedMember("detail", detail),
-                  ...definedMember("source", source),
-                  ...definedMember(
-                    "meta",
-                    Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
-                      ? Object.fromEntries(
-                          options.fieldKeys.flatMap((key) =>
-                            fields[key] === undefined ? [] : [[key, fields[key]]],
-                          ),
-                        )
-                      : undefined,
-                  ),
-                },
-              ],
-            };
-          },
-        }),
-      ),
-      HttpApiSchema.status(options.status),
-    )
-    .pipe((schema) => asJsonApi(schema));
+  const wire = strictDocument.pipe(
+    Schema.decodeTo(
+      klass as unknown as Schema.Top,
+      SchemaTransformation.transform<unknown, WireDocumentType>({
+        // document -> class encoded form ({ _tag, ...fields }). A field the
+        // document's `meta` does not carry is left absent (not `undefined`),
+        // so an optional field decodes from a document another server wrote
+        // without `meta`; a `detail` field falls back to the error object's
+        // own `detail` — the source-bearing 400s of the schema-error
+        // middleware carry it there and nowhere else.
+        decode: (doc) => {
+          const first = doc.errors[0];
+          const meta = first?.meta ?? {};
+          const fields: Record<string, unknown> = {};
+          for (const key of options.fieldKeys) {
+            if (key in meta) fields[key] = meta[key];
+            else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail;
+          }
+          return { _tag: options.tag, ...fields };
+        },
+        // class encoded form -> document. An optional field the instance
+        // leaves absent stays out of `meta` (an `undefined` member is not
+        // JSON), mirroring `decode` above.
+        encode: (encoded) => {
+          const fields = encoded as Record<string, unknown>;
+          const detail = options.detail?.(fields);
+          const source = options.source?.(fields);
+          return {
+            errors: [
+              {
+                status: String(options.status),
+                code: options.code,
+                ...definedMember("title", options.title),
+                ...definedMember("detail", detail),
+                ...definedMember("source", source),
+                ...definedMember(
+                  "meta",
+                  Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
+                    ? Object.fromEntries(
+                        options.fieldKeys.flatMap((key) =>
+                          fields[key] === undefined ? [] : [[key, fields[key]]],
+                        ),
+                      )
+                    : undefined,
+                ),
+              },
+            ],
+          };
+        },
+      }),
+    ),
+    HttpApiSchema.status(options.status),
+    (schema) => asJsonApi(schema),
+  );
 
   wireCache.set(klass, wire);
   return wire;

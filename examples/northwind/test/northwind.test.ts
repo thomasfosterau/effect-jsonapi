@@ -382,9 +382,8 @@ describe("northwind example: pagination links carry the request's query (#447)",
         });
         const next = first.links?.next;
         assert(Predicate.isString(next));
-        const second = yield* client.products.list({
-          query: Schema.decodeUnknownSync(ProductsQuery)(searchOf(next)),
-        });
+        const query = yield* Schema.decodeUnknownEffect(ProductsQuery)(searchOf(next));
+        const second = yield* client.products.list({ query });
         return [first, second] as const;
       }),
     );
