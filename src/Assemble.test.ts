@@ -952,6 +952,33 @@ describe("Assemble.edgePage", () => {
     expect(document.data[0]).not.toHaveProperty("meta");
     expect(document.meta.totalCount).toBe(7);
   });
+  it("carries the request's other query pairs on every link (#569)", async () => {
+    const document = await run(
+      Assemble.edgePage(
+        "contributions",
+        { items: [person("a")], totalCount: 3 },
+        {
+          limit: 1,
+          offset: 1,
+          query: [
+            ["filter[role]", "author"],
+            ["sort", "-createdAt"],
+          ],
+        },
+        "https://example.test",
+      ),
+    );
+    const tail = "filter[role]=author&sort=-createdAt";
+    expect(document.links.self).toBe(
+      `https://example.test/contributions?${tail}&page[offset]=1&page[limit]=1`,
+    );
+    expect(document.links.next).toBe(
+      `https://example.test/contributions?${tail}&page[offset]=2&page[limit]=1`,
+    );
+    expect(document.links.prev).toBe(
+      `https://example.test/contributions?${tail}&page[offset]=0&page[limit]=1`,
+    );
+  });
 });
 
 describe("helpers", () => {

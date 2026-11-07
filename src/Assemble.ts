@@ -1173,13 +1173,39 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
  * no write surface of its own) and no walk. The one shape every edge family
  * shares, stated once.
  *
- * @since 0.16.0
+ * `input.query` is the rest of the request's query as canonical wire pairs
+ * (`Query.canonicalPairs(listQuery)(query)`), exactly as {@link Pagination}'s
+ * `query`: every pagination link carries it, so a filtered or sorted edge
+ * page's `next` keeps its `filter[…]` and `sort` (#569).
+ *
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const page = Effect.runSync(
+ *   Assemble.edgePage(
+ *     "contributions",
+ *     { items: [{ type: "contributions", id: "c1", attributes: {} }], totalCount: 3 },
+ *     { limit: 1, offset: 0, query: [["filter[role]", "author"]] },
+ *     "https://example.test"
+ *   )
+ * )
+ * console.log(page.links.next)
+ * // → https://example.test/contributions?filter[role]=author&page[offset]=1&page[limit]=1
+ * ```
+ *
+ * @since 0.16.0 (`input.query` since 0.21.0)
  * @category constructors
  */
 export const edgePage = <R extends ResourceLike, V = unknown>(
   segment: string,
   page: { readonly items: ReadonlyArray<R>; readonly totalCount: number },
-  input: { readonly limit: number; readonly offset: number },
+  input: {
+    readonly limit: number;
+    readonly offset: number;
+    readonly query?: ReadonlyArray<Query.Pair> | undefined;
+  },
   base: string,
   viewer?: V,
 ): Effect.Effect<CollectionDocument<R>> =>
@@ -1193,6 +1219,7 @@ export const edgePage = <R extends ResourceLike, V = unknown>(
         offset: input.offset,
         limit: input.limit,
         baseUrl: `${base}/${segment}`,
+        ...definedMember("query", input.query),
       },
       { viewer, capabilities: noCapabilities },
     ),
