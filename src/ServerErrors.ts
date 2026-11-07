@@ -32,13 +32,14 @@
  *
  * @since 0.16.0
  */
+import { pathToJsonPointer as toPointer } from "@thomasfosterau/effect-ext/Issues";
 import { Effect, Match, Option, Predicate, Schema } from "effect";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as Document from "./Document.js";
 import { MEDIA_TYPE } from "./internal/media.js";
-import { issueLeaves, pathToJsonPointer as toPointer } from "./internal/schemaExt.js";
+import { issueLeaves } from "./internal/schemaExt.js";
 import { definedMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------

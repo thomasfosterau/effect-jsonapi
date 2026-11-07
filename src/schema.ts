@@ -2,7 +2,8 @@
  * effect-jsonapi — the schema-only entry point.
  *
  * `@thomasfosterau/effect-jsonapi/schema` re-exports every module whose import
- * graph depends on `effect` alone, so a consumer that wants JSON:API's *wire
+ * graph reaches only `effect`'s core and the pure Schema subpaths of
+ * `@thomasfosterau/effect-ext` (which import only `effect`'s core), so a consumer that wants JSON:API's *wire
  * types without the server* — a client decoding documents, a loader mapping
  * them into something else, a CLI or code generator producing them — never
  * resolves `effect/http-api`.
