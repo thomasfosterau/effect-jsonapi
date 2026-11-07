@@ -779,7 +779,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       Effect.gen(function* () {
         const name = payload.data.attributes.name;
         if (Iterable.some(store.products.values(), (existing) => existing.attributes.name === name))
-          return yield* Effect.fail(new ProductNameTaken({ name }));
+          return yield* new ProductNameTaken({ name });
         // `category` and `supplier` are required (`one`) relationships — the
         // payload always carries them, and both targets must exist.
         yield* loadCategory(payload.data.relationships.category.data.id);

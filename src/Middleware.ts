@@ -1133,7 +1133,7 @@ export const contentNegotiationLayer = (
           ),
           Effect.withSpan(Span.negotiate),
         );
-        if (error !== undefined) return yield* Effect.fail(error);
+        if (error !== undefined) return yield* error;
         return yield* httpEffect;
       }),
     ),

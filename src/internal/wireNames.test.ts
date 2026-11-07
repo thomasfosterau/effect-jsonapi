@@ -227,11 +227,10 @@ describe("wireProperties", () => {
     // The wire is `x`: read as a plain struct, `a` would be paired with `a`.
     [
       "a transformation from a struct with an encoding of its own",
-      Schema.Struct({ a: Schema.String })
-        .pipe(Schema.encodeKeys({ a: "x" }))
-        .pipe(
-          Schema.decodeTo(Schema.Struct({ a: Schema.String }), SchemaTransformation.passthrough()),
-        ),
+      Schema.Struct({ a: Schema.String }).pipe(
+        Schema.encodeKeys({ a: "x" }),
+        Schema.decodeTo(Schema.Struct({ a: Schema.String }), SchemaTransformation.passthrough()),
+      ),
     ],
     [
       "a transformation from a value that is no struct",

@@ -1317,7 +1317,7 @@ export const resolveIncluded = <Targets extends IncludeTargets>(
   IncludeTargetServices<Targets>
 > =>
   (paths === undefined
-    ? Effect.succeed(undefined)
+    ? Effect.undefined
     : Arr.isReadonlyArrayEmpty(paths)
       ? Effect.succeed([])
       : resolve(

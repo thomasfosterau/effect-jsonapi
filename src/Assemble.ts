@@ -748,7 +748,7 @@ const walk = <Targets extends Handlers.IncludeTargets>(
   Handlers.IncludeTargetServices<Targets>
 > => {
   const include = options.include;
-  if (include === undefined) return Effect.succeed(undefined);
+  if (include === undefined) return Effect.undefined;
   const depth = options.depth ?? MAX_INCLUDE_DEPTH;
   return Query.validateIncludePaths(include, {
     includable: options.includable ?? [],

@@ -656,7 +656,7 @@ export const decodeErrorDocument = (
  */
 export const errorDocument = (cause: unknown): Effect.Effect<Option.Option<ErrorDocument>> => {
   const response = HttpClientError.isHttpClientError(cause) ? cause.response : undefined;
-  if (response === undefined) return Effect.succeed(Option.none());
+  if (response === undefined) return Effect.succeedNone;
   return response.text.pipe(
     // The body may be unreadable (already consumed, a broken stream): that is
     // still "no document", never a second failure on top of the first.
@@ -760,7 +760,7 @@ export const isErrorResponse = (u: unknown): u is ErrorResponse => u instanceof 
  */
 export const toErrorResponse = (cause: unknown): Effect.Effect<Option.Option<ErrorResponse>> => {
   if (!HttpClientError.isHttpClientError(cause) || cause.response === undefined) {
-    return Effect.succeed(Option.none());
+    return Effect.succeedNone;
   }
   const status = cause.response.status;
   return errorDocument(cause).pipe(

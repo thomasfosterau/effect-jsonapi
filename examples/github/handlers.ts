@@ -334,10 +334,9 @@ const loadIssue = (id: string): Effect.Effect<Issue, IssueNotFound> => {
 
 const loadUnlockedIssue = (id: string): Effect.Effect<Issue, IssueNotFound | IssueLocked> =>
   loadIssue(id).pipe(
-    Effect.flatMap((issue) =>
-      issue.attributes.locked
-        ? Effect.fail(new IssueLocked({ id: issue.id }))
-        : Effect.succeed(issue),
+    Effect.filterOrFail(
+      (issue) => !issue.attributes.locked,
+      (issue) => new IssueLocked({ id: issue.id }),
     ),
   );
 

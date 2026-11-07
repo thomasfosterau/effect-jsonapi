@@ -257,7 +257,7 @@ export const budgeted = (ctx: Context, budget: number): Io => {
   const answers = MutableHashMap.empty<string, Observation>();
   const refetch = (target: Target): Effect.Effect<Option.Option<Observation>> =>
     Effect.suspend(() => {
-      if (spent >= budget) return Effect.succeed(Option.none());
+      if (spent >= budget) return Effect.succeedNone;
       return ctx
         .request({ url: target.url, headers: jsonApiAccept, requests: budget - spent })
         .pipe(
@@ -278,7 +278,7 @@ export const budgeted = (ctx: Context, budget: number): Io => {
       Effect.suspend(() =>
         Option.match(MutableHashMap.get(answers, target.href), {
           onNone: () => refetch(target),
-          onSome: (observation) => Effect.succeed(Option.some(observation)),
+          onSome: (observation) => Effect.succeedSome(observation),
         }),
       ),
     spent: () => spent,
