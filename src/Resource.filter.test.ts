@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Schema, SchemaGetter } from "effect";
+import { Record as Rec, Schema, SchemaGetter } from "effect";
 import * as Endpoint from "./Endpoint.js";
 import * as Filter from "./Filter.js";
 import * as Query from "./Query.js";
@@ -278,6 +278,92 @@ describe("Resource.filterable / Resource.sortable", () => {
           },
         }),
       ).toThrow(/Resource\.make\("bad"\): relationship "author" declares filter operator "lt"/);
+    });
+  });
+
+  describe("the resource id as a filter field (#556)", () => {
+    const Notes = Resource("notes", {
+      id: Schema.String.pipe(Filter.able(["eq", "in"])),
+      attributes: { title: Schema.String.pipe(Filter.able(["eq"])) },
+    });
+
+    it("reports a Filter.able id under `id`, first, with the id schema as its literal", () => {
+      const declared = filterable(Notes);
+      expect(Rec.keys(declared)).toEqual(["id", "title"]);
+      expect(declared.id.operators).toEqual(["eq", "in"]);
+      expect(Schema.decodeSync(declared.id.literal)("n-1")).toBe("n-1");
+      expect(Schema.encodeSync(declared.id.literal)("n-1")).toBe("n-1");
+    });
+
+    it("types the id key, its operators and its literal", () => {
+      expectTypeOf<FilterableKeys<typeof Notes>>().toEqualTypeOf<"id" | "title">();
+      expectTypeOf<FilterOperators<typeof Notes, "id">>().toEqualTypeOf<"eq" | "in">();
+      expectTypeOf(filterable(Notes).id.literal.Type).toEqualTypeOf<string>();
+      expectTypeOf(filterable(Notes).id.literal.Encoded).toEqualTypeOf<string>();
+    });
+
+    it("leaves the default id, and an undeclared custom id, unfilterable", () => {
+      const Plain = Resource("plains", { attributes: { title: Schema.String } });
+      const Custom = Resource("customs", {
+        id: Schema.String.pipe(Schema.brand("CustomId")),
+        attributes: { title: Schema.String },
+      });
+      expect(Rec.keys(filterable(Plain))).toEqual([]);
+      expect(Rec.keys(filterable(Custom))).toEqual([]);
+      expectTypeOf<FilterableKeys<typeof Plain>>().toEqualTypeOf<never>();
+      expectTypeOf<FilterableKeys<typeof Custom>>().toEqualTypeOf<never>();
+    });
+
+    it("decodes filter[id] in the shorthand, operator and group forms", () => {
+      const decode = Schema.decodeUnknownSync(Query.Filter(Notes));
+      expect(decode({ "filter[id]": "n-1" })).toEqual(Filter.eq("id", "n-1"));
+      expect(decode({ "filter[id][in]": "n-1,n-2" })).toEqual(Filter.isIn("id", ["n-1", "n-2"]));
+      expect(decode({ "filter[id]": "n-1,n-2" })).toEqual(Filter.isIn("id", ["n-1", "n-2"]));
+      expect(
+        decode({
+          "filter[c][condition][path]": "id",
+          "filter[c][condition][operator]": "eq",
+          "filter[c][condition][value]": "n-1",
+        }),
+      ).toEqual(Filter.eq("id", "n-1"));
+      // an operator the id does not declare is still refused
+      expect(() => decode({ "filter[id][gt]": "n-1" })).toThrow(/gt/);
+      // and the id literal encodes back to the wire
+      expect(Schema.encodeSync(Query.Filter(Notes))(Filter.eq("id", "n-1"))).toEqual({
+        "filter[id]": "n-1",
+      });
+    });
+
+    it("decodes the literal through the id schema, refinements and brands included", () => {
+      const Accounts = Resource("accounts", {
+        id: Schema.String.pipe(
+          Schema.check(Schema.isPattern(/^a-\d+$/)),
+          Schema.brand("AccountId"),
+          Filter.able(["eq"]),
+        ),
+        attributes: { email: Schema.String },
+      });
+      const literal = filterable(Accounts).id.literal;
+      expect(Schema.decodeSync(literal)("a-1")).toBe("a-1");
+      expect(() => Schema.decodeSync(literal)("b")).toThrow();
+      expectTypeOf(literal.Type).toEqualTypeOf<typeof Accounts.Id.Type>();
+    });
+
+    it("is inherited by extend with inheritId, and not by a fresh id", () => {
+      const Inherited = extend(Notes, "pinned-notes", { inheritId: true });
+      const Fresh = extend(Notes, "fresh-notes");
+      expect(Rec.keys(filterable(Inherited))).toEqual(["id", "title"]);
+      expect(Rec.keys(filterable(Fresh))).toEqual(["title"]);
+      expectTypeOf<FilterableKeys<typeof Inherited>>().toEqualTypeOf<"id" | "title">();
+      expectTypeOf<FilterOperators<typeof Inherited, "id">>().toEqualTypeOf<"eq" | "in">();
+      expectTypeOf(filterable(Inherited).id.literal.Type).toEqualTypeOf<typeof Inherited.Id.Type>();
+      expectTypeOf<FilterableKeys<typeof Fresh>>().toEqualTypeOf<"title">();
+    });
+
+    it("is reported through a base-anchored family", () => {
+      const Pinned = extend(Notes, "pinned", { inheritId: true });
+      const AnyNote = family(Notes, [Notes, Pinned]);
+      expect(Rec.keys(filterable(AnyNote))).toEqual(["id", "title"]);
     });
   });
 

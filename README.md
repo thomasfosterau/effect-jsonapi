@@ -1932,6 +1932,19 @@ The operator vocabulary is a schema, `Filter.Operator` — a `Schema.Literals` o
 
 To-one relationships (`Relationship.one` / `Relationship.optional`) take a `filter` option and become filter fields valued by the related resource's id — `filter[supplier]=9` — with the target's `Id` schema as the literal codec, so the decoded literal is the branded id. Only `eq ne in nin isnull` apply to a relationship (`Relationship.FilterOperator`, a narrowing of `Filter.Operator`); `filter: true` means those five, and declaring an ordering operator is a definition-time error. To-many relationships are not fields.
 
+The resource id becomes a filter field when the schema passed as `Resource.make`'s `id` option is `Filter.able`, piped last ([#556](https://github.com/thomasfosterau/effect-jsonapi/issues/556)). JSON:API reserves `id` as a field name, so an attribute named `id` is still refused; the id schema is where the declaration goes:
+
+```ts
+const Note = Resource.make("notes", {
+  id: Schema.String.pipe(Filter.able(["eq", "in"])),
+  attributes: { title: Schema.String },
+});
+Object.keys(Resource.filterable(Note)); // ["id"]
+// ?filter[id]=n-1, ?filter[id][in]=n-1,n-2 and the group form all decode
+```
+
+`Resource.filterable` reports it under the key `id`, ahead of the attributes, with the id schema itself as its literal codec (or the declaration's explicit `literal`), so refinements and brands on the id apply to the literal. The default derived id is not filterable; `Resource.extend(base, type, { inheritId: true })` inherits the base id's declaration.
+
 `Resource.sortable(R)` returns the declared attribute keys (attributes only), typed as their literal union, so it is the natural `sort` allow-list for an endpoint; `sort: true` keeps meaning "every attribute":
 
 ```ts
