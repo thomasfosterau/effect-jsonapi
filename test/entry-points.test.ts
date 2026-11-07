@@ -1,6 +1,8 @@
 /**
  * Mechanical proof that the schema-only entry point keeps its promise: that
- * `@thomasfosterau/effect-jsonapi/schema` resolves `effect` and nothing else.
+ * `@thomasfosterau/effect-jsonapi/schema` resolves `effect`'s core and the
+ * pure Schema subpaths of `@thomasfosterau/effect-ext` it takes its helpers
+ * from (#552), and nothing else.
  * The same holds for each schema-tier module subpath
  * (`@thomasfosterau/effect-jsonapi/Resource`, …, #385), and every module the
  * root re-exports is published as a subpath of its own.
@@ -248,19 +250,44 @@ const isHttpSurface = (specifier: string): boolean =>
 const isEffect = (specifier: string): boolean =>
   specifier === "effect" || specifier.startsWith("effect/");
 
-/** Externals of `graph` that are not `effect`, each with the chain that reached it. */
+/**
+ * The `@thomasfosterau/effect-ext` subpaths the package may import: its one
+ * runtime dependency, and only the pure Schema modules whose helpers replaced
+ * local copies (#552). Pinned, like the tiers: a new subpath is a decision,
+ * and `/Negotiate` (whose optional peer on this package would be a cycle) must
+ * never appear. `Issues` is reached only from `ServerErrors` (HTTP tier); the
+ * schema tier reaches the other three through `FlatQuery`.
+ */
+const EFFECT_EXT = [
+  "@thomasfosterau/effect-ext/Bounded",
+  "@thomasfosterau/effect-ext/Ids",
+  "@thomasfosterau/effect-ext/Issues",
+  "@thomasfosterau/effect-ext/TriState",
+];
+
+/** The effect-ext subpaths the schema tier reaches. */
+const SCHEMA_TIER_EFFECT_EXT = EFFECT_EXT.filter((subpath) => !subpath.endsWith("/Issues"));
+
+/** Whether `specifier` is `effect` or a permitted {@link EFFECT_EXT} subpath. */
+const isPermitted = (specifier: string): boolean =>
+  isEffect(specifier) || EFFECT_EXT.includes(specifier);
+
+/** Externals of `graph` that are not permitted, each with the chain that reached it. */
 const foreign = (graph: Graph): ReadonlyArray<string> =>
   Arr.sort(
     [...graph.externals.entries()]
-      .filter(([specifier]) => !isEffect(specifier))
+      .filter(([specifier]) => !isPermitted(specifier))
       .map(([specifier, trail]) => `${specifier} via ${trail.join(" -> ")}`),
     Order.String,
   );
 
-/** The externals of `graph` other than `effect` itself, labelled with `label`. */
+/**
+ * The externals of `graph` other than `effect` itself and the schema tier's
+ * effect-ext subpaths, labelled with `label`.
+ */
 const beyondEffect = (label: string, graph: Graph): ReadonlyArray<string> =>
   [...graph.externals.keys()]
-    .filter((specifier) => specifier !== "effect")
+    .filter((specifier) => specifier !== "effect" && !SCHEMA_TIER_EFFECT_EXT.includes(specifier))
     .map((specifier) => `${label}: ${specifier}`);
 
 /**
@@ -330,8 +357,10 @@ describe("schema-only entry point", () => {
     expect(httpSurface(schema)).toEqual([]);
   });
 
-  it("declares `effect` as its only external", () => {
-    expect(Arr.sort([...schema.externals.keys()], Order.String)).toEqual(["effect"]);
+  it("declares `effect` and the schema tier's effect-ext subpaths as its only externals", () => {
+    expect(Arr.sort([...schema.externals.keys()], Order.String)).toEqual(
+      Arr.sort([...SCHEMA_TIER_EFFECT_EXT, "effect"], Order.String),
+    );
   });
 
   it("reaches exactly the modules assigned to the schema tier", () => {
@@ -402,13 +431,11 @@ describe("module subpaths", () => {
     expect(SCHEMA_MODULES.every((module) => PUBLIC_MODULES.includes(module))).toBe(true);
   });
 
-  it("resolve `effect` alone from each schema-tier module", () => {
+  it("resolve `effect` and the schema tier's effect-ext subpaths alone from each schema-tier module", () => {
     const graphs = SCHEMA_MODULES.map(
       (module) => [module, graphFrom(path.join(SRC, `${module}.ts`), SRC)] as const,
     );
-    expect(graphs.map(([module, graph]) => [module, [...graph.externals.keys()]])).toEqual(
-      SCHEMA_MODULES.map((module) => [module, ["effect"]]),
-    );
+    expect(graphs.flatMap(([module, graph]) => beyondEffect(`./${module}`, graph))).toEqual([]);
     expect(
       graphs.flatMap(([module, graph]) =>
         graph.modules
@@ -418,7 +445,7 @@ describe("module subpaths", () => {
     ).toEqual([]);
   });
 
-  it("resolve nothing but `effect` from each HTTP-tier module", () => {
+  it("resolve nothing but `effect` and effect-ext's Schema subpaths from each HTTP-tier module", () => {
     expect(HTTP_MODULES.filter((module) => !HTTP_TIER.includes(`${module}.ts`))).toEqual([]);
     expect(
       HTTP_MODULES.flatMap((module) => foreign(graphFrom(path.join(SRC, `${module}.ts`), SRC))),
@@ -433,6 +460,34 @@ describe("module subpaths", () => {
     expect(httpSurface(graphFrom(path.join(SRC, "Endpoint.ts"), SRC)).join("\n")).toContain(
       "effect/http-api",
     );
+  });
+});
+
+/**
+ * The permitted effect-ext subpaths must themselves keep the promise: their
+ * published JavaScript and declarations, walked from this install, resolve
+ * `effect`'s core alone. No HTTP surface, no other package, and never this
+ * package (effect-ext's optional peer on it serves only `/Negotiate`).
+ */
+describe("effect-ext subpaths", () => {
+  const EXT_DIST = path.join(ROOT, "node_modules", "@thomasfosterau", "effect-ext", "dist");
+
+  it("resolve nothing but `effect`'s core, in JavaScript and declarations", () => {
+    const graphs = EFFECT_EXT.flatMap((subpath) => {
+      const name = path.basename(subpath);
+      return [`${name}.js`, `${name}.d.ts`].map(
+        (file) => [file, graphFrom(path.join(EXT_DIST, file), EXT_DIST)] as const,
+      );
+    });
+    expect(
+      graphs.flatMap(([file, graph]) =>
+        [...graph.externals.keys()]
+          .filter((specifier) => !isEffect(specifier) || isHttpSurface(specifier))
+          .map((specifier) => `${file}: ${specifier}`),
+      ),
+    ).toEqual([]);
+    // Control: the walk reached effect at all.
+    expect(graphs.every(([, graph]) => graph.externals.size > 0)).toBe(true);
   });
 });
 
@@ -556,10 +611,13 @@ describe("built artifact", () => {
   const built = path.join(DIST, "schema.js");
   const hasDist = fs.existsSync(built);
 
-  it.skipIf(!hasDist)("ships a schema entry point that resolves `effect` alone", () => {
-    expect(httpSurface(graphFrom(built, DIST))).toEqual([]);
-    expect([...graphFrom(built, DIST).externals.keys()]).toEqual(["effect"]);
-  });
+  it.skipIf(!hasDist)(
+    "ships a schema entry point that resolves `effect` and the schema tier's effect-ext subpaths alone",
+    () => {
+      expect(httpSurface(graphFrom(built, DIST))).toEqual([]);
+      expect(beyondEffect("dist/schema.js", graphFrom(built, DIST))).toEqual([]);
+    },
+  );
 
   it.skipIf(!hasDist)("ships JavaScript and declarations for every entry point", () => {
     const missing = ["index", "schema", ...PUBLIC_MODULES]
@@ -568,29 +626,51 @@ describe("built artifact", () => {
     expect(missing).toEqual([]);
   });
 
-  it.skipIf(!hasDist)("ships schema-tier subpaths that resolve `effect` alone", () => {
-    const entries = ["schema", ...SCHEMA_MODULES];
-    // `effect` at most: a module whose bundled code needs nothing from it
-    // (`dist/Sort.js`) imports no package at all.
+  it.skipIf(!hasDist)(
+    "ships schema-tier subpaths that resolve `effect` and effect-ext's Schema subpaths alone",
+    () => {
+      const entries = ["schema", ...SCHEMA_MODULES];
+      // `effect` (and effect-ext's Schema subpaths) at most: a module whose bundled code needs nothing from it
+      // (`dist/Sort.js`) imports no package at all.
+      expect(
+        entries.flatMap((entry) =>
+          beyondEffect(`dist/${entry}.js`, graphFrom(path.join(DIST, `${entry}.js`), DIST)),
+        ),
+      ).toEqual([]);
+      // The declarations may name an `effect` module (`import("effect/Cause")`
+      // in an inferred type), but never its HTTP surface.
+      const types = entries.map((entry) => graphFrom(path.join(DIST, `${entry}.d.ts`), DIST));
+      expect(types.flatMap(httpSurface)).toEqual([]);
+      expect(types.flatMap(foreign)).toEqual([]);
+    },
+  );
+
+  /**
+   * effect-ext is a `dependency`, not a peer, which is sound only while none
+   * of its types reaches a published declaration: a consumer's own copy would
+   * then be a second, incompatible one. Its helpers are re-exported under this
+   * package's own declared `Schema.*` types, so no `.d.ts` names it.
+   */
+  it.skipIf(!hasDist)("ships declarations that never name effect-ext", () => {
     expect(
-      entries.flatMap((entry) =>
-        beyondEffect(`dist/${entry}.js`, graphFrom(path.join(DIST, `${entry}.js`), DIST)),
+      ["index", "schema", ...PUBLIC_MODULES].flatMap((entry) =>
+        [...graphFrom(path.join(DIST, `${entry}.d.ts`), DIST).externals.keys()]
+          .filter((specifier) => specifier.startsWith("@thomasfosterau/effect-ext"))
+          .map((specifier) => `dist/${entry}.d.ts: ${specifier}`),
       ),
     ).toEqual([]);
-    // The declarations may name an `effect` module (`import("effect/Cause")`
-    // in an inferred type), but never its HTTP surface.
-    const types = entries.map((entry) => graphFrom(path.join(DIST, `${entry}.d.ts`), DIST));
-    expect(types.flatMap(httpSurface)).toEqual([]);
-    expect(types.flatMap(foreign)).toEqual([]);
   });
 
-  it.skipIf(!hasDist)("ships HTTP-tier subpaths that resolve nothing but `effect`", () => {
-    expect(
-      ["index", ...HTTP_MODULES]
-        .flatMap((entry) => [`${entry}.js`, `${entry}.d.ts`])
-        .flatMap((file) => foreign(graphFrom(path.join(DIST, file), DIST))),
-    ).toEqual([]);
-  });
+  it.skipIf(!hasDist)(
+    "ships HTTP-tier subpaths that resolve nothing but `effect` and effect-ext's Schema subpaths",
+    () => {
+      expect(
+        ["index", ...HTTP_MODULES]
+          .flatMap((entry) => [`${entry}.js`, `${entry}.d.ts`])
+          .flatMap((file) => foreign(graphFrom(path.join(DIST, file), DIST))),
+      ).toEqual([]);
+    },
+  );
 
   /**
    * Control for the declaration walk: `dist/Endpoint.d.ts` names

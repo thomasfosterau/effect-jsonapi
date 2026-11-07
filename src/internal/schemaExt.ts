@@ -1,13 +1,20 @@
 /**
- * Pure Effect Schema helpers with no JSON:API dependency of their own.
+ * Effect Schema helpers with no JSON:API dependency of their own that
+ * `@thomasfosterau/effect-ext` does not publish with the same behaviour (#552).
  *
- * **Moves to `@thomasfosterau/effect-schema-ext`** (effect-schema-ext#1) once
- * that package publishes; this module is the interim home so nothing here
- * depends on an unpublished package. Everything public is re-exported from a
- * public module (`ServerErrors.pathToJsonPointer`, `FlatQuery.suppliedValue`)
- * so the move is an import change, not an API change; `closedStruct` is used
- * only inside the library's own request-body schemas and the closed
- * identifier of `Endpoint.CommittedDocument`.
+ * `suppliedValue` and `pathToJsonPointer` moved to effect-ext's `TriState` and
+ * `Issues` subpaths, and `FlatQuery.suppliedValue` / `ServerErrors.pathToJsonPointer`
+ * re-export them. Two helpers stay here:
+ *
+ * - {@link issueLeaves}. effect-ext's `Issues.leaves` exposes no node to
+ *   format a leaf from, and `Issues.pointers` formats from a `Filter` only
+ *   when it sits directly over a bare `InvalidValue`. A struct-level check
+ *   with a `message` annotation, pointing its failure at a field, then reads
+ *   "Expected a valid value" instead of its message. The walk here carries
+ *   the nearest `Filter` down (`describedBy`).
+ * - `closedStruct`, with its cap helpers. effect-ext has no equivalent. It is
+ *   used only inside the library's own request-body schemas and the closed
+ *   identifier of `Endpoint.CommittedDocument`.
  *
  * @internal
  */
@@ -15,7 +22,6 @@
 // and `test/entry-points.test.ts` pins `effect` as its only external.
 import {
   Array as Arr,
-  JsonPointer,
   Match,
   Option,
   Predicate,
@@ -24,31 +30,6 @@ import {
   SchemaAST,
   SchemaIssue,
 } from "effect";
-
-/**
- * The value an update actually **supplies** for a clearable, tri-state field
- * (`Schema.optionalKey(Schema.OptionFromNullOr(X))`), collapsing the two
- * states that supply no value: an absent key (carry forward) and an explicit
- * `Option.none()` (clear).
- *
- * Use it only where those two genuinely behave alike — a side effect that
- * runs only when a value is *set*. Never on a write path, where "carry
- * forward" and "clear" must produce different column values.
- */
-export const suppliedValue = <A>(field: Option.Option<A> | undefined): Option.Option<A> =>
-  field ?? Option.none();
-
-/**
- * An RFC 6901 JSON Pointer from a path of property keys:
- * `["data", "attributes", "name"]` → `/data/attributes/name`. The empty path
- * is `""` (the whole document). Segments are escaped (`~` → `~0`, `/` → `~1`).
- */
-export const pathToJsonPointer = (path: ReadonlyArray<PropertyKey>): string =>
-  Arr.match(path, {
-    onEmpty: () => "",
-    onNonEmpty: (segments) =>
-      `/${segments.map((segment) => JsonPointer.escapeToken(String(segment))).join("/")}`,
-  });
 
 /** One terminal issue of a schema failure, with the path that reaches it. */
 export interface IssueLeaf {

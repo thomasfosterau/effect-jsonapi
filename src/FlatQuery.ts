@@ -19,10 +19,16 @@
  *
  * @since 0.16.0
  */
-import type { Option } from "effect";
-import { Effect, Schema, SchemaTransformation } from "effect";
+// The pure-schema pieces (the page window, UUID and id-list codecs, slugs, the
+// tri-state reader) come from `@thomasfosterau/effect-ext`'s Schema subpaths
+// (#552), which resolve `effect` alone. This module keeps their public names,
+// plain-value option objects and declared `Schema.*` types, so no
+// effect-ext type reaches the published declarations.
+import * as Bounded from "@thomasfosterau/effect-ext/Bounded";
+import * as Ids from "@thomasfosterau/effect-ext/Ids";
+import * as TriState from "@thomasfosterau/effect-ext/TriState";
+import { Option, Schema, SchemaTransformation } from "effect";
 import * as Resource from "./Resource.js";
-import { suppliedValue as supplied } from "./internal/schemaExt.js";
 
 // ---------------------------------------------------------------------------
 // Pagination
@@ -34,10 +40,7 @@ import { suppliedValue as supplied } from "./internal/schemaExt.js";
  * @since 0.16.0
  * @category schemas
  */
-export const PageOffset: Schema.Number = Schema.Number.check(
-  Schema.isInt(),
-  Schema.isGreaterThanOrEqualTo(0),
-);
+export const PageOffset: Schema.Number = Bounded.PageOffset;
 
 /**
  * The decoded type of a {@link PageOffset}: a non-negative integer.
@@ -55,12 +58,7 @@ export type PageOffset = typeof PageOffset.Type;
  * @since 0.16.0
  * @category schemas
  */
-export const pageLimit = (maxLimit: number): Schema.Number =>
-  Schema.Number.check(
-    Schema.isInt(),
-    Schema.isGreaterThan(0),
-    Schema.isLessThanOrEqualTo(maxLimit),
-  );
+export const pageLimit = (maxLimit: number): Schema.Number => Bounded.pageLimit(maxLimit);
 
 /**
  * Options of {@link pagination}.
@@ -136,12 +134,9 @@ export function pagination(
 ): RequiredPagination;
 export function pagination(options: PaginationOptions): DefaultedPagination;
 export function pagination(options: PaginationOptions): RequiredPagination | DefaultedPagination {
-  const limit = pageLimit(options.maxLimit);
-  if (options.defaultLimit === false) return { offset: PageOffset, limit };
-  return {
-    offset: PageOffset.pipe(Schema.withDecodingDefaultKey(Effect.succeed(0))),
-    limit: limit.pipe(Schema.withDecodingDefaultKey(Effect.succeed(options.defaultLimit ?? 50))),
-  };
+  const { maxLimit, defaultLimit } = options;
+  if (defaultLimit === false) return Bounded.requiredPagination({ maxLimit });
+  return Bounded.pagination({ maxLimit, defaultLimit: Option.fromUndefinedOr(defaultLimit) });
 }
 // ---------------------------------------------------------------------------
 // Sort
@@ -299,7 +294,7 @@ export const sortField = {
  * @since 0.16.0
  * @category schemas
  */
-export const Uuid: Schema.String = Schema.String.check(Schema.isUUID());
+export const Uuid: Schema.String = Ids.Uuid;
 
 /**
  * The decoded type of a {@link Uuid}: a UUID string.
@@ -315,7 +310,7 @@ export type Uuid = typeof Uuid.Type;
  * @since 0.16.0
  * @category constants
  */
-export const DEFAULT_MAX_ID_LIST = 100;
+export const DEFAULT_MAX_ID_LIST: 100 = Bounded.DEFAULT_MAX_ID_LIST;
 
 /**
  * A comma-separated list of UUIDs as a `filter[ids]` value carries on the
@@ -344,25 +339,7 @@ export const DEFAULT_MAX_ID_LIST = 100;
 export const idList = (options?: {
   readonly maxLength?: number | undefined;
 }): Schema.Codec<ReadonlyArray<string>, string | ReadonlyArray<string>, never, never> =>
-  Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
-    Schema.decodeTo(
-      Schema.String,
-      SchemaTransformation.transform<string, string | ReadonlyArray<string>>({
-        decode: (value) => (typeof value === "string" ? value : value.join(",")),
-        encode: (value) => value,
-      }),
-    ),
-    Schema.decodeTo(
-      Schema.Array(Uuid).check(
-        Schema.isMinLength(1),
-        Schema.isMaxLength(options?.maxLength ?? DEFAULT_MAX_ID_LIST),
-      ),
-      SchemaTransformation.transform<ReadonlyArray<string>, string>({
-        decode: (value) => value.split(","),
-        encode: (value) => value.join(","),
-      }),
-    ),
-  );
+  Bounded.idList({ maxLength: Option.fromUndefinedOr(options?.maxLength) });
 
 /**
  * {@link idList} at its default bound.
@@ -375,7 +352,7 @@ export const IdList: Schema.Codec<
   string | ReadonlyArray<string>,
   never,
   never
-> = idList();
+> = Bounded.IdList;
 
 /**
  * The `ids` field a list input spreads in to accept `?filter[ids]=`:
@@ -455,7 +432,7 @@ export const listInput = <const Fields extends Schema.Struct.Fields = Record<nev
  * @since 0.16.0
  * @category constants
  */
-export const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const SLUG_PATTERN: RegExp = Ids.SLUG_PATTERN;
 
 /**
  * Options of {@link slug}.
@@ -494,26 +471,11 @@ export interface SlugOptions {
  * @since 0.16.0
  * @category constructors
  */
-export const slug = (options?: SlugOptions): Schema.String => {
-  const reserved = new Set(options?.reserved ?? []);
-  return Schema.String.check(
-    Schema.isBetweenLength(1, options?.maxLength ?? 200),
-    Schema.isPattern(SLUG_PATTERN, {
-      message: `must be lowercase letters, numbers, and hyphens (e.g. "my-post-title")`,
-    }),
-    Schema.makeFilter(
-      (value) =>
-        reserved.has(value)
-          ? `"${value}" is a reserved path segment and cannot be used as a slug`
-          : true,
-      {
-        identifier: "notReservedSlug",
-        title: "not a reserved slug",
-        description: "rejects path segments that collide with a static sibling route",
-      },
-    ),
-  );
-};
+export const slug = (options?: SlugOptions): Schema.String =>
+  Ids.slug({
+    maxLength: Option.fromUndefinedOr(options?.maxLength),
+    reserved: Option.fromUndefinedOr(options?.reserved),
+  });
 
 /**
  * {@link slug} with no reserved segments.
@@ -521,7 +483,7 @@ export const slug = (options?: SlugOptions): Schema.String => {
  * @since 0.16.0
  * @category schemas
  */
-export const Slug: Schema.String = slug();
+export const Slug: Schema.String = Ids.Slug;
 
 /**
  * The `slug` attribute as a `Resource.attribute` descriptor: an optional
@@ -595,4 +557,5 @@ export const slugCreateFields = <S extends Schema.String>(schema: S) =>
  * @since 0.16.0
  * @category utils
  */
-export const suppliedValue: <A>(field: Option.Option<A> | undefined) => Option.Option<A> = supplied;
+export const suppliedValue: <A>(field: Option.Option<A> | undefined) => Option.Option<A> =
+  TriState.suppliedValue;

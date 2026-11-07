@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) imple
 pnpm add @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`^4.0.0`). Node.js 22 or newer is required.
+`effect` is a peer dependency (`^4.0.0`). The one runtime dependency, [`@thomasfosterau/effect-ext`](https://www.npmjs.com/package/@thomasfosterau/effect-ext), is installed with the package. Only its pure Schema subpaths are used (`Bounded`, `Ids`, `Issues`, `TriState`), and they peer the same `effect`. Node.js 22 or newer is required.
 
 ## Overview
 
@@ -86,17 +86,17 @@ const ApiLive = HttpApiBuilder.layer(Api).pipe(
 
 The package root exports everything and is the import you want by default. It reaches `effect/http-api`, because the error classes, endpoints, groups, media type combinators and middleware are built on Effect's `HttpApi`.
 
-Consumers that only want JSON:API's **wire types without the server** — a client decoding documents, a loader mapping them into something else, a CLI or code generator producing them — can import the same modules from a schema-only subpath whose only dependency is `effect` itself:
+Consumers that only want JSON:API's **wire types without the server** — a client decoding documents, a loader mapping them into something else, a CLI or code generator producing them — can import the same modules from a schema-only subpath that never reaches Effect's HTTP surface. Its dependencies are `effect`'s core and effect-ext's Schema subpaths, which import only `effect`'s core:
 
 ```ts
 import { Document, Resource } from "@thomasfosterau/effect-jsonapi/schema";
 ```
 
-`/schema` re-exports `Document`, `Filter`, `FlatQuery`, `Include`, `Relationship`, `Resource`, `Sort` and `MEDIA_TYPE` — the modules whose import graph is `effect` alone. Every symbol is the same object under both imports. Which modules are in the tier, and why `Query` (whose `Query.validateIncludePaths` fails with `HttpApi`-bound error classes) and `Client` are not: see the `/schema` module doc.
+`/schema` re-exports `Document`, `Filter`, `FlatQuery`, `Include`, `Relationship`, `Resource`, `Sort` and `MEDIA_TYPE` — the modules whose import graph reaches only `effect`'s core and those effect-ext subpaths. Every symbol is the same object under both imports. Which modules are in the tier, and why `Query` (whose `Query.validateIncludePaths` fails with `HttpApi`-bound error classes) and `Client` are not: see the `/schema` module doc.
 
 ### Module subpaths
 
-Every module is also published as a subpath of its own, as `effect` publishes `effect/Schema`: `@thomasfosterau/effect-jsonapi/Resource`, `…/Endpoint`, `…/Group`, and so on for each namespace the root exports. A subpath is the same module as the root's namespace, not a copy, so `Resource.make` and the error classes are identical whichever way they are imported, and the schema-tier modules (`Document`, `Filter`, `FlatQuery`, `Include`, `Relationship`, `Resource`, `Sort`) keep `effect` as their only dependency under their subpaths too.
+Every module is also published as a subpath of its own, as `effect` publishes `effect/Schema`: `@thomasfosterau/effect-jsonapi/Resource`, `…/Endpoint`, `…/Group`, and so on for each namespace the root exports. A subpath is the same module as the root's namespace, not a copy, so `Resource.make` and the error classes are identical whichever way they are imported, and the schema-tier modules (`Document`, `Filter`, `FlatQuery`, `Include`, `Relationship`, `Resource`, `Sort`) keep the same dependencies under their subpaths too: `effect`'s core and effect-ext's Schema subpaths.
 
 ```ts
 import * as Endpoint from "@thomasfosterau/effect-jsonapi/Endpoint";

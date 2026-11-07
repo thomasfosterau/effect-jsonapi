@@ -149,6 +149,9 @@
     "fallow": "fallow --summary",
     "fallow:audit": "fallow audit"
   },
+  "dependencies": {
+    "@thomasfosterau/effect-ext": "catalog:"
+  },
   "devDependencies": {
     "@changesets/cli": "catalog:",
     "@effect/docgen": "catalog:",
