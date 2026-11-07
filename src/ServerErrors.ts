@@ -566,12 +566,23 @@ export interface RespondOptions {
    * the cause a defect.
    */
   readonly materialise?: ((cause: unknown) => Option.Option<JsonapiError>) | undefined;
+  /**
+   * Mapping arms consulted **before** {@link fromTaggedError}: the place an
+   * application renders a cause the package already maps its own way (an
+   * `ApiError.Conflict` with the application's wording, a `NotFound` with
+   * its own `code`). `none` hands the cause on to `fromTaggedError`, then
+   * to `materialise` (#565).
+   *
+   * @since 0.21.0
+   */
+  readonly override?: ((cause: unknown) => Option.Option<JsonapiError>) | undefined;
 }
 
 /**
  * Wraps a handler effect for registration with `HttpApiBuilder`: expected
- * failures — anything {@link fromTaggedError} (or the caller's
- * {@link RespondOptions.materialise}) maps — become JSON:API error responses
+ * failures — anything the caller's {@link RespondOptions.override},
+ * {@link fromTaggedError} or the caller's {@link RespondOptions.materialise}
+ * maps, consulted in that order — become JSON:API error responses
  * with the right status; anything else is logged with its original cause and
  * answered with the opaque {@link SERVER_ERROR}.
  *
@@ -599,7 +610,8 @@ export const respond = <A, E, R>(
   options?: RespondOptions,
 ): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> => {
   const materialise = (cause: unknown): Option.Option<JsonapiError> =>
-    fromTaggedError(cause).pipe(
+    (options?.override?.(cause) ?? Option.none<JsonapiError>()).pipe(
+      Option.orElse(() => fromTaggedError(cause)),
       Option.orElse(() => options?.materialise?.(cause) ?? Option.none()),
     );
   return effect.pipe(
