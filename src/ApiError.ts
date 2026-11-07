@@ -268,15 +268,16 @@ const makeWire = (
                   ...definedMember("title", options.title),
                   ...definedMember("detail", detail),
                   ...definedMember("source", source),
+                  // An empty `meta` — every field optional and absent — is
+                  // left out rather than sent as `{}` (#565).
                   ...definedMember(
                     "meta",
-                    Arr.isReadonlyArrayNonEmpty(options.fieldKeys)
-                      ? Object.fromEntries(
-                          options.fieldKeys.flatMap((key) =>
-                            fields[key] === undefined ? [] : [[key, fields[key]]],
-                          ),
-                        )
-                      : undefined,
+                    Arr.match(
+                      options.fieldKeys.flatMap((key) =>
+                        fields[key] === undefined ? [] : [[key, fields[key]] as const],
+                      ),
+                      { onEmpty: () => undefined, onNonEmpty: Object.fromEntries },
+                    ),
                   ),
                 },
               ],
