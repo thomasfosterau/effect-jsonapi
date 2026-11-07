@@ -25,7 +25,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE.md"
+    "LICENSE.md",
+    "CHANGELOG.md"
   ],
   "type": "module",
   "sideEffects": false,
