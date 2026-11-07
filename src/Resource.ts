@@ -49,6 +49,7 @@ import {
   Array as Arr,
   Effect,
   Match,
+  Option,
   Schema,
   SchemaAST,
   SchemaIssue,
@@ -2150,6 +2151,11 @@ type FilterableRelationshipKeys<R extends Any> =
           : K;
       }[RelationshipName<R>];
 
+// `"id"` when the resource's id schema is `Filter.able` (#556), else `never`.
+// The id is not an attribute — JSON:API reserves the name — so it can never
+// collide with an attribute or relationship key.
+type FilterableIdKey<R extends Any> = [FilterMarkerOf<R["Id"]>] extends [never] ? never : "id";
+
 // The operators a declaration admits: the whole set for `true`, the subset
 // otherwise.
 type DeclaredOperators<D, All extends string> = D extends true
@@ -2160,8 +2166,9 @@ type DeclaredOperators<D, All extends string> = D extends true
 
 /**
  * The keys of a resource declared filterable, as a union of string literals:
- * attributes whose schema is `Filter.able` (piped, or via the `filter` sugar of
- * `Resource.attribute`) and to-one relationships declared with
+ * `"id"` when the id schema passed to `Resource.make`'s `id` option is
+ * `Filter.able`, attributes whose schema is `Filter.able` (piped, or via the
+ * `filter` sugar of `Resource.attribute`) and to-one relationships declared with
  * `Relationship.one(ref, { filter })` / `Relationship.optional(ref, { filter })`.
  * A plain schema attribute, a to-many relationship, or anything declared
  * without `filter`, is not filterable — the declaration fails closed, like
@@ -2177,6 +2184,7 @@ type DeclaredOperators<D, All extends string> = D extends true
  */
 export type FilterableKeys<R extends Any> = R extends Any
   ?
+      | FilterableIdKey<R>
       | {
           [K in AttributeKeys<R>]: [FilterMarkerOf<AttributesOf<R>[K]>] extends [never] ? never : K;
         }[AttributeKeys<R>]
@@ -2193,14 +2201,16 @@ export type FilterableKeys<R extends Any> = R extends Any
  * @category type-level
  */
 export type FilterOperators<R extends Any, K extends FilterableKeys<R>> =
-  K extends AttributeKeys<R>
-    ? FilterMarkerOf<AttributesOf<R>[K]>["operators"]
-    : K extends RelationshipName<R>
-      ? DeclaredOperators<
-          RelationshipFilterDeclarationOf<R["relationships"][K]>,
-          Relationship.FilterOperator
-        >
-      : never;
+  K extends FilterableIdKey<R>
+    ? FilterMarkerOf<R["Id"]>["operators"]
+    : K extends AttributeKeys<R>
+      ? FilterMarkerOf<AttributesOf<R>[K]>["operators"]
+      : K extends RelationshipName<R>
+        ? DeclaredOperators<
+            RelationshipFilterDeclarationOf<R["relationships"][K]>,
+            Relationship.FilterOperator
+          >
+        : never;
 
 /**
  * The attribute keys of a resource declared sortable — whose schema is
@@ -2259,14 +2269,21 @@ export interface FilterableField<Op extends Filter.Operator, Literal, RD = never
  * @category type-level
  */
 export type Filterable<R extends Any> = {
-  readonly [K in FilterableKeys<R>]: K extends AttributeKeys<R>
+  readonly [K in FilterableKeys<R>]: K extends FilterableIdKey<R>
     ? FilterableField<
         FilterOperators<R, K>,
-        FilterMarkerOf<AttributesOf<R>[K]>["literal"],
-        AttributesOf<R>[K]["DecodingServices"],
-        AttributesOf<R>[K]["EncodingServices"]
+        FilterMarkerOf<R["Id"]>["literal"],
+        R["Id"]["DecodingServices"],
+        R["Id"]["EncodingServices"]
       >
-    : FilterableField<FilterOperators<R, K>, Target<R, K>["Id"]["Type"]>;
+    : K extends AttributeKeys<R>
+      ? FilterableField<
+          FilterOperators<R, K>,
+          FilterMarkerOf<AttributesOf<R>[K]>["literal"],
+          AttributesOf<R>[K]["DecodingServices"],
+          AttributesOf<R>[K]["EncodingServices"]
+        >
+      : FilterableField<FilterOperators<R, K>, Target<R, K>["Id"]["Type"]>;
 };
 
 // The JSON scalar kinds a filter literal can take on the wire.
@@ -2512,28 +2529,50 @@ interface RuntimeFilterable {
   readonly literal: Schema.Codec<unknown, string>;
 }
 
-// Builds the filterable record for a resource: each attribute carrying a
-// `Filter.able` annotation with its derived (or explicit `literal`) codec, then
-// each declared to-one relationship with the target's `Id` schema as its
-// literal codec. The target is resolved lazily (`Schema.suspend` over the
-// descriptor's thunk), never here: definitions can be mutually recursive and
-// out of order.
+// The `Filter.able` declaration a schema carries, if any; a present but
+// malformed one is a definition error naming `subject` (an attribute, or the id).
+const filterDeclarationOf = (
+  type: string,
+  subject: string,
+  schema: Schema.Top,
+): Option.Option<Filter.Annotation> => {
+  const declared = declarationOf(schema, Filter.AnnotationId, isFilterAnnotation);
+  if (declared.kind === "malformed") {
+    throw new Error(
+      `Resource.make("${type}"): ${subject} carries a malformed filter declaration under ` +
+        `"${Filter.AnnotationId}"; declare it with Filter.able`,
+    );
+  }
+  return declared.kind === "declared" ? Option.some(declared.declaration) : Option.none();
+};
+
+// Builds the filterable record for a resource: the resource id when its schema
+// carries a `Filter.able` annotation, with the id schema itself (or the explicit
+// `literal`) as its codec (#556); each attribute carrying one, with its derived
+// (or explicit) codec; then each declared to-one relationship with the target's
+// `Id` schema as its literal codec. The target is resolved lazily
+// (`Schema.suspend` over the descriptor's thunk), never here: definitions can be
+// mutually recursive and out of order.
 const filterableFields = (
   type: string,
   fields: Schema.Struct.Fields,
   relationships: Relationships,
+  id: Schema.Top,
 ) => {
   const result: Record<string, RuntimeFilterable> = {};
+  // The id's `Encoded` side is `string` (`make` requires it), so deriving its
+  // literal never fails: a wire string decoded through the id schema.
+  const idDeclaration = filterDeclarationOf(type, "the id schema", id);
+  if (Option.isSome(idDeclaration)) {
+    result["id"] = {
+      operators: idDeclaration.value.operators,
+      literal: idDeclaration.value.literal ?? deriveFilterLiteral(type, "id", id),
+    };
+  }
   for (const [key, field] of Object.entries(fields)) {
-    const declared = declarationOf(field as Schema.Top, Filter.AnnotationId, isFilterAnnotation);
-    if (declared.kind === "absent") continue;
-    if (declared.kind === "malformed") {
-      throw new Error(
-        `Resource.make("${type}"): attribute "${key}" carries a malformed filter declaration under ` +
-          `"${Filter.AnnotationId}"; declare it with Filter.able`,
-      );
-    }
-    const { declaration } = declared;
+    const declared = filterDeclarationOf(type, `attribute "${key}"`, field as Schema.Top);
+    if (Option.isNone(declared)) continue;
+    const declaration = declared.value;
     result[key] = {
       operators: declaration.operators,
       literal:
@@ -2597,6 +2636,15 @@ const nameOnlyFamilyAttributes = new WeakSet<object>();
  * `filter[author]=9` decodes to the target's branded id. The target is resolved
  * lazily, so declaration order does not matter.
  *
+ * The resource id is filterable too when the schema passed as {@link make}'s
+ * `id` option is `Filter.able` (`id: Schema.String.pipe(Filter.able(["eq", "in"]))`):
+ * it is reported under the key `id`, first, with the id schema itself as its
+ * literal codec (or the declaration's explicit `literal`), so `filter[id]=…` is
+ * legal in the shorthand, operator and group forms. JSON:API reserves `id` as a
+ * field name, so this is the only way to declare it; an attribute named `id`
+ * is still refused. The default derived id is not filterable. An
+ * {@link extend} with `inheritId: true` inherits the declaration.
+ *
  * Downstream consumers read this to validate and plan filters; the `filter`
  * URL codec over the declaration lands in a follow-up.
  *
@@ -2641,7 +2689,12 @@ export const filterable = <R extends Any>(resource: R): Filterable<R> => {
   if (nameOnlyFamilyAttributes.has(attributes)) return {} as Filterable<R>;
   let result = filterableCache.get(attributes);
   if (result === undefined) {
-    result = filterableFields(resource.type, attributes.fields, resource.relationships);
+    result = filterableFields(
+      resource.type,
+      attributes.fields,
+      resource.relationships,
+      resource.Id,
+    );
     filterableCache.set(attributes, result);
   }
   return { ...result } as unknown as Filterable<R>;
@@ -2953,6 +3006,8 @@ export const make = <
      * The id schema for this resource. Any schema whose `Encoded` side is
      * `string` (so the wire stays spec-compliant); its decoded type becomes the
      * resource's id brand. Defaults to the auto-derived {@link Id} for `type`.
+     * Pipe it through `Filter.able` (last) to make `filter[id]` legal: see
+     * {@link filterable}.
      */
     readonly id?: IdSchema | undefined;
     /**
@@ -3036,7 +3091,7 @@ export const make = <
   // Filter declarations are checked now, not on first use: an attribute declared
   // filterable whose encoded form has no literal codec, or a relationship
   // declaring an operator it cannot admit, throws here, naming the key.
-  filterableCache.set(attributes, filterableFields(type, attributes.fields, relationships));
+  filterableCache.set(attributes, filterableFields(type, attributes.fields, relationships, id));
   sortableCache.set(attributes, sortableKeys(type, attributes.fields));
 
   const fields: ResourceFields<Type, Attributes, Rels, Meta, IdSchema> = {
@@ -3378,8 +3433,23 @@ export type ExtendedId<
   Custom extends Schema.Codec<any, string>
     ? Custom
     : Inherit extends true
-      ? Schema.brand<BaseId, `${Type}Id`>
+      ? InheritedId<BaseId, Type>
       : Id<Type>;
+
+// The base's id branded with the child's type. A `Filter.able` base id stays
+// filterable at runtime through the brand (a rebuild keeps the annotation), so
+// the type-level marker is carried over too, its literal re-typed to the child's
+// brand (#556).
+type InheritedId<BaseId extends Schema.Top, Type extends string> = BaseId extends {
+  readonly [K in Filter.MarkerKey]: Filter.Marker<infer Op, unknown>;
+}
+  ? Schema.brand<BaseId, `${Type}Id`> & {
+      readonly [K in Filter.MarkerKey]: Filter.Marker<
+        Op,
+        Filter.LiteralType<Schema.brand<BaseId, `${Type}Id`>>
+      >;
+    }
+  : Schema.brand<BaseId, `${Type}Id`>;
 
 /**
  * Defines a new resource that **extends** (subtypes) an existing one: the new
