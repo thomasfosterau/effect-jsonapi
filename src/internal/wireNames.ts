@@ -264,70 +264,108 @@ interface At {
 }
 
 // A node the formatter does not walk through, formatted alone, its leaves'
-// paths prefixed with where it sits.
-const formatted = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<WireLeaf> =>
+// paths prefixed with where it sits, and their messages replaced by the
+// message of the nearest check above it that names one, when there is one.
+const formatted = (
+  issue: SchemaIssue.Issue,
+  at: At,
+  message: Option.Option<string>,
+): ReadonlyArray<WireLeaf> =>
   Arr.map(format(issue).issues, (leaf) => {
     const below = Arr.map(leaf.path ?? [], (segment) =>
       Predicate.isPropertyKey(segment) ? segment : segment.key,
     );
-    return { message: leaf.message, path: [...at.path, ...below], wire: [...at.wire, ...below] };
+    return {
+      message: Option.getOrElse(message, () => leaf.message),
+      path: [...at.path, ...below],
+      wire: [...at.wire, ...below],
+    };
   });
 
-// Whether the formatter walks through a failed check to the issue it
-// carries, as it does when the check names no message of its own and its
-// issue is no bare value (a struct check's `{ path, issue }` is a pointer).
-const walksThrough = (filter: SchemaIssue.Filter): boolean =>
-  SchemaIssue.defaultCheckHook(filter) === undefined && filter.issue._tag !== "InvalidValue";
+// The message a failed check gives every leaf below it, as the formatter
+// settles it: its own (`SchemaIssue.defaultCheckHook`), or none, when each
+// leaf keeps its own. A check whose issue is a bare value is a leaf itself and
+// is `formatted` whole, so its message needs no carrying.
+const checkMessage = (filter: SchemaIssue.Filter): Option.Option<string> =>
+  Option.fromUndefinedOr(SchemaIssue.defaultCheckHook(filter));
 
-// `SchemaIssue.makeFormatterStandardSchemaV1`'s own walk, which extends the
-// path only through a pointer, an encoding, a composite, a non-empty union
-// and a check it `walksThrough`: every other node is `formatted` alone. A
-// struct's property issue is a pointer under the struct's composite, either
-// directly or under a check on the struct that points at the property (a
+// `SchemaIssue.makeFormatterStandardSchemaV1`'s own walk (effect 4.1), which
+// extends the path through a pointer, an encoding, a composite, a non-empty
+// union and a failed check, carrying the nearest check's message down to the
+// leaves it reaches: every other node is `formatted` alone. A struct's
+// property issue is a pointer under the struct's composite, either directly or
+// under a check on the struct that points at the property (a
 // `Schema.makeFilter` returning `{ path, issue }`, or several of them, which
-// the check carries as a composite of pointers on the same struct). Either
-// way the pointer's first key is the struct's property, named on the wire by
-// `wireNameOf` the composite's AST: a struct's issue reports its decoded
-// side's AST when the decoded side rejected the value, under decoded names,
-// and its encoded side's AST when the wire value was rejected before any
-// rename, under wire names. A check met anywhere else is `formatted` alone,
-// as the formatter would render it, in the names the issue reports.
-const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<WireLeaf> =>
+// the check carries as a composite of pointers on the same struct). Either way
+// the pointer's first key is the struct's property, named on the wire by
+// `wireNameOf` the composite's AST: a struct's issue reports its decoded side's
+// AST when the decoded side rejected the value, under decoded names, and its
+// encoded side's AST when the wire value was rejected before any rename, under
+// wire names. A check met anywhere else is walked the same way, in the names
+// the issue reports.
+const leavesOf = (
+  issue: SchemaIssue.Issue,
+  at: At,
+  message: Option.Option<string>,
+): ReadonlyArray<WireLeaf> =>
   Match.value(issue).pipe(
     Match.tag("Pointer", (pointer) =>
-      leavesOf(pointer.issue, {
-        path: [...at.path, ...pointer.path],
-        wire: [...at.wire, ...pointer.path],
-      }),
+      leavesOf(
+        pointer.issue,
+        { path: [...at.path, ...pointer.path], wire: [...at.wire, ...pointer.path] },
+        message,
+      ),
     ),
-    Match.tag("Encoding", (encoding) => leavesOf(encoding.issue, at)),
+    Match.tag("Encoding", (encoding) => leavesOf(encoding.issue, at, message)),
+    Match.tag("Filter", (filter) =>
+      walkCheck(filter, at, message, (inner, carried) => leavesOf(inner, at, carried)),
+    ),
     Match.tag("Composite", (composite) => {
       const wireName = wireNameOf(composite.ast);
-      const enter = (child: SchemaIssue.Issue): ReadonlyArray<WireLeaf> =>
+      const enter = (
+        child: SchemaIssue.Issue,
+        carried: Option.Option<string>,
+      ): ReadonlyArray<WireLeaf> =>
         Match.value(child).pipe(
           Match.tag("Pointer", (pointer) => {
             const [key, ...rest] = pointer.path;
             const sent = key === undefined ? [] : [Option.getOrElse(wireName(key), () => key)];
-            return leavesOf(pointer.issue, {
-              path: [...at.path, ...pointer.path],
-              wire: [...at.wire, ...sent, ...rest],
-            });
+            return leavesOf(
+              pointer.issue,
+              { path: [...at.path, ...pointer.path], wire: [...at.wire, ...sent, ...rest] },
+              carried,
+            );
           }),
-          Match.tag("Filter", (filter) =>
-            walksThrough(filter) ? enter(filter.issue) : formatted(filter, at),
-          ),
-          Match.orElse((other) => leavesOf(other, at)),
+          Match.tag("Filter", (filter) => walkCheck(filter, at, carried, enter)),
+          Match.orElse((other) => leavesOf(other, at, carried)),
         );
-      return Arr.flatMap(composite.issues, enter);
+      return Arr.flatMap(composite.issues, (child) => enter(child, message));
     }),
     Match.tag("AnyOf", (anyOf) =>
       Arr.match(anyOf.issues, {
-        onEmpty: () => formatted(anyOf, at),
-        onNonEmpty: (issues) => Arr.flatMap(issues, (child) => leavesOf(child, at)),
+        onEmpty: () => formatted(anyOf, at, message),
+        onNonEmpty: (issues) => Arr.flatMap(issues, (child) => leavesOf(child, at, message)),
       }),
     ),
-    Match.orElse((other) => formatted(other, at)),
+    Match.orElse((other) => formatted(other, at, message)),
   );
+
+// A failed check: one whose issue is a bare value is a leaf, `formatted` whole
+// at `at` (under the message carried down, or its own); any other is walked
+// through by `next`, carrying the nearest message — an outer one wins, as in
+// the formatter.
+const walkCheck = (
+  filter: SchemaIssue.Filter,
+  at: At,
+  message: Option.Option<string>,
+  next: (issue: SchemaIssue.Issue, message: Option.Option<string>) => ReadonlyArray<WireLeaf>,
+): ReadonlyArray<WireLeaf> =>
+  filter.issue._tag === "InvalidValue"
+    ? formatted(filter, at, message)
+    : next(
+        filter.issue,
+        Option.orElse(message, () => checkMessage(filter)),
+      );
 
 /**
  * The formatted leaves of a request part's decode failure, as
@@ -344,4 +382,4 @@ const leavesOf = (issue: SchemaIssue.Issue, at: At): ReadonlyArray<WireLeaf> =>
  * @internal
  */
 export const wireLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<WireLeaf> =>
-  leavesOf(issue, { path: [], wire: [] });
+  leavesOf(issue, { path: [], wire: [] }, Option.none());

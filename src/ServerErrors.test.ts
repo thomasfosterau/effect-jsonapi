@@ -215,10 +215,12 @@ describe("schemaIssueToErrors", () => {
     const detailsFor = (schema: Schema.Top) =>
       ServerErrors.schemaIssueToErrors(issueFor(schema, input)).map((e) => [e.source, e.detail]);
 
-    // A pointed issue: Effect's own formatter renders the check's message too.
+    // A pointed issue: Effect's own formatter renders the check's message too,
+    // followed (since effect 4.1) by the path, which the error carries as its
+    // `source.pointer` instead.
     const pointed = matching({ path: ["confirm"], issue: bare });
     expect(SchemaIssue.makeFormatterDefault()(issueFor(pointed, input))).toBe(
-      "Passwords must match",
+      'Passwords must match\n  at ["confirm"]',
     );
     expect(detailsFor(pointed)).toEqual([
       [{ pointer: "/data/attributes/confirm" }, "Passwords must match"],
