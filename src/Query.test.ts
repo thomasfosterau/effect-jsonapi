@@ -1086,6 +1086,19 @@ describe("Query.canonical", () => {
     );
   });
 
+  it("omits a JSON object member, which has no flat wire form (#536)", () => {
+    const wire = Schema.Struct({
+      location: Schema.optionalKey(Schema.Struct({ x: Schema.String })),
+      flag: Schema.optionalKey(Schema.Boolean),
+      ...Query.Page.Offset,
+    }).pipe(Schema.encodeKeys({ limit: "page[limit]", offset: "page[offset]" }));
+    // never `location=[object Object]`
+    expect(Query.canonicalPairs(wire)({ location: { x: "a" }, flag: false, limit: 5 })).toEqual([
+      ["page[limit]", "5"],
+      ["flag", "false"],
+    ]);
+  });
+
   it("serialise: RFC 3986 percent-encoding, brackets readable in keys, spaces %20, commas %2C", () => {
     expect(
       Query.serialise([

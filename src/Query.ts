@@ -2018,8 +2018,8 @@ export const serialise: (pairs: Iterable<Pair>) => string = serialisePairs;
  *    builders emit, so a `self` link and the canonical string agree
  * 6. any other key (a consumer's own flat schema), sorted by key
  *
- * An absent (`undefined` or `null`) value is omitted, an empty string is
- * kept (`key=`), and an array is the repeated key, one pair per item in
+ * An absent (`undefined` or `null`) value is omitted, as is a JSON object
+ * (it has no flat wire form), an empty string is kept (`key=`), and an array is the repeated key, one pair per item in
  * order (`include` excepted: its comma form) — see {@link FlatQuerySchema}.
  *
  * @example

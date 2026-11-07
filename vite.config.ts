@@ -162,10 +162,6 @@ export default defineConfig({
       "typescript/no-unnecessary-type-parameters": "warn",
       // 43 sites, 39 in src/ (most in Resource.ts's mapped types).
       "typescript/no-generated-empty-object-type": "warn",
-      // 1 site: `pairsOf` in src/internal/canonical.ts stringifies a JSON
-      // object member as `[object Object]`. A JSON object has no flat wire
-      // form; picking one (omit it, or fail) is a behaviour change (#536).
-      "typescript/no-base-to-string": "warn",
       // `@effect/tsgo`'s preset sets its rules at `warn`; the `correctness` /
       // `suspicious` categories above raised these three to `error`. Back at
       // the preset's level, counted: 106 sites (94 in tests and examples),

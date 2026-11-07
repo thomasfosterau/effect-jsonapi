@@ -67,17 +67,19 @@ export type FlatQuery = Readonly<Partial<Record<string, Schema.Json>>>;
 // per item — the repeated-key spelling `UrlParams.toRecord` decodes back to
 // an array — except `include`, whose comma form is the schema's own encoding
 // of the set (the query schema already joins it; a consumer's flat schema
-// may not have). An absent member and `null` have no wire form and are omitted.
+// may not have). An absent member, `null` and a JSON object have no flat wire
+// form and are omitted (#536).
 const pairsOf = (key: string, member: FlatValue): ReadonlyArray<Pair> => {
   if (Option.isNone(member) || member.value === null) return [];
   const value = member.value;
   if (typeof value === "string") return [[key, value]];
+  if (typeof value === "number" || typeof value === "boolean") return [[key, String(value)]];
   if (Array.isArray(value)) {
     return key === "include"
       ? [[key, value.map(String).join(",")]]
       : value.map((item) => [key, String(item)]);
   }
-  return [[key, String(value)]];
+  return [];
 };
 
 /**
@@ -95,7 +97,8 @@ const pairsOf = (key: string, member: FlatValue): ReadonlyArray<Pair> => {
  *    link builders emit), keys the schema does not declare after them, sorted
  * 6. everything else (a consumer's own flat keys), sorted by key
  *
- * `undefined` and `null` values are omitted; an empty string is kept
+ * `undefined`, `null` and JSON object values are omitted (an object has no
+ * flat wire form); an empty string is kept
  * (`key=`); an array is the repeated key, one pair per item in order
  * (`include` excepted: the comma form). Sorting is stable, so a repeated
  * key's items keep their order.
