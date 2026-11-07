@@ -5,7 +5,7 @@
  * arm), and `respond`'s two catch paths.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Option, Schema, SchemaIssue } from "effect";
+import { Cause, Effect, Exit, Option, Predicate, Schema, SchemaIssue } from "effect";
 import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as ServerErrors from "./ServerErrors.js";
@@ -481,5 +481,29 @@ describe("respond", () => {
       ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { materialise }),
     );
     expect(catalogue.status).toBe(403);
+  });
+
+  it("consults the caller's override ahead of the catalogue (#565)", async () => {
+    const override = (cause: unknown) =>
+      Predicate.isTagged(cause, "Conflict")
+        ? Option.some(
+            new ServerErrors.JsonapiError({
+              status: 409,
+              errors: [{ status: "409", code: "conflict", detail: "Someone else changed it" }],
+            }),
+          )
+        : Option.none();
+    const overridden = await responseOf(
+      ServerErrors.respond(Effect.fail(new ApiError.Conflict({})), { override }),
+    );
+    expect(overridden.status).toBe(409);
+    expect(overridden.body.errors).toEqual([
+      { status: "409", code: "conflict", detail: "Someone else changed it" },
+    ]);
+    // a cause the override declines still reaches the catalogue
+    const declined = await responseOf(
+      ServerErrors.respond(Effect.fail(new ServerErrors.Forbidden({})), { override }),
+    );
+    expect(declined.status).toBe(403);
   });
 });

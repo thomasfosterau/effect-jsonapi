@@ -146,11 +146,13 @@ describe("standard errors", () => {
     ).toBeUndefined();
   });
 
-  it("BadRequest omits detail when not provided", () => {
+  it("BadRequest omits detail, and an empty meta, when not provided (#565)", () => {
     const wire = Schema.encodeUnknownSync(ApiError.BadRequest.wire)(new ApiError.BadRequest({}));
     expect(wire).toEqual({
-      errors: [{ status: "400", code: "bad_request", title: "Bad Request", meta: {} }],
+      errors: [{ status: "400", code: "bad_request", title: "Bad Request" }],
     });
+    // and it decodes back
+    expect(Schema.decodeSync(ApiError.BadRequest.wire)(wire)).toBeInstanceOf(ApiError.BadRequest);
   });
 
   it("UnsupportedMediaType encodes to a 415 error document", () => {
