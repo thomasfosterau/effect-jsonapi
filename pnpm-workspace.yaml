@@ -62,7 +62,7 @@ catalog:
   # (#205). Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.63.0
+  "@effect/tsgo": 0.67.4
   # The Effect lint preset (`effect.configs.recommended` in vite.config.ts):
   # 74 `effect/` rules, including the anti-slop set. Replaced
   # @mpsuesser/oxlint-plugin-effect (#532). It ranges its oxlint plugin API
@@ -85,7 +85,7 @@ catalog:
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a
   # mismatch, so it moves with the vite-plus set.
-  "@vitest/coverage-istanbul": 5.0.5
+  "@vitest/coverage-istanbul": 5.1.0
   # Deliberately tracks the `latest` dist-tag, ahead of the applications'
   # lockstep, so the gates run against the newest `effect` release. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
@@ -115,9 +115,9 @@ catalog:
   # every resolution to the catalog singleton. 1.4.0 carries oxlint 1.89.0,
   # oxfmt 0.74.0 and oxlint-tsgolint 7.0.2004, all in @effect/tsgo 0.63.0's
   # components table, and vitest 5.0.5. Releases up to 1.0.0 are affected by GHSA-587h-7wmj-h5pm.
-  vite-plus: 1.4.0
+  vite-plus: 1.5.0
   vite: npm:@voidzero-dev/vite-plus-core@1.4.0
-  vitest: 5.0.5
+  vitest: 5.1.0
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact
