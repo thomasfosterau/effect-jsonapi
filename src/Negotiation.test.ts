@@ -230,9 +230,63 @@ describe("alternates and the fallback", () => {
     ).toBe(true);
   });
 
+  it("wins with media-type parameters of its own, which the JSON:API rule does not govern (#566)", () => {
+    expect(
+      markdown.negotiate(get(`/contests/${UUID}`, "text/markdown;charset=utf-8")).representation,
+    ).toBe("text/markdown");
+    expect(
+      markdown.negotiate(
+        get(`/contests/${UUID}`, `text/markdown;charset=utf-8;q=0.9, text/html;q=0.5`),
+      ).representation,
+    ).toBe("text/markdown");
+  });
+
   it("reports the host's own fallback token", () => {
     const custom = Negotiation.make({ api: Api, fallback: "text/plain" });
     expect(custom.negotiate(get("/contests")).representation).toBe("text/plain");
+  });
+});
+
+describe("extensions (#566)", () => {
+  const ATOMIC = "https://jsonapi.org/ext/atomic";
+  const UNKNOWN = "https://unknown.example/ext";
+  const strict = Negotiation.make({ api: Api, extensions: [ATOMIC] });
+
+  it("dispatches a read or write whose ext URIs are all supported", () => {
+    expect(strict.negotiate(get("/contests", `${MEDIA_TYPE};ext="${ATOMIC}"`)).dispatch).toBe(true);
+    expect(
+      strict.negotiate(write("POST", "/people", `${MEDIA_TYPE};ext="${ATOMIC}"`)).dispatch,
+    ).toBe(true);
+  });
+
+  it("§5: 406 for a read whose only JSON:API instance names an unsupported ext", () => {
+    const verdict = strict.negotiate(get("/contests", `${MEDIA_TYPE};ext="${UNKNOWN}"`));
+    expect(verdict.dispatch).toBe(false);
+    expect(verdict.error).toBe(Negotiation.NOT_ACCEPTABLE);
+    // a clean instance beside it still dispatches
+    expect(
+      strict.negotiate(get("/contests", `${MEDIA_TYPE};ext="${UNKNOWN}", ${MEDIA_TYPE}`)).dispatch,
+    ).toBe(true);
+  });
+
+  it("§5: 415 for a write whose Content-Type names an unsupported ext", () => {
+    const verdict = strict.negotiate(write("POST", "/people", `${MEDIA_TYPE};ext="${UNKNOWN}"`));
+    expect(verdict.dispatch).toBe(false);
+    expect(verdict.error).toBe(Negotiation.UNSUPPORTED_MEDIA_TYPE);
+  });
+
+  it("checks no ext URI when the option is omitted, as before", () => {
+    expect(negotiate(get("/contests", `${MEDIA_TYPE};ext="${UNKNOWN}"`)).dispatch).toBe(true);
+    expect(negotiate(write("POST", "/people", `${MEDIA_TYPE};ext="${UNKNOWN}"`)).dispatch).toBe(
+      true,
+    );
+  });
+
+  it("refuses every ext under an empty list", () => {
+    const none = Negotiation.make({ api: Api, extensions: [] });
+    expect(none.negotiate(write("POST", "/people", `${MEDIA_TYPE};ext="${ATOMIC}"`)).error).toBe(
+      Negotiation.UNSUPPORTED_MEDIA_TYPE,
+    );
   });
 });
 

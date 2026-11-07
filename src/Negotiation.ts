@@ -38,7 +38,7 @@
  * @since 0.16.0
  */
 import { Array as Arr, Option } from "effect";
-import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
+import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
 
 /**
  * A JSON:API error emitted at the seam — the §5 negotiation statuses and the
@@ -147,6 +147,21 @@ export interface Options {
    */
   // oxlint-disable-next-line effect/prefer-option-over-null -- a plain options record: `| undefined` lets a caller forward its own optional under exactOptionalPropertyTypes, as the sibling options do
   readonly onExplicitRefusal?: "fallthrough" | "notAcceptable" | undefined;
+  /**
+   * The JSON:API extension URIs the api supports (e.g. `Atomic.EXTENSION_URI`),
+   * exactly as `Middleware`'s `extensions` option. When given, a JSON:API
+   * instance whose `ext` parameter names a URI outside the list is not clean:
+   * a read with no clean instance left is `406` ({@link NOT_ACCEPTABLE}), a
+   * write is `415` ({@link UNSUPPORTED_MEDIA_TYPE}), per JSON:API §5.
+   *
+   * When omitted, `ext` URIs are not checked — any `ext` dispatches, as
+   * before — so pass the api's list (`[]` for an api with no extension) to
+   * get §5's behaviour (#566).
+   *
+   * @since 0.21.0
+   */
+  // oxlint-disable-next-line effect/prefer-option-over-null -- a plain options record: `| undefined` lets a caller forward its own optional under exactOptionalPropertyTypes, as the sibling options do
+  readonly extensions?: ReadonlyArray<string> | undefined;
 }
 
 /**
@@ -320,13 +335,29 @@ interface AcceptEntry {
 
 const ALLOWED_PARAMETERS: ReadonlySet<string> = new Set(["ext", "profile"]);
 
+// Whether a JSON:API instance's media-type parameters are allowed: only `ext`
+// and `profile`, and — when the host lists its extensions — every `ext` URI
+// among them, as `Middleware`'s §5 check reads them.
+const cleanParameters =
+  (extensions: Option.Option<ReadonlyArray<string>>) =>
+  (parameters: ReadonlyArray<readonly [name: string, value: string]>): boolean =>
+    Option.match(extensions, {
+      onNone: () => parameters.every(([name]) => ALLOWED_PARAMETERS.has(name)),
+      onSome: (supported) => parametersAreAcceptable(parameters, supported),
+    });
+
 /**
  * The entries of an `Accept` header. A malformed `q` is the default
  * weight (the client named the type; a malformed weight is not a refusal),
  * as in `Middleware`'s §5 check, so the same header gets the same verdict
- * under either deployment shape.
+ * under either deployment shape. Only a JSON:API instance can be unclean: the
+ * §5 parameter rule is JSON:API's, so another media type's parameters
+ * (`text/markdown;charset=utf-8`) never stop it winning (#566).
  */
-const acceptEntries = (header: string | null): ReadonlyArray<AcceptEntry> =>
+const acceptEntries = (
+  header: string | null,
+  clean: (parameters: ReadonlyArray<readonly [name: string, value: string]>) => boolean,
+): ReadonlyArray<AcceptEntry> =>
   (header ?? "")
     .split(",")
     .map((entry) => entry.trim())
@@ -335,7 +366,7 @@ const acceptEntries = (header: string | null): ReadonlyArray<AcceptEntry> =>
       const { base, parameters, weight } = parseMediaType(entry);
       return {
         base,
-        clean: parameters.every(([name]) => ALLOWED_PARAMETERS.has(name)),
+        clean: base !== MEDIA_TYPE || clean(parameters),
         weight: weight ?? 1,
       };
     });
@@ -440,6 +471,7 @@ export const make = (options: Options): Negotiator => {
   const fallback = options.fallback ?? "text/html";
   const alternates = options.alternates ?? [];
   const refuseExplicitly = options.onExplicitRefusal === "notAcceptable";
+  const clean = cleanParameters(Option.fromUndefinedOr(options.extensions));
   const patterns = groupsOf(options.api).flatMap((group) =>
     Object.values(group.endpoints).flatMap((endpoint) =>
       Arr.fromOption(routePattern(endpoint.path)),
@@ -453,7 +485,7 @@ export const make = (options: Options): Negotiator => {
 
   const negotiateRead = (request: Request): Verdict => {
     const pathname = new URL(request.url).pathname;
-    const entries = acceptEntries(request.headers.get("accept"));
+    const entries = acceptEntries(request.headers.get("accept"), clean);
     // Alternates are negotiated first: they apply to their own paths, an
     // orthogonal media type / path set from the JSON:API surface.
     for (const alternate of alternates) {
@@ -474,7 +506,7 @@ export const make = (options: Options): Negotiator => {
     if (header === null) return html;
     const { base, parameters } = parseMediaType(header.trim());
     if (base !== MEDIA_TYPE || !isApiPath(new URL(request.url).pathname)) return html;
-    if (!parameters.every(([name]) => ALLOWED_PARAMETERS.has(name))) {
+    if (!clean(parameters)) {
       return { ...html, error: UNSUPPORTED_MEDIA_TYPE };
     }
     return dispatch;
