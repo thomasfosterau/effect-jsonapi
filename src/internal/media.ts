@@ -149,3 +149,27 @@ export const parseMediaType = (entry: string): MediaRange => {
   }
   return { base: baseMediaType(first ?? ""), parameters, weight };
 };
+
+/**
+ * JSON:API §5: a JSON:API media type instance is acceptable when its only
+ * parameters are `ext` and `profile`, and every `ext` URI is supported.
+ * Unsupported profiles are ignored (never rejected), per the spec.
+ *
+ * @internal
+ */
+export const parametersAreAcceptable = (
+  parameters: ReadonlyArray<readonly [name: string, value: string]>,
+  extensions: ReadonlyArray<string>,
+): boolean => {
+  for (const [name, value] of parameters) {
+    if (name === "profile") continue;
+    if (name === "ext") {
+      const uris = value.split(" ").filter((uri) => uri !== "");
+      if (!uris.every((uri) => extensions.includes(uri))) return false;
+      continue;
+    }
+    // Any parameter other than ext / profile is unacceptable.
+    return false;
+  }
+  return true;
+};

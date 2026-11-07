@@ -115,7 +115,7 @@ import { pointer } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { declaredNames, declaresName } from "./internal/declaredQuery.js";
 import { indexErrorMeta } from "./internal/errorMeta.js";
-import { MEDIA_TYPE, parseMediaType } from "./internal/media.js";
+import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
 import { CLIENT_ID_UNSUPPORTED, refusedClientIdPointer } from "./internal/refusedClientId.js";
 import { conflictingType, isTypePath, ServedTypes } from "./internal/servedTypes.js";
 import { requestedFieldsets } from "./internal/linkage.js";
@@ -200,28 +200,6 @@ export interface NegotiationOptions {
    */
   readonly extensions?: ReadonlyArray<string>;
 }
-
-/**
- * JSON:API §5: a JSON:API media type instance is acceptable when its only
- * parameters are `ext` and `profile`, and every `ext` URI is supported.
- * Unsupported profiles are ignored (never rejected), per the spec.
- */
-const parametersAreAcceptable = (
-  parameters: ReadonlyArray<readonly [name: string, value: string]>,
-  extensions: ReadonlyArray<string>,
-): boolean => {
-  for (const [name, value] of parameters) {
-    if (name === "profile") continue;
-    if (name === "ext") {
-      const uris = value.split(" ").filter((uri) => uri !== "");
-      if (!uris.every((uri) => extensions.includes(uri))) return false;
-      continue;
-    }
-    // Any parameter other than ext / profile is unacceptable.
-    return false;
-  }
-  return true;
-};
 
 /**
  * JSON:API §5: the server MUST respond with 415 if the request `Content-Type`
