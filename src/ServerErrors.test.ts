@@ -441,9 +441,10 @@ const responseOf = (effect: Effect.Effect<unknown>) =>
     return {
       status: web.status,
       contentType: web.headers.get("content-type"),
-      body: yield* Effect.tryPromise(
-        () => web.json() as Promise<{ errors: ReadonlyArray<{ code?: string }> }>,
-      ).pipe(Effect.orDie),
+      body: yield* Effect.tryPromise({
+        try: () => web.json() as Promise<{ errors: ReadonlyArray<{ code?: string }> }>,
+        catch: (cause) => new Cause.UnknownError(cause),
+      }).pipe(Effect.orDie),
     };
   });
 

@@ -4059,9 +4059,7 @@ type RelationshipsMap = Readonly<Record<string, boolean | RelationshipConfig | u
 
 // A generated `getRelationship`'s `include` option: absent while it is off,
 // so the endpoint is exactly the one built without it.
-const includeOpt = (
-  include: IncludeArgument | undefined,
-): { readonly include?: IncludeArgument } =>
+const includeOpt = (include: IncludeArgument | undefined): { readonly include?: IncludeArgument } =>
   include === undefined || include === false ? {} : { include };
 
 // A generated `getRelationship`'s compound-document options. Each is off
