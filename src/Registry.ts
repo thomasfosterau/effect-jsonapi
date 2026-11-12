@@ -141,7 +141,7 @@ export interface Family<R = any> {
  */
 export interface ApiLike {
   readonly groups: {
-    readonly [id: string]: { readonly endpoints: { readonly [name: string]: unknown } };
+    readonly [id: string]: { readonly endpoints: R.ReadonlyRecord<string, unknown> };
   };
 }
 

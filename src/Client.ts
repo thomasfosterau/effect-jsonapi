@@ -827,10 +827,10 @@ export const failWithErrorResponse = <A, E, R>(
 export interface IncludedResource {
   readonly type: string;
   readonly id: string;
-  readonly attributes?: { readonly [key: string]: unknown } | undefined;
-  readonly relationships?: { readonly [key: string]: unknown } | undefined;
-  readonly links?: { readonly [key: string]: unknown } | undefined;
-  readonly meta?: { readonly [key: string]: unknown } | undefined;
+  readonly attributes?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly links?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
 }
 
 /**
@@ -841,8 +841,8 @@ export interface IncludedResource {
  * @category models
  */
 export interface DocumentMembers {
-  readonly meta?: { readonly [key: string]: unknown } | undefined;
-  readonly links?: { readonly [key: string]: unknown } | undefined;
+  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly links?: R.ReadonlyRecord<string, unknown> | undefined;
   readonly jsonapi?: JsonApiObject | undefined;
 }
 
@@ -888,10 +888,10 @@ export interface CollectionDocument<R, Included = IncludedResource> extends Docu
  */
 export const readTotalCount = (
   source:
-    | {
-        readonly meta?: { readonly [key: string]: unknown } | undefined;
-        readonly [member: string]: unknown;
-      }
+    | ({ readonly meta?: R.ReadonlyRecord<string, unknown> | undefined } & R.ReadonlyRecord<
+        string,
+        unknown
+      >)
     | undefined,
 ): number => {
   const totalCount = source?.meta?.["totalCount"];
@@ -1017,7 +1017,7 @@ export const indexIncluded = (
  * @category models
  */
 export interface LinkedResource {
-  readonly relationships?: { readonly [key: string]: unknown } | undefined;
+  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
 }
 
 /** The refs one relationship key carries: `[]` for absent, `null` or empty linkage. */

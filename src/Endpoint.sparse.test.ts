@@ -108,7 +108,7 @@ const wire = {
 } as const;
 
 // A wire resource object with only the named attributes.
-const only = <O extends { readonly attributes: Readonly<Record<string, unknown>> }>(
+const only = <O extends { readonly attributes: R.ReadonlyRecord<string, unknown> }>(
   object: O,
   ...names: ReadonlyArray<keyof O["attributes"] & string>
 ) => ({
@@ -121,8 +121,8 @@ const only = <O extends { readonly attributes: Readonly<Record<string, unknown>>
 // when it names none of them.
 const projected = <
   O extends {
-    readonly attributes: Readonly<Record<string, unknown>>;
-    readonly relationships?: Readonly<Record<string, unknown>>;
+    readonly attributes: R.ReadonlyRecord<string, unknown>;
+    readonly relationships?: R.ReadonlyRecord<string, unknown>;
   },
 >(
   object: O,
@@ -144,7 +144,7 @@ const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>
   [...endpoint.success][0] as Schema.Codec<unknown, unknown>;
 
 // A wire resource object or document, as a client receives it.
-type Wire = Readonly<Record<string, unknown>>;
+type Wire = R.ReadonlyRecord<string, unknown>;
 
 // Whether an endpoint's success document decodes `document`.
 const decodes = (endpoint: { readonly success: Iterable<Schema.Top> }, document: Wire) =>

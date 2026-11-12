@@ -5,6 +5,8 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as R from "effect/Record";
+import * as Types from "effect/Types";
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js";
 import * as Filter from "./Filter.js";
 import * as Query from "./Query.js";
@@ -763,9 +765,9 @@ describe("type-level guarantees", () => {
   });
 
   it("default meta is a free-form record", () => {
-    expectTypeOf<NonNullable<(typeof Person.Type)["meta"]>>().toEqualTypeOf<{
-      readonly [x: string]: unknown;
-    }>();
+    expectTypeOf<NonNullable<(typeof Person.Type)["meta"]>>().toEqualTypeOf<
+      R.ReadonlyRecord<string, unknown>
+    >();
   });
 });
 
@@ -2056,7 +2058,7 @@ describe("Resource.annotate / Resource.annotations", () => {
     expect(Schema.resolveAnnotations(twice)?.["acme/level"]).toBe(2);
     // the bag is a copy: mutating it cannot corrupt the definition
     const bag = annotations(twice);
-    (bag as Record<string, unknown>)["acme/level"] = 99;
+    (bag as Types.Mutable<R.ReadonlyRecord<string, unknown>>)["acme/level"] = 99;
     expect(annotations(twice)["acme/level"]).toBe(2);
   });
 

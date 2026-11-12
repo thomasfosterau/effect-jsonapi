@@ -619,9 +619,9 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
  */
 export interface Payload {
   readonly type: string;
-  readonly attributes?: Readonly<Record<string, unknown>> | undefined;
-  readonly relationships?: Readonly<Record<string, unknown>> | undefined;
-  readonly meta?: Readonly<Record<string, unknown>> | undefined;
+  readonly attributes?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
 }
 
 /** @internal */

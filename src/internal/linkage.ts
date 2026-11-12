@@ -49,7 +49,7 @@ export const reachable = (
 };
 
 /** @internal */
-export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> => P.isObject(u);
+export const isRecord = (u: unknown): u is R.ReadonlyRecord<string, unknown> => P.isObject(u);
 
 /**
  * Whether a JSON value is an array.
@@ -78,7 +78,7 @@ export const idKey = (type: string, id: string): string => stringify(["id", type
  *
  * @internal
  */
-export const identity = (resource: Readonly<Record<string, unknown>>): string | undefined => {
+export const identity = (resource: R.ReadonlyRecord<string, unknown>): string | undefined => {
   const type = resource["type"];
   if (!P.isString(type)) return undefined;
   const id = resource["id"];
@@ -147,7 +147,7 @@ export const seeds = <A>(
  *
  * @internal
  */
-export const linkageOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArray<string> => {
+export const linkageOf = (resource: R.ReadonlyRecord<string, unknown>): ReadonlyArray<string> => {
   const relationships = resource["relationships"];
   if (!isRecord(relationships)) return [];
   const out: Array<string> = [];

@@ -419,7 +419,7 @@ type Declare<
 // sugar would stamp again (`never` makes the `schema` argument unassignable).
 type NotAlready<S, Key extends string, Given> = [Given] extends [false]
   ? unknown
-  : S extends { readonly [K in Key]: unknown }
+  : S extends R.ReadonlyRecord<Key, unknown>
     ? never
     : unknown;
 

@@ -13,6 +13,7 @@
  * assertions.
  */
 import * as Schema from "effect/Schema";
+import * as R from "effect/Record";
 import {
   Assemble,
   Document,
@@ -43,7 +44,7 @@ export const declared =
 // A relationship without the option keeps the open record.
 export const open =
   assertTrue<
-    Equals<Relationships["chair"]["meta"], { readonly [x: string]: unknown } | undefined>
+    Equals<Relationships["chair"]["meta"], R.ReadonlyRecord<string, unknown> | undefined>
   >();
 
 // @ts-expect-error a declared meta is not the open record
@@ -66,7 +67,7 @@ export const narrowedMany =
 export const narrowedPaginated =
   assertTrue<Equals<Wired["history"]["meta"], { readonly totalCount: number } | undefined>>();
 export const untouchedToOne =
-  assertTrue<Equals<Wired["chair"]["meta"], { readonly [x: string]: unknown } | undefined>>();
+  assertTrue<Equals<Wired["chair"]["meta"], R.ReadonlyRecord<string, unknown> | undefined>>();
 
 // What `Assemble.resource` answers over the resource's own Type fits the flat
 // `get` document's primary data — the relationship metas included — with no

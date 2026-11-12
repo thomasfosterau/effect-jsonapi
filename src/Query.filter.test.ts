@@ -10,6 +10,8 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as R from "effect/Record";
+import * as Types from "effect/Types";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -61,10 +63,12 @@ const inherited = ["constructor", "__proto__", "toString", "hasOwnProperty", "va
 const fields = filterable(Article);
 const codec = Query.Filter(Article);
 type Ast = typeof codec.Type;
-const decode = (record: Record<string, unknown>): Ast => Schema.decodeUnknownSync(codec)(record);
+const decode = (record: R.ReadonlyRecord<string, unknown>): Ast =>
+  Schema.decodeUnknownSync(codec)(record);
 const encode = (ast: Ast): Record<string, string> => Schema.encodeSync(codec)(ast);
-const canonical = (record: Record<string, unknown>): ReadonlyArray<readonly [string, string]> =>
-  Object.entries(encode(decode(record)));
+const canonical = (
+  record: R.ReadonlyRecord<string, unknown>,
+): ReadonlyArray<readonly [string, string]> => Object.entries(encode(decode(record)));
 
 // The first segment of a Standard Schema issue path, as text: a segment is a
 // property key or a `{ key }` object.
@@ -77,7 +81,7 @@ const firstKey = (
 
 // The offending keys of a failed decode, in order, with their messages.
 const failures = (
-  record: Record<string, unknown>,
+  record: R.ReadonlyRecord<string, unknown>,
 ): ReadonlyArray<{ readonly key: string; readonly message: string }> => {
   const result = Schema.decodeUnknownResult(codec)(record);
   assert(Result.isFailure(result), "expected the decode to fail");
@@ -1074,7 +1078,7 @@ describe("Query.canonical with filter: true", () => {
   });
   type Decoded = typeof query.Type;
   const decodeQuery = Schema.decodeUnknownSync(query as Schema.Codec<any, any>) as (
-    input: Record<string, unknown>,
+    input: R.ReadonlyRecord<string, unknown>,
   ) => Decoded;
   const canonical = Query.canonical(query);
   const parse = (s: string): Record<string, string> => Object.fromEntries(new URLSearchParams(s));
@@ -1106,7 +1110,7 @@ describe("Query.canonical with filter: true", () => {
   });
 
   it("is byte-identical for the two-condition filter written three ways, in any key order", () => {
-    const spellings: ReadonlyArray<Record<string, unknown>> = [
+    const spellings: ReadonlyArray<R.ReadonlyRecord<string, unknown>> = [
       { "filter[status]": "open", "filter[age][gt]": "18", sort: "title", include: "author" },
       { include: ["author"], "filter[age][gt]": "18", sort: "title", "filter[status][eq]": "open" },
       {
@@ -1144,10 +1148,10 @@ describe("Query.canonical with filter: true", () => {
     // `page` are never empty objects (an empty group has no wire form and
     // decodes as absent).
     const decodedQuery = (): Decoded => {
-      const q: Record<string, unknown> = {};
+      const q: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
       if (random() < 0.7) q.include = subset(["author", "editor", "comments"] as const);
       if (random() < 0.7) {
-        const fields: Record<string, unknown> = {};
+        const fields: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
         if (random() < 0.7) fields.articles = subset(attributes);
         if (random() < 0.5 || Arr.isReadonlyArrayEmpty(Object.keys(fields)))
           fields.people = subset(["name"] as const);
