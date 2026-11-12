@@ -1,5 +1,5 @@
 import * as DateTime from "effect/DateTime";
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Brand from "effect/Brand";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -395,7 +395,8 @@ describe("Resource relationships", () => {
     });
     expect(decoded.relationships?.posts.links.related).toBe("/authors/7/posts");
     expect(decoded.relationships?.posts.meta?.count).toBe(42);
-    expectTypeOf(decoded.relationships!.posts).not.toHaveProperty("data");
+    assert(decoded.relationships !== undefined);
+    expectTypeOf(decoded.relationships.posts).not.toHaveProperty("data");
   });
 
   it("rejects relationship identifiers of the wrong type", () => {

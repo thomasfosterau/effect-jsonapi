@@ -168,8 +168,9 @@ describe("github example: fetching", () => {
     // without discriminating on `type`
     const owner = document.included?.[0];
     expect(owner?.attributes.login).toBe("octocat");
-    expectTypeOf(owner!.attributes.login).toEqualTypeOf<string>();
-    expectTypeOf(owner!.type).toEqualTypeOf<"users">();
+    assert(owner !== undefined);
+    expectTypeOf(owner.attributes.login).toEqualTypeOf<string>();
+    expectTypeOf(owner.type).toEqualTypeOf<"users">();
   });
 
   it("fetches a pull request with its reviewers included", async () => {

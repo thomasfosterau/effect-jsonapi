@@ -22,6 +22,7 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
@@ -297,6 +298,19 @@ const store = {
   pulls: new Map<string, PullRequest>([[readmePull.id, readmePull]]),
 };
 
+/**
+ * A stored resource's relationships. Every record in the store is built with
+ * them, so an absent member is a defect, and reading it fails right here
+ * rather than at a later `undefined` access.
+ */
+const relationshipsOf = <T extends { readonly relationships?: object }>(
+  resource: T,
+): NonNullable<T["relationships"]> =>
+  Option.getOrThrowWith(
+    Option.fromNullishOr(resource.relationships),
+    () => new Cause.NoSuchElementError(),
+  );
+
 const loadUser = (id: string): Effect.Effect<User, UserNotFound> => {
   const user = store.users.get(id);
   return user === undefined ? Effect.fail(new UserNotFound({ id })) : Effect.succeed(user);
@@ -364,6 +378,10 @@ const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> =
 
 // Resolve the resources referenced by the requested include paths.
 
+// The stored user a linkage names, if the store holds one.
+const usersFor = (ref: Option.Option<{ readonly id: string }>): Array<User> =>
+  Arr.fromOption(Option.flatMap(ref, ({ id }) => Option.fromNullishOr(store.users.get(id))));
+
 const resolveRepositoryIncluded = (
   repository: Repository,
   include: ReadonlyArray<string> | undefined,
@@ -371,7 +389,7 @@ const resolveRepositoryIncluded = (
   const included: Array<User> = [];
   if (include?.includes("owner")) {
     const owner = repository.relationships?.owner.data;
-    if (owner !== undefined && store.users.has(owner.id)) included.push(store.users.get(owner.id)!);
+    included.push(...usersFor(Option.fromNullishOr(owner)));
   }
   return included;
 };
@@ -395,7 +413,7 @@ const resolveIssueIncluded = (
   for (const key of ["author", "assignee"] as const) {
     if (include.includes(key)) {
       const ref = issue.relationships?.[key].data;
-      if (ref != null && store.users.has(ref.id)) included.push(store.users.get(ref.id)!);
+      included.push(...usersFor(Option.fromNullishOr(ref)));
     }
   }
   if (include.includes("labels")) {
@@ -425,7 +443,7 @@ const resolvePullIncluded = (
   }
   if (include.includes("author")) {
     const ref = pull.relationships?.author.data;
-    if (ref !== undefined && store.users.has(ref.id)) included.push(store.users.get(ref.id)!);
+    included.push(...usersFor(Option.fromNullishOr(ref)));
   }
   if (include.includes("reviewers")) {
     for (const ref of pull.relationships?.reviewers.data ?? []) {
@@ -751,7 +769,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
             ...repository,
             attributes: patchAttributes(repository.attributes, payload.data.attributes),
             relationships: {
-              owner: payload.data.relationships?.owner ?? repository.relationships!.owner,
+              owner: payload.data.relationships?.owner ?? relationshipsOf(repository).owner,
             },
           });
           store.repositories.set(updated.id, updated);
@@ -773,7 +791,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
     .handle("owner", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
-          const owner = store.users.get(repository.relationships!.owner.data.id) ?? null;
+          const owner = store.users.get(relationshipsOf(repository).owner.data.id) ?? null;
           return Handlers.data(owner, {
             self: Handlers.relatedLink("repositories", repository.id, "owner"),
             jsonapi: Document.v1_1,
@@ -870,7 +888,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
         // Resources) and leaves the issue unchanged.
         Effect.tap(() => requireLabels(payload.data.relationships?.labels?.data ?? [])),
         Effect.map((issue) => {
-          const relationships = issue.relationships!;
+          const relationships = relationshipsOf(issue);
           const updated = Issue.make({
             ...issue,
             attributes: patchAttributes(issue.attributes, payload.data.attributes),
@@ -901,7 +919,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
                 ? undefined
                 : query.include.includes("author")
                   ? page.flatMap((comment) => {
-                      const author = store.users.get(comment.relationships!.author.data.id);
+                      const author = store.users.get(relationshipsOf(comment).author.data.id);
                       return author === undefined ? [] : [author];
                     })
                   : [],
@@ -954,7 +972,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           }
           const updated = Issue.make({
             ...issue,
-            relationships: { ...issue.relationships!, assignee: { data: payload.data } },
+            relationships: { ...relationshipsOf(issue), assignee: { data: payload.data } },
           });
           store.issues.set(updated.id, updated);
           return Effect.succeed(
@@ -973,7 +991,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
         Effect.map((issue) => {
           const updated = Issue.make({
             ...issue,
-            relationships: { ...issue.relationships!, labels: { data: payload.data } },
+            relationships: { ...relationshipsOf(issue), labels: { data: payload.data } },
           });
           store.issues.set(updated.id, updated);
           return Handlers.linkage(payload.data, {
@@ -996,7 +1014,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           ];
           const updated = Issue.make({
             ...issue,
-            relationships: { ...issue.relationships!, labels: { data: added } },
+            relationships: { ...relationshipsOf(issue), labels: { data: added } },
           });
           store.issues.set(updated.id, updated);
           return Handlers.linkage(added, {
@@ -1016,7 +1034,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
           );
           const updated = Issue.make({
             ...issue,
-            relationships: { ...issue.relationships!, labels: { data: remaining } },
+            relationships: { ...relationshipsOf(issue), labels: { data: remaining } },
           });
           store.issues.set(updated.id, updated);
         }),

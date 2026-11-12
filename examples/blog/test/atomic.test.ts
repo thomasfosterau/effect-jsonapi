@@ -92,7 +92,9 @@ describe("atomic operations: creating with lids", () => {
 
         // the paginated comments relationship is only reachable through its
         // relationship endpoint — verify the linkage landed there
-        const articleId = document["atomic:results"][0].data!.id;
+        const articleIdData = document["atomic:results"][0].data;
+        assert.exists(articleIdData);
+        const articleId = articleIdData.id;
         const linkage = yield* client.articles.commentsRelationship({
           params: { id: Article.Id.make(articleId) },
           query: {},
@@ -141,7 +143,9 @@ describe("atomic operations: creating with lids", () => {
           ),
         });
 
-        const id = created["atomic:results"][0].data!.id;
+        const idData = created["atomic:results"][0].data;
+        assert.exists(idData);
+        const id = idData.id;
         return yield* client.articles.get({ params: { id: Article.Id.make(id) }, query: {} });
       }),
     );
@@ -165,7 +169,9 @@ describe("atomic operations: updating and removing", () => {
             }),
           ),
         });
-        const doomedId = created["atomic:results"][0].data!.id;
+        const doomedIdData = created["atomic:results"][0].data;
+        assert.exists(doomedIdData);
+        const doomedId = doomedIdData.id;
 
         return yield* client.operations.operations({
           payload: Atomic.request(
@@ -273,7 +279,9 @@ describe("atomic operations: relationship operations", () => {
           ),
         });
 
-        const commentId = created["atomic:results"][0].data!.id;
+        const commentIdData = created["atomic:results"][0].data;
+        assert.exists(commentIdData);
+        const commentId = commentIdData.id;
         const afterAdd = yield* client.articles.commentsRelationship({
           params: { id: sampleArticle.id },
           query: {},

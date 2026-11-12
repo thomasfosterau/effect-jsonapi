@@ -21,11 +21,13 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Iterable from "effect/Iterable";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ord from "effect/Order";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
@@ -397,6 +399,19 @@ const store = {
   ]),
 };
 
+/**
+ * A stored resource's relationships. Every record in the store is built with
+ * them, so an absent member is a defect, and reading it fails right here
+ * rather than at a later `undefined` access.
+ */
+const relationshipsOf = <T extends { readonly relationships?: object }>(
+  resource: T,
+): NonNullable<T["relationships"]> =>
+  Option.getOrThrowWith(
+    Option.fromNullishOr(resource.relationships),
+    () => new Cause.NoSuchElementError(),
+  );
+
 const loadCategory = (id: string): Effect.Effect<Category, CategoryNotFound> => {
   const category = store.categories.get(id);
   return category === undefined
@@ -739,14 +754,14 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
       const category = query.filter?.category;
       if (category !== undefined) {
         products = products.filter(
-          (product) => product.relationships!.category.data.id === category,
+          (product) => relationshipsOf(product).category.data.id === category,
         );
       }
       // filter[supplier]=<supplier id> — a supplier's products
       const supplier = query.filter?.supplier;
       if (supplier !== undefined) {
         products = products.filter(
-          (product) => product.relationships!.supplier.data.id === supplier,
+          (product) => relationshipsOf(product).supplier.data.id === supplier,
         );
       }
       // filter[discontinued]=true|false
@@ -810,8 +825,8 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
             ...product,
             attributes: patchAttributes(product.attributes, payload.data.attributes),
             relationships: {
-              category: payload.data.relationships?.category ?? product.relationships!.category,
-              supplier: payload.data.relationships?.supplier ?? product.relationships!.supplier,
+              category: payload.data.relationships?.category ?? relationshipsOf(product).category,
+              supplier: payload.data.relationships?.supplier ?? relationshipsOf(product).supplier,
             },
           });
           store.products.set(updated.id, updated);
@@ -833,7 +848,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
     .handle("supplier", ({ params }) =>
       loadProduct(params.id).pipe(
         Effect.map((product) => {
-          const supplier = store.suppliers.get(product.relationships!.supplier.data.id) ?? null;
+          const supplier = store.suppliers.get(relationshipsOf(product).supplier.data.id) ?? null;
           return Handlers.data(supplier, {
             self: Handlers.relatedLink("products", product.id, "supplier"),
             jsonapi: Document.v1_1,
@@ -849,7 +864,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
             Effect.map(() => {
               const updated = Product.make({
                 ...product,
-                relationships: { ...product.relationships!, category: { data: payload.data } },
+                relationships: { ...relationshipsOf(product), category: { data: payload.data } },
               });
               store.products.set(updated.id, updated);
               return Handlers.linkage(payload.data, {
@@ -869,7 +884,7 @@ export const ProductsLive = HttpApiBuilder.group(Api, "products", (handlers) =>
             Effect.map(() => {
               const updated = Product.make({
                 ...product,
-                relationships: { ...product.relationships!, supplier: { data: payload.data } },
+                relationships: { ...relationshipsOf(product), supplier: { data: payload.data } },
               });
               store.products.set(updated.id, updated);
               return Handlers.linkage(payload.data, {
@@ -941,7 +956,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
         Effect.map((employee) => {
           const updated = Employee.make({
             ...employee,
-            relationships: { ...employee.relationships!, territories: { data: payload.data } },
+            relationships: { ...relationshipsOf(employee), territories: { data: payload.data } },
           });
           store.employees.set(updated.id, updated);
           return Handlers.linkage(payload.data, {
@@ -960,7 +975,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
           const added = [...existing, ...payload.data.filter((ref) => !known.has(ref.id))];
           const updated = Employee.make({
             ...employee,
-            relationships: { ...employee.relationships!, territories: { data: added } },
+            relationships: { ...relationshipsOf(employee), territories: { data: added } },
           });
           store.employees.set(updated.id, updated);
           return Handlers.linkage(added, {
@@ -980,7 +995,7 @@ export const EmployeesLive = HttpApiBuilder.group(Api, "employees", (handlers) =
           );
           const updated = Employee.make({
             ...employee,
-            relationships: { ...employee.relationships!, territories: { data: remaining } },
+            relationships: { ...relationshipsOf(employee), territories: { data: remaining } },
           });
           store.employees.set(updated.id, updated);
         }),
@@ -1019,12 +1034,12 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
       // filter[customer]=<customer id> — a customer's orders
       const customer = query.filter?.customer;
       if (customer !== undefined) {
-        orders = orders.filter((order) => order.relationships!.customer.data.id === customer);
+        orders = orders.filter((order) => relationshipsOf(order).customer.data.id === customer);
       }
       // filter[employee]=<employee id> — an employee's orders
       const employee = query.filter?.employee;
       if (employee !== undefined) {
-        orders = orders.filter((order) => order.relationships!.employee.data.id === employee);
+        orders = orders.filter((order) => relationshipsOf(order).employee.data.id === employee);
       }
       // filter[shipped]=true|false — has the order shipped?
       const shipped = query.filter?.shipped;
@@ -1085,7 +1100,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
     .handle("update", ({ params, payload }) =>
       loadOrder(params.id).pipe(
         Effect.map((order) => {
-          const relationships = order.relationships!;
+          const relationships = relationshipsOf(order);
           const updated = Order.make({
             ...order,
             attributes: patchAttributes(order.attributes, payload.data.attributes),
@@ -1141,7 +1156,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
     .handle("shipperRelationship", ({ params }) =>
       loadOrder(params.id).pipe(
         Effect.map((order) =>
-          Handlers.linkage(order.relationships!.shipper.data, {
+          Handlers.linkage(relationshipsOf(order).shipper.data, {
             self: Handlers.relationshipLink("orders", order.id, "shipper"),
             related: Handlers.relatedLink("orders", order.id, "shipper"),
             jsonapi: Document.v1_1,
@@ -1159,7 +1174,7 @@ export const OrdersLive = HttpApiBuilder.group(Api, "orders", (handlers) =>
             Effect.map(() => {
               const updated = Order.make({
                 ...order,
-                relationships: { ...order.relationships!, shipper: { data: payload.data } },
+                relationships: { ...relationshipsOf(order), shipper: { data: payload.data } },
               });
               store.orders.set(updated.id, updated);
               return Handlers.linkage(payload.data, {

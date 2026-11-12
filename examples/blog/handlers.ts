@@ -22,14 +22,16 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import * as Schema from "effect/Schema";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
@@ -139,6 +141,19 @@ export const discardArticle = (id: string): Effect.Effect<void> =>
     store.articleComments.delete(id);
   });
 
+/**
+ * A stored resource's relationships. Every record in the store is built with
+ * them, so an absent member is a defect, and reading it fails right here
+ * rather than at a later `undefined` access.
+ */
+const relationshipsOf = <T extends { readonly relationships?: object }>(
+  resource: T,
+): NonNullable<T["relationships"]> =>
+  Option.getOrThrowWith(
+    Option.fromNullishOr(resource.relationships),
+    () => new Cause.NoSuchElementError(),
+  );
+
 const loadArticle = (id: string): Effect.Effect<Article, ArticleNotFound> => {
   const article = store.articles.get(id);
   return article === undefined ? Effect.fail(new ArticleNotFound({ id })) : Effect.succeed(article);
@@ -163,8 +178,8 @@ const resolveIncluded = (article: Article, include: ReadonlyArray<string> | unde
   const included: Array<Person | Tag> = [];
   if (include?.includes("author")) {
     const author = article.relationships?.author.data;
-    if (author !== undefined && store.people.has(author.id))
-      included.push(store.people.get(author.id)!);
+    const person = author === undefined ? undefined : store.people.get(author.id);
+    if (person !== undefined) included.push(person);
   }
   if (include?.includes("tags")) {
     for (const identifier of article.relationships?.tags.data ?? []) {
@@ -297,7 +312,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("update", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          const relationships = article.relationships!;
+          const relationships = relationshipsOf(article);
           const updated = Article.make({
             ...article,
             attributes: patchAttributes(article.attributes, payload.data.attributes),
@@ -327,7 +342,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("author", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          const author = store.people.get(article.relationships!.author.data.id) ?? null;
+          const author = store.people.get(relationshipsOf(article).author.data.id) ?? null;
           return Handlers.data(author, {
             self: Handlers.relatedLink("articles", article.id, "author"),
             jsonapi: Document.v1_1,
@@ -415,7 +430,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
         Effect.map((article) => {
           const updated = Article.make({
             ...article,
-            relationships: { ...article.relationships!, author: { data: payload.data } },
+            relationships: { ...relationshipsOf(article), author: { data: payload.data } },
           });
           store.articles.set(updated.id, updated);
           return Handlers.linkage(payload.data, {
@@ -641,7 +656,7 @@ const applyOperation = (
         Article.make({
           ...article,
           relationships: {
-            ...article.relationships!,
+            ...relationshipsOf(article),
             author: {
               data: requireAuthor(lids.identifier(Person, op.data), `${at}/data`),
             },
@@ -669,7 +684,7 @@ const applyOperation = (
         article.id,
         Article.make({
           ...article,
-          relationships: { ...article.relationships!, tags: { data: next } },
+          relationships: { ...relationshipsOf(article), tags: { data: next } },
         }),
       );
       return Atomic.emptyResult;
@@ -763,7 +778,7 @@ const applyOperation = (
           const updated = Article.make({
             ...article,
             attributes: patchAttributes(article.attributes, update.data.attributes),
-            relationships: { ...article.relationships!, ...resolved },
+            relationships: { ...relationshipsOf(article), ...resolved },
           });
           draft.articles.set(updated.id, updated);
           return { data: updated };
@@ -809,7 +824,7 @@ const applyOperation = (
           const updated = Comment.make({
             ...comment,
             attributes: patchAttributes(comment.attributes, update.data.attributes),
-            relationships: { ...comment.relationships!, ...resolved },
+            relationships: { ...relationshipsOf(comment), ...resolved },
           });
           draft.comments.set(updated.id, updated);
           return { data: updated };

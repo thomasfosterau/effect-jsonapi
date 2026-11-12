@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -642,8 +642,9 @@ describe("the per-resource transform pass", () => {
     expect(document.data.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     // the assertion that matters: one type, one shape
+    assert(document.included !== undefined);
     expect(Object.keys(document.data.attributes)).toEqual(
-      Object.keys(document.included![0].attributes),
+      Object.keys(document.included[0].attributes),
     );
     // …and the relationship that carried the linkage went with the
     // fieldset, which exempts the member it linked (#494)
@@ -657,8 +658,9 @@ describe("the per-resource transform pass", () => {
     });
     expect(document.data[0]?.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
+    assert(document.included !== undefined);
     expect(Object.keys(document.data[0].attributes)).toEqual(
-      Object.keys(document.included![0].attributes),
+      Object.keys(document.included[0].attributes),
     );
   });
 

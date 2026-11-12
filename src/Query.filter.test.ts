@@ -1201,8 +1201,8 @@ describe("Query.canonical with filter: true", () => {
         queries.some(
           (q) =>
             Object.keys(q).length === 5 &&
-            Arr.isReadonlyArrayNonEmpty(q.include!) &&
-            Arr.isReadonlyArrayNonEmpty(q.sort!),
+            Arr.isReadonlyArrayNonEmpty(q.include ?? []) &&
+            Arr.isReadonlyArrayNonEmpty(q.sort ?? []),
         ),
       ).toBe(true);
     });
