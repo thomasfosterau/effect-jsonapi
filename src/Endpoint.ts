@@ -129,6 +129,7 @@ import type {
 } from "./Resource.js";
 import { directTargets } from "./Resource.js";
 import { definedMember } from "./internal/members.js";
+import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
 // Error classes
@@ -2112,7 +2113,7 @@ const relationshipIncludePaths = (
   if (include !== true && include.paths !== undefined) {
     const outside = include.paths.filter((path) => !rootedAt(name)(path));
     if (Arr.isReadonlyArrayNonEmpty(outside)) {
-      throw new Error(
+      throw declarationError(
         `Endpoint.getRelationship: include path(s) ${outside.map((path) => `"${path}"`).join(", ")} ` +
           `are not rooted at the relationship "${name}" of "${base.type}"`,
       );
@@ -2181,7 +2182,7 @@ const capitalize = (value: string): string => value.charAt(0).toUpperCase() + va
 const descriptorFor = (resource: Any, name: string): Relationship.Descriptor => {
   const descriptor = (resource.relationships as Record<string, Relationship.Descriptor>)[name];
   if (descriptor === undefined) {
-    throw new Error(`Unknown relationship "${name}" on resource "${resource.type}"`);
+    throw declarationError(`Unknown relationship "${name}" on resource "${resource.type}"`);
   }
   return descriptor;
 };

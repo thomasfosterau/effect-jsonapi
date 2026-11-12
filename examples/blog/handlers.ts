@@ -22,12 +22,14 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";
@@ -523,6 +525,12 @@ interface Draft {
   readonly articleComments: Map<string, Array<string>>;
 }
 
+/** A malformed or dangling atomic operation, thrown inside the draft and converted to `OperationFailed`. */
+class InvalidOperation extends Schema.TaggedError<
+  InvalidOperation,
+  { readonly brand: unique symbol }
+>()("InvalidOperation", { message: Schema.String }) {}
+
 let atomicIdCounter = 0;
 const freshId = (): string => `atomic-${++atomicIdCounter}`;
 
@@ -540,7 +548,7 @@ const targetId = (
     if (id !== undefined) return id;
     throw new Lid.UnknownLidError(target.lid);
   }
-  throw new Error("operation does not identify a target resource");
+  throw new InvalidOperation({ message: "operation does not identify a target resource" });
 };
 
 const getArticle = (
@@ -550,7 +558,7 @@ const getArticle = (
 ): Article => {
   const id = targetId(lids, target);
   const article = draft.articles.get(id);
-  if (article === undefined) throw new Error(`article "${id}" not found`);
+  if (article === undefined) throw new InvalidOperation({ message: `article "${id}" not found` });
   return article;
 };
 
@@ -561,7 +569,7 @@ const getComment = (
 ): Comment => {
   const id = targetId(lids, target);
   const comment = draft.comments.get(id);
-  if (comment === undefined) throw new Error(`comment "${id}" not found`);
+  if (comment === undefined) throw new InvalidOperation({ message: `comment "${id}" not found` });
   return comment;
 };
 
@@ -846,7 +854,7 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
                 ? error
                 : new OperationFailed({
                     operation: index,
-                    reason: error instanceof Error ? error.message : String(error),
+                    reason: P.isError(error) ? error.message : String(error),
                   }),
           }),
         { concurrency: 1 },

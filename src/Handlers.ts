@@ -60,6 +60,7 @@ import { assign } from "./internal/define.js";
 import { isLinkageData, reachable, seeds } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
 import { definedMember } from "./internal/members.js";
+import { declarationError } from "./internal/errors.js";
 
 /**
  * The top-level `jsonapi` object *value* (`{ version?, ext?, profile?, meta? }`).
@@ -898,7 +899,7 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
     );
     Arr.forEach(mapped, (resource) => {
       if (!HashSet.has(linked, key(resource))) {
-        throw new Error(
+        throw declarationError(
           `JSON:API full linkage violation: included resource "${resource.type}:${resource.id}" ` +
             `is not reachable from the primary data through resource linkage ` +
             `(https://jsonapi.org/format/1.1/#document-compound-documents)`,
@@ -1413,7 +1414,7 @@ const buildLinks = (options: {
     options.self !== undefined ? { self: options.self, ...options.links } : options.links;
   if (options.query === undefined) return links;
   if (links?.self === undefined) {
-    throw new Error(
+    throw declarationError(
       "Handlers.collection: `query` needs a self link to be appended to — pass `self` or `links.self`",
     );
   }

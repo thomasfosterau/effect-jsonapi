@@ -68,6 +68,7 @@ import * as Relationship from "./Relationship.js";
 import type { Relationships, RelationshipSchemas } from "./Relationship.js";
 import * as Sort from "./Sort.js";
 import { render } from "./internal/json.js";
+import { declarationError } from "./internal/errors.js";
 
 // The relationship descriptor types (`Descriptor`, `Relationships`,
 // `RelationshipSchemas`) are part of the public API under the `Relationship`
@@ -442,7 +443,7 @@ const declare = (
   const filter = options?.filter;
   if (filter !== undefined && filter !== false) {
     if (annotationAt(schema.ast, Filter.AnnotationId, isFilterAnnotation).kind !== "absent") {
-      throw new Error(
+      throw declarationError(
         "Resource.attribute: the schema is already Filter.able; drop the `filter` option or the pipe, not both",
       );
     }
@@ -451,13 +452,13 @@ const declare = (
         ? Filter.able(filter)(declared)
         : Filter.able(filter, { literal: options.filterLiteral })(declared);
   } else if (options?.filterLiteral !== undefined) {
-    throw new Error(
+    throw declarationError(
       "Resource.attribute: `filterLiteral` given without `filter`; declare the operators the literal is for",
     );
   }
   if (options?.sort === true) {
     if (annotationAt(schema.ast, Sort.AnnotationId, isSortAnnotation).kind !== "absent") {
-      throw new Error(
+      throw declarationError(
         "Resource.attribute: the schema is already Sort.able; drop the `sort` option or the pipe, not both",
       );
     }
@@ -2409,7 +2410,7 @@ const deriveFilterLiteral = (
   const base = nonNullableBase(schema);
   const kind = scalarKindOf(SchemaAST.toEncoded(base.ast));
   if (kind === undefined) {
-    throw new Error(
+    throw declarationError(
       `Resource.make("${type}"): attribute "${key}" is declared filterable but its encoded form is not a JSON scalar ` +
         "(string, number, boolean, or Schema.NullOr of one); pass `filterLiteral` to supply the literal codec explicitly",
     );
@@ -2515,7 +2516,7 @@ const sortableKeys = (type: string, fields: Schema.Struct.Fields): ReadonlyArray
     const declared = declarationOf(field as Schema.Top, Sort.AnnotationId, isSortAnnotation);
     if (declared.kind === "absent") return;
     if (declared.kind === "malformed") {
-      throw new Error(
+      throw declarationError(
         `Resource.make("${type}"): attribute "${key}" carries a malformed sort declaration under ` +
           `"${Sort.AnnotationId}"; declare it with Sort.able`,
       );
@@ -2544,7 +2545,7 @@ const filterDeclarationOf = (
 ): Option.Option<Filter.Annotation> => {
   const declared = declarationOf(schema, Filter.AnnotationId, isFilterAnnotation);
   if (declared.kind === "malformed") {
-    throw new Error(
+    throw declarationError(
       `Resource.make("${type}"): ${subject} carries a malformed filter declaration under ` +
         `"${Filter.AnnotationId}"; declare it with Filter.able`,
     );
@@ -2771,7 +2772,7 @@ const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void =
     const descriptor = descriptorOf(field as Schema.Top);
     if (descriptor === undefined || descriptor.resource !== false) return;
     if (descriptor.create === false && descriptor.update === false) {
-      throw new Error(
+      throw declarationError(
         `Resource.make("${type}"): attribute "${key}" declares resource: false with create: false and update: false, ` +
           "so it would appear nowhere; keep a create or update projection, or drop the attribute",
       );
@@ -2779,13 +2780,13 @@ const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void =
     if (
       declarationOf(field as Schema.Top, Filter.AnnotationId, isFilterAnnotation).kind !== "absent"
     ) {
-      throw new Error(
+      throw declarationError(
         `Resource.make("${type}"): attribute "${key}" is input-only (resource: false) but declared filterable; ` +
           "an attribute absent from the resource object cannot be filtered on",
       );
     }
     if (declarationOf(field as Schema.Top, Sort.AnnotationId, isSortAnnotation).kind !== "absent") {
-      throw new Error(
+      throw declarationError(
         `Resource.make("${type}"): attribute "${key}" is input-only (resource: false) but declared sortable; ` +
           "an attribute absent from the resource object cannot be sorted on",
       );
@@ -2823,7 +2824,7 @@ const validateFieldNames = (
 ): void => {
   Arr.forEach(Object.keys(attributes), (key) => {
     if (reservedFieldNames.has(key)) {
-      throw new Error(
+      throw declarationError(
         `${context}: attribute "${key}" uses a name JSON:API reserves; ` +
           'a resource can not have an attribute or relationship named "type" or "id"',
       );
@@ -2831,13 +2832,13 @@ const validateFieldNames = (
   });
   Arr.forEach(Object.keys(relationships), (key) => {
     if (reservedFieldNames.has(key)) {
-      throw new Error(
+      throw declarationError(
         `${context}: relationship "${key}" uses a name JSON:API reserves; ` +
           'a resource can not have an attribute or relationship named "type" or "id"',
       );
     }
     if (Object.hasOwn(attributes, key)) {
-      throw new Error(
+      throw declarationError(
         `${context}: "${key}" is declared as both an attribute and a relationship; ` +
           "JSON:API fields share one namespace, so rename one of them",
       );
@@ -2860,14 +2861,14 @@ const validateStorageKeys = (
     if (!Relationship.isToOne(descriptor) || descriptor.key === undefined) return;
     const key = descriptor.key;
     if (Object.hasOwn(attributes, key)) {
-      throw new Error(
+      throw declarationError(
         `${context}: relationship "${name}" declares storage key "${key}", which is also an attribute; ` +
           "a storage key names the stored field that holds the related id, so it can not be an attribute",
       );
     }
     const other = claimed.get(key);
     if (other !== undefined) {
-      throw new Error(
+      throw declarationError(
         `${context}: relationships "${other}" and "${name}" both declare storage key "${key}"; ` +
           "each to-one relationship needs its own stored field",
       );
@@ -3367,7 +3368,7 @@ export const annotate = <R extends Any>(
 ): R => {
   const definition = definitions.get(resource);
   if (definition === undefined) {
-    throw new Error(
+    throw declarationError(
       `Resource.annotate("${resource.type}"): not a resource definition — ` +
         "expected one built by Resource.make or Resource.extend (a Resource.family cannot be annotated; " +
         "annotate its members instead)",
@@ -3585,7 +3586,7 @@ export const extend = <
   ExtendedId<BaseId, Type, InheritId, IdSchema>
 > => {
   if (options?.id !== undefined && options.inheritId === true) {
-    throw new Error(
+    throw declarationError(
       "Resource.extend: `id` and `inheritId: true` are contradictory; pass a custom `id` schema or `inheritId: true`, not both",
     );
   }
@@ -3927,7 +3928,7 @@ export function family(
   members: ReadonlyArray<Any>,
 ): Family<string, ReadonlyArray<Any>, any> {
   if (Arr.isReadonlyArrayEmpty(members)) {
-    throw new Error("Resource.family requires at least one member");
+    throw declarationError("Resource.family requires at least one member");
   }
   const base = P.isString(nameOrBase) ? undefined : nameOrBase;
   const name = base !== undefined ? base.type : (nameOrBase as string);

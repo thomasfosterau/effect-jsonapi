@@ -39,6 +39,7 @@ import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { asJsonApi } from "./internal/httpMedia.js";
 import { definedMember } from "./internal/members.js";
+import { declarationError } from "./internal/errors.js";
 
 /**
  * The wire document schema every {@link make} error encodes to.
@@ -417,7 +418,7 @@ export const make =
 export const toDocument = (error: Any): typeof WireDocument.Type => {
   const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire;
   if (wire === undefined || !Schema.isSchema(wire)) {
-    throw new Error(
+    throw declarationError(
       "ApiError.toDocument expects an instance of an ApiError.make(...) class (with a static `wire` schema)",
     );
   }

@@ -1,4 +1,4 @@
-import { describe, expect, it, onTestFinished } from "vite-plus/test";
+import { assert, describe, expect, it, onTestFinished } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as ErrorReporter from "effect/ErrorReporter";
 import * as Layer from "effect/Layer";
@@ -200,7 +200,7 @@ describe("Middleware.schemaErrorDocument", () => {
         errors: "all",
       },
     );
-    if (Result.isSuccess(result)) throw new Error("expected a failure");
+    assert(Result.isFailure(result), "expected a failure");
     return result.failure;
   };
   // The error-object `source` members these cases assert on.

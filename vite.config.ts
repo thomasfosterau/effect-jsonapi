@@ -145,7 +145,6 @@ export default defineConfig({
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-non-null-assertion": "warn",
       "effect/avoid-any": "warn",
-      "effect/avoid-untagged-errors": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/effect-run-in-body": "warn",
       "effect/prefer-option-over-null": "warn",

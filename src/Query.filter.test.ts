@@ -80,7 +80,7 @@ const failures = (
   record: Record<string, unknown>,
 ): ReadonlyArray<{ readonly key: string; readonly message: string }> => {
   const result = Schema.decodeUnknownResult(codec)(record);
-  if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
+  assert(Result.isFailure(result), "expected the decode to fail");
   return SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
     key: firstKey(issue.path),
     message: issue.message,
@@ -1316,7 +1316,7 @@ describe("Query.schema with filter: true", () => {
         [`filter[${name}]`]: "x",
         "page[limit]": "5",
       });
-      if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
+      assert(Result.isFailure(result), "expected the decode to fail");
       expect(
         SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
           key: firstKey(issue.path),

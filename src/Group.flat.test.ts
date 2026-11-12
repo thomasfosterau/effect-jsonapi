@@ -37,12 +37,12 @@ interface EndpointLike {
 }
 const endpointOf = (group: GroupLike, name: string): EndpointLike => {
   const endpoint = group.endpoints[name];
-  if (endpoint === undefined) throw new Error(`no '${name}' endpoint`);
+  assert(endpoint !== undefined, `no '${name}' endpoint`);
   return endpoint as EndpointLike;
 };
 const queryOf = (group: GroupLike, name: string): Schema.Top => {
   const query = endpointOf(group, name).query;
-  if (query === undefined) throw new Error(`${name} declares no query`);
+  assert(query !== undefined, `${name} declares no query`);
   return query;
 };
 
