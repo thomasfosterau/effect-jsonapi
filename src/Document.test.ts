@@ -47,7 +47,7 @@ describe("Url", () => {
 
 describe("links decode URLs", () => {
   it("TopLevelLinks decodes absolute members to URL and keeps relative ones as strings", () => {
-    const links = Schema.decodeUnknownSync(Document.TopLevelLinks)({
+    const links = Schema.decodeSync(Document.TopLevelLinks)({
       self: "/articles?page[offset]=0",
       related: "https://example.com/articles",
       next: null,
@@ -58,7 +58,7 @@ describe("links decode URLs", () => {
   });
 
   it("a LinkObject's href and describedby decode to URLs", () => {
-    const link = Schema.decodeUnknownSync(Document.LinkObject)({
+    const link = Schema.decodeSync(Document.LinkObject)({
       href: "https://example.com/articles/1",
       describedby: "https://example.com/schema.json",
       title: "Article",
@@ -99,7 +99,7 @@ describe("href", () => {
   });
 
   it("narrows a decoded TopLevelLinks member regardless of which arm it decoded to", () => {
-    const links = Schema.decodeUnknownSync(Document.TopLevelLinks)({
+    const links = Schema.decodeSync(Document.TopLevelLinks)({
       self: "/articles?page[offset]=0",
       related: "https://example.com/articles",
     });
@@ -114,7 +114,7 @@ describe("href", () => {
 
 describe("JsonApiObject ext/profile", () => {
   it("decodes ext and profile URIs to URLs", () => {
-    const jsonapi = Schema.decodeUnknownSync(Document.JsonApiObject)({
+    const jsonapi = Schema.decodeSync(Document.JsonApiObject)({
       version: "1.1",
       ext: ["https://jsonapi.org/ext/atomic"],
       profile: ["https://example.com/profiles/timestamps"],

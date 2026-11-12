@@ -148,7 +148,7 @@ type Wire = Readonly<Record<string, unknown>>;
 
 // Whether an endpoint's success document decodes `document`.
 const decodes = (endpoint: { readonly success: Iterable<Schema.Top> }, document: Wire) =>
-  Exit.isSuccess(Schema.decodeUnknownExit(successOf(endpoint))(document));
+  Exit.isSuccess(Schema.decodeExit(successOf(endpoint))(document));
 
 // Whether the document admits `primary` (wrapped in an array for a collection)
 // and the `included` members.
@@ -298,7 +298,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
         admitsPartial(endpoint, holder, many, [only(wire.editors, "name"), only(reviewer)]),
       ).toBe(true);
       // …and still decodes as itself, `type` and `id` intact.
-      const decoded = Schema.decodeUnknownSync(successOf(endpoint))({
+      const decoded = Schema.decodeSync(successOf(endpoint))({
         data: many ? [holder] : holder,
         included: [only(wire.editors, "note")],
       });
@@ -342,7 +342,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
       expect(admitsPartial(endpoint, only(wire.others), false)).toBe(true);
       // Whole members still decode, as themselves.
       expect(
-        Schema.decodeUnknownSync(successOf(endpoint))({ data: only(reviewer, "name") }),
+        Schema.decodeSync(successOf(endpoint))({ data: only(reviewer, "name") }),
       ).toMatchObject({ data: { type: "reviewers", id: "8", attributes: { name: "Rue" } } });
       expect(admitsPartial(endpoint, wire.others, false)).toBe(true);
       expect(admitsPartial(endpoint, only(wire.tags), false)).toBe(false);

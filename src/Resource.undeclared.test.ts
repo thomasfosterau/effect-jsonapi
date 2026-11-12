@@ -174,7 +174,7 @@ const ErrorDocument = Schema.fromJsonString(
     ),
   }),
 );
-const errorsOf = (text: string) => Schema.decodeUnknownSync(ErrorDocument)(text).errors;
+const errorsOf = (text: string) => Schema.decodeSync(ErrorDocument)(text).errors;
 
 const polluted = (): boolean =>
   Object.hasOwn(Object.prototype, "polluted") || Reflect.has({}, "polluted");
@@ -680,9 +680,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
       attributes: { body: Schema.String },
       maxUndeclaredMemberErrors: Number.POSITIVE_INFINITY,
     });
-    const issues = issuesOf(
-      Schema.decodeUnknownResult(Open.createInput)({ body: "b", ...extras(100) }),
-    );
+    const issues = issuesOf(Schema.decodeResult(Open.createInput)({ body: "b", ...extras(100) }));
     expect(issues).toHaveLength(100);
     expect(issues.every(({ message }) => message === "Expected no excess property")).toBe(true);
   });
@@ -693,13 +691,9 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     const Annotated = annotate(Capped, { "acme/table": "capped" });
     expect([Child, Wider, Annotated].map((r) => r.maxUndeclaredMemberErrors)).toEqual([2, 4, 2]);
     expect(
-      issuesOf(
-        Schema.decodeUnknownResult(Child.createInput)({ body: "b", extra: "e", ...extras(5) }),
-      ),
+      issuesOf(Schema.decodeResult(Child.createInput)({ body: "b", extra: "e", ...extras(5) })),
     ).toEqual(cappedAt([]));
-    expect(
-      issuesOf(Schema.decodeUnknownResult(Wider.createInput)({ body: "b", ...extras(5) })),
-    ).toEqual([
+    expect(issuesOf(Schema.decodeResult(Wider.createInput)({ body: "b", ...extras(5) }))).toEqual([
       ...["k0", "k1", "k2", "k3"].map((k) => ({
         path: [k],
         message: "Expected no excess property",
@@ -720,7 +714,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     ]);
     expect(
       issuesOf(
-        Schema.decodeUnknownResult(Atomic.AddOperation(Anchored))({
+        Schema.decodeResult(Atomic.AddOperation(Anchored))({
           op: "add",
           data: { type: "capped", attributes: { body: "b", ...extras(5) } },
         }),
@@ -794,7 +788,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     expect(
       reported(
         issuesOf(
-          Schema.decodeUnknownResult(add)({
+          Schema.decodeResult(add)({
             op: "add",
             data: { type: "notes", attributes: { body: "b", ...extras(13) } },
           }),
@@ -804,7 +798,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     expect(
       reported(
         issuesOf(
-          Schema.decodeUnknownResult(update)({
+          Schema.decodeResult(update)({
             op: "update",
             data: { type: "notes", id: "1", attributes: extras(13) },
           }),
@@ -849,7 +843,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     const add = Atomic.AddOperation(withCap(handRolled({ maxUndeclaredMemberErrors: 1 }), null));
     expect(
       issuesOf(
-        Schema.decodeUnknownResult(add)({
+        Schema.decodeResult(add)({
           op: "add",
           data: { type: "notes", attributes: { body: "b", ...extras(13) } },
         }),
@@ -1380,7 +1374,7 @@ describe("which own keys of a closed member count as members (#292)", () => {
       const value = { ...declared };
       Object.defineProperty(value, "isAdmin", { value: true, enumerable: false });
       Object.defineProperty(value, hidden, { value: true, enumerable: false });
-      expect(issuesOf(Schema.decodeUnknownResult(schema)(value))).toEqual([]);
+      expect(issuesOf(Schema.decodeResult(schema)(value))).toEqual([]);
       expect(issuesOf(Schema.encodeUnknownResult(schema)(value))).toEqual([]);
     });
 
@@ -1390,7 +1384,7 @@ describe("which own keys of a closed member count as members (#292)", () => {
         { path: ["isAdmin"], message: "Expected no excess property" },
         { path: [hidden], message: "Expected no excess property" },
       ];
-      expect(issuesOf(Schema.decodeUnknownResult(schema)(value))).toEqual(expected);
+      expect(issuesOf(Schema.decodeResult(schema)(value))).toEqual(expected);
       expect(issuesOf(Schema.encodeUnknownResult(schema)(value))).toEqual(expected);
     });
   });

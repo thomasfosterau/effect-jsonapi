@@ -483,7 +483,7 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
         encode: SchemaGetter.transform((value: string | null) => value ?? "none"),
       }),
     );
-    expect(Schema.decodeUnknownSync(NoneAsNull)("none")).toBeNull();
+    expect(Schema.decodeSync(NoneAsNull)("none")).toBeNull();
     const Legacy = Resource("legacy", {
       attributes: {
         code: attribute(Schema.NullOr(Schema.String), {
@@ -538,7 +538,7 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
     // decided from the declaration alone, before any resource is looked at
     expect(failures({ "filter[body]": "x" })[0]?.message).toBe('Unknown filter field "body"');
     // an absent filter is no constraint; the codec never synthesises a node for it
-    expect(Schema.decodeUnknownResult(codec)({})._tag).toBe("Failure");
+    expect(Schema.decodeResult(codec)({})._tag).toBe("Failure");
     // And([]) is representable, and is a different thing entirely
     expect(decode({ "filter[g][group][conjunction]": "AND" })).toEqual({
       _tag: "And",
@@ -732,7 +732,7 @@ describe("Query.Filter: rejections name the offending key", () => {
   });
 
   it("rejects an empty record: an absent filter is Query.schema's concern", () => {
-    const result = Schema.decodeUnknownResult(codec)({});
+    const result = Schema.decodeResult(codec)({});
     expect(result._tag).toBe("Failure");
   });
 
@@ -1318,7 +1318,7 @@ describe("Query.schema with filter: true", () => {
   it.each(inherited)(
     "routes filter[%s] to the grammar and a bare key of that name nowhere",
     (name) => {
-      const result = Schema.decodeUnknownResult(query)({
+      const result = Schema.decodeResult(query)({
         [`filter[${name}]`]: "x",
         "page[limit]": "5",
       });
@@ -1362,13 +1362,13 @@ describe("Query.schema with filter: true", () => {
   it("fails closed on a resource declaring nothing filterable", () => {
     const Plain = Resource("plains", { attributes: { n: Schema.Number } });
     const plain = Query.schema(Plain, { filter: true });
-    expect(Schema.decodeUnknownSync(plain)({})).toEqual({});
-    const result = Schema.decodeUnknownResult(plain)({ "filter[n]": "1" });
+    expect(Schema.decodeSync(plain)({})).toEqual({});
+    const result = Schema.decodeResult(plain)({ "filter[n]": "1" });
     expect(result._tag).toBe("Failure");
   });
 
   it("keeps the issue path at the flat key through the combined schema", () => {
-    const result = Schema.decodeUnknownResult(query)({
+    const result = Schema.decodeResult(query)({
       "filter[age][gt]": "abc",
       "page[limit]": "1",
     });
@@ -1380,7 +1380,7 @@ describe("Query.schema with filter: true", () => {
 
   it("rejects a malformed or bare filter key instead of dropping it", () => {
     Arr.forEach(["filter[status]x", "filter[", "filter"], (key) => {
-      const result = Schema.decodeUnknownResult(query)({ [key]: "open", "page[limit]": "1" });
+      const result = Schema.decodeResult(query)({ [key]: "open", "page[limit]": "1" });
       assert(Result.isFailure(result));
       const [issue] = SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues;
       expect(issue?.path).toEqual([key]);
@@ -1577,9 +1577,9 @@ describe("Endpoint.list with filter: true, end to end", () => {
 
   it("decodes through the endpoint's query schema directly", () => {
     const listQuery = list.query as Schema.Codec<any, any>;
-    expect(Schema.decodeUnknownSync(listQuery)({ "filter[priority]": "2,1" })).toEqual({
+    expect(Schema.decodeSync(listQuery)({ "filter[priority]": "2,1" })).toEqual({
       filter: Filter.isIn("priority", [1, 2]),
     });
-    expect(() => Schema.decodeUnknownSync(listQuery)({ "filter[body]": "x" })).toThrow();
+    expect(() => Schema.decodeSync(listQuery)({ "filter[body]": "x" })).toThrow();
   });
 });
