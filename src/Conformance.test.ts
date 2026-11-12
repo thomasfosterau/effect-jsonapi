@@ -2983,6 +2983,72 @@ describe("Conformance: the filter grammar profile", () => {
 
   const row = { type: "products", id: "1", attributes: { name: "Widget", priceCents: 1200 } };
 
+  const declared = HashMap.fromIterable<string, ReadonlyArray<string>>([
+    ["name", ["eq", "ne"]],
+    ["priceCents", ["eq", "gt", "lt"]],
+  ]);
+
+  type Conditions = Map<string, { path?: string; operator?: string; value?: string }>;
+
+  /** The parameter a shorthand `filter[field]` / `filter[field][op]` key is refused at, if any. */
+  const shorthandRefusal = (
+    key: string,
+    segments: ReadonlyArray<string>,
+    value: string,
+    conditions: Conditions,
+  ): Option.Option<string> => {
+    // Anything deeper than `filter[field][op]` is a 400.
+    if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments)) return Option.some(key);
+    const field = segments[0];
+    const operators = Option.getOrUndefined(HashMap.get(declared, field));
+    const operator = segments.length === 2 ? segments[1] : "eq";
+    if (operators === undefined || !operators.includes(operator)) return Option.some(key);
+    conditions.set(key, { path: field, operator, value });
+    return Option.none();
+  };
+
+  /** The parameter a `filter[…]` key is refused at, if any; group members are collected. */
+  const keyRefusal = (
+    raw: URLSearchParams,
+    conditions: Conditions,
+    key: string,
+  ): Option.Option<string> => {
+    if (!key.startsWith("filter")) return Option.none();
+    // §2: a repeated `filter[…]` key is a 400.
+    if (raw.getAll(key).length > 1) return Option.some(key);
+    const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
+    const value = raw.get(key)!;
+    // Group form: filter[id][condition][member].
+    if (segments.length === 3 && segments[1] === "condition") {
+      const member = segments[2];
+      if (member !== "path" && member !== "operator" && member !== "value") return Option.some(key);
+      const entry = conditions.get(segments[0]) ?? {};
+      entry[member] = value;
+      conditions.set(segments[0], entry);
+      return Option.none();
+    }
+    return shorthandRefusal(key, segments, value, conditions);
+  };
+
+  /** The parameter an incomplete or undeclared group condition is refused at, if any. */
+  const conditionRefusal = (
+    id: string,
+    condition: { path?: string; operator?: string; value?: string },
+  ): Option.Option<string> => {
+    const parameter = `filter[${id}][condition][operator]`;
+    if (
+      condition.path === undefined ||
+      condition.operator === undefined ||
+      condition.value === undefined
+    ) {
+      return Option.some(parameter);
+    }
+    const operators = Option.getOrUndefined(HashMap.get(declared, condition.path));
+    return operators === undefined || !operators.includes(condition.operator)
+      ? Option.some(parameter)
+      : Option.none();
+  };
+
   /** A server that implements the grammar's §2/§4/§5/§7 surface correctly. */
   const grammarServe = (request: { readonly path: string }): Canned => {
     const [, search = ""] = request.path.split("?");
@@ -2994,57 +3060,13 @@ describe("Conformance: the filter grammar profile", () => {
       body: { errors: [{ status: "400", title: "Bad Request", source: { parameter } }] },
     });
 
-    const declared = HashMap.fromIterable<string, ReadonlyArray<string>>([
-      ["name", ["eq", "ne"]],
-      ["priceCents", ["eq", "gt", "lt"]],
-    ]);
-    const conditions = new Map<string, { path?: string; operator?: string; value?: string }>();
-
-    const refused = Arr.findFirst(new Set(raw.keys()), (key) => {
-      if (!key.startsWith("filter")) return Option.none();
-      // §2: a repeated `filter[…]` key is a 400.
-      if (raw.getAll(key).length > 1) return Option.some(reject(key));
-      const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
-      const value = raw.get(key)!;
-
-      // Group form: filter[id][condition][member].
-      if (segments.length === 3 && segments[1] === "condition") {
-        const entry = conditions.get(segments[0]) ?? {};
-        if (segments[2] === "path" || segments[2] === "operator" || segments[2] === "value") {
-          entry[segments[2]] = value;
-          conditions.set(segments[0], entry);
-          return Option.none();
-        }
-        return Option.some(reject(key));
-      }
-      // Shorthand: filter[field] or filter[field][op]. Anything deeper is a 400.
-      if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments))
-        return Option.some(reject(key));
-      const field = segments[0];
-      const operators = Option.getOrUndefined(HashMap.get(declared, field));
-      if (operators === undefined) return Option.some(reject(key));
-      const operator = segments.length === 2 ? segments[1] : "eq";
-      if (!operators.includes(operator)) return Option.some(reject(key));
-      conditions.set(key, { path: field, operator, value });
-      return Option.none();
-    });
-    if (Option.isSome(refused)) return refused.value;
-
-    const incomplete = Arr.findFirst(conditions, ([id, condition]) => {
-      if (
-        condition.path === undefined ||
-        condition.operator === undefined ||
-        condition.value === undefined
-      ) {
-        return Option.some(reject(`filter[${id}][condition][operator]`));
-      }
-      const operators = Option.getOrUndefined(HashMap.get(declared, condition.path));
-      if (operators === undefined || !operators.includes(condition.operator)) {
-        return Option.some(reject(`filter[${id}][condition][operator]`));
-      }
-      return Option.none();
-    });
-    if (Option.isSome(incomplete)) return incomplete.value;
+    const conditions: Conditions = new Map();
+    const refused = Arr.findFirst(new Set(raw.keys()), (key) => keyRefusal(raw, conditions, key));
+    if (Option.isSome(refused)) return reject(refused.value);
+    const incomplete = Arr.findFirst(conditions, ([id, condition]) =>
+      conditionRefusal(id, condition),
+    );
+    if (Option.isSome(incomplete)) return reject(incomplete.value);
 
     return { contentType, body: { jsonapi: { version: "1.1" }, data: [row] } };
   };
