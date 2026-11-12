@@ -4382,9 +4382,9 @@ export const resource = <
       ? (relationshipsOpt as RelationshipsMap)
       : {};
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
-    for (const name of Object.keys(relationships)) {
+    Arr.forEach(Object.keys(relationships), (name) => {
       const captured = relationshipConfig(relMap, name);
-      if (Option.isNone(captured)) continue;
+      if (Option.isNone(captured)) return;
       const relConfig = captured.value;
       const toMany = Relationship.isToMany(relationships[name]);
       // A constrained `include` names this resource's paths, not the target's:
@@ -4427,7 +4427,7 @@ export const resource = <
         endpoints.push(addRelationship(resource, name as never, { ...errorOpt } as never));
         endpoints.push(removeRelationship(resource, name as never, { ...errorOpt } as never));
       }
-    }
+    });
   }
 
   return endpoints as unknown as ResourceEndpoints<

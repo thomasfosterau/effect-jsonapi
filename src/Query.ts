@@ -486,7 +486,9 @@ export const bracketKeys =
     )[BRACKETED];
     const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>);
     const mapping = { ...state?.mapping };
-    for (const key of keys) mapping[key] = `${prefix}[${key}]`;
+    Arr.forEach(keys, (key) => {
+      mapping[key] = `${prefix}[${key}]`;
+    });
     const wire = struct.pipe(Schema.encodeKeys(mapping));
     return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
       BracketedBase<S>,
@@ -1812,9 +1814,9 @@ export const schema = <R extends Any, const O extends Options<R>>(
 
   if (options.page !== undefined) {
     nestedFields.page = Schema.optionalKey(Schema.Struct(options.page));
-    for (const key of Object.keys(options.page)) {
+    Arr.forEach(Object.keys(options.page), (key) => {
       flatFields[`page[${key}]`] = Schema.optionalKey(Schema.String);
-    }
+    });
   }
 
   // The grammar's field declaration, when `filter: true` is on.
@@ -1844,9 +1846,9 @@ export const schema = <R extends Any, const O extends Options<R>>(
     flatFields.filter = Schema.optionalKey(FilterWireValue);
   } else if (P.isObjectOrArray(options.filter)) {
     nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter));
-    for (const key of Object.keys(options.filter)) {
+    Arr.forEach(Object.keys(options.filter), (key) => {
       flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String);
-    }
+    });
   }
 
   const flatStruct = Schema.Struct(flatFields);

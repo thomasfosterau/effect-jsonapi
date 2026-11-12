@@ -23,6 +23,7 @@
  *
  * @since 0.1.0
  */
+import * as Arr from "effect/Array";
 import type { MetaValue } from "./Handlers.js";
 import type * as Relationship from "./Relationship.js";
 import type { Any, RefValue } from "./Resource.js";
@@ -221,7 +222,7 @@ export const make = (): LidMap => {
     resolveLinkage: (_resource, relationships) => {
       if (relationships === undefined) return {};
       const resolved: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(relationships)) {
+      Arr.forEach(Object.entries(relationships), ([key, value]) => {
         const linkage = value.data;
         // An own data property, so a member named `__proto__` stays a key
         // instead of re-parenting `resolved` (plain assignment would).
@@ -239,7 +240,7 @@ export const make = (): LidMap => {
           writable: true,
           configurable: true,
         });
-      }
+      });
       return resolved as ResolvedLinkage<Any>;
     },
   };

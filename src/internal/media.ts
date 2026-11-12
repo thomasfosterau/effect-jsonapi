@@ -12,6 +12,7 @@
  * @internal
  */
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 
 /**
  * The JSON:API media type, per
@@ -136,17 +137,18 @@ interface MediaRange {
 export const parseMediaType = (entry: string): MediaRange => {
   const [first, ...rest] = entry.split(";");
   const parameters: Array<readonly [name: string, value: string]> = [];
-  let weight: number | undefined = 1;
-  for (const part of rest) {
+  // `q` terminates the media type's parameter list; it and everything after
+  // it are accept-extension parameters of the header field.
+  const quality = Arr.findFirst(rest, (part) => {
     const [name, value] = parseParameter(part);
-    // `q` terminates the media type's parameter list; it and everything after
-    // it are accept-extension parameters of the header field.
-    if (name === "q") {
-      weight = QVALUE.test(value) ? Number(value) : undefined;
-      break;
-    }
+    if (name === "q") return Option.some(value);
     parameters.push([name, unquote(value)] as const);
-  }
+    return Option.none();
+  });
+  const weight: number | undefined = Option.match(quality, {
+    onNone: () => 1,
+    onSome: (value) => (QVALUE.test(value) ? Number(value) : undefined),
+  });
   return { base: baseMediaType(first ?? ""), parameters, weight };
 };
 
@@ -161,15 +163,13 @@ export const parametersAreAcceptable = (
   parameters: ReadonlyArray<readonly [name: string, value: string]>,
   extensions: ReadonlyArray<string>,
 ): boolean => {
-  for (const [name, value] of parameters) {
-    if (name === "profile") continue;
+  return Arr.every(parameters, ([name, value]) => {
+    if (name === "profile") return true;
     if (name === "ext") {
       const uris = value.split(" ").filter((uri) => uri !== "");
-      if (!uris.every((uri) => extensions.includes(uri))) return false;
-      continue;
+      return uris.every((uri) => extensions.includes(uri));
     }
     // Any parameter other than ext / profile is unacceptable.
     return false;
-  }
-  return true;
+  });
 };

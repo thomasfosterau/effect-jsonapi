@@ -50,13 +50,13 @@ export const resolveOperators = <const L extends ReadonlyArray<string>>(
   }
   const isAllowed = Schema.is(allowed);
   const operators: Array<L[number]> = [];
-  for (const operator of filter) {
+  Arr.forEach(filter, (operator) => {
     if (!isAllowed(operator)) {
       throw new Error(
         `${subject} declares filter operator ${render(operator)}; expected one of ${allowed.literals.join(", ")}`,
       );
     }
     if (!operators.includes(operator)) operators.push(operator);
-  }
+  });
   return operators;
 };

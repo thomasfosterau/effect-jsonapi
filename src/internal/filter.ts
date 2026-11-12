@@ -128,35 +128,31 @@ const unescape = (
   raw: string,
   list: boolean,
 ): { readonly items: ReadonlyArray<string> } | { readonly error: string } => {
-  const items: Array<string> = [];
-  let current = "";
-  for (let i = 0; i < raw.length; i++) {
-    const c = raw[i];
-    if (c === "\\") {
-      const next = raw[i + 1];
-      if (next !== "," && next !== "\\") {
-        return {
-          error:
-            next === undefined
-              ? "Malformed literal: a trailing backslash; only \\, and \\\\ are escapes"
-              : `Malformed literal: unknown escape \\${next}; only \\, and \\\\ are escapes`,
-        };
-      }
-      current += next;
-      i++;
-    } else if (c === ",") {
-      if (!list)
-        return {
-          error:
+  // One token per escape (a backslash and the character after it, if any), unescaped
+  // comma or run of plain characters, in input order.
+  const tokens = Arr.fromIterable(raw.matchAll(/\\([\s\S]?)|(,)|([^\\,]+)/g));
+  const error = Arr.findFirst(tokens, (token): Option.Option<string> => {
+    if (token[2] !== undefined) {
+      return list
+        ? Option.none()
+        : Option.some(
             "Malformed literal: an unescaped comma in a scalar position (write \\, for a comma)",
-        };
-      items.push(current);
-      current = "";
-    } else {
-      current += c;
+          );
     }
-  }
-  items.push(current);
+    const next = token[1];
+    if (next === undefined || next === "," || next === "\\") return Option.none();
+    return Option.some(
+      next === ""
+        ? "Malformed literal: a trailing backslash; only \\, and \\\\ are escapes"
+        : `Malformed literal: unknown escape \\${next}; only \\, and \\\\ are escapes`,
+    );
+  });
+  if (Option.isSome(error)) return { error: error.value };
+  const items = Arr.reduce(tokens, [""], (acc, token) => {
+    if (token[2] !== undefined) acc.push("");
+    else acc[acc.length - 1] += token[3] ?? token[1];
+    return acc;
+  });
   return { items };
 };
 
@@ -287,16 +283,18 @@ export const decodeFilter = (
     if (operator === nullOperator) return { _tag: "IsNull", field, negated: items[0] === "false" };
     const decode = Schema.decodeUnknownResult(codec.literal as Schema.Codec<unknown, string>);
     const values: Array<unknown> = [];
-    for (const item of items) {
+    const invalid = Arr.findFirst(items, (item) => {
       const result = decode(item);
-      if (Result.isFailure(result)) {
-        return fail(
-          keys.value,
-          `Invalid literal ${render(item)} for field ${render(field)}: ${issueMessage(result.failure)}`,
-          raw,
-        );
-      }
+      if (Result.isFailure(result)) return Option.some({ item, failure: result.failure });
       values.push(result.success);
+      return Option.none();
+    });
+    if (Option.isSome(invalid)) {
+      return fail(
+        keys.value,
+        `Invalid literal ${render(invalid.value.item)} for field ${render(field)}: ${issueMessage(invalid.value.failure)}`,
+        raw,
+      );
     }
     if (operator === "in" || operator === "nin") {
       return {
@@ -314,71 +312,77 @@ export const decodeFilter = (
   // of the second kind.
   const conflicted = new Set<string>();
 
-  for (const [key, value] of Object.entries(input)) {
-    if (value === undefined) continue;
-    const segments = keySegments(key);
-    let raw: string;
-    if (P.isString(value)) {
-      raw = value;
-    } else if (segments !== undefined && isListPosition(segments)) {
+  // The raw text of an entry's value, or `None` (after reporting) when a key
+  // repeats where no comma list is possible.
+  const rawOf = (
+    key: string,
+    value: string | ReadonlyArray<string>,
+    segments: ReadonlyArray<string> | undefined,
+  ): Option.Option<string> => {
+    if (P.isString(value)) return Option.some(value);
+    if (segments !== undefined && isListPosition(segments)) {
       // The repeated-key spelling of a comma list: `filter[f]=a&filter[f]=b`
       // is `filter[f]=a,b`. Each occurrence's raw value is preserved as-is —
       // one that is itself a comma list, or carries an escaped comma, still
       // means what it would in the single-value spelling; whether the result
       // is legal (a list operator declared, or none at all) is exactly the
       // check the comma form already goes through below.
-      raw = value.join(",");
-    } else {
-      fail(key, `Repeated filter key ${render(key)}; a filter key may appear once`, value);
-      continue;
+      return Option.some(value.join(","));
     }
+    fail(key, `Repeated filter key ${render(key)}; a filter key may appear once`, value);
+    return Option.none();
+  };
+
+  // Records one member of a `filter[id][group|condition][member]` draft.
+  const draftMember = (
+    key: string,
+    segments: readonly [string, "group" | "condition", string],
+    raw: string,
+  ): void => {
+    const [id, kind, member] = segments;
+    const allowed =
+      kind === "group" ? ["conjunction", "memberOf"] : ["path", "operator", "value", "memberOf"];
+    if (!allowed.includes(member)) {
+      fail(key, `Unknown ${kind} member ${render(member)}; expected one of ${allowed.join(", ")}`);
+      return;
+    }
+    let draft = drafts.get(id);
+    if (draft === undefined) {
+      draft = { kind, members: new Map() };
+      drafts.set(id, draft);
+    } else if (draft.kind !== kind) {
+      if (!conflicted.has(id)) {
+        conflicted.add(id);
+        fail(key, `Filter id ${render(id)} is used as both a group and a condition`);
+      }
+      return;
+    }
+    draft.members.set(member, { key, value: raw });
+  };
+
+  Arr.forEach(Object.entries(input), ([key, value]) => {
+    if (value === undefined) return;
+    const segments = keySegments(key);
+    const raw = rawOf(key, value, segments);
+    if (Option.isNone(raw)) return;
     if (segments === undefined) {
       fail(key, MALFORMED_KEY);
-      continue;
+      return;
     }
-    if (segments.length === 1) {
-      const node = condition(
-        { field: key, operator: key, value: key },
-        segments[0],
-        undefined,
-        raw,
-      );
-      if (node !== undefined) roots.push(node);
-    } else if (segments.length === 2) {
+    if (segments.length === 1 || segments.length === 2) {
       const node = condition(
         { field: key, operator: key, value: key },
         segments[0],
         segments[1],
-        raw,
+        raw.value,
       );
       if (node !== undefined) roots.push(node);
     } else if (segments.length === 3 && (segments[1] === "group" || segments[1] === "condition")) {
-      const [id, kind, member] = segments as [string, "group" | "condition", string];
-      const allowed =
-        kind === "group" ? ["conjunction", "memberOf"] : ["path", "operator", "value", "memberOf"];
-      if (!allowed.includes(member)) {
-        fail(
-          key,
-          `Unknown ${kind} member ${render(member)}; expected one of ${allowed.join(", ")}`,
-        );
-        continue;
-      }
-      let draft = drafts.get(id);
-      if (draft === undefined) {
-        draft = { kind, members: new Map() };
-        drafts.set(id, draft);
-      } else if (draft.kind !== kind) {
-        if (!conflicted.has(id)) {
-          conflicted.add(id);
-          fail(key, `Filter id ${render(id)} is used as both a group and a condition`);
-        }
-        continue;
-      }
-      draft.members.set(member, { key, value: raw });
+      draftMember(key, segments as [string, "group" | "condition", string], raw.value);
     } else {
       fail(key, MALFORMED_KEY);
     }
-  }
+  });
 
   // Group form: build every node, then wire them up.
   interface Built {
@@ -388,26 +392,27 @@ export const decodeFilter = (
     readonly memberOf?: { readonly key: string; readonly value: string } | undefined;
   }
   const built = new Map<string, Built>();
-  for (const [id, draft] of drafts) {
+  Arr.forEach(drafts, ([id, draft]) => {
     const memberOf = draft.members.get("memberOf");
     if (draft.kind === "condition") {
       const path = draft.members.get("path");
       const operator = draft.members.get("operator");
       const value = draft.members.get("value");
-      let complete = true;
-      for (const [member, present] of [
-        ["path", path],
-        ["operator", operator],
-        ["value", value],
-      ] as const) {
-        if (present === undefined) {
-          fail(
-            `filter[${id}][condition][${member}]`,
-            `Missing required condition member ${render(member)}`,
-          );
-          complete = false;
-        }
-      }
+      const missing = Arr.filter(
+        [
+          ["path", path],
+          ["operator", operator],
+          ["value", value],
+        ] as const,
+        ([, present]) => present === undefined,
+      );
+      Arr.forEach(missing, ([member]) => {
+        fail(
+          `filter[${id}][condition][${member}]`,
+          `Missing required condition member ${render(member)}`,
+        );
+      });
+      const complete = Arr.isReadonlyArrayEmpty(missing);
       const node = complete
         ? condition(
             { field: path!.key, operator: operator!.key, value: value!.key },
@@ -430,12 +435,12 @@ export const decodeFilter = (
       }
       built.set(id, { kind: "group", conjunction, memberOf });
     }
-  }
+  });
 
   // Parents must be declared groups, and the parent chain must be acyclic.
   const parentOf = new Map<string, string>();
-  for (const [id, node] of built) {
-    if (node.memberOf === undefined) continue;
+  Arr.forEach(built, ([id, node]) => {
+    if (node.memberOf === undefined) return;
     const target = built.get(node.memberOf.value);
     if (target === undefined) {
       fail(
@@ -452,43 +457,50 @@ export const decodeFilter = (
     } else {
       parentOf.set(id, node.memberOf.value);
     }
-  }
+  });
   const cyclic = new Set<string>();
-  for (const [start] of parentOf) {
-    if (cyclic.has(start)) continue;
-    const seen = new Set<string>([start]);
-    let current = parentOf.get(start);
-    while (current !== undefined && !seen.has(current)) {
-      seen.add(current);
-      current = parentOf.get(current);
-    }
-    if (current === undefined) continue;
+  const parentOfId = (id: string): Option.Option<string> =>
+    Option.fromUndefinedOr(parentOf.get(id));
+  // Follows the parent chain from `id` until it runs out (`None`) or reaches a
+  // node already in `seen`, which it returns.
+  const follow = (id: Option.Option<string>, seen: Set<string>): Option.Option<string> => {
+    if (Option.isNone(id) || seen.has(id.value)) return id;
+    seen.add(id.value);
+    return follow(parentOfId(id.value), seen);
+  };
+  // The members of the cycle that `id` is on.
+  const collect = (id: string, cycle: Set<string>): Set<string> => {
+    if (cycle.has(id)) return cycle;
+    cycle.add(id);
+    return collect(parentOf.get(id)!, cycle);
+  };
+  Arr.forEach(Arr.fromIterable(parentOf.keys()), (start) => {
+    if (cyclic.has(start)) return;
+    const current = follow(parentOfId(start), new Set<string>([start]));
+    if (Option.isNone(current)) return;
     // `current` is on a cycle; report it at the first cycle member in input order.
-    const cycle = new Set<string>();
-    for (let id = current; !cycle.has(id); id = parentOf.get(id)!) cycle.add(id);
-    for (const id of built.keys()) {
-      if (cycle.has(id)) {
-        fail(built.get(id)!.memberOf!.key, "memberOf forms a cycle");
-        break;
-      }
-    }
-    for (const id of cycle) cyclic.add(id);
-  }
+    const cycle = collect(current.value, new Set<string>());
+    const first = Arr.findFirst(built.keys(), (id) => cycle.has(id));
+    if (Option.isSome(first)) fail(built.get(first.value)!.memberOf!.key, "memberOf forms a cycle");
+    Arr.forEach(cycle, (id) => {
+      cyclic.add(id);
+    });
+  });
 
   if (issues.size > 0) return { _tag: "Issues", issues: [...issues.values()] };
 
   // Assemble the tree from the leaves up.
   const children = new Map<string, Array<string>>();
-  for (const [id, node] of built) {
+  Arr.forEach(built, ([id, node]) => {
     const parent = node.memberOf?.value;
-    if (parent === undefined) continue;
+    if (parent === undefined) return;
     let list = children.get(parent);
     if (list === undefined) {
       list = [];
       children.set(parent, list);
     }
     list.push(id);
-  }
+  });
   const build = (id: string): Node => {
     const node = built.get(id)!;
     if (node.kind === "condition") return node.node!;
@@ -506,9 +518,9 @@ export const decodeFilter = (
     }
     return { _tag: conjunction === "AND" ? "And" : "Or", members };
   };
-  for (const [id, node] of built) {
+  Arr.forEach(built, ([id, node]) => {
     if (node.memberOf === undefined) roots.push(build(id));
-  }
+  });
   if (issues.size > 0) return { _tag: "Issues", issues: [...issues.values()] };
 
   if (Arr.isReadonlyArrayEmpty(roots)) {
@@ -545,18 +557,23 @@ export interface PreparedGroup {
   readonly members: ReadonlyArray<Prepared>;
 }
 
+const SURROGATE = /[\uD800-\uDFFF]/;
+
 /** Code-point order on strings (`<` on strings is code-unit order). */
 export const compareCodePoints = (a: string, b: string): number => {
-  let i = 0;
-  let j = 0;
-  while (i < a.length && j < b.length) {
-    const ca = a.codePointAt(i)!;
-    const cb = b.codePointAt(j)!;
-    if (ca !== cb) return ca < cb ? -1 : 1;
-    i += ca > 0xffff ? 2 : 1;
-    j += cb > 0xffff ? 2 : 1;
-  }
-  return i < a.length ? 1 : j < b.length ? -1 : 0;
+  if (a === b) return 0;
+  // Without a surrogate, code-unit order is code-point order.
+  if (!SURROGATE.test(a) && !SURROGATE.test(b)) return a < b ? -1 : 1;
+  const cpsA = Arr.fromIterable(a);
+  const cpsB = Arr.fromIterable(b);
+  return Option.getOrElse(
+    Arr.findFirst(cpsA, (cp, i) => {
+      const other = cpsB[i];
+      if (other === undefined || cp === other) return Option.none();
+      return Option.some(cp.codePointAt(0)! < other.codePointAt(0)! ? -1 : 1);
+    }),
+    () => (cpsA.length > cpsB.length ? 1 : cpsA.length < cpsB.length ? -1 : 0),
+  );
 };
 
 /** The total node order of §3.2. */
@@ -572,12 +589,14 @@ const compareNodes = (a: Prepared, b: Prepared): number => {
   if (a.kind === "group" && b.kind === "group") {
     const byConjunction = compareCodePoints(a.conjunction, b.conjunction);
     if (byConjunction !== 0) return byConjunction;
-    const n = Math.min(a.members.length, b.members.length);
-    for (let i = 0; i < n; i++) {
-      const c = compareNodes(a.members[i], b.members[i]);
-      if (c !== 0) return c;
-    }
-    return a.members.length - b.members.length;
+    return Option.getOrElse(
+      Arr.findFirst(a.members, (member, i) => {
+        if (i >= b.members.length) return Option.none();
+        const c = compareNodes(member, b.members[i]);
+        return c === 0 ? Option.none() : Option.some(c);
+      }),
+      () => a.members.length - b.members.length,
+    );
   }
   return 0;
 };
@@ -732,7 +751,9 @@ export const encodeFilter = (root: Prepared) => {
         const id = `g${groups++}`;
         pairs.push([`filter[${id}][group][conjunction]`, node.conjunction]);
         if (parent !== undefined) pairs.push([`filter[${id}][group][memberOf]`, parent]);
-        for (const member of node.members) visit(member, id);
+        Arr.forEach(node.members, (member) => {
+          visit(member, id);
+        });
       } else {
         const id = `c${conditions++}`;
         pairs.push([`filter[${id}][condition][path]`, node.field]);
@@ -743,7 +764,5 @@ export const encodeFilter = (root: Prepared) => {
     };
     visit(root, undefined);
   }
-  const record: Record<string, string> = {};
-  for (const [key, value] of pairs) record[key] = value;
-  return record;
+  return Rec.fromEntries(pairs);
 };
