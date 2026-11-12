@@ -232,7 +232,7 @@ const run = (
       only: [ruleId],
     });
     const outcome = report.outcomes.find((candidate) => candidate.rule.id === ruleId);
-    if (outcome === undefined) return yield* Effect.die(new Error(`no outcome for ${ruleId}`));
+    assert(outcome !== undefined, `no outcome for ${ruleId}`);
     return { outcome, sent };
   });
 

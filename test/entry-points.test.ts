@@ -41,6 +41,9 @@ const SCHEMA_TIER = [
   "Relationship.ts",
   "Resource.ts",
   "Sort.ts",
+  // `DeclarationError`, thrown by the declaration helpers on an invalid
+  // definition; a `Schema.TaggedError`, importing only `effect/Schema`.
+  "internal/errors.ts",
   "internal/filter.ts",
   // `Include.included(resource, { include })` derives an endpoint's default
   // `included` union from this walk (#342); it imports neither `Query` nor

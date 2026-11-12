@@ -68,6 +68,7 @@ import * as Schema from "effect/Schema";
 import type { IncludedResources } from "./internal/includeGraph.js";
 import { includedResources, includePathsFor } from "./internal/includeGraph.js";
 import type { Any, IncludableKeys, IncludeDepth, IncludePathsTo, Target } from "./Resource.js";
+import { declarationError } from "./internal/errors.js";
 
 // The discriminant key both a branch and a surface carry, so neither can be
 // confused with a resource definition (or with `Query.IncludeOptions`, whose
@@ -446,19 +447,19 @@ interface Entry {
 const checkHop = (owner: Any, key: string, target: Any, path: string): void => {
   const descriptor = owner.relationships[key];
   if (descriptor === undefined) {
-    throw new Error(
+    throw declarationError(
       `Include: "${path}" — resource "${owner.type}" declares no relationship "${key}"`,
     );
   }
   if (descriptor.kind === "paginated") {
-    throw new Error(
+    throw declarationError(
       `Include: "${path}" — relationship "${key}" on "${owner.type}" is paginated; ` +
         "a paginated relationship carries no inline linkage and is never included",
     );
   }
   const declared = descriptor.ref();
   if (declared.type !== target.type) {
-    throw new Error(
+    throw declarationError(
       `Include: "${path}" — relationship "${key}" on "${owner.type}" targets "${declared.type}", ` +
         `but the surface declares "${target.type}"`,
     );
@@ -481,7 +482,7 @@ const walk = (
     if (value === undefined) continue;
     const path = prefix === "" ? key : `${prefix}.${key}`;
     if (depth > MAX_DEPTH) {
-      throw new Error(
+      throw declarationError(
         `Include: "${path}" is ${depth} hops deep, past the ${MAX_DEPTH}-hop maximum (Include.MAX_DEPTH)`,
       );
     }
@@ -828,7 +829,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
 ): Surface<R, AsSpec<S>> => {
   const entries = entriesOf(resource, spec as AsSpec<S>);
   if (Arr.isReadonlyArrayEmpty(entries)) {
-    throw new Error(
+    throw declarationError(
       `Include.make: the surface for "${resource.type}" declares no paths; ` +
         "omit the `include` option entirely for an endpoint that serves no walk",
     );

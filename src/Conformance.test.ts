@@ -180,7 +180,7 @@ const failed = (report: Conformance.Report): ReadonlyArray<string> =>
 
 const outcomeFor = (report: Conformance.Report, id: string): Conformance.Outcome => {
   const found = report.outcomes.find((outcome) => outcome.rule.id === id);
-  if (found === undefined) throw new Error(`no outcome for ${id}`);
+  assert(found !== undefined, `no outcome for ${id}`);
   return found;
 };
 

@@ -101,6 +101,7 @@ import type {
   IncludePathsTo,
 } from "./Resource.js";
 import { attributeKeys, fieldKeys, filterable } from "./Resource.js";
+import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -1345,8 +1346,7 @@ const encodeFilterNode = (
     }),
   );
 
-const messageOf = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause);
+const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message : String(cause));
 
 /**
  * Creates the `filter` codec for one resource: the filter grammar
@@ -1702,8 +1702,7 @@ const fieldsetTargetsOf = (
   if (fields === true) return targets;
   const unknown = fields.filter((type) => !targets.some((target) => target.type === type));
   if (Arr.isReadonlyArrayNonEmpty(unknown)) {
-    // oxlint-disable-next-line effect/avoid-untagged-errors -- a construction-time programmer error, thrown while the api is declared, never an Effect failure
-    throw new Error(
+    throw declarationError(
       `Query.schema: \`fields\` names ${unknown.map((type) => `"${type}"`).join(", ")}, ` +
         `which the endpoint's response cannot carry; it can carry ${targets.map((target) => `"${target.type}"`).join(", ")}`,
     );
@@ -1821,7 +1820,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
   let filterFields: FieldCodecs | undefined;
   if (options.filter === true) {
     if (resources.length !== 1) {
-      throw new Error(
+      throw declarationError(
         "Query.schema: `filter: true` derives the filter grammar from one resource's declaration; " +
           "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead",
       );
