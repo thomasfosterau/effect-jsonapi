@@ -239,7 +239,7 @@ describe("northwind example: fetching", () => {
           ),
         );
         expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
-        expect(new Set(keys).size).toBe(keys.length);
+        expect(Arr.dedupe(keys).length).toBe(keys.length);
       }),
   );
 
@@ -889,10 +889,7 @@ describe("northwind example: heterogeneous search", () => {
           }),
         );
 
-        const types = Arr.sort(
-          [...new Set(document.data.map((result) => result.type))],
-          Ord.String,
-        );
+        const types = Arr.sort(Arr.dedupe(document.data.map((result) => result.type)), Ord.String);
         expect(types).toEqual(["customers", "products", "suppliers"]);
 
         // The endpoint declares `fields`, so a client reads each attribute as

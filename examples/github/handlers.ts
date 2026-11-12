@@ -22,6 +22,9 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as R from "effect/Record";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
@@ -68,7 +71,7 @@ const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUns
 const definedAttributes = <A extends Record<string, unknown>>(
   attributes: A,
 ): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
-  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+  R.fromEntries(R.toEntries(attributes).filter(([, value]) => value !== undefined)) as {
     readonly [K in keyof A]: Exclude<A[K], undefined>;
   };
 
@@ -279,23 +282,29 @@ export const readmePull: PullRequest = PullRequest.make({
 });
 
 const store = {
-  users: new Map<string, User>([octocat, defunkt, hubot].map((user) => [user.id, user])),
-  labels: new Map<string, Label>([bugLabel, enhancementLabel].map((label) => [label.id, label])),
-  repositories: new Map<string, Repository>(
+  users: MutableHashMap.fromIterable<string, User>(
+    [octocat, defunkt, hubot].map((user) => [user.id, user]),
+  ),
+  labels: MutableHashMap.fromIterable<string, Label>(
+    [bugLabel, enhancementLabel].map((label) => [label.id, label]),
+  ),
+  repositories: MutableHashMap.fromIterable<string, Repository>(
     [helloWorld, spoonKnife, secretProject].map((repository) => [repository.id, repository]),
   ),
-  issues: new Map<string, Issue>(
+  issues: MutableHashMap.fromIterable<string, Issue>(
     [bugIssue, featureIssue, lockedIssue].map((issue) => [issue.id, issue]),
   ),
-  issueComments: new Map<string, IssueComment>(bugComments.map((comment) => [comment.id, comment])),
+  issueComments: MutableHashMap.fromIterable<string, IssueComment>(
+    bugComments.map((comment) => [comment.id, comment]),
+  ),
   // The paginated comments relationship is backed by its own index, not by
   // inline linkage on the issue.
-  commentsByIssue: new Map<string, Array<string>>([
+  commentsByIssue: MutableHashMap.fromIterable<string, Array<string>>([
     [bugIssue.id, bugComments.map((comment) => comment.id)],
     [featureIssue.id, []],
     [lockedIssue.id, []],
   ]),
-  pulls: new Map<string, PullRequest>([[readmePull.id, readmePull]]),
+  pulls: MutableHashMap.fromIterable<string, PullRequest>([[readmePull.id, readmePull]]),
 };
 
 /**
@@ -312,7 +321,7 @@ const relationshipsOf = <T extends { readonly relationships?: object }>(
   );
 
 const loadUser = (id: string): Effect.Effect<User, UserNotFound> => {
-  const user = store.users.get(id);
+  const user = Option.getOrUndefined(MutableHashMap.get(store.users, id));
   return user === undefined ? Effect.fail(new UserNotFound({ id })) : Effect.succeed(user);
 };
 
@@ -322,7 +331,7 @@ const loadUser = (id: string): Effect.Effect<User, UserNotFound> => {
  */
 export const discardRepository = (id: string): Effect.Effect<void> =>
   Effect.sync(() => {
-    store.repositories.delete(id);
+    MutableHashMap.remove(store.repositories, id);
   });
 
 /**
@@ -331,19 +340,19 @@ export const discardRepository = (id: string): Effect.Effect<void> =>
  */
 export const discardIssue = (id: string): Effect.Effect<void> =>
   Effect.sync(() => {
-    store.issues.delete(id);
-    store.commentsByIssue.delete(id);
+    MutableHashMap.remove(store.issues, id);
+    MutableHashMap.remove(store.commentsByIssue, id);
   });
 
 const loadRepository = (id: string): Effect.Effect<Repository, RepositoryNotFound> => {
-  const repository = store.repositories.get(id);
+  const repository = Option.getOrUndefined(MutableHashMap.get(store.repositories, id));
   return repository === undefined
     ? Effect.fail(new RepositoryNotFound({ id }))
     : Effect.succeed(repository);
 };
 
 const loadIssue = (id: string): Effect.Effect<Issue, IssueNotFound> => {
-  const issue = store.issues.get(id);
+  const issue = Option.getOrUndefined(MutableHashMap.get(store.issues, id));
   return issue === undefined ? Effect.fail(new IssueNotFound({ id })) : Effect.succeed(issue);
 };
 
@@ -363,12 +372,14 @@ const loadUnlockedIssue = (id: string): Effect.Effect<Issue, IssueNotFound | Iss
 const requireLabels = (
   identifiers: ReadonlyArray<{ readonly id: string }>,
 ): Effect.Effect<void, LabelNotFound> => {
-  const missing = identifiers.find((identifier) => !store.labels.has(identifier.id));
+  const missing = identifiers.find(
+    (identifier) => !MutableHashMap.has(store.labels, identifier.id),
+  );
   return missing === undefined ? Effect.void : Effect.fail(new LabelNotFound({ id: missing.id }));
 };
 
 const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> => {
-  const pull = store.pulls.get(id);
+  const pull = Option.getOrUndefined(MutableHashMap.get(store.pulls, id));
   return pull === undefined ? Effect.fail(new PullRequestNotFound({ id })) : Effect.succeed(pull);
 };
 
@@ -380,7 +391,11 @@ const loadPull = (id: string): Effect.Effect<PullRequest, PullRequestNotFound> =
 
 // The stored user a linkage names, if the store holds one.
 const usersFor = (ref: Option.Option<{ readonly id: string }>): Array<User> =>
-  Arr.fromOption(Option.flatMap(ref, ({ id }) => Option.fromNullishOr(store.users.get(id))));
+  Arr.fromOption(
+    Option.flatMap(ref, ({ id }) =>
+      Option.fromNullishOr(Option.getOrUndefined(MutableHashMap.get(store.users, id))),
+    ),
+  );
 
 const resolveRepositoryIncluded = (
   repository: Repository,
@@ -402,7 +417,10 @@ const resolveIssueIncluded = (
   if (include === undefined) return included;
   if (include.some((path) => path === "repository" || path === "repository.owner")) {
     const ref = issue.relationships?.repository.data;
-    const repository = ref !== undefined ? store.repositories.get(ref.id) : undefined;
+    const repository =
+      ref !== undefined
+        ? Option.getOrUndefined(MutableHashMap.get(store.repositories, ref.id))
+        : undefined;
     if (repository !== undefined) {
       included.push(repository);
       if (include.includes("repository.owner")) {
@@ -418,7 +436,7 @@ const resolveIssueIncluded = (
   });
   if (include.includes("labels")) {
     Arr.forEach(issue.relationships?.labels.data ?? [], (ref) => {
-      const label = store.labels.get(ref.id);
+      const label = Option.getOrUndefined(MutableHashMap.get(store.labels, ref.id));
       if (label !== undefined) included.push(label);
     });
   }
@@ -433,7 +451,10 @@ const resolvePullIncluded = (
   if (include === undefined) return included;
   if (include.some((path) => path === "repository" || path === "repository.owner")) {
     const ref = pull.relationships?.repository.data;
-    const repository = ref !== undefined ? store.repositories.get(ref.id) : undefined;
+    const repository =
+      ref !== undefined
+        ? Option.getOrUndefined(MutableHashMap.get(store.repositories, ref.id))
+        : undefined;
     if (repository !== undefined) {
       included.push(repository);
       if (include.includes("repository.owner")) {
@@ -447,7 +468,7 @@ const resolvePullIncluded = (
   }
   if (include.includes("reviewers")) {
     Arr.forEach(pull.relationships?.reviewers.data ?? [], (ref) => {
-      const reviewer = store.users.get(ref.id);
+      const reviewer = Option.getOrUndefined(MutableHashMap.get(store.users, ref.id));
       if (reviewer !== undefined) included.push(reviewer);
     });
   }
@@ -663,7 +684,7 @@ export const UsersLive = HttpApiBuilder.group(Api, "users", (handlers) =>
       ),
     )
     .handle("list", ({ query }) => {
-      const users = sortBy([...store.users.values()], query.sort);
+      const users = sortBy(Arr.fromIterable(MutableHashMap.values(store.users)), query.sort);
       const { number, page, size, total } = paginate(users, query.page);
       return Effect.succeed(
         Handlers.collection(page, {
@@ -699,7 +720,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       ),
     )
     .handle("list", ({ query }) => {
-      let repositories = [...store.repositories.values()];
+      let repositories = Arr.fromIterable(MutableHashMap.values(store.repositories));
 
       // filter[owner]=<user id>
       const owner = query.filter?.owner;
@@ -746,7 +767,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
       const owner = payload.data.relationships.owner.data.id;
       if (
         Arr.some(
-          Arr.fromIterable(store.repositories.values()),
+          Arr.fromIterable(MutableHashMap.values(store.repositories)),
           (existing) =>
             existing.attributes.name === name && existing.relationships?.owner.data.id === owner,
         )
@@ -754,11 +775,11 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
         return Effect.fail(new RepositoryNameTaken({ name }));
       }
       const repository = Repository.make({
-        id: Repository.Id.make(`${store.repositories.size + 1}`),
+        id: Repository.Id.make(`${MutableHashMap.size(store.repositories) + 1}`),
         attributes: definedAttributes(payload.data.attributes),
         relationships: payload.data.relationships,
       });
-      store.repositories.set(repository.id, repository);
+      MutableHashMap.set(store.repositories, repository.id, repository);
       // The created resource carries its own `self` link: the 201's `Location`
       // header is copied from it, so the two match.
       const self = `/repositories/${repository.id}`;
@@ -776,7 +797,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
               owner: payload.data.relationships?.owner ?? relationshipsOf(repository).owner,
             },
           });
-          store.repositories.set(updated.id, updated);
+          MutableHashMap.set(store.repositories, updated.id, updated);
           return Handlers.data(updated, {
             self: `/repositories/${updated.id}`,
             jsonapi: Document.v1_1,
@@ -787,7 +808,7 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
     .handle("delete", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
-          store.repositories.delete(repository.id);
+          MutableHashMap.remove(store.repositories, repository.id);
         }),
       ),
     )
@@ -795,7 +816,10 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
     .handle("owner", ({ params }) =>
       loadRepository(params.id).pipe(
         Effect.map((repository) => {
-          const owner = store.users.get(relationshipsOf(repository).owner.data.id) ?? null;
+          const owner =
+            Option.getOrUndefined(
+              MutableHashMap.get(store.users, relationshipsOf(repository).owner.data.id),
+            ) ?? null;
           return Handlers.data(owner, {
             self: Handlers.relatedLink("repositories", repository.id, "owner"),
             jsonapi: Document.v1_1,
@@ -811,10 +835,12 @@ export const RepositoriesLive = HttpApiBuilder.group(Api, "repositories", (handl
 
 // The comments attached to an issue, via the relationship index.
 const commentsFor = (issueId: string): Array<IssueComment> =>
-  (store.commentsByIssue.get(issueId) ?? []).flatMap((commentId) => {
-    const comment = store.issueComments.get(commentId);
-    return comment === undefined ? [] : [comment];
-  });
+  (Option.getOrUndefined(MutableHashMap.get(store.commentsByIssue, issueId)) ?? []).flatMap(
+    (commentId) => {
+      const comment = Option.getOrUndefined(MutableHashMap.get(store.issueComments, commentId));
+      return comment === undefined ? [] : [comment];
+    },
+  );
 
 export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
   handlers
@@ -834,7 +860,10 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
     .handle("list", ({ query }) => {
       // filter[state]=open&filter[repository]=1, filter[assignee][isnull]=true,
       // filter[number][gt]=1000, an `OR` group, … — the grammar, evaluated per §6.
-      const issues = matching([...store.issues.values()], Option.fromUndefinedOr(query.filter));
+      const issues = matching(
+        Arr.fromIterable(MutableHashMap.values(store.issues)),
+        Option.fromUndefinedOr(query.filter),
+      );
 
       sortBy(issues, query.sort);
       const { number, page, size, total } = paginate(issues, query.page);
@@ -857,14 +886,14 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
       // `repository` and `author` are required (`one`) relationships — the
       // payload always carries them; the repository must also exist.
       const repository = payload.data.relationships.repository.data;
-      if (!store.repositories.has(repository.id)) {
+      if (!MutableHashMap.has(store.repositories, repository.id)) {
         return Effect.fail(new RepositoryNotFound({ id: repository.id }));
       }
       // Linkage naming a label the store does not hold answers 404 (JSON:API
       // §Creating Resources) rather than creating the issue with it.
       return requireLabels(payload.data.relationships.labels?.data ?? []).pipe(
         Effect.map(() => {
-          const id = Issue.Id.make(`${store.issues.size + 1}`);
+          const id = Issue.Id.make(`${MutableHashMap.size(store.issues) + 1}`);
           const issue = Issue.make({
             id,
             attributes: definedAttributes(payload.data.attributes),
@@ -877,8 +906,8 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
               comments: issueComments(id),
             },
           });
-          store.issues.set(issue.id, issue);
-          store.commentsByIssue.set(issue.id, []);
+          MutableHashMap.set(store.issues, issue.id, issue);
+          MutableHashMap.set(store.commentsByIssue, issue.id, []);
           // The created resource carries its own `self` link: the 201's
           // `Location` header is copied from it, so the two match.
           const self = `/issues/${issue.id}`;
@@ -904,7 +933,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
               comments: relationships.comments,
             },
           });
-          store.issues.set(updated.id, updated);
+          MutableHashMap.set(store.issues, updated.id, updated);
           return Handlers.data(updated, { self: `/issues/${updated.id}`, jsonapi: Document.v1_1 });
         }),
       ),
@@ -923,7 +952,9 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
                 ? undefined
                 : query.include.includes("author")
                   ? page.flatMap((comment) => {
-                      const author = store.users.get(relationshipsOf(comment).author.data.id);
+                      const author = Option.getOrUndefined(
+                        MutableHashMap.get(store.users, relationshipsOf(comment).author.data.id),
+                      );
                       return author === undefined ? [] : [author];
                     })
                   : [],
@@ -971,14 +1002,14 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
     .handle("updateAssigneeRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
         Effect.flatMap((issue) => {
-          if (payload.data !== null && !store.users.has(payload.data.id)) {
+          if (payload.data !== null && !MutableHashMap.has(store.users, payload.data.id)) {
             return Effect.fail(new UserNotFound({ id: payload.data.id }));
           }
           const updated = Issue.make({
             ...issue,
             relationships: { ...relationshipsOf(issue), assignee: { data: payload.data } },
           });
-          store.issues.set(updated.id, updated);
+          MutableHashMap.set(store.issues, updated.id, updated);
           return Effect.succeed(
             Handlers.linkage(payload.data, {
               self: Handlers.relationshipLink("issues", issue.id, "assignee"),
@@ -997,7 +1028,7 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
             ...issue,
             relationships: { ...relationshipsOf(issue), labels: { data: payload.data } },
           });
-          store.issues.set(updated.id, updated);
+          MutableHashMap.set(store.issues, updated.id, updated);
           return Handlers.linkage(payload.data, {
             self: Handlers.relationshipLink("issues", issue.id, "labels"),
             jsonapi: Document.v1_1,
@@ -1011,16 +1042,18 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
         Effect.tap(() => requireLabels(payload.data)),
         Effect.map((issue) => {
           const existing = issue.relationships?.labels.data ?? [];
-          const known = new Set<string>(existing.map((identifier) => identifier.id));
+          const known = MutableHashSet.fromIterable<string>(
+            existing.map((identifier) => identifier.id),
+          );
           const added = [
             ...existing,
-            ...payload.data.filter((identifier) => !known.has(identifier.id)),
+            ...payload.data.filter((identifier) => !MutableHashSet.has(known, identifier.id)),
           ];
           const updated = Issue.make({
             ...issue,
             relationships: { ...relationshipsOf(issue), labels: { data: added } },
           });
-          store.issues.set(updated.id, updated);
+          MutableHashMap.set(store.issues, updated.id, updated);
           return Handlers.linkage(added, {
             self: Handlers.relationshipLink("issues", issue.id, "labels"),
             jsonapi: Document.v1_1,
@@ -1032,15 +1065,17 @@ export const IssuesLive = HttpApiBuilder.group(Api, "issues", (handlers) =>
     .handle("removeLabelsRelationship", ({ params, payload }) =>
       loadUnlockedIssue(params.id).pipe(
         Effect.map((issue) => {
-          const remove = new Set<string>(payload.data.map((identifier) => identifier.id));
+          const remove = MutableHashSet.fromIterable<string>(
+            payload.data.map((identifier) => identifier.id),
+          );
           const remaining = (issue.relationships?.labels.data ?? []).filter(
-            (identifier) => !remove.has(identifier.id),
+            (identifier) => !MutableHashSet.has(remove, identifier.id),
           );
           const updated = Issue.make({
             ...issue,
             relationships: { ...relationshipsOf(issue), labels: { data: remaining } },
           });
-          store.issues.set(updated.id, updated);
+          MutableHashMap.set(store.issues, updated.id, updated);
         }),
       ),
     ),
@@ -1065,7 +1100,7 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
       ),
     )
     .handle("list", ({ query }) => {
-      let pulls = [...store.pulls.values()];
+      let pulls = Arr.fromIterable(MutableHashMap.values(store.pulls));
 
       const repository = query.filter?.repository;
       if (repository !== undefined) {
@@ -1109,13 +1144,13 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     const q = query.filter?.q ?? "";
 
     // search across all three resource types; results stay discriminated by `type`
-    const repositories = [...store.repositories.values()].filter((repository) =>
-      matches([repository.attributes.name, repository.attributes.description], q),
+    const repositories = Arr.fromIterable(MutableHashMap.values(store.repositories)).filter(
+      (repository) => matches([repository.attributes.name, repository.attributes.description], q),
     );
-    const issues = [...store.issues.values()].filter((issue) =>
+    const issues = Arr.fromIterable(MutableHashMap.values(store.issues)).filter((issue) =>
       matches([issue.attributes.title, issue.attributes.body], q),
     );
-    const users = [...store.users.values()].filter((user) =>
+    const users = Arr.fromIterable(MutableHashMap.values(store.users)).filter((user) =>
       matches([user.attributes.login, user.attributes.name], q),
     );
     const results = [...repositories, ...issues, ...users];

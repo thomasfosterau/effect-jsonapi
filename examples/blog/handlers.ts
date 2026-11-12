@@ -22,6 +22,9 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as R from "effect/Record";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
@@ -56,7 +59,7 @@ const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUns
 const definedAttributes = <A extends Record<string, unknown>>(
   attributes: A,
 ): { readonly [K in keyof A]: Exclude<A[K], undefined> } =>
-  Object.fromEntries(Object.entries(attributes).filter(([, value]) => value !== undefined)) as {
+  R.fromEntries(R.toEntries(attributes).filter(([, value]) => value !== undefined)) as {
     readonly [K in keyof A]: Exclude<A[K], undefined>;
   };
 
@@ -119,13 +122,15 @@ export const sampleArticle: Article = Article.make({
 });
 
 const store = {
-  articles: new Map<string, Article>([[sampleArticle.id, sampleArticle]]),
-  people: new Map<string, Person>([[sampleAuthor.id, sampleAuthor]]),
-  tags: new Map<string, Tag>([[sampleTag.id, sampleTag]]),
-  comments: new Map<string, Comment>(sampleComments.map((comment) => [comment.id, comment])),
+  articles: MutableHashMap.fromIterable<string, Article>([[sampleArticle.id, sampleArticle]]),
+  people: MutableHashMap.fromIterable<string, Person>([[sampleAuthor.id, sampleAuthor]]),
+  tags: MutableHashMap.fromIterable<string, Tag>([[sampleTag.id, sampleTag]]),
+  comments: MutableHashMap.fromIterable<string, Comment>(
+    sampleComments.map((comment) => [comment.id, comment]),
+  ),
   // The paginated comments relationship is backed by its own index, not by
   // inline linkage on the article.
-  articleComments: new Map<string, Array<string>>([
+  articleComments: MutableHashMap.fromIterable<string, Array<string>>([
     [sampleArticle.id, sampleComments.map((c) => c.id)],
   ]),
 };
@@ -137,8 +142,8 @@ const store = {
  */
 export const discardArticle = (id: string): Effect.Effect<void> =>
   Effect.sync(() => {
-    store.articles.delete(id);
-    store.articleComments.delete(id);
+    MutableHashMap.remove(store.articles, id);
+    MutableHashMap.remove(store.articleComments, id);
   });
 
 /**
@@ -155,19 +160,21 @@ const relationshipsOf = <T extends { readonly relationships?: object }>(
   );
 
 const loadArticle = (id: string): Effect.Effect<Article, ArticleNotFound> => {
-  const article = store.articles.get(id);
+  const article = Option.getOrUndefined(MutableHashMap.get(store.articles, id));
   return article === undefined ? Effect.fail(new ArticleNotFound({ id })) : Effect.succeed(article);
 };
 
 // A relationship write naming a resource the store does not hold answers 404
 // (JSON:API §Updating Relationships) rather than linking it.
 const requirePerson = (id: string): Effect.Effect<void, PersonNotFound> =>
-  store.people.has(id) ? Effect.void : Effect.fail(new PersonNotFound({ id }));
+  MutableHashMap.has(store.people, id) ? Effect.void : Effect.fail(new PersonNotFound({ id }));
 
 const requireComments = (
   identifiers: ReadonlyArray<{ readonly id: string }>,
 ): Effect.Effect<void, CommentNotFound> => {
-  const missing = identifiers.find((identifier) => !store.comments.has(identifier.id));
+  const missing = identifiers.find(
+    (identifier) => !MutableHashMap.has(store.comments, identifier.id),
+  );
   return missing === undefined ? Effect.void : Effect.fail(new CommentNotFound({ id: missing.id }));
 };
 
@@ -178,12 +185,15 @@ const resolveIncluded = (article: Article, include: ReadonlyArray<string> | unde
   const included: Array<Person | Tag> = [];
   if (include?.includes("author")) {
     const author = article.relationships?.author.data;
-    const person = author === undefined ? undefined : store.people.get(author.id);
+    const person =
+      author === undefined
+        ? undefined
+        : Option.getOrUndefined(MutableHashMap.get(store.people, author.id));
     if (person !== undefined) included.push(person);
   }
   if (include?.includes("tags")) {
     Arr.forEach(article.relationships?.tags.data ?? [], (identifier) => {
-      const tag = store.tags.get(identifier.id);
+      const tag = Option.getOrUndefined(MutableHashMap.get(store.tags, identifier.id));
       if (tag !== undefined) included.push(tag);
     });
   }
@@ -192,10 +202,12 @@ const resolveIncluded = (article: Article, include: ReadonlyArray<string> | unde
 
 // The comments attached to an article, via the relationship index.
 const articleComments = (articleId: string): Array<Comment> =>
-  (store.articleComments.get(articleId) ?? []).flatMap((commentId) => {
-    const comment = store.comments.get(commentId);
-    return comment === undefined ? [] : [comment];
-  });
+  (Option.getOrUndefined(MutableHashMap.get(store.articleComments, articleId)) ?? []).flatMap(
+    (commentId) => {
+      const comment = Option.getOrUndefined(MutableHashMap.get(store.comments, commentId));
+      return comment === undefined ? [] : [comment];
+    },
+  );
 
 // One offset page of an article's comments, shared by the related collection
 // and the relationship endpoint: the page, the bounds it was cut at and the
@@ -215,7 +227,10 @@ const articleCommentPage = (
 const commentAuthors = (comments: ReadonlyArray<Comment>): Array<Person> =>
   comments.flatMap((comment) => {
     const authorId = comment.relationships?.author.data.id;
-    const author = authorId === undefined ? undefined : store.people.get(authorId);
+    const author =
+      authorId === undefined
+        ? undefined
+        : Option.getOrUndefined(MutableHashMap.get(store.people, authorId));
     return author === undefined ? [] : [author];
   });
 
@@ -239,7 +254,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       ),
     )
     .handle("list", ({ query }) => {
-      let articles = [...store.articles.values()];
+      let articles = Arr.fromIterable(MutableHashMap.values(store.articles));
 
       // filter[author]=<person id>
       const author = query.filter?.author;
@@ -281,13 +296,13 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       const title = payload.data.attributes.title;
       if (
         Arr.some(
-          Arr.fromIterable(store.articles.values()),
+          Arr.fromIterable(MutableHashMap.values(store.articles)),
           (existing) => existing.attributes.title === title,
         )
       ) {
         return Effect.fail(new TitleTaken({ title }));
       }
-      const id = Article.Id.make(`${store.articles.size + 1}`);
+      const id = Article.Id.make(`${MutableHashMap.size(store.articles) + 1}`);
       const article = Article.make({
         id,
         attributes: payload.data.attributes,
@@ -300,8 +315,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
           comments: Handlers.paginatedRelationship("articles", id, "comments"),
         },
       });
-      store.articles.set(article.id, article);
-      store.articleComments.set(article.id, []);
+      MutableHashMap.set(store.articles, article.id, article);
+      MutableHashMap.set(store.articleComments, article.id, []);
       // The created resource carries its own `self` link: the 201's `Location`
       // header is copied from it, so the two match.
       const self = `/articles/${article.id}`;
@@ -322,7 +337,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
               comments: relationships.comments,
             },
           });
-          store.articles.set(updated.id, updated);
+          MutableHashMap.set(store.articles, updated.id, updated);
           return Handlers.data(updated, {
             self: `/articles/${updated.id}`,
             jsonapi: Document.v1_1,
@@ -333,8 +348,8 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("delete", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          store.articles.delete(article.id);
-          store.articleComments.delete(article.id);
+          MutableHashMap.remove(store.articles, article.id);
+          MutableHashMap.remove(store.articleComments, article.id);
         }),
       ),
     )
@@ -342,7 +357,10 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("author", ({ params }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          const author = store.people.get(relationshipsOf(article).author.data.id) ?? null;
+          const author =
+            Option.getOrUndefined(
+              MutableHashMap.get(store.people, relationshipsOf(article).author.data.id),
+            ) ?? null;
           return Handlers.data(author, {
             self: Handlers.relatedLink("articles", article.id, "author"),
             jsonapi: Document.v1_1,
@@ -412,7 +430,9 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
               query.include === undefined
                 ? undefined
                 : tags.flatMap((identifier) => {
-                    const tag = store.tags.get(identifier.id);
+                    const tag = Option.getOrUndefined(
+                      MutableHashMap.get(store.tags, identifier.id),
+                    );
                     return tag === undefined ? [] : [tag];
                   }),
             // `?fields[tags]=…` narrows the `included` tags; projecting an
@@ -432,7 +452,7 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
             ...article,
             relationships: { ...relationshipsOf(article), author: { data: payload.data } },
           });
-          store.articles.set(updated.id, updated);
+          MutableHashMap.set(store.articles, updated.id, updated);
           return Handlers.linkage(payload.data, {
             self: Handlers.relationshipLink("articles", article.id, "author"),
             related: Handlers.relatedLink("articles", article.id, "author"),
@@ -445,11 +465,12 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(
         Effect.tap(() => requireComments(payload.data)),
         Effect.map((article) => {
-          const linked = store.articleComments.get(article.id) ?? [];
+          const linked =
+            Option.getOrUndefined(MutableHashMap.get(store.articleComments, article.id)) ?? [];
           Arr.forEach(payload.data, (identifier) => {
             if (!linked.includes(identifier.id)) linked.push(identifier.id);
           });
-          store.articleComments.set(article.id, linked);
+          MutableHashMap.set(store.articleComments, article.id, linked);
           return Handlers.linkage(
             linked.map((id) => Comment.ref(id)),
             {
@@ -464,10 +485,15 @@ export const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     .handle("removeCommentsRelationship", ({ params, payload }) =>
       loadArticle(params.id).pipe(
         Effect.map((article) => {
-          const remove = new Set<string>(payload.data.map((identifier) => identifier.id));
-          store.articleComments.set(
+          const remove = MutableHashSet.fromIterable<string>(
+            payload.data.map((identifier) => identifier.id),
+          );
+          MutableHashMap.set(
+            store.articleComments,
             article.id,
-            (store.articleComments.get(article.id) ?? []).filter((id) => !remove.has(id)),
+            (
+              Option.getOrUndefined(MutableHashMap.get(store.articleComments, article.id)) ?? []
+            ).filter((id) => !MutableHashSet.has(remove, id)),
           );
         }),
       ),
@@ -487,10 +513,10 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
     const q = query.filter?.q ?? "";
 
     // search across both resource types; results stay discriminated by `type`
-    const articles = [...store.articles.values()].filter((article) =>
+    const articles = Arr.fromIterable(MutableHashMap.values(store.articles)).filter((article) =>
       matches([article.attributes.title, article.attributes.body], q),
     );
-    const people = [...store.people.values()].filter((person) =>
+    const people = Arr.fromIterable(MutableHashMap.values(store.people)).filter((person) =>
       matches([person.attributes.firstName, person.attributes.lastName], q),
     );
     const results = [...articles, ...people];
@@ -534,10 +560,10 @@ type ResultEntry = { readonly data?: Article | Comment | null };
  * if every operation succeeds — all-or-nothing, per the extension.
  */
 interface Draft {
-  readonly articles: Map<string, Article>;
-  readonly comments: Map<string, Comment>;
+  readonly articles: MutableHashMap.MutableHashMap<string, Article>;
+  readonly comments: MutableHashMap.MutableHashMap<string, Comment>;
   /** The paginated comments relationship index (article id → comment ids). */
-  readonly articleComments: Map<string, Array<string>>;
+  readonly articleComments: MutableHashMap.MutableHashMap<string, Array<string>>;
 }
 
 /** A malformed or dangling atomic operation, thrown inside the draft and converted to `OperationFailed`. */
@@ -572,7 +598,7 @@ const getArticle = (
   target: { readonly id?: string; readonly lid?: string },
 ): Article => {
   const id = targetId(lids, target);
-  const article = draft.articles.get(id);
+  const article = Option.getOrUndefined(MutableHashMap.get(draft.articles, id));
   if (article === undefined) throw new InvalidOperation({ message: `article "${id}" not found` });
   return article;
 };
@@ -583,7 +609,7 @@ const getComment = (
   target: { readonly id?: string; readonly lid?: string },
 ): Comment => {
   const id = targetId(lids, target);
-  const comment = draft.comments.get(id);
+  const comment = Option.getOrUndefined(MutableHashMap.get(draft.comments, id));
   if (comment === undefined) throw new InvalidOperation({ message: `comment "${id}" not found` });
   return comment;
 };
@@ -605,12 +631,12 @@ const isLinkageNotFound = (error: unknown): error is LinkageNotFound =>
  * error, so nothing is committed.
  */
 const requireHeld = <I extends { readonly id: string }>(
-  held: ReadonlyMap<string, unknown>,
+  held: MutableHashMap.MutableHashMap<string, unknown>,
   notFound: (fields: { readonly id: string; readonly pointer: string }) => LinkageNotFound,
   identifier: I,
   pointer: string,
 ): I => {
-  if (!held.has(identifier.id)) throw notFound({ id: identifier.id, pointer });
+  if (!MutableHashMap.has(held, identifier.id)) throw notFound({ id: identifier.id, pointer });
   return identifier;
 };
 
@@ -651,7 +677,8 @@ const applyOperation = (
     // replace an article's author (`one`: the new linkage is never null)
     Match.when(Atomic.targetsRelationship(Article, "author"), (op) => {
       const article = getArticle(draft, lids, op.ref);
-      draft.articles.set(
+      MutableHashMap.set(
+        draft.articles,
         article.id,
         Article.make({
           ...article,
@@ -680,7 +707,8 @@ const applyOperation = (
           : op.op === "remove"
             ? current.filter((existing) => !refs.some((removed) => removed.id === existing.id))
             : refs;
-      draft.articles.set(
+      MutableHashMap.set(
+        draft.articles,
         article.id,
         Article.make({
           ...article,
@@ -705,20 +733,22 @@ const applyOperation = (
               `${at}/data/${index}`,
             ).id;
       });
-      const current = draft.articleComments.get(article.id) ?? [];
+      const current =
+        Option.getOrUndefined(MutableHashMap.get(draft.articleComments, article.id)) ?? [];
       const next =
         op.op === "add"
           ? [...current, ...ids.filter((id) => !current.includes(id))]
           : op.op === "remove"
             ? current.filter((id) => !ids.includes(id))
             : [...ids];
-      draft.articleComments.set(article.id, next);
+      MutableHashMap.set(draft.articleComments, article.id, next);
       return Atomic.emptyResult;
     }),
     // replace a comment's author (`one`)
     Match.when(Atomic.targetsRelationship(Comment, "author"), (op) => {
       const comment = getComment(draft, lids, op.ref);
-      draft.comments.set(
+      MutableHashMap.set(
+        draft.comments,
         comment.id,
         Comment.make({
           ...comment,
@@ -758,8 +788,8 @@ const applyOperation = (
               comments: Handlers.paginatedRelationship("articles", id, "comments"),
             },
           });
-          draft.articles.set(article.id, article);
-          draft.articleComments.set(article.id, []);
+          MutableHashMap.set(draft.articles, article.id, article);
+          MutableHashMap.set(draft.articleComments, article.id, []);
           if (add.data.lid !== undefined) lids.assign(add.data.lid, article.id);
           return { data: article };
         }),
@@ -780,13 +810,13 @@ const applyOperation = (
             attributes: patchAttributes(article.attributes, update.data.attributes),
             relationships: { ...relationshipsOf(article), ...resolved },
           });
-          draft.articles.set(updated.id, updated);
+          MutableHashMap.set(draft.articles, updated.id, updated);
           return { data: updated };
         }),
         Match.when({ op: "remove" }, (remove) => {
           const article = getArticle(draft, lids, remove.ref);
-          draft.articles.delete(article.id);
-          draft.articleComments.delete(article.id);
+          MutableHashMap.remove(draft.articles, article.id);
+          MutableHashMap.remove(draft.articleComments, article.id);
           return Atomic.emptyResult;
         }),
         Match.exhaustive,
@@ -808,7 +838,7 @@ const applyOperation = (
               },
             },
           });
-          draft.comments.set(comment.id, comment);
+          MutableHashMap.set(draft.comments, comment.id, comment);
           if (add.data.lid !== undefined) lids.assign(add.data.lid, comment.id);
           return { data: comment };
         }),
@@ -826,15 +856,16 @@ const applyOperation = (
             attributes: patchAttributes(comment.attributes, update.data.attributes),
             relationships: { ...relationshipsOf(comment), ...resolved },
           });
-          draft.comments.set(updated.id, updated);
+          MutableHashMap.set(draft.comments, updated.id, updated);
           return { data: updated };
         }),
         Match.when({ op: "remove" }, (remove) => {
           const comment = getComment(draft, lids, remove.ref);
-          draft.comments.delete(comment.id);
+          MutableHashMap.remove(draft.comments, comment.id);
           // unlink it from any article's paginated comments relationship
           Arr.forEach(draft.articleComments, ([articleId, ids]) => {
-            draft.articleComments.set(
+            MutableHashMap.set(
+              draft.articleComments,
               articleId,
               ids.filter((id) => id !== comment.id),
             );
@@ -851,9 +882,9 @@ export const OperationsLive = HttpApiBuilder.group(Api, "operations", (handlers)
   handlers.handle("operations", ({ payload }) =>
     Effect.gen(function* () {
       const draft: Draft = {
-        articles: new Map(store.articles),
-        comments: new Map(store.comments),
-        articleComments: new Map(
+        articles: MutableHashMap.fromIterable(store.articles),
+        comments: MutableHashMap.fromIterable(store.comments),
+        articleComments: MutableHashMap.fromIterable(
           [...store.articleComments].map(([articleId, ids]) => [articleId, [...ids]]),
         ),
       };

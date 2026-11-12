@@ -6,6 +6,8 @@
  * the transaction boundary each write opens, the `?include=` walk on `get`
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import { assert, describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -107,7 +109,7 @@ interface UpdateInput {
 
 /** A stub op set over an in-memory store, counting every call. */
 const makeOps = (seed: ReadonlyArray<PersonLike>) => {
-  const store = new Map<string, PersonLike>(seed.map((p) => [p.id, p]));
+  const store = MutableHashMap.fromIterable(seed.map((p) => [p.id, p] as const));
   const calls = { list: 0, get: 0, create: 0, update: 0, delete: 0 };
   const ops: ResourceHandlers.Ops<
     ListInput,
@@ -122,7 +124,7 @@ const makeOps = (seed: ReadonlyArray<PersonLike>) => {
     list: (input) =>
       Effect.sync(() => {
         calls.list += 1;
-        const all = [...store.values()].filter(
+        const all = Arr.fromIterable(MutableHashMap.values(store)).filter(
           (p) => input.q === undefined || p.attributes.name.toLowerCase().includes(input.q),
         );
         const offset = input.offset ?? 0;
@@ -132,7 +134,7 @@ const makeOps = (seed: ReadonlyArray<PersonLike>) => {
     get: (id) =>
       Effect.suspend(() => {
         calls.get += 1;
-        const found = store.get(id);
+        const found = Option.getOrUndefined(MutableHashMap.get(store, id));
         return found === undefined
           ? new ServerErrors.NotFound({ resource: "people", id })
           : Effect.succeed(found);
@@ -141,17 +143,17 @@ const makeOps = (seed: ReadonlyArray<PersonLike>) => {
       Effect.gen(function* () {
         yield* Transaction;
         calls.create += 1;
-        const created = person(ids(store.size + 1), input.name);
-        store.set(created.id, created);
+        const created = person(ids(MutableHashMap.size(store) + 1), input.name);
+        MutableHashMap.set(store, created.id, created);
         return { id: created.id };
       }),
     update: (input) =>
       Effect.gen(function* () {
         yield* Transaction;
         calls.update += 1;
-        const current = store.get(input.id);
+        const current = Option.getOrUndefined(MutableHashMap.get(store, input.id));
         if (current === undefined) return yield* Effect.die("missing");
-        store.set(input.id, {
+        MutableHashMap.set(store, input.id, {
           ...current,
           attributes: { name: input.name ?? current.attributes.name },
         });
@@ -161,7 +163,7 @@ const makeOps = (seed: ReadonlyArray<PersonLike>) => {
       Effect.gen(function* () {
         yield* Transaction;
         calls.delete += 1;
-        store.delete(id);
+        MutableHashMap.remove(store, id);
       }),
   };
   return { ops, calls, store };
@@ -180,11 +182,11 @@ const makeTransact = () => {
 
 /** An in-memory cache stand-in with a freshness bypass for admins and a fault switch. */
 const makeCache = () => {
-  const store = new Map<string, PersonLike>();
+  const store = MutableHashMap.empty<string, PersonLike>();
   const state = { getFails: false };
   const cache: ResourceHandlers.Cache<PersonLike, Viewer> = {
-    set: (id, resource) => Effect.sync(() => void store.set(id, resource)),
-    delete: (id) => Effect.sync(() => void store.delete(id)),
+    set: (id, resource) => Effect.sync(() => void MutableHashMap.set(store, id, resource)),
+    delete: (id) => Effect.sync(() => void MutableHashMap.remove(store, id)),
     readThrough: <E, R>(
       id: string,
       load: Effect.Effect<PersonLike, E, R>,
@@ -192,10 +194,12 @@ const makeCache = () => {
       Effect.gen(function* () {
         const user = yield* viewer;
         if (user?.role === "admin") return yield* load;
-        const hit = state.getFails ? undefined : store.get(id);
+        const hit = state.getFails
+          ? undefined
+          : Option.getOrUndefined(MutableHashMap.get(store, id));
         if (hit !== undefined) return hit;
         const loaded = yield* load;
-        store.set(id, loaded);
+        MutableHashMap.set(store, id, loaded);
         return loaded;
       }),
   };
@@ -298,7 +302,9 @@ describe("update", () => {
         expect(calls).toMatchObject({ update: 1, get: 1 });
         expect(document.data.attributes.name).toBe("Renamed");
         expect(document.data.meta).toEqual({ canEdit: true, canDelete: true });
-        expect(cacheStore.get(ids(1))?.attributes.name).toBe("Renamed");
+        expect(Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name).toBe(
+          "Renamed",
+        );
       }),
   );
 });
@@ -313,14 +319,14 @@ describe("create / delete", () => {
         .create({ payload: { name: "Delta" } })
         .pipe(Effect.provide(layer));
       expect(created.data.attributes.name).toBe("Delta");
-      expect(cacheStore.has(created.data.id)).toBe(true);
+      expect(MutableHashMap.has(cacheStore, created.data.id)).toBe(true);
       expect(opened()).toBe(1);
       const removed = yield* handlers
         .delete({ params: { id: created.data.id } })
         .pipe(Effect.provide(layer));
       expect(removed).toBeUndefined();
-      expect(cacheStore.has(created.data.id)).toBe(false);
-      expect(store.has(created.data.id)).toBe(false);
+      expect(MutableHashMap.has(cacheStore, created.data.id)).toBe(false);
+      expect(MutableHashMap.has(store, created.data.id)).toBe(false);
       expect(calls).toMatchObject({ create: 1, delete: 1 });
       expect(opened()).toBe(2);
     }),
@@ -410,8 +416,8 @@ describe("a write whose re-read fails", () => {
               ),
           };
     // The public entry a reader cached before the write.
-    cacheStore.set(ids(1), person(ids(1), "Public"));
-    cacheStore.set(ids(2), person(ids(2), "Public"));
+    MutableHashMap.set(cacheStore, ids(1), person(ids(1), "Public"));
+    MutableHashMap.set(cacheStore, ids(2), person(ids(2), "Public"));
     const handlers = ResourceHandlers.make({
       ops,
       segment: "people",
@@ -446,7 +452,7 @@ describe("a write whose re-read fails", () => {
         );
         const { handlers, cacheStore } = build(ops, { evicting });
         // A stale entry under the id the create is about to write.
-        cacheStore.set(ids(4), person(ids(4), "Stale"));
+        MutableHashMap.set(cacheStore, ids(4), person(ids(4), "Stale"));
         const written = kind === "create" ? ids(4) : ids(1);
         const write =
           kind === "create"
@@ -460,7 +466,7 @@ describe("a write whose re-read fails", () => {
           }),
         );
         expect(Deferred.isDoneUnsafe(evicting)).toBe(true);
-        expect(cacheStore.has(written)).toBe(false);
+        expect(MutableHashMap.has(cacheStore, written)).toBe(false);
       }),
   );
 
@@ -478,8 +484,8 @@ describe("a write whose re-read fails", () => {
           yield* Fiber.interrupt(fiber);
         }),
       );
-      expect(store.has(ids(2))).toBe(false);
-      expect(cacheStore.has(ids(2))).toBe(false);
+      expect(MutableHashMap.has(store, ids(2))).toBe(false);
+      expect(MutableHashMap.has(cacheStore, ids(2))).toBe(false);
     }),
   );
 
@@ -498,11 +504,11 @@ describe("a write whose re-read fails", () => {
       expect(
         yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
       ).toBeInstanceOf(CommitFailed);
-      expect(cacheStore.has(ids(1))).toBe(false);
+      expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
       expect(
         yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
       ).toBeInstanceOf(CommitFailed);
-      expect(cacheStore.has(ids(2))).toBe(false);
+      expect(MutableHashMap.has(cacheStore, ids(2))).toBe(false);
       expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
     }),
   );
@@ -515,9 +521,11 @@ describe("a write whose re-read fails", () => {
         const { handlers, cacheStore } = build(ops);
         const error = yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin)));
         expect(error._tag).toBe("NotFound");
-        expect(store.get(ids(1))?.attributes.name).toBe("Private");
-        expect(cacheStore.has(ids(1))).toBe(false);
-        expect(cacheStore.has(ids(2))).toBe(true);
+        expect(Option.getOrUndefined(MutableHashMap.get(store, ids(1)))?.attributes.name).toBe(
+          "Private",
+        );
+        expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
+        expect(MutableHashMap.has(cacheStore, ids(2))).toBe(true);
       }),
   );
 
@@ -531,7 +539,7 @@ describe("a write whose re-read fails", () => {
       expect(Exit.isFailure(exit) && Cause.findErrorOption(exit.cause)).toEqual(
         Option.some(new StoreDown()),
       );
-      expect(failed.cacheStore.has(ids(1))).toBe(false);
+      expect(MutableHashMap.has(failed.cacheStore, ids(1))).toBe(false);
     }),
   );
 
@@ -552,7 +560,7 @@ describe("a write whose re-read fails", () => {
         broke.handlers.update(renameFirst).pipe(Effect.provide(admin)),
       );
       expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
-      expect(broke.cacheStore.has(ids(1))).toBe(false);
+      expect(MutableHashMap.has(broke.cacheStore, ids(1))).toBe(false);
     }),
   );
 
@@ -566,13 +574,13 @@ describe("a write whose re-read fails", () => {
       const { handlers, cacheStore } = build(ops, { transact: interrupting });
       const update = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
       expect(Exit.isFailure(update) && Cause.hasInterruptsOnly(update.cause)).toBe(true);
-      expect(cacheStore.has(ids(1))).toBe(false);
+      expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
 
       const remove = yield* Effect.exit(
         handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin)),
       );
       expect(Exit.isFailure(remove)).toBe(true);
-      expect(cacheStore.has(ids(2))).toBe(false);
+      expect(MutableHashMap.has(cacheStore, ids(2))).toBe(false);
       expect(calls).toMatchObject({ update: 1, delete: 1, get: 0 });
     }),
   );
@@ -593,8 +601,12 @@ describe("a write whose re-read fails", () => {
       expect(
         yield* failure(handlers.delete({ params: { id: ids(2) } }).pipe(Effect.provide(admin))),
       ).toBeInstanceOf(ServerErrors.NotFound);
-      expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
-      expect(cacheStore.get(ids(2))?.attributes.name).toBe("Public");
+      expect(Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name).toBe(
+        "Public",
+      );
+      expect(Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(2)))?.attributes.name).toBe(
+        "Public",
+      );
     }),
   );
 
@@ -615,7 +627,7 @@ describe("a write whose re-read fails", () => {
             data: { type: "people", id: ids(1), meta: { version: 7 } },
             jsonapi: { version: "1.1" },
           });
-          expect(cacheStore.has(ids(1))).toBe(false);
+          expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
         }),
     );
 
@@ -672,7 +684,9 @@ describe("a write whose re-read fails", () => {
           expect(yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin)))).toEqual(
             refused(ids(1)),
           );
-          expect(cacheStore.get(ids(1))?.attributes.name).toBe("Public");
+          expect(
+            Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name,
+          ).toBe("Public");
         }),
     );
 
@@ -689,7 +703,7 @@ describe("a write whose re-read fails", () => {
         const { handlers, cacheStore } = build(ops, { hiddenWrite });
         const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
         expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(2);
-        expect(cacheStore.has(ids(1))).toBe(false);
+        expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
       }),
     );
 
@@ -703,7 +717,7 @@ describe("a write whose re-read fails", () => {
           });
           const exit = yield* Effect.exit(handlers.update(renameFirst).pipe(Effect.provide(admin)));
           expect(Exit.isFailure(exit) && exit.cause.reasons.length).toBe(0);
-          expect(cacheStore.has(ids(1))).toBe(false);
+          expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
         }),
     );
 
@@ -746,7 +760,7 @@ describe("a write whose re-read fails", () => {
         expect(
           yield* failure(handlers.update(renameFirst).pipe(Effect.provide(admin))),
         ).toBeInstanceOf(StoreDown);
-        expect(cacheStore.has(ids(1))).toBe(false);
+        expect(MutableHashMap.has(cacheStore, ids(1))).toBe(false);
       }),
     );
 
@@ -763,7 +777,9 @@ describe("a write whose re-read fails", () => {
           const { handlers, cacheStore } = build(visible, { hiddenWrite });
           const document = yield* success(handlers.update(renameFirst).pipe(Effect.provide(admin)));
           expect(document.data).toMatchObject({ id: ids(1), attributes: { name: "Private" } });
-          expect(cacheStore.get(ids(1))?.attributes.name).toBe("Private");
+          expect(
+            Option.getOrUndefined(MutableHashMap.get(cacheStore, ids(1)))?.attributes.name,
+          ).toBe("Private");
         }),
     );
   });
@@ -781,7 +797,7 @@ describe("get", () => {
         expect(first.data.attributes.name).toBe("Beta");
         expect(first.data.meta).toEqual({ canEdit: false, canDelete: false });
         expect(calls.get).toBe(1);
-        expect(cacheStore.has(ids(2))).toBe(true);
+        expect(MutableHashMap.has(cacheStore, ids(2))).toBe(true);
         const second = yield* handlers.get({ params: { id: ids(2) } }).pipe(Effect.provide(layer));
         expect(second.data.id).toBe(ids(2));
         expect(calls.get).toBe(1);
@@ -794,7 +810,7 @@ describe("get", () => {
       Effect.gen(function* () {
         const { ops, calls } = seeded();
         const { handlers, cacheStore, state } = handlersFor(ops);
-        cacheStore.set(ids(1), person(ids(1), "Stale"));
+        MutableHashMap.set(cacheStore, ids(1), person(ids(1), "Stale"));
         const admin = yield* handlers
           .get({ params: { id: ids(1) } })
           .pipe(Effect.provide(as(Option.some(ADMIN))));
@@ -965,7 +981,7 @@ describe("readOnly", () => {
         listQuery: peopleListQuery,
         linkBase: Effect.succeed("https://example.test"),
       });
-      expect(Arr.sort(Object.keys(handlers), Order.String)).toEqual(["get", "list"]);
+      expect(Arr.sort(R.keys(handlers), Order.String)).toEqual(["get", "list"]);
       const document = yield* handlers.get({ params: { id: ids(1) } });
       expect(document.data.id).toBe(ids(1));
       expect(document.data).not.toHaveProperty("meta");

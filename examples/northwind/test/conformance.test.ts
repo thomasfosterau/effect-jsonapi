@@ -16,6 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import { HttpApiTest } from "effect/http-api";
 import { Conformance } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
@@ -218,9 +219,9 @@ layer(RunLive)("northwind: JSON:API conformance", (it) => {
       // Keyed by type, so a sample that did not resolve shows up under its type,
       // and a type the kit resolved no read for is missing.
       expect(
-        Object.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
+        R.fromEntries((report.samples ?? []).map((sample) => [sample.type, sample.status])),
         Conformance.format(report),
-      ).toEqual(Object.fromEntries(Object.keys(IDS).map((type) => [type, 200])));
+      ).toEqual(R.fromEntries(R.keys(IDS).map((type) => [type, 200])));
     }),
   );
 

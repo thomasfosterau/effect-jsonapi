@@ -3,6 +3,7 @@
  * spellings, the `page[…]` / `filter[…]` re-keying, what stays flat, and the
  * canonical pairs the links are spelled from.
  */
+import * as R from "effect/Record";
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import * as FlatQuery from "./FlatQuery.js";
@@ -107,10 +108,10 @@ describe("flatList", () => {
   });
 
   it("emits the same page-cursor keys as `bracketPageKeys`", () => {
-    const packageKeys = Object.keys(
+    const packageKeys = R.keys<string, unknown>(
       encode(Query.bracketPageKeys(ListWidgets))({ limit: 5, offset: 0 }),
     );
-    const flatKeys = Object.keys(
+    const flatKeys = R.keys<string, unknown>(
       encode(Query.flatList(ListWidgets, { filters: ["owner"] }))({ limit: 5, offset: 0 }),
     );
     expect(flatKeys.toSorted()).toEqual(packageKeys.toSorted());

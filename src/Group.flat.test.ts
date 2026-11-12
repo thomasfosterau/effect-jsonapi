@@ -6,12 +6,12 @@
  * `METHOD /path -> statuses` list `OpenApi.fromApi` renders, which is what a
  * consuming application's contract snapshot pins.
  */
+import * as R from "effect/Record";
 import { assert, describe, expect, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as R from "effect/Record";
 import { HttpApi, OpenApi } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as FlatQuery from "./FlatQuery.js";
@@ -73,7 +73,7 @@ describe("Group.flat", () => {
   });
 
   it("emits exactly the five CRUD endpoints, and no relationship endpoints", () => {
-    expect(Object.keys(group.endpoints).toSorted()).toEqual([
+    expect(R.keys(group.endpoints).toSorted()).toEqual([
       "create",
       "delete",
       "get",
@@ -162,7 +162,7 @@ describe("Group.flatReadOnly", () => {
   });
 
   it("emits `list` and `get` only", () => {
-    expect(Object.keys(group.endpoints).toSorted()).toEqual(["get", "list"]);
+    expect(R.keys(group.endpoints).toSorted()).toEqual(["get", "list"]);
   });
 
   it("decodes the bracket-keyed pagination input, defaulting absent keys", () => {
@@ -199,7 +199,7 @@ describe("Group.flatReadOnly", () => {
   it("round-trips a serialised link back through the endpoint", () => {
     const query = { limit: 10, offset: 20, owner: "ada", include: ["maker"] };
     const serialised = Query.serialise(Query.canonicalPairs(listQuery)(query));
-    const wire = Object.fromEntries(new URLSearchParams(serialised).entries());
+    const wire = R.fromEntries(new URLSearchParams(serialised).entries());
     expect(decode(queryOf(group, "list"))(wire)).toEqual(query);
   });
 });
@@ -256,11 +256,11 @@ describe("the wire contract", () => {
   }
   const render = (api: HttpApi.Constraint): ReadonlyArray<string> => {
     const spec = OpenApi.fromApi(api as never) as unknown as OpenApiPaths;
-    return Object.entries(spec.paths)
+    return R.toEntries(spec.paths)
       .flatMap(([path, operations]) =>
-        Object.entries(operations).map(
+        R.toEntries(operations).map(
           ([method, operation]) =>
-            `${method.toUpperCase()} ${path} -> ${Object.keys(operation.responses).join(", ")}`,
+            `${method.toUpperCase()} ${path} -> ${R.keys(operation.responses).join(", ")}`,
         ),
       )
       .toSorted();

@@ -123,9 +123,9 @@ export default defineConfig({
       // zero — a new site is a defect, not headroom. Counted on adopting
       // plugin 0.6.0 (`vp lint`, 2026-10-22): 4,040 warnings, with 813
       // `require-safety-comment-for-type-assertion`, 626 `casting-awareness`,
-      // 489 `prefer-option-over-null` and 326 `avoid-native-object-helpers`
-      // the largest (`avoid-non-null-assertion`, at 237, has since reached
-      // zero and is at `error`). Per-rule remainder and the
+      // 489 `prefer-option-over-null` the largest (`avoid-non-null-assertion`,
+      // at 237, and `avoid-native-object-helpers`, at 326, have since reached
+      // zero and are at `error`). Per-rule remainder and the
       // order to pay it down in: #436. The move to @enfect/oxlint 0.9.0 (#532),
       // the same rules under the same `effect/` names plus
       // `no-cause-in-http-response` (no sites), left the count unchanged.
@@ -138,7 +138,6 @@ export default defineConfig({
       // (`import * as R from "effect/Record"`), the alias
       // `effect/prefer-namespace-imports` requires. No other binding in a
       // file may be called `R`, so a resource type parameter is `Res`.
-      "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-any": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/prefer-option-over-null": "warn",
@@ -207,10 +206,6 @@ export default defineConfig({
       // Many `toThrow()` assertions pin only that a sync decode throws; the
       // message is Effect's, not ours, and checking it would test Effect.
       "vitest/require-to-throw-message": "off",
-      // The Effect preset's `avoid-native-object-helpers` counts every native
-      // `Set` as debt, so trading a short constant array for one would add a
-      // site there (#436) to clear one here.
-      "unicorn/prefer-set-has": "off",
       // Reports prose comments that mention `expect(` as commented-out tests.
       "vitest/no-commented-out-tests": "off",
       // `@effect/vitest`'s runners (#600) are test blocks the rule does not

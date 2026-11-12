@@ -1,3 +1,4 @@
+import * as R from "effect/Record";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
@@ -10,7 +11,6 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import * as SchemaIssue from "effect/SchemaIssue";
-import * as R from "effect/Record";
 import * as Types from "effect/Types";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
@@ -68,7 +68,7 @@ const decode = (record: R.ReadonlyRecord<string, unknown>): Ast =>
 const encode = (ast: Ast): Record<string, string> => Schema.encodeSync(codec)(ast);
 const canonical = (
   record: R.ReadonlyRecord<string, unknown>,
-): ReadonlyArray<readonly [string, string]> => Object.entries(encode(decode(record)));
+): ReadonlyArray<readonly [string, string]> => R.toEntries(encode(decode(record)));
 
 // The first segment of a Standard Schema issue path, as text: a segment is a
 // property key or a `{ key }` object.
@@ -203,7 +203,7 @@ describe("Query.Filter: the design's worked examples (§3.4)", () => {
     expect(canonical(input)).toEqual(expected);
     // ids are a function of the tree: a hand-built tree in any member order encodes the same
     expect(
-      Object.entries(
+      R.toEntries(
         encode(
           Filter.or(
             Filter.and(eq("status", "done"), lte("age", 18)),
@@ -213,11 +213,11 @@ describe("Query.Filter: the design's worked examples (§3.4)", () => {
       ),
     ).toEqual(expected);
     // and the canonical string decodes to the same tree
-    expect(decode(Object.fromEntries(expected))).toEqual(tree);
+    expect(decode(R.fromEntries(expected))).toEqual(tree);
   });
 
   it("encodes NOT (status = open) in the group form", () => {
-    const pairs = Object.entries(encode(Filter.not(eq("status", "open"))));
+    const pairs = R.toEntries(encode(Filter.not(eq("status", "open"))));
     expect(pairs).toEqual([
       ["filter[g0][group][conjunction]", "NOT"],
       ["filter[c0][condition][path]", "status"],
@@ -225,7 +225,7 @@ describe("Query.Filter: the design's worked examples (§3.4)", () => {
       ["filter[c0][condition][value]", "open"],
       ["filter[c0][condition][memberOf]", "g0"],
     ]);
-    expect(decode(Object.fromEntries(pairs))).toEqual(Filter.not(eq("status", "open")));
+    expect(decode(R.fromEntries(pairs))).toEqual(Filter.not(eq("status", "open")));
   });
 });
 
@@ -315,7 +315,7 @@ describe("Query.Filter: shorthand and literals", () => {
     // single-value In is written [in], so it does not come back as eq
     expect(encode(Filter.isIn("priority", [1]))).toEqual({ "filter[priority][in]": "1" });
     // And with one member is a different tree from the member alone
-    expect(Object.keys(encode(Filter.and(eq("status", "open"))))).toEqual([
+    expect(R.keys(encode(Filter.and(eq("status", "open"))))).toEqual([
       "filter[g0][group][conjunction]",
       "filter[c0][condition][path]",
       "filter[c0][condition][operator]",
@@ -327,28 +327,28 @@ describe("Query.Filter: shorthand and literals", () => {
     );
     // a repeated (field, operator) pair needs the group form
     const repeated = Filter.and(gt("age", 18), gt("age", 20));
-    expect(Object.keys(encode(repeated))[0]).toBe("filter[g0][group][conjunction]");
+    expect(R.keys(encode(repeated))[0]).toBe("filter[g0][group][conjunction]");
     expect(decode(encode(repeated))).toEqual(repeated);
     // a bare eq and a bare in on the same field would share a key
     const shared = Filter.and(eq("title", "a"), Filter.isIn("title", ["a", "b"]));
-    expect(Object.keys(encode(shared))[0]).toBe("filter[g0][group][conjunction]");
+    expect(R.keys(encode(shared))[0]).toBe("filter[g0][group][conjunction]");
     expect(decode(encode(shared))).toEqual(shared);
     // empty groups are representable, in the group form
     expect(encode(Filter.and())).toEqual({ "filter[g0][group][conjunction]": "AND" });
     expect(encode(Filter.or())).toEqual({ "filter[g0][group][conjunction]": "OR" });
     expect(decode({ "filter[g][group][conjunction]": "OR" })).toEqual(Filter.or());
     // any Or or Not, or a nested group, is the group form
-    expect(Object.keys(encode(Filter.or(eq("status", "open"), eq("status", "done"))))[0]).toBe(
+    expect(R.keys(encode(Filter.or(eq("status", "open"), eq("status", "done"))))[0]).toBe(
       "filter[g0][group][conjunction]",
     );
-    expect(Object.keys(encode(Filter.and(eq("status", "open"), Filter.and())))[0]).toBe(
+    expect(R.keys(encode(Filter.and(eq("status", "open"), Filter.and())))[0]).toBe(
       "filter[g0][group][conjunction]",
     );
   });
 
   it("sorts shorthand pairs by key, code-point order (§3.3)", () => {
     expect(
-      Object.keys(
+      R.keys(
         encode(
           Filter.and(eq("status", "open"), Filter.isNull("deletedAt"), gt("age", 1), lte("age", 9)),
         ),
@@ -962,7 +962,7 @@ const filterGenerator = (seed: number) => {
     limit: () => int(100),
     author: () => Person.Id.make(String(int(50))),
   };
-  const fieldNames = Object.keys(literal) as ReadonlyArray<FilterableKeys<typeof Article>>;
+  const fieldNames = R.keys(literal) as ReadonlyArray<FilterableKeys<typeof Article>>;
 
   const condition = (): Filter.Node => {
     const field = pick(fieldNames);
@@ -1007,9 +1007,9 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
       const encoded = encode(normal);
       const decoded = decode(encoded);
       expect(decoded).toEqual(normal);
-      expect(Object.entries(encode(decoded))).toEqual(Object.entries(encoded));
+      expect(R.toEntries(encode(decoded))).toEqual(R.toEntries(encoded));
       // encoding never depends on the input's order or duplicates
-      expect(Object.entries(encode(tree as Ast))).toEqual(Object.entries(encoded));
+      expect(R.toEntries(encode(tree as Ast))).toEqual(R.toEntries(encoded));
     },
   );
 
@@ -1038,9 +1038,9 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
       has(
         (n) =>
           (P.isTagged(n, "And") || P.isTagged(n, "Or")) &&
-          new Set(
+          Arr.dedupe(
             n.members.filter((m) => P.isTagged(m, "Compare")).map((m) => `${m.field}/${m.op}`),
-          ).size < n.members.filter((m) => P.isTagged(m, "Compare")).length,
+          ).length < n.members.filter((m) => P.isTagged(m, "Compare")).length,
       ),
     ).toBe(true);
     expect(
@@ -1081,7 +1081,7 @@ describe("Query.canonical with filter: true", () => {
     input: R.ReadonlyRecord<string, unknown>,
   ) => Decoded;
   const canonical = Query.canonical(query);
-  const parse = (s: string): Record<string, string> => Object.fromEntries(new URLSearchParams(s));
+  const parse = (s: string): Record<string, string> => R.fromEntries(new URLSearchParams(s));
 
   it("places the grammar's pairs between fields and sort, in the encoder's order", () => {
     expect(
@@ -1125,7 +1125,7 @@ describe("Query.canonical with filter: true", () => {
       },
     ];
     const strings = spellings.map((spelling) => canonical(decodeQuery(spelling)));
-    expect(new Set(strings).size).toBe(1);
+    expect(Arr.dedupe(strings).length).toBe(1);
     expect(strings[0]).toBe("include=author&filter[age][gt]=18&filter[status]=open&sort=title");
   });
 
@@ -1153,7 +1153,7 @@ describe("Query.canonical with filter: true", () => {
       if (random() < 0.7) {
         const fields: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
         if (random() < 0.7) fields.articles = subset(attributes);
-        if (random() < 0.5 || Arr.isReadonlyArrayEmpty(Object.keys(fields)))
+        if (random() < 0.5 || Arr.isReadonlyArrayEmpty(R.keys(fields)))
           fields.people = subset(["name"] as const);
         q.fields = fields;
       }
@@ -1166,7 +1166,7 @@ describe("Query.canonical with filter: true", () => {
       if (random() < 0.7) {
         const page: Record<string, number> = {};
         if (random() < 0.7) page.offset = int(1000);
-        if (random() < 0.7 || Arr.isReadonlyArrayEmpty(Object.keys(page))) page.limit = int(100);
+        if (random() < 0.7 || Arr.isReadonlyArrayEmpty(R.keys(page))) page.limit = int(100);
         q.page = page;
       }
       if (random() < 0.8) q.filter = Filter.normalise(node(0) as Ast, fields);
@@ -1181,7 +1181,7 @@ describe("Query.canonical with filter: true", () => {
         const s = canonical(q);
         const params = new URLSearchParams(s);
         // canonical output never repeats a key, so a record parse is lossless
-        expect([...params.keys()].length).toBe(new Set(params.keys()).size);
+        expect([...params.keys()].length).toBe(Arr.dedupe(params.keys()).length);
         const back = decodeQuery(parse(s));
         expect(back).toEqual(q);
         expect(canonical(back)).toBe(s);
@@ -1210,7 +1210,7 @@ describe("Query.canonical with filter: true", () => {
       expect(
         queries.some(
           (q) =>
-            Object.keys(q).length === 5 &&
+            R.keys<string, unknown>(q).length === 5 &&
             Arr.isReadonlyArrayNonEmpty(q.include ?? []) &&
             Arr.isReadonlyArrayNonEmpty(q.sort ?? []),
         ),
@@ -1347,7 +1347,7 @@ describe("Query.schema with filter: true", () => {
       filter: Filter.or(eq("status", "open"), Filter.isNull("deletedAt")),
       page: { offset: 0, limit: 10 },
     });
-    expect(Object.entries(encoded)).toEqual([
+    expect(R.toEntries<string, unknown>(encoded)).toEqual([
       ["page[offset]", "0"],
       ["page[limit]", "10"],
       ["filter[g0][group][conjunction]", "OR"],

@@ -144,7 +144,7 @@ describe("blog example: fetching", () => {
         }),
       );
       expect(document.data.attributes).toEqual({ title: sampleArticle.attributes.title });
-      expect(Object.keys(document.data.relationships ?? {})).toEqual(["author"]);
+      expect(R.keys<string, unknown>(document.data.relationships ?? {})).toEqual(["author"]);
       expect(document.data.relationships?.author?.data).toEqual(Person.ref(sampleAuthor.id));
     }),
   );
@@ -707,10 +707,7 @@ describe("blog example: heterogeneous search", () => {
         }),
       );
 
-      const types = Arr.sort(
-        [...new Set(document.data.map((result) => result.type))],
-        Order.String,
-      );
+      const types = Arr.sort(Arr.dedupe(document.data.map((result) => result.type)), Order.String);
       expect(types).toEqual(["articles", "people"]);
 
       // the union is discriminated by the `type` tag; the endpoint declares
