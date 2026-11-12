@@ -29,6 +29,7 @@
  *
  * @since 0.1.0
  */
+import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import type { NonEmptyReadonlyArray } from "effect/Array";
@@ -94,9 +95,9 @@ export function make(
   nameOrResource: string | { readonly type: string },
   ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>
 ) {
-  return HttpApiGroup.make(
-    typeof nameOrResource === "string" ? nameOrResource : nameOrResource.type,
-  ).add(...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>));
+  return HttpApiGroup.make(P.isString(nameOrResource) ? nameOrResource : nameOrResource.type).add(
+    ...(endpoints as unknown as NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
+  );
 }
 
 /**

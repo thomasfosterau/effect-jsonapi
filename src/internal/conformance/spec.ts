@@ -789,7 +789,7 @@ const resourceIdentification: RuleImpl = {
         const findings: Array<Finding> = [];
         for (const { pointer, resource } of resourcesOf(Option.some(body))) {
           const type = resource["type"];
-          if (typeof type !== "string" || type === "") {
+          if (!P.isString(type) || type === "") {
             findings.push(
               finding(resourceIdentification.rule, {
                 detail: `${where} answered a resource object at ${pointer} with no string \`type\``,
@@ -800,7 +800,7 @@ const resourceIdentification: RuleImpl = {
             );
           }
           const id = resource["id"];
-          if (typeof id !== "string" || id === "") {
+          if (!P.isString(id) || id === "") {
             findings.push(
               finding(resourceIdentification.rule, {
                 detail: `${where} answered a resource object at ${pointer} with no string \`id\``,
@@ -842,7 +842,7 @@ const jsonApiObject: RuleImpl = {
           ];
         }
         const findings: Array<Finding> = [];
-        if ("version" in value && typeof value["version"] !== "string") {
+        if ("version" in value && !P.isString(value["version"])) {
           findings.push(
             finding(jsonApiObject.rule, {
               detail: `${where} answered a non-string \`jsonapi.version\``,
@@ -855,7 +855,7 @@ const jsonApiObject: RuleImpl = {
         for (const member of ["ext", "profile"] as const) {
           if (!(member in value)) continue;
           const list = value[member];
-          if (!Array.isArray(list) || list.some((uri) => typeof uri !== "string")) {
+          if (!Array.isArray(list) || list.some((uri) => !P.isString(uri))) {
             findings.push(
               finding(jsonApiObject.rule, {
                 detail: `${where} answered a \`jsonapi.${member}\` that is not an array of strings`,
@@ -963,7 +963,7 @@ const errorMemberTypes: RuleImpl = {
       const findings: Array<Finding> = [];
       for (const { error, observation } of errors) {
         for (const member of ["id", "status", "code", "title", "detail"] as const) {
-          if (member in error && typeof error[member] !== "string") {
+          if (member in error && !P.isString(error[member])) {
             findings.push(
               finding(errorMemberTypes.rule, {
                 detail: `a ${observation.status} error object's \`${member}\` is not a string`,
@@ -1029,7 +1029,7 @@ const errorSourceDiscrimination: RuleImpl = {
             continue;
           }
           const value = source[key];
-          if (typeof value !== "string") {
+          if (!P.isString(value)) {
             findings.push(
               finding(errorSourceDiscrimination.rule, {
                 detail: `a ${observation.status} error object's \`source.${key}\` is not a string`,
@@ -1075,7 +1075,7 @@ const errorStatusMatches: RuleImpl = {
       for (const observation of observations) {
         const error = errorObjectsOf(observation.body)[0];
         const status = error["status"];
-        if (typeof status === "string" && status !== String(observation.status)) {
+        if (P.isString(status) && status !== String(observation.status)) {
           findings.push(
             finding(errorStatusMatches.rule, {
               detail: "a single-error document's `status` disagrees with the response status",
@@ -1129,7 +1129,7 @@ const fieldsByType = (body: Body, where: Slot): Map<string, ReadonlyArray<string
   for (const { pointer, resource } of resourcesOf(body)) {
     if (!inSlot(pointer, where)) continue;
     const type = resource["type"];
-    if (typeof type === "string" && !byType.has(type)) byType.set(type, fieldNamesOf(resource));
+    if (P.isString(type) && !byType.has(type)) byType.set(type, fieldNamesOf(resource));
   }
   return byType;
 };
@@ -1278,7 +1278,7 @@ const sparseFieldsetsEmpty: RuleImpl = {
           const types = new Set(
             resourcesOf(baseline.body).flatMap(({ resource }) => {
               const type = resource["type"];
-              return typeof type === "string" && Arr.isReadonlyArrayNonEmpty(fieldNamesOf(resource))
+              return P.isString(type) && Arr.isReadonlyArrayNonEmpty(fieldNamesOf(resource))
                 ? [type]
                 : [];
             }),

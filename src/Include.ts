@@ -63,6 +63,7 @@
  * @since 0.15.0
  */
 import * as Arr from "effect/Array";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type { IncludedResources } from "./internal/includeGraph.js";
 import { includedResources, includePathsFor } from "./internal/includeGraph.js";
@@ -264,7 +265,7 @@ export const nested = <R extends Any, const S extends Spec<R>>(
  * @category guards
  */
 export const isBranch = (u: unknown): u is AnyBranch =>
-  typeof u === "object" && u !== null && (u as Record<string, unknown>)[TAG] === "branch";
+  P.isObjectOrArray(u) && (u as Record<string, unknown>)[TAG] === "branch";
 
 // ---------------------------------------------------------------------------
 // The derivations
@@ -428,7 +429,7 @@ export type SurfaceFor<R extends Any> = AnySurface & { readonly resource: R };
  * @category guards
  */
 export const isSurface = (u: unknown): u is AnySurface =>
-  typeof u === "object" && u !== null && (u as Record<string, unknown>)[TAG] === "surface";
+  P.isObjectOrArray(u) && (u as Record<string, unknown>)[TAG] === "surface";
 
 // ---------------------------------------------------------------------------
 // The walk

@@ -4,6 +4,7 @@
  * @internal
  */
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -186,7 +187,7 @@ export const flatten = (nested: { readonly [key: string]: unknown }) => {
   const flat: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(nested)) {
     if (value === undefined) continue;
-    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (P.isObject(value)) {
       for (const [sub, subValue] of Object.entries(value)) {
         if (subValue === undefined) continue;
         define(flat, `${key}[${sub}]`, subValue);

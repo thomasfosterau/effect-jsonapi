@@ -49,6 +49,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -227,7 +228,7 @@ export const Ref = <R extends Any>(resource: R | (() => R)): Ref<R> => {
   // lazy thunk. `type` is a resource-only own property (never present on a
   // plain `() => R` thunk), so check for that instead.
   const thunk: () => R =
-    typeof resource === "function" && !("type" in resource) ? resource : () => resource;
+    P.isFunction(resource) && !("type" in resource) ? resource : () => resource;
   return Schema.Union([
     Schema.suspend(() => thunk().identifier as R["identifier"]),
     Schema.suspend(() => LocalIdentifier(thunk().type) as LocalIdentifier<R["type"]>),
@@ -2307,8 +2308,15 @@ const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
       }),
       Match.tag("Null", () => true),
       Match.tag("Literal", (node) => {
-        const kind = typeof node.literal;
-        if (kind !== "string" && kind !== "number" && kind !== "boolean") return false;
+        const literal = node.literal;
+        const kind = P.isString(literal)
+          ? "string"
+          : P.isNumber(literal)
+            ? "number"
+            : P.isBoolean(literal)
+              ? "boolean"
+              : undefined;
+        if (kind === undefined) return false;
         kinds.add(kind);
         return true;
       }),
@@ -2482,8 +2490,8 @@ const attributeSchemaOf = (field: Schema.Top): Schema.Top => {
 // declaration: a non-empty list of operators from the closed core, and a
 // literal that is absent or a schema.
 const isFilterAnnotation = (u: unknown): u is Filter.Annotation => {
-  if (typeof u !== "object" || u === null) return false;
-  const { operators, literal } = u as { readonly operators?: unknown; readonly literal?: unknown };
+  if (!P.isObject(u)) return false;
+  const { operators, literal } = u;
   return (
     Array.isArray(operators) &&
     Arr.isReadonlyArrayNonEmpty(operators) &&
@@ -3851,8 +3859,7 @@ const intersectAttributes = (members: ReadonlyArray<Any>): Schema.Struct.Fields 
  * @category guards
  */
 export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, any> =>
-  (typeof u === "object" || typeof u === "function") &&
-  u !== null &&
+  P.isObjectKeyword(u) &&
   Array.isArray((u as { readonly members?: unknown }).members) &&
   "relationships" in u &&
   "identifier" in u;
@@ -3920,7 +3927,7 @@ export function family(
   if (Arr.isReadonlyArrayEmpty(members)) {
     throw new Error("Resource.family requires at least one member");
   }
-  const base = typeof nameOrBase === "string" ? undefined : nameOrBase;
+  const base = P.isString(nameOrBase) ? undefined : nameOrBase;
   const name = base !== undefined ? base.type : (nameOrBase as string);
 
   const memberUnion = Schema.Union(members);

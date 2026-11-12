@@ -48,7 +48,7 @@ export const reachable = (
 
 /** @internal */
 export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> =>
-  typeof u === "object" && u !== null && !Array.isArray(u);
+  Predicate.isObject(u);
 
 /**
  * Whether a JSON value is an array.
@@ -80,11 +80,11 @@ export const idKey = (type: string, id: string): string => JSON.stringify(["id",
  */
 export const identity = (resource: Readonly<Record<string, unknown>>): string | undefined => {
   const type = resource["type"];
-  if (typeof type !== "string") return undefined;
+  if (!Predicate.isString(type)) return undefined;
   const id = resource["id"];
-  if (typeof id === "string") return idKey(type, id);
+  if (Predicate.isString(id)) return idKey(type, id);
   const lid = resource["lid"];
-  if (typeof lid === "string") return JSON.stringify(["lid", type, lid]);
+  if (Predicate.isString(lid)) return JSON.stringify(["lid", type, lid]);
   return undefined;
 };
 
@@ -222,7 +222,7 @@ export const unlinkedIncluded = (
   // have had relationships excluded, whose linkage the wire no longer shows.
   const fieldsetOn = (resource: Schema.JsonObject): boolean => {
     const type = resource["type"];
-    return fields !== undefined && typeof type === "string" && Object.hasOwn(fields, type);
+    return fields !== undefined && Predicate.isString(type) && Object.hasOwn(fields, type);
   };
   const reached = [
     ...(asLinkage ? [] : primaries),

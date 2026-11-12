@@ -104,6 +104,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/http";
 import type { HttpApi, HttpApiGroup } from "effect/http-api";
@@ -621,9 +622,7 @@ export const decodeErrorDocument = (
   // value, lifts to `None`: there is no document here, and this is an error
   // path already.
   Option.flatten(
-    Option.liftThrowable(() =>
-      decodeWireDocument(typeof body === "string" ? JSON.parse(body) : body),
-    )(),
+    Option.liftThrowable(() => decodeWireDocument(P.isString(body) ? JSON.parse(body) : body))(),
   );
 
 /**
@@ -888,7 +887,7 @@ export const readTotalCount = (
     | undefined,
 ): number => {
   const totalCount = source?.meta?.["totalCount"];
-  return typeof totalCount === "number" ? totalCount : 0;
+  return P.isNumber(totalCount) ? totalCount : 0;
 };
 
 /**
@@ -1016,9 +1015,9 @@ const refsOf = (
   key: string,
 ): ReadonlyArray<{ readonly type: string; readonly id: string }> => {
   const linkage = resource?.relationships?.[key];
-  if (linkage === null || typeof linkage !== "object") return [];
-  const data = (linkage as { readonly data?: unknown }).data;
-  if (data === null || data === undefined || typeof data !== "object") return [];
+  if (!P.isObject(linkage)) return [];
+  const data = linkage["data"];
+  if (!P.isObjectOrArray(data)) return [];
   return (Array.isArray(data) ? data : [data]) as ReadonlyArray<{
     readonly type: string;
     readonly id: string;

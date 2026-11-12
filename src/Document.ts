@@ -20,6 +20,7 @@
  */
 import * as JsonPointer from "effect/JsonPointer";
 import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 
 // ---------------------------------------------------------------------------
@@ -144,7 +145,7 @@ export function href(link: Link): string;
 export function href(link: Link | undefined): string | undefined;
 export function href(link: Link | undefined): string | undefined {
   if (link === undefined) return undefined;
-  if (typeof link === "string") return link;
+  if (P.isString(link)) return link;
   if (link instanceof URL) return link.href;
   return href(link.href);
 }
@@ -1022,8 +1023,7 @@ export interface WireOptions<TM extends Schema.Top = never> {
 const isStructLike = (
   schema: Schema.Top,
 ): schema is Schema.Top & { readonly fields: { readonly [key: string]: Schema.Top } } =>
-  typeof (schema as { readonly fields?: unknown }).fields === "object" &&
-  (schema as { readonly fields?: unknown }).fields !== null;
+  P.isObjectOrArray((schema as { readonly fields?: unknown }).fields);
 
 const isUnionLike = (
   schema: Schema.Top,

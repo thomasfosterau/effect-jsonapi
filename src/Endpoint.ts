@@ -4241,7 +4241,7 @@ export const resource = <
   // The resource's base meta schema, for resolving `meta` functions.
   const baseMeta = (resource.fields.meta as { readonly schema: Schema.Top }).schema;
   const resolveMeta = (value: MetaOption<Schema.Top>): Schema.Top =>
-    typeof value === "function"
+    Predicate.isFunction(value)
       ? // SAFETY: a callable `meta` is read as `MetaOption`'s
         // `(base) => Schema.Top` member.
         (value as (base: Schema.Top) => Schema.Top)(baseMeta)
@@ -4378,8 +4378,9 @@ export const resource = <
     // SAFETY: a `RelationshipsOption` map's entries are shorthands or
     // `RelationshipConfig`s over this resource, each of which is a
     // `RelationshipConfig` over any.
-    const relMap =
-      typeof relationshipsOpt === "object" ? (relationshipsOpt as RelationshipsMap) : {};
+    const relMap = Predicate.isObjectOrArray(relationshipsOpt)
+      ? (relationshipsOpt as RelationshipsMap)
+      : {};
     const relationships = resource.relationships as Record<string, Relationship.Descriptor>;
     for (const name of Object.keys(relationships)) {
       const captured = relationshipConfig(relMap, name);
@@ -4389,7 +4390,7 @@ export const resource = <
       // A constrained `include` names this resource's paths, not the target's:
       // a relationship endpoint only inherits that the parameter is on.
       const inheritedInclude = pick(relConfig, "include", gInclude);
-      const include = typeof inheritedInclude === "object" ? true : inheritedInclude;
+      const include = Predicate.isObjectOrArray(inheritedInclude) ? true : inheritedInclude;
       const fields = pick(relConfig, "fields", gFields);
       const sortOpt = pick(relConfig, "sort", gSort);
       const page = pick(relConfig, "page", gPage);

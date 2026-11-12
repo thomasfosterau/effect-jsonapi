@@ -3,6 +3,7 @@
  * `Date` codecs, optionality, unions — is untouched.
  */
 import { describe, expect, it } from "vite-plus/test";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
 import * as Relationship from "./Relationship.js";
@@ -31,7 +32,7 @@ describe("Document.wire", () => {
       },
       links: { self: "https://example.test/people/1" },
     });
-    expect(typeof wired.links?.self).toBe("string");
+    expect(P.isString(wired.links?.self)).toBe(true);
     expect(wired.relationships?.birthPlace?.links?.related).toBe(
       "https://example.test/people/1/birthPlace",
     );

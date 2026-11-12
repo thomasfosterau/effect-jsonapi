@@ -710,7 +710,7 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
     const attributeKeys = isJsonObject(attributes) ? Object.keys(attributes) : [];
     const type = first["type"];
     if (
-      typeof type === "string" &&
+      Predicate.isString(type) &&
       endpoint.queryKeys.includes(`fields[${type}]`) &&
       attributeKeys.length >= 2
     ) {

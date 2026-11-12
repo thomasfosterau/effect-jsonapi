@@ -78,7 +78,7 @@ const codePointOrder = (left: string, right: string): number =>
 /** Code-point order, NULL last: S-ORD-1 and S-ORD-3. */
 const ascending = (left: Value, right: Value): number => {
   if (left === null || right === null) return Number(left === null) - Number(right === null);
-  if (typeof left === "string" && typeof right === "string") return codePointOrder(left, right);
+  if (P.isString(left) && P.isString(right)) return codePointOrder(left, right);
   return left < right ? -1 : left > right ? 1 : 0;
 };
 
@@ -355,7 +355,7 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     const locale: Sorter = {
       refuses: ["due"],
       compare: (left, right) =>
-        typeof left === "string" && typeof right === "string"
+        P.isString(left) && P.isString(right)
           ? left.localeCompare(right, "en", { sensitivity: "base" })
           : ascending(left, right),
     };

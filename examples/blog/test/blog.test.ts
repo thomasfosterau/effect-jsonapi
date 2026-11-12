@@ -653,8 +653,10 @@ describe("blog example: heterogeneous search", () => {
       }
       // each member still carries its own type's attribute at runtime
       expect(
-        typeof (result.type === "articles" ? result.attributes.title : result.attributes.firstName),
-      ).toBe("string");
+        P.isString(
+          result.type === "articles" ? result.attributes.title : result.attributes.firstName,
+        ),
+      ).toBe(true);
     }
   });
 

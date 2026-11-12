@@ -392,7 +392,7 @@ const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isA
 /** Recursively orders object keys so re-serialisation is stable. */
 const canonicalValue = (value: Schema.Json): Schema.Json => {
   if (isJsonArray(value)) return value.map(canonicalValue);
-  if (typeof value === "object" && value !== null) {
+  if (P.isObjectKeyword(value)) {
     return Object.fromEntries(
       Arr.sort(Object.keys(value), Order.String).map((key) => [key, canonicalValue(value[key])]),
     );

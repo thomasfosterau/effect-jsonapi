@@ -1166,7 +1166,7 @@ const withData = (
   change: (body: Record<string, unknown>) => Record<string, unknown>,
 ): Canned => {
   const body = canned.body;
-  if (typeof body !== "object" || body === null || !("data" in body)) return canned;
+  if (!P.isObjectOrArray(body) || !("data" in body)) return canned;
   return { ...canned, body: change(body) };
 };
 
@@ -1505,7 +1505,7 @@ describe("Conformance: detects a deliberately broken server", () => {
   // #494: a relationship is a field, so a fieldset that leaves it out drops it.
   const withAuthor = (body: Record<string, unknown>) => {
     const data = body["data"];
-    return typeof data === "object" && data !== null && "type" in data && data.type === "articles"
+    return P.isObjectOrArray(data) && "type" in data && data.type === "articles"
       ? {
           ...body,
           data: { ...data, relationships: { author: { data: { type: "people", id: "9" } } } },
