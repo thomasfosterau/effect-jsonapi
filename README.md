@@ -1822,6 +1822,7 @@ const document = Assemble.unpaginatedCollection(colours, {
 
 ```ts
 import { Assemble, Registry, ResourceHandlers } from "@thomasfosterau/effect-jsonapi"
+import * as Option from "effect/Option"
 
 const peopleFamily = {
   group: "people",
@@ -1829,8 +1830,8 @@ const peopleFamily = {
     segment: "people",
     listQuery: peopleListQuery,                    // the family's own list query, for the links
     linkBase,                                      // Effect<string>: the absolute origin
-    viewer,                                        // Effect<User | null>: the request's viewer
-    capabilities: Assemble.roleCapabilities((user) => user?.role === "admin"),
+    viewer,                                        // Effect<Option<User>>: the request's viewer
+    capabilities: Assemble.roleCapabilities((user) => Option.exists(user, (u) => u.role === "admin")),
     transact,                                      // the boundary every write runs inside
     cache,                                         // read-through on get, write-through on writes
     include: { includable: PERSON_INCLUDE.paths, targets },

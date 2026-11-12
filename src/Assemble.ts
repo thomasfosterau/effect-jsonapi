@@ -270,10 +270,10 @@ export type CapabilitiesHook<V = unknown> = (
  * import { Assemble } from "@thomasfosterau/effect-jsonapi"
  *
  * interface User { readonly id: string; readonly role: "user" | "admin" }
- * const adminOnly = Assemble.roleCapabilities((viewer: User | null | undefined) => viewer?.role === "admin")
+ * const adminOnly = Assemble.roleCapabilities((viewer?: User) => viewer?.role === "admin")
  *
  * const person = { type: "people", id: "1", attributes: {} }
- * console.log(adminOnly(person, { id: "9", role: "admin" }), adminOnly(person, null))
+ * console.log(adminOnly(person, { id: "9", role: "admin" }), adminOnly(person, undefined))
  * // → { canEdit: true, canDelete: true } { canEdit: false, canDelete: false }
  * ```
  *
@@ -317,7 +317,7 @@ export interface OwnedCapabilitiesOptions<V> {
  *
  * interface User { readonly id: string; readonly role: "user" | "moderator" }
  * const owned = Assemble.ownedCapabilities({
- *   viewerId: (viewer: User | null | undefined) => Option.fromNullishOr(viewer?.id),
+ *   viewerId: (viewer?: User) => Option.fromUndefinedOr(viewer?.id),
  *   canModerate: (viewer) => viewer?.role === "moderator"
  * })
  * const garden = {
