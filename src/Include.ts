@@ -64,6 +64,7 @@
  */
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as HashMap from "effect/HashMap";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
@@ -473,7 +474,7 @@ const checkHop = (owner: Any, key: string, target: Any, path: string): void => {
 // everything below it, so `paths` order is walk order and a prefix always
 // precedes the paths it prefixes.
 const walk = (
-  owner: Any | undefined,
+  owner: Option.Option<Any>,
   spec: AnySpec,
   prefix: string,
   depth: number,
@@ -491,13 +492,13 @@ const walk = (
     }
     const branch = isBranch(value);
     const target = branch ? value.target : value;
-    if (owner !== undefined) checkHop(owner, key, target, path);
+    if (Option.isSome(owner)) checkHop(owner.value, key, target, path);
     out.push({ path, target });
-    if (branch) walk(target, value.children, path, depth + 1, out);
+    if (branch) walk(Option.some(target), value.children, path, depth + 1, out);
   });
 };
 
-const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> => {
+const entriesOf = (owner: Option.Option<Any>, spec: AnySpec): ReadonlyArray<Entry> => {
   const out: Array<Entry> = [];
   walk(owner, spec, "", 1, out);
   return out;
@@ -538,7 +539,7 @@ export function paths<const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>>
 export function paths(spec: AnySpec): ReadonlyArray<string> {
   const seen = MutableHashSet.empty<string>();
   const out: Array<string> = [];
-  Arr.forEach(entriesOf(undefined, spec), (entry) => {
+  Arr.forEach(entriesOf(Option.none(), spec), (entry) => {
     if (MutableHashSet.has(seen, entry.path)) return;
     MutableHashSet.add(seen, entry.path);
     out.push(entry.path);
@@ -766,7 +767,7 @@ export function included(
   // schema graphs.
   return Schema.Union(
     Arr.dedupeWith(
-      Arr.map(entriesOf(undefined, source), (entry) => entry.target),
+      Arr.map(entriesOf(Option.none(), source), (entry) => entry.target),
       Object.is,
     ),
   );
@@ -831,7 +832,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
   resource: R,
   spec: S,
 ): Surface<R, AsSpec<S>> => {
-  const entries = entriesOf(resource, spec as AsSpec<S>);
+  const entries = entriesOf(Option.some(resource), spec as AsSpec<S>);
   if (Arr.isReadonlyArrayEmpty(entries)) {
     throw declarationError(
       `Include.make: the surface for "${resource.type}" declares no paths; ` +

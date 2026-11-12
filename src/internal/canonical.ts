@@ -39,7 +39,8 @@ const byKey = (a: Pair, b: Pair): number => compareCodePoints(a[0], b[0]);
 
 // Whether a `filter[...]` key is in the grammar's group form (three bracket
 // segments): `filter[g0][group][conjunction]`, `filter[c0][condition][path]`.
-const isGroupFormKey = (key: string): boolean => (keySegments(key)?.length ?? 0) >= 3;
+const isGroupFormKey = (key: string): boolean =>
+  Option.exists(keySegments(key), (segments) => segments.length >= 3);
 
 /**
  * The wire keys a schema declares, in declaration order — the property

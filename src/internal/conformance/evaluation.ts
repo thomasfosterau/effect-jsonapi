@@ -293,7 +293,7 @@ const linkageOf = (relationship: ResourceObject): Option.Option<Json | Null> => 
  * named like an attribute (which JSON:API forbids) is left out.
  */
 const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
-  Option.map(Option.fromUndefinedOr(identity(resource)), (key) => {
+  Option.map(identity(resource), (key) => {
     const attributes = objectIn(resource["attributes"]);
     const relationships = R.filterMap(
       objectIn(resource["relationships"]),
@@ -751,9 +751,7 @@ const labelled = (candidate: Candidate, node: Tree): string => {
 const answeredOf = (answered: ReadonlyArray<ResourceObject>) =>
   Arr.dedupeWith(
     Arr.getSomes(
-      Arr.map(answered, (resource) =>
-        Option.map(Option.fromUndefinedOr(identity(resource)), (key) => ({ key, resource })),
-      ),
+      Arr.map(answered, (resource) => Option.map(identity(resource), (key) => ({ key, resource }))),
     ),
     (a, b) => a.key === b.key,
   );
@@ -871,16 +869,17 @@ const unincluded = (
   Arr.flatMap(Arr.fromOption(probe.include), (name) => {
     const carried = HashSet.fromIterable([
       ...Arr.map(got, ({ key }) => key),
-      ...Arr.getSomes(Arr.map(included, (resource) => Option.fromUndefinedOr(identity(resource)))),
+      ...Arr.getSomes(Arr.map(included, identity)),
     ]);
     const missing = Arr.dedupe(
       Arr.filterMap(
         Arr.flatMap(got, ({ resource }) => linkedThrough(resource, name)),
         (linked) => {
-          const key = identity(linked);
-          return key === undefined || HashSet.has(carried, key)
-            ? Result.failVoid
-            : Result.succeed(resourceLabel(linked));
+          return Option.match(identity(linked), {
+            onNone: () => Result.failVoid,
+            onSome: (key) =>
+              HashSet.has(carried, key) ? Result.failVoid : Result.succeed(resourceLabel(linked)),
+          });
         },
       ),
     );
@@ -1008,7 +1007,7 @@ interface Family {
 
 /** Whether an answer's media type names the filter profile (§5). */
 const negotiated = (observation: Observation): boolean =>
-  Option.exists(Option.fromUndefinedOr(observation.contentType), (header) =>
+  Option.exists(observation.contentType, (header) =>
     Arr.contains(
       Arr.flatMap(parseMediaType(header).parameters, ([name, value]) =>
         name === "profile" ? value.split(" ") : [],
@@ -1279,7 +1278,7 @@ export const evaluation: RuleImpl = {
           rule,
           Arr.length(decided),
           Arr.flatMap(decided, ({ findings }) => findings),
-          why === "" ? undefined : `not decided: ${why}`,
+          why === "" ? Option.none() : Option.some(`not decided: ${why}`),
         );
       },
     );

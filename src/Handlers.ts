@@ -61,7 +61,7 @@ import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
 import { isLinkageData, reachable, seeds } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
-import { definedMember } from "./internal/members.js";
+import { definedMember, someMember } from "./internal/members.js";
 import { declarationError } from "./internal/errors.js";
 
 /**
@@ -360,27 +360,31 @@ const selectMembers = <V>(
   return projected;
 };
 
-// The set of field names `fields` requests for `type`, or `undefined` when it
-// requests none (the type's fields are the server's to choose).
+// The set of field names `fields` requests for `type`, or `None` when it
+// requests none (the type's fields are the server's to choose). Called per
+// resource: `None` is a shared value, so a type with no set allocates nothing.
 const requestedFor = (
-  fields: Fields | undefined,
+  fields: Option.Option<Fields>,
   type: string,
-): MutableHashSet.MutableHashSet<string> | undefined => {
-  if (fields === undefined || !Object.hasOwn(fields, type)) return undefined;
-  const requested = fields[type];
-  return requested === undefined ? undefined : MutableHashSet.fromIterable(requested);
+): Option.Option<MutableHashSet.MutableHashSet<string>> => {
+  if (Option.isNone(fields) || !Object.hasOwn(fields.value, type)) return Option.none();
+  const requested = fields.value[type];
+  return requested === undefined
+    ? Option.none()
+    : Option.some(MutableHashSet.fromIterable(requested));
 };
 
 const projectResource = (
   resource: AnyResourceValue,
-  fields: Fields | undefined,
+  fields: Option.Option<Fields>,
 ): AnyResourceValue => {
   // No requested set for this type leaves every field. A *present* empty set
   // (`?fields[TYPE]=`) is the spec's "no fields" (§Sparse Fieldsets: "An empty
   // value indicates that no fields should be returned") and projects
   // `attributes` to `{}` like any other set (#488).
-  const requested = requestedFor(fields, resource.type);
-  if (requested === undefined) return resource;
+  const found = requestedFor(fields, resource.type);
+  if (Option.isNone(found)) return resource;
+  const requested = found.value;
   const { attributes, relationships } = resource;
   // Resource identifiers (and any resource with neither member) have nothing
   // to project.
@@ -408,39 +412,48 @@ const projections = new WeakMap<ResourceTransform<TransformLambda>, Fields>();
 
 // The fieldset `transform` applies, when `project` (or a composition of it)
 // built it.
-const projectionOf = (
-  transform: ResourceTransform<TransformLambda> | undefined,
-): Fields | undefined => (transform === undefined ? undefined : projections.get(transform));
+const projectionOf = (transform?: ResourceTransform<TransformLambda>): Option.Option<Fields> =>
+  transform === undefined ? Option.none() : Option.fromUndefinedOr(projections.get(transform));
 
 // Registers `transform` as applying `fields`, and hands it back.
 const projecting = <T extends ResourceTransform<TransformLambda>>(
   transform: T,
-  fields: Fields | undefined,
+  fields: Option.Option<Fields>,
 ): T => {
-  if (fields !== undefined) projections.set(transform, fields);
+  if (Option.isSome(fields)) projections.set(transform, fields.value);
   return transform;
 };
 
 // The fieldset two projections in turn apply: a field survives both only when
 // each set that names its type requests it.
 const bothProjections = (
-  first: Fields | undefined,
-  second: Fields | undefined,
-): Fields | undefined => {
-  if (first === undefined || second === undefined) return first ?? second;
+  first: Option.Option<Fields>,
+  second: Option.Option<Fields>,
+): Option.Option<Fields> => {
+  if (Option.isNone(first)) return second;
+  if (Option.isNone(second)) return first;
   const types = Arr.dedupe([
-    ...R.keys<string, Fields[string]>(first),
-    ...R.keys<string, Fields[string]>(second),
+    ...R.keys<string, Fields[string]>(first.value),
+    ...R.keys<string, Fields[string]>(second.value),
   ]);
-  return R.fromEntries(
-    types.flatMap((type) => {
-      const a = requestedFor(first, type);
-      const b = requestedFor(second, type);
-      if (a === undefined) return b === undefined ? [] : [[type, [...b]]];
-      return [
-        [type, b === undefined ? [...a] : [...a].filter((name) => MutableHashSet.has(b, name))],
-      ];
-    }),
+  return Option.some(
+    R.fromEntries(
+      types.flatMap((type) =>
+        Option.match(requestedFor(first, type), {
+          onNone: () =>
+            Arr.map(Arr.fromOption(requestedFor(second, type)), (b) => [type, [...b]] as const),
+          onSome: (a) => [
+            [
+              type,
+              Option.match(requestedFor(second, type), {
+                onNone: () => [...a],
+                onSome: (b) => [...a].filter((name) => MutableHashSet.has(b, name)),
+              }),
+            ] as const,
+          ],
+        }),
+      ),
+    ),
   );
 };
 
@@ -539,12 +552,12 @@ export function project<Res extends ResourceValue, const F extends Fields>(
   fields: F | undefined,
 ): Projected<Res, F>;
 export function project(...args: ReadonlyArray<unknown>) {
+  // SAFETY: the overloads type `args` as `(fields)` or `(resource, fields)`,
+  // `fields` a `Fields` or `undefined`.
+  const fields = Option.fromUndefinedOr(args[args.length >= 2 ? 1 : 0]) as Option.Option<Fields>;
   return args.length >= 2
-    ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
-    : projecting(
-        (resource: AnyResourceValue) => projectResource(resource, args[0] as Fields | undefined),
-        args[0] as Fields | undefined,
-      );
+    ? projectResource(args[0] as AnyResourceValue, fields)
+    : projecting((resource: AnyResourceValue) => projectResource(resource, fields), fields);
 }
 
 // ---------------------------------------------------------------------------
@@ -582,10 +595,7 @@ export interface WithMetaLambda<M extends MetaValue> extends TransformLambda {
   readonly Out: WithMeta<this["In"], M>;
 }
 
-const stampMeta = (
-  resource: AnyResourceValue,
-  computed: MetaValue | undefined,
-): AnyResourceValue => {
+const stampMeta = (resource: AnyResourceValue, computed?: MetaValue): AnyResourceValue => {
   const merged = { ...resource.meta, ...computed };
   if (Arr.isReadonlyArrayNonEmpty(R.keys(merged))) return { ...resource, meta: merged };
   // An empty `meta` is a *present* meta object to the spec, which is a
@@ -722,13 +732,13 @@ const linkageKeys = (resource: ResourceValue): Array<string> =>
 const walkKeys = (
   mapped: ResourceValue,
   original: ResourceValue,
-  fields: Fields | undefined,
+  fields: Option.Option<Fields>,
 ): Array<string> => {
   const requested = requestedFor(fields, original.type);
-  if (requested === undefined || original.relationships === undefined) return linkageKeys(mapped);
+  if (Option.isNone(requested) || original.relationships === undefined) return linkageKeys(mapped);
   const excluded = R.filter(
     original.relationships,
-    (_, name) => !MutableHashSet.has(requested, name),
+    (_, name) => !MutableHashSet.has(requested.value, name),
   );
   return [...linkageKeys(mapped), ...linkageKeys({ ...original, relationships: excluded })];
 };
@@ -755,7 +765,7 @@ const memoise = <F extends TransformLambda>(
 // when there is none.
 const mapResources = <F extends TransformLambda>(
   resources: ReadonlyArray<ResourceValue>,
-  onResource: ResourceTransform<F> | undefined,
+  onResource?: ResourceTransform<F>,
 ): ReadonlyArray<ResourceValue> =>
   onResource === undefined
     ? resources
@@ -1423,16 +1433,22 @@ const buildLinks = (options: {
   readonly self?: string | undefined;
   readonly query?: string | ReadonlyArray<Pair> | undefined;
   readonly links?: LinksValue | undefined;
-}): LinksValue | undefined => {
-  const links: LinksValue | undefined =
-    options.self !== undefined ? { self: options.self, ...options.links } : options.links;
+}): Option.Option<LinksValue> => {
+  const links =
+    options.self !== undefined
+      ? Option.some<LinksValue>({ self: options.self, ...options.links })
+      : Option.fromUndefinedOr(options.links);
   if (options.query === undefined) return links;
-  if (links?.self === undefined) {
+  const self = Option.flatMapNullishOr(links, ({ self }) => self);
+  if (Option.isNone(links) || Option.isNone(self)) {
     throw declarationError(
       "Handlers.collection: `query` needs a self link to be appended to — pass `self` or `links.self`",
     );
   }
-  return { ...links, self: linkWithQuery(links.self, queryString(options.query)) };
+  return Option.some({
+    ...links.value,
+    self: linkWithQuery(self.value, queryString(options.query)),
+  });
 };
 
 // `data` and `primary` are the already-transformed primary resources: the
@@ -1444,22 +1460,20 @@ const buildLinks = (options: {
 const build = (
   data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue | null,
   primary: ReadonlyArray<ResourceValue>,
-  options:
-    | {
-        readonly included?: ReadonlyArray<ResourceValue> | undefined;
-        readonly meta?: MetaValue | undefined;
-        readonly jsonapi?: JsonApiObjectValue | undefined;
-        readonly self?: string | undefined;
-        readonly query?: string | ReadonlyArray<Pair> | undefined;
-        readonly links?: LinksValue | undefined;
-        readonly checkLinkage?: boolean | undefined;
-      }
-    | undefined,
-  onResource: ResourceTransform<TransformLambda> | undefined,
+  options?: {
+    readonly included?: ReadonlyArray<ResourceValue> | undefined;
+    readonly meta?: MetaValue | undefined;
+    readonly jsonapi?: JsonApiObjectValue | undefined;
+    readonly self?: string | undefined;
+    readonly query?: string | ReadonlyArray<Pair> | undefined;
+    readonly links?: LinksValue | undefined;
+    readonly checkLinkage?: boolean | undefined;
+  },
+  onResource?: ResourceTransform<TransformLambda>,
   asLinkage = false,
   originals: ReadonlyArray<ResourceValue> = primary,
 ) => {
-  const links = options === undefined ? undefined : buildLinks(options);
+  const links = options === undefined ? Option.none() : buildLinks(options);
   // An array — however empty, and however empty dedup against the primary
   // data leaves it — is a compound document, and keeps its `included` key:
   // §Fetching Includes requires one in every response to a request carrying
@@ -1478,7 +1492,7 @@ const build = (
   return {
     data,
     ...definedMember("included", included),
-    ...definedMember("links", links),
+    ...someMember("links", links),
     ...definedMember("meta", options?.meta),
     ...definedMember("jsonapi", options?.jsonapi),
   };
@@ -1933,23 +1947,23 @@ type TransformedLinkage<F extends TransformLambda, Data> = Data extends null
     : Transformed<F, Data>;
 
 // A linkage document's top-level links: `self` and `related`, then `links`.
-const linkageLinks = (
-  options:
-    | { readonly self?: string; readonly related?: string; readonly links?: LinksValue }
-    | undefined,
-): LinksValue | undefined =>
+const linkageLinks = (options?: {
+  readonly self?: string;
+  readonly related?: string;
+  readonly links?: LinksValue;
+}): Option.Option<LinksValue> =>
   options?.self === undefined && options?.related === undefined
-    ? options?.links
-    : {
+    ? Option.fromUndefinedOr(options?.links)
+    : Option.some({
         ...definedMember("self", options.self),
         ...definedMember("related", options.related),
         ...options.links,
-      };
+      });
 
 // The linkage with the transform applied to each identifier.
 const applyToLinkage = (
   data: LinkageValue,
-  onResource: ResourceTransform<TransformLambda> | undefined,
+  onResource?: ResourceTransform<TransformLambda>,
 ): LinkageValue =>
   onResource === undefined || data === null
     ? data
@@ -2119,7 +2133,7 @@ export const linkage = <
       checkLinkage: options?.checkLinkage,
       meta: options?.meta,
       jsonapi: options?.jsonapi,
-      links: linkageLinks(options),
+      ...someMember("links", linkageLinks(options)),
     },
     options?.onResource,
     true,
@@ -2152,7 +2166,7 @@ export interface PaginationLinksOptions {
 const withPage = (
   path: string,
   page: Record<string, number>,
-  query: ReadonlyArray<Pair> | undefined,
+  query?: ReadonlyArray<Pair>,
 ): string => {
   const cursor: ReadonlyArray<Pair> = R.toEntries(page).map(([key, value]) => [
     `page[${key}]`,
@@ -2164,7 +2178,7 @@ const withPage = (
 // The links of an unpageable collection (a non-positive page size, which
 // `page[limit]=0` can request): `self` keeps the request's canonical pairs as
 // sent, its own `page[*]` included; nothing else can be linked.
-const unpageable = (path: string, query: ReadonlyArray<Pair> | undefined): LinksValue => ({
+const unpageable = (path: string, query?: ReadonlyArray<Pair>): LinksValue => ({
   self: query === undefined ? path : withQuery(path, serialise(query)),
   first: null,
   prev: null,

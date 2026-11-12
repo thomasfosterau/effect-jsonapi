@@ -52,6 +52,7 @@ import type * as SchemaAST from "effect/SchemaAST";
 import type * as Types from "effect/Types";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -219,12 +220,14 @@ export type NumberPageFields<O extends NumberPageOptions> = {
 // field a number default.
 const withPageDefault = (
   leaf: Schema.Top,
-  value: number | undefined,
+  value: Option.Option<number>,
   fromString: boolean,
 ): Schema.Top =>
-  value === undefined
-    ? Schema.optionalKey(leaf)
-    : leaf.pipe(Schema.withDecodingDefaultKey(Effect.succeed(fromString ? String(value) : value)));
+  Option.match(value, {
+    onNone: () => Schema.optionalKey(leaf),
+    onSome: (value) =>
+      leaf.pipe(Schema.withDecodingDefaultKey(Effect.succeed(fromString ? String(value) : value))),
+  });
 
 const offsetPage = <const O extends OffsetPageOptions = Record<never, never>>(
   options?: O,
@@ -241,8 +244,8 @@ const offsetPage = <const O extends OffsetPageOptions = Record<never, never>>(
           Schema.isLessThanOrEqualTo(maxLimit),
         );
   return {
-    offset: withPageDefault(offsetLeaf, defaultOffset, fromString),
-    limit: withPageDefault(limitLeaf, defaultLimit, fromString),
+    offset: withPageDefault(offsetLeaf, Option.fromUndefinedOr(defaultOffset), fromString),
+    limit: withPageDefault(limitLeaf, Option.fromUndefinedOr(defaultLimit), fromString),
   } as OffsetPageFields<O>;
 };
 
@@ -262,8 +265,8 @@ const numberPage = <const O extends NumberPageOptions = Record<never, never>>(
           Schema.isLessThanOrEqualTo(maxSize),
         );
   return {
-    number: withPageDefault(numberLeaf, defaultNumber, fromString),
-    size: withPageDefault(sizeLeaf, defaultSize, fromString),
+    number: withPageDefault(numberLeaf, Option.fromUndefinedOr(defaultNumber), fromString),
+    size: withPageDefault(sizeLeaf, Option.fromUndefinedOr(defaultSize), fromString),
   } as NumberPageFields<O>;
 };
 
@@ -1829,7 +1832,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   }
 
   // The grammar's field declaration, when `filter: true` is on.
-  let filterFields: FieldCodecs | undefined;
+  let filterFields = Option.none<FieldCodecs>();
   if (options.filter === true) {
     if (resources.length !== 1) {
       throw declarationError(
@@ -1837,7 +1840,8 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
           "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead",
       );
     }
-    filterFields = filterable(resources[0]);
+    const declared = filterable(resources[0]);
+    filterFields = Option.some(declared);
     // The grammar's filterable fields ride on the decoded tree's schema as
     // the `filter` vocabulary, so `Middleware`'s support check treats
     // `filter: true` over a resource with no filterable field as unsupported
@@ -1846,7 +1850,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
       AstSchema.annotate(
         vocabularyAnnotation({
           family: "filter",
-          values: R.keys<string, FieldCodec>(filterFields),
+          values: R.keys<string, FieldCodec>(declared),
         }),
       ),
     );
@@ -1861,10 +1865,10 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   }
 
   const flatStruct = Schema.Struct(flatFields);
-  const flat =
-    filterFields === undefined ? flatStruct : Schema.StructWithRest(flatStruct, [FilterRest]);
+  const flat = Option.isNone(filterFields)
+    ? flatStruct
+    : Schema.StructWithRest(flatStruct, [FilterRest]);
   const nested = Schema.Struct(nestedFields);
-  const fields = filterFields;
 
   type Values = R.ReadonlyRecord<string, unknown>;
   // A struct with no fields is effect's `{}`: it accepts any object and hands
@@ -1878,13 +1882,15 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
   return flat.pipe(
     Schema.decodeTo(
       nested,
-      fields === undefined
-        ? SchemaTransformation.transform<Values, Values>({
+      Option.match(filterFields, {
+        onNone: () =>
+          SchemaTransformation.transform<Values, Values>({
             decode: (flatValues) => nest(declaredOnly(flatValues)),
             encode: (nestedValues) => declaredOnly(flatten(nestedValues)),
-          })
-        : // `filter[...]` keys are routed to the grammar ahead of the one-level
-          // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
+          }),
+        // `filter[...]` keys are routed to the grammar ahead of the one-level
+        // bracket reshaper, so `page[*]` / `fields[*]` are untouched.
+        onSome: (fields) =>
           SchemaTransformation.transformEffect<Values, Values>({
             decode: (flatValues, parseOptions) => {
               // The flat struct has already decoded every `filter[...]` key
@@ -1918,6 +1924,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
               );
             },
           }),
+      }),
     ),
   ) as QuerySchema<Res, O>;
 };

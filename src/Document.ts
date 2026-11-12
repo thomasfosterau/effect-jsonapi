@@ -450,24 +450,20 @@ export const parsePointer = (value: string): Option.Option<PointerMember> => {
   if (!value.startsWith("/")) return Option.none();
   const segments = value.split("/").slice(1).map(JsonPointer.unescapeToken);
   if (segments[0] !== "data") return Option.none();
-  let rest = segments.slice(1);
-  let index: number | undefined;
-  if (rest.length === 3 && /^\d+$/.test(rest[0])) {
-    index = Number(rest[0]);
-    rest = rest.slice(1);
-  }
+  const after = segments.slice(1);
+  const indexed = after.length === 3 && /^\d+$/.test(after[0]);
+  const index = indexed ? Option.some(Number(after[0])) : Option.none<number>();
+  const rest = indexed ? after.slice(1) : after;
   if (rest.length !== 2) return Option.none();
   const [kind, name] = rest as [string, string];
   if (name === "") return Option.none();
-  if (kind === "attributes")
-    return Option.some(
-      index === undefined ? { _tag: "attribute", name } : { _tag: "attribute", name, index },
-    );
-  if (kind === "relationships") {
-    return Option.some(
-      index === undefined ? { _tag: "relationship", name } : { _tag: "relationship", name, index },
-    );
-  }
+  const member = (_tag: PointerMember["_tag"]): PointerMember =>
+    Option.match(index, {
+      onNone: () => ({ _tag, name }),
+      onSome: (index) => ({ _tag, name, index }),
+    });
+  if (kind === "attributes") return Option.some(member("attribute"));
+  if (kind === "relationships") return Option.some(member("relationship"));
   return Option.none();
 };
 
@@ -532,7 +528,7 @@ export const ErrorObjectWithCodes = <const Codes extends ReadonlyArray<string>>(
 // The top-level members every data and linkage document carries beside
 // `data` and `included`: `links`, `meta` (at the caller's schema, `AnyMeta`
 // by default) and `jsonapi`.
-const topLevelMembers = <M extends Schema.Top>(meta: M | undefined) => ({
+const topLevelMembers = <M extends Schema.Top>(meta?: M) => ({
   links: Schema.optionalKey(TopLevelLinks),
   // SAFETY: `M` defaults to `typeof AnyMeta`, the schema used when none is passed.
   meta: Schema.optionalKey((meta ?? AnyMeta) as M),
@@ -541,7 +537,7 @@ const topLevelMembers = <M extends Schema.Top>(meta: M | undefined) => ({
 
 // The `included` member of a data document: an optional array of `Included`,
 // `Schema.Never` (no member admitted) by default.
-const includedMember = <Included extends Schema.Top>(included: Included | undefined) => ({
+const includedMember = <Included extends Schema.Top>(included?: Included) => ({
   // SAFETY: `Included` defaults to `typeof Schema.Never`, the schema used when none is passed.
   included: Schema.optionalKey(Schema.Array((included ?? Schema.Never) as Included)),
 });
@@ -1036,9 +1032,8 @@ const isUnionLike = (
 ): schema is Schema.Top & { readonly members: ReadonlyArray<Schema.Top> } =>
   Array.isArray((schema as { readonly members?: unknown }).members);
 
-/** The `_tag` of a schema's AST node, when it exposes one. */
-const astTag = (schema: Schema.Top): string | undefined =>
-  (schema as { readonly ast?: { readonly _tag?: string } }).ast?._tag;
+/** The `_tag` of a schema's AST node. */
+const astTag = (schema: Schema.Top): string => schema.ast._tag;
 
 /**
  * Whether a struct field is declared optional — `Schema.optionalKey(S)` or

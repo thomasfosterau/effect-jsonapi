@@ -131,7 +131,7 @@ import {
   isMemberName,
 } from "./internal/vocabulary.js";
 import { errorResponse, SERVER_ERROR } from "./ServerErrors.js";
-import { definedMember } from "./internal/members.js";
+import { definedMember, someMember } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Tracing
@@ -257,7 +257,7 @@ export const acceptIsAcceptable = (
     if (base === "*/*" || base === "application/*") return true;
     if (base !== MEDIA_TYPE) return false;
     // A malformed `q` is the default weight, not a refusal (as in `Negotiation`).
-    if ((weight ?? 1) <= 0) return false;
+    if (Option.getOrElse(weight, () => 1) <= 0) return false;
     return parametersAreAcceptable(parameters, options?.extensions ?? []);
   });
 };
@@ -371,30 +371,30 @@ const jsonPointer = (path: ReadonlyArray<string | number>): string =>
 const sourceOf = (
   part: RequestPart,
   path: ReadonlyArray<string | number>,
-): ErrorSource | undefined =>
+): Option.Option<ErrorSource> =>
   Match.value(part).pipe(
     Match.when("Query", () => {
       const keys = Arr.takeWhile(path, P.isString);
-      if (Arr.isReadonlyArrayEmpty(keys)) return undefined;
-      return {
+      if (Arr.isReadonlyArrayEmpty(keys)) return Option.none();
+      return Option.some({
         parameter:
           keys[0] +
           keys
             .slice(1)
             .map((key) => `[${key}]`)
             .join(""),
-      };
+      });
     }),
-    Match.when("Params", () => {
-      const key = path.find((segment): segment is string => P.isString(segment));
-      return key === undefined ? undefined : { parameter: key };
-    }),
-    Match.when("Headers", () => {
-      const key = path.find((segment): segment is string => P.isString(segment));
-      return key === undefined ? undefined : { header: key };
-    }),
+    Match.when("Params", () =>
+      Option.map(Arr.findFirst(path, P.isString), (key): ErrorSource => ({ parameter: key })),
+    ),
+    Match.when("Headers", () =>
+      Option.map(Arr.findFirst(path, P.isString), (key): ErrorSource => ({ header: key })),
+    ),
     Match.when("Payload", () =>
-      Arr.isReadonlyArrayEmpty(path) ? undefined : { pointer: jsonPointer(path) },
+      Arr.isReadonlyArrayEmpty(path)
+        ? Option.none()
+        : Option.some<ErrorSource>({ pointer: jsonPointer(path) }),
     ),
     Match.exhaustive,
   );
@@ -475,15 +475,15 @@ export const schemaErrorDocument = (
     const path = leaf.wire.flatMap((key) => (P.isString(key) || P.isNumber(key) ? [key] : []));
     return { detail: leaf.message, source: sourceOf(part, path), meta: metaAt(leaf.path) };
   });
-  if (!errors.some((error) => error.source !== undefined)) return toDocument(schemaError(part));
+  if (!errors.some((error) => Option.isSome(error.source))) return toDocument(schemaError(part));
   return {
     errors: errors.map(({ detail, source, meta }) => ({
       status: String(BadRequest.status),
       code: BadRequest.code,
       ...definedMember("title", BadRequest.title),
       detail,
-      ...definedMember("source", source),
-      ...definedMember("meta", meta),
+      ...someMember("source", source),
+      ...someMember("meta", meta),
     })),
   };
 };
@@ -1160,11 +1160,7 @@ const badRequestResponse = (part: RequestPart, document: typeof WireDocument.Typ
 // A payload refusal other than the 400: one error object naming the member
 // at `pointer`, under the same span as the 400 it replaces.
 const payloadRefusal = (
-  error: {
-    readonly status: number;
-    readonly code: string;
-    readonly title?: string | undefined;
-  },
+  error: Pick<typeof Conflict | typeof Forbidden, "status" | "code" | "title">,
   detail: string,
   pointer: string,
 ) =>

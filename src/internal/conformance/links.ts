@@ -66,7 +66,9 @@ import {
   statusOf,
   succeeded,
   topLevel,
+  joinNotes,
 } from "./core.js";
+import { someMember } from "../members.js";
 import {
   answeredFrom,
   budgeted,
@@ -215,7 +217,7 @@ const NO_IDENTITY = "a string `type` and `id`";
 
 const memberOf = (resource: JsonObject): Option.Option<Member> =>
   P.isString(resource["type"]) && P.isString(resource["id"])
-    ? Option.map(Option.fromUndefinedOr(identity(resource)), (key) => ({
+    ? Option.map(identity(resource), (key) => ({
         key,
         label: quote(resourceLabel(resource)),
       }))
@@ -629,7 +631,10 @@ const broken = (
       detail: `${found.where} ${args.detail}`,
       expected: args.expected,
       observed: args.observed,
-      probe: Option.getOrUndefined(Option.map(observation, ({ probe }) => probe)),
+      ...someMember(
+        "probe",
+        Option.map(observation, ({ probe }) => probe),
+      ),
     }),
   });
 
@@ -900,7 +905,10 @@ const judgeAnswer = (judging: Judging, found: Found, observation: Observation): 
   const { rule } = judging;
   const data = dataOf(observation);
   const one = (member: Member, detail: string): Verdict =>
-    Option.exists(data, (value) => isJsonObject(value) && identity(value) === member.key)
+    Option.exists(
+      data,
+      (value) => isJsonObject(value) && Option.contains(identity(value), member.key),
+    )
       ? Verdict.Held()
       : broken(rule, found, Option.some(observation), {
           detail,
@@ -1191,7 +1199,6 @@ const listedFindings = (rule: Rule, result: Crawl): ReadonlyArray<Finding> =>
           detail: `${counted(result.unlisted, "more link")} broke the rule; only the first ${FINDING_LIMIT} are listed`,
           expected: "every link the rule follows to answer what it claims",
           observed: `${counted(result.unlisted, "further finding")}, not listed`,
-          probe: undefined,
         }),
       ];
 
@@ -1235,9 +1242,9 @@ const outcomeOf = (
     ...(Arr.isReadonlyArrayEmpty(result.undecided)
       ? []
       : [`${counted(result.undecided.length, "link")} not decided: ${reasons(result.undecided)}`]),
-    ...Option.toArray(Option.fromUndefinedOr(coverageNote(unresolved))),
+    ...Option.toArray(coverageNote(unresolved)),
   ];
-  return pass(rule, probes, Arr.isReadonlyArrayEmpty(notes) ? undefined : notes.join("; "));
+  return pass(rule, probes, joinNotes(notes));
 };
 
 /** A rule that collects one kind of link from the read endpoints and follows each. */

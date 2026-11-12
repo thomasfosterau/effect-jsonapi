@@ -167,19 +167,13 @@ const advertisesProfile: RuleImpl = {
       if (Arr.isReadonlyArrayEmpty(targets)) return skip(advertisesProfile.rule, NO_GRAMMAR);
       const findings: Array<Finding> = [];
       yield* eachSuccessfulRead(ctx, targets, (path, observation) => {
-        const header = observation.contentType;
-        const profiles =
-          header === undefined
-            ? []
-            : parseMediaType(header)
-                .parameters.filter(([name]) => name === "profile")
-                .flatMap(([, value]) => value.split(" "));
+        const profiles = mediaTypeProfiles(observation);
         if (!profiles.includes(PROFILE_URI)) {
           findings.push(
             finding(advertisesProfile.rule, {
               detail: `${path} speaks the filter grammar but does not advertise the profile`,
               expected: `a \`profile\` parameter containing ${PROFILE_URI}`,
-              observed: header === undefined ? "no Content-Type" : header,
+              observed: Option.getOrElse(observation.contentType, () => "no Content-Type"),
               probe: observation.probe,
             }),
           );
@@ -368,7 +362,6 @@ const spellingEquivalence: RuleImpl = {
                   0,
                   120,
                 )}…`,
-                probe: undefined,
               }),
             );
           }
@@ -415,7 +408,7 @@ const documentProfiles = (observation: Observation): ReadonlyArray<string> =>
 
 /** The profile URIs an answer's `Content-Type` names in its `profile` parameter (space-separated). */
 const mediaTypeProfiles = (observation: Observation): ReadonlyArray<string> =>
-  Option.match(Option.fromUndefinedOr(observation.contentType), {
+  Option.match(observation.contentType, {
     onNone: () => [],
     onSome: (header) =>
       parseMediaType(header)
@@ -450,9 +443,10 @@ const advertisedOn = (
     finding(rule, {
       detail: `the ${observation.status} ${write}, which accepts \`Idempotency-Key\`, does not advertise the profile`,
       expected: `\`jsonapi.profile\` or the media type's \`profile\` parameter naming ${IDEMPOTENCY_PROFILE_URI}`,
-      observed: `jsonapi: ${Option.match(jsonapi, { onNone: () => "(none)", onSome: quote })} · Content-Type: ${
-        observation.contentType === undefined ? "(none)" : quote(observation.contentType)
-      }`,
+      observed: `jsonapi: ${Option.match(jsonapi, { onNone: () => "(none)", onSome: quote })} · Content-Type: ${Option.match(
+        observation.contentType,
+        { onNone: () => "(none)", onSome: quote },
+      )}`,
       probe: observation.probe,
     }),
   ]);

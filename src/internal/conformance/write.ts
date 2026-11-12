@@ -249,7 +249,7 @@ const fixtureFor = (ctx: Context, role: WriteRole, key: string): Result.Result<U
 const createEndpointFor = (ctx: Context, key: string): Option.Option<Discovered> =>
   Arr.findFirst(
     ctx.endpoints,
-    (endpoint) => endpoint.role === "create" && endpoint.segment === key,
+    (endpoint) => endpoint.role === "create" && Option.contains(endpoint.segment, key),
   );
 
 /** The target `endpoint` gives a rule of `role`, or why it gives none. */
@@ -260,7 +260,7 @@ const usable = (
 ): Result.Result<WriteTarget, string> =>
   Result.gen(function* () {
     const noCreate = `${endpoint.method} ${endpoint.path} has no create endpoint to make a disposable target with`;
-    const key = yield* Result.fromOption(Option.fromUndefinedOr(endpoint.segment), () => noCreate);
+    const key = yield* Result.fromOption(endpoint.segment, () => noCreate);
     const create = yield* Result.fromOption(
       role === "create" ? Option.some(endpoint) : createEndpointFor(ctx, key),
       () => noCreate,
@@ -333,8 +333,11 @@ export const atomicTargets = (ctx: Context, operations: Discovered): Targets => 
 /** The skip reason when no type has a `create` fixture, naming the keys the api suggests. */
 const noAtomicFixture = (ctx: Context, operations: Discovered): string => {
   const keys = Arr.filterMap(ctx.endpoints, (endpoint) =>
-    endpoint.role === "create" && endpoint.segment !== undefined
-      ? Result.succeed(`writes["${endpoint.segment}"].create`)
+    endpoint.role === "create"
+      ? Result.fromOption(
+          Option.map(endpoint.segment, (segment) => `writes["${segment}"].create`),
+          () => undefined,
+        )
       : Result.failVoid,
   );
   const suggestion = Arr.match(keys, {
@@ -944,7 +947,7 @@ export const readEndpointFor = (
       ctx.endpoints,
       (endpoint) =>
         endpoint.role === "resource" &&
-        endpoint.segment === target.key &&
+        Option.contains(endpoint.segment, target.key) &&
         endpoint.params.length === 1,
     ),
     () =>
@@ -993,7 +996,7 @@ const linkageValue = (relationship: JsonObject): Option.Option<Schema.Json> => {
   if (!("data" in relationship)) return Option.none();
   const data = relationship["data"];
   const key = (item: Schema.Json): string =>
-    isJsonObject(item) ? (identity(item) ?? rendered(item)) : rendered(item);
+    isJsonObject(item) ? Option.getOrElse(identity(item), () => rendered(item)) : rendered(item);
   if (isJsonArray(data)) return Option.some(Arr.sort(Arr.map(data, key), Order.String));
   return Option.some(data === null ? null : key(data));
 };
@@ -1271,8 +1274,8 @@ export const overTargetsAll = (
     const [settled, undecidedFor] = Arr.partition(verdicts, decision);
     const reasons = [...found.missing, ...undecidedFor];
     const note = Arr.match(reasons, {
-      onEmpty: () => undefined,
-      onNonEmpty: (named) => `not decided for: ${named.join("; ")}`,
+      onEmpty: () => Option.none<string>(),
+      onNonEmpty: (named) => Option.some(`not decided for: ${named.join("; ")}`),
     });
     return Arr.match(settled, {
       onEmpty: () => skip(rule, reasons.join("; ")),

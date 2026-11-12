@@ -17,7 +17,7 @@ import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
-import type { Compare, Node } from "../Filter.js";
+import type { Compare, LiteralCodecs, Node } from "../Filter.js";
 import { conjunctions, listOperators, nullOperator, operators } from "./operators.js";
 import { render } from "./json.js";
 
@@ -89,9 +89,7 @@ export type OperatorCheck = (field: string, operator: string) => void;
 
 /** An `OperatorCheck` over a declaration. */
 export const operatorCheck =
-  (fields: {
-    readonly [field: string]: { readonly operators?: ReadonlyArray<string> | undefined };
-  }): OperatorCheck =>
+  (fields: { readonly [field: string]: Pick<LiteralCodecs[string], "operators"> }): OperatorCheck =>
   (field, operator) => {
     const codec = declaration(fields, field);
     if (codec === undefined) throw new InvalidFilter({ message: unknownField(field) });
@@ -165,11 +163,11 @@ const unescape = (
 
 const FILTER_KEY = /^filter((?:\[[^[\]]*\])+)$/;
 
-/** The bracket segments of a `filter[...]` key, or `undefined` when malformed. */
-export const keySegments = (key: string): ReadonlyArray<string> | undefined => {
+/** The bracket segments of a `filter[...]` key, or `None` when malformed. */
+export const keySegments = (key: string): Option.Option<ReadonlyArray<string>> => {
   const match = FILTER_KEY.exec(key);
-  if (match === null) return undefined;
-  return [...match[1].matchAll(/\[([^[\]]*)\]/g)].map((m) => m[1]);
+  if (match === null) return Option.none();
+  return Option.some([...match[1].matchAll(/\[([^[\]]*)\]/g)].map((m) => m[1]));
 };
 
 /**
@@ -242,31 +240,36 @@ export const decodeFilter = (
   input: { readonly [key: string]: WireValue },
 ): Decoded => {
   const issues = MutableHashMap.empty<string, SchemaIssue.Issue>();
-  const fail = (key: string, message: string, value?: WireValue): undefined => {
+  const fail = (key: string, message: string, value?: WireValue): void => {
     if (!MutableHashMap.has(issues, key))
       MutableHashMap.set(issues, key, pointed(key, message, value));
-    return undefined;
+  };
+  // `fail`, as the result of a decode that produced nothing.
+  const reject = (key: string, message: string, value?: WireValue): Option.Option<never> => {
+    fail(key, message, value);
+    return Option.none();
   };
 
   // One condition, from wherever its members came from.
   const condition = (
     keys: ConditionKeys,
     field: string,
-    op: string | undefined,
+    given: Option.Option<string>,
     raw: string,
-  ): Node | undefined => {
+  ): Option.Option<Node> => {
     const codec = declaration(fields, field);
-    if (codec === undefined) return fail(keys.field, unknownField(field), field);
+    if (codec === undefined) return reject(keys.field, unknownField(field), field);
     let items: ReadonlyArray<string>;
     let operator: string;
-    if (op === undefined) {
+    if (Option.isNone(given)) {
       const parsed = unescape(raw, true);
-      if ("error" in parsed) return fail(keys.value, parsed.error, raw);
+      if ("error" in parsed) return reject(keys.value, parsed.error, raw);
       items = parsed.items;
       operator = items.length > 1 ? "in" : "eq";
     } else {
+      const op = given.value;
       if (!allOperators.includes(op)) {
-        return fail(
+        return reject(
           keys.operator,
           `Unknown filter operator ${render(op)}; expected one of ${allOperators.join(", ")}`,
           op,
@@ -275,19 +278,20 @@ export const decodeFilter = (
       operator = op;
       if (op === nullOperator) {
         if (raw !== "true" && raw !== "false") {
-          return fail(keys.value, `Expected true or false for isnull, got ${render(raw)}`, raw);
+          return reject(keys.value, `Expected true or false for isnull, got ${render(raw)}`, raw);
         }
         items = [raw];
       } else {
         const parsed = unescape(raw, isListOperator(op));
-        if ("error" in parsed) return fail(keys.value, parsed.error, raw);
+        if ("error" in parsed) return reject(keys.value, parsed.error, raw);
         items = parsed.items;
       }
     }
     if (!codec.operators.includes(operator)) {
-      return fail(keys.operator, undeclaredOperator(field, operator, codec.operators), operator);
+      return reject(keys.operator, undeclaredOperator(field, operator, codec.operators), operator);
     }
-    if (operator === nullOperator) return { _tag: "IsNull", field, negated: items[0] === "false" };
+    if (operator === nullOperator)
+      return Option.some({ _tag: "IsNull", field, negated: items[0] === "false" });
     const decode = Schema.decodeUnknownResult(codec.literal as Schema.Codec<unknown, string>);
     const values: Array<unknown> = [];
     const invalid = Arr.findFirst(items, (item) => {
@@ -297,20 +301,20 @@ export const decodeFilter = (
       return Option.none();
     });
     if (Option.isSome(invalid)) {
-      return fail(
+      return reject(
         keys.value,
         `Invalid literal ${render(invalid.value.item)} for field ${render(field)}: ${issueMessage(invalid.value.failure)}`,
         raw,
       );
     }
     if (operator === "in" || operator === "nin") {
-      return {
+      return Option.some({
         _tag: operator === "in" ? "In" : "NotIn",
         field,
         values: values as [unknown, ...Array<unknown>],
-      };
+      });
     }
-    return { _tag: "Compare", op: operator as never, field, value: values[0] };
+    return Option.some({ _tag: "Compare", op: operator as never, field, value: values[0] });
   };
 
   const roots: Array<Node> = [];
@@ -324,10 +328,10 @@ export const decodeFilter = (
   const rawOf = (
     key: string,
     value: string | ReadonlyArray<string>,
-    segments: ReadonlyArray<string> | undefined,
+    segments: Option.Option<ReadonlyArray<string>>,
   ): Option.Option<string> => {
     if (P.isString(value)) return Option.some(value);
-    if (segments !== undefined && isListPosition(segments)) {
+    if (Option.exists(segments, isListPosition)) {
       // The repeated-key spelling of a comma list: `filter[f]=a&filter[f]=b`
       // is `filter[f]=a,b`. Each occurrence's raw value is preserved as-is —
       // one that is itself a comma list, or carries an escaped comma, still
@@ -369,21 +373,22 @@ export const decodeFilter = (
 
   Arr.forEach(R.toEntries(input), ([key, value]) => {
     if (value === undefined) return;
-    const segments = keySegments(key);
-    const raw = rawOf(key, value, segments);
+    const parsed = keySegments(key);
+    const raw = rawOf(key, value, parsed);
     if (Option.isNone(raw)) return;
-    if (segments === undefined) {
+    if (Option.isNone(parsed)) {
       fail(key, MALFORMED_KEY);
       return;
     }
+    const segments = parsed.value;
     if (segments.length === 1 || segments.length === 2) {
       const node = condition(
         { field: key, operator: key, value: key },
         segments[0],
-        segments[1],
+        Arr.get(segments, 1),
         raw.value,
       );
-      if (node !== undefined) roots.push(node);
+      if (Option.isSome(node)) roots.push(node.value);
     } else if (segments.length === 3 && (segments[1] === "group" || segments[1] === "condition")) {
       draftMember(key, segments as [string, "group" | "condition", string], raw.value);
     } else {
@@ -394,13 +399,13 @@ export const decodeFilter = (
   // Group form: build every node, then wire them up.
   interface Built {
     readonly kind: "group" | "condition";
-    readonly node?: Node | undefined;
-    readonly conjunction?: { readonly key: string; readonly value: string } | undefined;
-    readonly memberOf?: { readonly key: string; readonly value: string } | undefined;
+    readonly node: Option.Option<Node>;
+    readonly conjunction: Option.Option<{ readonly key: string; readonly value: string }>;
+    readonly memberOf: Option.Option<{ readonly key: string; readonly value: string }>;
   }
   const built = MutableHashMap.empty<string, Built>();
   Arr.forEach(drafts, ([id, draft]) => {
-    const memberOf = Option.getOrUndefined(MutableHashMap.get(draft.members, "memberOf"));
+    const memberOf = MutableHashMap.get(draft.members, "memberOf");
     if (draft.kind === "condition") {
       const path = Option.getOrUndefined(MutableHashMap.get(draft.members, "path"));
       const operator = Option.getOrUndefined(MutableHashMap.get(draft.members, "operator"));
@@ -424,45 +429,51 @@ export const decodeFilter = (
           ? condition(
               { field: path.key, operator: operator.key, value: value.key },
               path.value,
-              operator.value,
+              Option.some(operator.value),
               value.value,
             )
-          : undefined;
-      MutableHashMap.set(built, id, { kind: "condition", node, memberOf });
+          : Option.none();
+      MutableHashMap.set(built, id, {
+        kind: "condition",
+        node,
+        conjunction: Option.none(),
+        memberOf,
+      });
     } else {
-      const conjunction = Option.getOrUndefined(MutableHashMap.get(draft.members, "conjunction"));
-      if (conjunction === undefined) {
+      const conjunction = MutableHashMap.get(draft.members, "conjunction");
+      if (Option.isNone(conjunction)) {
         fail(`filter[${id}][group][conjunction]`, `Missing required group member "conjunction"`);
-      } else if (!isConjunction(conjunction.value)) {
+      } else if (!isConjunction(conjunction.value.value)) {
         fail(
-          conjunction.key,
-          `Unknown conjunction ${render(conjunction.value)}; expected AND, OR or NOT`,
-          conjunction.value,
+          conjunction.value.key,
+          `Unknown conjunction ${render(conjunction.value.value)}; expected AND, OR or NOT`,
+          conjunction.value.value,
         );
       }
-      MutableHashMap.set(built, id, { kind: "group", conjunction, memberOf });
+      MutableHashMap.set(built, id, { kind: "group", node: Option.none(), conjunction, memberOf });
     }
   });
 
   // Parents must be declared groups, and the parent chain must be acyclic.
   const parentOf = MutableHashMap.empty<string, string>();
   Arr.forEach(built, ([id, node]) => {
-    if (node.memberOf === undefined) return;
-    const target = Option.getOrUndefined(MutableHashMap.get(built, node.memberOf.value));
+    if (Option.isNone(node.memberOf)) return;
+    const memberOf = node.memberOf.value;
+    const target = Option.getOrUndefined(MutableHashMap.get(built, memberOf.value));
     if (target === undefined) {
       fail(
-        node.memberOf.key,
-        `memberOf names an unknown group ${render(node.memberOf.value)}`,
-        node.memberOf.value,
+        memberOf.key,
+        `memberOf names an unknown group ${render(memberOf.value)}`,
+        memberOf.value,
       );
     } else if (target.kind !== "group") {
       fail(
-        node.memberOf.key,
-        `memberOf names ${render(node.memberOf.value)}, which is a condition, not a group`,
-        node.memberOf.value,
+        memberOf.key,
+        `memberOf names ${render(memberOf.value)}, which is a condition, not a group`,
+        memberOf.value,
       );
     } else {
-      MutableHashMap.set(parentOf, id, node.memberOf.value);
+      MutableHashMap.set(parentOf, id, memberOf.value);
     }
   });
   const cyclic = MutableHashSet.empty<string>();
@@ -493,7 +504,7 @@ export const decodeFilter = (
     // `current` is on a cycle; report it at the first cycle member in input order.
     const cycle = collect(current.value, MutableHashSet.empty<string>());
     const first = Arr.findFirst(built, ([id, node]) =>
-      MutableHashSet.has(cycle, id) ? Option.fromNullishOr(node.memberOf) : Option.none(),
+      MutableHashSet.has(cycle, id) ? node.memberOf : Option.none(),
     );
     if (Option.isSome(first)) fail(first.value.key, "memberOf forms a cycle");
     Arr.forEach(cycle, (id) => {
@@ -507,8 +518,8 @@ export const decodeFilter = (
   // Assemble the tree from the leaves up.
   const children = MutableHashMap.empty<string, Array<string>>();
   Arr.forEach(built, ([id, node]) => {
-    const parent = node.memberOf?.value;
-    if (parent === undefined) return;
+    if (Option.isNone(node.memberOf)) return;
+    const parent = node.memberOf.value.value;
     let list = Option.getOrUndefined(MutableHashMap.get(children, parent));
     if (list === undefined) {
       list = [];
@@ -518,11 +529,13 @@ export const decodeFilter = (
   });
   const build = (id: string): Node => {
     const node = defined(Option.getOrUndefined(MutableHashMap.get(built, id)));
-    if (node.kind === "condition") return defined(node.node);
+    if (node.kind === "condition") return defined(Option.getOrUndefined(node.node));
     const members = Option.getOrElse(MutableHashMap.get(children, id), (): Array<string> => []).map(
       build,
     );
-    const { key: conjunctionKey, value: conjunction } = defined(node.conjunction);
+    const { key: conjunctionKey, value: conjunction } = defined(
+      Option.getOrUndefined(node.conjunction),
+    );
     if (conjunction === "NOT") {
       if (members.length !== 1) {
         fail(conjunctionKey, `A NOT group must have exactly one member, got ${members.length}`);
@@ -533,7 +546,7 @@ export const decodeFilter = (
     return { _tag: conjunction === "AND" ? "And" : "Or", members };
   };
   Arr.forEach(built, ([id, node]) => {
-    if (node.memberOf === undefined) roots.push(build(id));
+    if (Option.isNone(node.memberOf)) roots.push(build(id));
   });
   if (MutableHashMap.size(issues) > 0)
     return { _tag: "Issues", issues: Arr.fromIterable(MutableHashMap.values(issues)) };
@@ -738,24 +751,26 @@ const shorthandPair = (condition: PreparedCondition): readonly [string, string] 
 };
 
 // The shorthand pairs of a prepared tree, when shorthand decodes back to the
-// same tree (§3.1); `undefined` otherwise.
-const shorthand = (root: Prepared): ReadonlyArray<readonly [string, string]> | undefined => {
+// same tree (§3.1); `None` otherwise.
+const shorthand = (root: Prepared): Option.Option<ReadonlyArray<readonly [string, string]>> => {
   let conditions: ReadonlyArray<PreparedCondition>;
   if (root.kind === "condition") {
     conditions = [root];
   } else if (root.conjunction === "AND" && root.members.length >= 2) {
-    if (!root.members.every((member) => member.kind === "condition")) return undefined;
+    if (!root.members.every((member) => member.kind === "condition")) return Option.none();
     conditions = root.members;
   } else {
-    return undefined;
+    return Option.none();
   }
   const pairs = conditions.map(shorthandPair);
   // A key names one condition; two conditions on the same key (the same field
   // and operator, or a bare `eq` next to a bare `in`) need the group form.
-  if (Arr.dedupe(pairs.map(([key]) => key)).length !== pairs.length) return undefined;
-  return Arr.sort(
-    pairs,
-    orderOf<(typeof pairs)[number]>(([a], [b]) => compareCodePoints(a, b)),
+  if (Arr.dedupe(pairs.map(([key]) => key)).length !== pairs.length) return Option.none();
+  return Option.some(
+    Arr.sort(
+      pairs,
+      orderOf<(typeof pairs)[number]>(([a], [b]) => compareCodePoints(a, b)),
+    ),
   );
 };
 
@@ -766,28 +781,32 @@ const shorthand = (root: Prepared): ReadonlyArray<readonly [string, string]> | u
 export const encodeFilter = (root: Prepared) => {
   const pairs: Array<readonly [string, string]> = [];
   const short = shorthand(root);
-  if (short !== undefined) {
-    pairs.push(...short);
+  if (Option.isSome(short)) {
+    pairs.push(...short.value);
   } else {
     let groups = 0;
     let conditions = 0;
-    const visit = (node: Prepared, parent: string | undefined): void => {
+    // `parent` is the enclosing group's id; the root has none. A group wraps
+    // its own id once, for all its members, so the walk allocates per group
+    // (as the id itself does), not per member.
+    const visit = (node: Prepared, parent: Option.Option<string>): void => {
       if (node.kind === "group") {
         const id = `g${groups++}`;
         pairs.push([`filter[${id}][group][conjunction]`, node.conjunction]);
-        if (parent !== undefined) pairs.push([`filter[${id}][group][memberOf]`, parent]);
+        if (Option.isSome(parent)) pairs.push([`filter[${id}][group][memberOf]`, parent.value]);
+        const self = Option.some(id);
         Arr.forEach(node.members, (member) => {
-          visit(member, id);
+          visit(member, self);
         });
       } else {
         const id = `c${conditions++}`;
         pairs.push([`filter[${id}][condition][path]`, node.field]);
         pairs.push([`filter[${id}][condition][operator]`, node.op]);
         pairs.push([`filter[${id}][condition][value]`, node.value]);
-        if (parent !== undefined) pairs.push([`filter[${id}][condition][memberOf]`, parent]);
+        if (Option.isSome(parent)) pairs.push([`filter[${id}][condition][memberOf]`, parent.value]);
       }
     };
-    visit(root, undefined);
+    visit(root, Option.none());
   }
   return R.fromEntries(pairs);
 };

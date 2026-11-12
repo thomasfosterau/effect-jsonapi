@@ -436,13 +436,11 @@ type LiteralResource<R> = boolean extends R ? never : unknown;
 // sugar would silently override it (and the type-level markers would clash).
 const declare = (
   schema: Schema.Top,
-  options:
-    | {
-        readonly filter?: FilterDeclaration | undefined;
-        readonly filterLiteral?: Schema.Codec<unknown, string> | undefined;
-        readonly sort?: boolean | undefined;
-      }
-    | undefined,
+  options?: {
+    readonly filter?: FilterDeclaration | undefined;
+    readonly filterLiteral?: Schema.Codec<unknown, string> | undefined;
+    readonly sort?: boolean | undefined;
+  },
 ): Schema.Top => {
   let declared = schema;
   const filter = options?.filter;
@@ -676,7 +674,14 @@ export const readOnlyAttribute = <
 ): ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>> =>
   attribute(schema as Schema.Top, {
     ...options,
-    filterLiteral: options?.filterLiteral as Schema.Codec<unknown, string> | undefined,
+    filterLiteral: Option.getOrUndefined(
+      Option.map(
+        Option.fromUndefinedOr(options?.filterLiteral),
+        // SAFETY: the codec's `Literal` is the attribute's; `attribute` below
+        // is called over the erased schema, whose literal is `unknown`.
+        (literal) => literal as Schema.Codec<unknown, string>,
+      ),
+    ),
     create: false,
     update: false,
   }) as ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>>;
@@ -693,43 +698,52 @@ interface RuntimeAttributeConfig {
   readonly clearable: boolean;
 }
 
-// The non-null member of a `Schema.NullOr(...)` — a two-member union with a
-// `Null` member — at the AST level; `undefined` for anything else. The one
-// definition of "nullable" the runtime shares: `isNullable`, `nonNullableBase`
-// and the declaration readers all go through it.
-const nullableBaseAst = (ast: SchemaAST.AST): SchemaAST.AST | undefined =>
+// Whether an AST is a `Schema.NullOr(...)` — a two-member union with a `Null`
+// member. The one definition of "nullable" the runtime shares: `isNullable`,
+// `nonNullableBase` and the declaration readers all go through it.
+const isNullableAst = (ast: SchemaAST.AST): ast is SchemaAST.Union =>
   SchemaAST.isUnion(ast) &&
   ast.types.length === 2 &&
-  ast.types.some((member) => SchemaAST.isNull(member))
-    ? ast.types.find((member) => !SchemaAST.isNull(member))
-    : undefined;
+  ast.types.some((member) => SchemaAST.isNull(member));
+
+// The non-null member of a `Schema.NullOr(...)` at the AST level; `None` for
+// anything else.
+const nullableBaseAst = (ast: SchemaAST.AST): Option.Option<SchemaAST.AST> =>
+  isNullableAst(ast)
+    ? Arr.findFirst(ast.types, (member) => !SchemaAST.isNull(member))
+    : Option.none();
 
 // Whether a schema is a two-member `Schema.NullOr(...)` union, at runtime.
-const isNullable = (schema: Schema.Top): boolean => nullableBaseAst(schema.ast) !== undefined;
+const isNullable = (schema: Schema.Top): boolean => isNullableAst(schema.ast);
 
 // The base schema of a `Schema.NullOr(...)` — the member whose AST is the
 // non-null one — or the schema itself if it is not a nullable union.
-const nonNullableBase = (schema: Schema.Top): Schema.Top => {
-  const baseAst = nullableBaseAst(schema.ast);
-  if (baseAst === undefined) return schema;
-  const members = (schema as { readonly members?: ReadonlyArray<Schema.Top> }).members;
-  return members?.find((member) => member.ast === baseAst) ?? schema;
-};
+const nonNullableBase = (schema: Schema.Top): Schema.Top =>
+  Option.match(nullableBaseAst(schema.ast), {
+    onNone: () => schema,
+    onSome: (baseAst) => {
+      const members = (schema as { readonly members?: ReadonlyArray<Schema.Top> }).members;
+      return members?.find((member) => member.ast === baseAst) ?? schema;
+    },
+  });
 
 // Wraps a schema in `Schema.NullOr` unless it is already nullable.
 const ensureNullable = (schema: Schema.Top): Schema.Top =>
   isNullable(schema) ? schema : Schema.NullOr(schema);
 
-// Reads an attribute's runtime projection descriptor, or `undefined` for a plain
+// Reads an attribute's runtime projection descriptor, or `None` for a plain
 // schema attribute (which projects with the read-write defaults).
-const descriptorOf = (schema: Schema.Top): RuntimeAttributeConfig | undefined =>
-  Schema.resolveAnnotations(schema)?.[AttributeDescriptorAnnotationId] as
-    | RuntimeAttributeConfig
-    | undefined;
+const descriptorOf = (schema: Schema.Top): Option.Option<RuntimeAttributeConfig> =>
+  // SAFETY: only `attribute` stamps `AttributeDescriptorAnnotationId`, and it
+  // stamps a `RuntimeAttributeConfig`.
+  Option.fromUndefinedOr(
+    Schema.resolveAnnotations(schema)?.[AttributeDescriptorAnnotationId],
+  ) as Option.Option<RuntimeAttributeConfig>;
 
 // Whether an attribute field is input-only (`resource: false`): declared for
 // the write projections, absent from the resource object.
-const isInputOnly = (field: Schema.Top): boolean => descriptorOf(field)?.resource === false;
+const isInputOnly = (field: Schema.Top): boolean =>
+  Option.exists(descriptorOf(field), (descriptor) => descriptor.resource === false);
 
 // Builds the resource-object field map for a resource's declared attribute
 // fields: every attribute except the input-only ones (`resource: false`), each
@@ -746,18 +760,17 @@ function resourceAttributeFields(fields: Schema.Struct.Fields) {
   return result;
 }
 
-// The schema a bare `Schema.optionalKey(S)` attribute wraps (`S`), or
-// `undefined` for anything else — a required field, or a field that already
-// admits `undefined` (`Schema.optional(S)` is `optionalKey(UndefinedOr(S))`),
-// which needs no widening.
-const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
-  if (field.ast.context?.isOptional !== true) return undefined;
-  const wrapped = (field as { readonly schema?: Schema.Top }).schema;
-  if (wrapped === undefined) return undefined;
-  const ast = wrapped.ast;
-  const admitsUndefined =
-    SchemaAST.isUnion(ast) && ast.types.some((member) => SchemaAST.isUndefined(member));
-  return admitsUndefined ? undefined : wrapped;
+// The schema a bare `Schema.optionalKey(S)` attribute wraps (`S`), or `None`
+// for anything else — a required field, or a field that already admits
+// `undefined` (`Schema.optional(S)` is `optionalKey(UndefinedOr(S))`), which
+// needs no widening.
+const strictOptionalInner = (field: Schema.Top): Option.Option<Schema.Top> => {
+  if (field.ast.context?.isOptional !== true) return Option.none();
+  return Option.filter(
+    Option.fromUndefinedOr((field as { readonly schema?: Schema.Top }).schema),
+    ({ ast }) =>
+      !(SchemaAST.isUnion(ast) && ast.types.some((member) => SchemaAST.isUndefined(member))),
+  );
 };
 
 /**
@@ -779,12 +792,15 @@ export function createAttributeFields<A extends Schema.Struct.Fields>(
 export function createAttributeFields(fields: Schema.Struct.Fields) {
   const result: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
-    const descriptor = descriptorOf(field as Schema.Top);
-    if (!descriptor) {
-      const inner = strictOptionalInner(field as Schema.Top);
-      result[key] = inner === undefined ? (field as Schema.Top) : Schema.optional(inner);
+    const found = descriptorOf(field as Schema.Top);
+    if (Option.isNone(found)) {
+      result[key] = Option.match(strictOptionalInner(field as Schema.Top), {
+        onNone: () => field as Schema.Top,
+        onSome: (inner) => Schema.optional(inner),
+      });
       return;
     }
+    const descriptor = found.value;
     if (descriptor.create === false) return;
     result[key] =
       descriptor.create === "optional" ? Schema.optional(descriptor.schema) : descriptor.schema;
@@ -809,11 +825,12 @@ export function updateAttributeFields(fields: Schema.Struct.Fields) {
   const result: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
     const attribute = field as Schema.Top;
-    const descriptor = descriptorOf(attribute);
-    if (descriptor === undefined) {
+    const found = descriptorOf(attribute);
+    if (Option.isNone(found)) {
       result[key] = Schema.optional(attribute);
       return;
     }
+    const descriptor = found.value;
     if (descriptor.update === false) return;
     const base = descriptor.clearable
       ? ensureNullable(descriptor.schema)
@@ -1579,8 +1596,8 @@ const erase = (schema: Schema.Top): Schema.Codec<unknown, unknown> =>
 // on the resource object and an optional key at create.
 const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor => {
   const annotations = Schema.resolveAnnotations(field);
-  const config = descriptorOf(field);
-  if (config === undefined) {
+  const found = descriptorOf(field);
+  if (Option.isNone(found)) {
     const schema = attributeSchemaOf(field);
     const presence: AttributePresence =
       field.ast.context?.isOptional === true ? "optional" : "required";
@@ -1600,6 +1617,7 @@ const describeAttribute = (key: string, field: Schema.Top): AttributeDescriptor 
       annotations,
     };
   }
+  const config = found.value;
   return {
     key,
     schema: erase(config.schema),
@@ -2015,11 +2033,7 @@ export const declaredAttributes = <R extends Any>(resource: R): DeclaredAttribut
  */
 export const attributeAnnotations = <R extends Any>(resource: R): AttributeAnnotationsOf<R> => {
   const fields = resource.fields.attributes.fields as Record<string, Schema.Top>;
-  const result: Record<string, Schema.Annotations.Annotations | undefined> = {};
-  Arr.forEach(R.keys(fields), (key) => {
-    result[key] = Schema.resolveAnnotations(fields[key]);
-  });
-  return result as AttributeAnnotationsOf<R>;
+  return R.map(fields, (field) => Schema.resolveAnnotations(field)) as AttributeAnnotationsOf<R>;
 };
 
 /**
@@ -2322,9 +2336,9 @@ type ScalarKind = "string" | "number" | "boolean";
 
 // Classifies the encoded (wire) form of an attribute schema as one JSON scalar
 // kind, looking through `NullOr` unions (NULL is never a literal), literal
-// unions and suspensions. `undefined` when the form is not a scalar (a struct,
-// an array, a `Date` declaration, …) or mixes kinds.
-const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
+// unions and suspensions. `None` when the form is not a scalar (a struct, an
+// array, a `Date` declaration, …) or mixes kinds.
+const scalarKindOf = (ast: SchemaAST.AST): Option.Option<ScalarKind> => {
   const kinds = MutableHashSet.empty<ScalarKind>();
   const visit = (node: SchemaAST.AST): boolean =>
     Match.value(node).pipe(
@@ -2343,15 +2357,10 @@ const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
       Match.tag("Null", () => true),
       Match.tag("Literal", (node) => {
         const literal = node.literal;
-        const kind = P.isString(literal)
-          ? "string"
-          : P.isNumber(literal)
-            ? "number"
-            : P.isBoolean(literal)
-              ? "boolean"
-              : undefined;
-        if (kind === undefined) return false;
-        MutableHashSet.add(kinds, kind);
+        if (P.isString(literal)) MutableHashSet.add(kinds, "string");
+        else if (P.isNumber(literal)) MutableHashSet.add(kinds, "number");
+        else if (P.isBoolean(literal)) MutableHashSet.add(kinds, "boolean");
+        else return false;
         return true;
       }),
       // Encodes as a plain string; the template's own check applies on decode.
@@ -2363,8 +2372,8 @@ const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
       Match.tag("Suspend", (node) => visit(node.thunk())),
       Match.orElse(() => false),
     );
-  if (!visit(ast) || MutableHashSet.size(kinds) !== 1) return undefined;
-  return Arr.fromIterable(kinds)[0];
+  if (!visit(ast) || MutableHashSet.size(kinds) !== 1) return Option.none();
+  return Arr.head(Arr.fromIterable(kinds));
 };
 
 // A strict decimal: an optional sign, digits with an optional fraction (or a
@@ -2372,16 +2381,16 @@ const scalarKindOf = (ast: SchemaAST.AST): ScalarKind | undefined => {
 // which also accepts `""`, whitespace, hex, binary and octal forms.
 const DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
-// Parses a wire literal as one scalar kind; `undefined` when it is not one.
-const parseScalar = (kind: ScalarKind, input: string): string | number | boolean | undefined =>
+// Parses a wire literal as one scalar kind; `None` when it is not one.
+const parseScalar = (kind: ScalarKind, input: string): Option.Option<string | number | boolean> =>
   Match.value(kind).pipe(
-    Match.when("string", () => input),
-    Match.when("number", () => {
-      if (!DECIMAL.test(input)) return undefined;
-      const value = Number(input);
-      return Number.isFinite(value) ? value : undefined;
-    }),
-    Match.when("boolean", () => (input === "true" ? true : input === "false" ? false : undefined)),
+    Match.when("string", () => Option.some(input)),
+    Match.when("number", () =>
+      DECIMAL.test(input) ? Option.liftPredicate(Number(input), Number.isFinite) : Option.none(),
+    ),
+    Match.when("boolean", () =>
+      input === "true" ? Option.some(true) : input === "false" ? Option.some(false) : Option.none(),
+    ),
     Match.exhaustive,
   );
 
@@ -2396,16 +2405,15 @@ const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unkno
         target,
         SchemaTransformation.transformEffect<unknown, string>({
           decode: (input, options) => {
-            const value = parseScalar(kind, input);
-            return value === undefined
-              ? Effect.fail(
-                  new SchemaIssue.InvalidValue(
-                    { message: `Expected a ${kind} filter literal, got ${render(input)}` },
-                    input,
-                    options,
-                  ),
-                )
-              : Effect.succeed(value);
+            return Effect.fromOption(
+              parseScalar(kind, input),
+              () =>
+                new SchemaIssue.InvalidValue(
+                  { message: `Expected a ${kind} filter literal, got ${render(input)}` },
+                  input,
+                  options,
+                ),
+            );
           },
           // `target` has already validated and encoded the value, so it arrives
           // here as a scalar of `kind`; the one thing left to refuse is a
@@ -2442,13 +2450,13 @@ const deriveFilterLiteral = (
 ): Schema.Codec<unknown, string> => {
   const base = nonNullableBase(schema);
   const kind = scalarKindOf(SchemaAST.toEncoded(base.ast));
-  if (kind === undefined) {
+  if (Option.isNone(kind)) {
     throw declarationError(
       `Resource.make("${type}"): attribute "${key}" is declared filterable but its encoded form is not a JSON scalar ` +
         "(string, number, boolean, or Schema.NullOr of one); pass `filterLiteral` to supply the literal codec explicitly",
     );
   }
-  return scalarLiteral(kind, base);
+  return scalarLiteral(kind.value, base);
 };
 
 // What a schema declares under an annotation id, read through a guard `is`:
@@ -2493,8 +2501,10 @@ const annotationAt = <A>(
   const own = ownAnnotationAt(ast, id, is);
   if (own.kind !== "absent") return own;
   if (SchemaAST.isSuspend(ast)) return annotationAt(ast.thunk(), id, is);
-  const base = nullableBaseAst(ast);
-  return base === undefined ? absent : annotationAt(base, id, is);
+  return Option.match(nullableBaseAst(ast), {
+    onNone: () => absent,
+    onSome: (base) => annotationAt(base, id, is),
+  });
 };
 
 // Reads a declaration (`Filter.able` / `Sort.able`) off an attribute field via
@@ -2508,8 +2518,10 @@ const declarationOf = <A>(
 ): Declared<A> => {
   const found = annotationAt(field.ast, id, is);
   if (found.kind !== "absent") return found;
-  const inner = descriptorOf(field)?.schema;
-  return inner === undefined ? absent : annotationAt(inner.ast, id, is);
+  return Option.match(descriptorOf(field), {
+    onNone: () => absent,
+    onSome: ({ schema }) => annotationAt(schema.ast, id, is),
+  });
 };
 
 // The schema an attribute field wraps, for deriving its literal codec: the
@@ -2517,7 +2529,7 @@ const declarationOf = <A>(
 // schema of a bare `Schema.optionalKey`, otherwise the field itself.
 const attributeSchemaOf = (field: Schema.Top): Schema.Top => {
   const descriptor = descriptorOf(field);
-  if (descriptor !== undefined) return descriptor.schema;
+  if (Option.isSome(descriptor)) return descriptor.value.schema;
   const wrapped = (field as { readonly schema?: Schema.Top }).schema;
   return wrapped !== undefined && field.ast.context?.isOptional === true ? wrapped : field;
 };
@@ -2800,8 +2812,9 @@ export function sortable(resource: Any): ReadonlyArray<string> {
 // sorted on.
 const validateDescriptors = (type: string, fields: Schema.Struct.Fields): void => {
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
-    const descriptor = descriptorOf(field as Schema.Top);
-    if (descriptor === undefined || descriptor.resource !== false) return;
+    const found = descriptorOf(field as Schema.Top);
+    if (Option.isNone(found) || found.value.resource !== false) return;
+    const descriptor = found.value;
     if (descriptor.create === false && descriptor.update === false) {
       throw declarationError(
         `Resource.make("${type}"): attribute "${key}" declares resource: false with create: false and update: false, ` +
@@ -2920,7 +2933,7 @@ interface Definition {
   readonly attributes: Schema.Struct.Fields;
   readonly relationships: Relationships;
   readonly meta: Schema.Top;
-  readonly annotations: Schema.Annotations.Annotations | undefined;
+  readonly annotations: Option.Option<Schema.Annotations.Annotations>;
   readonly maxUndeclaredMemberErrors: number;
 }
 
@@ -3285,7 +3298,7 @@ export const make = <
     attributes: options.attributes,
     relationships,
     meta,
-    annotations: options.annotations,
+    annotations: Option.fromUndefinedOr(options.annotations),
     maxUndeclaredMemberErrors,
   });
 
@@ -3413,7 +3426,10 @@ export function annotate(resource: Any, annotationsToAdd: Schema.Annotations.Ann
     attributes: definition.attributes,
     relationships: definition.relationships,
     meta: definition.meta,
-    annotations: { ...definition.annotations, ...annotationsToAdd },
+    annotations: {
+      ...Option.getOrElse(definition.annotations, (): Schema.Annotations.Annotations => ({})),
+      ...annotationsToAdd,
+    },
     maxUndeclaredMemberErrors: definition.maxUndeclaredMemberErrors,
   });
 }
@@ -4005,10 +4021,14 @@ export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): A
   // resolve regardless of declaration order — the no-base intersection walks
   // `descriptor.ref()`, which must not be forced at construction time (the rest
   // of the library is lazy; forcing it here would reintroduce an order dependency).
-  let relationships: Relationships | undefined;
+  let relationships = Option.none<Relationships>();
   Object.defineProperty(fam, "relationships", {
     get: () =>
-      (relationships ??= base !== undefined ? base.relationships : intersectRelationships(members)),
+      Option.getOrElse(relationships, () => {
+        const resolved = base !== undefined ? base.relationships : intersectRelationships(members);
+        relationships = Option.some(resolved);
+        return resolved;
+      }),
     enumerable: true,
     configurable: true,
   });

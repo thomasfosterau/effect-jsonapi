@@ -51,14 +51,19 @@ export const targets = (
 ): ReadonlyArray<Omit<SampleRecord, "status">> =>
   Arr.dedupeWith(
     Arr.filterMap(endpoints, (endpoint) => {
-      const type = endpoint.segment;
-      const id = type === undefined ? undefined : options.ids[type];
       const overridden = options.paths[`${endpoint.group}.${endpoint.name}`] !== undefined;
       if (endpoint.role !== "resource" || endpoint.params.length !== 1 || overridden)
         return Result.failVoid;
-      if (type === undefined || id === undefined) return Result.failVoid;
-      const url = endpoint.path.replace(`:${endpoint.params[0]}`, encodeURIComponent(id));
-      return Result.succeed({ type, id, url });
+      return Result.fromOption(
+        Option.flatMap(endpoint.segment, (type) =>
+          Option.map(R.get(options.ids, type), (id) => ({
+            type,
+            id,
+            url: endpoint.path.replace(`:${endpoint.params[0]}`, encodeURIComponent(id)),
+          })),
+        ),
+        () => undefined,
+      );
     }),
     (left, right) => left.url === right.url,
   );

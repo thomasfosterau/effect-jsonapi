@@ -213,7 +213,7 @@ export const answeredFrom = (target: Target, observation: Observation): Target =
  * @internal
  */
 export const unanswered = (observation: Observation): boolean =>
-  observation.transportError !== undefined ||
+  Option.isSome(observation.transportError) ||
   observation.status === 408 ||
   observation.status === 429 ||
   observation.status >= 500;

@@ -222,11 +222,10 @@ const answer = (sample: SampleRecord): string =>
  * holds has the report it always had.
  */
 const renderSamples = (
-  recorded: ReadonlyArray<SampleRecord> | undefined,
+  samples: ReadonlyArray<SampleRecord>,
   width: number,
-): ReadonlyArray<string> => {
-  const samples = recorded ?? [];
-  return Arr.match(
+): ReadonlyArray<string> =>
+  Arr.match(
     Arr.filter(samples, (sample) => !resolved(sample)),
     {
       onEmpty: () => [],
@@ -245,7 +244,6 @@ const renderSamples = (
       ],
     },
   );
-};
 
 /**
  * Renders the whole report. Within each tier the rules that died come first —
@@ -292,7 +290,7 @@ export const format = (
     });
   });
 
-  out.push(...renderSamples(report.samples, width));
+  out.push(...renderSamples(report.samples ?? [], width));
   out.push(...renderWrites(report.writes ?? []));
 
   out.push("NOT COVERED BY THIS KIT");

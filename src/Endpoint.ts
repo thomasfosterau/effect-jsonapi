@@ -160,9 +160,8 @@ export type Wires<Errors extends ReadonlyArray<ErrorClass>> = {
   readonly [K in keyof Errors]: Errors[K]["wire"];
 };
 
-const wires = <const Errors extends ReadonlyArray<ErrorClass>>(
-  errors: Errors | undefined,
-): Wires<Errors> => ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>;
+const wires = <const Errors extends ReadonlyArray<ErrorClass>>(errors?: Errors): Wires<Errors> =>
+  ((errors ?? []) as Errors).map((error) => error.wire) as Wires<Errors>;
 
 // ---------------------------------------------------------------------------
 // Shared option types
@@ -334,12 +333,10 @@ interface DocumentSchemas {
 // absent so each default stands.
 const documentOptions = (
   resource: Any,
-  options:
-    | {
-        readonly meta?: Schema.Top;
-        readonly include?: IncludeArgument;
-      }
-    | undefined,
+  options?: {
+    readonly meta?: Schema.Top;
+    readonly include?: IncludeArgument;
+  },
 ): DocumentSchemas => {
   const out: DocumentSchemas = {};
   if (options?.meta !== undefined) out.meta = options.meta;
@@ -1207,7 +1204,7 @@ export const update = <
 // spec's 204 no-content default; an override is served as a JSON:API body,
 // defaulting to 200 (the status HttpApi gives a success schema that carries
 // one).
-const deleteSuccess = (success: Schema.Top | undefined, status: number | undefined): Schema.Top =>
+const deleteSuccess = (success?: Schema.Top, status?: number): Schema.Top =>
   success === undefined
     ? status === undefined
       ? HttpApiSchema.NoContent
@@ -2112,9 +2109,9 @@ const relationshipIncludeBase = (resource: Any, name: string): Any => {
 const relationshipIncludePaths = (
   base: Any,
   name: string,
-  include: IncludeArgument | undefined,
+  include: IncludeArgument,
 ): Option.Option<ReadonlyArray<string>> => {
-  if (include === undefined || include === false) return Option.none();
+  if (include === false) return Option.none();
   if (include !== true && include.paths !== undefined) {
     const outside = include.paths.filter((path) => !rootedAt(name)(path));
     if (Arr.isReadonlyArrayNonEmpty(outside)) {
@@ -2521,13 +2518,19 @@ export const getRelationship = <
   type R = Resource<Type, Attributes, Rels, Meta, IdSchema>;
   const descriptor = descriptorFor(resource, name);
   const target = descriptor.ref();
-  // SAFETY: every `RelationshipIncludeOption` is an `IncludeArgument` at
-  // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
-  const include = options?.include as IncludeArgument | undefined;
+  const include = Option.map(
+    Option.fromUndefinedOr(options?.include),
+    // SAFETY: every `RelationshipIncludeOption` is an `IncludeArgument` at
+    // runtime — a boolean, a `{ paths?, depth? }` object, or a surface.
+    (include) => include as IncludeArgument,
+  );
+  const surface = Option.filter(include, isSurface);
   // The parent, a `paginated` `name` read as a `many` (#483): the paths and
   // the query derive over it.
   const base = relationshipIncludeBase(resource, name);
-  const includable = relationshipIncludePaths(base, name, include);
+  const includable = Option.flatMap(include, (include) =>
+    relationshipIncludePaths(base, name, include),
+  );
   // Every resource the rooted paths reach from the parent — the target first.
   const reached = Option.map(includable, (paths) => includedResources([base], true, paths));
   // The wire types `fields` declares: those the reached resources carry, a
@@ -2544,7 +2547,10 @@ export const getRelationship = <
   // `include` is off, so the document has no `included` member; with `fields`,
   // every member a fieldset names is partial (#485).
   const included = Option.map(reached, (resources) => {
-    const union = isSurface(include) ? include.included : Schema.Union(resources);
+    const union = Option.match(surface, {
+      onNone: () => Schema.Union(resources),
+      onSome: (surface) => surface.included,
+    });
     return options?.fields === true ? sparseUnion(union, fieldsetNames) : union;
   });
   // SAFETY: `linkageData` mirrors `LinkageData` kind by kind, and `included`
@@ -2571,7 +2577,7 @@ export const getRelationship = <
         {
           include: Option.match(includable, {
             onNone: () => false,
-            onSome: (paths) => (isSurface(include) ? include : { paths }),
+            onSome: (paths) => Option.getOrElse(surface, (): IncludeArgument => ({ paths })),
           }),
           // An allow-list: the query is the parent's, whose own fieldset
           // types (the parent, its direct targets) the document never carries.
@@ -4062,11 +4068,11 @@ const relationshipConfig = (
 
 // The `relationships` map as `resource` reads it at runtime: each entry a
 // shorthand or a `RelationshipConfig`, whatever relationship it names.
-type RelationshipsMap = Readonly<Record<string, boolean | RelationshipConfig | undefined>>;
+type RelationshipsMap = Readonly<Record<string, boolean | RelationshipConfig>>;
 
 // A generated `getRelationship`'s `include` option: absent while it is off,
 // so the endpoint is exactly the one built without it.
-const includeOpt = (include: IncludeArgument | undefined): { readonly include?: IncludeArgument } =>
+const includeOpt = (include?: IncludeArgument): { readonly include?: IncludeArgument } =>
   include === undefined || include === false ? {} : { include };
 
 // A generated `getRelationship`'s compound-document options. Each is off
@@ -4245,7 +4251,8 @@ export const resource = <
   const gMeta = options?.meta;
   const gErrors = options?.errors;
   const gIdem = options?.idempotency;
-  const endpointsOpt = options?.endpoints as R.ReadonlyRecord<string, unknown> | undefined;
+  // An absent `endpoints` map configures nothing: every op is emitted.
+  const endpointsOpt = { ...options?.endpoints };
   const relationshipsOpt = options?.relationships ?? true;
 
   // The resource's base meta schema, for resolving `meta` functions.
@@ -4259,7 +4266,6 @@ export const resource = <
 
   // Emit + captured config for a CRUD op.
   const opConfig = (op: CrudOperation): OpConfig => {
-    if (endpointsOpt === undefined) return { emit: true, config: {} };
     const value = endpointsOpt[op];
     if (value === undefined || value === true) return { emit: true, config: {} };
     if (value === false) return { emit: false, config: {} };

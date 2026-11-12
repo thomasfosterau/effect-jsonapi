@@ -69,9 +69,9 @@ const context = (store = MutableHashMap.empty<string, string>()): Core.Context =
         Effect.sync(() => ({
           probe: { method: probe.method ?? "GET", url: probe.url, headers: {}, body: undefined },
           headers: {},
-          contentType: undefined,
+          contentType: Option.none(),
           text: "",
-          transportError: undefined,
+          transportError: Option.none(),
           redirects: [],
           unfollowed: Option.none(),
           ...serve(probe),
