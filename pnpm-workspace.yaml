@@ -20,7 +20,7 @@
 # (website / gardeneria / preferenceflow) wherever the two overlap — effect,
 # vite-plus, the TypeScript 6/7 pair, @effect/tsgo, fallow — so the library
 # builds against exactly what they run. Two deliberate deviations:
-# `vite-plus` (with `vitest` and `@effect/tsgo`), moved to 1.4.0 ahead of the
+# `vite-plus` (with `vitest` and `@effect/tsgo`), moved to 1.6.0 ahead of the
 # applications because every vite-plus up to 1.0.0 is affected by
 # GHSA-587h-7wmj-h5pm, which fails CI's `pnpm audit --audit-level high` (see
 # both notes); and `effect`, which tracks the `latest` dist-tag ahead of the
@@ -48,21 +48,21 @@ catalog:
   # Effect Language Service as a native (TypeScript-Go) binary — the TS7 side
   # of the 6/7 split. `effect-tsgo patch` overwrites the native `tsc` binary
   # with an Effect-patched build matched by gitHead, so this pins in lockstep
-  # with `@typescript/native` below (0.63.0 ships against typescript 7.0.2).
+  # with `@typescript/native` below (0.67.7 ships against typescript 7.0.2).
   #
   # The root `prepare` script runs `effect-tsgo patch --typescript --oxlint`,
   # so this ALSO pins in lockstep with the `oxlint` that `vite-plus` pulls in
   # (see that entry). Each @effect/tsgo release ships artifacts for an explicit
   # set of component versions and hard-errors
   # (UnsupportedTargetPackageVersionError) on anything else, failing
-  # `pnpm install` itself rather than a later task: 0.63.0 supports typescript
-  # 7.0.2 / 7.1.0-beta / 7.1.0-dev.20261028.1, oxlint 1.88.0-1.90.0 and
-  # oxlint-tsgolint 7.0.2004 / 7.0.2005. 0.47.0 is also the first release with the
+  # `pnpm install` itself rather than a later task: 0.67.7 supports typescript
+  # 7.0.2 / 7.1.0-beta / 7.1.0-dev.20261109.1, oxlint 1.89.0 / 1.91.0-1.93.0 and
+  # oxlint-tsgolint 7.0.2004-7.0.2006. 0.47.0 is also the first release with the
   # `unstableApiUsage` rule that tsconfig.base.json lowers to "suggestion"
   # (#205). Read the
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
-  "@effect/tsgo": 0.63.0
+  "@effect/tsgo": 0.67.7
   # Effect-aware test runner (`it.effect`, `layer`, `TestClock`): tests run
   # their Effects through it instead of `Effect.runPromise` in the body
   # (`effect/effect-run-in-body`, #600). Pinned to the `effect` release below
@@ -93,7 +93,7 @@ catalog:
   # `vp run test:coverage`'s provider. Must equal the vitest that vite-plus
   # bundles (see `vitest` below); vite-plus refuses to run coverage on a
   # mismatch, so it moves with the vite-plus set.
-  "@vitest/coverage-istanbul": 5.0.5
+  "@vitest/coverage-istanbul": 5.1.0
   # Deliberately tracks the `latest` dist-tag, ahead of the applications'
   # lockstep, so the gates run against the newest `effect` release. What
   # consumers may resolve is the `catalogs.peers` range, whose floor is
@@ -120,12 +120,12 @@ catalog:
   # vite-plus pins `oxlint`, `oxfmt` and `vitest` to exact versions; `vite` is
   # the same release under its aliased core package, and `vitest` must match
   # vite-plus's exact pin because the `"vitest@*": "catalog:"` override forces
-  # every resolution to the catalog singleton. 1.4.0 carries oxlint 1.89.0,
-  # oxfmt 0.74.0 and oxlint-tsgolint 7.0.2004, all in @effect/tsgo 0.63.0's
-  # components table, and vitest 5.0.5. Releases up to 1.0.0 are affected by GHSA-587h-7wmj-h5pm.
-  vite-plus: 1.4.0
-  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
-  vitest: 5.0.5
+  # every resolution to the catalog singleton. 1.6.0 carries oxlint 1.93.0,
+  # oxfmt 0.78.0 and oxlint-tsgolint 7.0.2006, all in @effect/tsgo 0.67.7's
+  # components table, and vitest 5.1.0. Releases up to 1.0.0 are affected by GHSA-587h-7wmj-h5pm.
+  vite-plus: 1.6.0
+  vite: npm:@voidzero-dev/vite-plus-core@1.6.0
+  vitest: 5.1.0
 
 # Peer ranges the PUBLISHED package declares. Kept as a named catalog so the
 # strict catalog mode still governs them while they stay ranges (an exact

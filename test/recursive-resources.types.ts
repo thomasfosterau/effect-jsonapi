@@ -224,7 +224,7 @@ assertType<"comments">(articleDocument.fields.data.type);
 
 // Query schemas derive their include whitelist from the cyclic graph.
 const articleQuery = Query.schema(Article, { include: true });
-const decodedQuery = Schema.decodeUnknownSync(articleQuery)({ include: "comments.article" });
+const decodedQuery = Schema.decodeSync(articleQuery)({ include: "comments.article" });
 assertType<ReadonlyArray<string> | undefined>(decodedQuery.include);
 
 // Endpoints derive their path and success document from the resource.

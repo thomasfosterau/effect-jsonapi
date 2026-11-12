@@ -80,7 +80,7 @@ describe("extension constants", () => {
 
 describe("refs", () => {
   it("Ref decodes id-based identifiers", () => {
-    const ref = Schema.decodeUnknownSync(Ref(Article))({
+    const ref = Schema.decodeSync(Ref(Article))({
       type: "articles",
       id: "1",
     });
@@ -88,7 +88,7 @@ describe("refs", () => {
   });
 
   it("Ref decodes lid-based local identifiers", () => {
-    const ref = Schema.decodeUnknownSync(Ref(Article))({
+    const ref = Schema.decodeSync(Ref(Article))({
       type: "articles",
       lid: "a1",
     });
@@ -97,7 +97,7 @@ describe("refs", () => {
 
   it("Ref rejects identifiers of other types", () => {
     expect(() =>
-      Schema.decodeUnknownSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
+      Schema.decodeSync(Ref(Article) as Schema.Codec<unknown, unknown>)({
         type: "people",
         id: "9",
       }),
@@ -111,7 +111,7 @@ describe("refs", () => {
   });
 
   it("Resource.localIdentifier is the { type, lid } schema", () => {
-    const decoded = Schema.decodeUnknownSync(Article.localIdentifier)({
+    const decoded = Schema.decodeSync(Article.localIdentifier)({
       type: "articles",
       lid: "a1",
     });
@@ -573,13 +573,13 @@ describe("operationsFor", () => {
   it("the record's schemas decode their wire forms", () => {
     const operations = Atomic.operationsFor(Article);
 
-    const add = Schema.decodeUnknownSync(operations.add)({
+    const add = Schema.decodeSync(operations.add)({
       op: "add",
       data: { type: "articles", attributes: { title: "Hello", body: "" } },
     }) as { readonly op: string };
     expect(add.op).toBe("add");
 
-    const linkComments = Schema.decodeUnknownSync(operations.relationships.comments.add)({
+    const linkComments = Schema.decodeSync(operations.relationships.comments.add)({
       op: "add",
       ref: { type: "articles", id: "1", relationship: "comments" },
       data: [{ type: "comments", id: "5" }],
@@ -769,7 +769,7 @@ describe("per-attribute descriptors in operations", () => {
   });
 
   it("excludes read-only attributes from the add operation", () => {
-    const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Doc))({
+    const decoded = Schema.decodeSync(Atomic.AddOperation(Doc))({
       op: "add",
       data: { type: "docs", attributes: { title: "Hello", slug: "hello" } },
     });
@@ -783,7 +783,7 @@ describe("per-attribute descriptors in operations", () => {
   });
 
   it("excludes read-only and non-updatable attributes from the update operation", () => {
-    const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Doc))({
+    const decoded = Schema.decodeSync(Atomic.UpdateOperation(Doc))({
       op: "update",
       data: { type: "docs", id: "1", attributes: { title: "Renamed" } },
     });
@@ -818,7 +818,7 @@ describe("input-only attributes in operations", () => {
       readonly file: Uint8Array;
       readonly secret: string;
     }>();
-    const decoded = Schema.decodeUnknownSync(Atomic.AddOperation(Upload))({
+    const decoded = Schema.decodeSync(Atomic.AddOperation(Upload))({
       op: "add",
       data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } },
     });
@@ -841,7 +841,7 @@ describe("input-only attributes in operations", () => {
     >;
     expectTypeOf<UpdateAttrs>().toHaveProperty("secret");
     expectTypeOf<UpdateAttrs>().not.toHaveProperty("file");
-    const decoded = Schema.decodeUnknownSync(Atomic.UpdateOperation(Upload))({
+    const decoded = Schema.decodeSync(Atomic.UpdateOperation(Upload))({
       op: "update",
       data: { type: "uploads", id: "1", attributes: { secret: "t" } },
     });
@@ -879,17 +879,17 @@ describe("optional create attributes in the add operation", () => {
       string | undefined
     >();
 
-    const absent = Schema.decodeUnknownSync(Add)({
+    const absent = Schema.decodeSync(Add)({
       op: "add",
       data: { type: "notes", attributes: { title: "t" } },
     });
     expect(absent.data.attributes).toEqual({ title: "t" });
-    const present = Schema.decodeUnknownSync(Add)({
+    const present = Schema.decodeSync(Add)({
       op: "add",
       data: { type: "notes", attributes: { title: "t", body: "b" } },
     });
     expect(present.data.attributes).toEqual({ title: "t", body: "b" });
-    const explicit = Schema.decodeUnknownSync(Add)({
+    const explicit = Schema.decodeSync(Add)({
       op: "add",
       data: { type: "notes", attributes: { title: "t", body: undefined } },
     });

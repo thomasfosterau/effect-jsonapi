@@ -83,7 +83,7 @@ describe("Relationship wire schemas", () => {
     const schema = Relationship.schemaFor(Relationship.one(() => Person));
 
     it("accepts identifier linkage", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({ data: { type: "people", id: "9" } });
+      const decoded = Schema.decodeSync(schema)({ data: { type: "people", id: "9" } });
       expect(decoded.data).toEqual({ type: "people", id: "9" });
     });
 
@@ -102,7 +102,7 @@ describe("Relationship wire schemas", () => {
     });
 
     it("accepts optional links and meta", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({
+      const decoded = Schema.decodeSync(schema)({
         data: { type: "people", id: "9" },
         links: { self: "/articles/1/relationships/author", related: "/articles/1/author" },
         meta: { count: 1 },
@@ -116,12 +116,12 @@ describe("Relationship wire schemas", () => {
     const schema = Relationship.schemaFor(Relationship.optional(() => Person));
 
     it("accepts identifier linkage", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({ data: { type: "people", id: "9" } });
+      const decoded = Schema.decodeSync(schema)({ data: { type: "people", id: "9" } });
       expect(decoded.data).toEqual({ type: "people", id: "9" });
     });
 
     it("accepts null linkage (empty relationship)", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({ data: null });
+      const decoded = Schema.decodeSync(schema)({ data: null });
       expect(decoded.data).toBeNull();
     });
 
@@ -134,7 +134,7 @@ describe("Relationship wire schemas", () => {
     const schema = Relationship.schemaFor(Relationship.many(() => Comment));
 
     it("accepts identifier array linkage", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({
+      const decoded = Schema.decodeSync(schema)({
         data: [
           { type: "comments", id: "5" },
           { type: "comments", id: "6" },
@@ -144,7 +144,7 @@ describe("Relationship wire schemas", () => {
     });
 
     it("accepts an empty array", () => {
-      expect(Schema.decodeUnknownSync(schema)({ data: [] }).data).toEqual([]);
+      expect(Schema.decodeSync(schema)({ data: [] }).data).toEqual([]);
     });
 
     it("rejects null linkage", () => {
@@ -162,14 +162,14 @@ describe("Relationship wire schemas", () => {
     const schema = Relationship.schemaFor(Relationship.paginated(() => Comment));
 
     it("accepts links-only relationship objects (no data)", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({
+      const decoded = Schema.decodeSync(schema)({
         links: { related: "/articles/1/revisions" },
       });
       expect(decoded.links.related).toBe("/articles/1/revisions");
     });
 
     it("accepts a self link alongside related", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({
+      const decoded = Schema.decodeSync(schema)({
         links: {
           self: "/articles/1/relationships/revisions",
           related: "/articles/1/revisions",
@@ -189,7 +189,7 @@ describe("Relationship wire schemas", () => {
     });
 
     it("accepts meta (e.g. a count) alongside links", () => {
-      const decoded = Schema.decodeUnknownSync(schema)({
+      const decoded = Schema.decodeSync(schema)({
         links: { related: "/articles/1/revisions" },
         meta: { count: 412 },
       });
@@ -200,7 +200,7 @@ describe("Relationship wire schemas", () => {
 
 describe("relationship kinds in resource objects", () => {
   it("decodes a resource exercising all four kinds", () => {
-    const decoded = Schema.decodeUnknownSync(Article)({
+    const decoded = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hello" },
@@ -334,7 +334,7 @@ describe("Relationship.paginated `order`", () => {
     });
     const schema = Relationship.schemaFor(Page.relationships.revisions);
     expect(Object.keys(schema.fields)).toEqual(["links", "meta"]);
-    expect(Schema.decodeUnknownSync(schema)({ links: { related: "/pages/1/revisions" } })).toEqual({
+    expect(Schema.decodeSync(schema)({ links: { related: "/pages/1/revisions" } })).toEqual({
       links: { related: "/pages/1/revisions" },
     });
   });

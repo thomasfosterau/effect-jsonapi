@@ -123,7 +123,7 @@ const admitted = (
   const success = successOf(endpoint);
   return types.filter((type) =>
     Exit.isSuccess(
-      Schema.decodeUnknownExit(success)({
+      Schema.decodeExit(success)({
         data: collection ? [primary] : primary,
         included: [wire[type]],
       }),
@@ -367,7 +367,7 @@ describe("an endpoint that turns no include path on keeps its union (#320)", () 
     const roundTrip = (endpoint: { readonly success: Iterable<Schema.Top> }) => {
       const success = successOf(endpoint);
       return Schema.encodeUnknownSync(success)(
-        Schema.decodeUnknownSync(success)({ data: wire.articles, included: [wire.comments] }),
+        Schema.decodeSync(success)({ data: wire.articles, included: [wire.comments] }),
       );
     };
     expect(roundTrip(Endpoint.get(Article))).toEqual(
@@ -447,7 +447,7 @@ describe("a declared surface on `collection` / `polymorphic` derives their union
     (_, endpoint, data) => {
       const sparse = { ...wire.people, attributes: { name: "Ada" } };
       expect(
-        Exit.isSuccess(Schema.decodeUnknownExit(successOf(endpoint))({ data, included: [sparse] })),
+        Exit.isSuccess(Schema.decodeExit(successOf(endpoint))({ data, included: [sparse] })),
       ).toBe(true);
     },
   );
