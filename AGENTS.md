@@ -87,6 +87,7 @@ The same split explains why filtering has two forms with different flat encoding
 - `pnpm install` — dependencies, the Vite+ git hooks (pre-commit runs `vp staged`: format with fixes, then lint without, on staged files) and, through the root `prepare` script, the Effect-patched `tsc` / `oxlint` binaries. There is **no pre-push hook** — run the gates yourself.
 - `vp check` — format + lint (Oxfmt + Oxlint); the lint is type-aware through oxlint-tsgolint (`typeAware` + `typeCheck` in `vite.config.ts`), reading each file's nearest `tsconfig.json`, so it never depends on `dist/`. `vp run check` — the type gate: sources + colocated tests + type-level tests (`typecheck`), the emitted declarations (`typecheck:dist`, which builds `dist/` first) and every example. They are different commands.
 - `vp run -r test:unit` — the root suite and each example's, under `vite-plus/test`.
+- `vp run typecheck:floor` — a typed `Client.make` consumer (`test/floor/`) compiled against the packed package and `effect` 4.1.0 exactly, the peer floor (#586); needs network and `dist/`; CI runs it as its own job. Not part of `vp run check`. Validate a change to it by running with `EFFECT_VERSION=4.0.6` (must fail).
 - `vp run build` — `vp pack`, then `tsc -p tsconfig.build.json` → `dist/`.
 - `vp run docgen` — build `dist/`, then type-check and execute every JSDoc `@example`; generate the API docs under `docs/`.
 - `vp run test:coverage` — the root suite under one Istanbul map at `coverage/coverage-final.json`, which `fallow audit` reads for exact per-function CRAP scores (`health.coverage` in `.fallowrc.json`). Without it fallow scores every function as uncovered.
@@ -136,7 +137,7 @@ Issues are the backlog: when you find work you can't do now, file an issue rathe
 
 **IMPORTANT:** Never guess at an Effect API. Read the installed package before writing Effect code: its declarations (`node_modules/effect/dist/*.d.ts`), its sources (`node_modules/effect/src`), and the guides it ships for agents (`node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/`).
 
-The pinned version is the `effect` entry in `pnpm-workspace.yaml`. The published `effect` peer (`catalogs.peers`) is `^4.0.0`; raise it only when a dependency requires it, naming the dependency in the catalog comment. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
+The pinned version is the `effect` entry in `pnpm-workspace.yaml`. The published `effect` peer (`catalogs.peers`) is `^4.1.0`; raise it only when a dependency requires it, naming the dependency in the catalog comment. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
 
 ## Agent sessions
 

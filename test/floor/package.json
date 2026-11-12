@@ -1,0 +1,9 @@
+{
+  "name": "effect-jsonapi-floor-consumer",
+  "private": true,
+  "description": "A consumer pinned to the lowest effect the peer range admits. Not a workspace member; test/floor/check.sh installs it with --ignore-workspace.",
+  "type": "module",
+  "dependencies": {
+    "effect": "4.1.0"
+  }
+}

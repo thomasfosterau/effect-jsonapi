@@ -71,7 +71,16 @@ export default defineConfig({
     // root tsconfig.json, which excludes it, so it resolves the package through
     // `exports` to `dist/`: it would fail on a clean tree and pass after a
     // build, a lint result that depends on build output (#535).
-    ignorePatterns: ["**/dist/**", "**/node_modules/**", "**/coverage/**", "test/emitted/**"],
+    ignorePatterns: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/coverage/**",
+      "test/emitted/**",
+      // A consumer of the packed tarball on effect 4.1.0, type-checked by
+      // `typecheck:floor` against a scratch install; the root has no such
+      // install to resolve it against.
+      "test/floor/**",
+    ],
     extends: [recommended, effect.configs.recommended],
     // Type-aware rules and a full type check through oxlint-tsgolint (bundled
     // with vite-plus, patched by `effect-tsgo patch --oxlint`), so `vp check`
@@ -332,6 +341,17 @@ export default defineConfig({
           input: [...cacheInputs, "dist/**"],
           output: [],
         },
+      },
+      // The peer floor (#586): a typed `Client.make` consumer compiled
+      // against the PACKED package and effect 4.1.0, the lowest the peer range
+      // admits, so the published declarations cannot silently need a newer
+      // effect. Reads `dist/` (via `pnpm pack`), hence `build`. See
+      // test/floor/check.sh. Needs network (a scratch `pnpm install`), so it is
+      // not in `check`; CI runs it as its own job.
+      "typecheck:floor": {
+        command: "bash test/floor/check.sh",
+        dependsOn: ["build"],
+        cache: false,
       },
       // Emits `dist/`: the JavaScript with `vp pack` (see the `pack` block
       // below), then one declaration file per source module with `tsc`

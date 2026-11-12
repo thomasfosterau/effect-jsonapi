@@ -72,7 +72,7 @@ catalog:
   # to live in src/internal/schemaExt.ts and src/FlatQuery.ts (#552). A runtime
   # `dependency`, not a peer: only its Schema subpaths are imported (never
   # `/Negotiate`, whose optional peer on this package would be a cycle), they
-  # resolve only `effect` (its `^4.0.0` peer, the same as ours), and no type of
+  # resolve only `effect` (its `^4.0.0` peer, which ours `^4.1.0` satisfies), and no type of
   # theirs reaches this package's declarations, so a consumer never needs to
   # see the same copy. First-party, so `minimumReleaseAgeExclude` admits a
   # fresh release. Its optional peer on this package is resolved in this
@@ -128,16 +128,19 @@ catalog:
 # replaces `catalog:peers` with these ranges in the published manifest — which
 # is why the release publishes with pnpm, not npm.
 #
-# The `effect` peer is `^4.0.0` (owner policy): raise it only when a
+# The `effect` peer is `^4.1.0` (owner policy): raise it only when a
 # dependency requires a newer `effect`, naming that dependency and its range
-# here; the package's own code uses the 4.0 API instead. Its one runtime
-# dependency, `@thomasfosterau/effect-ext`, peers `effect ^4.0.0` too, so
-# nothing forces more. Raising the floor means
-# re-running the gates with the catalog pin set to the new floor, not only the
-# pin.
+# here. Raised from `^4.0.0` for effect's own HttpApi types (#586): on
+# 4.0.6 a `Group.resource` endpoint's `~Success` resolves to `any` in the
+# published declarations, so a typed `Client.make` consumer loses every
+# response type. The floor is enforced by `vp run typecheck:floor`
+# (test/floor/), which compiles a consumer against effect 4.1.0 exactly.
+# Raising it again means moving `effect` in test/floor/package.json with it.
+# The runtime dependency `@thomasfosterau/effect-ext` peers `effect ^4.0.0`,
+# which 4.1.x satisfies.
 catalogs:
   peers:
-    effect: ^4.0.0
+    effect: ^4.1.0
 
 overrides:
   # `effect` MUST be a singleton (see the header): force every resolution to

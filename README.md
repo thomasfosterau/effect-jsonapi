@@ -12,7 +12,7 @@ Type-safe, spec-compliant [JSON:API v1.1](https://jsonapi.org/format/1.1/) imple
 pnpm add @thomasfosterau/effect-jsonapi effect
 ```
 
-`effect` is a peer dependency (`^4.0.0`). The one runtime dependency, [`@thomasfosterau/effect-ext`](https://www.npmjs.com/package/@thomasfosterau/effect-ext), is installed with the package. Only its pure Schema subpaths are used (`Bounded`, `Ids`, `Issues`, `TriState`), and they peer the same `effect`. Node.js 22 or newer is required.
+`effect` is a peer dependency (`^4.1.0`). The one runtime dependency, [`@thomasfosterau/effect-ext`](https://www.npmjs.com/package/@thomasfosterau/effect-ext), is installed with the package. Only its pure Schema subpaths are used (`Bounded`, `Ids`, `Issues`, `TriState`), and they peer the same `effect`. Node.js 22 or newer is required.
 
 ## Overview
 

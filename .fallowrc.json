@@ -10,7 +10,13 @@
     "examples/*/**/*.ts",
     "**/vite.config.ts"
   ],
-  "ignorePatterns": ["**/dist/**", "**/coverage/**", "**/node_modules/**", "docs/**"],
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/coverage/**",
+    "**/node_modules/**",
+    "docs/**",
+    "test/floor/**"
+  ],
   "ignoreDependencies": [
     "@types/node",
     "@effect/docgen",
