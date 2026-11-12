@@ -153,7 +153,7 @@ overrides:
   # the catalog version so a hoisting reshuffle cannot introduce a second copy.
   effect: "catalog:"
   # Advisory floors for transitive dependencies of the dev toolchain, which
-  # `pnpm audit --audit-level high` (CI's last step) gates. None is reached
+  # `pnpm audit --audit-level high` (a `vp run ci` gate) gates. None is reached
   # by the published package: `js-yaml` 3.x via
   # @effect/docgen > @effect/markdown-toc > gray-matter 3 (`^3.10.0`)
   # (GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh — patched
