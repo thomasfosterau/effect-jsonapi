@@ -12,6 +12,7 @@
  * Type-checked by `tsconfig.json`; the `@ts-expect-error` annotations are the
  * assertions.
  */
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as R from "effect/Record";
 import {
@@ -39,12 +40,18 @@ const Contest = Resource.make("contests", {
 type Relationships = NonNullable<(typeof Contest.Type)["relationships"]>;
 export const declared =
   assertTrue<
-    Equals<Relationships["ballots"]["meta"], { readonly totalCount: number } | undefined>
+    Equals<
+      Pick<Relationships["ballots"], "meta">,
+      { readonly meta?: { readonly totalCount: number } }
+    >
   >();
 // A relationship without the option keeps the open record.
 export const open =
   assertTrue<
-    Equals<Relationships["chair"]["meta"], R.ReadonlyRecord<string, unknown> | undefined>
+    Equals<
+      Pick<Relationships["chair"], "meta">,
+      { readonly meta?: R.ReadonlyRecord<string, unknown> }
+    >
   >();
 
 // @ts-expect-error a declared meta is not the open record
@@ -63,11 +70,17 @@ const Plain = Resource.make("plains", {
 const WirePlain = Document.wire(Plain, { toManyMeta: Count });
 type Wired = NonNullable<(typeof WirePlain.Type)["relationships"]>;
 export const narrowedMany =
-  assertTrue<Equals<Wired["ballots"]["meta"], { readonly totalCount: number } | undefined>>();
+  assertTrue<
+    Equals<Pick<Wired["ballots"], "meta">, { readonly meta?: { readonly totalCount: number } }>
+  >();
 export const narrowedPaginated =
-  assertTrue<Equals<Wired["history"]["meta"], { readonly totalCount: number } | undefined>>();
+  assertTrue<
+    Equals<Pick<Wired["history"], "meta">, { readonly meta?: { readonly totalCount: number } }>
+  >();
 export const untouchedToOne =
-  assertTrue<Equals<Wired["chair"]["meta"], R.ReadonlyRecord<string, unknown> | undefined>>();
+  assertTrue<
+    Equals<Pick<Wired["chair"], "meta">, { readonly meta?: R.ReadonlyRecord<string, unknown> }>
+  >();
 
 // What `Assemble.resource` answers over the resource's own Type fits the flat
 // `get` document's primary data — the relationship metas included — with no
@@ -82,7 +95,8 @@ export const fits = (
 const PlainGetDocument = Endpoint.ResourceDocument(Plain, { toManyMeta: Count });
 export const plainMeta = (
   document: (typeof PlainGetDocument.Type)["data"],
-): { readonly totalCount: number } | undefined => document.relationships?.ballots.meta;
+): Option.Option<{ readonly totalCount: number }> =>
+  Option.fromUndefinedOr(document.relationships?.ballots.meta);
 export const plainMetaIsNarrow = (document: (typeof PlainGetDocument.Type)["data"]) =>
   // @ts-expect-error the narrowed meta has no open members
   document.relationships?.ballots.meta?.anything;

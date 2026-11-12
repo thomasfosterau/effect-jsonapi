@@ -123,10 +123,11 @@ export default defineConfig({
       // zero — a new site is a defect, not headroom. Counted on adopting
       // plugin 0.6.0 (`vp lint`, 2026-10-22): 4,040 warnings, with 813
       // `require-safety-comment-for-type-assertion`, 626 `casting-awareness`,
-      // 489 `prefer-option-over-null` the largest (`avoid-non-null-assertion`,
-      // at 237, and `avoid-native-object-helpers`, at 326, have since reached
-      // zero and are at `error`). Per-rule remainder and the
-      // order to pay it down in: #436. The move to @enfect/oxlint 0.9.0 (#532),
+      // 489 `prefer-option-over-null` the largest (that one,
+      // `avoid-non-null-assertion`, at 237, and `avoid-native-object-helpers`,
+      // at 326, have since reached zero and are at `error`; the last
+      // `prefer-option-over-null` sites went in #533's six PRs). Per-rule
+      // remainder and the order to pay it down in: #436. The move to @enfect/oxlint 0.9.0 (#532),
       // the same rules under the same `effect/` names plus
       // `no-cause-in-http-response` (no sites), left the count unchanged.
       "effect/require-safety-comment-for-type-assertion": "warn",
@@ -139,7 +140,6 @@ export default defineConfig({
       // `effect/prefer-namespace-imports` requires. No other binding in a
       // file may be called `R`, so a resource type parameter is `Res`.
       "effect/prefer-effect-is": "warn",
-      "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
       // `typeAware` turned these on. Each sits at `warn` with its count on
       // adoption (`vp lint`, 2026-10-30); the same rules as the Effect block

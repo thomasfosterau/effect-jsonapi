@@ -72,9 +72,7 @@ const canonical = (
 
 // The first segment of a Standard Schema issue path, as text: a segment is a
 // property key or a `{ key }` object.
-const firstKey = (
-  path: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }> | undefined,
-): string => {
+const firstKey = (path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }>): string => {
   const segment = path?.[0];
   return String(P.isObject(segment) ? segment.key : segment);
 };
@@ -484,7 +482,7 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
     const NoneAsNull = Schema.String.pipe(
       Schema.decodeTo(Schema.NullOr(Schema.String), {
         decode: SchemaGetter.transform((s: string) => (s === "none" ? null : s)),
-        encode: SchemaGetter.transform((value: string | null) => value ?? "none"),
+        encode: SchemaGetter.transform((value) => value ?? "none"),
       }),
     );
     expect(Schema.decodeSync(NoneAsNull)("none")).toBeNull();
@@ -1415,7 +1413,9 @@ describe("Endpoint.list with filter: true, end to end", () => {
   const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
     handlers.handle("list", ({ query }) => {
       received.push(query.filter);
-      expectTypeOf(query.filter).toEqualTypeOf<Query.FilterAst<typeof Article> | undefined>();
+      expectTypeOf<Pick<typeof query, "filter">>().toEqualTypeOf<{
+        readonly filter?: Query.FilterAst<typeof Article>;
+      }>();
       return Effect.succeed({ data: [] });
     }),
   );

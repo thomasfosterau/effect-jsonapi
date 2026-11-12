@@ -3238,9 +3238,12 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   const decodeFilter = Schema.decodeUnknownOption(Query.Filter(Product));
 
-  type Scalar = string | number;
+  const Scalar = Schema.Union([Schema.String, Schema.Finite]);
+  type Scalar = typeof Scalar.Type;
 
-  type Attributes = Readonly<Record<string, Scalar | null>>;
+  /** A product's attributes on the wire, where `null` is a member present without a value. */
+  const Attributes = Schema.Record(Schema.String, Schema.NullOr(Scalar));
+  type Attributes = typeof Attributes.Type;
 
   /** A `maker` relationship's linkage on the wire: empty (`data: null`) for `None`. */
   const linkage = (maker: Option.Option<string>) => ({
@@ -11171,13 +11174,13 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
     ),
   );
 
-  interface Identifier {
-    readonly type: string;
-    readonly id: string;
-  }
+  const Identifier = Schema.Struct({ type: Schema.String, id: Schema.String });
+  type Identifier = typeof Identifier.Type;
+  /** A to-one linkage on the wire: `null` when empty. */
+  const ToOneLinkage = Schema.NullOr(Identifier);
   interface Stored {
     readonly title: string;
-    author: Identifier | null;
+    author: typeof ToOneLinkage.Type;
     tags: Array<Identifier>;
   }
   type Posts = MutableHashMap.MutableHashMap<string, Stored>;
@@ -11224,11 +11227,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
   });
   const decodeBody = Schema.decodeUnknownOption(Body);
   const Linkage = Schema.Struct({
-    data: Schema.Union([
-      Schema.Null,
-      Schema.Struct({ type: Schema.String, id: Schema.String }),
-      Schema.Array(Schema.Struct({ type: Schema.String, id: Schema.String })),
-    ]),
+    data: Schema.Union([ToOneLinkage, Schema.Array(Identifier)]),
   });
   const decodeLinkage = Schema.decodeUnknownOption(Linkage);
 
@@ -11274,12 +11273,12 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       attributes: { title: post.title },
       relationships: { author: { data: post.author }, tags: { data: post.tags } },
     });
-    const honours = (asked: string | undefined): asked is string =>
+    const honours = (asked?: string): asked is string =>
       asked !== undefined && (breakage.clientIds ?? "supported") === "supported";
-    const refusesId = (asked: string | undefined): boolean =>
+    const refusesId = (asked?: string): boolean =>
       asked !== undefined && breakage.clientIds === "unsupported";
     /** The answer to a create that stored `post` under `id`, `asked` the id it carried. */
-    const created = (id: string, post: Stored, asked: string | undefined): Canned =>
+    const created = (id: string, post: Stored, asked?: string): Canned =>
       asked !== undefined && breakage.noContent === true
         ? { status: 204 }
         : { status: 201, body: { data: resource(id, post) } };
@@ -11330,7 +11329,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           const before = post[name];
           if (Array.isArray(data)) post.tags = applied(request.method, post.tags, data);
           else if (data !== null || breakage.keepsOnNull !== true)
-            post.author = data as Identifier | null;
+            post.author = data as typeof ToOneLinkage.Type;
           return answer(post, name, before);
         },
       });
@@ -11351,8 +11350,9 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
           ? undefined
           : Option.getOrUndefined(MutableHashMap.get(posts, decodeURIComponent(match[1])));
       if (match === null || post === undefined) return refused(404);
-      const name = match[2] as "author" | "tags" | undefined;
-      if (name !== undefined) return onRelationship(request, post, name);
+      // The pattern admits no relationship name but these two.
+      const name = match[2];
+      if (name === "author" || name === "tags") return onRelationship(request, post, name);
       return request.method === "GET" ? { body: { data: resource(match[1], post) } } : refused(405);
     };
   };

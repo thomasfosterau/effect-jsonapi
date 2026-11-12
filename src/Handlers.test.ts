@@ -294,9 +294,9 @@ describe("Handlers.linkage", () => {
         data: ids("5", "12"),
         included: [comment("5"), comment("12"), person("9")],
       });
-      expectTypeOf(doc.included).toEqualTypeOf<
-        ReadonlyArray<ReturnType<typeof comment> | ReturnType<typeof person>> | undefined
-      >();
+      expectTypeOf<Pick<typeof doc, "included">>().toEqualTypeOf<{
+        readonly included?: ReadonlyArray<ReturnType<typeof comment> | ReturnType<typeof person>>;
+      }>();
     });
 
     it("does not dedupe against the identifiers, only among the members", () => {

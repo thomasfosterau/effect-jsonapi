@@ -11,11 +11,11 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource, Registry } from "@thomasfosterau/effect-jsonapi";
@@ -53,11 +53,6 @@ const runExit = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
 ): Effect.Effect<Exit.Exit<A, E>> =>
   Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
-
-const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
-  const result = Cause.findError(cause);
-  return Result.isSuccess(result) ? result.success : undefined;
-};
 
 describe("blog example: fetching", () => {
   it.effect("fetches a single article document with a self link", () =>
@@ -216,9 +211,9 @@ describe("blog example: fetching", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(ArticleNotFound);
-      expect((error as ArticleNotFound).id).toBe("nope");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof ArticleNotFound);
+      expect(error.value.id).toBe("nope");
     }),
   );
 });
@@ -323,7 +318,9 @@ describe("blog example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(TitleTaken);
+      assert(
+        Option.exists(Cause.findErrorOption(exit.cause), (error) => error instanceof TitleTaken),
+      );
     }),
   );
 
@@ -426,7 +423,12 @@ describe("blog example: related resource endpoints", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof ArticleNotFound,
+        ),
+      );
     }),
   );
 });
@@ -546,8 +548,8 @@ describe("blog example: relationship endpoints", () => {
           { ...sampleTag, attributes: { name: sampleTag.attributes.name } },
         ]);
         expectTypeOf<
-          NonNullable<typeof sparse.included>[number]["attributes"]["slug"]
-        >().toEqualTypeOf<string | undefined>();
+          Pick<NonNullable<typeof sparse.included>[number]["attributes"], "slug">
+        >().toEqualTypeOf<{ readonly slug?: string }>();
       }),
   );
 
@@ -631,7 +633,12 @@ describe("blog example: relationship endpoints", () => {
         );
 
         assert(Exit.isFailure(exit));
-        expect(findFailure(exit.cause)).toBeInstanceOf(PersonNotFound);
+        assert(
+          Option.exists(
+            Cause.findErrorOption(exit.cause),
+            (error) => error instanceof PersonNotFound,
+          ),
+        );
         const article = yield* run(
           Effect.gen(function* () {
             const client = yield* buildClient;
@@ -660,7 +667,12 @@ describe("blog example: relationship endpoints", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(CommentNotFound);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof CommentNotFound,
+        ),
+      );
       const linkage = yield* run(
         Effect.gen(function* () {
           const client = yield* buildClient;
@@ -715,9 +727,13 @@ describe("blog example: heterogeneous search", () => {
       // `fields`, so a client reads each attribute as optional (#322)
       Arr.forEach(document.data, (result) => {
         if (result.type === "articles") {
-          expectTypeOf(result.attributes.title).toEqualTypeOf<string | undefined>();
+          expectTypeOf<Pick<typeof result.attributes, "title">>().toEqualTypeOf<{
+            readonly title?: string;
+          }>();
         } else {
-          expectTypeOf(result.attributes.firstName).toEqualTypeOf<string | undefined>();
+          expectTypeOf<Pick<typeof result.attributes, "firstName">>().toEqualTypeOf<{
+            readonly firstName?: string;
+          }>();
         }
         // each member still carries its own type's attribute at runtime
         expect(

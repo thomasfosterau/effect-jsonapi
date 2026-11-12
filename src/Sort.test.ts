@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Filter from "./Filter.js";
 import * as Sort from "./Sort.js";
@@ -26,9 +27,12 @@ describe("Sort.able", () => {
     const sortFirst = Schema.Int.pipe(Sort.able(), Filter.able(["eq"]));
     Arr.forEach([filterFirst, sortFirst], (schema) => {
       const annotations = Schema.resolveAnnotations(schema);
-      const filter = annotations?.[Filter.AnnotationId] as Filter.Annotation | undefined;
+      const filter = Option.fromUndefinedOr(annotations?.[Filter.AnnotationId]).pipe(
+        // SAFETY: `Filter.able` stamps a `Filter.Annotation` under this id.
+        Option.map((annotation) => annotation as Filter.Annotation),
+      );
       expect(annotations?.[Sort.AnnotationId]).toBe(true);
-      expect(filter?.operators).toEqual(["eq"]);
+      expect(Option.map(filter, (declared) => declared.operators)).toEqual(Option.some(["eq"]));
     });
     expectTypeOf<(typeof filterFirst)[Sort.MarkerKey]>().toEqualTypeOf<true>();
     expectTypeOf<(typeof sortFirst)[Sort.MarkerKey]>().toEqualTypeOf<true>();

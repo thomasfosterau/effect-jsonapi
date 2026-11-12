@@ -34,6 +34,7 @@ import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
+import type * as Schema from "effect/Schema";
 import * as Str from "effect/String";
 import { HttpServerResponse } from "effect/http";
 import { HttpApiBuilder } from "effect/http-api";
@@ -82,7 +83,7 @@ const definedAttributes = <A extends Record<string, unknown>>(
  */
 const patchAttributes = <A extends Record<string, unknown>>(
   current: A,
-  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined,
+  patch?: Schema.Struct<{ readonly [K in keyof A]: Schema.optional<Schema.Schema<A[K]>> }>["Type"],
 ): A => ({ ...current, ...definedAttributes(patch ?? {}) });
 
 // ---------------------------------------------------------------------------
@@ -410,7 +411,7 @@ const usersFor = (ref: Option.Option<{ readonly id: string }>): Array<User> =>
 
 const resolveRepositoryIncluded = (
   repository: Repository,
-  include: ReadonlyArray<string> | undefined,
+  include?: ReadonlyArray<string>,
 ): Array<User> => {
   const included: Array<User> = [];
   if (include?.includes("owner")) {
@@ -422,7 +423,7 @@ const resolveRepositoryIncluded = (
 
 const resolveIssueIncluded = (
   issue: Issue,
-  include: ReadonlyArray<string> | undefined,
+  include?: ReadonlyArray<string>,
 ): Array<Repository | User | Label> => {
   const included: Array<Repository | User | Label> = [];
   if (include === undefined) return included;
@@ -456,7 +457,7 @@ const resolveIssueIncluded = (
 
 const resolvePullIncluded = (
   pull: PullRequest,
-  include: ReadonlyArray<string> | undefined,
+  include?: ReadonlyArray<string>,
 ): Array<Repository | User> => {
   const included: Array<Repository | User> = [];
   if (include === undefined) return included;
@@ -493,7 +494,7 @@ const sortBy = <
   },
 >(
   items: Array<A>,
-  sort: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }> | undefined,
+  sort?: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }>,
 ): Array<A> => {
   Arr.forEach((sort ?? []).toReversed(), (term) => {
     const ascending = Order.make<A>((a, b) => {
@@ -524,7 +525,7 @@ interface Page<A> {
 // Apply `?page[number]=&page[size]=` pagination.
 const paginate = <A>(
   items: ReadonlyArray<A>,
-  page: { readonly number?: number; readonly size?: number } | undefined,
+  page?: { readonly number?: number; readonly size?: number },
 ): Page<A> => {
   const total = items.length;
   const size = page?.size ?? Math.max(total, 1);
@@ -1165,10 +1166,8 @@ export const PullsLive = HttpApiBuilder.group(Api, "pulls", (handlers) =>
 // Search — a heterogeneous collection of repositories, issues and users
 // ---------------------------------------------------------------------------
 
-const matches = (haystack: ReadonlyArray<string | undefined>, needle: string): boolean =>
-  haystack.some(
-    (value) => value !== undefined && value.toLowerCase().includes(needle.toLowerCase()),
-  );
+const matches = (haystack: ReadonlyArray<Option.Option<string>>, needle: string): boolean =>
+  haystack.some(Option.exists((value) => value.toLowerCase().includes(needle.toLowerCase())));
 
 export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
   handlers.handle("search", ({ query }) => {
@@ -1176,13 +1175,20 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     // search across all three resource types; results stay discriminated by `type`
     const repositories = Arr.fromIterable(MutableHashMap.values(store.repositories)).filter(
-      (repository) => matches([repository.attributes.name, repository.attributes.description], q),
+      (repository) =>
+        matches(
+          Arr.map(
+            [repository.attributes.name, repository.attributes.description],
+            Option.fromUndefinedOr,
+          ),
+          q,
+        ),
     );
     const issues = Arr.fromIterable(MutableHashMap.values(store.issues)).filter((issue) =>
-      matches([issue.attributes.title, issue.attributes.body], q),
+      matches(Arr.map([issue.attributes.title, issue.attributes.body], Option.fromUndefinedOr), q),
     );
     const users = Arr.fromIterable(MutableHashMap.values(store.users)).filter((user) =>
-      matches([user.attributes.login, user.attributes.name], q),
+      matches(Arr.map([user.attributes.login, user.attributes.name], Option.fromUndefinedOr), q),
     );
     const results = [...repositories, ...issues, ...users];
 

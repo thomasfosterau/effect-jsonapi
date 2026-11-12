@@ -252,13 +252,13 @@ export const listArticles = Endpoint.list(Article, { include: declared });
 // indexed access, which a deferred conditional can't be asked for.
 type IncludedOf<E> =
   HttpApiEndpoint.Success<E> extends {
-    readonly Type: { readonly included?: ReadonlyArray<infer M> | undefined };
+    readonly Type: { readonly included?: ReadonlyArray<infer M> };
   }
     ? M
     : never;
 type AdvertisedBy<E> =
   HttpApiEndpoint.Query<E> extends {
-    readonly Type: { readonly include?: ReadonlyArray<infer P> | undefined };
+    readonly Type: { readonly include?: ReadonlyArray<infer P> };
   }
     ? P
     : never;
@@ -470,8 +470,8 @@ export const cyclicSelfEdge = Include.make(CyclicArticle, { editor: CyclicArticl
 // `has` narrows to the whitelist (what #106's resolver validates against)
 // ---------------------------------------------------------------------------
 
-export const validate = (candidate: string): Paths | undefined =>
-  declared.has(candidate) ? candidate : undefined;
+export const validate = (candidate: string): Option.Option<Paths> =>
+  declared.has(candidate) ? Option.some(candidate) : Option.none();
 
 export const target = HashMap.get(declared.targets, "comments.author");
 assertType<Option.Option<typeof Person | typeof Comment>>(target);

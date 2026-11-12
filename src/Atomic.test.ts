@@ -242,7 +242,9 @@ describe("operation schemas", () => {
     expect("note" in (decode({}).data.attributes ?? {})).toBe(false);
     // the declared type advertises value | null | undefined
     type Attrs = NonNullable<Atomic.UpdateOperation<typeof Widget>["Type"]["data"]["attributes"]>;
-    expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>();
+    expectTypeOf<Attrs["note"]>().toEqualTypeOf<
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
+    >();
   });
 
   it("decodes a remove operation targeted by ref", () => {
@@ -880,14 +882,14 @@ describe("optional create attributes in the add operation", () => {
 
   it("accepts an absent key, a value, or an explicit undefined (Schema.optional, as update does)", () => {
     type AddAttrs = Atomic.AddOperation<typeof Note>["Type"]["data"]["attributes"];
-    expectTypeOf<AddAttrs["body"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<AddAttrs["body"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
     expectTypeOf<AddAttrs>().toEqualTypeOf<{
       readonly title: string;
-      readonly body?: string | undefined;
+      readonly body?: Schema.optional<Schema.String>["Type"];
     }>();
     // the field schema itself is `Schema.optional`, so its own `Type` admits `undefined`
     expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.body)["Type"]>().toEqualTypeOf<
-      string | undefined
+      Schema.optional<Schema.String>["Type"]
     >();
 
     const absent = Schema.decodeSync(Add)({
@@ -917,9 +919,9 @@ describe("optional create attributes in the add operation", () => {
     });
     const Add = Atomic.AddOperation(Profile);
     type AddAttrs = Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"];
-    expectTypeOf<AddAttrs["bio"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<AddAttrs["bio"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
     expectTypeOf<(typeof Add.fields.data.fields.attributes.fields.bio)["Type"]>().toEqualTypeOf<
-      string | undefined
+      Schema.optional<Schema.String>["Type"]
     >();
     const decode = <A>(attributes: A) =>
       Schema.decodeUnknownSync(Add)({ op: "add", data: { type: "profiles", attributes } }).data

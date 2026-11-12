@@ -842,7 +842,9 @@ describe("Resource.filterable / Resource.sortable", () => {
         expectTypeOf<FilterOperators<typeof res, "rating">>().toEqualTypeOf<"eq" | "gte">();
         expectTypeOf<SortableKeys<typeof res>>().toEqualTypeOf<"rating" | "score">();
         expectTypeOf(filterable(res).rating.literal.Type).toEqualTypeOf<number>();
-        expectTypeOf<(typeof res.Type)["attributes"]["rating"]>().toEqualTypeOf<number | null>();
+        expectTypeOf<(typeof res.Type)["attributes"]["rating"]>().toEqualTypeOf<
+          Schema.NullOr<Schema.Finite>["Type"]
+        >();
       });
 
       it("the descriptor's inner schema, for a descriptor stamped by hand", () => {

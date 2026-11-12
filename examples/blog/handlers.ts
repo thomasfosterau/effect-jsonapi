@@ -70,7 +70,7 @@ const definedAttributes = <A extends Record<string, unknown>>(
  */
 const patchAttributes = <A extends Record<string, unknown>>(
   current: A,
-  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined,
+  patch?: Schema.Struct<{ readonly [K in keyof A]: Schema.optional<Schema.Schema<A[K]>> }>["Type"],
 ): A => ({ ...current, ...definedAttributes(patch ?? {}) });
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ const definedMember = <const K extends string, A>(key: K, value: A): DefinedMemb
 // Resolve the resources referenced by the requested include paths.
 // Only `one` / `optional` / `many` relationships are includable; the paginated
 // `comments` relationship never appears here.
-const resolveIncluded = (article: Article, include: ReadonlyArray<string> | undefined) => {
+const resolveIncluded = (article: Article, include?: ReadonlyArray<string>) => {
   const included: Array<Person | Tag> = [];
   if (include?.includes("author")) {
     const author = article.relationships?.author.data;
@@ -225,7 +225,7 @@ const articleComments = (articleId: string): Array<Comment> =>
 // collection's total.
 const articleCommentPage = (
   articleId: string,
-  request: { readonly offset?: number; readonly limit?: number } | undefined,
+  request?: { readonly offset?: number; readonly limit?: number },
 ) => {
   const all = articleComments(articleId);
   const total = all.length;
@@ -576,7 +576,7 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 type AtomicOperation = Atomic.Operation<typeof Article | typeof Comment>["Type"];
 
 /** One result entry per operation; removals and relationship updates return no data. */
-type ResultEntry = { readonly data?: Article | Comment | null };
+type ResultEntry = Atomic.Result<typeof Article | typeof Comment>["Type"];
 
 /**
  * A draft of the store: operations apply here, and the draft is committed only

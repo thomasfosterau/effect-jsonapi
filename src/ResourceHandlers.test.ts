@@ -48,7 +48,7 @@ class Transaction extends Context.Service<Transaction, { readonly depth: number 
 
 const as = (user: Option.Option<User>) => Layer.succeed(Viewer, user);
 const viewer = Effect.map(Effect.service(Viewer), Option.getOrUndefined);
-const capabilities = (_resource: Assemble.ResourceLike, user: User | undefined) => ({
+const capabilities = (_resource: Assemble.ResourceLike, user?: User) => ({
   canEdit: user?.role === "admin",
   canDelete: user?.role === "admin",
 });
@@ -95,18 +95,17 @@ const place: Assemble.ResourceLike = {
 };
 
 /* The decoded list input the stub ops read — both page fields optional, with no default, so the handler's "caller named no window" fallback is reachable. */
-interface ListInput {
-  readonly limit?: number | undefined;
-  readonly offset?: number | undefined;
-  readonly include?: ReadonlyArray<string> | undefined;
-  readonly q?: string | undefined;
-}
+const ListInput = Schema.Struct({
+  limit: Schema.optional(Schema.Finite),
+  offset: Schema.optional(Schema.Finite),
+  include: Schema.optional(Schema.Array(Schema.String)),
+  q: Schema.optional(Schema.String),
+});
+type ListInput = typeof ListInput.Type;
 
 /** The update input the stub ops take. */
-interface UpdateInput {
-  readonly id: string;
-  readonly name?: string | undefined;
-}
+const UpdateInput = Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String) });
+type UpdateInput = typeof UpdateInput.Type;
 
 /** A stub op set over an in-memory store, counting every call. */
 const makeOps = (seed: ReadonlyArray<PersonLike>) => {

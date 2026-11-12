@@ -723,9 +723,9 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
   // anything else with `JSON.stringify`, or `String` again for a value JSON
   // writes as nothing (a symbol). The non-numbers stand for what a caller the
   // types don't check (plain JavaScript) could pass. `null` is not among them:
-  // it counts as not given (the tests after these).
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `null` an unchecked caller passes, not a modelled absence
-  type Invalid = number | string | boolean | symbol | { readonly cap: number } | null;
+  // it counts as not given (the tests after these). An unchecked caller can
+  // pass any JSON value, `null` included, or a symbol.
+  type Invalid = Schema.Json | symbol;
   const invalid: ReadonlyArray<readonly [Invalid, string]> = [
     [0, "0"],
     [-1, "-1"],

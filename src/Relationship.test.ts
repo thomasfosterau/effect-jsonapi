@@ -258,7 +258,9 @@ describe("relationship kinds in resource objects", () => {
   it("types `one` linkage as non-nullable and `optional` linkage as nullable", () => {
     type Rels = NonNullable<(typeof Article.Type)["relationships"]>;
     expectTypeOf<Rels["author"]["data"]>().toEqualTypeOf<typeof Person.identifier.Type>();
-    expectTypeOf<Rels["editor"]["data"]>().toEqualTypeOf<typeof Person.identifier.Type | null>();
+    expectTypeOf<Rels["editor"]["data"]>().toEqualTypeOf<
+      Schema.NullOr<typeof Person.identifier>["Type"]
+    >();
   });
 });
 

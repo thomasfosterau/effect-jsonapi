@@ -10,12 +10,12 @@ import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import * as Ord from "effect/Order";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Registry } from "@thomasfosterau/effect-jsonapi";
@@ -88,11 +88,6 @@ const runExit = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
 ): Effect.Effect<Exit.Exit<A, E>> =>
   Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
-
-const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
-  const result = Cause.findError(cause);
-  return Result.isSuccess(result) ? result.success : undefined;
-};
 
 describe("northwind example: fetching", () => {
   it.effect("fetches a product document with a self link", () =>
@@ -262,9 +257,9 @@ describe("northwind example: fetching", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(ProductNotFound);
-      expect((error as ProductNotFound).id).toBe("nope");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof ProductNotFound);
+      expect(error.value.id).toBe("nope");
     }),
   );
 });
@@ -550,7 +545,12 @@ describe("northwind example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(ProductNameTaken);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof ProductNameTaken,
+        ),
+      );
     }),
   );
 
@@ -580,7 +580,12 @@ describe("northwind example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(CategoryNotFound);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof CategoryNotFound,
+        ),
+      );
     }),
   );
 
@@ -673,7 +678,12 @@ describe("northwind example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(CustomerNotFound);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof CustomerNotFound,
+        ),
+      );
     }),
   );
 
@@ -880,7 +890,7 @@ describe("northwind example: related & relationship endpoints", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(Error);
+      assert(Option.exists(Cause.findErrorOption(exit.cause), P.isError));
     }),
   );
 });
@@ -905,11 +915,17 @@ describe("northwind example: heterogeneous search", () => {
         // optional (#322).
         Arr.forEach(document.data, (result) => {
           if (result.type === "products") {
-            expectTypeOf(result.attributes.unitPrice).toEqualTypeOf<number | undefined>();
+            expectTypeOf<Pick<typeof result.attributes, "unitPrice">>().toEqualTypeOf<{
+              readonly unitPrice?: number;
+            }>();
           } else if (result.type === "customers") {
-            expectTypeOf(result.attributes.companyName).toEqualTypeOf<string | undefined>();
+            expectTypeOf<Pick<typeof result.attributes, "companyName">>().toEqualTypeOf<{
+              readonly companyName?: string;
+            }>();
           } else {
-            expectTypeOf(result.attributes.country).toEqualTypeOf<string | undefined>();
+            expectTypeOf<Pick<typeof result.attributes, "country">>().toEqualTypeOf<{
+              readonly country?: string;
+            }>();
           }
         });
       }),

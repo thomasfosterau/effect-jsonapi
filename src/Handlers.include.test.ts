@@ -75,7 +75,7 @@ const ids = (resources: ReadonlyArray<Handlers.ResourceValue>) =>
 // The walk for a request that carried `include`: the paths are present, so
 // the result is always `Some`, unwrapped here.
 const resolveSome = <Targets extends Handlers.IncludeTargets>(
-  primary: Handlers.ResourceValue | null | ReadonlyArray<Handlers.ResourceValue>,
+  primary: Parameters<typeof Handlers.resolveIncluded>[0],
   paths: ReadonlyArray<string>,
   targets: Targets,
   options?: Handlers.ResolveIncludedOptions,

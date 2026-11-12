@@ -1,3 +1,4 @@
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import { it } from "@effect/vitest";
 import * as Arr from "effect/Array";
@@ -9,7 +10,6 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import {
@@ -55,7 +55,7 @@ const definedAttributes = <A extends Record<string, unknown>>(
  */
 const patchAttributes = <A extends Record<string, unknown>>(
   current: A,
-  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined,
+  patch?: Schema.Struct<{ readonly [K in keyof A]: Schema.optional<Schema.Schema<A[K]>> }>["Type"],
 ): A => ({ ...current, ...definedAttributes(patch ?? {}) });
 
 // ---------------------------------------------------------------------------
@@ -291,11 +291,6 @@ const ArticlesLive = HttpApiBuilder.group(Api, "articles", (handlers) =>
       loadArticle(params.id).pipe(Effect.asVoid),
     ),
 );
-
-const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
-  const result = Cause.findError(cause);
-  return Result.isSuccess(result) ? result.success : undefined;
-};
 
 // The builder's handlers reduced to the one method these tests call: they
 // answer with minimal documents, deliberately looser than each endpoint's
@@ -848,9 +843,9 @@ describe("HTTP round-trip via HttpApiTest", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(ArticleNotFound);
-      expect((error as ArticleNotFound).id).toBe("missing");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof ArticleNotFound);
+      expect(error.value.id).toBe("missing");
     }),
   );
 
@@ -1029,7 +1024,12 @@ describe("HTTP round-trip via HttpApiTest", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof ArticleNotFound,
+        ),
+      );
     }),
   );
 });
@@ -1627,7 +1627,7 @@ describe("Endpoint.list query override", () => {
     }),
   );
 
-  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) =>
+  const queryOf = (endpoint: Pick<HttpApiEndpoint.Top, "query">) =>
     endpoint.query as Schema.Codec<unknown, unknown>;
 
   it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
@@ -1807,7 +1807,7 @@ describe("HTTP round-trip with an overridden list query", () => {
 // ---------------------------------------------------------------------------
 
 describe("Endpoint include path constraints", () => {
-  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) =>
+  const queryOf = (endpoint: Pick<HttpApiEndpoint.Top, "query">) =>
     endpoint.query as Schema.Codec<unknown, unknown>;
 
   it("advertises the whole graph at depth 2 when `include: true` (regression: the default)", () => {
@@ -2132,7 +2132,7 @@ describe("HTTP round-trip with a wire success document", () => {
 
       expect(result.data).toMatchObject({ type: "articles", id: "1" });
       expect(result.data.links?.self).toBe("https://api.example.com/articles/1");
-      expectTypeOf(result.data.links?.self).toEqualTypeOf<string | undefined>();
+      expectTypeOf(result.data.links?.self).toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
     }),
   );
 
@@ -2514,7 +2514,7 @@ describe("Endpoint.get query override", () => {
     includeDeleted: Schema.optionalKey(Schema.Literals(["true", "false"])),
   });
 
-  const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) =>
+  const queryOf = (endpoint: Pick<HttpApiEndpoint.Top, "query">) =>
     endpoint.query as Schema.Codec<unknown, unknown>;
 
   it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
