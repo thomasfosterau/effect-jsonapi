@@ -1763,6 +1763,17 @@ negotiate(read("application/vnd.api+json;q=0, application/json")); // the page, 
 
 The refusal applies only when no range of any media type carries `q > 0`; another range — `text/html`, `application/json`, `*/*`, an alternate, another JSON:API instance — is negotiated as without the option. `NOT_ACCEPTABLE_REFUSED` shares `NOT_ACCEPTABLE`'s status and `code`; its `detail` names the RFC 9110 rule rather than the §6.3.2 media-type-parameter one, so the two 406s can be told apart.
 
+A host that negotiates with `@thomasfosterau/effect-ext/Negotiate`'s media-type-agnostic `negotiateRepresentation` takes the JSON:API half from here: `Negotiation.representation({ extensions, servesPath })` is the JSON:API `Representation` (JSON:API §5: only `ext` / `profile`, every `ext` URI declared), and `Negotiation.toApiError(negotiation)` turns that negotiator's refusal of it into `ApiError.NotAcceptable` (406) or `ApiError.UnsupportedMediaType` (415):
+
+```ts
+const jsonApi = Negotiation.representation({
+  extensions: [Atomic.EXTENSION_URI],
+  servesPath: isApiPath,
+});
+// negotiateRepresentation(request, { accept: [markdown, jsonApi], contentType: [jsonApi] })
+Negotiation.toApiError(negotiation); // Option<ApiError.NotAcceptable | ApiError.UnsupportedMediaType>
+```
+
 ### The assembler, the handlers and the registry
 
 `Assemble.resource` / `Assemble.collection` are the seam a handler's document returns go through: capability `meta` (`canEdit` / `canDelete`, computed per resource by a hook — `roleCapabilities`, `ownedCapabilities`, or your own), links stringified, fieldsets projected, the `include` walk validated and resolved batched through a `Handlers.IncludeTargets` registry, the `jsonapi` member set. A request carrying `include` always gets the `included` key — `[]` when nothing resolved or every candidate was already primary data. Presence is the signal: a bare `?include=` decodes to `[]` and is a request carrying `include` too. Without `include` the key is absent unless members the caller resolved itself survive the dedupe. `ResourceHandlers.related` answers an empty to-one the same way: `{ data: null, included: [] }` when the request carried `include`, its paths validated (`400` for one outside the whitelist) though there is nothing to walk from.

@@ -6,7 +6,11 @@
  * an alternate representation negotiated ahead of JSON:API.
  */
 import { describe, expect, it } from "vite-plus/test";
+import { MimeType } from "@thomasfosterau/effect-ext/Mime";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as ApiError from "./ApiError.js";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
@@ -440,5 +444,92 @@ describe("errorResponse", () => {
     expect(
       ((await unavailable.json()) as { errors: ReadonlyArray<{ code: string }> }).errors[0]?.code,
     ).toBe("unavailable");
+  });
+});
+
+// The JSON:API half of a generic negotiator (#577). The cases are those of
+// effect-ext's former `tests/web/negotiate.test.ts` 406 / 415 suite, at the
+// parameter rule they reduce to: each instance is parsed as a WHATWG MIME
+// type by effect-ext's `Mime`, as `Negotiate` hands it over.
+describe("representation (#577)", () => {
+  const ATOMIC = "https://jsonapi.org/ext/atomic";
+  // `none` for a header that is not a MIME type, so a typo can't pass as a refusal.
+  const accepts = (jsonApi: Negotiation.Representation, header: string): Option.Option<boolean> =>
+    Option.map(MimeType.parse(header), jsonApi.acceptsParameters);
+
+  it("is the JSON:API media type, on every path unless told otherwise", () => {
+    const jsonApi = Negotiation.representation();
+    expect(jsonApi.mediaType).toBe(MEDIA_TYPE);
+    expect(jsonApi.servesPath).toBeUndefined();
+    const scoped = Negotiation.representation({ servesPath: (path) => path === "/posts" });
+    expect(scoped.servesPath?.("/posts")).toBe(true);
+    expect(scoped.servesPath?.("/about")).toBe(false);
+  });
+
+  it("accepts a bare instance, a profile and a declared ext", () => {
+    const jsonApi = Negotiation.representation({ extensions: [ATOMIC] });
+    expect(accepts(jsonApi, MEDIA_TYPE)).toEqual(Option.some(true));
+    expect(accepts(jsonApi, `${MEDIA_TYPE};profile="https://x"`)).toEqual(Option.some(true));
+    expect(accepts(jsonApi, `${MEDIA_TYPE};ext="${ATOMIC}"`)).toEqual(Option.some(true));
+    expect(accepts(jsonApi, `${MEDIA_TYPE} ;EXT="${ATOMIC}"`)).toEqual(Option.some(true));
+  });
+
+  it("§6: refuses any other parameter (the 406 / 415 instance)", () => {
+    const jsonApi = Negotiation.representation({ extensions: [ATOMIC] });
+    expect(accepts(jsonApi, `${MEDIA_TYPE};charset=utf-8`)).toEqual(Option.some(false));
+    expect(accepts(jsonApi, `${MEDIA_TYPE};profile="https://x";foo=bar`)).toEqual(
+      Option.some(false),
+    );
+  });
+
+  it("§6: refuses an ext naming an undeclared URI", () => {
+    const jsonApi = Negotiation.representation({ extensions: [ATOMIC] });
+    expect(accepts(jsonApi, `${MEDIA_TYPE};ext="https://example.com/unknown"`)).toEqual(
+      Option.some(false),
+    );
+    expect(accepts(jsonApi, `${MEDIA_TYPE};ext="${ATOMIC} https://example.com/x"`)).toEqual(
+      Option.some(false),
+    );
+  });
+
+  it("refuses every ext when no extension is declared", () => {
+    expect(accepts(Negotiation.representation(), `${MEDIA_TYPE};ext="${ATOMIC}"`)).toEqual(
+      Option.some(false),
+    );
+  });
+});
+
+describe("toApiError (#577)", () => {
+  const jsonApi = Negotiation.representation();
+  const markdown = { mediaType: "text/markdown" };
+  const firstError = (outcome: Negotiation.Outcome) =>
+    Option.flatMap(Negotiation.toApiError(outcome), (error) =>
+      Arr.head(ApiError.toDocument(error).errors),
+    );
+  const statusOf = (outcome: Negotiation.Outcome): Option.Option<string> =>
+    Option.flatMap(firstError(outcome), (error) => Option.fromNullishOr(error.status));
+
+  it("maps a refused JSON:API read to 406 and write to 415", () => {
+    expect(statusOf({ _tag: "NotAcceptable", representation: jsonApi })).toEqual(
+      Option.some("406"),
+    );
+    expect(statusOf({ _tag: "UnsupportedMediaType", representation: jsonApi })).toEqual(
+      Option.some("415"),
+    );
+    expect(
+      Option.map(
+        firstError({ _tag: "NotAcceptable", representation: jsonApi }),
+        (error) => error.code,
+      ),
+    ).toEqual(Option.some("not_acceptable"));
+  });
+
+  it("is none for a selection, a fallback, or another representation's refusal", () => {
+    expect(statusOf({ _tag: "Selected", representation: jsonApi })).toEqual(Option.none());
+    expect(statusOf({ _tag: "Fallback" })).toEqual(Option.none());
+    expect(statusOf({ _tag: "NotAcceptable", representation: markdown })).toEqual(Option.none());
+    expect(statusOf({ _tag: "UnsupportedMediaType", representation: markdown })).toEqual(
+      Option.none(),
+    );
   });
 });
