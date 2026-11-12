@@ -344,6 +344,14 @@ const SHARED_FLAT_OPTIONS = {
   sort: false,
 } as const;
 
+// The `included` union of a flat group's surface, or `never` without one. Named
+// so the document constructors below receive it as an explicit type argument:
+// inferred from `options.include?.included` while `Surface` is still generic,
+// it widened to the constraint's `Schema.Top`, whose `DecodingServices` are
+// `unknown`, so every endpoint's success schema, and a typed client's methods,
+// asked for `unknown` services (#595).
+type SurfaceIncluded<Surface extends AnySurface | undefined> = NonNullable<Surface>["included"];
+
 const flatWire = <
   R extends Schema.Top,
   List extends Query.FlatListStruct,
@@ -356,8 +364,14 @@ const flatWire = <
   const included = options.include?.included;
   const toManyMeta = options.toManyMeta;
   return {
-    document: Endpoint.ResourceDocument(options.resource, { included, toManyMeta }),
-    collection: Endpoint.FlatCollectionDocument(options.resource, { included, toManyMeta }),
+    document: Endpoint.ResourceDocument<R, SurfaceIncluded<Surface>, TM>(options.resource, {
+      included,
+      toManyMeta,
+    }),
+    collection: Endpoint.FlatCollectionDocument<R, SurfaceIncluded<Surface>, TM>(options.resource, {
+      included,
+      toManyMeta,
+    }),
     listQuery: Query.flatList(options.list, { filters: options.filters }),
   };
 };
