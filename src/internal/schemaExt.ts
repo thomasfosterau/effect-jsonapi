@@ -4,107 +4,22 @@
  *
  * `suppliedValue` and `pathToJsonPointer` moved to effect-ext's `TriState` and
  * `Issues` subpaths, and `FlatQuery.suppliedValue` / `ServerErrors.pathToJsonPointer`
- * re-export them. Two helpers stay here:
- *
- * - {@link issueLeaves}. effect-ext's `Issues.leaves` exposes no node to
- *   format a leaf from, and `Issues.pointers` formats from a `Filter` only
- *   when it sits directly over a bare `InvalidValue`. A struct-level check
- *   with a `message` annotation, pointing its failure at a field, then reads
- *   "Expected a valid value" instead of its message. The walk here carries
- *   the nearest `Filter` down (`describedBy`).
- * - `closedStruct`, with its cap helpers. effect-ext has no equivalent. It is
- *   used only inside the library's own request-body schemas and the closed
- *   identifier of `Endpoint.CommittedDocument`.
+ * re-export them, and the issue walk behind `ServerErrors.schemaIssueToErrors`
+ * is effect-ext's `Issues.leaves` / `Issues.message` since 0.2.0 (#555). What
+ * stays here is `closedStruct`, with its cap helpers: effect-ext has no
+ * equivalent. It is used only inside the library's own request-body schemas
+ * and the closed identifier of `Endpoint.CommittedDocument`.
  *
  * @internal
  */
 // The bare `effect` barrel: the schema-only entry point reaches this module,
 // and `test/entry-points.test.ts` pins `effect` as its only external.
 import * as Arr from "effect/Array";
-import * as Match from "effect/Match";
-import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
-
-/** One terminal issue of a schema failure, with the path that reaches it. */
-export interface IssueLeaf {
-  readonly path: ReadonlyArray<PropertyKey>;
-  readonly issue: SchemaIssue.Issue;
-  /**
-   * The node a formatter renders this leaf's message from: the leaf itself,
-   * or the nearest `Filter` above it. A failed check's leaf is usually an
-   * `InvalidValue` with no message of its own; what the check expected, and
-   * any `message` annotation on it, lives on the `Filter`.
-   */
-  readonly describedBy: SchemaIssue.Issue;
-}
-
-/** An `InvalidValue` leaf carrying no `message` annotation of its own. */
-const isBareInvalidValue = (leaf: SchemaIssue.Issue): boolean =>
-  P.isTagged(leaf, "InvalidValue") && !P.isString(leaf.annotations?.message);
-
-/**
- * A bare `InvalidValue` is described by the nearest `Filter` above it when
- * that `Filter` sits directly over it (its `expected` text, or `Expected
- * <filter>`) or carries a `message` annotation (a struct-level check that
- * points its failure at a field). Any other leaf describes itself.
- */
-const describedBy = (
-  leaf: SchemaIssue.Issue,
-  filter: Option.Option<SchemaIssue.Filter>,
-): SchemaIssue.Issue =>
-  isBareInvalidValue(leaf)
-    ? Option.getOrElse(
-        Option.filter(
-          filter,
-          (check) => check.issue === leaf || SchemaIssue.defaultCheckHook(check) !== undefined,
-        ),
-        () => leaf,
-      )
-    : leaf;
-
-/**
- * Flattens an Effect Schema issue tree to its leaves, accumulating every
- * `Pointer`'s path on the way down.
- *
- * `Pointer` extends the path and recurses; `Composite` and a non-empty
- * `AnyOf` recurse into each child at the same path (one leaf per rejected
- * union member); `Filter` and `Encoding` recurse into their inner issue (the
- * nearest `Filter` is carried down to decide each leaf's `describedBy`); an
- * empty `AnyOf` (a literal-union no-match) and every other node is a leaf.
- */
-export const issueLeaves = (issue: SchemaIssue.Issue): ReadonlyArray<IssueLeaf> => {
-  const leaves: Array<IssueLeaf> = [];
-  const walk = (
-    current: SchemaIssue.Issue,
-    path: ReadonlyArray<PropertyKey>,
-    filter: Option.Option<SchemaIssue.Filter>,
-  ): void => {
-    Match.value(current).pipe(
-      Match.tag("Pointer", (current) => walk(current.issue, [...path, ...current.path], filter)),
-      Match.tag("Composite", (current) => {
-        for (const child of current.issues) walk(child, path, filter);
-      }),
-      Match.tag("AnyOf", (current) => {
-        if (Arr.isReadonlyArrayEmpty(current.issues)) {
-          leaves.push({ path, issue: current, describedBy: current });
-          return;
-        }
-        for (const child of current.issues) walk(child, path, filter);
-      }),
-      Match.tag("Filter", (current) => walk(current.issue, path, Option.some(current))),
-      Match.tag("Encoding", (current) => walk(current.issue, path, filter)),
-      Match.orElse((current) => {
-        leaves.push({ path, issue: current, describedBy: describedBy(current, filter) });
-      }),
-    );
-  };
-  walk(issue, [], Option.none());
-  return leaves;
-};
 
 /**
  * How many undeclared members a closed struct reports at their own paths
