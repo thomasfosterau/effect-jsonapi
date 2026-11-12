@@ -656,32 +656,32 @@ export interface Summary extends ReportFormat.Summary {}
  * @since 0.15.0
  * @category errors
  */
-export class ContractViolation extends Schema.TaggedError<ContractViolation>()(
-  "ContractViolation",
-  {
-    rule: Schema.Struct({
-      id: Schema.String,
-      tier: Schema.Literals(["spec", "profile"]),
-      section: Schema.String,
-      reference: Schema.String,
-      level: Schema.Literals(["MUST", "MUST NOT", "SHOULD", "MAY"]),
-      requirement: Schema.String,
+export class ContractViolation extends Schema.TaggedError<
+  ContractViolation,
+  { readonly brand: unique symbol }
+>()("ContractViolation", {
+  rule: Schema.Struct({
+    id: Schema.String,
+    tier: Schema.Literals(["spec", "profile"]),
+    section: Schema.String,
+    reference: Schema.String,
+    level: Schema.Literals(["MUST", "MUST NOT", "SHOULD", "MAY"]),
+    requirement: Schema.String,
+  }),
+  detail: Schema.String,
+  expected: Schema.String,
+  observed: Schema.String,
+  probe: Schema.UndefinedOr(
+    Schema.Struct({
+      method: Schema.String,
+      url: Schema.String,
+      headers: Schema.Record(Schema.String, Schema.String),
+      body: Schema.Unknown,
     }),
-    detail: Schema.String,
-    expected: Schema.String,
-    observed: Schema.String,
-    probe: Schema.UndefinedOr(
-      Schema.Struct({
-        method: Schema.String,
-        url: Schema.String,
-        headers: Schema.Record(Schema.String, Schema.String),
-        body: Schema.Unknown,
-      }),
-    ),
-    /** How many further findings the report carries beyond this one. */
-    remaining: Schema.Number,
-  },
-) {
+  ),
+  /** How many further findings the report carries beyond this one. */
+  remaining: Schema.Number,
+}) {
   /**
    * The rule, its requirement and its citation, then the observation — in that
    * order, because the rule is what a reader needs first.
@@ -709,11 +709,14 @@ export class ContractViolation extends Schema.TaggedError<ContractViolation>()(
  * message naming it and the defect, and the defect itself as `cause`. Private
  * on purpose — callers match it by its tag (`_tag: "RuleDied"`), not by class.
  */
-class RuleDied extends Schema.TaggedError<RuleDied>()("RuleDied", {
-  rule: Schema.String,
-  message: Schema.String,
-  cause: Schema.Unknown,
-}) {}
+class RuleDied extends Schema.TaggedError<RuleDied, { readonly brand: unique symbol }>()(
+  "RuleDied",
+  {
+    rule: Schema.String,
+    message: Schema.String,
+    cause: Schema.Unknown,
+  },
+) {}
 
 // ---------------------------------------------------------------------------
 // The catalogue

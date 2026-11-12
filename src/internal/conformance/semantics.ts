@@ -100,7 +100,10 @@ export const NOT = {
  *
  * @internal
  */
-export class DomainMismatch extends Schema.TaggedError<DomainMismatch>()("DomainMismatch", {
+export class DomainMismatch extends Schema.TaggedError<
+  DomainMismatch,
+  { readonly brand: unique symbol }
+>()("DomainMismatch", {
   value: Schema.Unknown,
   literal: Schema.Unknown,
 }) {}

@@ -468,7 +468,10 @@ describe("ApiError.toDocument", () => {
     expect(ApiError.isApiError(new Teapot())).toBe(true);
     expect(ApiError.isApiError(new ApiError.Forbidden({}))).toBe(true);
     // a tagged error that is not an ApiError.make class
-    class Plain extends Schema.TaggedError<Plain>()("Plain", {}) {}
+    class Plain extends Schema.TaggedError<Plain, { readonly brand: unique symbol }>()(
+      "Plain",
+      {},
+    ) {}
     expect(ApiError.isApiError(new Plain())).toBe(false);
     expect(ApiError.isApiError({ _tag: "NotFound" })).toBe(false);
     expect(ApiError.isApiError(null)).toBe(false);

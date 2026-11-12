@@ -56,10 +56,13 @@ import { definedMember } from "./internal/members.js";
  * @since 0.16.0
  * @category errors
  */
-export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
-  resource: Schema.String,
-  id: Schema.String,
-}) {}
+export class NotFound extends Schema.TaggedError<NotFound, { readonly brand: unique symbol }>()(
+  "NotFound",
+  {
+    resource: Schema.String,
+    id: Schema.String,
+  },
+) {}
 
 /**
  * No authenticated session was found on the request. Answered as
@@ -68,7 +71,10 @@ export class NotFound extends Schema.TaggedError<NotFound>()("NotFound", {
  * @since 0.16.0
  * @category errors
  */
-export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthorized", {
+export class Unauthorized extends Schema.TaggedError<
+  Unauthorized,
+  { readonly brand: unique symbol }
+>()("Unauthorized", {
   message: Schema.optional(Schema.String),
 }) {}
 
@@ -79,9 +85,12 @@ export class Unauthorized extends Schema.TaggedError<Unauthorized>()("Unauthoriz
  * @since 0.16.0
  * @category errors
  */
-export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
-  message: Schema.optional(Schema.String),
-}) {}
+export class Forbidden extends Schema.TaggedError<Forbidden, { readonly brand: unique symbol }>()(
+  "Forbidden",
+  {
+    message: Schema.optional(Schema.String),
+  },
+) {}
 
 /**
  * Redirect the client to a new URL. Answered as the 3xx `status` with the
@@ -91,10 +100,13 @@ export class Forbidden extends Schema.TaggedError<Forbidden>()("Forbidden", {
  * @since 0.16.0
  * @category errors
  */
-export class Redirect extends Schema.TaggedError<Redirect>()("Redirect", {
-  to: Schema.String,
-  status: Schema.Number,
-}) {}
+export class Redirect extends Schema.TaggedError<Redirect, { readonly brand: unique symbol }>()(
+  "Redirect",
+  {
+    to: Schema.String,
+    status: Schema.Number,
+  },
+) {}
 
 /**
  * Catch-all HTTP error for status codes outside the dedicated tags. Answered
@@ -104,10 +116,13 @@ export class Redirect extends Schema.TaggedError<Redirect>()("Redirect", {
  * @since 0.16.0
  * @category errors
  */
-export class HttpError extends Schema.TaggedError<HttpError>()("HttpError", {
-  status: Schema.Number,
-  message: Schema.String,
-}) {}
+export class HttpError extends Schema.TaggedError<HttpError, { readonly brand: unique symbol }>()(
+  "HttpError",
+  {
+    status: Schema.Number,
+    message: Schema.String,
+  },
+) {}
 
 /**
  * A form-level validation failure carrying one or more issues. Each issue is
@@ -125,10 +140,10 @@ export class HttpError extends Schema.TaggedError<HttpError>()("HttpError", {
  * @since 0.16.0
  * @category errors
  */
-export class ValidationFailure extends Schema.TaggedError<ValidationFailure>()(
-  "ValidationFailure",
-  { issues: Schema.Array(Schema.Unknown) },
-) {}
+export class ValidationFailure extends Schema.TaggedError<
+  ValidationFailure,
+  { readonly brand: unique symbol }
+>()("ValidationFailure", { issues: Schema.Array(Schema.Unknown) }) {}
 
 // ---------------------------------------------------------------------------
 // The carrier
@@ -177,7 +192,10 @@ export interface ErrorDocument {
  * @since 0.16.0
  * @category models
  */
-export class JsonapiError extends Schema.TaggedError<JsonapiError>()("JsonapiError", {
+export class JsonapiError extends Schema.TaggedError<
+  JsonapiError,
+  { readonly brand: unique symbol }
+>()("JsonapiError", {
   status: Schema.Number,
   errors: Schema.Array(Document.ErrorObject),
 }) {

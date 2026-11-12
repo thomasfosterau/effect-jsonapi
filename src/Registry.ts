@@ -149,7 +149,10 @@ export interface ApiLike {
  * @since 0.16.0
  * @category errors
  */
-export class UnknownFamily extends Schema.TaggedError<UnknownFamily>()("UnknownFamily", {
+export class UnknownFamily extends Schema.TaggedError<
+  UnknownFamily,
+  { readonly brand: unique symbol }
+>()("UnknownFamily", {
   group: Schema.String,
   message: Schema.String,
 }) {}
@@ -160,7 +163,10 @@ export class UnknownFamily extends Schema.TaggedError<UnknownFamily>()("UnknownF
  * @since 0.16.0
  * @category errors
  */
-export class FamilyMismatch extends Schema.TaggedError<FamilyMismatch>()("FamilyMismatch", {
+export class FamilyMismatch extends Schema.TaggedError<
+  FamilyMismatch,
+  { readonly brand: unique symbol }
+>()("FamilyMismatch", {
   group: Schema.String,
   message: Schema.String,
 }) {}

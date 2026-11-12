@@ -735,10 +735,10 @@ export interface SchemaErrorsOptions extends QueryParameterOptions {
  * @since 0.17.0
  * @category errors
  */
-export class InvalidAllowedQueryParameter extends Schema.TaggedError<InvalidAllowedQueryParameter>()(
-  "InvalidAllowedQueryParameter",
-  { parameter: Schema.String, message: Schema.String },
-) {}
+export class InvalidAllowedQueryParameter extends Schema.TaggedError<
+  InvalidAllowedQueryParameter,
+  { readonly brand: unique symbol }
+>()("InvalidAllowedQueryParameter", { parameter: Schema.String, message: Schema.String }) {}
 
 // The tail of the refusal of an allow-list entry the 400 for a family the
 // specification defines covers.
@@ -1141,10 +1141,10 @@ const isResponsePart = (kind: HttpApiError.HttpApiSchemaError["kind"]): kind is 
 // that 400. This one answers with the opaque JSON:API 500 `ServerErrors.respond`
 // uses for every other server defect, and asks error reporters for `Error`
 // severity; the original `HttpApiSchemaError` rides along as `cause`.
-class ResponseEncodeError extends Schema.TaggedError<ResponseEncodeError>()(
-  "effect-jsonapi/ResponseEncodeError",
-  { message: Schema.String, cause: Schema.Defect() },
-) {
+class ResponseEncodeError extends Schema.TaggedError<
+  ResponseEncodeError,
+  { readonly brand: unique symbol }
+>()("effect-jsonapi/ResponseEncodeError", { message: Schema.String, cause: Schema.Defect() }) {
   override readonly [ErrorReporter.severity] = "Error" as const;
 
   [HttpServerRespondable.symbol]() {

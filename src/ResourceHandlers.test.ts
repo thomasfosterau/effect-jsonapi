@@ -331,7 +331,10 @@ describe("create / delete", () => {
  * that refuses.
  */
 describe("a write whose re-read fails", () => {
-  class StoreDown extends Schema.TaggedError<StoreDown>()("StoreDown", {}) {}
+  class StoreDown extends Schema.TaggedError<StoreDown, { readonly brand: unique symbol }>()(
+    "StoreDown",
+    {},
+  ) {}
 
   /** The seeded ops, with a re-read that fails for the ids in `hidden` as `reread` says. */
   const hidingOps = (
@@ -367,7 +370,10 @@ describe("a write whose re-read fails", () => {
     return { ...seededOps, ops, hidden };
   };
 
-  class CommitFailed extends Schema.TaggedError<CommitFailed>()("CommitFailed", {}) {}
+  class CommitFailed extends Schema.TaggedError<CommitFailed, { readonly brand: unique symbol }>()(
+    "CommitFailed",
+    {},
+  ) {}
   type HiddenRule = ResourceHandlers.HiddenWrite<ServerErrors.NotFound | StoreDown, "people">;
 
   /**
