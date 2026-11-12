@@ -24,6 +24,11 @@ import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import { stringify } from "./internal/json.js";
 
+/** A tagged failure standing in for an arbitrary cause. */
+class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()("Boom", {
+  message: Schema.String,
+}) {}
+
 const Person = Resource.make("people", { attributes: { name: Schema.NonEmptyString } });
 const Credit = Resource.make("credits", {
   attributes: { role: Schema.String },
@@ -65,7 +70,7 @@ const call = (
   );
 
 const failureOf = <A, E>(exit: Exit.Exit<A, E>): E => {
-  if (Exit.isSuccess(exit)) throw new Error("expected a failure");
+  assert(Exit.isFailure(exit), "expected a failure");
   const error = Cause.findErrorOption(exit.cause);
   assert(Option.isSome(error), "expected a typed failure");
   return error.value;
@@ -107,10 +112,10 @@ describe("Client.make({ decodeErrors: true })", () => {
         const raw = failureOf(yield* call(canned(409, body), false));
         expect(Client.isErrorResponse(raw)).toBe(false);
         expect((raw as { readonly _tag?: string })._tag).toBe("HttpClientError");
-        const faulty = HttpClient.make(() => Effect.die(new Error("connection reset")));
+        const faulty = HttpClient.make(() => Effect.die(new Boom({ message: "connection reset" })));
         const exit = yield* call(faulty);
         expect(Exit.isFailure(exit)).toBe(true);
-        expect(Option.isNone(yield* Client.toErrorResponse(new Error("x")))).toBe(true);
+        expect(Option.isNone(yield* Client.toErrorResponse(new Boom({ message: "x" })))).toBe(true);
       }),
   );
 

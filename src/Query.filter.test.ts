@@ -80,7 +80,7 @@ const failures = (
   record: Record<string, unknown>,
 ): ReadonlyArray<{ readonly key: string; readonly message: string }> => {
   const result = Schema.decodeUnknownResult(codec)(record);
-  if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
+  assert(Result.isFailure(result), "expected the decode to fail");
   return SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
     key: firstKey(issue.path),
     message: issue.message,
@@ -116,13 +116,13 @@ describe("Query.Filter: the design's worked examples (§3.4)", () => {
     ["filter[title]", "Hello\\, world", eq("title", "Hello, world")],
   ];
 
-  for (const [key, value, ast] of examples) {
+  Arr.forEach(examples, ([key, value, ast]) => {
     it(`${key}=${value} decodes and re-encodes canonically`, () => {
       expect(decode({ [key]: value })).toEqual(ast);
       expect(encode(ast)).toEqual({ [key]: value });
       expect(canonical({ [key]: value })).toEqual([[key, value]]);
     });
-  }
+  });
 
   it("decodes the two-condition filter written three ways to one tree and one canonical string", () => {
     const tree = Filter.and(gt("age", 18), eq("status", "open"));
@@ -138,10 +138,10 @@ describe("Query.Filter: the design's worked examples (§3.4)", () => {
         "filter[x][condition][value]": "18",
       },
     ];
-    for (const spelling of spellings) {
+    Arr.forEach(spellings, (spelling) => {
       expect(decode(spelling)).toEqual(tree);
       expect(url(canonical(spelling))).toBe("filter[age][gt]=18&filter[status]=open");
-    }
+    });
   });
 
   it("decodes and canonicalises the nested OR of two ANDs byte for byte", () => {
@@ -483,7 +483,7 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
         encode: SchemaGetter.transform((value: string | null) => value ?? "none"),
       }),
     );
-    expect(Schema.decodeUnknownSync(NoneAsNull)("none")).toBeNull();
+    expect(Schema.decodeSync(NoneAsNull)("none")).toBeNull();
     const Legacy = Resource("legacy", {
       attributes: {
         code: attribute(Schema.NullOr(Schema.String), {
@@ -518,9 +518,9 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
   });
 
   it("F-COERCE-4: one spelling per value, so equal filters share a canonical string", () => {
-    for (const spelling of ["010", "+1e1", "10.0", "1.0e1"]) {
+    Arr.forEach(["010", "+1e1", "10.0", "1.0e1"], (spelling) => {
       expect(canonical({ "filter[age]": spelling })).toEqual([["filter[age]", "10"]]);
-    }
+    });
     expect(canonical({ "filter[age]": "-0" })).toEqual([["filter[age]", "0"]]);
     // a date literal canonicalises to its full ISO-8601 UTC form
     expect(canonical({ "filter[deletedAt][gte]": "2026-01-01" })).toEqual([
@@ -538,7 +538,7 @@ describe("Query.Filter: §6 semantics — the literal rules the codec enforces",
     // decided from the declaration alone, before any resource is looked at
     expect(failures({ "filter[body]": "x" })[0]?.message).toBe('Unknown filter field "body"');
     // an absent filter is no constraint; the codec never synthesises a node for it
-    expect(Schema.decodeUnknownResult(codec)({})._tag).toBe("Failure");
+    expect(Schema.decodeResult(codec)({})._tag).toBe("Failure");
     // And([]) is representable, and is a different thing entirely
     expect(decode({ "filter[g][group][conjunction]": "AND" })).toEqual({
       _tag: "And",
@@ -646,17 +646,20 @@ describe("Query.Filter: rejections name the offending key", () => {
   });
 
   it("rejects malformed keys", () => {
-    for (const key of [
-      "filter[a][b][c]",
-      "filter[a][b][c][d]",
-      "filter[a][group][conjunction][x]",
-      "filter[",
-      "filter",
-    ]) {
-      const [failure] = failures({ [key]: "x" });
-      expect(failure?.key).toBe(key);
-      expect(failure?.message).toMatch(/^Malformed filter key/);
-    }
+    Arr.forEach(
+      [
+        "filter[a][b][c]",
+        "filter[a][b][c][d]",
+        "filter[a][group][conjunction][x]",
+        "filter[",
+        "filter",
+      ],
+      (key) => {
+        const [failure] = failures({ [key]: "x" });
+        expect(failure?.key).toBe(key);
+        expect(failure?.message).toMatch(/^Malformed filter key/);
+      },
+    );
   });
 
   it("reports one issue per offending key, in key order", () => {
@@ -670,21 +673,24 @@ describe("Query.Filter: rejections name the offending key", () => {
   it("rejects on encode what it would reject on decode: an unknown field or undeclared operator", () => {
     const encoded = (ast: Filter.Node) => Schema.encodeUnknownResult(codec)(ast);
     // `title` declares eq ne in nin; `flag` declares eq only; `deletedAt` declares isnull gte lte
-    for (const [tree, message] of [
-      [Filter.lt("title", "x"), /Operator "lt" is not declared on field "title"/],
-      [Filter.isIn("flag", [true]), /Operator "in" is not declared on field "flag"/],
-      [Filter.notIn("flag", [true]), /Operator "nin" is not declared on field "flag"/],
-      [Filter.isNull("title"), /Operator "isnull" is not declared on field "title"/],
+    Arr.forEach(
       [
-        Filter.and(eq("status", "open"), Filter.not(gt("title", "x"))),
-        /Operator "gt" is not declared/,
-      ],
-      [eq("body", "x"), /Unknown filter field "body"/],
-    ] as const) {
-      const result = encoded(tree);
-      assert(Result.isFailure(result));
-      expect(result.failure.message).toMatch(message);
-    }
+        [Filter.lt("title", "x"), /Operator "lt" is not declared on field "title"/],
+        [Filter.isIn("flag", [true]), /Operator "in" is not declared on field "flag"/],
+        [Filter.notIn("flag", [true]), /Operator "nin" is not declared on field "flag"/],
+        [Filter.isNull("title"), /Operator "isnull" is not declared on field "title"/],
+        [
+          Filter.and(eq("status", "open"), Filter.not(gt("title", "x"))),
+          /Operator "gt" is not declared/,
+        ],
+        [eq("body", "x"), /Unknown filter field "body"/],
+      ] as const,
+      ([tree, message]) => {
+        const result = encoded(tree);
+        assert(Result.isFailure(result));
+        expect(result.failure.message).toMatch(message);
+      },
+    );
     // …so a URL the codec emits always decodes back
     expect(decode(encode(Filter.isNull("deletedAt", true)))).toEqual(
       Filter.isNull("deletedAt", true),
@@ -726,7 +732,7 @@ describe("Query.Filter: rejections name the offending key", () => {
   });
 
   it("rejects an empty record: an absent filter is Query.schema's concern", () => {
-    const result = Schema.decodeUnknownResult(codec)({});
+    const result = Schema.decodeResult(codec)({});
     expect(result._tag).toBe("Failure");
   });
 
@@ -1201,8 +1207,8 @@ describe("Query.canonical with filter: true", () => {
         queries.some(
           (q) =>
             Object.keys(q).length === 5 &&
-            Arr.isReadonlyArrayNonEmpty(q.include!) &&
-            Arr.isReadonlyArrayNonEmpty(q.sort!),
+            Arr.isReadonlyArrayNonEmpty(q.include ?? []) &&
+            Arr.isReadonlyArrayNonEmpty(q.sort ?? []),
         ),
       ).toBe(true);
     });
@@ -1312,11 +1318,11 @@ describe("Query.schema with filter: true", () => {
   it.each(inherited)(
     "routes filter[%s] to the grammar and a bare key of that name nowhere",
     (name) => {
-      const result = Schema.decodeUnknownResult(query)({
+      const result = Schema.decodeResult(query)({
         [`filter[${name}]`]: "x",
         "page[limit]": "5",
       });
-      if (Result.isSuccess(result)) throw new Error("expected the decode to fail");
+      assert(Result.isFailure(result), "expected the decode to fail");
       expect(
         SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues.map((issue) => ({
           key: firstKey(issue.path),
@@ -1356,13 +1362,13 @@ describe("Query.schema with filter: true", () => {
   it("fails closed on a resource declaring nothing filterable", () => {
     const Plain = Resource("plains", { attributes: { n: Schema.Number } });
     const plain = Query.schema(Plain, { filter: true });
-    expect(Schema.decodeUnknownSync(plain)({})).toEqual({});
-    const result = Schema.decodeUnknownResult(plain)({ "filter[n]": "1" });
+    expect(Schema.decodeSync(plain)({})).toEqual({});
+    const result = Schema.decodeResult(plain)({ "filter[n]": "1" });
     expect(result._tag).toBe("Failure");
   });
 
   it("keeps the issue path at the flat key through the combined schema", () => {
-    const result = Schema.decodeUnknownResult(query)({
+    const result = Schema.decodeResult(query)({
       "filter[age][gt]": "abc",
       "page[limit]": "1",
     });
@@ -1373,13 +1379,13 @@ describe("Query.schema with filter: true", () => {
   });
 
   it("rejects a malformed or bare filter key instead of dropping it", () => {
-    for (const key of ["filter[status]x", "filter[", "filter"]) {
-      const result = Schema.decodeUnknownResult(query)({ [key]: "open", "page[limit]": "1" });
+    Arr.forEach(["filter[status]x", "filter[", "filter"], (key) => {
+      const result = Schema.decodeResult(query)({ [key]: "open", "page[limit]": "1" });
       assert(Result.isFailure(result));
       const [issue] = SchemaIssue.makeFormatterStandardSchemaV1()(result.failure.issue).issues;
       expect(issue?.path).toEqual([key]);
       expect(issue?.message).toMatch(/^Malformed filter key/);
-    }
+    });
     // a parameter that merely starts with "filter" is not the family
     expect(decodeQuery({ filters: "x", filtering: "y" })).toEqual({});
   });
@@ -1515,13 +1521,17 @@ describe("Endpoint.list with filter: true, end to end", () => {
   });
 
   it("answers 400 with source.parameter for a malformed or bare filter key", async () => {
-    for (const key of ["filter[status]x", "filter"]) {
+    const check = async (key: string) => {
       const response = await request(`http://localhost/articles?${key}=open`);
       expect(response.status).toBe(400);
       expect(response.body.errors).toHaveLength(1);
       expect(response.body.errors[0].source).toEqual({ parameter: key });
       expect(response.body.errors[0].detail).toMatch(/^Malformed filter key/);
-    }
+    };
+    // One request after another, in order.
+    await Arr.reduce(["filter[status]x", "filter"], Promise.resolve(), (previous, key) =>
+      previous.then(() => check(key)),
+    );
   });
 
   it("decodes through BadRequest.wire with the detail (client side)", async () => {
@@ -1567,9 +1577,9 @@ describe("Endpoint.list with filter: true, end to end", () => {
 
   it("decodes through the endpoint's query schema directly", () => {
     const listQuery = list.query as Schema.Codec<any, any>;
-    expect(Schema.decodeUnknownSync(listQuery)({ "filter[priority]": "2,1" })).toEqual({
+    expect(Schema.decodeSync(listQuery)({ "filter[priority]": "2,1" })).toEqual({
       filter: Filter.isIn("priority", [1, 2]),
     });
-    expect(() => Schema.decodeUnknownSync(listQuery)({ "filter[body]": "x" })).toThrow();
+    expect(() => Schema.decodeSync(listQuery)({ "filter[body]": "x" })).toThrow();
   });
 });

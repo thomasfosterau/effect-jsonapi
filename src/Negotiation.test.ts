@@ -395,9 +395,12 @@ describe("onExplicitRefusal", () => {
 
 describe("isMutatingMethod", () => {
   it("classifies mutating methods", () => {
-    for (const m of ["POST", "put", "Patch", "DELETE"])
+    Arr.forEach(["POST", "put", "Patch", "DELETE"], (m) => {
       expect(Negotiation.isMutatingMethod(m)).toBe(true);
-    for (const m of ["GET", "HEAD", "OPTIONS"]) expect(Negotiation.isMutatingMethod(m)).toBe(false);
+    });
+    Arr.forEach(["GET", "HEAD", "OPTIONS"], (m) => {
+      expect(Negotiation.isMutatingMethod(m)).toBe(false);
+    });
   });
 });
 

@@ -1,5 +1,5 @@
 import * as DateTime from "effect/DateTime";
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Brand from "effect/Brand";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
@@ -83,7 +83,7 @@ const Author = Resource("authors", {
 
 describe("Resource", () => {
   it("is itself the resource object schema", () => {
-    const decoded = Schema.decodeUnknownSync(Article)({
+    const decoded = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -128,7 +128,7 @@ describe("Resource", () => {
   });
 
   it("derives the resource identifier schema", () => {
-    const decoded = Schema.decodeUnknownSync(Article.identifier)({ type: "articles", id: "1" });
+    const decoded = Schema.decodeSync(Article.identifier)({ type: "articles", id: "1" });
     expect(decoded).toEqual({ type: "articles", id: "1" });
     expect(() =>
       Schema.decodeUnknownSync(Article.identifier)({ type: "people", id: "1" }),
@@ -136,7 +136,7 @@ describe("Resource", () => {
   });
 
   it("encodes decoded resources back to wire form", () => {
-    const decoded = Schema.decodeUnknownSync(Article)({
+    const decoded = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -160,7 +160,7 @@ describe("Resource", () => {
 
 describe("Resource.createPayload", () => {
   it("accepts a payload without id", () => {
-    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+    const decoded = Schema.decodeSync(Article.createPayload)({
       data: {
         type: "articles",
         attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -170,7 +170,7 @@ describe("Resource.createPayload", () => {
   });
 
   it("accepts a payload with a client-generated lid", () => {
-    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+    const decoded = Schema.decodeSync(Article.createPayload)({
       data: {
         type: "articles",
         lid: "temp-1",
@@ -219,7 +219,7 @@ describe("Resource.createPayload", () => {
       }),
     ).toThrow();
 
-    const decoded = Schema.decodeUnknownSync(Comment.createPayload)({
+    const decoded = Schema.decodeSync(Comment.createPayload)({
       data: {
         type: "comments",
         attributes: { body: "Nice" },
@@ -243,7 +243,7 @@ describe("Resource.createPayload", () => {
 
   it("keeps relationships optional when the resource has no `one` relationship", () => {
     // Article only has `optional` / `many` relationships.
-    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+    const decoded = Schema.decodeSync(Article.createPayload)({
       data: {
         type: "articles",
         attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -271,7 +271,7 @@ describe("Resource.createPayload", () => {
     ).toThrow();
 
     // Without the paginated key the payload decodes (profile is required).
-    const decoded = Schema.decodeUnknownSync(Author.createPayload)({
+    const decoded = Schema.decodeSync(Author.createPayload)({
       data: {
         type: "authors",
         attributes: { name: "Dan" },
@@ -287,7 +287,7 @@ describe("Resource.createPayload", () => {
 
 describe("Resource.updatePayload", () => {
   it("requires id and accepts partial attributes", () => {
-    const decoded = Schema.decodeUnknownSync(Article.updatePayload)({
+    const decoded = Schema.decodeSync(Article.updatePayload)({
       data: {
         type: "articles",
         id: "1",
@@ -308,7 +308,7 @@ describe("Resource.updatePayload", () => {
 
   it("keeps all relationships optional (PATCH semantics), even `one`", () => {
     // Omitting a required relationship in a PATCH means "leave it unchanged".
-    const decoded = Schema.decodeUnknownSync(Comment.updatePayload)({
+    const decoded = Schema.decodeSync(Comment.updatePayload)({
       data: { type: "comments", id: "5", attributes: { body: "Updated" } },
     });
     expect(decoded.data.relationships).toBeUndefined();
@@ -345,7 +345,7 @@ describe("Resource.updatePayload", () => {
 
 describe("Resource relationships", () => {
   it("optional accepts null data (empty linkage)", () => {
-    const decoded = Schema.decodeUnknownSync(Article)({
+    const decoded = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -384,7 +384,7 @@ describe("Resource relationships", () => {
   });
 
   it("paginated carries only links (no inline data)", () => {
-    const decoded = Schema.decodeUnknownSync(Author)({
+    const decoded = Schema.decodeSync(Author)({
       type: "authors",
       id: "7",
       attributes: { name: "Dan" },
@@ -395,7 +395,8 @@ describe("Resource relationships", () => {
     });
     expect(decoded.relationships?.posts.links.related).toBe("/authors/7/posts");
     expect(decoded.relationships?.posts.meta?.count).toBe(42);
-    expectTypeOf(decoded.relationships!.posts).not.toHaveProperty("data");
+    assert(decoded.relationships !== undefined);
+    expectTypeOf(decoded.relationships.posts).not.toHaveProperty("data");
   });
 
   it("rejects relationship identifiers of the wrong type", () => {
@@ -422,7 +423,7 @@ describe("Resource relationships", () => {
 describe("Resource.document / Resource.collection", () => {
   it("document produces non-null primary data", () => {
     const doc = Article.document();
-    const withData = Schema.decodeUnknownSync(doc)({
+    const withData = Schema.decodeSync(doc)({
       data: {
         type: "articles",
         id: "1",
@@ -437,14 +438,14 @@ describe("Resource.document / Resource.collection", () => {
 
   it("collection requires array data", () => {
     const doc = Article.collection();
-    const decoded = Schema.decodeUnknownSync(doc)({ data: [] });
+    const decoded = Schema.decodeSync(doc)({ data: [] });
     expect(decoded.data).toEqual([]);
     expect(() => Schema.decodeUnknownSync(doc)({ data: null })).toThrow();
   });
 
   it("included union is derived from the relationship graph (one hop)", () => {
     const doc = Article.document();
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: {
         type: "articles",
         id: "1",
@@ -505,7 +506,7 @@ describe("Resource.document / Resource.collection", () => {
     ).toThrow();
 
     // The linkable target (Person) still works.
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: {
         type: "authors",
         id: "7",
@@ -522,7 +523,7 @@ describe("Resource.document / Resource.collection", () => {
 
   it("included can be overridden explicitly for deeper compound documents", () => {
     const doc = Article.document({ included: Schema.Union([Person, Comment]) });
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: {
         type: "articles",
         id: "1",
@@ -534,7 +535,7 @@ describe("Resource.document / Resource.collection", () => {
   });
 
   it("typed resource meta flows into documents", () => {
-    const decoded = Schema.decodeUnknownSync(Article)({
+    const decoded = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hello", body: "World", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -547,7 +548,7 @@ describe("Resource.document / Resource.collection", () => {
   it("document meta can be overridden per document", () => {
     const PageMeta = Schema.Struct({ total: Schema.Int });
     const doc = Article.collection({ meta: PageMeta });
-    const decoded = Schema.decodeUnknownSync(doc)({ data: [], meta: { total: 0 } });
+    const decoded = Schema.decodeSync(doc)({ data: [], meta: { total: 0 } });
     expect(decoded.meta?.total).toBe(0);
   });
 });
@@ -569,7 +570,7 @@ describe("DataDocument nullability is compositional", () => {
 
   it("NullOr: `data` is `resource | null` and round-trips `null` on the wire", () => {
     const doc = DataDocument(Schema.NullOr(Article));
-    const decoded = Schema.decodeUnknownSync(doc)({ data: null });
+    const decoded = Schema.decodeSync(doc)({ data: null });
     expect(decoded.data).toBeNull();
     expectTypeOf(decoded.data).toEqualTypeOf<typeof Article.Type | null>();
     expect(Schema.encodeUnknownSync(doc)({ data: null })).toEqual({ data: null });
@@ -577,7 +578,7 @@ describe("DataDocument nullability is compositional", () => {
 
   it("OptionFromNullOr: `data` is `Option<resource>`, encoding `None ⇆ null`", () => {
     const doc = DataDocument(Article.nullable());
-    const none = Schema.decodeUnknownSync(doc)({ data: null });
+    const none = Schema.decodeSync(doc)({ data: null });
     expect(Option.isNone(none.data)).toBe(true);
     const some = Schema.decodeUnknownSync(doc)({ data: article });
     expect(Option.isSome(some.data)).toBe(true);
@@ -590,12 +591,12 @@ describe("DataDocument nullability is compositional", () => {
     const doc = DataDocument(
       Schema.NullOr(Schema.Union([Comment.identifier, Schema.Array(Comment.identifier)])),
     );
-    expect(Schema.decodeUnknownSync(doc)({ data: null }).data).toBeNull();
-    expect(Schema.decodeUnknownSync(doc)({ data: { type: "comments", id: "5" } }).data).toEqual({
+    expect(Schema.decodeSync(doc)({ data: null }).data).toBeNull();
+    expect(Schema.decodeSync(doc)({ data: { type: "comments", id: "5" } }).data).toEqual({
       type: "comments",
       id: "5",
     });
-    expect(Schema.decodeUnknownSync(doc)({ data: [{ type: "comments", id: "5" }] }).data).toEqual([
+    expect(Schema.decodeSync(doc)({ data: [{ type: "comments", id: "5" }] }).data).toEqual([
       { type: "comments", id: "5" },
     ]);
   });
@@ -607,7 +608,7 @@ describe("DataDocument nullability is compositional", () => {
     const doc = DataDocument(Schema.NullOr(Article), {
       included: Schema.Union([Person, Comment]),
     });
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: null,
       included: [{ type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } }],
     });
@@ -626,7 +627,7 @@ describe("DataDocument nullability is compositional", () => {
 describe("Resource without relationships", () => {
   it("decodes documents without included", () => {
     const doc = Person.document();
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } },
     });
     expect(decoded.data.attributes.firstName).toBe("John");
@@ -656,7 +657,7 @@ describe("Resource.ref", () => {
   });
 
   it("refs validate against the identifier schema", () => {
-    const decoded = Schema.decodeUnknownSync(Article.identifier)(Article.ref("1"));
+    const decoded = Schema.decodeSync(Article.identifier)(Article.ref("1"));
     expect(decoded.id).toBe("1");
   });
 });
@@ -668,7 +669,7 @@ describe("heterogeneous (union) documents", () => {
 
   it("single-resource documents accept a union of resources", () => {
     const doc = DataDocument(FeedItem);
-    const asArticle = Schema.decodeUnknownSync(doc)({
+    const asArticle = Schema.decodeSync(doc)({
       data: {
         type: "articles",
         id: "1",
@@ -677,7 +678,7 @@ describe("heterogeneous (union) documents", () => {
     });
     expect(asArticle.data.type).toBe("articles");
 
-    const asPerson = Schema.decodeUnknownSync(doc)({
+    const asPerson = Schema.decodeSync(doc)({
       data: { type: "people", id: "9", attributes: { firstName: "John", lastName: "Doe" } },
     });
     expect(asPerson.data.type).toBe("people");
@@ -685,7 +686,7 @@ describe("heterogeneous (union) documents", () => {
 
   it("collection documents accept mixed resource types", () => {
     const feed = CollectionDocument(FeedItem);
-    const decoded = Schema.decodeUnknownSync(feed)({
+    const decoded = Schema.decodeSync(feed)({
       data: [
         {
           type: "articles",
@@ -716,7 +717,7 @@ describe("heterogeneous (union) documents", () => {
 describe("Identifier", () => {
   it("can be used standalone", () => {
     const PersonIdentifier = Identifier("people");
-    const decoded = Schema.decodeUnknownSync(PersonIdentifier)({ type: "people", id: "9" });
+    const decoded = Schema.decodeSync(PersonIdentifier)({ type: "people", id: "9" });
     expect(decoded.id).toBe("9");
   });
 });
@@ -733,7 +734,7 @@ describe("forward references", () => {
     });
     expect(Tag.relationships.posts.ref().type).toBe("posts");
     const doc = Tag.document();
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: {
         type: "tags",
         id: "1",
@@ -770,7 +771,7 @@ describe("type-level guarantees", () => {
 
 describe("AnyMeta", () => {
   it("accepts arbitrary records", () => {
-    const decoded = Schema.decodeUnknownSync(AnyMeta)({ anything: [1, 2, 3], nested: { a: true } });
+    const decoded = Schema.decodeSync(AnyMeta)({ anything: [1, 2, 3], nested: { a: true } });
     expect(decoded.anything).toEqual([1, 2, 3]);
   });
 });
@@ -780,14 +781,14 @@ describe("Resource.attributes / Resource.relationships", () => {
     const fields = attributesOf(Article);
     expect(Object.keys(fields)).toEqual(["title", "body", "createdAt"]);
     // the extracted schemas are the ones the resource was defined with
-    expect(Schema.decodeUnknownSync(fields.title)("Hello")).toBe("Hello");
+    expect(Schema.decodeSync(fields.title)("Hello")).toBe("Hello");
   });
 
   it("attributes can be spread into a new resource definition", () => {
     const Profile = Resource("profiles", {
       attributes: { ...attributesOf(Person), bio: Schema.String },
     });
-    const decoded = Schema.decodeUnknownSync(Profile)({
+    const decoded = Schema.decodeSync(Profile)({
       type: "profiles",
       id: "1",
       attributes: { firstName: "John", lastName: "Doe", bio: "hi" },
@@ -834,7 +835,7 @@ describe("Resource.extend", () => {
   });
 
   it("inherits the base attributes and relationships, adding its own", () => {
-    const decoded = Schema.decodeUnknownSync(Admin)({
+    const decoded = Schema.decodeSync(Admin)({
       type: "admins",
       id: "1",
       attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: ["write"] },
@@ -869,7 +870,7 @@ describe("Resource.extend", () => {
       }),
     ).toThrow();
 
-    const decoded = Schema.decodeUnknownSync(Admin.createPayload)({
+    const decoded = Schema.decodeSync(Admin.createPayload)({
       data: {
         type: "admins",
         attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: [] },
@@ -880,7 +881,7 @@ describe("Resource.extend", () => {
   });
 
   it("inherits the base meta by default", () => {
-    const decoded = Schema.decodeUnknownSync(Admin)({
+    const decoded = Schema.decodeSync(Admin)({
       type: "admins",
       id: "1",
       attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z", permissions: [] },
@@ -894,7 +895,7 @@ describe("Resource.extend", () => {
     const Flagged = extend(Account, "flagged", {
       meta: Schema.Struct({ isFlagged: Schema.Boolean }),
     });
-    const decoded = Schema.decodeUnknownSync(Flagged)({
+    const decoded = Schema.decodeSync(Flagged)({
       type: "flagged",
       id: "1",
       attributes: { email: "a@b.c", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -907,7 +908,7 @@ describe("Resource.extend", () => {
     const Restricted = extend(Account, "restricted", {
       attributes: { email: Schema.Literal("fixed@example.com") },
     });
-    const decoded = Schema.decodeUnknownSync(Restricted)({
+    const decoded = Schema.decodeSync(Restricted)({
       type: "restricted",
       id: "1",
       attributes: { email: "fixed@example.com", createdAt: "2024-01-01T00:00:00.000Z" },
@@ -924,7 +925,7 @@ describe("Resource.extend", () => {
 
   it("extends with attributes only (relationships optional)", () => {
     const Named = extend(Person, "named", { attributes: { nickname: Schema.String } });
-    const decoded = Schema.decodeUnknownSync(Named)({
+    const decoded = Schema.decodeSync(Named)({
       type: "named",
       id: "1",
       attributes: { firstName: "John", lastName: "Doe", nickname: "JD" },
@@ -937,7 +938,7 @@ describe("Resource.extend", () => {
     // Admin's linkable targets: Person (inherited `profile`) and Account (added `manages`).
     expect(directTargets(Admin).map((target) => target.type)).toEqual(["people", "accounts"]);
     const doc = Admin.document();
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: {
         type: "admins",
         id: "1",
@@ -980,7 +981,7 @@ describe("Resource custom id injection", () => {
 
   it("uses the injected id schema as the resource's Id", () => {
     expectTypeOf<typeof Person.Id>().toEqualTypeOf<typeof PersonId>();
-    const decoded = Schema.decodeUnknownSync(Person)({
+    const decoded = Schema.decodeSync(Person)({
       type: "people",
       id: "9",
       attributes: { name: "Dan" },
@@ -992,7 +993,7 @@ describe("Resource custom id injection", () => {
 
   it("threads the injected id through the identifier", () => {
     expectTypeOf<(typeof Person.identifier.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>();
-    const decoded = Schema.decodeUnknownSync(Person.identifier)({ type: "people", id: "9" });
+    const decoded = Schema.decodeSync(Person.identifier)({ type: "people", id: "9" });
     expect(decoded).toEqual({ type: "people", id: "9" });
   });
 
@@ -1012,7 +1013,7 @@ describe("Resource custom id injection", () => {
 
   it("Identifier accepts a custom id schema standalone", () => {
     const PersonIdentifier = Identifier("people", PersonId);
-    const decoded = Schema.decodeUnknownSync(PersonIdentifier)({ type: "people", id: "9" });
+    const decoded = Schema.decodeSync(PersonIdentifier)({ type: "people", id: "9" });
     expect(decoded.id).toBe("9");
     expectTypeOf<(typeof PersonIdentifier.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>();
   });
@@ -1027,7 +1028,7 @@ describe("Resource custom id injection", () => {
 
   it("can be extended (the new type gets its own default id)", () => {
     const Member = extend(Person, "members", { attributes: { role: Schema.String } });
-    const decoded = Schema.decodeUnknownSync(Member)({
+    const decoded = Schema.decodeSync(Member)({
       type: "members",
       id: "1",
       attributes: { name: "Dan", role: "admin" },
@@ -1036,7 +1037,7 @@ describe("Resource custom id injection", () => {
   });
 
   it("create payload still carries no id member (server-assigned), custom id or not", () => {
-    const decoded = Schema.decodeUnknownSync(Person.createPayload)({
+    const decoded = Schema.decodeSync(Person.createPayload)({
       data: { type: "people", attributes: { name: "Dan" } },
     });
     expect("id" in decoded.data).toBe(false);
@@ -1149,7 +1150,7 @@ describe("Resource flat inputs", () => {
   });
 
   it("createInput is a flat attributes struct (no JSON:API envelope)", () => {
-    const decoded = Schema.decodeUnknownSync(Person.createInput)({ name: "Dan", bio: null });
+    const decoded = Schema.decodeSync(Person.createInput)({ name: "Dan", bio: null });
     expect(decoded).toEqual({ name: "Dan", bio: null });
     expectTypeOf<typeof Person.createInput.Type>().toEqualTypeOf<{
       readonly name: string;
@@ -1158,11 +1159,11 @@ describe("Resource flat inputs", () => {
   });
 
   it("updateInput is flat: id plus tri-state attributes", () => {
-    const decoded = Schema.decodeUnknownSync(Person.updateInput)({ id: "1", bio: null });
+    const decoded = Schema.decodeSync(Person.updateInput)({ id: "1", bio: null });
     expect(decoded.id).toBe("1");
     expect(decoded.bio).toBeNull();
     // omitting an attribute leaves it unchanged
-    const minimal = Schema.decodeUnknownSync(Person.updateInput)({ id: "1" });
+    const minimal = Schema.decodeSync(Person.updateInput)({ id: "1" });
     expect("name" in minimal).toBe(false);
     // the id carries the injected brand; nullable attribute is value | null | undefined
     expectTypeOf<(typeof Person.updateInput.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>();
@@ -1248,7 +1249,7 @@ describe("Resource.extend custom id injection", () => {
   it("still inherits the base's attributes and relationships", () => {
     expect(attributeKeys(Admin)).toEqual(["email", "level"]);
     expect(Object.keys(Admin.relationships)).toEqual(["organisation"]);
-    const decoded = Schema.decodeUnknownSync(Admin)({
+    const decoded = Schema.decodeSync(Admin)({
       type: "admins",
       id: "1",
       attributes: { email: "a@example.com", level: 3 },
@@ -1266,20 +1267,20 @@ describe("Resource.extend custom id injection", () => {
 
   it("threads the injected id through the identifier, update payload and documents", () => {
     expectTypeOf<(typeof Admin.identifier.Type)["id"]>().toEqualTypeOf<typeof AdminId.Type>();
-    const identifier = Schema.decodeUnknownSync(Admin.identifier)({ type: "admins", id: "1" });
+    const identifier = Schema.decodeSync(Admin.identifier)({ type: "admins", id: "1" });
     expect(identifier).toEqual({ type: "admins", id: "1" });
 
     expectTypeOf<(typeof Admin.updatePayload.Type)["data"]["id"]>().toEqualTypeOf<
       typeof AdminId.Type
     >();
-    const update = Schema.decodeUnknownSync(Admin.updatePayload)({
+    const update = Schema.decodeSync(Admin.updatePayload)({
       data: { type: "admins", id: "1", attributes: { level: 4 } },
     });
     expect(update.data.id).toBe("1");
 
     const doc = Admin.document();
     expectTypeOf<(typeof doc.Type)["data"]["id"]>().toEqualTypeOf<typeof AdminId.Type>();
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: { type: "admins", id: "1", attributes: { email: "a@example.com", level: 3 } },
     });
     expect(decoded.data.id).toBe("1");
@@ -1340,7 +1341,7 @@ describe("Resource.readOnlyAttribute", () => {
   });
 
   it("keeps read-only attributes in the resource object schema", () => {
-    const decoded = Schema.decodeUnknownSync(Post)({
+    const decoded = Schema.decodeSync(Post)({
       type: "posts",
       id: "1",
       attributes: { title: "Hello", createdAt: at("2024-01-01"), updatedAt: null },
@@ -1365,7 +1366,7 @@ describe("Resource.readOnlyAttribute", () => {
     type DocAttrs = (typeof Doc.Type)["data"]["attributes"];
     expectTypeOf<DocAttrs["createdAt"]>().toEqualTypeOf<Date>();
     expectTypeOf<DocAttrs["updatedAt"]>().toEqualTypeOf<Date | null>();
-    const decoded = Schema.decodeUnknownSync(Doc)({
+    const decoded = Schema.decodeSync(Doc)({
       data: {
         type: "posts",
         id: "1",
@@ -1382,7 +1383,7 @@ describe("Resource.readOnlyAttribute", () => {
     expectTypeOf<CreateAttrs>().not.toHaveProperty("createdAt");
     expectTypeOf<CreateAttrs>().not.toHaveProperty("updatedAt");
     // a create body that omits the server-set attributes decodes cleanly
-    const decoded = Schema.decodeUnknownSync(Post.createPayload)({
+    const decoded = Schema.decodeSync(Post.createPayload)({
       data: {
         type: "posts",
         attributes: { title: "Hello" },
@@ -1408,7 +1409,7 @@ describe("Resource.readOnlyAttribute", () => {
     expectTypeOf<UpdateAttrs>().toHaveProperty("title");
     expectTypeOf<UpdateAttrs>().not.toHaveProperty("createdAt");
     expectTypeOf<UpdateAttrs>().not.toHaveProperty("updatedAt");
-    const decoded = Schema.decodeUnknownSync(Post.updatePayload)({
+    const decoded = Schema.decodeSync(Post.updatePayload)({
       data: { type: "posts", id: "1", attributes: { title: "Renamed" } },
     });
     expect(decoded.data.attributes).toEqual({ title: "Renamed" });
@@ -1426,9 +1427,9 @@ describe("Resource.readOnlyAttribute", () => {
     expectTypeOf<UpdateIn>().not.toHaveProperty("createdAt");
     expectTypeOf<UpdateIn>().not.toHaveProperty("updatedAt");
 
-    const createIn = Schema.decodeUnknownSync(Post.createInput)({ title: "Hello" });
+    const createIn = Schema.decodeSync(Post.createInput)({ title: "Hello" });
     expect(createIn).toEqual({ title: "Hello" });
-    const updateIn = Schema.decodeUnknownSync(Post.updateInput)({ id: "1", title: "Renamed" });
+    const updateIn = Schema.decodeSync(Post.updateInput)({ id: "1", title: "Renamed" });
     expect(updateIn).toEqual({ id: "1", title: "Renamed" });
   });
 
@@ -1450,7 +1451,7 @@ describe("Resource.readOnlyAttribute", () => {
     expectTypeOf<CreateAttrs>().toHaveProperty("body");
     expectTypeOf<CreateAttrs>().not.toHaveProperty("createdAt");
     expectTypeOf<CreateAttrs>().not.toHaveProperty("updatedAt");
-    const decoded = Schema.decodeUnknownSync(Article.createPayload)({
+    const decoded = Schema.decodeSync(Article.createPayload)({
       data: {
         type: "articles",
         attributes: { title: "Hello", body: "World" },
@@ -1492,7 +1493,7 @@ describe("Resource.attribute", () => {
       "status",
     ]);
     // `resource: "optional"` makes the key optional on the resource object
-    const decoded = Schema.decodeUnknownSync(Widget)({
+    const decoded = Schema.decodeSync(Widget)({
       type: "widgets",
       id: "1",
       attributes: {
@@ -1521,7 +1522,7 @@ describe("Resource.attribute", () => {
     expectTypeOf<CreateAttrs["summary"]>().toEqualTypeOf<string | null | undefined>();
     expectTypeOf<CreateAttrs["nickname"]>().toEqualTypeOf<string | undefined>();
 
-    const decoded = Schema.decodeUnknownSync(Widget.createPayload)({
+    const decoded = Schema.decodeSync(Widget.createPayload)({
       data: { type: "widgets", attributes: { name: "x", slug: "s", status: "ok" } },
     });
     expect(decoded.data.attributes).toEqual({ name: "x", slug: "s", status: "ok" });
@@ -1537,7 +1538,7 @@ describe("Resource.attribute", () => {
     expectTypeOf<UpdateAttrs>().toHaveProperty("summary");
     expectTypeOf<UpdateAttrs>().toHaveProperty("status");
 
-    const decoded = Schema.decodeUnknownSync(Widget.updatePayload)({
+    const decoded = Schema.decodeSync(Widget.updatePayload)({
       data: { type: "widgets", id: "1", attributes: { name: "y", summary: null } },
     });
     expect(decoded.data.attributes).toEqual({ name: "y", summary: null });
@@ -1545,7 +1546,7 @@ describe("Resource.attribute", () => {
 
   it("clears a clearable attribute with null but rejects null for a non-clearable one", () => {
     // `summary` is clearable (nullable, default) → null accepted
-    const cleared = Schema.decodeUnknownSync(Widget.updatePayload)({
+    const cleared = Schema.decodeSync(Widget.updatePayload)({
       data: { type: "widgets", id: "1", attributes: { summary: null } },
     });
     expect(cleared.data.attributes?.summary).toBeNull();
@@ -1555,7 +1556,7 @@ describe("Resource.attribute", () => {
         data: { type: "widgets", id: "1", attributes: { status: null } },
       }),
     ).toThrow();
-    const set = Schema.decodeUnknownSync(Widget.updatePayload)({
+    const set = Schema.decodeSync(Widget.updatePayload)({
       data: { type: "widgets", id: "1", attributes: { status: "active" } },
     });
     expect(set.data.attributes?.status).toBe("active");
@@ -1571,7 +1572,7 @@ describe("Resource.attribute", () => {
     });
     type UpdateAttrs = NonNullable<(typeof R.updatePayload.Type)["data"]["attributes"]>;
     expectTypeOf<UpdateAttrs["bio"]>().toEqualTypeOf<string | null | undefined>();
-    const decoded = Schema.decodeUnknownSync(R.updatePayload)({
+    const decoded = Schema.decodeSync(R.updatePayload)({
       data: { type: "clears", id: "1", attributes: { bio: null } },
     });
     expect(decoded.data.attributes?.bio).toBeNull();
@@ -1587,13 +1588,13 @@ describe("Resource.attribute", () => {
     expectTypeOf<UpdateIn>().not.toHaveProperty("createdAt");
     expectTypeOf<UpdateIn>().not.toHaveProperty("slug");
 
-    const createIn = Schema.decodeUnknownSync(Widget.createInput)({
+    const createIn = Schema.decodeSync(Widget.createInput)({
       name: "x",
       slug: "s",
       status: "ok",
     });
     expect(createIn).toEqual({ name: "x", slug: "s", status: "ok" });
-    const updateIn = Schema.decodeUnknownSync(Widget.updateInput)({ id: "1", name: "y" });
+    const updateIn = Schema.decodeSync(Widget.updateInput)({ id: "1", name: "y" });
     expect(updateIn).toEqual({ id: "1", name: "y" });
   });
 
@@ -1685,7 +1686,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
     type CreateAttrs = (typeof Upload.createPayload.Type)["data"]["attributes"];
     expectTypeOf<CreateAttrs>().toEqualTypeOf<CreateIn>();
 
-    const input = Schema.decodeUnknownSync(Upload.createInput)({
+    const input = Schema.decodeSync(Upload.createInput)({
       fileName: "a.png",
       file: bytes,
       secret: "s",
@@ -1696,7 +1697,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
       Schema.decodeUnknownSync(Upload.createInput)({ fileName: "a.png", secret: "s" }),
     ).toThrow();
     // optional (`create: "optional"`): `note` may be present or absent
-    const withNote = Schema.decodeUnknownSync(Upload.createInput)({
+    const withNote = Schema.decodeSync(Upload.createInput)({
       fileName: "a.png",
       file: bytes,
       secret: "s",
@@ -1704,7 +1705,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
     });
     expect(withNote.note).toBe("n");
 
-    const payload = Schema.decodeUnknownSync(Upload.createPayload)({
+    const payload = Schema.decodeSync(Upload.createPayload)({
       data: { type: "uploads", attributes: { fileName: "a.png", file: bytes, secret: "s" } },
     });
     expect(payload.data.attributes).toEqual({ fileName: "a.png", file: bytes, secret: "s" });
@@ -1722,13 +1723,13 @@ describe("Resource.attribute with resource: false (input-only)", () => {
     expectTypeOf<UpdateAttrs>().toHaveProperty("secret");
     expectTypeOf<UpdateAttrs>().not.toHaveProperty("file");
 
-    const input = Schema.decodeUnknownSync(Upload.updateInput)({ id: "1", secret: "t" });
+    const input = Schema.decodeSync(Upload.updateInput)({ id: "1", secret: "t" });
     expect(input).toEqual({ id: "1", secret: "t" });
     // `file` on the wire is rejected at its path (#292)
     expect(
       issuesOf(Schema.decodeUnknownResult(Upload.updateInput)({ id: "1", file: bytes })),
     ).toEqual([{ path: ["file"], message: "Expected no excess property" }]);
-    const payload = Schema.decodeUnknownSync(Upload.updatePayload)({
+    const payload = Schema.decodeSync(Upload.updatePayload)({
       data: { type: "uploads", id: "1", attributes: { secret: "t" } },
     });
     expect(payload.data.attributes).toEqual({ secret: "t" });
@@ -1744,14 +1745,14 @@ describe("Resource.attribute with resource: false (input-only)", () => {
   it("keeps input-only attributes out of sparse fieldsets", () => {
     const fieldset = Query.Fieldset(Upload);
     expectTypeOf<typeof fieldset.Type>().toEqualTypeOf<ReadonlyArray<"fileName">>();
-    expect(Schema.decodeUnknownSync(fieldset)("fileName")).toEqual(["fileName"]);
-    expect(() => Schema.decodeUnknownSync(fieldset)("file")).toThrow();
+    expect(Schema.decodeSync(fieldset)("fileName")).toEqual(["fileName"]);
+    expect(() => Schema.decodeSync(fieldset)("file")).toThrow();
 
     const query = Query.schema(Upload, { fields: true });
-    expect(Schema.decodeUnknownSync(query)({ "fields[uploads]": "fileName" })).toEqual({
+    expect(Schema.decodeSync(query)({ "fields[uploads]": "fileName" })).toEqual({
       fields: { uploads: ["fileName"] },
     });
-    expect(() => Schema.decodeUnknownSync(query)({ "fields[uploads]": "fileName,file" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "fields[uploads]": "fileName,file" })).toThrow();
   });
 
   it("exposes the declared map through declaredAttributes, the resource-object map through attributes", () => {
@@ -1779,7 +1780,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
     expectTypeOf<CreateIn["file"]>().toEqualTypeOf<Uint8Array>();
     expectTypeOf<CreateIn>().toHaveProperty("width");
     expectTypeOf<(typeof Image.Type)["attributes"]>().not.toHaveProperty("file");
-    const input = Schema.decodeUnknownSync(Image.createInput)({
+    const input = Schema.decodeSync(Image.createInput)({
       fileName: "a.png",
       file: bytes,
       secret: "s",
@@ -1880,16 +1881,16 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
   });
 
   it("decodes an absent key, a value, and an explicit undefined through createInput", () => {
-    expect(Schema.decodeUnknownSync(Note.createInput)({ title: "t" })).toEqual({ title: "t" });
-    expect(Schema.decodeUnknownSync(Note.createInput)({ title: "t", body: "b" })).toEqual({
+    expect(Schema.decodeSync(Note.createInput)({ title: "t" })).toEqual({ title: "t" });
+    expect(Schema.decodeSync(Note.createInput)({ title: "t", body: "b" })).toEqual({
       title: "t",
       body: "b",
     });
-    const explicit = Schema.decodeUnknownSync(Note.createInput)({ title: "t", body: undefined });
+    const explicit = Schema.decodeSync(Note.createInput)({ title: "t", body: undefined });
     expect(explicit).toEqual({ title: "t", body: undefined });
     expect("body" in explicit).toBe(true);
     // the nullable one still takes null
-    expect(Schema.decodeUnknownSync(Note.createInput)({ title: "t", summary: null })).toEqual({
+    expect(Schema.decodeSync(Note.createInput)({ title: "t", summary: null })).toEqual({
       title: "t",
       summary: null,
     });
@@ -1921,11 +1922,11 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     type UpdateIn = typeof Note.updateInput.Type;
     expectTypeOf<UpdateIn["body"]>().toEqualTypeOf<string | undefined>();
     expectTypeOf<UpdateIn["summary"]>().toEqualTypeOf<string | null | undefined>();
-    expect(Schema.decodeUnknownSync(Note.updateInput)({ id: "1", body: undefined })).toEqual({
+    expect(Schema.decodeSync(Note.updateInput)({ id: "1", body: undefined })).toEqual({
       id: "1",
       body: undefined,
     });
-    expect(Schema.decodeUnknownSync(Note.updateInput)({ id: "1", summary: null })).toEqual({
+    expect(Schema.decodeSync(Note.updateInput)({ id: "1", summary: null })).toEqual({
       id: "1",
       summary: null,
     });
@@ -1963,16 +1964,16 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     }>();
 
     // runtime: absent, a value, an explicit undefined
-    expect(Schema.decodeUnknownSync(Profile.createInput)({ handle: "h" })).toEqual({ handle: "h" });
-    expect(Schema.decodeUnknownSync(Profile.createInput)({ handle: "h", bio: "b" })).toEqual({
+    expect(Schema.decodeSync(Profile.createInput)({ handle: "h" })).toEqual({ handle: "h" });
+    expect(Schema.decodeSync(Profile.createInput)({ handle: "h", bio: "b" })).toEqual({
       handle: "h",
       bio: "b",
     });
-    const explicit = Schema.decodeUnknownSync(Profile.createInput)({ handle: "h", bio: undefined });
+    const explicit = Schema.decodeSync(Profile.createInput)({ handle: "h", bio: undefined });
     expect(explicit).toEqual({ handle: "h", bio: undefined });
     expect("bio" in explicit).toBe(true);
     expect(
-      Schema.decodeUnknownSync(Profile.createPayload)({
+      Schema.decodeSync(Profile.createPayload)({
         data: { type: "profiles", attributes: { handle: "h", bio: undefined, motto: undefined } },
       }).data.attributes,
     ).toEqual({ handle: "h", bio: undefined, motto: undefined });
@@ -2034,7 +2035,7 @@ describe("Resource.annotate / Resource.annotations", () => {
     expect(annotated).toHaveProperty("nullable", expect.any(Function));
     // and it still decodes as the resource it is
     expect(
-      Schema.decodeUnknownSync(annotated)({ type: "widgets", id: "1", attributes: { name: "n" } }),
+      Schema.decodeSync(annotated)({ type: "widgets", id: "1", attributes: { name: "n" } }),
     ).toEqual({
       type: "widgets",
       id: "1",
@@ -2120,7 +2121,7 @@ describe("Resource.annotate / Resource.annotations", () => {
     expect(annotations(directTargets(Post)[0])[Table]).toBe("authors");
 
     // linkage decodes against the annotated target's identifier
-    const decoded = Schema.decodeUnknownSync(Post)({
+    const decoded = Schema.decodeSync(Post)({
       type: "posts",
       id: "1",
       attributes: { title: "T" },
@@ -2143,7 +2144,7 @@ describe("Resource.annotate / Resource.annotations", () => {
     ).toThrow();
 
     // and the annotated target is what the compound document includes
-    const document = Schema.decodeUnknownSync(Post.document())({
+    const document = Schema.decodeSync(Post.document())({
       data: {
         type: "posts",
         id: "1",
@@ -2253,11 +2254,11 @@ describe("Resource.attributeDescriptors", () => {
 
   it("hands over the attribute's own schema and annotation bag", () => {
     // the declared schema, with any key-optionality wrapper removed …
-    expect(Schema.decodeUnknownSync(byKey.caption.schema)("c")).toBe("c");
-    expect(Schema.decodeUnknownSync(byKey.summary.schema)(null)).toBeNull();
-    expect(
-      Schema.decodeUnknownSync(byKey.createdAt.schema)("2024-01-02T03:04:05.000Z"),
-    ).toBeInstanceOf(Date);
+    expect(Schema.decodeSync(byKey.caption.schema)("c")).toBe("c");
+    expect(Schema.decodeSync(byKey.summary.schema)(null)).toBeNull();
+    expect(Schema.decodeSync(byKey.createdAt.schema)("2024-01-02T03:04:05.000Z")).toBeInstanceOf(
+      Date,
+    );
     // … and the same annotation bag `attributeAnnotations` reports
     expect(byKey.bio.annotations?.dbColumn).toBe("biography");
     expect(byKey.bio.annotations).toBe(attributeAnnotations(Thing).bio);

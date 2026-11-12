@@ -92,7 +92,7 @@ const admitted = (
 ): ReadonlyArray<WireType> =>
   types.filter((type) =>
     Exit.isSuccess(
-      Schema.decodeUnknownExit(successOf(endpoint))(
+      Schema.decodeExit(successOf(endpoint))(
         { data, included: [wire[type]] },
         { onExcessProperty: "error" },
       ),
@@ -108,7 +108,7 @@ const decodesInto = (
 ): boolean => {
   // SAFETY: every endpoint under test declares a query codec.
   const query = endpoint.query as Schema.Codec<unknown, unknown>;
-  const decoded = Schema.decodeUnknownExit(query)(input);
+  const decoded = Schema.decodeExit(query)(input);
   return (
     Exit.isSuccess(decoded) &&
     // SAFETY: a query codec decodes to a struct.
@@ -142,7 +142,7 @@ const admitsPartial = (
   type: WireType,
 ): boolean =>
   Exit.isSuccess(
-    Schema.decodeUnknownExit(successOf(endpoint))(
+    Schema.decodeExit(successOf(endpoint))(
       { data, included: [{ ...wire[type], attributes: {} }] },
       { onExcessProperty: "error" },
     ),
@@ -161,10 +161,7 @@ describe("`Endpoint.resource`'s `relationshipInclude` (#484)", () => {
     expect(accepts(comments, "comments")).toBe(false);
     expect(admitted(comments, commentIds)).toEqual([]);
     expect(
-      Schema.decodeUnknownSync(successOf(comments))(
-        { data: commentIds },
-        { onExcessProperty: "error" },
-      ),
+      Schema.decodeSync(successOf(comments))({ data: commentIds }, { onExcessProperty: "error" }),
     ).toEqual({ data: commentIds });
     // The `related` endpoints keep their own `include`.
     expect(accepts(named(endpoints, "comments"), "author")).toBe(true);

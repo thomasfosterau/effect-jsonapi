@@ -101,6 +101,7 @@ import type {
   IncludePathsTo,
 } from "./Resource.js";
 import { attributeKeys, fieldKeys, filterable } from "./Resource.js";
+import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
 // Pagination strategies
@@ -486,7 +487,9 @@ export const bracketKeys =
     )[BRACKETED];
     const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>);
     const mapping = { ...state?.mapping };
-    for (const key of keys) mapping[key] = `${prefix}[${key}]`;
+    Arr.forEach(keys, (key) => {
+      mapping[key] = `${prefix}[${key}]`;
+    });
     const wire = struct.pipe(Schema.encodeKeys(mapping));
     return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
       BracketedBase<S>,
@@ -1348,8 +1351,7 @@ const encodeFilterNode = (
     }),
   );
 
-const messageOf = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : String(cause);
+const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message : String(cause));
 
 /**
  * Creates the `filter` codec for one resource: the filter grammar
@@ -1705,8 +1707,7 @@ const fieldsetTargetsOf = (
   if (fields === true) return targets;
   const unknown = fields.filter((type) => !targets.some((target) => target.type === type));
   if (Arr.isReadonlyArrayNonEmpty(unknown)) {
-    // oxlint-disable-next-line effect/avoid-untagged-errors -- a construction-time programmer error, thrown while the api is declared, never an Effect failure
-    throw new Error(
+    throw declarationError(
       `Query.schema: \`fields\` names ${unknown.map((type) => `"${type}"`).join(", ")}, ` +
         `which the endpoint's response cannot carry; it can carry ${targets.map((target) => `"${target.type}"`).join(", ")}`,
     );
@@ -1815,16 +1816,16 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
 
   if (options.page !== undefined) {
     nestedFields.page = Schema.optionalKey(Schema.Struct(options.page));
-    for (const key of Object.keys(options.page)) {
+    Arr.forEach(Object.keys(options.page), (key) => {
       flatFields[`page[${key}]`] = Schema.optionalKey(Schema.String);
-    }
+    });
   }
 
   // The grammar's field declaration, when `filter: true` is on.
   let filterFields: FieldCodecs | undefined;
   if (options.filter === true) {
     if (resources.length !== 1) {
-      throw new Error(
+      throw declarationError(
         "Query.schema: `filter: true` derives the filter grammar from one resource's declaration; " +
           "a heterogeneous endpoint (several resources) must use the per-key `filter: { … }` map instead",
       );
@@ -1847,9 +1848,9 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
     flatFields.filter = Schema.optionalKey(FilterWireValue);
   } else if (P.isObjectOrArray(options.filter)) {
     nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter));
-    for (const key of Object.keys(options.filter)) {
+    Arr.forEach(Object.keys(options.filter), (key) => {
       flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String);
-    }
+    });
   }
 
   const flatStruct = Schema.Struct(flatFields);

@@ -68,6 +68,7 @@ import * as Schema from "effect/Schema";
 import type { IncludedResources } from "./internal/includeGraph.js";
 import { includedResources, includePathsFor } from "./internal/includeGraph.js";
 import type { Any, IncludableKeys, IncludeDepth, IncludePathsTo, Target } from "./Resource.js";
+import { declarationError } from "./internal/errors.js";
 
 // The discriminant key both a branch and a surface carry, so neither can be
 // confused with a resource definition (or with `Query.IncludeOptions`, whose
@@ -446,19 +447,19 @@ interface Entry {
 const checkHop = (owner: Any, key: string, target: Any, path: string): void => {
   const descriptor = owner.relationships[key];
   if (descriptor === undefined) {
-    throw new Error(
+    throw declarationError(
       `Include: "${path}" — resource "${owner.type}" declares no relationship "${key}"`,
     );
   }
   if (descriptor.kind === "paginated") {
-    throw new Error(
+    throw declarationError(
       `Include: "${path}" — relationship "${key}" on "${owner.type}" is paginated; ` +
         "a paginated relationship carries no inline linkage and is never included",
     );
   }
   const declared = descriptor.ref();
   if (declared.type !== target.type) {
-    throw new Error(
+    throw declarationError(
       `Include: "${path}" — relationship "${key}" on "${owner.type}" targets "${declared.type}", ` +
         `but the surface declares "${target.type}"`,
     );
@@ -475,13 +476,13 @@ const walk = (
   depth: number,
   out: Array<Entry>,
 ): void => {
-  for (const [key, value] of Object.entries(spec)) {
+  Arr.forEach(Object.entries(spec), ([key, value]) => {
     // `Spec` marks every key optional, so an explicitly-undefined key is
     // representable; it declares nothing.
-    if (value === undefined) continue;
+    if (value === undefined) return;
     const path = prefix === "" ? key : `${prefix}.${key}`;
     if (depth > MAX_DEPTH) {
-      throw new Error(
+      throw declarationError(
         `Include: "${path}" is ${depth} hops deep, past the ${MAX_DEPTH}-hop maximum (Include.MAX_DEPTH)`,
       );
     }
@@ -490,7 +491,7 @@ const walk = (
     if (owner !== undefined) checkHop(owner, key, target, path);
     out.push({ path, target });
     if (branch) walk(target, value.children, path, depth + 1, out);
-  }
+  });
 };
 
 const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> => {
@@ -533,11 +534,11 @@ const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> 
 export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>> => {
   const seen = new Set<string>();
   const out: Array<string> = [];
-  for (const entry of entriesOf(undefined, spec)) {
-    if (seen.has(entry.path)) continue;
+  Arr.forEach(entriesOf(undefined, spec), (entry) => {
+    if (seen.has(entry.path)) return;
     seen.add(entry.path);
     out.push(entry.path);
-  }
+  });
   return out as unknown as ReadonlyArray<Paths<S>>;
 };
 
@@ -759,11 +760,11 @@ export function included(
   if (Schema.isSchema(source)) return endpointIncluded([source], options?.include ?? false);
   const seen = new Set<Any>();
   const members: Array<Any> = [];
-  for (const entry of entriesOf(undefined, source)) {
-    if (seen.has(entry.target)) continue;
+  Arr.forEach(entriesOf(undefined, source), (entry) => {
+    if (seen.has(entry.target)) return;
     seen.add(entry.target);
     members.push(entry.target);
-  }
+  });
   return Schema.Union(members);
 }
 
@@ -828,7 +829,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
 ): Surface<R, AsSpec<S>> => {
   const entries = entriesOf(resource, spec as AsSpec<S>);
   if (Arr.isReadonlyArrayEmpty(entries)) {
-    throw new Error(
+    throw declarationError(
       `Include.make: the surface for "${resource.type}" declares no paths; ` +
         "omit the `include` option entirely for an endpoint that serves no walk",
     );
@@ -839,7 +840,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
   const declared: Array<string> = [];
   const seenTarget = new Set<Any>();
   const members: Array<Any> = [];
-  for (const entry of entries) {
+  Arr.forEach(entries, (entry) => {
     if (!seenPath.has(entry.path)) {
       seenPath.add(entry.path);
       declared.push(entry.path);
@@ -849,7 +850,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
       seenTarget.add(entry.target);
       members.push(entry.target);
     }
-  }
+  });
 
   // Built against the erased shape first — which pins `TAG` to the discriminant
   // the interfaces declare — then widened to the precise one, whose `paths` and

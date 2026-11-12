@@ -75,12 +75,15 @@ describe("paths", () => {
     });
     expect(declared).toEqual(["comments", "comments.author", "comments.author.company"]);
     const order: ReadonlyArray<string> = declared;
-    for (const path of order) {
+    Arr.forEach(order, (path) => {
       const segments = path.split(".");
-      for (let n = 1; n < segments.length; n++) {
-        expect(order.indexOf(segments.slice(0, n).join("."))).toBeLessThan(order.indexOf(path));
-      }
-    }
+      // Every proper prefix of the path.
+      Arr.forEach(segments.slice(1), (_, index) => {
+        expect(order.indexOf(segments.slice(0, index + 1).join("."))).toBeLessThan(
+          order.indexOf(path),
+        );
+      });
+    });
   });
 });
 
@@ -125,9 +128,9 @@ describe("included", () => {
       }),
     });
     expect(union.members).toEqual([Comment, Person, Company]);
-    for (const member of union.members) {
+    Arr.forEach(union.members, (member) => {
       expect(P.isString((member as { readonly type?: unknown }).type)).toBe(true);
-    }
+    });
   });
 });
 
@@ -154,12 +157,12 @@ describe("make", () => {
     expect(surface.targets.get("comments.author")).toBe(Person);
     // Every prefix of an accepted path is itself accepted, so a level-by-level
     // walk can always look up the hop it is about to load.
-    for (const path of surface.paths) {
+    Arr.forEach(surface.paths, (path) => {
       const segments = path.split(".");
-      for (let n = 1; n <= segments.length; n++) {
-        expect(surface.targets.has(segments.slice(0, n).join("."))).toBe(true);
-      }
-    }
+      Arr.forEach(segments, (_, index) => {
+        expect(surface.targets.has(segments.slice(0, index + 1).join("."))).toBe(true);
+      });
+    });
   });
 
   it("matches the whole dotted path, never the head segment", () => {
@@ -319,10 +322,10 @@ describe("the advertised parameter", () => {
 
   it("decodes through a whole query schema", () => {
     const query = Query.schema(Article, { include: surface, fields: true });
-    expect(Schema.decodeUnknownSync(query)({ include: "comments.author" })).toEqual({
+    expect(Schema.decodeSync(query)({ include: "comments.author" })).toEqual({
       include: ["comments.author"],
     });
-    expect(() => Schema.decodeUnknownSync(query)({ include: "comments.editor" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ include: "comments.editor" })).toThrow();
   });
 
   it("leaves `include: true` and `Query.IncludeOptions` behaviour untouched", () => {
@@ -345,7 +348,7 @@ describe("endpoint documents", () => {
   });
 
   const successOf = (endpoint: { readonly success: Iterable<unknown> }) =>
-    Schema.decodeUnknownSync([...endpoint.success][0]! as Schema.Codec<any, any>);
+    Schema.decodeUnknownSync([...endpoint.success][0] as Schema.Codec<any, any>);
 
   const article = { type: "articles", id: "1", attributes: { title: "Hello" } };
   const comment = { type: "comments", id: "c1", attributes: { body: "Nice" } };

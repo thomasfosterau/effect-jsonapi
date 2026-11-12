@@ -251,16 +251,15 @@ export const acceptIsAcceptable = (
 ): boolean => {
   if (header === undefined) return true;
   const entries = header.split(",").map((entry) => entry.trim());
-  for (const entry of entries) {
-    if (entry === "") continue;
+  return Arr.some(entries, (entry) => {
+    if (entry === "") return false;
     const { base, parameters, weight } = parseMediaType(entry);
     if (base === "*/*" || base === "application/*") return true;
-    if (base !== MEDIA_TYPE) continue;
+    if (base !== MEDIA_TYPE) return false;
     // A malformed `q` is the default weight, not a refusal (as in `Negotiation`).
-    if ((weight ?? 1) <= 0) continue;
-    if (parametersAreAcceptable(parameters, options?.extensions ?? [])) return true;
-  }
-  return false;
+    if ((weight ?? 1) <= 0) return false;
+    return parametersAreAcceptable(parameters, options?.extensions ?? []);
+  });
 };
 
 /**
@@ -375,11 +374,7 @@ const sourceOf = (
 ): ErrorSource | undefined =>
   Match.value(part).pipe(
     Match.when("Query", () => {
-      const keys: Array<string> = [];
-      for (const segment of path) {
-        if (!P.isString(segment)) break;
-        keys.push(segment);
-      }
+      const keys = Arr.takeWhile(path, P.isString);
       if (Arr.isReadonlyArrayEmpty(keys)) return undefined;
       return {
         parameter:

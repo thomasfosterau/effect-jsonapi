@@ -1,4 +1,5 @@
 import { it } from "@effect/vitest";
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
@@ -184,11 +185,13 @@ const samplePerson = Person.make({
   attributes: { firstName: "John", lastName: "Doe" },
 });
 
+const sampleCommentAuthor = { type: "people", id: Person.Id.make("9") } as const;
+
 const sampleComment = Comment.make({
   id: Comment.Id.make("5"),
   attributes: { body: "Nice" },
   relationships: {
-    author: { data: { type: "people", id: Person.Id.make("9") } },
+    author: { data: sampleCommentAuthor },
   },
 });
 
@@ -332,17 +335,14 @@ describe("endpoint conventions", () => {
   });
 
   it("attaches the JSON:API protocol middlewares to every endpoint", () => {
-    for (const endpoint of [
-      fetchArticle,
-      listArticles,
-      createArticle,
-      updateArticle,
-      deleteArticle,
-    ]) {
-      const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
-      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
-      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
-    }
+    Arr.forEach(
+      [fetchArticle, listArticles, createArticle, updateArticle, deleteArticle],
+      (endpoint) => {
+        const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
+        expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
+        expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
+      },
+    );
   });
 
   it("groups take the resource type as their identifier", () => {
@@ -408,7 +408,7 @@ describe("Endpoint.collection", () => {
   it("success document data is the union of the searched resources", () => {
     // the success schema decodes mixed collections, discriminated by type
     const successSchema = [...searchEndpoint.success][0];
-    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: [
         {
           type: "articles",
@@ -425,7 +425,7 @@ describe("Endpoint.collection", () => {
   it("rejects resources outside the searched union", () => {
     const successSchema = [...searchEndpoint.success][0];
     expect(() =>
-      Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+      Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
         data: [{ type: "comments", id: "5", attributes: { body: "Nice" } }],
         meta: { total: 1 },
       }),
@@ -434,7 +434,7 @@ describe("Endpoint.collection", () => {
 
   it("query spans both resources: fieldsets for each type, include across graphs", () => {
     const query = searchEndpoint.query as Schema.Codec<unknown, unknown>;
-    const decoded = Schema.decodeUnknownSync(query)({
+    const decoded = Schema.decodeSync(query)({
       include: "author,comments.author",
       "fields[articles]": "title",
       "fields[people]": "firstName",
@@ -494,18 +494,21 @@ describe("relationship endpoint conventions", () => {
   });
 
   it("attaches the JSON:API protocol middlewares", () => {
-    for (const endpoint of [
-      relatedAuthor,
-      relatedComments,
-      getCommentsRelationship,
-      updateAuthorRelationship,
-      addCommentsRelationship,
-      removeCommentsRelationship,
-    ]) {
-      const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
-      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
-      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
-    }
+    Arr.forEach(
+      [
+        relatedAuthor,
+        relatedComments,
+        getCommentsRelationship,
+        updateAuthorRelationship,
+        addCommentsRelationship,
+        removeCommentsRelationship,
+      ],
+      (endpoint) => {
+        const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
+        expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
+        expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
+      },
+    );
   });
 
   it("add/remove relationship endpoints only accept to-many relationship names", () => {
@@ -545,14 +548,14 @@ describe("relationship endpoint conventions", () => {
 describe("relationship endpoint schemas", () => {
   it("getRelationship success is a linkage document (identifiers, not resources)", () => {
     const successSchema = [...getCommentsRelationship.success][0];
-    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: [{ type: "comments", id: "5" }],
     }) as { readonly data: ReadonlyArray<{ readonly type: string; readonly id: string }> };
     expect(decoded.data).toEqual([{ type: "comments", id: "5" }]);
 
     // Full resource objects are not linkage
     expect(() =>
-      Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)(
+      Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)(
         { data: [{ type: "comments", id: "5", attributes: { body: "Nice" } }] },
         { onExcessProperty: "error" },
       ),
@@ -562,7 +565,7 @@ describe("relationship endpoint schemas", () => {
   it("updateRelationship payload follows the relationship kind", () => {
     // `author` is optional → payload data may be null (clearing the relationship)
     const authorPayload = [...updateAuthorRelationship.payload.values()][0].schemas[0];
-    const cleared = Schema.decodeUnknownSync(authorPayload as Schema.Codec<unknown, unknown>)({
+    const cleared = Schema.decodeSync(authorPayload as Schema.Codec<unknown, unknown>)({
       data: null,
     }) as {
       readonly data: null;
@@ -573,13 +576,11 @@ describe("relationship endpoint schemas", () => {
     const updateCommentAuthor = Endpoint.updateRelationship(Comment, "author");
     const commentAuthorPayload = [...updateCommentAuthor.payload.values()][0].schemas[0];
     expect(() =>
-      Schema.decodeUnknownSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({
+      Schema.decodeSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({
         data: null,
       }),
     ).toThrow();
-    const replaced = Schema.decodeUnknownSync(
-      commentAuthorPayload as Schema.Codec<unknown, unknown>,
-    )({
+    const replaced = Schema.decodeSync(commentAuthorPayload as Schema.Codec<unknown, unknown>)({
       data: { type: "people", id: "9" },
     }) as { readonly data: { readonly id: string } };
     expect(replaced.data.id).toBe("9");
@@ -587,14 +588,14 @@ describe("relationship endpoint schemas", () => {
 
   it("addRelationship payload is an identifier array of the target type", () => {
     const payloadSchema = [...addCommentsRelationship.payload.values()][0].schemas[0];
-    const decoded = Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(payloadSchema as Schema.Codec<unknown, unknown>)({
       data: [{ type: "comments", id: "12" }],
     }) as { readonly data: ReadonlyArray<{ readonly id: string }> };
     expect(decoded.data[0]?.id).toBe("12");
 
     // Wrong target type fails
     expect(() =>
-      Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+      Schema.decodeSync(payloadSchema as Schema.Codec<unknown, unknown>)({
         data: [{ type: "people", id: "9" }],
       }),
     ).toThrow();
@@ -630,7 +631,7 @@ describe("Endpoint.operations", () => {
 
   it("payload accepts operations across all of the given resources", () => {
     const payloadSchema = [...operationsEndpoint.payload.values()][0].schemas[0];
-    const decoded = Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(payloadSchema as Schema.Codec<unknown, unknown>)({
       "atomic:operations": [
         {
           op: "add",
@@ -659,7 +660,7 @@ describe("Endpoint.operations", () => {
   it("rejects add operations missing required (`one`) relationships", () => {
     const payloadSchema = [...operationsEndpoint.payload.values()][0].schemas[0];
     expect(() =>
-      Schema.decodeUnknownSync(payloadSchema as Schema.Codec<unknown, unknown>)({
+      Schema.decodeSync(payloadSchema as Schema.Codec<unknown, unknown>)({
         "atomic:operations": [
           { op: "add", data: { type: "comments", attributes: { body: "No author" } } },
         ],
@@ -669,7 +670,7 @@ describe("Endpoint.operations", () => {
 
   it("success documents results as the union of the given resources", () => {
     const successSchema = [...operationsEndpoint.success][0];
-    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
       "atomic:results": [
         {
           data: {
@@ -1145,10 +1146,10 @@ describe("Endpoint.resource / Group.resource", () => {
     const listQuery = byName.list.query as Schema.Codec<unknown, unknown>;
     // list keeps `include`; get dropped it (the param is gone from get's query)
     expect(
-      (Schema.decodeUnknownSync(listQuery)({ include: "author" }) as { include?: unknown }).include,
+      (Schema.decodeSync(listQuery)({ include: "author" }) as { include?: unknown }).include,
     ).toEqual(["author"]);
     expect(
-      (Schema.decodeUnknownSync(getQuery)({ include: "author" }) as { include?: unknown }).include,
+      (Schema.decodeSync(getQuery)({ include: "author" }) as { include?: unknown }).include,
     ).toBeUndefined();
   });
 
@@ -1165,7 +1166,7 @@ describe("Endpoint.resource / Group.resource", () => {
     );
     // the list success document's meta now carries both the base `revision` and the added `total`
     const successSchema = [...byName.list.success][0];
-    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: [{ type: "widgets", id: "1", attributes: { name: "Gear" } }],
       meta: { revision: 3, total: 1 },
     }) as { readonly meta: { readonly revision: number; readonly total: number } };
@@ -1204,7 +1205,7 @@ describe("Endpoint.resource / Group.resource", () => {
           )
           .handle("authorRelationship", ({ params }) =>
             Effect.succeed(
-              Handlers.linkage(sampleComment.relationships!.author.data, {
+              Handlers.linkage(sampleCommentAuthor, {
                 self: Handlers.relationshipLink("comments", params.id, "author"),
                 related: Handlers.relatedLink("comments", params.id, "author"),
               }),
@@ -1252,7 +1253,7 @@ describe("Endpoint.resource / Group.resource", () => {
 // payload tests above do.
 const payloadSchemaOf = (endpoint: {
   readonly payload: ReadonlyMap<string, { readonly schemas: ReadonlyArray<unknown> }>;
-}) => [...endpoint.payload.values()][0].schemas[0]! as Schema.Codec<unknown, unknown>;
+}) => [...endpoint.payload.values()][0].schemas[0] as Schema.Codec<unknown, unknown>;
 
 describe("Endpoint.create / Endpoint.update payload override", () => {
   const envelopedCreate = {
@@ -1265,36 +1266,36 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
 
   it("defaults create to the JSON:API envelope (regression: unchanged without `payload`)", () => {
     const schema = payloadSchemaOf(Endpoint.create(Article));
-    expect(Schema.decodeUnknownSync(schema)(envelopedCreate)).toMatchObject({
+    expect(Schema.decodeSync(schema)(envelopedCreate)).toMatchObject({
       data: { type: "articles", attributes: { title: "Hello" } },
     });
     // …and still rejects the flat shape, exactly as before this option existed.
-    expect(() => Schema.decodeUnknownSync(schema)(flatCreate)).toThrow();
+    expect(() => Schema.decodeSync(schema)(flatCreate)).toThrow();
   });
 
   it("defaults update to the JSON:API envelope (regression: unchanged without `payload`)", () => {
     const schema = payloadSchemaOf(Endpoint.update(Article));
     expect(
-      Schema.decodeUnknownSync(schema)({
+      Schema.decodeSync(schema)({
         data: { type: "articles", id: "1", attributes: { title: "Hi" } },
       }),
     ).toMatchObject({ data: { type: "articles", id: "1" } });
-    expect(() => Schema.decodeUnknownSync(schema)({ id: "1", title: "Hi" })).toThrow();
+    expect(() => Schema.decodeSync(schema)({ id: "1", title: "Hi" })).toThrow();
   });
 
   it("accepts a flat command input when `payload` is supplied", () => {
     const schema = payloadSchemaOf(Endpoint.create(Article, { payload: Article.createInput }));
-    expect(Schema.decodeUnknownSync(schema)(flatCreate)).toMatchObject({
+    expect(Schema.decodeSync(schema)(flatCreate)).toMatchObject({
       title: "Hello",
       body: "World",
     });
     // the envelope is no longer the contract
-    expect(() => Schema.decodeUnknownSync(schema)(envelopedCreate)).toThrow();
+    expect(() => Schema.decodeSync(schema)(envelopedCreate)).toThrow();
   });
 
   it("accepts a flat update input, keeping the id as the payload's validation authority", () => {
     const schema = payloadSchemaOf(Endpoint.update(Article, { payload: Article.updateInput }));
-    expect(Schema.decodeUnknownSync(schema)({ id: "1", title: "Hi" })).toMatchObject({
+    expect(Schema.decodeSync(schema)({ id: "1", title: "Hi" })).toMatchObject({
       id: "1",
       title: "Hi",
     });
@@ -1335,11 +1336,11 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
         },
       }).map((endpoint) => [endpoint.identifier, endpoint]),
     );
-    expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.create))(flatCreate)).toMatchObject({
+    expect(Schema.decodeSync(payloadSchemaOf(byName.create))(flatCreate)).toMatchObject({
       title: "Hello",
     });
     expect(
-      Schema.decodeUnknownSync(payloadSchemaOf(byName.update))({ id: "1", title: "Hi" }),
+      Schema.decodeSync(payloadSchemaOf(byName.update))({ id: "1", title: "Hi" }),
     ).toMatchObject({
       id: "1",
     });
@@ -1352,12 +1353,10 @@ describe("Endpoint.create / Endpoint.update payload override", () => {
         endpoint,
       ]),
     );
-    expect(Schema.decodeUnknownSync(payloadSchemaOf(byName.create))(envelopedCreate)).toMatchObject(
-      {
-        data: { type: "articles" },
-      },
-    );
-    expect(() => Schema.decodeUnknownSync(payloadSchemaOf(byName.create))(flatCreate)).toThrow();
+    expect(Schema.decodeSync(payloadSchemaOf(byName.create))(envelopedCreate)).toMatchObject({
+      data: { type: "articles" },
+    });
+    expect(() => Schema.decodeSync(payloadSchemaOf(byName.create))(flatCreate)).toThrow();
   });
 
   it("threads through Group.resource, typed end to end", () => {
@@ -1612,7 +1611,7 @@ describe("Endpoint.list query override", () => {
     // …decoding the spec's bracket families into the nested shape, as before
     // this option existed.
     expect(
-      Schema.decodeUnknownSync(queryOf(endpoint))({
+      Schema.decodeSync(queryOf(endpoint))({
         include: "author",
         sort: "-createdAt",
         "page[offset]": "20",
@@ -1630,7 +1629,7 @@ describe("Endpoint.list query override", () => {
   it("replaces the whole composition when `query` is supplied", () => {
     const endpoint = Endpoint.list(Article, { query: FlatListQuery });
     expect(
-      Schema.decodeUnknownSync(queryOf(endpoint))({
+      Schema.decodeSync(queryOf(endpoint))({
         "page[offset]": "20",
         "page[limit]": "10",
         sort: "-createdAt",
@@ -1651,7 +1650,7 @@ describe("Endpoint.list query override", () => {
     });
     // the package-composed families are gone: `filter[author]` is now excess
     expect(() =>
-      Schema.decodeUnknownSync(queryOf(endpoint))(
+      Schema.decodeSync(queryOf(endpoint))(
         { "filter[author]": "9" },
         { onExcessProperty: "error" },
       ),
@@ -1690,12 +1689,12 @@ describe("Endpoint.list query override", () => {
         endpoints: { list: { query: FlatListQuery } },
       }).map((endpoint) => [endpoint.identifier, endpoint]),
     );
-    expect(
-      Schema.decodeUnknownSync(queryOf(byName.list))({ "page[limit]": "10", authorId: "9" }),
-    ).toEqual({
-      limit: 10,
-      authorId: "9",
-    });
+    expect(Schema.decodeSync(queryOf(byName.list))({ "page[limit]": "10", authorId: "9" })).toEqual(
+      {
+        limit: 10,
+        authorId: "9",
+      },
+    );
   });
 
   it("leaves Endpoint.resource's list query package-composed when no override is given (regression)", () => {
@@ -1705,7 +1704,7 @@ describe("Endpoint.list query override", () => {
       ),
     );
     expect(
-      Schema.decodeUnknownSync(queryOf(byName.list))({ "page[limit]": "10", include: "author" }),
+      Schema.decodeSync(queryOf(byName.list))({ "page[limit]": "10", include: "author" }),
     ).toEqual({
       page: { limit: 10 },
       include: ["author"],
@@ -1782,7 +1781,7 @@ describe("Endpoint include path constraints", () => {
   it("advertises the whole graph at depth 2 when `include: true` (regression: the default)", () => {
     const endpoint = Endpoint.get(Article, { include: true });
     expect(
-      Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author,comments,comments.author" }),
+      Schema.decodeSync(queryOf(endpoint))({ include: "author,comments,comments.author" }),
     ).toEqual({
       include: ["author", "comments", "comments.author"],
     });
@@ -1790,14 +1789,12 @@ describe("Endpoint include path constraints", () => {
 
   it("narrows `get` to an explicit allow-list", () => {
     const endpoint = Endpoint.get(Article, { include: { paths: ["author"] } });
-    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author" })).toEqual({
+    expect(Schema.decodeSync(queryOf(endpoint))({ include: "author" })).toEqual({
       include: ["author"],
     });
     // the depth-2 path the resolver can't populate is a 400 now, not a 200
     // carrying an empty `included`
-    expect(() =>
-      Schema.decodeUnknownSync(queryOf(endpoint))({ include: "comments.author" }),
-    ).toThrow();
+    expect(() => Schema.decodeSync(queryOf(endpoint))({ include: "comments.author" })).toThrow();
     expectTypeOf<HttpApiEndpoint.Query<typeof endpoint>["Type"]>().toEqualTypeOf<{
       readonly include?: ReadonlyArray<"author">;
     }>();
@@ -1805,12 +1802,10 @@ describe("Endpoint include path constraints", () => {
 
   it("narrows `list` by depth", () => {
     const endpoint = Endpoint.list(Article, { include: { depth: 1 } });
-    expect(Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author,comments" })).toEqual({
+    expect(Schema.decodeSync(queryOf(endpoint))({ include: "author,comments" })).toEqual({
       include: ["author", "comments"],
     });
-    expect(() =>
-      Schema.decodeUnknownSync(queryOf(endpoint))({ include: "comments.author" }),
-    ).toThrow();
+    expect(() => Schema.decodeSync(queryOf(endpoint))({ include: "comments.author" })).toThrow();
     expectTypeOf<HttpApiEndpoint.Query<typeof endpoint>["Type"]>().toEqualTypeOf<{
       readonly include?: ReadonlyArray<"author" | "comments">;
     }>();
@@ -1825,17 +1820,15 @@ describe("Endpoint include path constraints", () => {
     );
 
     // the per-endpoint allow-list wins on `get`
-    expect(() => Schema.decodeUnknownSync(queryOf(byName.get))({ include: "comments" })).toThrow();
+    expect(() => Schema.decodeSync(queryOf(byName.get))({ include: "comments" })).toThrow();
     // `list` inherits the top-level depth bound
-    expect(Schema.decodeUnknownSync(queryOf(byName.list))({ include: "comments" })).toEqual({
+    expect(Schema.decodeSync(queryOf(byName.list))({ include: "comments" })).toEqual({
       include: ["comments"],
     });
-    expect(() =>
-      Schema.decodeUnknownSync(queryOf(byName.list))({ include: "comments.author" }),
-    ).toThrow();
+    expect(() => Schema.decodeSync(queryOf(byName.list))({ include: "comments.author" })).toThrow();
     // a relationship endpoint's paths are its *target's* graph, so it only
     // inherits that `include` is on
-    expect(Schema.decodeUnknownSync(queryOf(byName.comments))({ include: "author" })).toEqual({
+    expect(Schema.decodeSync(queryOf(byName.comments))({ include: "author" })).toEqual({
       include: ["author"],
     });
   });
@@ -1847,7 +1840,7 @@ describe("Endpoint include path constraints", () => {
         endpoint,
       ]),
     );
-    expect(Schema.decodeUnknownSync(queryOf(byName.list))({ include: "comments.author" })).toEqual({
+    expect(Schema.decodeSync(queryOf(byName.list))({ include: "comments.author" })).toEqual({
       include: ["comments.author"],
     });
   });
@@ -1875,7 +1868,7 @@ describe("Endpoint include path constraints", () => {
 
 // Reads the success schema off a constructed endpoint.
 const successSchemaOf = (endpoint: { readonly success: Iterable<unknown> }) =>
-  [...endpoint.success][0]! as Schema.Codec<any, any>;
+  [...endpoint.success][0] as Schema.Codec<any, any>;
 
 describe("primary-data success override", () => {
   // The wire variant of the resource: identical but for its link members, which
@@ -1902,13 +1895,13 @@ describe("primary-data success override", () => {
   };
 
   it("decodes `links.self` as a URL by default (regression: unchanged without `success`)", () => {
-    const decoded = Schema.decodeUnknownSync(successSchemaOf(fetchArticle))({ data: wireArticle });
+    const decoded = Schema.decodeSync(successSchemaOf(fetchArticle))({ data: wireArticle });
     expect(decoded.data.links.self).toBeInstanceOf(URL);
   });
 
   it("decodes `links.self` as a plain string when `success` is the wire variant", () => {
     const wire = Endpoint.get(Article, { success: WireDocument });
-    const decoded = Schema.decodeUnknownSync(successSchemaOf(wire))({ data: wireArticle });
+    const decoded = Schema.decodeSync(successSchemaOf(wire))({ data: wireArticle });
     expect(decoded.data.links.self).toBe("https://api.example.com/articles/1");
     expect(decoded.data.links.self).not.toBeInstanceOf(URL);
   });
@@ -1982,13 +1975,13 @@ describe("primary-data success override", () => {
       }).map((endpoint) => [endpoint.identifier, endpoint]),
     );
 
-    for (const name of ["get", "create", "update"]) {
-      const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]))({
+    Arr.forEach(["get", "create", "update"], (name) => {
+      const decoded = Schema.decodeSync(successSchemaOf(byName[name]))({
         data: wireArticle,
       });
       expect(decoded.data.links.self).toBe("https://api.example.com/articles/1");
-    }
-    const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list))({ data: [wireArticle] });
+    });
+    const listed = Schema.decodeSync(successSchemaOf(byName.list))({ data: [wireArticle] });
     expect(listed.data[0].links.self).toBe("https://api.example.com/articles/1");
   });
 
@@ -2000,13 +1993,13 @@ describe("primary-data success override", () => {
       ]),
     );
 
-    for (const name of ["get", "create", "update"]) {
-      const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]))({
+    Arr.forEach(["get", "create", "update"], (name) => {
+      const decoded = Schema.decodeSync(successSchemaOf(byName[name]))({
         data: wireArticle,
       });
       expect(decoded.data.links.self).toBeInstanceOf(URL);
-    }
-    const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list))({ data: [wireArticle] });
+    });
+    const listed = Schema.decodeSync(successSchemaOf(byName.list))({ data: [wireArticle] });
     expect(listed.data[0].links.self).toBeInstanceOf(URL);
   });
 
@@ -2463,7 +2456,7 @@ describe("Endpoint.get query override", () => {
   it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
     const endpoint = Endpoint.get(Article, { include: true, fields: true });
     expect(
-      Schema.decodeUnknownSync(queryOf(endpoint))({
+      Schema.decodeSync(queryOf(endpoint))({
         include: "author",
         "fields[articles]": "title",
       }),
@@ -2476,7 +2469,7 @@ describe("Endpoint.get query override", () => {
   it("replaces the whole composition when `query` is supplied", () => {
     const endpoint = Endpoint.get(Article, { query: FlatGetQuery });
     expect(
-      Schema.decodeUnknownSync(queryOf(endpoint))({ include: "author", includeDeleted: "true" }),
+      Schema.decodeSync(queryOf(endpoint))({ include: "author", includeDeleted: "true" }),
     ).toEqual({
       include: "author",
       includeDeleted: "true",
@@ -2486,7 +2479,7 @@ describe("Endpoint.get query override", () => {
   it("ignores the feature options once `query` is supplied", () => {
     const endpoint = Endpoint.get(Article, { include: true, fields: true, query: FlatGetQuery });
     expect(() =>
-      Schema.decodeUnknownSync(queryOf(endpoint))(
+      Schema.decodeSync(queryOf(endpoint))(
         { "fields[articles]": "title" },
         { onExcessProperty: "error" },
       ),
@@ -2528,7 +2521,7 @@ describe("Endpoint.get query override", () => {
         endpoints: { get: { query: FlatGetQuery } },
       }).map((endpoint) => [endpoint.identifier, endpoint]),
     );
-    expect(Schema.decodeUnknownSync(queryOf(byName.get))({ includeDeleted: "true" })).toEqual({
+    expect(Schema.decodeSync(queryOf(byName.get))({ includeDeleted: "true" })).toEqual({
       includeDeleted: "true",
     });
   });
@@ -2540,7 +2533,7 @@ describe("Endpoint.get query override", () => {
         endpoint,
       ]),
     );
-    expect(Schema.decodeUnknownSync(queryOf(byName.get))({ include: "author" })).toEqual({
+    expect(Schema.decodeSync(queryOf(byName.get))({ include: "author" })).toEqual({
       include: ["author"],
     });
   });

@@ -969,7 +969,7 @@ export const decodeInput =
   (
     input: LooseInput<S["Encoded"]>,
   ): Effect.Effect<S["Type"], Schema.SchemaError, S["DecodingServices"]> =>
-    Schema.decodeUnknownEffect(
+    Schema.decodeEffect(
       schema as unknown as Schema.Codec<S["Type"], S["Encoded"], S["DecodingServices"]>,
     )(stripUndefined(input as object));
 
@@ -1129,10 +1129,10 @@ export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
   path: P,
   index: IncludedIndex,
 ): ReadonlyArray<PathTarget<R, P>["Type"]> => {
-  let level: ReadonlyArray<LinkedResource | undefined> = [data];
-  for (const segment of path.split(".")) {
+  const roots: ReadonlyArray<LinkedResource | undefined> = [data];
+  const level = Arr.reduce(path.split("."), roots, (parents, segment) => {
     const seen = new Set<string>();
-    level = level.flatMap((parent) =>
+    return parents.flatMap((parent) =>
       lookup(refsOf(parent, segment), index).filter((found) => {
         const key = refKey(found);
         if (seen.has(key)) return false;
@@ -1140,7 +1140,7 @@ export const walk = <R extends Any, const P extends IncludePathsTo<R, 3>>(
         return true;
       }),
     );
-  }
+  });
   return level as ReadonlyArray<PathTarget<R, P>["Type"]>;
 };
 

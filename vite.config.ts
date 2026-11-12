@@ -123,8 +123,9 @@ export default defineConfig({
       // zero — a new site is a defect, not headroom. Counted on adopting
       // plugin 0.6.0 (`vp lint`, 2026-10-22): 4,040 warnings, with 813
       // `require-safety-comment-for-type-assertion`, 626 `casting-awareness`,
-      // 489 `prefer-option-over-null`, 326 `avoid-native-object-helpers` and
-      // 237 `avoid-non-null-assertion` the largest. Per-rule remainder and the
+      // 489 `prefer-option-over-null` and 326 `avoid-native-object-helpers`
+      // the largest (`avoid-non-null-assertion`, at 237, has since reached
+      // zero and is at `error`). Per-rule remainder and the
       // order to pay it down in: #436. The move to @enfect/oxlint 0.9.0 (#532),
       // the same rules under the same `effect/` names plus
       // `no-cause-in-http-response` (no sites), left the count unchanged.
@@ -138,13 +139,9 @@ export default defineConfig({
       // `effect/prefer-namespace-imports` requires. No other binding in a
       // file may be called `R`, so a resource type parameter is `Res`.
       "effect/no-unsafe-dictionary-type": "warn",
-      "effect/imperative-loops": "warn",
       "effect/avoid-native-object-helpers": "warn",
-      "effect/avoid-non-null-assertion": "warn",
       "effect/avoid-any": "warn",
-      "effect/avoid-untagged-errors": "warn",
       "effect/prefer-effect-is": "warn",
-      "effect/effect-run-in-body": "warn",
       "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
       // `typeAware` turned these on. Each sits at `warn` with its count on
@@ -170,6 +167,7 @@ export default defineConfig({
       "effecttsgo/global-error-in-effect-failure": "error",
       "effecttsgo/schema-class-missing-brand": "error",
       "effecttsgo/unnecessary-typeof-type": "error",
+      "effecttsgo/prefer-typed-schema-decoder": "error",
       // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
       // surface this library is built on (`effect/http`, `effect/http-api`,
       // much of it `@stability unstable`) does not flood the gates (#205):

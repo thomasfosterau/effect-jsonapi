@@ -37,12 +37,12 @@ interface EndpointLike {
 }
 const endpointOf = (group: GroupLike, name: string): EndpointLike => {
   const endpoint = group.endpoints[name];
-  if (endpoint === undefined) throw new Error(`no '${name}' endpoint`);
+  assert(endpoint !== undefined, `no '${name}' endpoint`);
   return endpoint as EndpointLike;
 };
 const queryOf = (group: GroupLike, name: string): Schema.Top => {
   const query = endpointOf(group, name).query;
-  if (query === undefined) throw new Error(`${name} declares no query`);
+  assert(query !== undefined, `${name} declares no query`);
   return query;
 };
 
@@ -136,7 +136,7 @@ describe("Group.flat: hiddenWrites", () => {
     (name) => {
       const invalid = { data: { type: "widgets", id, attributes: { name: 42 } } };
       expect(Exit.isFailure(encode(hiding, name)(invalid))).toBe(true);
-      expect(Exit.isFailure(Schema.decodeUnknownExit(successOf(hiding, name))(invalid))).toBe(true);
+      expect(Exit.isFailure(Schema.decodeExit(successOf(hiding, name))(invalid))).toBe(true);
     },
   );
 

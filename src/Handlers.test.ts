@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
@@ -514,9 +514,7 @@ describe("Handlers.project", () => {
     const resource = {
       type: "articles",
       id: "3",
-      attributes: Schema.decodeUnknownSync(Json)(
-        '{"__proto__":{"inner":2},"title":"T","body":"B"}',
-      ),
+      attributes: Schema.decodeSync(Json)('{"__proto__":{"inner":2},"title":"T","body":"B"}'),
     };
     const { attributes } = Handlers.project(resource, { articles: ["__proto__", "title"] });
     expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
@@ -642,8 +640,9 @@ describe("the per-resource transform pass", () => {
     expect(document.data.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     // the assertion that matters: one type, one shape
+    assert(document.included !== undefined);
     expect(Object.keys(document.data.attributes)).toEqual(
-      Object.keys(document.included![0].attributes),
+      Object.keys(document.included[0].attributes),
     );
     // …and the relationship that carried the linkage went with the
     // fieldset, which exempts the member it linked (#494)
@@ -657,8 +656,9 @@ describe("the per-resource transform pass", () => {
     });
     expect(document.data[0]?.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
+    assert(document.included !== undefined);
     expect(Object.keys(document.data[0].attributes)).toEqual(
-      Object.keys(document.included![0].attributes),
+      Object.keys(document.included[0].attributes),
     );
   });
 
@@ -943,20 +943,23 @@ describe("the sparse-fieldset exemption from full linkage", () => {
 
   it("is carried through `compose`, on either side", () => {
     const stamp = Handlers.withMeta(() => ({ seen: true }));
-    for (const onResource of [
-      Handlers.compose(stamp, Handlers.project({ articles: ["title"] })),
-      Handlers.compose(Handlers.project({ articles: ["title"] }), stamp),
-      Handlers.compose(
-        Handlers.project({ articles: ["title", "author"] }),
-        Handlers.project({ articles: ["title", "comments"] }),
-      ),
-    ]) {
-      const document = Handlers.data(article, { included: [author, comment], onResource });
-      expect(document.included?.map((member) => `${member.type}:${member.id}`)).toEqual([
-        "people:9",
-        "comments:5",
-      ]);
-    }
+    Arr.forEach(
+      [
+        Handlers.compose(stamp, Handlers.project({ articles: ["title"] })),
+        Handlers.compose(Handlers.project({ articles: ["title"] }), stamp),
+        Handlers.compose(
+          Handlers.project({ articles: ["title", "author"] }),
+          Handlers.project({ articles: ["title", "comments"] }),
+        ),
+      ],
+      (onResource) => {
+        const document = Handlers.data(article, { included: [author, comment], onResource });
+        expect(document.included?.map((member) => `${member.type}:${member.id}`)).toEqual([
+          "people:9",
+          "comments:5",
+        ]);
+      },
+    );
   });
 
   it("does not cover a relationship a transform drops for any other reason", () => {
@@ -1178,7 +1181,7 @@ describe("pagination links", () => {
 
     it("keeps the request's pairs, its own page[*] included, on `self` when the window is unpageable", () => {
       // ?sort=-title&page[limit]=0 — `PageInt` admits 0, so the request decodes and nothing can be paged
-      const request = Schema.decodeUnknownSync(listQuery as Schema.Codec<any, any>)({
+      const request = Schema.decodeSync(listQuery as Schema.Codec<any, any>)({
         sort: "-title",
         "page[limit]": "0",
       }) as typeof listQuery.Type;
@@ -1248,7 +1251,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
 
   it("Document.Value names a data-document value type", () => {
     const doc: Document.Value<typeof Article> = {
-      data: Schema.decodeUnknownSync(Article)({
+      data: Schema.decodeSync(Article)({
         type: "articles",
         id: "1",
         attributes: { title: "Hi" },
@@ -1259,7 +1262,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
   });
 
   it("Document.Value carries included and meta when parameterized", () => {
-    const item = Schema.decodeUnknownSync(Article)({
+    const item = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hi" },

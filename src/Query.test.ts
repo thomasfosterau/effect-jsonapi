@@ -54,16 +54,16 @@ describe("Query.Include", () => {
   const include = Query.Include(Article);
 
   it("decodes comma-separated relationship paths", () => {
-    expect(Schema.decodeUnknownSync(include)("author,comments")).toEqual(["author", "comments"]);
+    expect(Schema.decodeSync(include)("author,comments")).toEqual(["author", "comments"]);
   });
 
   it("accepts nested paths from the relationship graph", () => {
-    expect(Schema.decodeUnknownSync(include)("comments.author")).toEqual(["comments.author"]);
+    expect(Schema.decodeSync(include)("comments.author")).toEqual(["comments.author"]);
   });
 
   it("rejects unknown include paths (→ 400)", () => {
-    expect(() => Schema.decodeUnknownSync(include)("author,publisher")).toThrow();
-    expect(() => Schema.decodeUnknownSync(include)("comments.likes")).toThrow();
+    expect(() => Schema.decodeSync(include)("author,publisher")).toThrow();
+    expect(() => Schema.decodeSync(include)("comments.likes")).toThrow();
   });
 
   it("encodes back to a comma-separated string", () => {
@@ -75,9 +75,9 @@ describe("Query.Include", () => {
   it("excludes paginated relationships from include paths (→ 400)", () => {
     const feedInclude = Query.Include(Feed);
     // `owner` is linkable; `entries` is paginated and cannot be included.
-    expect(Schema.decodeUnknownSync(feedInclude)("owner")).toEqual(["owner"]);
-    expect(() => Schema.decodeUnknownSync(feedInclude)("entries")).toThrow();
-    expect(() => Schema.decodeUnknownSync(feedInclude)("entries.author")).toThrow();
+    expect(Schema.decodeSync(feedInclude)("owner")).toEqual(["owner"]);
+    expect(() => Schema.decodeSync(feedInclude)("entries")).toThrow();
+    expect(() => Schema.decodeSync(feedInclude)("entries.author")).toThrow();
     // ... and paths *through* a paginated relationship don't exist either.
     type FeedPaths = typeof feedInclude.Type;
     expectTypeOf<FeedPaths>().toEqualTypeOf<ReadonlyArray<"owner">>();
@@ -85,7 +85,7 @@ describe("Query.Include", () => {
 
   it("derives the whole graph at depth 2 when unconstrained (regression: the default)", () => {
     // every path the graph reaches, and nothing further
-    expect(Schema.decodeUnknownSync(include)("author,comments,comments.author")).toEqual([
+    expect(Schema.decodeSync(include)("author,comments,comments.author")).toEqual([
       "author",
       "comments",
       "comments.author",
@@ -97,21 +97,21 @@ describe("Query.Include", () => {
 
   it("constrains the legal paths to an explicit allow-list", () => {
     const subset = Query.Include(Article, { paths: ["author", "comments"] });
-    expect(Schema.decodeUnknownSync(subset)("author,comments")).toEqual(["author", "comments"]);
+    expect(Schema.decodeSync(subset)("author,comments")).toEqual(["author", "comments"]);
     // a path the graph has but this endpoint can't populate is now a 400, not
     // a 200 with an empty `included`
-    expect(() => Schema.decodeUnknownSync(subset)("comments.author")).toThrow();
+    expect(() => Schema.decodeSync(subset)("comments.author")).toThrow();
     expectTypeOf<typeof subset.Type>().toEqualTypeOf<ReadonlyArray<"author" | "comments">>();
   });
 
   it("bounds the derivation by depth", () => {
     const shallow = Query.Include(Article, { depth: 1 });
-    expect(Schema.decodeUnknownSync(shallow)("author,comments")).toEqual(["author", "comments"]);
-    expect(() => Schema.decodeUnknownSync(shallow)("comments.author")).toThrow();
+    expect(Schema.decodeSync(shallow)("author,comments")).toEqual(["author", "comments"]);
+    expect(() => Schema.decodeSync(shallow)("comments.author")).toThrow();
     expectTypeOf<typeof shallow.Type>().toEqualTypeOf<ReadonlyArray<"author" | "comments">>();
 
     const deep = Query.Include(Article, { depth: 3 });
-    expect(Schema.decodeUnknownSync(deep)("comments.author")).toEqual(["comments.author"]);
+    expect(Schema.decodeSync(deep)("comments.author")).toEqual(["comments.author"]);
     expectTypeOf<typeof deep.Type>().toEqualTypeOf<
       ReadonlyArray<"author" | "comments" | "comments.author">
     >();
@@ -119,8 +119,8 @@ describe("Query.Include", () => {
 
   it("lets an explicit allow-list win over a depth bound", () => {
     const subset = Query.Include(Article, { paths: ["comments.author"], depth: 1 });
-    expect(Schema.decodeUnknownSync(subset)("comments.author")).toEqual(["comments.author"]);
-    expect(() => Schema.decodeUnknownSync(subset)("author")).toThrow();
+    expect(Schema.decodeSync(subset)("comments.author")).toEqual(["comments.author"]);
+    expect(() => Schema.decodeSync(subset)("author")).toThrow();
   });
 });
 
@@ -128,16 +128,16 @@ describe("Query.Fieldset", () => {
   const fieldset = Query.Fieldset(Article);
 
   it("decodes attribute names", () => {
-    expect(Schema.decodeUnknownSync(fieldset)("title,body")).toEqual(["title", "body"]);
+    expect(Schema.decodeSync(fieldset)("title,body")).toEqual(["title", "body"]);
   });
 
   it("rejects unknown attribute names (→ 400)", () => {
-    expect(() => Schema.decodeUnknownSync(fieldset)("title,publisher")).toThrow();
+    expect(() => Schema.decodeSync(fieldset)("title,publisher")).toThrow();
   });
 
   it("decodes relationship names, which are fields too (#494)", () => {
-    expect(Schema.decodeUnknownSync(fieldset)("title,author")).toEqual(["title", "author"]);
-    expect(Schema.decodeUnknownSync(fieldset)(["comments"])).toEqual(["comments"]);
+    expect(Schema.decodeSync(fieldset)("title,author")).toEqual(["title", "author"]);
+    expect(Schema.decodeSync(fieldset)(["comments"])).toEqual(["comments"]);
   });
 
   it("types the decoded fields as attribute- and relationship-key literals", () => {
@@ -152,14 +152,14 @@ describe("Query.Sort", () => {
   const sort = Query.Sort(["createdAt", "title"]);
 
   it("decodes sort terms with direction prefixes", () => {
-    expect(Schema.decodeUnknownSync(sort)("-createdAt,title")).toEqual([
+    expect(Schema.decodeSync(sort)("-createdAt,title")).toEqual([
       { field: "createdAt", direction: "desc" },
       { field: "title", direction: "asc" },
     ]);
   });
 
   it("rejects unknown sort fields (→ 400)", () => {
-    expect(() => Schema.decodeUnknownSync(sort)("body")).toThrow();
+    expect(() => Schema.decodeSync(sort)("body")).toThrow();
   });
 
   it("encodes sort terms back to the wire form", () => {
@@ -214,10 +214,8 @@ describe("an empty vocabulary says so when it rejects a value (#282)", () => {
   });
 
   it("leaves a non-empty vocabulary's rejection as it was", () => {
-    expect(() => Schema.decodeUnknownSync(Query.Sort(["title"]))("body")).toThrow(
-      'Expected "title"',
-    );
-    expect(() => Schema.decodeUnknownSync(Query.Fieldset(Article))("nope")).toThrow(/^Expected "/);
+    expect(() => Schema.decodeSync(Query.Sort(["title"]))("body")).toThrow('Expected "title"');
+    expect(() => Schema.decodeSync(Query.Fieldset(Article))("nope")).toThrow(/^Expected "/);
   });
 });
 
@@ -231,7 +229,7 @@ describe("Query.schema", () => {
   });
 
   it("decodes a full flat query into the nested ergonomic shape", () => {
-    const decoded = Schema.decodeUnknownSync(query)({
+    const decoded = Schema.decodeSync(query)({
       include: "author,comments.author",
       "fields[articles]": "title,body",
       "fields[people]": "firstName",
@@ -250,16 +248,16 @@ describe("Query.schema", () => {
   });
 
   it("decodes an empty query (all features optional)", () => {
-    expect(Schema.decodeUnknownSync(query)({})).toEqual({});
+    expect(Schema.decodeSync(query)({})).toEqual({});
   });
 
   it("decodes partial queries", () => {
-    const decoded = Schema.decodeUnknownSync(query)({ "page[limit]": "5" });
+    const decoded = Schema.decodeSync(query)({ "page[limit]": "5" });
     expect(decoded).toEqual({ page: { limit: 5 } });
   });
 
   it("rejects unknown include paths in the combined schema", () => {
-    expect(() => Schema.decodeUnknownSync(query)({ include: "publisher" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ include: "publisher" })).toThrow();
   });
 
   it("carries a constrained include through the combined schema", () => {
@@ -267,13 +265,11 @@ describe("Query.schema", () => {
       include: { paths: ["author"] },
       page: Query.Page.Offset,
     });
-    expect(
-      Schema.decodeUnknownSync(constrained)({ include: "author", "page[limit]": "5" }),
-    ).toEqual({
+    expect(Schema.decodeSync(constrained)({ include: "author", "page[limit]": "5" })).toEqual({
       include: ["author"],
       page: { limit: 5 },
     });
-    expect(() => Schema.decodeUnknownSync(constrained)({ include: "comments" })).toThrow();
+    expect(() => Schema.decodeSync(constrained)({ include: "comments" })).toThrow();
     expectTypeOf<typeof constrained.Type>().toEqualTypeOf<{
       readonly include?: ReadonlyArray<"author">;
       readonly page?: { readonly offset?: number; readonly limit?: number };
@@ -294,11 +290,11 @@ describe("Query.schema", () => {
   });
 
   it("rejects unknown sparse fieldsets", () => {
-    expect(() => Schema.decodeUnknownSync(query)({ "fields[articles]": "secret" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "fields[articles]": "secret" })).toThrow();
   });
 
   it("rejects non-numeric page parameters", () => {
-    expect(() => Schema.decodeUnknownSync(query)({ "page[offset]": "abc" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "page[offset]": "abc" })).toThrow();
   });
 
   it("encodes the nested shape back to flat wire parameters (client side)", () => {
@@ -340,22 +336,22 @@ describe("Query.schema", () => {
 
   it("supports restricted sort fields", () => {
     const restricted = Query.schema(Article, { sort: ["createdAt"] });
-    expect(Schema.decodeUnknownSync(restricted)({ sort: "-createdAt" })).toEqual({
+    expect(Schema.decodeSync(restricted)({ sort: "-createdAt" })).toEqual({
       sort: [{ field: "createdAt", direction: "desc" }],
     });
-    expect(() => Schema.decodeUnknownSync(restricted)({ sort: "title" })).toThrow();
+    expect(() => Schema.decodeSync(restricted)({ sort: "title" })).toThrow();
     type Decoded = typeof restricted.Type;
     expectTypeOf<NonNullable<Decoded["sort"]>[number]["field"]>().toEqualTypeOf<"createdAt">();
   });
 
   it("builds an empty schema when no features are enabled", () => {
     const empty = Query.schema(Article, {});
-    expect(Schema.decodeUnknownSync(empty)({})).toEqual({});
+    expect(Schema.decodeSync(empty)({})).toEqual({});
   });
 
   it("a paginated-only target gets no sparse fieldset; its related endpoint declares one (#311)", () => {
     const feedQuery = Query.schema(Feed, { include: true, fields: true });
-    const decoded = Schema.decodeUnknownSync(feedQuery)({
+    const decoded = Schema.decodeSync(feedQuery)({
       "fields[feeds]": "name",
       "fields[people]": "firstName",
     });
@@ -363,16 +359,16 @@ describe("Query.schema", () => {
     // Article is only reachable via the paginated `entries` relationship,
     // which is never an include path (so never in a feed's `included`): the
     // feed's query declares no `fields[articles]`.
-    expect(() => Schema.decodeUnknownSync(feedQuery)({ include: "entries" })).toThrow();
+    expect(() => Schema.decodeSync(feedQuery)({ include: "entries" })).toThrow();
     expect(feedQuery.from.fields).not.toHaveProperty(["fields[articles]"]);
     expect(feedQuery.from.fields).toHaveProperty(["fields[people]"]);
     type FeedFieldsets = keyof NonNullable<typeof feedQuery.Type.fields>;
     expectTypeOf<FeedFieldsets>().toEqualTypeOf<"feeds" | "people">();
     // The related endpoint, whose primary data the articles are, declares it.
     const entries = Query.schema(Article, { fields: true });
-    expect(
-      Schema.decodeUnknownSync(entries)({ "fields[articles]": "title" }).fields?.articles,
-    ).toEqual(["title"]);
+    expect(Schema.decodeSync(entries)({ "fields[articles]": "title" }).fields?.articles).toEqual([
+      "title",
+    ]);
   });
 
   describe("definitions sharing a wire type share one fields[TYPE] vocabulary (#362)", () => {
@@ -399,11 +395,11 @@ describe("Query.schema", () => {
     ])("accepts the union of their attributes (%s)", (_, Gallery) => {
       const query = Query.schema(Gallery, { fields: true });
       const decode = (value: string) =>
-        Schema.decodeUnknownSync(query)({ "fields[photos]": value }).fields?.photos;
+        Schema.decodeSync(query)({ "fields[photos]": value }).fields?.photos;
       expect(decode("width")).toEqual(["width"]);
       expect(decode("caption")).toEqual(["caption"]);
       expect(decode("width,caption")).toEqual(["width", "caption"]);
-      expect(() => Schema.decodeUnknownSync(query)({ "fields[photos]": "t" })).toThrow();
+      expect(() => Schema.decodeSync(query)({ "fields[photos]": "t" })).toThrow();
       type Photos = NonNullable<NonNullable<(typeof query)["Type"]["fields"]>["photos"]>;
       expectTypeOf<Photos[number]>().toEqualTypeOf<"width" | "caption">();
     });
@@ -419,13 +415,13 @@ describe("Query.Page", () => {
 
   it("number strategy decodes page[number]/page[size]", () => {
     const query = Query.schema(Article, { page: Query.Page.Number });
-    const decoded = Schema.decodeUnknownSync(query)({ "page[number]": "2", "page[size]": "25" });
+    const decoded = Schema.decodeSync(query)({ "page[number]": "2", "page[size]": "25" });
     expect(decoded).toEqual({ page: { number: 2, size: 25 } });
   });
 
   it("cursor strategy keeps the cursor opaque", () => {
     const query = Query.schema(Article, { page: Query.Page.Cursor });
-    const decoded = Schema.decodeUnknownSync(query)({ "page[cursor]": "opaque-token" });
+    const decoded = Schema.decodeSync(query)({ "page[cursor]": "opaque-token" });
     expect(decoded).toEqual({ page: { cursor: "opaque-token" } });
   });
 });
@@ -437,7 +433,7 @@ describe("Query.Page.offset (factory)", () => {
 
   it("fromString: false decodes a plain number and rejects a numeric string", () => {
     const page = Schema.Struct(Query.Page.offset({ fromString: false }));
-    expect(Schema.decodeUnknownSync(page)({ offset: 0, limit: 50 })).toEqual({
+    expect(Schema.decodeSync(page)({ offset: 0, limit: 50 })).toEqual({
       offset: 0,
       limit: 50,
     });
@@ -446,7 +442,7 @@ describe("Query.Page.offset (factory)", () => {
 
   it("fromString: true (default) decodes a numeric string and rejects a plain number", () => {
     const page = Schema.Struct(Query.Page.offset());
-    expect(Schema.decodeUnknownSync(page)({ offset: "0", limit: "50" })).toEqual({
+    expect(Schema.decodeSync(page)({ offset: "0", limit: "50" })).toEqual({
       offset: 0,
       limit: 50,
     });
@@ -455,54 +451,54 @@ describe("Query.Page.offset (factory)", () => {
 
   it("maxLimit rejects maxLimit + 1 and accepts maxLimit", () => {
     const page = Schema.Struct(Query.Page.offset({ maxLimit: 100, fromString: false }));
-    expect(Schema.decodeUnknownSync(page)({ limit: 100 })).toEqual({ limit: 100 });
-    expect(() => Schema.decodeUnknownSync(page)({ limit: 101 })).toThrow();
+    expect(Schema.decodeSync(page)({ limit: 100 })).toEqual({ limit: 100 });
+    expect(() => Schema.decodeSync(page)({ limit: 101 })).toThrow();
   });
 
   it("minLimit defaults to 1 (rejects 0) and is configurable", () => {
     const dflt = Schema.Struct(Query.Page.offset({ fromString: false }));
-    expect(() => Schema.decodeUnknownSync(dflt)({ limit: 0 })).toThrow();
-    expect(Schema.decodeUnknownSync(dflt)({ limit: 1 })).toEqual({ limit: 1 });
+    expect(() => Schema.decodeSync(dflt)({ limit: 0 })).toThrow();
+    expect(Schema.decodeSync(dflt)({ limit: 1 })).toEqual({ limit: 1 });
 
     const floored = Schema.Struct(Query.Page.offset({ minLimit: 10, fromString: false }));
-    expect(() => Schema.decodeUnknownSync(floored)({ limit: 9 })).toThrow();
-    expect(Schema.decodeUnknownSync(floored)({ limit: 10 })).toEqual({ limit: 10 });
+    expect(() => Schema.decodeSync(floored)({ limit: 9 })).toThrow();
+    expect(Schema.decodeSync(floored)({ limit: 10 })).toEqual({ limit: 10 });
   });
 
   it("defaultLimit/defaultOffset fill in on an absent key", () => {
     const withDefaults = Schema.Struct(
       Query.Page.offset({ defaultLimit: 25, defaultOffset: 0, fromString: false }),
     );
-    expect(Schema.decodeUnknownSync(withDefaults)({})).toEqual({ offset: 0, limit: 25 });
+    expect(Schema.decodeSync(withDefaults)({})).toEqual({ offset: 0, limit: 25 });
     // a present key still wins over the default
-    expect(Schema.decodeUnknownSync(withDefaults)({ limit: 10 })).toEqual({ offset: 0, limit: 10 });
+    expect(Schema.decodeSync(withDefaults)({ limit: 10 })).toEqual({ offset: 0, limit: 10 });
   });
 
   it("encodes a string default for a string-coercing field (fromString: true)", () => {
     // withDecodingDefaultKey takes the *encoded* default, so the string field
     // must default through a string and still decode to a number.
     const page = Schema.Struct(Query.Page.offset({ defaultLimit: 25 }));
-    expect(Schema.decodeUnknownSync(page)({})).toEqual({ limit: 25 });
+    expect(Schema.decodeSync(page)({})).toEqual({ limit: 25 });
   });
 
   it("omitting a default leaves the field optionalKey (absent → undefined)", () => {
     const page = Schema.Struct(Query.Page.offset({ fromString: false }));
-    expect(Schema.decodeUnknownSync(page)({})).toEqual({});
+    expect(Schema.decodeSync(page)({})).toEqual({});
   });
 
   it("rejects negative offsets and non-integers on both fields", () => {
     const page = Schema.Struct(Query.Page.offset({ fromString: false }));
-    expect(() => Schema.decodeUnknownSync(page)({ offset: -1 })).toThrow();
-    expect(() => Schema.decodeUnknownSync(page)({ offset: 1.5 })).toThrow();
-    expect(() => Schema.decodeUnknownSync(page)({ limit: 2.5 })).toThrow();
+    expect(() => Schema.decodeSync(page)({ offset: -1 })).toThrow();
+    expect(() => Schema.decodeSync(page)({ offset: 1.5 })).toThrow();
+    expect(() => Schema.decodeSync(page)({ limit: 2.5 })).toThrow();
   });
 
   it("slots into Query.schema as a drop-in for the constant, carrying its bound", () => {
     const query = Query.schema(Article, { page: Query.Page.offset({ maxLimit: 100 }) });
-    expect(Schema.decodeUnknownSync(query)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
+    expect(Schema.decodeSync(query)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
       page: { offset: 20, limit: 10 },
     });
-    expect(() => Schema.decodeUnknownSync(query)({ "page[limit]": "101" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "page[limit]": "101" })).toThrow();
   });
 
   it("types a defaulted field as required and an un-defaulted field as optional", () => {
@@ -523,7 +519,7 @@ describe("Query.Page.number (factory)", () => {
   it("produces the { number, size } shape and decodes", () => {
     expect(Object.keys(Query.Page.number())).toEqual(["number", "size"]);
     const page = Schema.Struct(Query.Page.number({ fromString: false }));
-    expect(Schema.decodeUnknownSync(page)({ number: 2, size: 25 })).toEqual({
+    expect(Schema.decodeSync(page)({ number: 2, size: 25 })).toEqual({
       number: 2,
       size: 25,
     });
@@ -531,16 +527,16 @@ describe("Query.Page.number (factory)", () => {
 
   it("treats page numbers as 1-based (rejects 0)", () => {
     const page = Schema.Struct(Query.Page.number({ fromString: false }));
-    expect(() => Schema.decodeUnknownSync(page)({ number: 0 })).toThrow();
-    expect(Schema.decodeUnknownSync(page)({ number: 1 })).toEqual({ number: 1 });
+    expect(() => Schema.decodeSync(page)({ number: 0 })).toThrow();
+    expect(Schema.decodeSync(page)({ number: 1 })).toEqual({ number: 1 });
   });
 
   it("bounds and defaults the size field", () => {
     const page = Schema.Struct(
       Query.Page.number({ maxSize: 50, defaultSize: 10, fromString: false }),
     );
-    expect(Schema.decodeUnknownSync(page)({})).toEqual({ size: 10 });
-    expect(() => Schema.decodeUnknownSync(page)({ size: 51 })).toThrow();
+    expect(Schema.decodeSync(page)({})).toEqual({ size: 10 });
+    expect(() => Schema.decodeSync(page)({ size: 51 })).toThrow();
   });
 });
 
@@ -564,7 +560,7 @@ describe("Query.bracketPageKeys", () => {
   it("round-trips decode → encode through the bracket keys", () => {
     const wire = Query.bracketPageKeys(ListArticles);
     const encoded = { "page[offset]": 20, "page[limit]": 10, authorId: "9" };
-    const decoded = Schema.decodeUnknownSync(wire)(encoded);
+    const decoded = Schema.decodeSync(wire)(encoded);
 
     // The decoded shape stays flat — the whole point of the combinator.
     expect(decoded).toEqual({ offset: 20, limit: 10, authorId: "9" });
@@ -587,12 +583,12 @@ describe("Query.bracketPageKeys", () => {
 
   it("carries the checks of the underlying leaves through the rename", () => {
     const wire = Query.bracketPageKeys(ListArticles);
-    expect(() => Schema.decodeUnknownSync(wire)({ "page[limit]": 101 })).toThrow();
+    expect(() => Schema.decodeSync(wire)({ "page[limit]": 101 })).toThrow();
   });
 
   it("bracket-keys the string-decoding Page.Offset constant too", () => {
     const wire = Query.bracketPageKeys(Schema.Struct(Query.Page.Offset));
-    expect(Schema.decodeUnknownSync(wire)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
+    expect(Schema.decodeSync(wire)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
       offset: 20,
       limit: 10,
     });
@@ -606,9 +602,7 @@ describe("Query.bracketPageKeys", () => {
     expect(Arr.sort(Object.keys(standalone.from.fields), Order.String)).toEqual(
       Arr.sort(Object.keys(composed.from.fields), Order.String),
     );
-    expect(
-      Schema.decodeUnknownSync(composed)({ "page[offset]": "20", "page[limit]": "10" }),
-    ).toEqual({
+    expect(Schema.decodeSync(composed)({ "page[offset]": "20", "page[limit]": "10" })).toEqual({
       page: { offset: 20, limit: 10 },
     });
   });
@@ -635,7 +629,7 @@ describe("Query.bracketKeys", () => {
   it("round-trips decode → encode through the bracket keys", () => {
     const wire = ListArticles.pipe(Query.bracketKeys("filter", ["status"]));
     const encoded = { "filter[status]": "open", offset: 20, limit: 10, authorId: "9" };
-    const decoded = Schema.decodeUnknownSync(wire)(encoded);
+    const decoded = Schema.decodeSync(wire)(encoded);
     expect(decoded).toEqual({ status: "open", offset: 20, limit: 10, authorId: "9" });
     expect(Schema.encodeSync(wire)(decoded)).toEqual(encoded);
   });
@@ -647,8 +641,8 @@ describe("Query.bracketKeys", () => {
       Arr.sort(Object.keys(viaBracketPageKeys.from.fields), Order.String),
     );
     const encoded = { "page[offset]": 20, "page[limit]": 10, authorId: "9", status: "open" };
-    expect(Schema.decodeUnknownSync(wire)(encoded)).toEqual(
-      Schema.decodeUnknownSync(viaBracketPageKeys)(encoded),
+    expect(Schema.decodeSync(wire)(encoded)).toEqual(
+      Schema.decodeSync(viaBracketPageKeys)(encoded),
     );
   });
 
@@ -674,7 +668,7 @@ describe("Query.bracketKeys", () => {
         "filter[authorId]": "9",
         "filter[status]": "open",
       };
-      const decoded = Schema.decodeUnknownSync(wire)(encoded);
+      const decoded = Schema.decodeSync(wire)(encoded);
       expect(decoded).toEqual({ offset: 20, limit: 10, authorId: "9", status: "open" });
       expect(Schema.encodeSync(wire)(decoded)).toEqual(encoded);
     });
@@ -714,7 +708,7 @@ describe("Query.bracketKeys", () => {
 
   it("carries the checks of the underlying leaves through the rename", () => {
     const wire = ListArticles.pipe(Query.bracketKeys("page", ["limit"]));
-    expect(() => Schema.decodeUnknownSync(wire)({ "page[limit]": 101 })).toThrow();
+    expect(() => Schema.decodeSync(wire)({ "page[limit]": 101 })).toThrow();
   });
 });
 
@@ -836,7 +830,7 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
     expect(decode({ "fields[articles]": "" })).toEqual({ fields: { articles: [] } });
     expect(decode({ "fields[articles]": [""] })).toEqual({ fields: { articles: [] } });
     expect(decode({})).toEqual({});
-    expect(Schema.decodeUnknownSync(Query.Fieldset(Article))("")).toEqual([]);
+    expect(Schema.decodeSync(Query.Fieldset(Article))("")).toEqual([]);
     expect(Schema.encodeSync(query)({ fields: { articles: [] } })).toEqual({
       "fields[articles]": "",
     });
@@ -854,20 +848,17 @@ describe("sort and fields[TYPE]: repeated keys (issue #102)", () => {
 describe("Query.Include / Query.Fieldset / Query.Sort: the standalone constructors compose Repeatable too", () => {
   it("Query.Include accepts the repeated-key spelling directly", () => {
     const include = Query.Include(Article);
-    expect(Schema.decodeUnknownSync(include)(["author", "comments"])).toEqual([
-      "author",
-      "comments",
-    ]);
+    expect(Schema.decodeSync(include)(["author", "comments"])).toEqual(["author", "comments"]);
   });
 
   it("Query.Fieldset accepts the repeated-key spelling directly", () => {
     const fieldset = Query.Fieldset(Article);
-    expect(Schema.decodeUnknownSync(fieldset)(["title", "body"])).toEqual(["title", "body"]);
+    expect(Schema.decodeSync(fieldset)(["title", "body"])).toEqual(["title", "body"]);
   });
 
   it("Query.Sort accepts the repeated-key spelling directly", () => {
     const sort = Query.Sort(["createdAt", "title"]);
-    expect(Schema.decodeUnknownSync(sort)(["-createdAt", "title"])).toEqual([
+    expect(Schema.decodeSync(sort)(["-createdAt", "title"])).toEqual([
       { field: "createdAt", direction: "desc" },
       { field: "title", direction: "asc" },
     ]);
@@ -877,19 +868,19 @@ describe("Query.Include / Query.Fieldset / Query.Sort: the standalone constructo
 describe("empty comma segments: normalised away, not treated as an item", () => {
   it("a double comma and a trailing comma both drop the empty segment", () => {
     const include = Query.Include(Article);
-    expect(Schema.decodeUnknownSync(include)("author,,comments")).toEqual(["author", "comments"]);
-    expect(Schema.decodeUnknownSync(include)("author,comments,")).toEqual(["author", "comments"]);
-    expect(Schema.decodeUnknownSync(include)(",author")).toEqual(["author"]);
+    expect(Schema.decodeSync(include)("author,,comments")).toEqual(["author", "comments"]);
+    expect(Schema.decodeSync(include)("author,comments,")).toEqual(["author", "comments"]);
+    expect(Schema.decodeSync(include)(",author")).toEqual(["author"]);
   });
 
   it("the whole-string empty case still decodes to an empty list", () => {
     const include = Query.Include(Article);
-    expect(Schema.decodeUnknownSync(include)("")).toEqual([]);
+    expect(Schema.decodeSync(include)("")).toEqual([]);
   });
 
   it("applies to Sort too: an empty term between commas is dropped, not a bad sort term", () => {
     const sort = Query.Sort(["createdAt", "title"]);
-    expect(Schema.decodeUnknownSync(sort)("-createdAt,,title")).toEqual([
+    expect(Schema.decodeSync(sort)("-createdAt,,title")).toEqual([
       { field: "createdAt", direction: "desc" },
       { field: "title", direction: "asc" },
     ]);
@@ -1077,7 +1068,7 @@ describe("Query.canonical", () => {
     // `UrlParams.toRecord` (what HttpApi hands the query schema) turns the repeated key back into the array
     const record = UrlParams.toRecord(UrlParams.fromInput(new URLSearchParams(s)));
     expect(record).toEqual({ "page[limit]": "5", tag: ["b", "a", "a"] });
-    expect(Schema.decodeUnknownSync(wire)(record)).toEqual({ tag: ["b", "a", "a"], limit: 5 });
+    expect(Schema.decodeSync(wire)(record)).toEqual({ tag: ["b", "a", "a"], limit: 5 });
     // a lone item is one pair, and decodes back through the same schema as a one-element array
     expect(Query.canonicalPairs(wire)({ tag: ["only"] })).toEqual([["tag", "only"]]);
     expect(flat({ tag: [] })).toBe("");
@@ -1273,7 +1264,7 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
 
   describe.each(schemas)("%s", (_, schema) => {
     it.each(titled(undeclared))("?%s decodes to {}", (_, search) => {
-      expect(Schema.decodeUnknownSync(schema)(wire(search))).toEqual({});
+      expect(Schema.decodeSync(schema)(wire(search))).toEqual({});
       expect(polluted()).toBe(false);
     });
   });
@@ -1284,7 +1275,7 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
 
   it("declared parameters decode unchanged alongside undeclared ones", () => {
     expect(
-      Schema.decodeUnknownSync(all)(
+      Schema.decodeSync(all)(
         wire(
           "include=author&fields[articles]=title&sort=-createdAt&page[limit]=5&filter[author]=9" +
             "&x=1&x[y]=2&page=3&include[x]=4&fields=5&filter=6&__proto__[polluted]=yes",
@@ -1297,9 +1288,9 @@ describe("Query.schema: undeclared parameters never reach the decoded query (iss
       page: { limit: 5 },
       filter: { author: "9" },
     });
-    expect(
-      Schema.decodeUnknownSync(grammar)(wire("filter[label]=a&x=1&x[y]=2&page[limit]=5")),
-    ).toEqual({ filter: { _tag: "Compare", op: "eq", field: "label", value: "a" } });
+    expect(Schema.decodeSync(grammar)(wire("filter[label]=a&x=1&x[y]=2&page[limit]=5"))).toEqual({
+      filter: { _tag: "Compare", op: "eq", field: "label", value: "a" },
+    });
   });
 
   describe("end to end: an endpoint whose query declares nothing", () => {

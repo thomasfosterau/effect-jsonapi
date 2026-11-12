@@ -3,6 +3,7 @@
  *
  * @internal
  */
+import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
@@ -161,8 +162,8 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
   // Whether a bare key holds `name`, wherever it sits in `flat`.
   const holdsBare = (name: string): boolean =>
     Option.getOrUndefined(R.get(flat, name)) !== undefined;
-  for (const [key, value] of R.toEntries(flat)) {
-    if (value === undefined) continue;
+  Arr.forEach(R.toEntries(flat), ([key, value]) => {
+    if (value === undefined) return;
     const [, name, member] = bracketKey.exec(key) ?? [];
     if (name === undefined || member === undefined || holdsBare(name)) {
       define(nested, key, value);
@@ -176,7 +177,7 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
       }) as Record<string, V>;
       define(group, member, value);
     }
-  }
+  });
   return nested;
 };
 
@@ -185,16 +186,16 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
  */
 export const flatten = (nested: { readonly [key: string]: unknown }) => {
   const flat: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(nested)) {
-    if (value === undefined) continue;
+  Arr.forEach(Object.entries(nested), ([key, value]) => {
+    if (value === undefined) return;
     if (P.isObject(value)) {
-      for (const [sub, subValue] of Object.entries(value)) {
-        if (subValue === undefined) continue;
+      Arr.forEach(Object.entries(value), ([sub, subValue]) => {
+        if (subValue === undefined) return;
         define(flat, `${key}[${sub}]`, subValue);
-      }
+      });
     } else {
       define(flat, key, value);
     }
-  }
+  });
   return flat;
 };

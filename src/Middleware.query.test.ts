@@ -1766,7 +1766,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
 
     // A host that decodes the query itself renders the same document.
     it("on a direct decode, through `schemaErrorDocument`", () => {
-      const result = Schema.decodeUnknownResult(endpoints.swap)({ inc: "nope" });
+      const result = Schema.decodeResult(endpoints.swap)({ inc: "nope" });
       expect(
         Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
       ).toEqual({ errors: [includable("inc")] });
@@ -1792,7 +1792,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
             },
           ),
         );
-      const result = Schema.decodeUnknownResult(fieldsets)({ fields: { people: "secret" } });
+      const result = Schema.decodeResult(fieldsets)({ fields: { people: "secret" } });
       expect(
         Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
       ).toEqual({ errors: [rejected("fields[people]", "not public")] });
@@ -1807,7 +1807,7 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       const outer = renamed.pipe(
         Schema.decodeTo(Schema.toType(renamed), SchemaTransformation.passthrough()),
       );
-      const result = Schema.decodeUnknownResult(outer)({ include: "nope" });
+      const result = Schema.decodeResult(outer)({ include: "nope" });
       expect(
         Result.isFailure(result) && Middleware.schemaErrorDocument("Query", result.failure),
       ).toEqual({ errors: [includable("include")] });

@@ -189,7 +189,7 @@ describe("Middleware.schemaErrorDocument on a renamed body or header (#316)", ()
     expect(
       Middleware.schemaErrorDocument(
         "Payload",
-        failure(Schema.decodeUnknownResult(Payload)({ data: { itemCount: "x" } })),
+        failure(Schema.decodeResult(Payload)({ data: { itemCount: "x" } })),
       ).errors[0]?.source,
     ).toEqual({ pointer: "/data/itemCount" });
     const Trace = Schema.Struct({ trace: Schema.FiniteFromString }).pipe(
@@ -198,7 +198,7 @@ describe("Middleware.schemaErrorDocument on a renamed body or header (#316)", ()
     expect(
       Middleware.schemaErrorDocument(
         "Headers",
-        failure(Schema.decodeUnknownResult(Trace)({ "x-trace": "y" })),
+        failure(Schema.decodeResult(Trace)({ "x-trace": "y" })),
       ).errors[0]?.source,
     ).toEqual({ header: "x-trace" });
   });
@@ -224,7 +224,7 @@ describe("Middleware.schemaErrorDocument on a renamed body or header (#316)", ()
     expect(
       Middleware.schemaErrorDocument(
         "Payload",
-        failure(Schema.decodeUnknownResult(Payload)({ o: { v: "x" } })),
+        failure(Schema.decodeResult(Payload)({ o: { v: "x" } })),
       ).errors[0]?.source,
     ).toEqual({ pointer: "/o/v/deep" });
   });
