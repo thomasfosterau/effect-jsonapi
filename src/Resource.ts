@@ -49,6 +49,7 @@ import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as HashSet from "effect/HashSet";
 import * as R from "effect/Record";
+import { cast } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
@@ -135,7 +136,7 @@ export const Id = <const Type extends string>(type: Type): Id<Type> =>
  */
 export interface Identifier<
   Type extends string,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 > extends Schema.Struct<{
   readonly type: Schema.tag<Type>;
   readonly id: IdSchema;
@@ -164,7 +165,7 @@ export interface Identifier<
  */
 export const Identifier = <
   const Type extends string,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 >(
   type: Type,
   id?: IdSchema,
@@ -598,7 +599,7 @@ export const attribute = <
   const resourceField = resource === "optional" ? Schema.optionalKey(declared) : declared;
   return resourceField.annotate({
     [AttributeDescriptorAnnotationId]: config,
-  }) as unknown as Attribute<
+  }) as Attribute<
     Declare<S, FilterDecl, Sortable, Literal>,
     Resource,
     Create,
@@ -678,7 +679,7 @@ export const readOnlyAttribute = <
     filterLiteral: options?.filterLiteral as Schema.Codec<unknown, string> | undefined,
     create: false,
     update: false,
-  }) as unknown as ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>>;
+  }) as ReadOnlyAttribute<Declare<S, FilterDecl, Sortable, Literal>>;
 
 // The runtime shape of an attribute's descriptor, stored under
 // `AttributeDescriptorAnnotationId`. `schema` is the inner (declared) schema:
@@ -735,14 +736,15 @@ const isInputOnly = (field: Schema.Top): boolean => descriptorOf(field)?.resourc
 // kept as declared (a plain schema, or the descriptor's resource-object field —
 // the base schema, or an `optionalKey` of it for `resource: "optional"`). Used
 // by `make` for the resource `Schema.Struct`.
-const resourceAttributeFields = (fields: Schema.Struct.Fields) => {
+function resourceAttributeFields<A extends Schema.Struct.Fields>(fields: A): ResourceAttributes<A>;
+function resourceAttributeFields(fields: Schema.Struct.Fields) {
   const result: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
     if (isInputOnly(field as Schema.Top)) return;
     result[key] = field as Schema.Top;
   });
   return result;
-};
+}
 
 // The schema a bare `Schema.optionalKey(S)` attribute wraps (`S`), or
 // `undefined` for anything else — a required field, or a field that already
@@ -771,7 +773,10 @@ const strictOptionalInner = (field: Schema.Top): Schema.Top | undefined => {
  * @since 0.5.0
  * @category utils
  */
-export const createAttributeFields = (fields: Schema.Struct.Fields) => {
+export function createAttributeFields<A extends Schema.Struct.Fields>(
+  fields: A,
+): CreateAttributes<A>;
+export function createAttributeFields(fields: Schema.Struct.Fields) {
   const result: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
     const descriptor = descriptorOf(field as Schema.Top);
@@ -785,7 +790,7 @@ export const createAttributeFields = (fields: Schema.Struct.Fields) => {
       descriptor.create === "optional" ? Schema.optional(descriptor.schema) : descriptor.schema;
   });
   return result;
-};
+}
 
 /**
  * Builds the **update** field map for a resource's attribute fields: each
@@ -797,7 +802,10 @@ export const createAttributeFields = (fields: Schema.Struct.Fields) => {
  * @since 0.5.0
  * @category utils
  */
-export const updateAttributeFields = (fields: Schema.Struct.Fields) => {
+export function updateAttributeFields<A extends Schema.Struct.Fields>(
+  fields: A,
+): UpdateAttributes<A>;
+export function updateAttributeFields(fields: Schema.Struct.Fields) {
   const result: Record<string, Schema.Top> = {};
   Arr.forEach(R.toEntries(fields), ([key, field]) => {
     const attribute = field as Schema.Top;
@@ -813,7 +821,7 @@ export const updateAttributeFields = (fields: Schema.Struct.Fields) => {
     result[key] = Schema.optional(base);
   });
   return result;
-};
+}
 
 // ---------------------------------------------------------------------------
 // Type-level write projections
@@ -875,11 +883,17 @@ export type ResourceAttributes<Attributes extends Schema.Struct.Fields> = AsFiel
 export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
   readonly [
     K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly create: false } ? never : K
-  ]: ConfigOf<Attributes[K]> extends AttributeConfig<infer S, infer C, any, any, any>
+  ]: ConfigOf<Attributes[K]> extends AttributeConfig<
+    infer S,
+    infer C,
+    infer _Update,
+    infer _Clearable,
+    infer _Resource
+  >
     ? C extends "optional"
       ? Schema.optional<S>
       : S
-    : Attributes[K] extends Schema.optional<any>
+    : Attributes[K] extends Schema.optional<Schema.Top>
       ? Attributes[K]
       : Attributes[K] extends Schema.optionalKey<infer S extends Schema.Top>
         ? Schema.optional<S>
@@ -897,7 +911,13 @@ export type CreateAttributes<Attributes extends Schema.Struct.Fields> = AsFields
 export type UpdateAttributes<Attributes extends Schema.Struct.Fields> = AsFields<{
   readonly [
     K in keyof Attributes as ConfigOf<Attributes[K]> extends { readonly update: false } ? never : K
-  ]: ConfigOf<Attributes[K]> extends AttributeConfig<infer S, any, "optional", infer Cl, any>
+  ]: ConfigOf<Attributes[K]> extends AttributeConfig<
+    infer S,
+    infer _Create,
+    "optional",
+    infer Cl,
+    infer _Resource
+  >
     ? Schema.optional<UpdateValueSchema<S, Cl>>
     : Schema.optional<Attributes[K]>;
 }>;
@@ -919,7 +939,7 @@ export type ResourceFields<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 > = {
   readonly type: Schema.tag<Type>;
   readonly id: IdSchema;
@@ -1119,7 +1139,7 @@ export interface UpdatePayload<
   Type extends string,
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 > extends Schema.Struct<{
   readonly data: Schema.Struct<{
     readonly type: Schema.tag<Type>;
@@ -1156,7 +1176,7 @@ export interface CreateInput<Attributes extends Schema.Struct.Fields> extends Sc
  */
 export interface UpdateInput<
   Attributes extends Schema.Struct.Fields,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
 > extends Schema.Struct<
   AsFields<Omit<UpdateAttributes<Attributes>, "id"> & { readonly id: IdSchema }>
 > {}
@@ -1200,7 +1220,7 @@ export interface Resource<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 > extends Schema.Struct<ResourceFields<Type, Attributes, Rels, Meta, IdSchema>> {
   /** The resource type name. */
   readonly type: Type;
@@ -1349,7 +1369,7 @@ export type Parameter<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 > = Resource<NoInfer<Type>, Attributes, Rels, Meta, IdSchema> & { readonly type: Type };
 
 /**
@@ -1845,8 +1865,10 @@ export type IncludedFor<R extends Any, Paths extends ReadonlyArray<string>> = Re
  * @since 0.1.0
  * @category accessors
  */
-export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<AttributeKeys<R>> =>
-  R.keys(resource.fields.attributes.fields) as unknown as ReadonlyArray<AttributeKeys<R>>;
+export function attributeKeys<Res extends Any>(resource: Res): ReadonlyArray<AttributeKeys<Res>>;
+export function attributeKeys(resource: Any): ReadonlyArray<string> {
+  return R.keys(resource.fields.attributes.fields);
+}
 
 /**
  * The relationship keys of a resource definition, at runtime.
@@ -1868,9 +1890,13 @@ export const attributeKeys = <R extends Any>(resource: R): ReadonlyArray<Attribu
  * @since 0.18.0
  * @category accessors
  */
-export const relationshipKeys = <R extends Any>(resource: R): ReadonlyArray<RelationshipKeys<R>> =>
-  // SAFETY: the keys of the descriptor record `RelationshipKeys` reads.
-  R.keys(resource.relationships) as unknown as ReadonlyArray<RelationshipKeys<R>>;
+export function relationshipKeys<Res extends Any>(
+  resource: Res,
+): ReadonlyArray<RelationshipKeys<Res>>;
+// The keys of the descriptor record `RelationshipKeys` reads.
+export function relationshipKeys(resource: Any): ReadonlyArray<string> {
+  return R.keys(resource.relationships);
+}
 
 /**
  * The field names of a resource definition, at runtime: its attribute keys,
@@ -2364,45 +2390,47 @@ const parseScalar = (kind: ScalarKind, input: string): string | number | boolean
 // encode. `target` is the attribute schema with any `NullOr` stripped, so the
 // codec's `Type` never includes `null`.
 const scalarLiteral = (kind: ScalarKind, target: Schema.Top): Schema.Codec<unknown, string> =>
-  Schema.String.pipe(
-    Schema.decodeTo(
-      target,
-      SchemaTransformation.transformEffect<unknown, string>({
-        decode: (input, options) => {
-          const value = parseScalar(kind, input);
-          return value === undefined
-            ? Effect.fail(
-                new SchemaIssue.InvalidValue(
-                  { message: `Expected a ${kind} filter literal, got ${render(input)}` },
-                  input,
-                  options,
+  cast(
+    Schema.String.pipe(
+      Schema.decodeTo(
+        target,
+        SchemaTransformation.transformEffect<unknown, string>({
+          decode: (input, options) => {
+            const value = parseScalar(kind, input);
+            return value === undefined
+              ? Effect.fail(
+                  new SchemaIssue.InvalidValue(
+                    { message: `Expected a ${kind} filter literal, got ${render(input)}` },
+                    input,
+                    options,
+                  ),
+                )
+              : Effect.succeed(value);
+          },
+          // `target` has already validated and encoded the value, so it arrives
+          // here as a scalar of `kind`; the one thing left to refuse is a
+          // non-finite number — `NaN` / `±Infinity` are numbers `Schema.Number`
+          // admits but the decoder above rejects, and refusing them keeps
+          // `decode ∘ encode` total. They are rendered with `String`:
+          // `JSON.stringify` writes all three as `null`, which reads as a NULL
+          // literal. (`null` itself never reaches here either — `target`
+          // rejects it first; the tree encoder in `internal/filter.ts` names it.)
+          encode: (value, options) =>
+            kind !== "number" || Number.isFinite(value)
+              ? Effect.succeed(String(value))
+              : Effect.fail(
+                  new SchemaIssue.InvalidValue(
+                    {
+                      message: `Expected a finite number to encode as a filter literal, got ${String(value)}`,
+                    },
+                    value,
+                    options,
+                  ),
                 ),
-              )
-            : Effect.succeed(value);
-        },
-        // `target` has already validated and encoded the value, so it arrives
-        // here as a scalar of `kind`; the one thing left to refuse is a
-        // non-finite number — `NaN` / `±Infinity` are numbers `Schema.Number`
-        // admits but the decoder above rejects, and refusing them keeps
-        // `decode ∘ encode` total. They are rendered with `String`:
-        // `JSON.stringify` writes all three as `null`, which reads as a NULL
-        // literal. (`null` itself never reaches here either — `target`
-        // rejects it first; the tree encoder in `internal/filter.ts` names it.)
-        encode: (value, options) =>
-          kind !== "number" || Number.isFinite(value)
-            ? Effect.succeed(String(value))
-            : Effect.fail(
-                new SchemaIssue.InvalidValue(
-                  {
-                    message: `Expected a finite number to encode as a filter literal, got ${String(value)}`,
-                  },
-                  value,
-                  options,
-                ),
-              ),
-      }),
+        }),
+      ),
     ),
-  ) as unknown as Schema.Codec<unknown, string>;
+  );
 
 // Derives the literal codec for a filterable attribute from its schema, or
 // throws when the schema's encoded form is not a JSON scalar. Called from
@@ -2600,10 +2628,7 @@ const filterableFields = (
         Relationship.FilterOperator,
         `Resource.make("${type}"): relationship "${key}"`,
       ),
-      literal: Schema.suspend(() => descriptor.ref().Id) as unknown as Schema.Codec<
-        unknown,
-        string
-      >,
+      literal: Schema.suspend(() => descriptor.ref().Id) as Schema.Codec<unknown, string>,
     };
   });
   return result;
@@ -2709,7 +2734,7 @@ export const filterable = <R extends Any>(resource: R): Filterable<R> => {
     );
     filterableCache.set(attributes, result);
   }
-  return { ...result } as unknown as Filterable<R>;
+  return { ...result } as Filterable<R>;
 };
 
 /**
@@ -2756,7 +2781,8 @@ export const filterable = <R extends Any>(resource: R): Filterable<R> => {
  * @since 0.13.0
  * @category accessors
  */
-export const sortable = <R extends Any>(resource: R): ReadonlyArray<SortableKeys<R>> => {
+export function sortable<R extends Any>(resource: R): ReadonlyArray<SortableKeys<R>>;
+export function sortable(resource: Any): ReadonlyArray<string> {
   const attributes = resource.fields.attributes;
   if (nameOnlyFamilyAttributes.has(attributes)) return [];
   let keys = sortableCache.get(attributes);
@@ -2764,8 +2790,8 @@ export const sortable = <R extends Any>(resource: R): ReadonlyArray<SortableKeys
     keys = sortableKeys(resource.type, attributes.fields);
     sortableCache.set(attributes, keys);
   }
-  return [...keys] as unknown as ReadonlyArray<SortableKeys<R>>;
-};
+  return [...keys];
+}
 
 // Refuses, at definition time and naming the attribute, an input-only
 // descriptor (`resource: false`) that declares nothing — excluded from the
@@ -2890,7 +2916,7 @@ const validateStorageKeys = (
 // rebuild a resource from its declaration rather than reverse-derive one from
 // the schema it produced.
 interface Definition {
-  readonly id: Schema.Codec<any, string>;
+  readonly id: Schema.Codec<unknown, string>;
   readonly attributes: Schema.Struct.Fields;
   readonly relationships: Relationships;
   readonly meta: Schema.Top;
@@ -3010,7 +3036,7 @@ export const make = <
   const Attributes extends Schema.Struct.Fields,
   const Rels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = typeof AnyMeta,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
 >(
   type: Type,
   options: {
@@ -3077,9 +3103,7 @@ export const make = <
   // ones (`resource: false`); a descriptor that declares nothing anywhere, or
   // declares an input-only attribute filterable / sortable, is refused here.
   validateDescriptors(type, options.attributes);
-  const attributes = Schema.Struct(
-    resourceAttributeFields(options.attributes),
-  ) as unknown as Schema.Struct<ResourceAttributes<Attributes>>;
+  const attributes = Schema.Struct(resourceAttributeFields<Attributes>(options.attributes));
   const relationshipsStruct = Schema.Struct(relationshipSchemas);
 
   // Per-attribute projections: each attribute may carry a descriptor (from
@@ -3092,11 +3116,11 @@ export const make = <
   // would hand it to the handler (#270).
   // Each reports at most `maxUndeclaredMemberErrors` of them at their own paths (#308).
   const createAttributes = closedStruct(
-    createAttributeFields(options.attributes),
+    createAttributeFields<Attributes>(options.attributes),
     maxUndeclaredMemberErrors,
   );
   const updateAttributes = closedStruct(
-    updateAttributeFields(options.attributes),
+    updateAttributeFields<Attributes>(options.attributes),
     maxUndeclaredMemberErrors,
   );
 
@@ -3158,7 +3182,7 @@ export const make = <
           : Schema.optionalKey(createRelationshipsStruct),
       }),
     ),
-  }) as unknown as CreatePayload<Type, Attributes, Rels>;
+  }) as CreatePayload<Type, Attributes, Rels>;
 
   // Update payload relationships: every non-`paginated` relationship, optional.
   const updateRelationshipFields: Record<string, Schema.Top> = {};
@@ -3179,21 +3203,23 @@ export const make = <
         closedStruct(updateRelationshipFields, maxUndeclaredMemberErrors),
       ),
     }),
-  }) as unknown as UpdatePayload<Type, Attributes, Rels, IdSchema>;
+  }) as UpdatePayload<Type, Attributes, Rels, IdSchema>;
 
   // Flat ("command-style") projections of the create/update inputs, without the
   // JSON:API `{ data: { type, ... } }` envelope. They mirror the enveloped
   // payloads' attribute projections.
-  const createInput = createAttributes as unknown as CreateInput<Attributes>;
+  const createInput: CreateInput<Attributes> = createAttributes;
   // Closed like the enveloped payload's attributes.
+  // SAFETY: no attribute may be named `id` (`validateFieldNames`), so the
+  // spread's `id` is the resource id and `UpdateInput`'s `Omit<…, "id">` drops
+  // nothing the spread carries.
   const updateInput = closedStruct(
     {
-      ...updateAttributeFields(options.attributes),
-      // No attribute may be named `id` (`validateFieldNames`), so this is the resource id.
+      ...updateAttributeFields<Attributes>(options.attributes),
       id,
     },
     maxUndeclaredMemberErrors,
-  ) as unknown as UpdateInput<Attributes, IdSchema>;
+  ) as UpdateInput<Attributes, IdSchema>;
 
   // The default `included` union: resources referenced by non-`paginated`
   // relationships. Built lazily so out-of-order / mutually recursive
@@ -3207,7 +3233,7 @@ export const make = <
           .filter(Relationship.isLinkable)
           .map((descriptor) => descriptor.ref()),
       ),
-    ) as unknown as DefaultIncluded<Rels>;
+    ) as DefaultIncluded<Rels>;
 
   const resource: Resource<Type, Attributes, Rels, Meta, IdSchema> = Object.assign(struct, {
     type,
@@ -3367,10 +3393,13 @@ export const annotations = <R extends Any>(resource: R): Schema.Annotations.Anno
  * @since 0.15.0
  * @category combinators
  */
-export const annotate = <R extends Any>(
+export function annotate<R extends Any>(
   resource: R,
   annotationsToAdd: Schema.Annotations.Annotations,
-): R => {
+): R;
+// The rebuilt definition has the same declared members as `resource`, so it is
+// an `R` by construction.
+export function annotate(resource: Any, annotationsToAdd: Schema.Annotations.Annotations): Any {
   const definition = definitions.get(resource);
   if (definition === undefined) {
     throw declarationError(
@@ -3386,8 +3415,8 @@ export const annotate = <R extends Any>(
     meta: definition.meta,
     annotations: { ...definition.annotations, ...annotationsToAdd },
     maxUndeclaredMemberErrors: definition.maxUndeclaredMemberErrors,
-  }) as unknown as R;
-};
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Extending (subtyping) a resource
@@ -3436,12 +3465,12 @@ export type ExtendedRelationships<
  * @category type-level
  */
 export type ExtendedId<
-  BaseId extends Schema.Codec<any, string>,
+  BaseId extends Schema.Codec<unknown, string>,
   Type extends string,
   Inherit extends boolean,
-  Custom extends Schema.Codec<any, string> | undefined = undefined,
+  Custom extends Schema.Codec<unknown, string> | undefined = undefined,
 > =
-  Custom extends Schema.Codec<any, string>
+  Custom extends Schema.Codec<unknown, string>
     ? Custom
     : Inherit extends true
       ? InheritedId<BaseId, Type>
@@ -3540,9 +3569,9 @@ export const extend = <
   const ExtraAttributes extends Schema.Struct.Fields = Record<never, never>,
   const ExtraRels extends Relationships = Record<never, never>,
   Meta extends Schema.Top = BaseMeta,
-  BaseId extends Schema.Codec<any, string> = Id<BaseType>,
+  BaseId extends Schema.Codec<unknown, string> = Id<BaseType>,
   const InheritId extends boolean = false,
-  IdSchema extends Schema.Codec<any, string> | undefined = undefined,
+  IdSchema extends Schema.Codec<unknown, string> | undefined = undefined,
 >(
   base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   type: Type,
@@ -3614,26 +3643,22 @@ export const extend = <
   // Checked here too, so a clash an extension introduces names the call that
   // introduced it.
   validateFieldNames(`Resource.extend("${type}")`, attributes, relationships);
-  return make(type, {
-    id,
-    attributes,
-    relationships,
-    meta: (options?.meta ?? base.fields.meta.schema) as Meta,
-    // Resource-level annotations are inherited like attributes and
-    // relationships are, the child's own keys winning.
-    annotations: { ...Schema.resolveAnnotations(base), ...options?.annotations },
-    // Validated here, so a bad value names the call that passed it.
-    maxUndeclaredMemberErrors: validateMaxUndeclaredMemberErrors(
-      `Resource.extend("${type}")`,
-      options?.maxUndeclaredMemberErrors ?? base.maxUndeclaredMemberErrors,
-    ),
-  }) as unknown as Resource<
-    Type,
-    ExtendedAttributes<BaseAttributes, ExtraAttributes>,
-    ExtendedRelationships<BaseRels, ExtraRels>,
-    Meta,
-    ExtendedId<BaseId, Type, InheritId, IdSchema>
-  >;
+  return cast(
+    make(type, {
+      id,
+      attributes,
+      relationships,
+      meta: (options?.meta ?? base.fields.meta.schema) as Meta,
+      // Resource-level annotations are inherited like attributes and
+      // relationships are, the child's own keys winning.
+      annotations: { ...Schema.resolveAnnotations(base), ...options?.annotations },
+      // Validated here, so a bad value names the call that passed it.
+      maxUndeclaredMemberErrors: validateMaxUndeclaredMemberErrors(
+        `Resource.extend("${type}")`,
+        options?.maxUndeclaredMemberErrors ?? base.maxUndeclaredMemberErrors,
+      ),
+    }),
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -3806,6 +3831,10 @@ export interface Family<
   }): CollectionDocument<Schema.Union<Members>, Included, M>;
 }
 
+// Any family, whether or not it is anchored to a base resource (`Base` is
+// `undefined` by default).
+type AnyFamily = Family<string, ReadonlyArray<Any>, Any> | Family<string, ReadonlyArray<Any>>;
+
 /**
  * The legal `include` query parameter paths for a family — the union of every
  * member's include paths.
@@ -3813,9 +3842,7 @@ export interface Family<
  * @since 0.4.0
  * @category type-level
  */
-export type FamilyIncludePath<F extends Family<any, ReadonlyArray<Any>, any>> = IncludePath<
-  F["members"][number]
->;
+export type FamilyIncludePath<F extends AnyFamily> = IncludePath<F["members"][number]>;
 
 /**
  * The `included` union for a family brought in by a set of include paths.
@@ -3823,10 +3850,10 @@ export type FamilyIncludePath<F extends Family<any, ReadonlyArray<Any>, any>> = 
  * @since 0.4.0
  * @category type-level
  */
-export type FamilyIncluded<
-  F extends Family<any, ReadonlyArray<Any>, any>,
-  Paths extends ReadonlyArray<string>,
-> = IncludedFor<F["members"][number], Paths>;
+export type FamilyIncluded<F extends AnyFamily, Paths extends ReadonlyArray<string>> = IncludedFor<
+  F["members"][number],
+  Paths
+>;
 
 // The by-key intersection of the members' relationships: keep a key only when
 // every member declares it with the same kind and the same target type.
@@ -3866,7 +3893,7 @@ const intersectAttributes = (members: ReadonlyArray<Any>): Schema.Struct.Fields 
  * @since 0.4.0
  * @category guards
  */
-export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, any> =>
+export const isFamily = (u: unknown): u is AnyFamily =>
   P.isObjectKeyword(u) &&
   Array.isArray((u as { readonly members?: unknown }).members) &&
   "relationships" in u &&
@@ -3922,16 +3949,13 @@ export function family<
   const BaseAttributes extends Schema.Struct.Fields,
   const BaseRels extends Relationships,
   BaseMeta extends Schema.Top,
-  BaseId extends Schema.Codec<any, string>,
+  BaseId extends Schema.Codec<unknown, string>,
   const Members extends ReadonlyArray<Any>,
 >(
   base: Parameter<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>,
   members: Members,
 ): Family<BaseType, Members, Resource<BaseType, BaseAttributes, BaseRels, BaseMeta, BaseId>>;
-export function family(
-  nameOrBase: string | Any,
-  members: ReadonlyArray<Any>,
-): Family<string, ReadonlyArray<Any>, any> {
+export function family(nameOrBase: string | Any, members: ReadonlyArray<Any>): AnyFamily {
   if (Arr.isReadonlyArrayEmpty(members)) {
     throw declarationError("Resource.family requires at least one member");
   }
@@ -3950,30 +3974,32 @@ export function family(
   // The default `included` union: every member's non-`paginated` targets.
   const includedUnion = () => Schema.Union(dedupe(members.flatMap(directTargets)));
 
-  const fam = Object.assign(memberUnion, {
-    type: name,
-    members,
-    Id: id,
-    identifier,
-    fields: { attributes },
-    // A family declares no attributes of its own: its declared map *is* its
-    // resource-object map (the base's, or the members' intersection).
-    declaredAttributes: attributes.fields,
-    // A base-anchored family writes through its base's attributes, so it
-    // reports undeclared members under its base's cap; a name-only family
-    // carries none, and the atomic operations use the default.
-    maxUndeclaredMemberErrors: base?.maxUndeclaredMemberErrors,
-    document: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
-      DataDocument(memberUnion, {
-        included: opts?.included ?? includedUnion(),
-        meta: opts?.meta ?? AnyMeta,
-      }),
-    collection: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
-      CollectionDocument(memberUnion, {
-        included: opts?.included ?? includedUnion(),
-        meta: opts?.meta ?? AnyMeta,
-      }),
-  }) as unknown as Family<string, ReadonlyArray<Any>, any>;
+  const fam: AnyFamily = cast(
+    Object.assign(memberUnion, {
+      type: name,
+      members,
+      Id: id,
+      identifier,
+      fields: { attributes },
+      // A family declares no attributes of its own: its declared map *is* its
+      // resource-object map (the base's, or the members' intersection).
+      declaredAttributes: attributes.fields,
+      // A base-anchored family writes through its base's attributes, so it
+      // reports undeclared members under its base's cap; a name-only family
+      // carries none, and the atomic operations use the default.
+      maxUndeclaredMemberErrors: base?.maxUndeclaredMemberErrors,
+      document: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
+        DataDocument(memberUnion, {
+          included: opts?.included ?? includedUnion(),
+          meta: opts?.meta ?? AnyMeta,
+        }),
+      collection: (opts?: { readonly included?: Schema.Top; readonly meta?: Schema.Top }) =>
+        CollectionDocument(memberUnion, {
+          included: opts?.included ?? includedUnion(),
+          meta: opts?.meta ?? AnyMeta,
+        }),
+    }),
+  );
 
   // `relationships` is resolved lazily (memoised) so member relationship thunks
   // resolve regardless of declaration order — the no-base intersection walks

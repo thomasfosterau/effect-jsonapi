@@ -47,14 +47,12 @@ describe("pathToJsonPointer", () => {
 });
 
 /** Decode through a schema and return the raised issue tree. */
-const issueFor = <S extends Schema.Top>(
+const issueFor = <S extends Schema.Codec<unknown, unknown>>(
   schema: S,
   input: Schema.Json,
   options?: { readonly errors: "first" | "all" },
 ): SchemaIssue.Issue => {
-  const exit = Effect.runSyncExit(
-    Schema.decodeEffect(schema as unknown as Schema.Codec<S["Type"]>)(input, options),
-  );
+  const exit = Effect.runSyncExit(Schema.decodeEffect(schema)(input, options));
   assert(Exit.isFailure(exit), "expected schema to fail");
   const error = Cause.findErrorOption(exit.cause);
   assert(Option.isSome(error), "Cause has no failure");
@@ -224,7 +222,7 @@ describe("schemaIssueToErrors", () => {
         }),
       );
     const input = { password: "a", confirm: "b" };
-    const detailsFor = (schema: Schema.Top) =>
+    const detailsFor = (schema: Schema.Codec<unknown, unknown>) =>
       ServerErrors.schemaIssueToErrors(issueFor(schema, input)).map((e) => [e.source, e.detail]);
 
     // A pointed issue: Effect's own formatter renders the check's message too,

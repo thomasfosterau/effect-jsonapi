@@ -762,11 +762,14 @@ const toWireValue = <A>(value: A): WireValue => {
  * @since 0.16.0
  * @category utils
  */
-export const toWireSafeResource = <R extends ResourceLike>(resource: R): R =>
-  // SAFETY: the walk keeps every member of the resource, coercing only the
-  // runtime-only leaves above; the signature promises `R` by design, since the
-  // response encoder reads the coerced members as their own wire forms.
-  toWireValue(resource) as unknown as R;
+export function toWireSafeResource<R extends ResourceLike>(resource: R): R;
+// SAFETY (the implementation signature): the walk keeps every member of the
+// resource, coercing only the runtime-only leaves above; the overload promises
+// `R` by design, since the response encoder reads the coerced members as their
+// own wire forms.
+export function toWireSafeResource(resource: ResourceLike): WireValue {
+  return toWireValue(resource);
+}
 
 // ---------------------------------------------------------------------------
 // The pipeline
@@ -774,7 +777,10 @@ export const toWireSafeResource = <R extends ResourceLike>(resource: R): R =>
 
 /** The resource-level transform every emitted resource goes through. */
 const onResourceFor = <V>(
-  options: Pick<Options<V, any>, "capabilities" | "capabilitiesOnIncluded" | "viewer" | "fields">,
+  options: Pick<
+    Options<V, Handlers.IncludeTargets>,
+    "capabilities" | "capabilitiesOnIncluded" | "viewer" | "fields"
+  >,
   primary: ReadonlyArray<ResourceLike>,
 ) => {
   // With `capabilitiesOnIncluded: false` only the primary data is stamped. The
@@ -801,7 +807,7 @@ const onResourceFor = <V>(
 // builders' stricter `ResourceValue` rejects; the builders only read
 // `type` / `id` / `relationships.data`, all present.
 const asValue = (resource: ResourceLike): Handlers.ResourceValue =>
-  resource as unknown as Handlers.ResourceValue;
+  resource as Handlers.ResourceValue;
 
 /**
  * Validates the requested paths, then walks them. `undefined` means the
@@ -810,9 +816,9 @@ const asValue = (resource: ResourceLike): Handlers.ResourceValue =>
  * no registry to walk through or no path to walk, so the document keeps its
  * `included` key (§Fetching Includes, #232).
  */
-const walk = <Targets extends Handlers.IncludeTargets>(
+const walk = <V, Targets extends Handlers.IncludeTargets>(
   primary: ReadonlyArray<ResourceLike>,
-  options: Options<any, Targets>,
+  options: Options<V, Targets>,
 ): Effect.Effect<
   ReadonlyArray<ResourceLike> | undefined,
   | ApiError.UnsupportedIncludeDepth
@@ -909,10 +915,7 @@ export const resource = <
         ),
         onResource: onResourceFor(options, [wired]),
       });
-      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<
-        R,
-        TargetsIncluded<Targets>
-      >;
+      return { ...built, jsonapi: JSONAPI_MEMBER } as ResourceDocument<R, TargetsIncluded<Targets>>;
     }),
   );
 };
@@ -972,7 +975,7 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets, X ext
       return {
         ...(requested ? built : withoutEmptyIncluded(built)),
         jsonapi: JSONAPI_MEMBER,
-      } as unknown as D;
+      } as D;
     }),
   );
 };
@@ -1290,7 +1293,7 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
   const related = rel?.links?.related === undefined ? undefined : toLinkString(rel.links.related);
   return {
     data: rel?.data ?? null,
-    included: included as unknown as ReadonlyArray<WireResource<I>>,
+    included: included as ReadonlyArray<WireResource<I>>,
     ...definedMember("links", related === undefined || related === "" ? undefined : { related }),
     jsonapi: JSONAPI_MEMBER,
   };

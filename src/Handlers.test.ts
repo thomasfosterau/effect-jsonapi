@@ -1181,10 +1181,10 @@ describe("pagination links", () => {
 
     it("keeps the request's pairs, its own page[*] included, on `self` when the window is unpageable", () => {
       // ?sort=-title&page[limit]=0 — `PageInt` admits 0, so the request decodes and nothing can be paged
-      const request = Schema.decodeSync(listQuery as Schema.Codec<any, any>)({
+      const request = Schema.decodeSync(listQuery)({
         sort: "-title",
         "page[limit]": "0",
-      }) as typeof listQuery.Type;
+      });
       expect(request).toEqual({
         sort: [{ field: "title", direction: "desc" }],
         page: { limit: 0 },

@@ -7,6 +7,7 @@
  * `Middleware.CreatedLocation`, which copies that link into the header.
  */
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
+import { cast } from "effect/Function";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -45,19 +46,26 @@ type CreateOptions = { readonly status?: number; readonly idempotency?: Idempote
 const createApi = (options: CreateOptions = {}) =>
   HttpApi.make("blog").add(Group.make(Article, Endpoint.create(Article, options)));
 
+// The builder's handlers reduced to the one method this harness calls.
+interface LooseHandlers {
+  readonly handle: (name: string, handler: () => Effect.Effect<unknown>) => LooseHandlers;
+}
+
 // One server per test, over the package's own middleware set, so the header is
 // observed on the wire exactly as a client receives it. Disposed when the test
 // finishes.
 const server = (options: {
-  readonly api: unknown;
+  readonly api: HttpApi.Constraint;
   readonly handle: () => Effect.Effect<unknown>;
   readonly store?: Idempotency.Store;
 }) => {
   // SAFETY: the handlers deliberately answer outside the endpoint's declared
   // success type (raw responses, malformed bodies) — this harness asserts the
   // wire, not the types — so the group is built untyped.
-  const live = HttpApiBuilder.group(options.api as never, "articles", (handlers: any) =>
-    handlers.handle("create", options.handle),
+  const live = HttpApiBuilder.group(
+    options.api as HttpApi.Top,
+    "articles",
+    cast((handlers: LooseHandlers) => handlers.handle("create", options.handle)),
   );
   // SAFETY: every middleware the api's endpoints require is provided here; the
   // platform services `HttpApiBuilder.layer` lists are unused by these routes.

@@ -21,8 +21,8 @@ import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 
-const decode = <S extends Schema.Top>(schema: S) =>
-  Schema.decodeUnknownSync(schema as unknown as Schema.Codec<S["Type"]>);
+const decode = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+  Schema.decodeUnknownSync(schema);
 
 /** A built group's endpoints, structurally. */
 interface GroupLike {
@@ -32,7 +32,7 @@ interface GroupLike {
 interface EndpointLike {
   readonly method: string;
   readonly path: string;
-  readonly query?: Schema.Top;
+  readonly query?: Schema.Codec<unknown, unknown>;
   readonly error: ReadonlySet<Schema.Top>;
   readonly success: ReadonlySet<Schema.Codec<unknown>>;
 }
@@ -41,7 +41,7 @@ const endpointOf = (group: GroupLike, name: string): EndpointLike => {
   assert(endpoint !== undefined, `no '${name}' endpoint`);
   return endpoint as EndpointLike;
 };
-const queryOf = (group: GroupLike, name: string): Schema.Top => {
+const queryOf = (group: GroupLike, name: string): Schema.Codec<unknown, unknown> => {
   const query = endpointOf(group, name).query;
   assert(query !== undefined, `${name} declares no query`);
   return query;
@@ -214,7 +214,7 @@ describe("Endpoint.flatRelated", () => {
     });
     expect(many.identifier).toBe("related_items");
     expect(many.path).toBe("/:id/items");
-    expect(decode(many.query as Schema.Top)({ "page[limit]": "5" })).toEqual({
+    expect(decode(many.query as Schema.Codec<unknown, unknown>)({ "page[limit]": "5" })).toEqual({
       limit: 5,
       offset: 0,
     });
@@ -232,7 +232,7 @@ describe("Endpoint.flatRelated", () => {
       target: Gadget,
       included: Gadget,
     });
-    expect(decode(included.query as Schema.Top)({ include: "a,b" })).toEqual({
+    expect(decode(included.query as Schema.Codec<unknown, unknown>)({ include: "a,b" })).toEqual({
       include: ["a", "b"],
     });
   });
@@ -246,16 +246,17 @@ describe("Endpoint.flatRelated", () => {
  * its `readOnlyResourceGroup` / `resourceGroup` families.
  */
 describe("the wire contract", () => {
-  interface OpenApiPaths {
-    readonly paths: Readonly<
-      Record<
-        string,
-        Readonly<Record<string, { readonly responses: R.ReadonlyRecord<string, unknown> }>>
-      >
-    >;
-  }
+  const OpenApiPaths = Schema.Struct({
+    paths: Schema.Record(
+      Schema.String,
+      Schema.Record(
+        Schema.String,
+        Schema.Struct({ responses: Schema.Record(Schema.String, Schema.Unknown) }),
+      ),
+    ),
+  });
   const render = (api: HttpApi.Constraint): ReadonlyArray<string> => {
-    const spec = OpenApi.fromApi(api as never) as unknown as OpenApiPaths;
+    const spec = Schema.decodeUnknownSync(OpenApiPaths)(OpenApi.fromApi(api as never));
     return Object.entries(spec.paths)
       .flatMap(([path, operations]) =>
         Object.entries(operations).map(

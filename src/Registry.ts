@@ -41,6 +41,7 @@ import type { HttpServerResponse } from "effect/http";
 import { Etag, HttpPlatform, HttpRouter } from "effect/http";
 import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpApiBuilder } from "effect/http-api";
+import { cast } from "effect/Function";
 import * as Middleware from "./Middleware.js";
 import * as ServerErrors from "./ServerErrors.js";
 import { declarationError } from "./internal/errors.js";
@@ -56,8 +57,7 @@ import { declarationError } from "./internal/errors.js";
  * @since 0.16.0
  * @category models
  */
-// oxlint-disable-next-line effect/avoid-any -- the request half is dispatched by name; the HTTP path re-validates it
-export type RawHandler<R = any> = (request: any) => Effect.Effect<unknown, unknown, R>;
+export type RawHandler<R = unknown> = (request: never) => Effect.Effect<unknown, unknown, R>;
 
 /**
  * The endpoint names a group declares, as a string union.
@@ -92,14 +92,11 @@ export type EndpointSuccess<G, N extends string> = HttpApiEndpoint.SuccessWithId
  */
 export type HandlersFor<G> = {
   readonly [N in EndpointNames<G>]: (
-    // oxlint-disable-next-line effect/avoid-any -- see `RawHandler`
-    request: any,
+    request: never,
   ) => Effect.Effect<
     EndpointSuccess<G, N> | HttpServerResponse.HttpServerResponse,
-    // oxlint-disable-next-line effect/avoid-any -- the error and requirement channels are checked at the router seam
-    any,
-    // oxlint-disable-next-line effect/avoid-any -- as above
-    any
+    unknown,
+    unknown
   >;
 };
 
@@ -125,8 +122,7 @@ export interface FamilyFor<G> {
  * @since 0.16.0
  * @category models
  */
-// oxlint-disable-next-line effect/avoid-any -- see `RawHandler`
-export interface Family<R = any> {
+export interface Family<R = unknown> {
   /** The `HttpApi` group identifier (`"people"`). */
   readonly group: string;
   /** Endpoint name → handler, matching the group's endpoints exactly. */
@@ -306,6 +302,23 @@ export type FamilyLayer<R> = Layer.Layer<
   HttpRouter.Request<"Requires", R>
 >;
 
+// The api with its identifier and group types erased: the registry folds the
+// groups dynamically, so the builder's per-endpoint inference does not apply.
+function erase<ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
+): HttpApi.Top;
+function erase(api: HttpApi.Constraint): HttpApi.Constraint {
+  return api;
+}
+
+// The one method of a `HttpApiBuilder` group's handlers the fold calls.
+interface DynamicHandlers {
+  readonly handle: (
+    name: string,
+    handler: (request: never) => Effect.Effect<unknown, unknown, unknown>,
+  ) => DynamicHandlers;
+}
+
 /**
  * Registers one family's handlers with its `HttpApiBuilder` group, each
  * wrapped in the boundary, after {@link checkFamily}. The generic fold
@@ -315,23 +328,23 @@ export type FamilyLayer<R> = Layer.Layer<
  * @since 0.16.0
  * @category layers
  */
-export const familyLayer = <R>(
-  // oxlint-disable-next-line effect/avoid-any -- the api's groups are folded dynamically
-  api: HttpApi.HttpApi<any, any>,
+export const familyLayer = <ApiId extends string, Groups extends HttpApiGroup.Constraint, R>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
   family: Family<R>,
   options?: Options<R>,
 ): FamilyLayer<R> => {
-  checkFamily(api, family);
+  const erased = erase(api);
+  checkFamily(erased, family);
   const respond =
     options?.respond ?? (<A, E>(effect: Effect.Effect<A, E, R>) => ServerErrors.respond(effect));
   // reason: a dynamic fold over the handler record; completeness is the runtime check above
-  const fold = (handlers: any): any =>
+  const fold = (handlers: DynamicHandlers): DynamicHandlers =>
     R.toEntries(family.handlers).reduce(
-      (current: any, [name, handler]) =>
+      (current, [name, handler]) =>
         current.handle(name, (request: never) => respond(handler(request))),
       handlers,
     );
-  return HttpApiBuilder.group(api, family.group as never, fold) as unknown as FamilyLayer<R>;
+  return cast(HttpApiBuilder.group(erased, family.group, cast(fold)));
 };
 
 /**
@@ -345,17 +358,17 @@ export const familyLayer = <R>(
  * @since 0.16.0
  * @category layers
  */
-export const layer = <R>(
-  // oxlint-disable-next-line effect/avoid-any -- see `familyLayer`
-  api: HttpApi.HttpApi<any, any>,
+export const layer = <ApiId extends string, Groups extends HttpApiGroup.Constraint, R>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
   families: ReadonlyArray<Family<R>>,
   options?: Options<R>,
 ): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request<"Requires", R>> => {
-  const [first, ...rest] = families.map((family) => familyLayer(api, family, options));
+  const erased = erase(api);
+  const [first, ...rest] = families.map((family) => familyLayer(erased, family, options));
   if (first === undefined)
     throw declarationError("Registry.layer: at least one family is required");
   const groups = rest.reduce((merged, next) => Layer.merge(merged, next), first);
-  return HttpApiBuilder.layer(api).pipe(
+  return HttpApiBuilder.layer(erased).pipe(
     Layer.provideMerge(groups),
     Layer.provide(platformLayer),
     // `Endpoint.create` requires `CreatedLocation`, which `Options.middleware`
@@ -422,9 +435,8 @@ export interface WebHandler<R> {
  * @since 0.16.0
  * @category constructors
  */
-export const webHandler = <R = never>(
-  // oxlint-disable-next-line effect/avoid-any -- see `familyLayer`
-  api: HttpApi.HttpApi<any, any>,
+export const webHandler = <ApiId extends string, Groups extends HttpApiGroup.Constraint, R = never>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
   families: ReadonlyArray<Family<R>>,
   options?: Options<R> & { readonly disableLogger?: boolean | undefined },
 ): WebHandler<R> => {

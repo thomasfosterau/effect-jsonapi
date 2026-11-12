@@ -217,8 +217,14 @@ describe("Client.make", () => {
       const bare: Array<HttpClientRequest.HttpClientRequest> = [];
       const negotiated: Array<HttpClientRequest.HttpClientRequest> = [];
 
-      const read = (client: { readonly articles: { readonly get: any } }) =>
-        client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+      const read = (client: {
+        readonly articles: {
+          readonly get: (request: {
+            readonly params: { readonly id: typeof Article.Id.Type };
+            readonly query: object;
+          }) => Effect.Effect<unknown, unknown, unknown>;
+        };
+      }) => client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
 
       yield* Effect.gen(function* () {
         const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost" });
@@ -247,8 +253,13 @@ describe("Client.make", () => {
       const bare: Array<HttpClientRequest.HttpClientRequest> = [];
       const negotiated: Array<HttpClientRequest.HttpClientRequest> = [];
 
-      const remove = (client: { readonly articles: { readonly delete: any } }) =>
-        client.articles.delete({ params: { id: Article.Id.make("1") } });
+      const remove = (client: {
+        readonly articles: {
+          readonly delete: (request: {
+            readonly params: { readonly id: typeof Article.Id.Type };
+          }) => Effect.Effect<unknown, unknown, unknown>;
+        };
+      }) => client.articles.delete({ params: { id: Article.Id.make("1") } });
 
       yield* Effect.gen(function* () {
         const client = yield* HttpApiClient.make(Api, { baseUrl: "http://localhost" });

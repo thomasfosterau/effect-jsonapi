@@ -1077,7 +1077,7 @@ describe("Query.canonical with filter: true", () => {
     filter: true,
   });
   type Decoded = typeof query.Type;
-  const decodeQuery = Schema.decodeUnknownSync(query as Schema.Codec<any, any>) as (
+  const decodeQuery = Schema.decodeUnknownSync(query) as (
     input: R.ReadonlyRecord<string, unknown>,
   ) => Decoded;
   const canonical = Query.canonical(query);
@@ -1421,10 +1421,12 @@ describe("Endpoint.list with filter: true, end to end", () => {
   );
 
   const request = async (url: string) => {
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(Api).pipe(
       Layer.provide(ArticlesLive),
       Layer.provide(Middleware.layer),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url));
@@ -1568,10 +1570,11 @@ describe("Endpoint.list with filter: true, end to end", () => {
 
   it("answers one error object per offending key", async () => {
     const response = await request("http://localhost/articles?filter[body]=x&filter[age][gt]=abc");
-    expect(response.body.errors.map((e: any) => e.source.parameter)).toEqual([
-      "filter[body]",
-      "filter[age][gt]",
-    ]);
+    expect(
+      response.body.errors.map(
+        (e: { readonly source: { readonly parameter: string } }) => e.source.parameter,
+      ),
+    ).toEqual(["filter[body]", "filter[age][gt]"]);
   });
 
   it("still documents the endpoint in OpenAPI", () => {
@@ -1580,7 +1583,7 @@ describe("Endpoint.list with filter: true, end to end", () => {
   });
 
   it("decodes through the endpoint's query schema directly", () => {
-    const listQuery = list.query as Schema.Codec<any, any>;
+    const listQuery = list.query as Schema.Codec<unknown, unknown>;
     expect(Schema.decodeSync(listQuery)({ "filter[priority]": "2,1" })).toEqual({
       filter: Filter.isIn("priority", [1, 2]),
     });

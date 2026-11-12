@@ -9,6 +9,8 @@ import { assert, describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import type * as Scope from "effect/Scope";
 import * as Exit from "effect/Exit";
 import * as Ord from "effect/Order";
 import * as P from "effect/Predicate";
@@ -16,7 +18,7 @@ import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
-import { Client } from "@thomasfosterau/effect-jsonapi";
+import { Client, Registry } from "@thomasfosterau/effect-jsonapi";
 import { Api, ProductsQuery, SearchQuery } from "../api.js";
 import {
   CategoryNotFound,
@@ -74,11 +76,18 @@ const buildClient = HttpApiTest.groups(Api, [
 
 const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-const run = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
-  effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>;
+// What the effects under test read: the group services of the live layers, and
+// the platform services `HttpApiTest` names but a JSON:API never uses.
+const Provided = Layer.mergeAll(NorthwindLive, Registry.platformLayer);
 
-const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<Exit.Exit<A, E>> =>
-  Effect.exit(effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>);
+const run = <A, E>(
+  effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
+): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(Provided));
+
+const runExit = <A, E>(
+  effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
+): Effect.Effect<Exit.Exit<A, E>> =>
+  Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
   const result = Cause.findError(cause);
@@ -983,7 +992,7 @@ describe("northwind example: spec compliance on the wire", () => {
 
     // typed query parameters are documented with their bracket names
     const listParams = spec.paths["/products"]?.get?.parameters?.map(
-      (parameter: any) => parameter.name,
+      (parameter: { readonly name: string }) => parameter.name,
     );
     expect(listParams).toContain("sort");
     expect(listParams).toContain("page[offset]");

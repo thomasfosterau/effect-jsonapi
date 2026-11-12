@@ -8,10 +8,10 @@ import * as Schema from "effect/Schema";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Query from "./Query.js";
 
-const decode = <S extends Schema.Top>(schema: S) =>
-  Schema.decodeUnknownSync(schema as unknown as Schema.Codec<S["Type"]>);
-const encode = <S extends Schema.Top>(schema: S) =>
-  Schema.encodeUnknownSync(schema as unknown as Schema.Codec<S["Type"], S["Encoded"]>);
+const decode = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+  Schema.decodeUnknownSync(schema);
+const encode = <S extends Schema.Codec<unknown, unknown>>(schema: S) =>
+  Schema.encodeUnknownSync(schema);
 
 describe("IncludeList (the §7.1 include grammar, both spellings)", () => {
   const include = decode(Query.IncludeList);

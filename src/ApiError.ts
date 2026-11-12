@@ -32,6 +32,7 @@
 import * as R from "effect/Record";
 import type * as Cause from "effect/Cause";
 import * as Arr from "effect/Array";
+import { cast } from "effect/Function";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
@@ -50,8 +51,6 @@ import { declarationError } from "./internal/errors.js";
  * @category schemas
  */
 export const WireDocument = ErrorDocument(ErrorObject);
-
-type WireDocumentType = typeof WireDocument.Type;
 
 /**
  * The brand every {@link make} error instance carries, which
@@ -199,6 +198,10 @@ export interface Config<Fields extends Schema.Struct.Fields> {
     | ((fields: Schema.Struct.Encoded<NoInfer<Fields>>) => ErrorSource | undefined);
 }
 
+// A concrete `Self` for the base class below: `Schema.TaggedError`'s `Self`
+// is only meaningful at the user's `extends` clause.
+interface ApiErrorSelf {}
+
 const snakeCase = (tag: string): string =>
   tag
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -207,18 +210,20 @@ const snakeCase = (tag: string): string =>
 
 // Wire schemas are derived lazily (so they bind to the user's final subclass,
 // preserving `instanceof`) and cached per class.
-const wireCache = new WeakMap<object, unknown>();
+const wireCache = new WeakMap<object, Schema.Top>();
 
-const makeWire = (
-  klass: { new (...args: Array<any>): any },
+const makeWire = <Fields extends Schema.Struct.Fields>(
+  klass: new (...args: ReadonlyArray<never>) => object,
   options: {
     readonly tag: string;
     readonly status: number;
     readonly code: string;
     readonly title: string | undefined;
     readonly fieldKeys: ReadonlyArray<string>;
-    readonly detail: ((fields: any) => string | undefined) | undefined;
-    readonly source: ((fields: any) => ErrorSource | undefined) | undefined;
+    readonly detail: ((fields: Schema.Struct.Encoded<Fields>) => string | undefined) | undefined;
+    readonly source:
+      | ((fields: Schema.Struct.Encoded<Fields>) => ErrorSource | undefined)
+      | undefined;
   },
 ) => {
   const cached = wireCache.get(klass);
@@ -234,12 +239,16 @@ const makeWire = (
       status: Schema.Literals([String(options.status)]),
       code: Schema.Literals([options.code]),
     }),
-  ) as unknown as typeof WireDocument;
+  );
+
+  if (!Schema.isSchema(klass)) {
+    throw declarationError("ApiError.wire expects an ApiError.make(...) class (a Schema)");
+  }
 
   const wire = strictDocument.pipe(
     Schema.decodeTo(
-      klass as unknown as Schema.Top,
-      SchemaTransformation.transform<unknown, WireDocumentType>({
+      klass,
+      SchemaTransformation.transform<unknown, typeof strictDocument.Type>({
         // document -> class encoded form ({ _tag, ...fields }). A field the
         // document's `meta` does not carry is left absent (not `undefined`),
         // so an optional field decodes from a document another server wrote
@@ -260,7 +269,10 @@ const makeWire = (
         // leaves absent stays out of `meta` (an `undefined` member is not
         // JSON), mirroring `decode` above.
         encode: (encoded) => {
-          const fields = encoded as R.ReadonlyRecord<string, unknown>;
+          // SAFETY: `encoded` is this class's encoded form, a record of `Fields`'
+          // encoded members (the schema this transformation decodes into).
+          const fields = encoded as Schema.Struct.Encoded<Fields> &
+            R.ReadonlyRecord<string, unknown>;
           const detail = options.detail?.(fields);
           const source = options.source?.(fields);
           return {
@@ -358,9 +370,11 @@ export const make =
 
     // The conditional `MissingSelfGeneric` branch only matters at the user's
     // `extends` clause, where `Self` is concrete — cast it away here.
-    const Base = Schema.TaggedError<Self>(identifier)(tag, fields) as unknown as new (
-      ...args: Array<any>
-    ) => object;
+    // The base class is built over erased `tag` / `fields`: a class cannot
+    // extend a constructor type that is still generic in them.
+    const erasedTag: string = tag;
+    const erasedFields: Schema.Struct.Fields = fields;
+    const Base = Schema.TaggedError<ApiErrorSelf>(identifier)(erasedTag, erasedFields);
 
     class ApiErrorBase extends Base {
       static readonly status = config.status;
@@ -385,7 +399,7 @@ export const make =
       }
     }
 
-    return ApiErrorBase as unknown as ApiErrorClass<Self, Tag, Fields>;
+    return cast<typeof ApiErrorBase, ApiErrorClass<Self, Tag, Fields>>(ApiErrorBase);
   };
 
 /**

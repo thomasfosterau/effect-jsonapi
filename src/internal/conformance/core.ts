@@ -31,7 +31,7 @@ import {
   HttpServerError,
   type HttpServerResponse,
 } from "effect/http";
-import type { HttpApi, HttpApiEndpoint } from "effect/http-api";
+import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { declaredNames } from "../declaredQuery.js";
 import {
@@ -570,10 +570,11 @@ const declaredLinkageTypes = (endpoint: HttpApiEndpoint.Top, role: Role): Readon
  *
  * @internal
  */
-export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Discovered> => {
-  const groups = api.groups as unknown as Readonly<
-    Record<string, { readonly endpoints: Readonly<Record<string, HttpApiEndpoint.Top>> }>
-  >;
+export function discover<ApiId extends string, Groups extends HttpApiGroup.Constraint>(
+  api: HttpApi.HttpApi<ApiId, Groups>,
+): ReadonlyArray<Discovered>;
+export function discover(api: HttpApi.Top): ReadonlyArray<Discovered> {
+  const groups = api.groups;
   return Arr.flatMap(R.keys(groups), (group) => {
     const endpoints = groups[group].endpoints;
     return Arr.map(R.keys(endpoints), (name): Discovered => {
@@ -605,7 +606,7 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
       };
     });
   });
-};
+}
 
 // ---------------------------------------------------------------------------
 // Options and the write fixture

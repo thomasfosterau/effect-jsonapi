@@ -1,5 +1,7 @@
 import { it } from "@effect/vitest";
 import * as Arr from "effect/Array";
+import { cast } from "effect/Function";
+import type * as Scope from "effect/Scope";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
@@ -21,6 +23,7 @@ import * as Document from "./Document.js";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";
 import * as Handlers from "./Handlers.js";
+import { platformLayer } from "./Registry.js";
 import * as Middleware from "./Middleware.js";
 import * as Query from "./Query.js";
 import * as Relationship from "./Relationship.js";
@@ -293,13 +296,32 @@ const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
   return Result.isSuccess(result) ? result.success : undefined;
 };
 
+// The builder's handlers reduced to the one method these tests call: they
+// answer with minimal documents, deliberately looser than each endpoint's
+// declared success type, so the builder's per-endpoint inference is bypassed.
+interface LooseHandlers {
+  readonly handle: (
+    name: string,
+    handler: () => Effect.Effect<unknown, unknown, unknown>,
+  ) => LooseHandlers;
+}
+
+const liveGroup = (
+  api: HttpApi.Constraint,
+  group: string,
+  build: (handlers: LooseHandlers) => LooseHandlers,
+): Layer.Layer<never, unknown, unknown> =>
+  cast(HttpApiBuilder.group(api as HttpApi.Top, group, cast(build)));
+
 const buildClient = HttpApiTest.groups(Api, ["articles"]);
 
-const withHandlers = <A, E>(effect: Effect.Effect<A, E, any>) =>
-  effect.pipe(
-    Effect.scoped,
-    Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
-  ) as Effect.Effect<A, E>;
+const providedArticlesLive = Layer.provideMerge(
+  ArticlesLive,
+  Layer.merge(Middleware.layer, platformLayer),
+);
+const withHandlers = <A, E>(
+  effect: Effect.Effect<A, E, Layer.Success<typeof providedArticlesLive> | Scope.Scope>,
+): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(providedArticlesLive));
 
 // ---------------------------------------------------------------------------
 // Endpoint shapes
@@ -441,7 +463,7 @@ describe("Endpoint.collection", () => {
       "filter[q]": "bikeshed",
       "page[offset]": "0",
       "page[limit]": "10",
-    }) as any;
+    });
     expect(decoded).toEqual({
       include: ["author", "comments.author"],
       fields: { articles: ["title"], people: ["firstName"] },
@@ -1216,11 +1238,13 @@ describe("Endpoint.resource / Group.resource", () => {
           ),
       );
 
-      const withComments = <A, E>(effect: Effect.Effect<A, E, any>) =>
-        effect.pipe(
-          Effect.scoped,
-          Effect.provide(Layer.provideMerge(CommentsLive, Middleware.layer)),
-        ) as Effect.Effect<A, E>;
+      const providedCommentsLive = Layer.provideMerge(
+        CommentsLive,
+        Layer.merge(Middleware.layer, platformLayer),
+      );
+      const withComments = <A, E>(
+        effect: Effect.Effect<A, E, Layer.Success<typeof providedCommentsLive> | Scope.Scope>,
+      ): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(providedCommentsLive));
 
       const result = yield* withComments(
         Effect.gen(function* () {
@@ -1406,11 +1430,13 @@ describe("HTTP round-trip with a flat write payload", () => {
       ),
   );
 
-  const run = <A, E>(effect: Effect.Effect<A, E, any>) =>
-    effect.pipe(
-      Effect.scoped,
-      Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
-    ) as Effect.Effect<A, E>;
+  const providedFlatLive = Layer.provideMerge(
+    FlatLive,
+    Layer.merge(Middleware.layer, platformLayer),
+  );
+  const run = <A, E>(
+    effect: Effect.Effect<A, E, Layer.Success<typeof providedFlatLive> | Scope.Scope>,
+  ): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(providedFlatLive));
 
   it.effect("creates from a flat body and still answers with a JSON:API document (201)", () =>
     Effect.gen(function* () {
@@ -1478,13 +1504,15 @@ describe("Endpoint.delete success override", () => {
   // assertions are on the wire: status and content type.
   const request = async (
     api: HttpApi.Constraint,
-    live: Layer.Layer<any, any, any>,
+    live: Layer.Layer<never, unknown, unknown>,
     url: string,
   ) => {
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
       Layer.provide(Middleware.layer),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url, { method: "DELETE" }));
@@ -1599,7 +1627,7 @@ describe("Endpoint.list query override", () => {
   );
 
   const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) =>
-    endpoint.query as Schema.Codec<any, any>;
+    endpoint.query as Schema.Codec<unknown, unknown>;
 
   it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
     const endpoint = Endpoint.list(Article, {
@@ -1761,7 +1789,10 @@ describe("HTTP round-trip with an overridden list query", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
-      ) as Effect.Effect<any>;
+      ) as Effect.Effect<{
+        readonly data: ReadonlyArray<unknown>;
+        readonly meta: unknown;
+      }>;
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0]).toMatchObject({ type: "articles", id: "1" });
@@ -1776,7 +1807,7 @@ describe("HTTP round-trip with an overridden list query", () => {
 
 describe("Endpoint include path constraints", () => {
   const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) =>
-    endpoint.query as Schema.Codec<any, any>;
+    endpoint.query as Schema.Codec<unknown, unknown>;
 
   it("advertises the whole graph at depth 2 when `include: true` (regression: the default)", () => {
     const endpoint = Endpoint.get(Article, { include: true });
@@ -1866,9 +1897,26 @@ describe("Endpoint include path constraints", () => {
 // Success document override (Endpoint.get / list / create / update)
 // ---------------------------------------------------------------------------
 
+// The decoded shape these tests read: a resource whose `links.self` is under
+// test.
+interface LinkedResource {
+  readonly links: { readonly self: unknown };
+}
+
 // Reads the success schema off a constructed endpoint.
-const successSchemaOf = (endpoint: { readonly success: Iterable<unknown> }) =>
-  [...endpoint.success][0] as Schema.Codec<any, any>;
+const successSchemaOf = (endpoint: {
+  readonly success: Iterable<unknown>;
+}): Schema.Codec<{ readonly data: LinkedResource }, unknown> =>
+  [...endpoint.success][0] as Schema.Codec<{ readonly data: LinkedResource }, unknown>;
+
+// …and the collection variant.
+const collectionSchemaOf = (endpoint: {
+  readonly success: Iterable<unknown>;
+}): Schema.Codec<{ readonly data: ReadonlyArray<LinkedResource> }, unknown> =>
+  [...endpoint.success][0] as Schema.Codec<
+    { readonly data: ReadonlyArray<LinkedResource> },
+    unknown
+  >;
 
 describe("primary-data success override", () => {
   // The wire variant of the resource: identical but for its link members, which
@@ -1981,8 +2029,8 @@ describe("primary-data success override", () => {
       });
       expect(decoded.data.links.self).toBe("https://api.example.com/articles/1");
     });
-    const listed = Schema.decodeSync(successSchemaOf(byName.list))({ data: [wireArticle] });
-    expect(listed.data[0].links.self).toBe("https://api.example.com/articles/1");
+    const listed = Schema.decodeSync(collectionSchemaOf(byName.list))({ data: [wireArticle] });
+    expect(listed.data[0]?.links.self).toBe("https://api.example.com/articles/1");
   });
 
   it("leaves Endpoint.resource's documents at the resource's own when no override is given (regression)", () => {
@@ -1999,8 +2047,8 @@ describe("primary-data success override", () => {
       });
       expect(decoded.data.links.self).toBeInstanceOf(URL);
     });
-    const listed = Schema.decodeSync(successSchemaOf(byName.list))({ data: [wireArticle] });
-    expect(listed.data[0].links.self).toBeInstanceOf(URL);
+    const listed = Schema.decodeSync(collectionSchemaOf(byName.list))({ data: [wireArticle] });
+    expect(listed.data[0]?.links.self).toBeInstanceOf(URL);
   });
 
   it("threads through Group.resource, typed end to end", () => {
@@ -2064,11 +2112,13 @@ describe("HTTP round-trip with a wire success document", () => {
       .handle("create", () => Effect.succeed({ data: assemble(sampleArticle) })),
   );
 
-  const run = <A, E>(effect: Effect.Effect<A, E, any>) =>
-    effect.pipe(
-      Effect.scoped,
-      Effect.provide(Layer.provideMerge(WireLive, Middleware.layer)),
-    ) as Effect.Effect<A, E>;
+  const providedWireLive = Layer.provideMerge(
+    WireLive,
+    Layer.merge(Middleware.layer, platformLayer),
+  );
+  const run = <A, E>(
+    effect: Effect.Effect<A, E, Layer.Success<typeof providedWireLive> | Scope.Scope>,
+  ): Effect.Effect<A, E> => effect.pipe(Effect.scoped, Effect.provide(providedWireLive));
 
   it.effect("answers `get` with the wire document — links.self is a string on the client", () =>
     Effect.gen(function* () {
@@ -2135,15 +2185,17 @@ describe("Endpoint.create / Endpoint.update status override", () => {
   // wire — what a real web handler actually answers.
   const request = async (
     api: HttpApi.Constraint,
-    live: Layer.Layer<any, any, any>,
+    live: Layer.Layer<never, unknown, unknown>,
     method: string,
     url: string,
     body: Schema.Json,
   ) => {
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
       Layer.provide(Middleware.layer),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(
@@ -2170,17 +2222,24 @@ describe("Endpoint.create / Endpoint.update status override", () => {
 
   // Every case below is the same two endpoints, differing only in the options
   // under test; the handlers answer the resource document regardless.
-  const writesApi = (name: string, ...endpoints: readonly [any, ...ReadonlyArray<any>]) =>
-    HttpApi.make(name).add(Group.make(Article, ...endpoints));
+  interface WriteOptions {
+    readonly success?: Schema.Top;
+    readonly status?: number;
+  }
 
-  const writesLive = (api: any): Layer.Layer<any, any, any> =>
-    HttpApiBuilder.group(api, "articles", (handlers: any) =>
+  const writesApi = (
+    name: string,
+    ...endpoints: readonly [HttpApiEndpoint.Top, ...ReadonlyArray<HttpApiEndpoint.Top>]
+  ) => HttpApi.make(name).add(Group.make(Article, ...endpoints));
+
+  const writesLive = (api: HttpApi.Constraint): Layer.Layer<never, unknown, unknown> =>
+    liveGroup(api, "articles", (handlers) =>
       handlers
         .handle("create", () => Effect.succeed({ data: sampleArticle }))
         .handle("update", () => Effect.succeed({ data: sampleArticle })),
-    ) as Layer.Layer<any, any, any>;
+    );
 
-  const roundTrip = async (createOptions?: any, updateOptions?: any) => {
+  const roundTrip = async (createOptions?: WriteOptions, updateOptions?: WriteOptions) => {
     const api = writesApi(
       `writes-${stringify(createOptions ?? {})}-${stringify(updateOptions ?? {})}`,
       Endpoint.create(Article, createOptions),
@@ -2299,15 +2358,17 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
   // a real request at each label.
   const post = async (
     api: HttpApi.Constraint,
-    live: Layer.Layer<any, any, any>,
+    live: Layer.Layer<never, unknown, unknown>,
     contentType: string,
   ) => {
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
       // the host negotiated §6 upstream; the package's own §5 check would
       // otherwise reject exactly the request this option exists to admit
       Layer.provide(Middleware.layerHostNegotiated),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(
@@ -2324,13 +2385,13 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
     return { status: response.status, body: await response.text() };
   };
 
-  const apiWith = (name: string, options: any) => {
+  const apiWith = (name: string, options: { readonly payloadMediaType?: string }) => {
     const api = HttpApi.make(name).add(
       Group.make(Article, Endpoint.create(Article, { payload: Article.createInput, ...options })),
     );
-    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+    const live = liveGroup(api, "articles", (handlers) =>
       handlers.handle("create", () => Effect.succeed({ data: sampleArticle })),
-    ) as Layer.Layer<any, any, any>;
+    );
     return { api, live };
   };
 
@@ -2354,13 +2415,15 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
     const api = HttpApi.make("plain-request-jsonapi-response").add(
       Group.make(Article, Endpoint.create(Article, { payloadMediaType: "application/json" })),
     );
-    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+    const live = liveGroup(api, "articles", (handlers) =>
       handlers.handle("create", () => Effect.succeed({ data: sampleArticle })),
-    ) as Layer.Layer<any, any, any>;
+    );
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(api as never).pipe(
       Layer.provide(live),
       Layer.provide(Middleware.layerHostNegotiated),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(
@@ -2407,11 +2470,11 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
         },
       }),
     );
-    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+    const live = liveGroup(api, "articles", (handlers) =>
       handlers
         .handle("create", () => Effect.succeed({ data: sampleArticle }))
         .handle("update", () => Effect.succeed({ data: sampleArticle })),
-    ) as Layer.Layer<any, any, any>;
+    );
     expect((await post(api, live, "application/json")).status).toBe(201);
     expect((await post(api, live, MEDIA_TYPE)).status).toBe(415);
   });
@@ -2428,11 +2491,11 @@ describe("Endpoint.create / Endpoint.update payload media type", () => {
         },
       }),
     );
-    const live = HttpApiBuilder.group(api as any, "articles", (handlers: any) =>
+    const live = liveGroup(api, "articles", (handlers) =>
       handlers
         .handle("create", () => Effect.succeed({ data: sampleArticle }))
         .handle("update", () => Effect.succeed({ data: sampleArticle })),
-    ) as Layer.Layer<any, any, any>;
+    );
     expect((await post(api, live, MEDIA_TYPE)).status).toBe(201);
     expect((await post(api, live, "application/json")).status).toBe(415);
   });
@@ -2451,7 +2514,7 @@ describe("Endpoint.get query override", () => {
   });
 
   const queryOf = (endpoint: { readonly query?: Schema.Top | undefined }) =>
-    endpoint.query as Schema.Codec<any, any>;
+    endpoint.query as Schema.Codec<unknown, unknown>;
 
   it("composes the query from the feature options when none is given (regression: unchanged default)", () => {
     const endpoint = Endpoint.get(Article, { include: true, fields: true });
@@ -2565,15 +2628,17 @@ describe("HTTP round-trip with repeated ?include= keys", () => {
       Effect.succeed({
         data: sampleArticle,
         meta: { requested: (query.include ?? []).join("|") },
-      } as any),
+      }),
     ),
   );
 
   const request = async (url: string) => {
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(IncludeApi as never).pipe(
       Layer.provide(IncludeLive),
       Layer.provide(Middleware.layer),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(new Request(url, { headers: { accept: MEDIA_TYPE } }));
@@ -2745,27 +2810,34 @@ describe("Endpoint constructors with an injected id schema", () => {
     const InvoiceApi = HttpApi.make("invoices-api").add(
       Group.resource(Invoice, { relationships: false }),
     );
+    const firstInvoiceId = Invoice.Id.make("1");
     const InvoiceLive = HttpApiBuilder.group(InvoiceApi, "invoices", (handlers) =>
       handlers
         .handle("get", ({ params }) =>
           Effect.succeed({
             data: { type: "invoices", id: params.id, attributes: { total: 10 } },
-          } as any),
+          }),
         )
-        .handle("list", () => Effect.succeed({ data: [] } as any))
+        .handle("list", () => Effect.succeed({ data: [] }))
         .handle("create", () =>
-          Effect.succeed({ data: { type: "invoices", id: "1", attributes: { total: 1 } } } as any),
+          Effect.succeed({
+            data: { type: "invoices", id: firstInvoiceId, attributes: { total: 1 } },
+          }),
         )
         .handle("update", () =>
-          Effect.succeed({ data: { type: "invoices", id: "1", attributes: { total: 1 } } } as any),
+          Effect.succeed({
+            data: { type: "invoices", id: firstInvoiceId, attributes: { total: 1 } },
+          }),
         )
         .handle("delete", () => Effect.void),
     );
 
+    // SAFETY: every middleware the api's endpoints require is provided here; the
+    // platform services `HttpApiBuilder.layer` lists are unused by these routes.
     const appLayer = HttpApiBuilder.layer(InvoiceApi as never).pipe(
       Layer.provide(InvoiceLive),
       Layer.provide(Middleware.layer),
-    ) as unknown as Layer.Layer<never, never, HttpRouter.HttpRouter>;
+    ) as Layer.Layer<never, never, HttpRouter.HttpRouter>;
     const { dispose, handler } = HttpRouter.toWebHandler(appLayer);
     onTestFinished(() => dispose());
     const response = await handler(

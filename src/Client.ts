@@ -969,13 +969,11 @@ export const stripUndefined = <T extends object>(
  * @category constructors
  */
 export const decodeInput =
-  <S extends Schema.Top>(schema: S) =>
+  <S extends Schema.Codec<unknown, unknown, unknown, unknown>>(schema: S) =>
   (
     input: LooseInput<S["Encoded"]>,
   ): Effect.Effect<S["Type"], Schema.SchemaError, S["DecodingServices"]> =>
-    Schema.decodeEffect(
-      schema as unknown as Schema.Codec<S["Type"], S["Encoded"], S["DecodingServices"]>,
-    )(stripUndefined(input as object));
+    Schema.decodeEffect(schema)(stripUndefined(input as object));
 
 // ---------------------------------------------------------------------------
 // Hydrating `included`

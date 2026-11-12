@@ -78,6 +78,7 @@
  */
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
+import { cast } from "effect/Function";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -282,7 +283,7 @@ type DefaultDocument<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   DocMeta extends Schema.Top,
   Include = false,
   Fields = false,
@@ -304,7 +305,7 @@ type DefaultCollection<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   DocMeta extends Schema.Top,
   Include = false,
   Fields = false,
@@ -395,7 +396,7 @@ type DefaultGetQuery<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
 > = Query.QuerySchema<
@@ -501,7 +502,7 @@ export const get = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "get",
   const Path extends `/${string}` = `/${Type}/:id`,
@@ -611,7 +612,7 @@ type DefaultListQuery<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   Include extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Fields extends boolean,
   Sort extends
@@ -718,7 +719,7 @@ export const list = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "list",
   const Path extends `/${string}` = `/${Type}`,
@@ -954,7 +955,7 @@ export const create = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "create",
   const Path extends `/${string}` = `/${Type}`,
@@ -1112,7 +1113,7 @@ export const update = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "update",
   const Path extends `/${string}` = `/${Type}/:id`,
@@ -1265,7 +1266,7 @@ const deleteEndpoint = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const Name extends string = "delete",
   const Path extends `/${string}` = `/${Type}/:id`,
@@ -1637,7 +1638,7 @@ export const collection = <
       },
     ),
     success: asJsonApi(
-      collectionDocument(resources, options) as unknown as MembersDocument<
+      collectionDocument(resources, options) as MembersDocument<
         "collection",
         Resources[number],
         Schema.Union<Resources>,
@@ -1664,7 +1665,7 @@ export const collection = <
 // member whose type a fieldset names made partial when the endpoint declares
 // `fields`. The cast at its use is sound as `collectionDocument`'s is.
 const polymorphicDocument = (
-  family: Family<string, ReadonlyArray<Any>, any>,
+  family: Family<string, ReadonlyArray<Any>, Any> | Family<string, ReadonlyArray<Any>>,
   options?: {
     readonly include?: IncludeArgument;
     readonly fields?: boolean;
@@ -1780,7 +1781,7 @@ export const polymorphic = <
         },
       ),
       success: asJsonApi(
-        polymorphicDocument(family, options) as unknown as MembersDocument<
+        polymorphicDocument(family, options) as MembersDocument<
           "document",
           Members[number],
           Schema.Union<Members>,
@@ -2265,7 +2266,7 @@ export const related = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = Name,
@@ -2333,11 +2334,11 @@ export const related = <
   // nullable single-resource document for to-one descriptors (`data: null` is
   // the empty-linkage case), a collection document otherwise. `included` keys
   // off the target's relationship graph, independent of the `data` wrapper.
-  const success = (Relationship.isToOne(descriptor)
-    ? DataDocument(Schema.NullOr(data), { included: includedUnion, meta: docMeta })
-    : CollectionDocument(data, { included: includedUnion, meta: docMeta })) as unknown as AsSchema<
-    RelatedSuccess<R, Name, DocMeta, Include, Fields>
-  >;
+  const success = (
+    Relationship.isToOne(descriptor)
+      ? DataDocument(Schema.NullOr(data), { included: includedUnion, meta: docMeta })
+      : CollectionDocument(data, { included: includedUnion, meta: docMeta })
+  ) as AsSchema<RelatedSuccess<R, Name, DocMeta, Include, Fields>>;
 
   return HttpApiEndpoint.get(
     (options?.name ?? name) as EndpointName,
@@ -2473,7 +2474,7 @@ export const getRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `${Name}Relationship`,
@@ -2548,10 +2549,12 @@ export const getRelationship = <
   });
   // SAFETY: `linkageData` mirrors `LinkageData` kind by kind, and `included`
   // mirrors `RelationshipSuccess`'s `included` union.
-  const success = LinkageDocument(linkageData(descriptor, target), {
-    meta: (options?.meta ?? AnyMeta) as DocMeta,
-    included: Option.getOrUndefined(included),
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta, Include, Fields>;
+  const success: RelationshipSuccess<R, Name, DocMeta, Include, Fields> = cast(
+    LinkageDocument(linkageData(descriptor, target), {
+      meta: (options?.meta ?? AnyMeta) as DocMeta,
+      included: Option.getOrUndefined(included),
+    }),
+  );
 
   return HttpApiEndpoint.get(
     (options?.name ?? `${name}Relationship`) as EndpointName,
@@ -2648,7 +2651,7 @@ export const updateRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   const Name extends keyof Rels & string,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `update${Capitalize<Name>}Relationship`,
@@ -2667,10 +2670,10 @@ export const updateRelationship = <
   const target = descriptor.ref();
   const data = linkageData(descriptor, target);
   // The casts are sound: the runtime schemas mirror the conditional types kind by kind.
-  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>;
+  const payload = Schema.Struct({ data }) as LinkagePayload<R, Name>;
   const success = LinkageDocument(data, {
     meta: (options?.meta ?? AnyMeta) as DocMeta,
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta>;
+  }) as RelationshipSuccess<R, Name, DocMeta>;
 
   return HttpApiEndpoint.patch(
     (options?.name ?? `update${capitalize(name)}Relationship`) as EndpointName,
@@ -2746,7 +2749,7 @@ export const addRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `add${Capitalize<Name>}Relationship`,
@@ -2765,10 +2768,10 @@ export const addRelationship = <
   const target = descriptor.ref();
   const data = Schema.Array(target.identifier);
   // The casts are sound: to-many linkage is always an identifier array.
-  const payload = Schema.Struct({ data }) as unknown as LinkagePayload<R, Name>;
+  const payload = Schema.Struct({ data }) as LinkagePayload<R, Name>;
   const success = LinkageDocument(data, {
     meta: (options?.meta ?? AnyMeta) as DocMeta,
-  }) as unknown as RelationshipSuccess<R, Name, DocMeta>;
+  }) as RelationshipSuccess<R, Name, DocMeta>;
 
   return HttpApiEndpoint.post(
     (options?.name ?? `add${capitalize(name)}Relationship`) as EndpointName,
@@ -2843,7 +2846,7 @@ export const removeRelationship = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   const Name extends ToManyName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   const Errors extends ReadonlyArray<ErrorClass> = readonly [],
   const EndpointName extends string = `remove${Capitalize<Name>}Relationship`,
@@ -2859,7 +2862,7 @@ export const removeRelationship = <
   // The cast is sound: to-many linkage is always an identifier array.
   const payload = Schema.Struct({
     data: Schema.Array(target.identifier),
-  }) as unknown as LinkagePayload<R, Name>;
+  }) as LinkagePayload<R, Name>;
 
   return HttpApiEndpoint.delete(
     (options?.name ?? `remove${capitalize(name)}Relationship`) as EndpointName,
@@ -3321,7 +3324,7 @@ type EmitRel<RO, K extends string> = RO extends false
         : true;
 
 // Resolve a meta option (schema or function) to its effective schema type.
-type ResolveMeta<M, Meta extends Schema.Top> = [M] extends [(...args: any) => infer Ret]
+type ResolveMeta<M, Meta extends Schema.Top> = [M] extends [(...args: never) => infer Ret]
   ? Ret extends Schema.Top
     ? Ret
     : Meta
@@ -3396,7 +3399,7 @@ type GeneratedGet<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
@@ -3456,7 +3459,7 @@ type GeneratedList<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends Query.IncludeOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
@@ -3527,7 +3530,7 @@ type GeneratedCreate<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
@@ -3565,7 +3568,7 @@ type GeneratedUpdate<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GMeta,
@@ -3603,7 +3606,7 @@ type GeneratedDelete<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   E,
   GErrors extends ReadonlyArray<ErrorClass>,
   GIdem extends Idempotency.Option,
@@ -3664,7 +3667,7 @@ type GeneratedRelated<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   K extends RelationshipName<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   RC,
   GErrors extends ReadonlyArray<ErrorClass>,
@@ -3718,7 +3721,7 @@ type GeneratedRelationships<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   RO,
   GErrors extends ReadonlyArray<ErrorClass>,
   GInclude extends boolean,
@@ -3836,7 +3839,7 @@ export type ResourceEndpoint<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
@@ -3898,7 +3901,7 @@ export type ResourceEndpoints<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   Endpoints,
   RelationshipsOpt,
   Errors extends ReadonlyArray<ErrorClass>,
@@ -3953,7 +3956,7 @@ export interface ResourceOptions<
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta>,
   RelationshipsOpt extends RelationshipsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>>,
   Errors extends ReadonlyArray<ErrorClass>,
@@ -4175,7 +4178,7 @@ export const resource = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Endpoints extends EndpointsOption<Resource<Type, Attributes, Rels, Meta, IdSchema>, Meta> =
     Record<never, never>,
   const RelationshipsOpt extends RelationshipsOption<
@@ -4443,25 +4446,7 @@ export const resource = <
     });
   }
 
-  return endpoints as unknown as ResourceEndpoints<
-    Type,
-    Attributes,
-    Rels,
-    Meta,
-    IdSchema,
-    Endpoints,
-    RelationshipsOpt,
-    Errors,
-    Include,
-    Fields,
-    Sort,
-    Page,
-    Filter,
-    GMeta,
-    GIdem,
-    GRelInclude,
-    GRelFields
-  >;
+  return cast(endpoints);
 };
 
 // ---------------------------------------------------------------------------

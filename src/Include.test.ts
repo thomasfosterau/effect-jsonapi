@@ -350,7 +350,7 @@ describe("endpoint documents", () => {
   });
 
   const successOf = (endpoint: { readonly success: Iterable<unknown> }) =>
-    Schema.decodeUnknownSync([...endpoint.success][0] as Schema.Codec<any, any>);
+    Schema.decodeUnknownSync([...endpoint.success][0] as Schema.Codec<unknown, unknown>);
 
   const article = { type: "articles", id: "1", attributes: { title: "Hello" } };
   const comment = { type: "comments", id: "c1", attributes: { body: "Nice" } };

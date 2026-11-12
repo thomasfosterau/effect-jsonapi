@@ -20,6 +20,10 @@
 import * as Schema from "effect/Schema";
 import { Client, Query, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
+// The `any` an untyped `JSON.parse` returns, as a probe of how the resolvers
+// treat a path they cannot see into.
+type UntypedPath = ReturnType<typeof JSON.parse>;
+
 // Compiles only when `A` and `B` are identical, not merely mutually assignable.
 type Pin<A, B> = [
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false,
@@ -177,8 +181,9 @@ export const widePaths: [
   Pin<Resource.ResolveIncludePath<typeof Story, `auth${string}`>, typeof Person>,
   Pin<Resource.ResolveIncludePath<typeof Story, `${string}s`>, typeof Remark>,
   Pin<Resource.ResolveIncludePath<typeof Story, `auth${string}.${string}`>, typeof Person>,
-  // An `any` path is as wide as `${string}.${string}`.
-  Pin<Resource.ResolveIncludePath<typeof Story, any>, StoryDirect | typeof Tag>,
+  // An `any` path (what an untyped `JSON.parse` yields) is as wide as
+  // `${string}.${string}`.
+  Pin<Resource.ResolveIncludePath<typeof Story, UntypedPath>, StoryDirect | typeof Tag>,
   // A union of a dotted and a plain path resolves each path on its own.
   Pin<Resource.IncludedFor<typeof Story, ["author", "remarks.tag"]>, StoryDirect | typeof Tag>,
 ] = [true, true, true, true, true, true, true, true, true, true];

@@ -799,7 +799,7 @@ export type LinkageDocumentFields<
  * @since 0.1.0 (`included` since 0.18.0)
  * @category constructors
  */
-export const LinkageDocument = <
+export function LinkageDocument<
   D extends Schema.Top,
   M extends Schema.Top = typeof AnyMeta,
   Included extends Schema.Top = typeof Schema.Never,
@@ -809,14 +809,19 @@ export const LinkageDocument = <
     readonly meta?: M | undefined;
     readonly included?: Included | undefined;
   },
-): LinkageDocument<D, M, Included> =>
-  // SAFETY: the struct's fields are `LinkageDocumentFields<D, M, Included>`:
-  // `included` only when an `Included` union was passed.
-  Schema.Struct(
+): LinkageDocument<D, M, Included>;
+// The struct's fields are `LinkageDocumentFields<D, M, Included>`: `included`
+// only when an `Included` union was passed.
+export function LinkageDocument(
+  data: Schema.Top,
+  options?: { readonly [K in "meta" | "included"]?: Schema.Top },
+): Schema.Top {
+  return Schema.Struct(
     options?.included === undefined
       ? { data, ...topLevelMembers(options?.meta) }
       : { data, ...includedMember(options.included), ...topLevelMembers(options.meta) },
-  ) as unknown as LinkageDocument<D, M, Included>;
+  );
+}
 
 /**
  * An error document: a non-empty `errors` array, never `data`.
@@ -1197,23 +1202,23 @@ const wireRelationship = (
  * @since 0.16.0
  * @category constructors
  */
-export const wire = <S extends Schema.Top, TM extends Schema.Top = never>(
+export function wire<S extends Schema.Top, TM extends Schema.Top = never>(
   schema: S,
   options?: WireOptions<TM>,
-): WireSchema<S, TM> => {
-  // The casts are the honest assertion this function makes: the rebuilt
-  // schema differs from `S` only in its link fields (and, with `toManyMeta`,
-  // its to-many relationships' `meta`), which `Wire` / `WithToManyMeta`
-  // mirror at the type level.
+): WireSchema<S, TM>;
+// The rebuilt schema differs from `S` only in its link fields (and, with
+// `toManyMeta`, its to-many relationships' `meta`), which `Wire` /
+// `WithToManyMeta` mirror at the type level.
+export function wire(schema: Schema.Top, options?: WireOptions<Schema.Top>): Schema.Top {
   const toManyMeta = Option.fromUndefinedOr(options?.toManyMeta);
   if (isUnionLike(schema)) {
     return Schema.Union(
       schema.members.map((member) =>
         wire(member, { toManyMeta: Option.getOrUndefined(toManyMeta) }),
       ),
-    ) as unknown as WireSchema<S, TM>;
+    );
   }
-  if (!isStructLike(schema)) return schema as unknown as WireSchema<S, TM>;
+  if (!isStructLike(schema)) return schema;
   const fields = { ...schema.fields };
   // `Resource.make` declares both blocks with `Schema.optionalKey`, so each is
   // unwrapped before its members are reachable and re-wrapped after.
@@ -1235,5 +1240,5 @@ export const wire = <S extends Schema.Top, TM extends Schema.Top = never>(
       );
     }
   }
-  return Schema.Struct(fields) as unknown as WireSchema<S, TM>;
-};
+  return Schema.Struct(fields);
+}

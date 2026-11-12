@@ -49,14 +49,13 @@ export const noHeaders = plainRequest.headers;
 // The middleware requirement the option adds
 // ---------------------------------------------------------------------------
 
-export const carriesMiddleware: (typeof optional)["~Middleware"] =
-  null as unknown as Idempotency.Middleware;
-export const requiredCarriesMiddleware: (typeof required)["~Middleware"] =
-  null as unknown as Idempotency.Middleware;
+declare const middleware: Idempotency.Middleware;
+
+export const carriesMiddleware: (typeof optional)["~Middleware"] = middleware;
+export const requiredCarriesMiddleware: (typeof required)["~Middleware"] = middleware;
 
 // @ts-expect-error — an endpoint that does not opt in carries no store requirement
-export const plainCarriesNone: (typeof plain)["~Middleware"] =
-  null as unknown as Idempotency.Middleware;
+export const plainCarriesNone: (typeof plain)["~Middleware"] = middleware;
 
 // ---------------------------------------------------------------------------
 // `update`, `delete` and `operations` carry the same option
@@ -66,14 +65,13 @@ const updated = Endpoint.update(Article, { idempotency: true });
 const deleted = Endpoint.delete(Article, { idempotency: "required" });
 const operations = Endpoint.operations([Article], { idempotency: true });
 
-export const updateKey: string | undefined = (null as unknown as (typeof updated)["~Request"])
-  .headers["idempotency-key"];
-export const deleteKey: string = (null as unknown as (typeof deleted)["~Request"]).headers[
-  "idempotency-key"
-];
-export const operationsKey: string | undefined = (
-  null as unknown as (typeof operations)["~Request"]
-).headers["idempotency-key"];
+declare const updatedRequest: (typeof updated)["~Request"];
+declare const deletedRequest: (typeof deleted)["~Request"];
+declare const operationsRequest: (typeof operations)["~Request"];
+
+export const updateKey: string | undefined = updatedRequest.headers["idempotency-key"];
+export const deleteKey: string = deletedRequest.headers["idempotency-key"];
+export const operationsKey: string | undefined = operationsRequest.headers["idempotency-key"];
 
 // ---------------------------------------------------------------------------
 // `Endpoint.resource` / `Group.resource` thread it to every generated write
@@ -87,9 +85,7 @@ const generatedGroup = Group.resource(Article, {
 
 // The generated set is a union of endpoint types; the writes among them carry
 // the middleware, so the whole group does.
-export const generatedCarriesMiddleware: (typeof generated)[number]["~Middleware"] =
-  null as unknown as Idempotency.Middleware;
+export const generatedCarriesMiddleware: (typeof generated)[number]["~Middleware"] = middleware;
 type GroupEndpoints =
   typeof generatedGroup extends HttpApiGroup.HttpApiGroup<string, infer E, boolean> ? E : never;
-export const generatedGroupCarriesMiddleware: GroupEndpoints["~Middleware"] =
-  null as unknown as Idempotency.Middleware;
+export const generatedGroupCarriesMiddleware: GroupEndpoints["~Middleware"] = middleware;

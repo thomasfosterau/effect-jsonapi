@@ -395,16 +395,22 @@ export interface BracketedKeys<
   readonly [BRACKETED]: BracketedState<S>;
 }
 
+// Any `BracketedKeys`, whatever struct and mapping it was built from.
+type AnyBracketedKeys = BracketedKeys<
+  Schema.Struct<Schema.Struct.Fields>,
+  { readonly [key: string]: string }
+>;
+
 // The struct a (possibly already-bracketed) schema was built from.
 type BracketedBase<S> =
-  S extends BracketedKeys<infer B, any>
+  S extends BracketedKeys<infer B, infer _Mapping>
     ? B
     : S extends Schema.Struct<Schema.Struct.Fields>
       ? S
       : never;
 
 // The rename mapping a (possibly already-bracketed) schema carries so far.
-type BracketedMapping<S> = S extends BracketedKeys<any, infer M> ? M : Record<never, never>;
+type BracketedMapping<S> = S extends BracketedKeys<infer _B, infer M> ? M : Record<never, never>;
 
 // The mapping one `bracketKeys(prefix, keys)` call itself contributes.
 type PrefixMapping<Prefix extends string, Keys extends ReadonlyArray<PropertyKey>> = {
@@ -470,32 +476,34 @@ type PrefixMapping<Prefix extends string, Keys extends ReadonlyArray<PropertyKey
  * @since 0.15.0
  * @category combinators
  */
-export const bracketKeys =
-  <
-    S extends Schema.Struct<Schema.Struct.Fields> | BracketedKeys<any, any>,
-    const Prefix extends string,
-    const Keys extends ReadonlyArray<Extract<keyof BracketedBase<S>["fields"], string>>,
-  >(
-    prefix: Prefix,
-    keys: Keys,
-  ) =>
-  (
+export const bracketKeys = <
+  S extends Schema.Struct<Schema.Struct.Fields> | AnyBracketedKeys,
+  const Prefix extends string,
+  const Keys extends ReadonlyArray<Extract<keyof BracketedBase<S>["fields"], string>>,
+>(
+  prefix: Prefix,
+  keys: Keys,
+) => {
+  function bracket(
     schema: S,
-  ): BracketedKeys<BracketedBase<S>, BracketedMapping<S> & PrefixMapping<Prefix, Keys>> => {
+  ): BracketedKeys<BracketedBase<S>, BracketedMapping<S> & PrefixMapping<Prefix, Keys>>;
+  // The result is `encodeKeys` over the original struct and the composed
+  // mapping, which `BracketedBase` / `BracketedMapping` / `PrefixMapping`
+  // mirror at the type level; the implementation signature erases `S`.
+  function bracket(schema: Schema.Struct<Schema.Struct.Fields> | AnyBracketedKeys): Schema.Top {
     const state = (
       schema as { readonly [BRACKETED]?: BracketedState<Schema.Struct<Schema.Struct.Fields>> }
     )[BRACKETED];
-    const struct = state?.struct ?? (schema as unknown as Schema.Struct<Schema.Struct.Fields>);
+    const struct = state?.struct ?? (schema as Schema.Struct<Schema.Struct.Fields>);
     const mapping = { ...state?.mapping };
     Arr.forEach(keys, (key) => {
       mapping[key] = `${prefix}[${key}]`;
     });
     const wire = struct.pipe(Schema.encodeKeys(mapping));
-    return Object.assign(wire, { [BRACKETED]: { struct, mapping } }) as unknown as BracketedKeys<
-      BracketedBase<S>,
-      BracketedMapping<S> & PrefixMapping<Prefix, Keys>
-    >;
-  };
+    return Object.assign(wire, { [BRACKETED]: { struct, mapping } });
+  }
+  return bracket;
+};
 
 /**
  * The struct shape {@link bracketPageKeys} accepts: any struct carrying
@@ -570,15 +578,16 @@ export interface BracketPageKeys<S extends OffsetPageStruct> extends Schema.enco
  * @since 0.7.0
  * @category combinators
  */
-export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketPageKeys<S> =>
-  // The casts are sound: `BracketPageKeys<S>` extends exactly the
-  // `Schema.encodeKeys` instantiation `bracketKeys("page", ["offset", "limit"])`
-  // builds, and resolves to it for every concrete `S` — but the two can't be
-  // proven comparable while `S` is still generic, nor can `bracketKeys`'s own
-  // key-membership check run against a struct type that is itself still generic.
-  (schema as unknown as Schema.Struct<Schema.Struct.Fields>).pipe(
-    bracketKeys("page", ["offset", "limit"]),
-  ) as unknown as BracketPageKeys<S>;
+export function bracketPageKeys<S extends OffsetPageStruct>(schema: S): BracketPageKeys<S>;
+// `BracketPageKeys<S>` extends exactly the `Schema.encodeKeys` instantiation
+// `bracketKeys("page", ["offset", "limit"])` builds, and resolves to it for
+// every concrete `S` — but the two can't be proven comparable while `S` is
+// still generic, nor can `bracketKeys`'s own key-membership check run against
+// a struct type that is itself still generic; the implementation signature
+// erases `S`.
+export function bracketPageKeys(schema: Schema.Struct<Schema.Struct.Fields>): Schema.Top {
+  return schema.pipe(bracketKeys("page", ["offset", "limit"]));
+}
 
 // ---------------------------------------------------------------------------
 // Feature schemas
@@ -934,7 +943,7 @@ export const flatList = <
   return withInclude.pipe(
     bracketKeys("page", ["offset", "limit"]),
     bracketKeys("filter", filters as ReadonlyArray<never>),
-  ) as unknown as FlatList<S, Filters, IncludeField>;
+  ) as FlatList<S, Filters, IncludeField>;
 };
 
 /**
@@ -1420,7 +1429,7 @@ export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
         encode: (node, options) => encodeFilterNode(fields, node, options),
       }),
     ),
-  ) as unknown as Filter<Res>;
+  ) as Filter<Res>;
 };
 
 // ---------------------------------------------------------------------------
@@ -1910,7 +1919,7 @@ export const schema = <Res extends Any, const O extends Options<Res>>(
             },
           }),
     ),
-  ) as unknown as QuerySchema<Res, O>;
+  ) as QuerySchema<Res, O>;
 };
 
 // ---------------------------------------------------------------------------

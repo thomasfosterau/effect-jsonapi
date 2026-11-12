@@ -96,7 +96,7 @@ export function make(
   ...endpoints: ReadonlyArray<HttpApiEndpoint.Top>
 ) {
   return HttpApiGroup.make(P.isString(nameOrResource) ? nameOrResource : nameOrResource.type).add(
-    ...(endpoints as unknown as Arr.NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
+    ...(endpoints as Arr.NonEmptyReadonlyArray<HttpApiEndpoint.Top>),
   );
 }
 
@@ -159,7 +159,7 @@ export const resource = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string> = Id<Type>,
+  IdSchema extends Schema.Codec<unknown, string> = Id<Type>,
   const Endpoints extends Endpoint.EndpointsOption<
     Resource<Type, Attributes, Rels, Meta, IdSchema>,
     Meta
@@ -418,7 +418,7 @@ export const flatReadOnly = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   List extends Query.FlatListStruct,
   const Filters extends ReadonlyArray<Extract<keyof List["fields"], string>> = readonly [],
   Surface extends AnySurface | undefined = undefined,
@@ -488,7 +488,7 @@ export const flat = <
   Attributes extends Schema.Struct.Fields,
   Rels extends Relationships,
   Meta extends Schema.Top,
-  IdSchema extends Schema.Codec<any, string>,
+  IdSchema extends Schema.Codec<unknown, string>,
   List extends Query.FlatListStruct,
   Create extends Schema.Top,
   Update extends Schema.Top,

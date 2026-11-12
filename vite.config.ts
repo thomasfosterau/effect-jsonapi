@@ -139,7 +139,6 @@ export default defineConfig({
       // `effect/prefer-namespace-imports` requires. No other binding in a
       // file may be called `R`, so a resource type parameter is `Res`.
       "effect/avoid-native-object-helpers": "warn",
-      "effect/avoid-any": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
@@ -156,7 +155,7 @@ export default defineConfig({
       "typescript/no-generated-empty-object-type": "warn",
       // `@effect/tsgo`'s preset sets its rules at `warn`; the `correctness` /
       // `suspicious` categories above raised these three to `error`. Back at
-      // the preset's level, counted: 106 sites (94 in tests and examples),
+      // the preset's level, counted: 90 sites (79 in tests and examples),
       // and 24 (all in tests and examples). The tsc gate leaves both off.
       "effecttsgo/any-unknown-in-error-context": "warn",
       "effecttsgo/unsafe-effect-type-assertion": "warn",
@@ -168,12 +167,14 @@ export default defineConfig({
       "effecttsgo/unnecessary-typeof-type": "error",
       "effecttsgo/prefer-typed-schema-decoder": "error",
       "effecttsgo/schema-number": "error",
+      // Outside the categories above, so on only by name; `effect/avoid-any`
+      // (`as any`, `as unknown as T`) is the preset's own `error`.
+      "typescript/no-explicit-any": "error",
       // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
       // surface this library is built on (`effect/http`, `effect/http-api`,
       // much of it `@stability unstable`) does not flood the gates (#205):
       // 917 sites, none actionable here. Off in lint for the same reason.
       "effecttsgo/unstable-api-usage": "off",
-      "typescript/no-explicit-any": "off",
       "typescript/no-empty-object-type": "off",
       "typescript/ban-ts-comment": "off",
       "unicorn/no-empty-file": "off",
