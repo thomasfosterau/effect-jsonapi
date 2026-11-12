@@ -10,7 +10,7 @@ import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -54,7 +54,7 @@ class InvalidFilter extends Schema.TaggedError<InvalidFilter, { readonly brand: 
 // and the field name comes from the request, so `constructor`, `__proto__`,
 // `toString`, … must read as undeclared, not as an `Object.prototype` member.
 const declaration = <V>(fields: { readonly [field: string]: V }, field: string) =>
-  Option.getOrUndefined(Rec.get(fields, field));
+  Option.getOrUndefined(R.get(fields, field));
 
 /**
  * Encodes one literal of a field to its wire string, before escaping. Throws

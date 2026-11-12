@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -65,7 +65,7 @@ const wire = {
   revisions: { type: "revisions", id: "3", attributes: { editedAt: "2026-01-01" } },
 } as const;
 type WireType = keyof typeof wire;
-const types: ReadonlyArray<WireType> = Rec.keys(wire);
+const types: ReadonlyArray<WireType> = R.keys(wire);
 
 // The generated endpoint named `name`.
 const named = (endpoints: ReadonlyArray<HttpApiEndpoint.Top>, name: string) =>
@@ -103,7 +103,7 @@ const admitted = (
 // value with the member `key` (a query that declares no such family drops it).
 const decodesInto = (
   endpoint: HttpApiEndpoint.Top,
-  input: Rec.ReadonlyRecord<string, string>,
+  input: R.ReadonlyRecord<string, string>,
   key: string,
 ): boolean => {
   // SAFETY: every endpoint under test declares a query codec.
@@ -112,7 +112,7 @@ const decodesInto = (
   return (
     Exit.isSuccess(decoded) &&
     // SAFETY: a query codec decodes to a struct.
-    Rec.has(decoded.value as Rec.ReadonlyRecord<string, unknown>, key)
+    R.has(decoded.value as R.ReadonlyRecord<string, unknown>, key)
   );
 };
 
@@ -122,7 +122,7 @@ const accepts = (endpoint: HttpApiEndpoint.Top, paths: string): boolean =>
 
 // The types whose `fields[TYPE]` a relationship endpoint's query declares: a
 // fieldset naming one of the type's attributes decodes into `fields`.
-const fieldsetAttribute: Rec.ReadonlyRecord<WireType | "articles", string> = {
+const fieldsetAttribute: R.ReadonlyRecord<WireType | "articles", string> = {
   articles: "title",
   comments: "body",
   people: "name",
@@ -130,7 +130,7 @@ const fieldsetAttribute: Rec.ReadonlyRecord<WireType | "articles", string> = {
   revisions: "editedAt",
 };
 const declaresFieldsets = (endpoint: HttpApiEndpoint.Top): ReadonlyArray<string> =>
-  Rec.keys(fieldsetAttribute).filter((type) =>
+  R.keys(fieldsetAttribute).filter((type) =>
     decodesInto(endpoint, { [`fields[${type}]`]: fieldsetAttribute[type] }, "fields"),
   );
 

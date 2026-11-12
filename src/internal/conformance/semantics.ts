@@ -16,7 +16,7 @@
  * @internal
  */
 import * as Match from "effect/Match";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import type * as Filter from "../../Filter.js";
 import { compareCodePoints } from "../filter.js";
@@ -109,10 +109,7 @@ export class DomainMismatch extends Schema.TaggedError<
 }) {}
 
 /** F-ORD-1: a JSON string, number or boolean. */
-export const isJson: Predicate.Refinement<unknown, Json> = Predicate.or(
-  Predicate.or(Predicate.isString, Predicate.isNumber),
-  Predicate.isBoolean,
-);
+export const isJson: P.Refinement<unknown, Json> = P.or(P.or(P.isString, P.isNumber), P.isBoolean);
 
 /**
  * §6.2 F-ORD-1 / F-ORD-2: the order of a value against a literal, in the
@@ -123,12 +120,10 @@ export const isJson: Predicate.Refinement<unknown, Json> = Predicate.or(
  * @internal
  */
 export const compare = (value: Json, literal: Json): number => {
-  if (Predicate.isNumber(value) && Predicate.isNumber(literal))
+  if (P.isNumber(value) && P.isNumber(literal))
     return value < literal ? -1 : value > literal ? 1 : 0;
-  if (Predicate.isBoolean(value) && Predicate.isBoolean(literal))
-    return Number(value) - Number(literal);
-  if (Predicate.isString(value) && Predicate.isString(literal))
-    return compareCodePoints(value, literal);
+  if (P.isBoolean(value) && P.isBoolean(literal)) return Number(value) - Number(literal);
+  if (P.isString(value) && P.isString(literal)) return compareCodePoints(value, literal);
   throw new DomainMismatch({ value, literal });
 };
 

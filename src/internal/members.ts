@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 
 /**
  * The object {@link definedMember} returns: `key` as an optional member that,
@@ -12,7 +12,7 @@ import * as Predicate from "effect/Predicate";
  * @internal
  */
 export type DefinedMember<K extends string, A> = {
-  readonly [P in K]?: Exclude<A, undefined>;
+  readonly [Prop in K]?: Exclude<A, undefined>;
 };
 
 /**
@@ -23,7 +23,7 @@ export type DefinedMember<K extends string, A> = {
  * @internal
  */
 export const definedMember = <const K extends string, A>(key: K, value: A): DefinedMember<K, A> => {
-  const member: { [P in K]?: Exclude<A, undefined> } = {};
-  if (Predicate.isNotUndefined(value)) member[key] = value;
+  const member: { [Prop in K]?: Exclude<A, undefined> } = {};
+  if (P.isNotUndefined(value)) member[key] = value;
   return member;
 };

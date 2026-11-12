@@ -16,7 +16,7 @@ import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -576,7 +576,7 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
       onSuccess: () => [],
     });
   const extras = (n: number): Record<string, number> =>
-    Rec.fromEntries(Array.from({ length: n }, (_, index) => [`k${index}`, 1] as const));
+    R.fromEntries(Array.from({ length: n }, (_, index) => [`k${index}`, 1] as const));
   // What a member with five undeclared members reports under a cap of 2.
   const cappedAt = (path: ReadonlyArray<string>) => [
     { path: [...path, "k0"], message: "Expected no excess property" },
@@ -1166,7 +1166,7 @@ describe("a null member that declares no fields (#286)", () => {
     expect(members("/flags", "post")?.attributes).toEqual(closed);
     expect(members("/flags/{id}", "patch")?.attributes).toEqual(closed);
     expect(members("/notes", "post")?.relationships).toEqual(closed);
-    expect(Rec.keys(spec.components.schemas)).toEqual([
+    expect(R.keys(spec.components.schemas)).toEqual([
       "BadRequestEncoded",
       "UnsupportedMediaTypeEncoded",
       "NotAcceptableEncoded",
@@ -1222,8 +1222,8 @@ describe("the members JSON:API allows around a closed member are still accepted 
       expect(
         received.map(({ attributes = {}, relationships = {}, type }) => [
           type,
-          Rec.keys(attributes),
-          Rec.keys(relationships),
+          R.keys(attributes),
+          R.keys(relationships),
         ]),
       ).toEqual(members);
     },
@@ -1307,9 +1307,9 @@ describe("encoding a closed member, as a client does, rejects an undeclared memb
 
 describe("a closed member keeps its fields and its OpenAPI properties (#292)", () => {
   it("keeps `.fields` on createInput and on each payload member", () => {
-    expect(Rec.keys(Memo.createInput.fields)).toEqual(["body"]);
-    expect(Rec.keys(Memo.updateInput.fields)).toEqual(["body", "id"]);
-    expect(Rec.keys(Note.createPayload.fields.data.fields.attributes.fields)).toEqual(["body"]);
+    expect(R.keys(Memo.createInput.fields)).toEqual(["body"]);
+    expect(R.keys(Memo.updateInput.fields)).toEqual(["body", "id"]);
+    expect(R.keys(Note.createPayload.fields.data.fields.attributes.fields)).toEqual(["body"]);
   });
 
   it("describes a member that declares fields by its properties, closed", () => {

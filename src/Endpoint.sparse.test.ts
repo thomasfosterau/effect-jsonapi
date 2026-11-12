@@ -19,7 +19,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiClient, OpenApi } from "effect/http-api";
@@ -112,7 +112,7 @@ const only = <O extends { readonly attributes: Readonly<Record<string, unknown>>
   ...names: ReadonlyArray<keyof O["attributes"] & string>
 ) => ({
   ...object,
-  attributes: Rec.fromEntries(names.map((name) => [name, object.attributes[name]] as const)),
+  attributes: R.fromEntries(names.map((name) => [name, object.attributes[name]] as const)),
 });
 
 // A wire resource as `Handlers.project` answers a fieldset naming `names`:
@@ -128,11 +128,11 @@ const projected = <
   ...names: ReadonlyArray<(keyof O["attributes"] | keyof NonNullable<O["relationships"]>) & string>
 ) => {
   const { relationships, ...rest } = object;
-  const kept = Rec.filter(relationships ?? {}, (_, name) => names.includes(name));
+  const kept = R.filter(relationships ?? {}, (_, name) => names.includes(name));
   return {
     ...rest,
-    attributes: Rec.filter(object.attributes, (_, name) => names.includes(name)),
-    ...definedMember("relationships", Rec.isEmptyRecord(kept) ? undefined : kept),
+    attributes: R.filter(object.attributes, (_, name) => names.includes(name)),
+    ...definedMember("relationships", R.isEmptyRecord(kept) ? undefined : kept),
   };
 };
 
