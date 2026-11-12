@@ -201,14 +201,14 @@ const specifiersOf = (file: string): ReadonlyArray<string> => {
  * The file a relative specifier names. A declaration file's `./x.js` is its
  * sibling `./x.d.ts`, never the JavaScript beside it: `dist/` holds both.
  */
-const resolveRelative = (from: string, specifier: string): string | null => {
+const resolveRelative = (from: string, specifier: string): Option.Option<string> => {
   const base = path.resolve(path.dirname(from), specifier);
   const candidates = from.endsWith(".d.ts")
     ? [base.replace(/\.js$/, ".d.ts")]
     : [base.replace(/\.js$/, ".ts"), `${base}.ts`, path.join(base, "index.ts"), base];
-  return (
-    candidates.find((candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile()) ??
-    null
+  return Arr.findFirst(
+    candidates,
+    (candidate) => fs.existsSync(candidate) && fs.statSync(candidate).isFile(),
   );
 };
 
@@ -232,10 +232,10 @@ const graphFrom = (entry: string, dir: string): Graph => {
         const resolved = resolveRelative(file, specifier);
         // An unresolvable relative import is a broken graph, not a pass.
         assert(
-          resolved !== null,
+          Option.isSome(resolved),
           `${path.relative(dir, file)} imports unresolvable "${specifier}"`,
         );
-        walk(resolved, here);
+        walk(resolved.value, here);
       } else if (!MutableHashMap.has(externals, specifier)) {
         MutableHashMap.set(externals, specifier, here);
       }

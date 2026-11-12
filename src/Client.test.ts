@@ -380,7 +380,7 @@ describe("Client.decodeErrorDocument", () => {
 // errorDocument
 // ---------------------------------------------------------------------------
 
-const clientError = (body: string | null, status: number): HttpClientError.HttpClientError => {
+const clientError = (body: string, status: number): HttpClientError.HttpClientError => {
   const request = HttpClientRequest.get("http://localhost/articles/1");
   const response = HttpClientResponse.fromWeb(request, new Response(body, { status }));
   return new HttpClientError.HttpClientError({

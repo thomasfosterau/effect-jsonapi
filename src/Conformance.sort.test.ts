@@ -69,23 +69,31 @@ const TASKS: ReadonlyArray<Wire> = [
   { type: "tasks", id: "4", attributes: { title: "B", rank: 2 } },
 ];
 
-type Value = string | number | boolean | null;
+type Scalar = string | number | boolean;
+
+/** An attribute's value; `Option.none()` is NULL, a wire `null` or an absent member alike. */
+type Value = Option.Option<Scalar>;
 
 const valueOf = (task: Wire, field: string): Value => {
   const value = task.attributes[field];
-  return value === undefined ? null : (value as Value);
+  return value === undefined || value === null ? Option.none() : Option.some(value as Scalar);
 };
 
 /** UTF-8 byte order, which is code-point order (F-ORD-2). */
 const codePointOrder = (left: string, right: string): number =>
   Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 
-/** Code-point order, NULL last: S-ORD-1 and S-ORD-3. */
-const ascending = (left: Value, right: Value): number => {
-  if (left === null || right === null) return Number(left === null) - Number(right === null);
+/** Code-point order between two values that are not NULL (S-ORD-1). */
+const scalarAscending = (left: Scalar, right: Scalar): number => {
   if (P.isString(left) && P.isString(right)) return codePointOrder(left, right);
   return left < right ? -1 : left > right ? 1 : 0;
 };
+
+/** Code-point order, NULL last: S-ORD-1 and S-ORD-3. */
+const ascending = (left: Value, right: Value): number =>
+  Option.isSome(left) && Option.isSome(right)
+    ? scalarAscending(left.value, right.value)
+    : Number(Option.isNone(left)) - Number(Option.isNone(right));
 
 interface Sorter {
   /** Orders two values of `field` ascending; descending is its reverse (S-ORD-2). */
@@ -142,7 +150,7 @@ const ordered = (
         const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
         return order !== 0 ? Option.some(order) : Option.none();
       });
-      return Option.getOrElse(decided, () => ascending(a.id, b.id));
+      return Option.getOrElse(decided, () => scalarAscending(a.id, b.id));
     }),
   );
   return reversed ? sorted.toReversed() : sorted;
@@ -319,7 +327,13 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     Effect.gen(function* () {
       const nullsFirst: Sorter = {
         compare: (left, right) =>
-          left === null ? (right === null ? 0 : -1) : right === null ? 1 : ascending(left, right),
+          Option.isNone(left)
+            ? Option.isNone(right)
+              ? 0
+              : -1
+            : Option.isNone(right)
+              ? 1
+              : ascending(left, right),
       };
       const { outcome } = yield* run(serve(nullsFirst));
       const findings = findingsOf(outcome);
@@ -342,8 +356,8 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
           ...answer,
           body: {
             data: [
-              ...data.filter((task) => valueOf(task, "due") !== null),
-              ...data.filter((task) => valueOf(task, "due") === null),
+              ...data.filter((task) => Option.isSome(valueOf(task, "due"))),
+              ...data.filter((task) => Option.isNone(valueOf(task, "due"))),
             ],
           },
         };
@@ -381,8 +395,11 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
       const locale: Sorter = {
         refuses: ["due"],
         compare: (left, right) =>
-          P.isString(left) && P.isString(right)
-            ? left.localeCompare(right, "en", { sensitivity: "base" })
+          Option.isSome(left) &&
+          Option.isSome(right) &&
+          P.isString(left.value) &&
+          P.isString(right.value)
+            ? left.value.localeCompare(right.value, "en", { sensitivity: "base" })
             : ascending(left, right),
       };
       const { outcome } = yield* run(serve(locale));

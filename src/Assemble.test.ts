@@ -37,13 +37,11 @@ const EDITOR: User = { id: "u-editor", role: "editor" };
 const NON_ADMIN: User = { id: "u-user", role: "user" };
 
 /** The reference-data rule: admins write, everyone else reads. */
-const adminCapabilities = Assemble.roleCapabilities(
-  (viewer: User | null | undefined) => viewer?.role === "admin",
-);
+const adminCapabilities = Assemble.roleCapabilities((viewer?: User) => viewer?.role === "admin");
 
 /** The applications' family rule: political types by role, ingested types never. */
 const POLITICAL = HashSet.make("people", "places");
-const familyCapabilities: Assemble.CapabilitiesHook<User | null> = (resource, viewer) =>
+const familyCapabilities = (resource: Assemble.ResourceLike, viewer?: User) =>
   HashSet.has(POLITICAL, resource.type)
     ? adminCapabilities(resource, viewer)
     : { canEdit: false, canDelete: false };
@@ -141,7 +139,7 @@ const parseResource = Schema.decodeUnknownSync(
 );
 const toJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const ids = (resources: ReadonlyArray<Assemble.ResourceLike> | undefined) =>
+const ids = (resources?: ReadonlyArray<Assemble.ResourceLike>) =>
   resources?.map((r) => `${r.type}:${r.id}`);
 
 describe("Assemble.resource", () => {
@@ -172,12 +170,12 @@ describe("Assemble.resource", () => {
     "stamps canEdit / canDelete per the hook: true for an admin, false for everyone else",
     () =>
       Effect.gen(function* () {
-        const stamped = (viewer: User | null) =>
+        const stamped = (viewer?: User) =>
           Assemble.resource(person("p1"), { viewer, capabilities: familyCapabilities });
         expect((yield* stamped(ADMIN)).data.meta).toEqual({ canEdit: true, canDelete: true });
         expect((yield* stamped(NON_ADMIN)).data.meta).toEqual({ canEdit: false, canDelete: false });
         expect((yield* stamped(EDITOR)).data.meta).toEqual({ canEdit: false, canDelete: false });
-        expect((yield* stamped(null)).data.meta).toEqual({ canEdit: false, canDelete: false });
+        expect((yield* stamped()).data.meta).toEqual({ canEdit: false, canDelete: false });
       }),
   );
 
@@ -1303,7 +1301,7 @@ describe("helpers", () => {
 
   it("ownedCapabilities: the owner and a moderator may write, a stranger may not", () => {
     const owned = Assemble.ownedCapabilities({
-      viewerId: (viewer: User | null | undefined) => Option.fromNullishOr(viewer?.id),
+      viewerId: (viewer?: User) => Option.fromUndefinedOr(viewer?.id),
       canModerate: (viewer) => viewer?.role === "admin",
     });
     const garden: Assemble.ResourceLike = {
@@ -1315,7 +1313,7 @@ describe("helpers", () => {
     expect(owned(garden, NON_ADMIN)).toEqual({ canEdit: true, canDelete: true });
     expect(owned(garden, ADMIN)).toEqual({ canEdit: true, canDelete: true });
     expect(owned(garden, EDITOR)).toEqual({ canEdit: false, canDelete: false });
-    expect(owned(garden, null)).toEqual({ canEdit: false, canDelete: false });
+    expect(owned(garden, undefined)).toEqual({ canEdit: false, canDelete: false });
     expect(owned(place, NON_ADMIN)).toEqual({ canEdit: false, canDelete: false });
   });
 });

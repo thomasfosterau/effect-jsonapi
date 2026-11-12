@@ -30,7 +30,7 @@ import * as R from "effect/Record";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
-import { HttpApi, HttpApiBuilder } from "effect/http-api";
+import { HttpApi, HttpApiBuilder, type HttpApiEndpoint } from "effect/http-api";
 import * as Assemble from "./Assemble.js";
 import * as Conformance from "./Conformance.js";
 import * as Endpoint from "./Endpoint.js";
@@ -99,7 +99,7 @@ const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>
   // SAFETY: every endpoint under test declares exactly one success schema, a
   // JSON:API document codec; decoding unknown input is what it is for.
   [...endpoint.success][0] as Schema.Codec<unknown, unknown>;
-const queryOf = (endpoint: { readonly query: Schema.Top | undefined }) =>
+const queryOf = (endpoint: Pick<HttpApiEndpoint.Top, "query">) =>
   // SAFETY: every endpoint under test declares a query codec.
   endpoint.query as Schema.Codec<unknown, unknown>;
 
@@ -126,7 +126,7 @@ const admitted = (
 // Whether a relationship endpoint's query decodes `?include=<paths>` into an
 // `include` (a query that declares none drops the key; `Middleware` answers
 // it with a 400, as the HTTP cases below show).
-const accepts = (endpoint: { readonly query: Schema.Top | undefined }, paths: string): boolean => {
+const accepts = (endpoint: Pick<HttpApiEndpoint.Top, "query">, paths: string): boolean => {
   const decoded = Schema.decodeExit(queryOf(endpoint))({ include: paths });
   return (
     Exit.isSuccess(decoded) &&
@@ -426,7 +426,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
   });
 
   // Every `include` the relationship endpoint was asked for, in order.
-  const requested: Array<ReadonlyArray<string> | undefined> = [];
+  const requested: Array<Option.Option<ReadonlyArray<string>>> = [];
   // Every fieldset it was asked for, in order (#485).
   const requestedFields: Array<Handlers.Fields> = [];
 
@@ -435,7 +435,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
       .handle("get", () => Effect.succeed(Handlers.data(article)))
       .handle("commentsRelationship", ({ query }) =>
         Effect.sync(() => {
-          requested.push(query.include);
+          requested.push(Option.fromUndefinedOr(query.include));
           if (query.fields !== undefined) requestedFields.push(query.fields);
         }).pipe(
           Effect.as(
@@ -534,7 +534,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
         expect.stringMatching(/^spec\/document\/no-duplicate-resources: (Passed|Skipped)$/),
         "spec/document/included-on-include: Passed",
       ]);
-      expect(requested).toContainEqual(["comments"]);
+      expect(requested).toContainEqual(Option.some(["comments"]));
     }),
   );
 

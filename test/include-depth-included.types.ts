@@ -60,7 +60,7 @@ const Article = Resource.make("articles", {
 // The `included` member type of an endpoint's success document.
 type IncludedOf<E> =
   HttpApiEndpoint.Success<E> extends {
-    readonly Type: { readonly included?: ReadonlyArray<infer M> | undefined };
+    readonly Type: { readonly included?: ReadonlyArray<infer M> };
   }
     ? M
     : never;

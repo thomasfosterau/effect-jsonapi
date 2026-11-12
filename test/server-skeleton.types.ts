@@ -10,6 +10,7 @@
  *   own list query" and its `list` operation is typed by it.
  */
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   Assemble,
@@ -45,8 +46,8 @@ declare const decoded: typeof listQuery.Type;
 // The flat input, unchanged: defaulted cursor, the family's filter, the open include.
 assertType<number>(decoded.limit);
 assertType<number>(decoded.offset);
-assertType<string | undefined>(decoded.q);
-assertType<ReadonlyArray<string> | undefined>(decoded.include);
+assertType<Option.Option<string>>(Option.fromUndefinedOr(decoded.q));
+assertType<Option.Option<ReadonlyArray<string>>>(Option.fromUndefinedOr(decoded.include));
 // @ts-expect-error — `sort` is the flat input's, decoded, not a string
 assertType<string>(decoded.sort);
 
@@ -60,7 +61,7 @@ assertType<Registry.Family>({
     linkBase: Effect.succeed("https://example.test"),
     ops: {
       list: (input) => {
-        assertType<string | undefined>(input.q);
+        assertType<Option.Option<string>>(Option.fromUndefinedOr(input.q));
         // @ts-expect-error — the input is the flat list type; `nope` is not a member
         assertType<unknown>(input.nope);
         return Effect.succeed({ items: [], totalCount: 0 });
@@ -85,7 +86,7 @@ ResourceHandlers.readOnly({
 // A read-only preset infers the same query type from its own list input.
 const readOnly = Group.flatReadOnly({ resource: Person, list: ListPeople });
 declare const readOnlyDecoded: typeof readOnly.listQuery.Type;
-assertType<string | undefined>(readOnlyDecoded.q);
+assertType<Option.Option<string>>(Option.fromUndefinedOr(readOnlyDecoded.q));
 // @ts-expect-error — a filter must name a field of the list input
 Group.flatReadOnly({ resource: Person, list: ListPeople, filters: ["nope"] });
 

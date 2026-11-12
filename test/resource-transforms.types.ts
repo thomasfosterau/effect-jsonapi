@@ -104,8 +104,8 @@ const withAuthor = Handlers.data(article, {
   onResource: Handlers.project({ articles: ["title", "author"] }),
 });
 // Requested, it survives, exactly as declared.
-assertType<{ readonly type: "people"; readonly id: string } | undefined>(
-  withAuthor.data.relationships?.author.data,
+assertType<Option.Option<{ readonly type: "people"; readonly id: string }>>(
+  Option.fromUndefinedOr(withAuthor.data.relationships?.author.data),
 );
 // @ts-expect-error -- …while `body`, not requested, is still gone
 assertType<string>(withAuthor.data.attributes.body);
@@ -147,8 +147,8 @@ const dynamicAttributes: Equals<
 assertType<string>(dynamic.data.attributes.title);
 // So is each relationship (#494), and the `relationships` member itself,
 // which the projection omits when it keeps none.
-assertType<{ readonly type: "people"; readonly id: string } | undefined>(
-  dynamic.data.relationships?.author?.data,
+assertType<Option.Option<{ readonly type: "people"; readonly id: string }>>(
+  Option.fromUndefinedOr(dynamic.data.relationships?.author?.data),
 );
 // @ts-expect-error -- `author` is not asserted present either
 assertType<unknown>(dynamic.data.relationships?.author.data);
@@ -168,9 +168,9 @@ const stamped = Handlers.data(article, {
     Option.some({ href: `/${resource.type}/${resource.id}` }),
   ),
 });
-assertType<string | undefined>(stamped.data.meta?.href);
+assertType<Option.Option<string>>(Option.fromUndefinedOr(stamped.data.meta?.href));
 // @ts-expect-error -- only the members the computation declares are there
-assertType<string | undefined>(stamped.data.meta?.nope);
+assertType<Option.Option<string>>(Option.fromUndefinedOr(stamped.data.meta?.nope));
 // the attributes are untouched by a meta stamp
 assertType<string>(stamped.data.attributes.body);
 
@@ -184,13 +184,13 @@ const composed = Handlers.data(article, {
 
 // Both effects are visible, and both apply in both slots.
 assertType<string>(composed.data.attributes.title);
-assertType<boolean | undefined>(composed.data.meta?.canEdit);
+assertType<Option.Option<boolean>>(Option.fromUndefinedOr(composed.data.meta?.canEdit));
 // @ts-expect-error -- projected away by the first half of the composition
 assertType<string>(composed.data.attributes.body);
 
 declare const composedIncluded: NonNullable<(typeof composed)["included"]>[number];
 assertType<string>(composedIncluded.attributes.title);
-assertType<boolean | undefined>(composedIncluded.meta?.canEdit);
+assertType<Option.Option<boolean>>(Option.fromUndefinedOr(composedIncluded.meta?.canEdit));
 // @ts-expect-error -- …identically
 assertType<string>(composedIncluded.attributes.body);
 
@@ -217,7 +217,7 @@ const emptyIsNull: Equals<(typeof empty)["data"], null> = true;
 const linkage = Handlers.linkage([{ type: "comments" as const, id: "5" }], {
   onResource: Handlers.withMeta(() => Option.some({ canEdit: true })),
 });
-assertType<boolean | undefined>(linkage.data[0].meta?.canEdit);
+assertType<Option.Option<boolean>>(Option.fromUndefinedOr(linkage.data[0].meta?.canEdit));
 assertType<"comments">(linkage.data[0].type);
 
 const emptyLinkage = Handlers.linkage(null, {

@@ -319,16 +319,16 @@ describe("Query.schema", () => {
   it("types the decoded query shape", () => {
     type Decoded = typeof query.Type;
     // include paths are typed literals derived from the relationship graph
-    expectTypeOf<Decoded["include"]>().toEqualTypeOf<
-      ReadonlyArray<"author" | "comments" | "comments.author"> | undefined
+    expectTypeOf<Pick<Decoded, "include">>().toEqualTypeOf<{
+      readonly include?: ReadonlyArray<"author" | "comments" | "comments.author">;
+    }>();
+    expectTypeOf<Pick<NonNullable<Decoded["fields"]>, "articles" | "people">>().toEqualTypeOf<{
+      readonly articles?: ReadonlyArray<"title" | "body" | "createdAt" | "author" | "comments">;
+      readonly people?: ReadonlyArray<"firstName" | "lastName">;
+    }>();
+    expectTypeOf<NonNullable<Decoded["page"]>["offset"]>().toEqualTypeOf<
+      Schema.optional<Schema.Finite>["Type"]
     >();
-    expectTypeOf<NonNullable<Decoded["fields"]>["articles"]>().toEqualTypeOf<
-      ReadonlyArray<"title" | "body" | "createdAt" | "author" | "comments"> | undefined
-    >();
-    expectTypeOf<NonNullable<Decoded["fields"]>["people"]>().toEqualTypeOf<
-      ReadonlyArray<"firstName" | "lastName"> | undefined
-    >();
-    expectTypeOf<NonNullable<Decoded["page"]>["offset"]>().toEqualTypeOf<number | undefined>();
     expectTypeOf<NonNullable<Decoded["sort"]>[number]["field"]>().toEqualTypeOf<
       "title" | "body" | "createdAt"
     >();
@@ -505,14 +505,14 @@ describe("Query.Page.offset (factory)", () => {
   it("types a defaulted field as required and an un-defaulted field as optional", () => {
     const page = Schema.Struct(Query.Page.offset({ defaultLimit: 50, fromString: false }));
     type Decoded = typeof page.Type;
-    expectTypeOf<Decoded["offset"]>().toEqualTypeOf<number | undefined>();
+    expectTypeOf<Decoded["offset"]>().toEqualTypeOf<Schema.optional<Schema.Finite>["Type"]>();
     expectTypeOf<Decoded["limit"]>().toEqualTypeOf<number>();
     expectTypeOf<Decoded>().toEqualTypeOf<{ readonly offset?: number; readonly limit: number }>();
 
     // with fromString: true the *encoded* (wire) shape is strings
     const wire = Schema.Struct(Query.Page.offset({ defaultLimit: 50 }));
     type Encoded = typeof wire.Encoded;
-    expectTypeOf<Encoded["limit"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<Encoded["limit"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
   });
 });
 

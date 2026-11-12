@@ -14,7 +14,7 @@ type Identifier = { readonly type: string } & ({ readonly id: string } | { reado
 const one = (linkage: Identifier | ReadonlyArray<Identifier>) => ({ data: linkage });
 
 /** A member's `type` / `id` / `lid` as text; anything but a string shows as `?`. */
-const text = (value: Schema.Json | undefined): string => (P.isString(value) ? value : "?");
+const text = (value?: Schema.Json): string => (P.isString(value) ? value : "?");
 
 /** The `type:id` (or `type:lid`) of each member the kit reports, in order. */
 const orphans = (document: Parameters<typeof unlinkedIncluded>[0]) =>

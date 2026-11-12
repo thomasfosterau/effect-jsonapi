@@ -211,7 +211,7 @@ describe("Resource.createPayload", () => {
   it("does not expose an id key in the payload type", () => {
     type CreateData = (typeof Article.createPayload.Type)["data"];
     expectTypeOf<CreateData>().not.toHaveProperty("id");
-    expectTypeOf<CreateData["lid"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<CreateData["lid"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
   });
 
   it("requires relationships when the resource has a `one` relationship", () => {
@@ -575,7 +575,7 @@ describe("DataDocument nullability is compositional", () => {
     const doc = DataDocument(Schema.NullOr(Article));
     const decoded = Schema.decodeSync(doc)({ data: null });
     expect(decoded.data).toBeNull();
-    expectTypeOf(decoded.data).toEqualTypeOf<typeof Article.Type | null>();
+    expectTypeOf(decoded.data).toEqualTypeOf<Schema.NullOr<typeof Article>["Type"]>();
     expect(Schema.encodeUnknownSync(doc)({ data: null })).toEqual({ data: null });
   });
 
@@ -1133,8 +1133,10 @@ describe("Resource.updatePayload tri-state semantics", () => {
 
   it("types a nullable attribute as value | null | undefined", () => {
     type Attrs = NonNullable<(typeof Widget.updatePayload.Type)["data"]["attributes"]>;
-    expectTypeOf<Attrs["note"]>().toEqualTypeOf<string | null | undefined>();
-    expectTypeOf<Attrs["name"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<Attrs["note"]>().toEqualTypeOf<
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
+    >();
+    expectTypeOf<Attrs["name"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
   });
 });
 
@@ -1157,7 +1159,7 @@ describe("Resource flat inputs", () => {
     expect(decoded).toEqual({ name: "Dan", bio: null });
     expectTypeOf<typeof Person.createInput.Type>().toEqualTypeOf<{
       readonly name: string;
-      readonly bio: string | null;
+      readonly bio: Schema.NullOr<Schema.String>["Type"];
     }>();
   });
 
@@ -1171,7 +1173,7 @@ describe("Resource flat inputs", () => {
     // the id carries the injected brand; nullable attribute is value | null | undefined
     expectTypeOf<(typeof Person.updateInput.Type)["id"]>().toEqualTypeOf<typeof PersonId.Type>();
     expectTypeOf<(typeof Person.updateInput.Type)["bio"]>().toEqualTypeOf<
-      string | null | undefined
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
     >();
   });
 });
@@ -1355,7 +1357,9 @@ describe("Resource.readOnlyAttribute", () => {
     expect(decoded.attributes.updatedAt).toBeNull();
     expectTypeOf<(typeof Post.Type)["attributes"]["title"]>().toEqualTypeOf<string>();
     expectTypeOf<(typeof Post.Type)["attributes"]["createdAt"]>().toEqualTypeOf<Date>();
-    expectTypeOf<(typeof Post.Type)["attributes"]["updatedAt"]>().toEqualTypeOf<Date | null>();
+    expectTypeOf<(typeof Post.Type)["attributes"]["updatedAt"]>().toEqualTypeOf<
+      Schema.NullOr<Schema.Date>["Type"]
+    >();
   });
 
   it("surfaces read-only attributes in attributeKeys and attributeAnnotations", () => {
@@ -1368,7 +1372,7 @@ describe("Resource.readOnlyAttribute", () => {
     const Doc = DataDocument(Post);
     type DocAttrs = (typeof Doc.Type)["data"]["attributes"];
     expectTypeOf<DocAttrs["createdAt"]>().toEqualTypeOf<Date>();
-    expectTypeOf<DocAttrs["updatedAt"]>().toEqualTypeOf<Date | null>();
+    expectTypeOf<DocAttrs["updatedAt"]>().toEqualTypeOf<Schema.NullOr<Schema.Date>["Type"]>();
     const decoded = Schema.decodeSync(Doc)({
       data: {
         type: "posts",
@@ -1509,7 +1513,7 @@ describe("Resource.attribute", () => {
     });
     expect("nickname" in decoded.attributes).toBe(false);
     expectTypeOf<(typeof Widget.Type)["attributes"]["nickname"]>().toEqualTypeOf<
-      string | undefined
+      Schema.optional<Schema.String>["Type"]
     >();
   });
 
@@ -1522,8 +1526,10 @@ describe("Resource.attribute", () => {
     expectTypeOf<CreateAttrs>().toHaveProperty("slug");
     expectTypeOf<CreateAttrs>().toHaveProperty("status");
     // optional create keys may be omitted
-    expectTypeOf<CreateAttrs["summary"]>().toEqualTypeOf<string | null | undefined>();
-    expectTypeOf<CreateAttrs["nickname"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<CreateAttrs["summary"]>().toEqualTypeOf<
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
+    >();
+    expectTypeOf<CreateAttrs["nickname"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
 
     const decoded = Schema.decodeSync(Widget.createPayload)({
       data: { type: "widgets", attributes: { name: "x", slug: "s", status: "ok" } },
@@ -1565,8 +1571,10 @@ describe("Resource.attribute", () => {
     expect(set.data.attributes?.status).toBe("active");
     // type-level: status update value excludes null
     type UpdateAttrs = NonNullable<(typeof Widget.updatePayload.Type)["data"]["attributes"]>;
-    expectTypeOf<UpdateAttrs["status"]>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<UpdateAttrs["summary"]>().toEqualTypeOf<string | null | undefined>();
+    expectTypeOf<UpdateAttrs["status"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
+    expectTypeOf<UpdateAttrs["summary"]>().toEqualTypeOf<
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
+    >();
   });
 
   it("makes a non-nullable attribute clearable on update when asked", () => {
@@ -1574,7 +1582,9 @@ describe("Resource.attribute", () => {
       attributes: { bio: attribute(Schema.String, { clearable: true }) },
     });
     type UpdateAttrs = NonNullable<(typeof res.updatePayload.Type)["data"]["attributes"]>;
-    expectTypeOf<UpdateAttrs["bio"]>().toEqualTypeOf<string | null | undefined>();
+    expectTypeOf<UpdateAttrs["bio"]>().toEqualTypeOf<
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
+    >();
     const decoded = Schema.decodeSync(res.updatePayload)({
       data: { type: "clears", id: "1", attributes: { bio: null } },
     });
@@ -1627,7 +1637,7 @@ describe("Resource.attribute", () => {
     const Plain = Resource("plains", { attributes: { name: Schema.NonEmptyString } });
     expectTypeOf<typeof Plain.createInput.Type>().toEqualTypeOf<{ readonly name: string }>();
     type UpdateAttrs = NonNullable<(typeof Plain.updatePayload.Type)["data"]["attributes"]>;
-    expectTypeOf<UpdateAttrs["name"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<UpdateAttrs["name"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
   });
 });
 
@@ -1684,7 +1694,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
       readonly fileName: string;
       readonly file: Uint8Array;
       readonly secret: string;
-      readonly note?: string | undefined;
+      readonly note?: Schema.optional<Schema.String>["Type"];
     }>();
     type CreateAttrs = (typeof Upload.createPayload.Type)["data"]["attributes"];
     expectTypeOf<CreateAttrs>().toEqualTypeOf<CreateIn>();
@@ -1718,7 +1728,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
     type UpdateIn = typeof Upload.updateInput.Type;
     // `update: "optional"` (the default) keeps `secret` as a tri-state key
     expectTypeOf<UpdateIn>().toHaveProperty("secret");
-    expectTypeOf<UpdateIn["secret"]>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<UpdateIn["secret"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
     // `update: false` excludes `file` and `note`
     expectTypeOf<UpdateIn>().not.toHaveProperty("file");
     expectTypeOf<UpdateIn>().not.toHaveProperty("note");
@@ -1863,12 +1873,12 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     type CreateIn = typeof Note.createInput.Type;
     expectTypeOf<CreateIn>().toEqualTypeOf<{
       readonly title: string;
-      readonly body?: string | undefined;
-      readonly summary?: string | null | undefined;
+      readonly body?: Schema.optional<Schema.String>["Type"];
+      readonly summary?: Schema.optional<Schema.NullOr<Schema.String>>["Type"];
     }>();
     // the field schema itself is `Schema.optional` (a strict `optionalKey` would type as `string`)
     expectTypeOf<(typeof Note.createInput.fields.body)["Type"]>().toEqualTypeOf<
-      string | undefined
+      Schema.optional<Schema.String>["Type"]
     >();
     expectTypeOf(Note.createInput.fields.body).toEqualTypeOf<Schema.optional<Schema.String>>();
     // the same shape as the update projection gives the attribute
@@ -1876,7 +1886,7 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
       (typeof Note.updateInput.fields.body)["Type"]
     >();
     // an explicit `undefined` is assignable — the form-adapter case of the issue
-    const maybe: string | undefined = undefined;
+    const maybe: Schema.optional<Schema.String>["Type"] = undefined;
     const input: CreateIn = { title: "t", body: maybe };
     expect(input.body).toBeUndefined();
     // a required attribute is untouched
@@ -1923,8 +1933,10 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
 
   it("leaves updateInput / updatePayload unchanged", () => {
     type UpdateIn = typeof Note.updateInput.Type;
-    expectTypeOf<UpdateIn["body"]>().toEqualTypeOf<string | undefined>();
-    expectTypeOf<UpdateIn["summary"]>().toEqualTypeOf<string | null | undefined>();
+    expectTypeOf<UpdateIn["body"]>().toEqualTypeOf<Schema.optional<Schema.String>["Type"]>();
+    expectTypeOf<UpdateIn["summary"]>().toEqualTypeOf<
+      Schema.optional<Schema.NullOr<Schema.String>>["Type"]
+    >();
     expect(Schema.decodeSync(Note.updateInput)({ id: "1", body: undefined })).toEqual({
       id: "1",
       body: undefined,
@@ -1946,7 +1958,7 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     // type: `bio` is `Schema.optional<String>` at create, as it is at update
     expectTypeOf(Profile.createInput.fields.bio).toEqualTypeOf<Schema.optional<Schema.String>>();
     expectTypeOf<(typeof Profile.createInput.fields.bio)["Type"]>().toEqualTypeOf<
-      string | undefined
+      Schema.optional<Schema.String>["Type"]
     >();
     expectTypeOf<(typeof Profile.createInput.fields.bio)["Type"]>().toEqualTypeOf<
       (typeof Profile.updateInput.fields.bio)["Type"]
@@ -1954,8 +1966,8 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     type CreateAttrs = (typeof Profile.createPayload.Type)["data"]["attributes"];
     expectTypeOf<CreateAttrs>().toEqualTypeOf<{
       readonly handle: string;
-      readonly bio?: string | undefined;
-      readonly motto?: string | undefined;
+      readonly bio?: Schema.optional<Schema.String>["Type"];
+      readonly motto?: Schema.optional<Schema.String>["Type"];
     }>();
     // `motto` was already `Schema.optional`: not wrapped again
     expect(Profile.createInput.fields.motto).toBe(Profile.fields.attributes.fields.motto);
@@ -1963,7 +1975,7 @@ describe('Resource.attribute with create: "optional" (Schema.optional, as update
     expectTypeOf<(typeof Profile.Type)["attributes"]>().toEqualTypeOf<{
       readonly handle: string;
       readonly bio?: string;
-      readonly motto?: string | undefined;
+      readonly motto?: Schema.optional<Schema.String>["Type"];
     }>();
 
     // runtime: absent, a value, an explicit undefined

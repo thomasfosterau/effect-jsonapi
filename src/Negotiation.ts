@@ -151,8 +151,7 @@ export interface Options {
    *
    * @since 0.17.0
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- a plain options record: `| undefined` lets a caller forward its own optional under exactOptionalPropertyTypes, as the sibling options do
-  readonly onExplicitRefusal?: "fallthrough" | "notAcceptable" | undefined;
+  readonly onExplicitRefusal?: "fallthrough" | "notAcceptable";
   /**
    * The JSON:API extension URIs the api supports (e.g. `Atomic.EXTENSION_URI`),
    * exactly as `Middleware`'s `extensions` option. When given, a JSON:API
@@ -166,8 +165,7 @@ export interface Options {
    *
    * @since 0.21.0
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- a plain options record: `| undefined` lets a caller forward its own optional under exactOptionalPropertyTypes, as the sibling options do
-  readonly extensions?: ReadonlyArray<string> | undefined;
+  readonly extensions?: ReadonlyArray<string>;
 }
 
 /**

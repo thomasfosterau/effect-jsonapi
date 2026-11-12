@@ -31,8 +31,8 @@ declare const article: typeof Article.Type;
 
 // Negative control: without `href`, the raw decoded member is *not* already a
 // plain string — a consumer touching it directly must narrow it themselves.
-// @ts-expect-error -- `article.links?.self` is `string | URL | LinkObject | undefined`, not `string | undefined`
-const rawSelf: string | undefined = article.links?.self;
+// @ts-expect-error -- `article.links?.self` is `string | URL | LinkObject` when present, not `string`
+const rawSelf: Option.Option<string> = Option.fromUndefinedOr(article.links?.self);
 
 // ---------------------------------------------------------------------------
 // The fix: `Document.href` gets a wire string without redeclaring `Article`

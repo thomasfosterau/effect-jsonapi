@@ -64,7 +64,7 @@ type SuccessOf<E> = HttpApiEndpoint.Success<E>["Type"];
 // The `included` member type of an endpoint's success document; `never` when
 // the document has no `included` member.
 type IncludedOf<E> =
-  SuccessOf<E> extends { readonly included?: ReadonlyArray<infer M> | undefined } ? M : never;
+  SuccessOf<E> extends { readonly included?: ReadonlyArray<infer M> } ? M : never;
 type HasIncluded<E> = "included" extends keyof SuccessOf<E> ? true : false;
 // The decoded `include` of an endpoint's query.
 type IncludeOf<E> = HttpApiEndpoint.Query<E>["Type"] extends { readonly include?: infer I }
@@ -231,8 +231,8 @@ const CompoundLinkage = Document.LinkageDocument(Schema.Array(Track.identifier),
 assertType<"included" extends keyof typeof Linkage.Type ? true : false>(false);
 assertType<
   Equals<
-    (typeof CompoundLinkage.Type)["included"],
-    ReadonlyArray<typeof Track.Type | typeof Artist.Type> | undefined
+    Pick<typeof CompoundLinkage.Type, "included">,
+    { readonly included?: ReadonlyArray<typeof Track.Type | typeof Artist.Type> }
   >
 >(true);
 

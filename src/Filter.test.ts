@@ -1,6 +1,7 @@
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
+import * as Option from "effect/Option";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
@@ -65,11 +66,16 @@ describe("Filter", () => {
   describe("able", () => {
     const declared = Schema.Int.pipe(Filter.able(["eq", Filter.Op.gt, "eq"]));
     const annotationOf = (schema: Schema.Top) =>
-      Schema.resolveAnnotations(schema)?.[Filter.AnnotationId] as Filter.Annotation | undefined;
+      Option.fromUndefinedOr(Schema.resolveAnnotations(schema)?.[Filter.AnnotationId]).pipe(
+        // SAFETY: `Filter.able` stamps a `Filter.Annotation` under this id.
+        Option.map((annotation) => annotation as Filter.Annotation),
+      );
 
     it("stamps the declaration as an annotation under Filter.AnnotationId, duplicates dropped", () => {
       expect(Filter.AnnotationId).toBe("@thomasfosterau/effect-jsonapi/filter");
-      expect(annotationOf(declared)).toEqual({ operators: ["eq", "gt"], literal: undefined });
+      expect(annotationOf(declared)).toEqual(
+        Option.some({ operators: ["eq", "gt"], literal: undefined }),
+      );
       // the schema is otherwise unchanged
       expect(Schema.decodeSync(declared)(3)).toBe(3);
       expect(() => Schema.decodeSync(declared)(3.5)).toThrow();
@@ -78,10 +84,12 @@ describe("Filter", () => {
     });
 
     it("declares the whole core with no argument or `true`", () => {
-      expect(annotationOf(Schema.String.pipe(Filter.able()))?.operators).toEqual(Filter.operators);
-      expect(annotationOf(Schema.String.pipe(Filter.able(true)))?.operators).toEqual(
-        Filter.operators,
-      );
+      expect(
+        Option.map(annotationOf(Schema.String.pipe(Filter.able())), (a) => a.operators),
+      ).toEqual(Option.some(Filter.operators));
+      expect(
+        Option.map(annotationOf(Schema.String.pipe(Filter.able(true))), (a) => a.operators),
+      ).toEqual(Option.some(Filter.operators));
     });
 
     it("carries the declaration at the type level", () => {
@@ -121,7 +129,7 @@ describe("Filter", () => {
         }),
       );
       const point = Point.pipe(Filter.able(["eq"], { literal: PointFromString }));
-      expect(annotationOf(point)?.literal).toBe(PointFromString);
+      expect(Option.exists(annotationOf(point), (a) => a.literal === PointFromString)).toBe(true);
       expectTypeOf<(typeof point)[Filter.MarkerKey]>().toEqualTypeOf<
         Filter.Marker<"eq", { readonly x: number; readonly y: number }>
       >();

@@ -10,6 +10,7 @@
  * This file is type-checked by `tsconfig.test.json`; the `@ts-expect-error`
  * annotations are the assertions.
  */
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { HttpApiGroup } from "effect/http-api";
 import { Endpoint, Group, Idempotency, Resource } from "@thomasfosterau/effect-jsonapi";
@@ -35,7 +36,9 @@ declare const requiredRequest: RequiredRequest;
 declare const plainRequest: PlainRequest;
 
 // `true` makes the key optional…
-export const optionalKey: string | undefined = optionalRequest.headers["idempotency-key"];
+export const optionalKey: Option.Option<string> = Option.fromUndefinedOr(
+  optionalRequest.headers["idempotency-key"],
+);
 // @ts-expect-error — and it is genuinely optional, so it is not a bare string
 export const notRequired: string = optionalRequest.headers["idempotency-key"];
 
@@ -69,9 +72,13 @@ declare const updatedRequest: (typeof updated)["~Request"];
 declare const deletedRequest: (typeof deleted)["~Request"];
 declare const operationsRequest: (typeof operations)["~Request"];
 
-export const updateKey: string | undefined = updatedRequest.headers["idempotency-key"];
+export const updateKey: Option.Option<string> = Option.fromUndefinedOr(
+  updatedRequest.headers["idempotency-key"],
+);
 export const deleteKey: string = deletedRequest.headers["idempotency-key"];
-export const operationsKey: string | undefined = operationsRequest.headers["idempotency-key"];
+export const operationsKey: Option.Option<string> = Option.fromUndefinedOr(
+  operationsRequest.headers["idempotency-key"],
+);
 
 // ---------------------------------------------------------------------------
 // `Endpoint.resource` / `Group.resource` thread it to every generated write

@@ -5,6 +5,7 @@
  */
 import { it } from "@effect/vitest";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf } from "vite-plus/test";
@@ -15,7 +16,6 @@ import * as Exit from "effect/Exit";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as R from "effect/Record";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Client, Filter, Query, Registry } from "@thomasfosterau/effect-jsonapi";
@@ -63,11 +63,6 @@ const runExit = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
 ): Effect.Effect<Exit.Exit<A, E>> =>
   Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
-
-const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
-  const result = Cause.findError(cause);
-  return Result.isSuccess(result) ? result.success : undefined;
-};
 
 describe("github example: fetching", () => {
   it.effect("fetches a repository document with a self link", () =>
@@ -227,9 +222,9 @@ describe("github example: fetching", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(RepositoryNotFound);
-      expect((error as RepositoryNotFound).id).toBe("nope");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof RepositoryNotFound);
+      expect(error.value.id).toBe("nope");
     }),
   );
 });
@@ -528,7 +523,12 @@ describe("github example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNameTaken);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof RepositoryNameTaken,
+        ),
+      );
     }),
   );
 
@@ -597,7 +597,12 @@ describe("github example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(RepositoryNotFound);
+      assert(
+        Option.exists(
+          Cause.findErrorOption(exit.cause),
+          (error) => error instanceof RepositoryNotFound,
+        ),
+      );
     }),
   );
 
@@ -637,9 +642,9 @@ describe("github example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof LabelNotFound);
-      expect(error.id).toBe("does-not-exist");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof LabelNotFound);
+      expect(error.value.id).toBe("does-not-exist");
       expect(after).toBe(before);
     }),
   );
@@ -672,9 +677,9 @@ describe("github example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof LabelNotFound);
-      expect(error.id).toBe("does-not-exist");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof LabelNotFound);
+      expect(error.value.id).toBe("does-not-exist");
       // the whole update is refused, attributes included
       expect(labels).toEqual(bugIssue.relationships?.labels.data);
       expect(title).toBe(bugIssue.attributes.title);
@@ -726,9 +731,9 @@ describe("github example: writing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(IssueLocked);
-      expect((error as IssueLocked).id).toBe(lockedIssue.id);
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof IssueLocked);
+      expect(error.value.id).toBe(lockedIssue.id);
     }),
   );
 });
@@ -883,7 +888,9 @@ describe("github example: issue triage via relationship endpoints", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(UserNotFound);
+      assert(
+        Option.exists(Cause.findErrorOption(exit.cause), (error) => error instanceof UserNotFound),
+      );
     }),
   );
 
@@ -911,7 +918,12 @@ describe("github example: issue triage via relationship endpoints", () => {
         );
 
         assert(Exit.isFailure(exit));
-        expect(findFailure(exit.cause)).toBeInstanceOf(LabelNotFound);
+        assert(
+          Option.exists(
+            Cause.findErrorOption(exit.cause),
+            (error) => error instanceof LabelNotFound,
+          ),
+        );
         const after = yield* run(
           Effect.gen(function* () {
             const client = yield* buildClient;
@@ -938,7 +950,9 @@ describe("github example: issue triage via relationship endpoints", () => {
       );
 
       assert(Exit.isFailure(exit));
-      expect(findFailure(exit.cause)).toBeInstanceOf(IssueLocked);
+      assert(
+        Option.exists(Cause.findErrorOption(exit.cause), (error) => error instanceof IssueLocked),
+      );
     }),
   );
 
@@ -1033,11 +1047,17 @@ describe("github example: heterogeneous search", () => {
         // `fields`, so a client reads each attribute as optional (#322)
         Arr.forEach(document.data, (result) => {
           if (result.type === "repositories") {
-            expectTypeOf(result.attributes.stargazerCount).toEqualTypeOf<number | undefined>();
+            expectTypeOf<Pick<typeof result.attributes, "stargazerCount">>().toEqualTypeOf<{
+              readonly stargazerCount?: number;
+            }>();
           } else if (result.type === "issues") {
-            expectTypeOf(result.attributes.state).toEqualTypeOf<"open" | "closed" | undefined>();
+            expectTypeOf<Pick<typeof result.attributes, "state">>().toEqualTypeOf<{
+              readonly state?: "open" | "closed";
+            }>();
           } else {
-            expectTypeOf(result.attributes.login).toEqualTypeOf<string | undefined>();
+            expectTypeOf<Pick<typeof result.attributes, "login">>().toEqualTypeOf<{
+              readonly login?: string;
+            }>();
           }
         });
       }),

@@ -5,7 +5,7 @@
  */
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
+import { Client, Document, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const assertType = <Expected>(_value: Expected): void => {};
 
@@ -46,7 +46,11 @@ assertType<ReadonlyArray<Person>>(hydrated.walk("authors.contributor"));
 // @ts-expect-error — not a relationship of `books`
 hydrated.related("contributor");
 
-// The document types are the wire form: string links.
+// The document types are the wire form: links as they are encoded, strings not `URL`s.
 declare const doc: Client.ResourceDocument<Person>;
-assertType<string | undefined>(doc.data.links?.self as string | undefined);
-assertType<ReadonlyArray<Client.IncludedResource> | undefined>(doc.included);
+assertType<Option.Option<typeof Document.Link.Encoded>>(
+  Option.fromUndefinedOr(doc.data.links?.self),
+);
+assertType<Option.Option<ReadonlyArray<Client.IncludedResource>>>(
+  Option.fromUndefinedOr(doc.included),
+);

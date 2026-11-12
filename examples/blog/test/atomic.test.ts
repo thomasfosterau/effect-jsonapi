@@ -12,8 +12,8 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import type * as Scope from "effect/Scope";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { ApiError, Atomic, Middleware, Registry } from "@thomasfosterau/effect-jsonapi";
@@ -53,11 +53,6 @@ const runExit = <A, E>(
   effect: Effect.Effect<A, E, Layer.Success<typeof Provided> | Scope.Scope>,
 ): Effect.Effect<Exit.Exit<A, E>> =>
   Effect.exit(effect.pipe(Effect.scoped, Effect.provide(Provided)));
-
-const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
-  const result = Cause.findError(cause);
-  return Result.isSuccess(result) ? result.success : undefined;
-};
 
 describe("atomic operations: creating with lids", () => {
   it.effect("creates an article and a comment linked to it by lid, atomically", () =>
@@ -357,10 +352,10 @@ describe("atomic operations: all-or-nothing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(OperationFailed);
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof OperationFailed);
       // the error identifies the operation that failed
-      expect((error as OperationFailed).operation).toBe(1);
+      expect(error.value.operation).toBe(1);
 
       // the first operation's article was not committed
       const list = yield* run(
@@ -392,10 +387,10 @@ describe("atomic operations: all-or-nothing", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      expect(error).toBeInstanceOf(OperationFailed);
-      expect((error as OperationFailed).reason).toMatch(/never-declared/);
-      expect((error as OperationFailed).operation).toBe(0);
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof OperationFailed);
+      expect(error.value.reason).toMatch(/never-declared/);
+      expect(error.value.operation).toBe(0);
     }),
   );
 });
@@ -439,11 +434,11 @@ describe("atomic operations: linkage to an absent resource", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof PersonNotFound);
-      expect(error.id).toBe("does-not-exist");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof PersonNotFound);
+      expect(error.value.id).toBe("does-not-exist");
       // the pointer locates the linkage inside the failing operation
-      expect(error.pointer).toBe("/atomic:operations/1/data");
+      expect(error.value.pointer).toBe("/atomic:operations/1/data");
       // all-or-nothing: neither operation was committed
       expect(articles).not.toContain("Orphaned by a 404");
       expect(author).toBe(sampleAuthor.id);
@@ -467,9 +462,9 @@ describe("atomic operations: linkage to an absent resource", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof PersonNotFound);
-      expect(error.pointer).toBe("/atomic:operations/0/data/relationships/author/data");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof PersonNotFound);
+      expect(error.value.pointer).toBe("/atomic:operations/0/data/relationships/author/data");
     }),
   );
 
@@ -497,10 +492,10 @@ describe("atomic operations: linkage to an absent resource", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof TagNotFound);
-      expect(error.id).toBe("does-not-exist");
-      expect(error.pointer).toBe("/atomic:operations/1/data/1");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof TagNotFound);
+      expect(error.value.id).toBe("does-not-exist");
+      expect(error.value.pointer).toBe("/atomic:operations/1/data/1");
       // all-or-nothing: the clearing operation was not committed either
       expect(tags).toEqual([Tag.ref(sampleTag.id)]);
     }),
@@ -530,9 +525,9 @@ describe("atomic operations: linkage to an absent resource", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof TagNotFound);
-      expect(error.pointer).toBe("/atomic:operations/0/data/relationships/tags/data/0");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof TagNotFound);
+      expect(error.value.pointer).toBe("/atomic:operations/0/data/relationships/tags/data/0");
     }),
   );
 
@@ -577,10 +572,10 @@ describe("atomic operations: linkage to an absent resource", () => {
       );
 
       assert(Exit.isFailure(exit));
-      const error = findFailure(exit.cause);
-      assert(error instanceof CommentNotFound);
-      expect(error.id).toBe("does-not-exist");
-      expect(error.pointer).toBe("/atomic:operations/1/data/1");
+      const error = Cause.findErrorOption(exit.cause);
+      assert(Option.isSome(error) && error.value instanceof CommentNotFound);
+      expect(error.value.id).toBe("does-not-exist");
+      expect(error.value.pointer).toBe("/atomic:operations/1/data/1");
       expect(linked.after).toEqual(linked.before);
     }),
   );

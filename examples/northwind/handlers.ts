@@ -33,6 +33,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ord from "effect/Order";
 import * as P from "effect/Predicate";
+import type * as Schema from "effect/Schema";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import {
@@ -94,7 +95,7 @@ const definedAttributes = <A extends Record<string, unknown>>(
  */
 const patchAttributes = <A extends Record<string, unknown>>(
   current: A,
-  patch: { readonly [K in keyof A]?: A[K] | undefined } | undefined,
+  patch?: Schema.Struct<{ readonly [K in keyof A]: Schema.optional<Schema.Schema<A[K]>> }>["Type"],
 ): A => ({ ...current, ...definedAttributes(patch ?? {}) });
 
 // ---------------------------------------------------------------------------
@@ -586,7 +587,7 @@ const sortBy = <
   },
 >(
   items: Array<A>,
-  sort: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }> | undefined,
+  sort?: ReadonlyArray<{ readonly field: string; readonly direction: "asc" | "desc" }>,
 ): Array<A> => {
   Arr.forEach((sort ?? []).toReversed(), (term) => {
     const ascending = Ord.make<A>((a, b) => {
@@ -617,7 +618,7 @@ interface Page<A> {
 // Apply `?page[offset]=&page[limit]=` pagination.
 const paginate = <A>(
   items: ReadonlyArray<A>,
-  page: { readonly offset?: number; readonly limit?: number } | undefined,
+  page?: { readonly offset?: number; readonly limit?: number },
 ): Page<A> => {
   const total = items.length;
   const offset = page?.offset ?? 0;
@@ -625,10 +626,8 @@ const paginate = <A>(
   return { page: items.slice(offset, offset + limit), total, offset, limit };
 };
 
-const matches = (haystack: ReadonlyArray<string | undefined>, needle: string): boolean =>
-  haystack.some(
-    (value) => value !== undefined && value.toLowerCase().includes(needle.toLowerCase()),
-  );
+const matches = (haystack: ReadonlyArray<Option.Option<string>>, needle: string): boolean =>
+  haystack.some(Option.exists((value) => value.toLowerCase().includes(needle.toLowerCase())));
 
 // ---------------------------------------------------------------------------
 // Reference data: categories, suppliers, shippers, territories, customers
@@ -1285,13 +1284,25 @@ export const SearchLive = HttpApiBuilder.group(Api, "search", (handlers) =>
 
     // search across all three resource types; results stay discriminated by `type`
     const products = Arr.fromIterable(MutableHashMap.values(store.products)).filter((product) =>
-      matches([product.attributes.name], q),
+      matches(Arr.map([product.attributes.name], Option.fromUndefinedOr), q),
     );
     const customers = Arr.fromIterable(MutableHashMap.values(store.customers)).filter((customer) =>
-      matches([customer.attributes.companyName, customer.attributes.contactName], q),
+      matches(
+        Arr.map(
+          [customer.attributes.companyName, customer.attributes.contactName],
+          Option.fromUndefinedOr,
+        ),
+        q,
+      ),
     );
     const suppliers = Arr.fromIterable(MutableHashMap.values(store.suppliers)).filter((supplier) =>
-      matches([supplier.attributes.companyName, supplier.attributes.contactName], q),
+      matches(
+        Arr.map(
+          [supplier.attributes.companyName, supplier.attributes.contactName],
+          Option.fromUndefinedOr,
+        ),
+        q,
+      ),
     );
     const results = [...products, ...customers, ...suppliers];
 

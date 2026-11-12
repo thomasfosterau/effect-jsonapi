@@ -90,7 +90,7 @@ describe("SchemaErrorsLive re-checks full linkage on the encoded document (#250)
 
   // `get` answers the document under test; `list` a plain collection, which
   // has no `included` for the check to read.
-  const live = (document: typeof throughEditor | typeof throughAuthor | undefined) =>
+  const live = (document?: typeof throughEditor | typeof throughAuthor) =>
     HttpApiBuilder.layer(Api).pipe(
       Layer.provide(
         HttpApiBuilder.group(Api, "articles", (handlers) =>
@@ -105,7 +105,7 @@ describe("SchemaErrorsLive re-checks full linkage on the encoded document (#250)
     );
 
   const serve = async (
-    document: typeof throughEditor | typeof throughAuthor | undefined,
+    document?: typeof throughEditor | typeof throughAuthor,
     url = "http://localhost/articles/1",
     middleware: Layer.Layer<
       Middleware.ContentNegotiation | Middleware.SchemaErrors | Middleware.CreatedLocation

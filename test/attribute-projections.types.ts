@@ -105,15 +105,15 @@ Atomic.add(Upload, { attributes: { fileName: "a.png", secret: "s" } });
 // (a strict `Schema.optionalKey<S>` would give plain `string`).
 const captionIsOptional: Equals<
   (typeof Upload.createInput.fields.caption)["Type"],
-  string | undefined
+  Schema.optional<Schema.String>["Type"]
 > = true;
 const captionInPayload: Equals<
   (typeof Upload.createPayload.fields.data.fields.attributes.fields.caption)["Type"],
-  string | undefined
+  Schema.optional<Schema.String>["Type"]
 > = true;
 const captionInAdd: Equals<
   Atomic.AddOperation<typeof Upload>["Type"]["data"]["attributes"]["caption"],
-  string | undefined
+  Schema.optional<Schema.String>["Type"]
 > = true;
 // … and the same shape as the update projection gives it
 const captionMatchesUpdate: Equals<
@@ -124,7 +124,7 @@ const captionMatchesUpdate: Equals<
 // So a caller computing `caption: maybeUndefined` type-checks against both
 // projections, exactly as the issue asks (and would under
 // `exactOptionalPropertyTypes` too, since the value type includes `undefined`).
-declare const optionalCaption: string | undefined;
+declare const optionalCaption: Schema.optional<Schema.String>["Type"];
 const createWithMaybe: typeof Upload.createInput.Type = {
   fileName: "a.png",
   file: bytes,
@@ -153,21 +153,23 @@ const Profile = Resource.make("profiles", {
     motto: Schema.optional(Schema.String),
   },
 });
-const bioIsOptional: Equals<(typeof Profile.createInput.fields.bio)["Type"], string | undefined> =
-  true;
+const bioIsOptional: Equals<
+  (typeof Profile.createInput.fields.bio)["Type"],
+  Schema.optional<Schema.String>["Type"]
+> = true;
 const bioMatchesUpdate: Equals<
   (typeof Profile.createInput.fields.bio)["Type"],
   (typeof Profile.updateInput.fields.bio)["Type"]
 > = true;
 const bioInAdd: Equals<
   Atomic.AddOperation<typeof Profile>["Type"]["data"]["attributes"]["bio"],
-  string | undefined
+  Schema.optional<Schema.String>["Type"]
 > = true;
 const mottoUnchanged: Equals<
   typeof Profile.createInput.fields.motto,
   typeof Profile.fields.attributes.fields.motto
 > = true;
-declare const optionalBio: string | undefined;
+declare const optionalBio: Schema.optional<Schema.String>["Type"];
 const profileCreate: typeof Profile.createInput.Type = { handle: "h", bio: optionalBio };
 const profileAdd = Atomic.add(Profile, { attributes: { handle: "h", bio: optionalBio } });
 
