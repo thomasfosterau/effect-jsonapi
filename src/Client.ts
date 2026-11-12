@@ -138,7 +138,7 @@ import { parse } from "./internal/json.js";
  * @category models
  */
 export interface AnyDocument {
-  readonly included?: ReadonlyArray<unknown> | undefined;
+  readonly included?: ReadonlyArray<unknown>;
 }
 
 /**
@@ -831,10 +831,10 @@ export const failWithErrorResponse = <A, E, R>(
 export interface IncludedResource {
   readonly type: string;
   readonly id: string;
-  readonly attributes?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly links?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly attributes?: R.ReadonlyRecord<string, unknown>;
+  readonly relationships?: R.ReadonlyRecord<string, unknown>;
+  readonly links?: R.ReadonlyRecord<string, unknown>;
+  readonly meta?: R.ReadonlyRecord<string, unknown>;
 }
 
 /**
@@ -845,9 +845,9 @@ export interface IncludedResource {
  * @category models
  */
 export interface DocumentMembers {
-  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly links?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly jsonapi?: JsonApiObject | undefined;
+  readonly meta?: R.ReadonlyRecord<string, unknown>;
+  readonly links?: R.ReadonlyRecord<string, unknown>;
+  readonly jsonapi?: JsonApiObject;
 }
 
 /**
@@ -860,7 +860,7 @@ export interface DocumentMembers {
  */
 export interface ResourceDocument<R, Included = IncludedResource> extends DocumentMembers {
   readonly data: Wire<R>;
-  readonly included?: ReadonlyArray<Included> | undefined;
+  readonly included?: ReadonlyArray<Included>;
 }
 
 /**
@@ -871,7 +871,7 @@ export interface ResourceDocument<R, Included = IncludedResource> extends Docume
  */
 export interface CollectionDocument<R, Included = IncludedResource> extends DocumentMembers {
   readonly data: ReadonlyArray<Wire<R>>;
-  readonly included?: ReadonlyArray<Included> | undefined;
+  readonly included?: ReadonlyArray<Included>;
 }
 
 /**
@@ -891,12 +891,10 @@ export interface CollectionDocument<R, Included = IncludedResource> extends Docu
  * @category accessors
  */
 export const readTotalCount = (
-  source:
-    | ({ readonly meta?: R.ReadonlyRecord<string, unknown> | undefined } & R.ReadonlyRecord<
-        string,
-        unknown
-      >)
-    | undefined,
+  source?: { readonly meta?: R.ReadonlyRecord<string, unknown> } & R.ReadonlyRecord<
+    string,
+    unknown
+  >,
 ): number => {
   const totalCount = source?.meta?.["totalCount"];
   return P.isNumber(totalCount) ? totalCount : 0;
@@ -1020,7 +1018,7 @@ export const indexIncluded = (included?: ReadonlyArray<IncludedResource>): Inclu
  * @category models
  */
 export interface LinkedResource {
-  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly relationships?: R.ReadonlyRecord<string, unknown>;
 }
 
 /** The refs one relationship key carries: `[]` for absent, `null` or empty linkage. */
@@ -1214,8 +1212,8 @@ export interface Hydrated<R extends Any> {
 export const hydrate = <R extends Any>(
   resource: R,
   document: {
-    readonly data: LinkedResource | null;
-    readonly included?: ReadonlyArray<IncludedResource> | undefined;
+    readonly data: Schema.NullOr<Schema.Schema<LinkedResource>>["Type"];
+    readonly included?: ReadonlyArray<IncludedResource>;
   },
 ): Hydrated<R> => {
   const index = indexIncluded(document.included);

@@ -626,9 +626,9 @@ export function discover(api: HttpApi.Top): ReadonlyArray<Discovered> {
  */
 export interface Payload {
   readonly type: string;
-  readonly attributes?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
-  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
+  readonly attributes?: R.ReadonlyRecord<string, unknown>;
+  readonly relationships?: R.ReadonlyRecord<string, unknown>;
+  readonly meta?: R.ReadonlyRecord<string, unknown>;
 }
 
 /** @internal */

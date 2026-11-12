@@ -1146,7 +1146,7 @@ export type RelationshipDataValue<R extends Any, K extends RelationshipName<R>> 
   R["relationships"][K] extends Relationship.One<infer T>
     ? RefValueFor<T>
     : R["relationships"][K] extends Relationship.Optional<infer T>
-      ? RefValueFor<T> | null
+      ? Schema.NullOr<Ref<T>>["Type"]
       : R["relationships"][K] extends Relationship.ToMany<infer T>
         ? ReadonlyArray<RefValueFor<T>>
         : never;
@@ -1384,7 +1384,7 @@ export const request = <
  * @category models
  */
 export interface ResultValue {
-  readonly data?: ResourceValue | null;
+  readonly data?: Schema.NullOr<Schema.Schema<ResourceValue>>["Type"];
   readonly meta?: MetaValue;
 }
 
@@ -1432,7 +1432,10 @@ export interface ResultEntry<R, M extends MetaValue = never> {
  * @since 0.1.0
  * @category constructors
  */
-export const result = <const R extends ResourceValue | null, const M extends MetaValue = never>(
+export const result = <
+  const R extends Schema.NullOr<Schema.Schema<ResourceValue>>["Type"],
+  const M extends MetaValue = never,
+>(
   data: R,
   meta?: M,
 ): ResultEntry<R, M> => ({

@@ -911,7 +911,9 @@ export const sendLinkage = (
   ctx: Context,
   endpoint: Discovered,
   url: string,
-  data: Identity | ReadonlyArray<Identity> | null,
+  data: Schema.NullOr<
+    Schema.Union<readonly [typeof Identity, Schema.$Array<typeof Identity>]>
+  >["Type"],
 ): Effect.Effect<Observation> =>
   idempotencyHeaders(endpoint).pipe(
     Effect.flatMap((key) =>
