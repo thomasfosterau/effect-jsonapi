@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
@@ -56,75 +57,81 @@ const server = () => {
 };
 
 const run = (client: HttpClient.HttpClient, options: Conformance.Options) =>
-  Effect.runPromise(Conformance.verifyWith(api, { client, baseUrl: BASE_URL, ...options }));
+  Conformance.verifyWith(api, { client, baseUrl: BASE_URL, ...options });
 
 describe("Conformance: Report.samples (#319)", () => {
-  it("records every `/:type/:id` read the `ids` resolve, with its status", async () => {
-    const { client } = server();
-    const report = await run(client, { ids: { articles: "1", people: "missing" } });
-    expect(report.samples).toEqual([
-      { type: "articles", id: "1", url: "/articles/1", status: 200 },
-      { type: "people", id: "missing", url: "/people/missing", status: 404 },
-    ]);
-    // An unresolved sample is not a gap, and fails no rule on its own account.
-    expect(report.gaps).toEqual(Conformance.gaps);
-  });
+  it.effect("records every `/:type/:id` read the `ids` resolve, with its status", () =>
+    Effect.gen(function* () {
+      const { client } = server();
+      const report = yield* run(client, { ids: { articles: "1", people: "missing" } });
+      expect(report.samples).toEqual([
+        { type: "articles", id: "1", url: "/articles/1", status: 200 },
+        { type: "people", id: "missing", url: "/people/missing", status: 404 },
+      ]);
+      // An unresolved sample is not a gap, and fails no rule on its own account.
+      expect(report.gaps).toEqual(Conformance.gaps);
+    }),
+  );
 
-  it("names the samples that answered non-2xx in the formatted report", async () => {
-    const { client } = server();
-    const unresolved = Conformance.format(
-      await run(client, { ids: { articles: "1", people: "missing" } }),
-    );
-    expect(unresolved).toContain("SAMPLES");
-    expect(unresolved.replace(/\s+/g, " ")).toContain(
-      "1 of 2 `ids` samples answered non-2xx, so every rule that reads it saw less of the api: people:missing (GET /people/missing: 404)",
-    );
-    expect(unresolved).not.toContain("articles:1 (GET");
+  it.effect("names the samples that answered non-2xx in the formatted report", () =>
+    Effect.gen(function* () {
+      const { client } = server();
+      const unresolved = Conformance.format(
+        yield* run(client, { ids: { articles: "1", people: "missing" } }),
+      );
+      expect(unresolved).toContain("SAMPLES");
+      expect(unresolved.replace(/\s+/g, " ")).toContain(
+        "1 of 2 `ids` samples answered non-2xx, so every rule that reads it saw less of the api: people:missing (GET /people/missing: 404)",
+      );
+      expect(unresolved).not.toContain("articles:1 (GET");
 
-    const clean = Conformance.format(await run(client, { ids: { articles: "1", people: "9" } }));
-    expect(clean).not.toContain("SAMPLES");
-  });
+      const clean = Conformance.format(yield* run(client, { ids: { articles: "1", people: "9" } }));
+      expect(clean).not.toContain("SAMPLES");
+    }),
+  );
 
-  it("sends no request of its own: a sample no selected rule read is left out", async () => {
-    const { client, hits } = server();
-    const report = await run(client, {
-      ids: { articles: "1", people: "9" },
-      only: ["spec/status/delete-response"],
-    });
-    expect(report.samples).toEqual([]);
-    expect([
-      MutableHashMap.get(hits, "/articles/1"),
-      MutableHashMap.get(hits, "/people/9"),
-    ]).toEqual([Option.none(), Option.none()]);
-  });
+  it.effect("sends no request of its own: a sample no selected rule read is left out", () =>
+    Effect.gen(function* () {
+      const { client, hits } = server();
+      const report = yield* run(client, {
+        ids: { articles: "1", people: "9" },
+        only: ["spec/status/delete-response"],
+      });
+      expect(report.samples).toEqual([]);
+      expect([
+        MutableHashMap.get(hits, "/articles/1"),
+        MutableHashMap.get(hits, "/people/9"),
+      ]).toEqual([Option.none(), Option.none()]);
+    }),
+  );
 
-  it("records only a plain read: a probe with its own Accept decides nothing", async () => {
-    const ledger = Samples.ledger(Core.discover(api), {
-      baseUrl: `${BASE_URL}/`,
-      ids: { articles: "1" },
-      paths: {},
-      absentId: "absent",
-      extensions: [],
-      mutating: false,
-      writes: {},
-      requestTimeout: Option.none(),
-    });
-    const answering =
-      (status: number): Core.Context["request"] =>
-      (probe) =>
-        Effect.succeed({
-          probe: { method: "GET", url: probe.url, headers: {}, body: undefined },
-          status,
-          headers: {},
-          contentType: undefined,
-          text: "",
-          body: Option.none(),
-          transportError: undefined,
-          redirects: [],
-          unfollowed: Option.none(),
-        });
-    const samples = await Effect.runPromise(
-      Effect.gen(function* () {
+  it.effect("records only a plain read: a probe with its own Accept decides nothing", () =>
+    Effect.gen(function* () {
+      const ledger = Samples.ledger(Core.discover(api), {
+        baseUrl: `${BASE_URL}/`,
+        ids: { articles: "1" },
+        paths: {},
+        absentId: "absent",
+        extensions: [],
+        mutating: false,
+        writes: {},
+        requestTimeout: Option.none(),
+      });
+      const answering =
+        (status: number): Core.Context["request"] =>
+        (probe) =>
+          Effect.succeed({
+            probe: { method: "GET", url: probe.url, headers: {}, body: undefined },
+            status,
+            headers: {},
+            contentType: undefined,
+            text: "",
+            body: Option.none(),
+            transportError: undefined,
+            redirects: [],
+            unfollowed: Option.none(),
+          });
+      const samples = yield* Effect.gen(function* () {
         yield* Samples.recording(
           answering(406),
           ledger,
@@ -132,8 +139,8 @@ describe("Conformance: Report.samples (#319)", () => {
         yield* Samples.recording(answering(200), ledger)({ url: `${BASE_URL}/articles/1` });
         yield* Samples.recording(answering(500), ledger)({ url: "/articles/1" });
         return Samples.snapshot(ledger);
-      }),
-    );
-    expect(samples).toEqual([{ type: "articles", id: "1", url: "/articles/1", status: 200 }]);
-  });
+      });
+      expect(samples).toEqual([{ type: "articles", id: "1", url: "/articles/1", status: 200 }]);
+    }),
+  );
 });

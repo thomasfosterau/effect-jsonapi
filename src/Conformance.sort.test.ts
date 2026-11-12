@@ -6,7 +6,8 @@
  * answer, pages sorted one at a time — must fail its rule, while a collection
  * that cannot show what a rule checks leaves it `Skipped`, never passed.
  */
-import { assert, describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assert, describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as P from "effect/Predicate";
@@ -205,35 +206,34 @@ const serve =
   };
 
 /** The paths a run sent, in order. */
-const run = async (
+const run = (
   answer: (path: string) => Answer,
   target: HttpApi.HttpApi<string, any> = api,
   ruleId: string = RULE,
-) => {
-  const sent: Array<string> = [];
-  const client = HttpClient.make((request, url) =>
-    Effect.sync(() => {
-      const path = `${url.pathname}${url.search}`;
-      sent.push(decodeURIComponent(path));
-      const { status, body } = answer(path);
-      return HttpClientResponse.fromWeb(
-        request,
-        new Response(JSON.stringify(body), { status, headers: { "content-type": MEDIA_TYPE } }),
-      );
-    }),
-  );
-  const report = await Effect.runPromise(
-    Conformance.verifyWith(target, {
+) =>
+  Effect.gen(function* () {
+    const sent: Array<string> = [];
+    const client = HttpClient.make((request, url) =>
+      Effect.sync(() => {
+        const path = `${url.pathname}${url.search}`;
+        sent.push(decodeURIComponent(path));
+        const { status, body } = answer(path);
+        return HttpClientResponse.fromWeb(
+          request,
+          new Response(JSON.stringify(body), { status, headers: { "content-type": MEDIA_TYPE } }),
+        );
+      }),
+    );
+    const report = yield* Conformance.verifyWith(target, {
       client,
       baseUrl: "http://fixture.test",
       ids: { projects: "1" },
       only: [ruleId],
-    }),
-  );
-  const outcome = report.outcomes.find((candidate) => candidate.rule.id === ruleId);
-  if (outcome === undefined) throw new Error(`no outcome for ${ruleId}`);
-  return { outcome, sent };
-};
+    });
+    const outcome = report.outcomes.find((candidate) => candidate.rule.id === ruleId);
+    if (outcome === undefined) return yield* Effect.die(new Error(`no outcome for ${ruleId}`));
+    return { outcome, sent };
+  });
 
 const findingsOf = (outcome: Conformance.Outcome) => {
   expect(outcome._tag).toBe("Failed");
@@ -249,199 +249,237 @@ describe("Conformance: sort order (filter-grammar §10)", () => {
     expect(Conformance.gaps.map((gap) => gap.area)).not.toContain("Sort ordering correctness");
   });
 
-  it("passes a server that sorts as the profile says, on list and related endpoints alike", async () => {
-    const { outcome, sent } = await run(serve(profileSorter));
-    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
-    // `due` holds NULLs, so it is the attribute decided — both ways — on each endpoint.
-    expect(sent).toEqual([
-      "/tasks",
-      "/tasks?sort=due",
-      "/tasks?sort=-due",
-      "/projects/1/tasks",
-      "/projects/1/tasks?sort=due",
-      "/projects/1/tasks?sort=-due",
-    ]);
-  });
+  it.effect(
+    "passes a server that sorts as the profile says, on list and related endpoints alike",
+    () =>
+      Effect.gen(function* () {
+        const { outcome, sent } = yield* run(serve(profileSorter));
+        expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+        // `due` holds NULLs, so it is the attribute decided — both ways — on each endpoint.
+        expect(sent).toEqual([
+          "/tasks",
+          "/tasks?sort=due",
+          "/tasks?sort=-due",
+          "/projects/1/tasks",
+          "/projects/1/tasks?sort=due",
+          "/projects/1/tasks?sort=-due",
+        ]);
+      }),
+  );
 
-  it("fails a server that ignores `sort`", async () => {
-    const { outcome } = await run(serve({ ...profileSorter, ignores: true }));
-    const findings = findingsOf(outcome);
-    expect(findings.map((found) => found.detail)).toEqual([
-      '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
-      '`?sort=-due` lists tasks:1 ("2026-01-02T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
-      '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
-      '`?sort=-due` lists tasks:1 ("2026-01-02T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
-    ]);
-    expect(findings[0]).toMatchObject({
-      expected:
-        "primary data in ascending order of `due` under F-ORD-1, NULLs last (S-ORD-1, S-ORD-3)",
-      observed:
-        '`due` in the order served: "2026-01-02T00:00:00.000Z", NULL, "2026-01-01T00:00:00.000Z", NULL',
-    });
-    expect(findings[0]?.probe?.url).toBe("/tasks?sort=due");
-  });
+  it.effect("fails a server that ignores `sort`", () =>
+    Effect.gen(function* () {
+      const { outcome } = yield* run(serve({ ...profileSorter, ignores: true }));
+      const findings = findingsOf(outcome);
+      expect(findings.map((found) => found.detail)).toEqual([
+        '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
+        '`?sort=-due` lists tasks:1 ("2026-01-02T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
+        '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
+        '`?sort=-due` lists tasks:1 ("2026-01-02T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
+      ]);
+      expect(findings[0]).toMatchObject({
+        expected:
+          "primary data in ascending order of `due` under F-ORD-1, NULLs last (S-ORD-1, S-ORD-3)",
+        observed:
+          '`due` in the order served: "2026-01-02T00:00:00.000Z", NULL, "2026-01-01T00:00:00.000Z", NULL',
+      });
+      expect(findings[0]?.probe?.url).toBe("/tasks?sort=due");
+    }),
+  );
 
-  it("fails a server that ignores `sort` over a collection with no NULL", async () => {
-    // Already in ascending order of `rank`, so only the descending request shows it ignored.
-    const ranked = TASKS.map((task) => ({
-      ...task,
-      attributes: { rank: task.attributes["rank"] },
-    }));
-    const tasks = Arr.sort(
-      ranked,
-      orderOf<(typeof ranked)[number]>((a, b) => ascending(valueOf(a, "rank"), valueOf(b, "rank"))),
-    );
-    const { outcome } = await run(serve({ ...profileSorter, ignores: true }, tasks));
-    expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
-      "`?sort=-rank` lists tasks:2 (1) before tasks:1 (2)",
-      "`?sort=-rank` lists tasks:2 (1) before tasks:1 (2)",
-    ]);
-  });
+  it.effect("fails a server that ignores `sort` over a collection with no NULL", () =>
+    Effect.gen(function* () {
+      // Already in ascending order of `rank`, so only the descending request shows it ignored.
+      const ranked = TASKS.map((task) => ({
+        ...task,
+        attributes: { rank: task.attributes["rank"] },
+      }));
+      const tasks = Arr.sort(
+        ranked,
+        orderOf<(typeof ranked)[number]>((a, b) =>
+          ascending(valueOf(a, "rank"), valueOf(b, "rank")),
+        ),
+      );
+      const { outcome } = yield* run(serve({ ...profileSorter, ignores: true }, tasks));
+      expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
+        "`?sort=-rank` lists tasks:2 (1) before tasks:1 (2)",
+        "`?sort=-rank` lists tasks:2 (1) before tasks:1 (2)",
+      ]);
+    }),
+  );
 
-  it("fails a server that puts NULLs first ascending and last descending", async () => {
-    const nullsFirst: Sorter = {
-      compare: (left, right) =>
-        left === null ? (right === null ? 0 : -1) : right === null ? 1 : ascending(left, right),
-    };
-    const { outcome } = await run(serve(nullsFirst));
-    const findings = findingsOf(outcome);
-    expect(findings.map((found) => found.detail)).toEqual([
-      '`?sort=due` lists tasks:4 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
-      '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
-      '`?sort=due` lists tasks:4 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
-      '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
-    ]);
-  });
-
-  it("fails a server that puts NULLs last both ways", async () => {
-    const reversedNullsLast = (path: string) => {
-      const answer = serve(profileSorter)(path);
-      if (!path.includes("sort=-")) return answer;
-      const data = (answer.body as { readonly data: ReadonlyArray<Wire> }).data;
-      return {
-        ...answer,
-        body: {
-          data: [
-            ...data.filter((task) => valueOf(task, "due") !== null),
-            ...data.filter((task) => valueOf(task, "due") === null),
-          ],
-        },
+  it.effect("fails a server that puts NULLs first ascending and last descending", () =>
+    Effect.gen(function* () {
+      const nullsFirst: Sorter = {
+        compare: (left, right) =>
+          left === null ? (right === null ? 0 : -1) : right === null ? 1 : ascending(left, right),
       };
-    };
-    const { outcome } = await run(reversedNullsLast);
-    expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
-      '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
-      '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
-    ]);
-  });
+      const { outcome } = yield* run(serve(nullsFirst));
+      const findings = findingsOf(outcome);
+      expect(findings.map((found) => found.detail)).toEqual([
+        '`?sort=due` lists tasks:4 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
+        '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
+        '`?sort=due` lists tasks:4 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
+        '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
+      ]);
+    }),
+  );
 
-  it("passes over an attribute the server refuses to sort by, and notes NULL placement went unobserved", async () => {
-    const { outcome, sent } = await run(serve({ ...profileSorter, refuses: ["due"] }));
-    assert(P.isTagged(outcome, "Passed"));
-    expect(outcome.note).toBe(
-      "NULL placement (S-ORD-3) not observed: no attribute decided held a NULL in its answers",
-    );
-    expect(sent.slice(0, 6)).toEqual([
-      "/tasks",
-      "/tasks?sort=due",
-      "/tasks?sort=title",
-      "/tasks?sort=-title",
-      "/tasks?sort=rank",
-      "/tasks?sort=-rank",
-    ]);
-  });
+  it.effect("fails a server that puts NULLs last both ways", () =>
+    Effect.gen(function* () {
+      const reversedNullsLast = (path: string) => {
+        const answer = serve(profileSorter)(path);
+        if (!path.includes("sort=-")) return answer;
+        const data = (answer.body as { readonly data: ReadonlyArray<Wire> }).data;
+        return {
+          ...answer,
+          body: {
+            data: [
+              ...data.filter((task) => valueOf(task, "due") !== null),
+              ...data.filter((task) => valueOf(task, "due") === null),
+            ],
+          },
+        };
+      };
+      const { outcome } = yield* run(reversedNullsLast);
+      expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
+        '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
+        '`?sort=-due` lists tasks:3 ("2026-01-01T00:00:00.000Z") before tasks:2 (NULL) — a NULL sorts before every value descending (S-ORD-3)',
+      ]);
+    }),
+  );
 
-  it("fails a server that orders strings under a locale collation (F-ORD-2)", async () => {
-    const locale: Sorter = {
-      refuses: ["due"],
-      compare: (left, right) =>
-        P.isString(left) && P.isString(right)
-          ? left.localeCompare(right, "en", { sensitivity: "base" })
-          : ascending(left, right),
-    };
-    const { outcome } = await run(serve(locale));
-    const details = findingsOf(outcome).map((found) => found.detail);
-    expect(details).toContain('`?sort=title` lists tasks:1 ("b") before tasks:4 ("B")');
-  });
+  it.effect(
+    "passes over an attribute the server refuses to sort by, and notes NULL placement went unobserved",
+    () =>
+      Effect.gen(function* () {
+        const { outcome, sent } = yield* run(serve({ ...profileSorter, refuses: ["due"] }));
+        assert(P.isTagged(outcome, "Passed"));
+        expect(outcome.note).toBe(
+          "NULL placement (S-ORD-3) not observed: no attribute decided held a NULL in its answers",
+        );
+        expect(sent.slice(0, 6)).toEqual([
+          "/tasks",
+          "/tasks?sort=due",
+          "/tasks?sort=title",
+          "/tasks?sort=-title",
+          "/tasks?sort=rank",
+          "/tasks?sort=-rank",
+        ]);
+      }),
+  );
 
-  it("skips, never passes, a collection that cannot show an order", async () => {
-    const { outcome } = await run(serve(profileSorter, [TASKS[0]]));
-    expect(outcome).toEqual({
-      _tag: "Skipped",
-      rule: expect.objectContaining({ id: RULE }),
-      reason:
-        "no attribute's order could be observed: /tasks: no attribute shows two distinct values across its 1 resource, so no order can be observed; /projects/1/tasks: no attribute shows two distinct values across its 1 resource, so no order can be observed",
-    });
-  });
+  it.effect("fails a server that orders strings under a locale collation (F-ORD-2)", () =>
+    Effect.gen(function* () {
+      const locale: Sorter = {
+        refuses: ["due"],
+        compare: (left, right) =>
+          P.isString(left) && P.isString(right)
+            ? left.localeCompare(right, "en", { sensitivity: "base" })
+            : ascending(left, right),
+      };
+      const { outcome } = yield* run(serve(locale));
+      const details = findingsOf(outcome).map((found) => found.detail);
+      expect(details).toContain('`?sort=title` lists tasks:1 ("b") before tasks:4 ("B")');
+    }),
+  );
 
-  it("skips when the server refuses every attribute", async () => {
-    const { outcome } = await run(serve({ ...profileSorter, refuses: ["title", "rank", "due"] }));
-    assert(P.isTagged(outcome, "Skipped"));
-    expect(outcome.reason).toBe(
-      "no attribute's order could be observed: /tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there); /projects/1/tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there)",
-    );
-  });
+  it.effect("skips, never passes, a collection that cannot show an order", () =>
+    Effect.gen(function* () {
+      const { outcome } = yield* run(serve(profileSorter, [TASKS[0]]));
+      expect(outcome).toEqual({
+        _tag: "Skipped",
+        rule: expect.objectContaining({ id: RULE }),
+        reason:
+          "no attribute's order could be observed: /tasks: no attribute shows two distinct values across its 1 resource, so no order can be observed; /projects/1/tasks: no attribute shows two distinct values across its 1 resource, so no order can be observed",
+      });
+    }),
+  );
 
-  it("decides nothing on a server error", async () => {
-    const failing = (path: string) =>
-      path.includes("sort=")
-        ? { status: 503, body: { errors: [{ status: "503" }] } }
-        : serve(profileSorter)(path);
-    const { outcome } = await run(failing);
-    assert(P.isTagged(outcome, "Skipped"));
-    expect(outcome.reason).toContain("`due`: `?sort=due` answered 503");
-  });
+  it.effect("skips when the server refuses every attribute", () =>
+    Effect.gen(function* () {
+      const { outcome } = yield* run(
+        serve({ ...profileSorter, refuses: ["title", "rank", "due"] }),
+      );
+      assert(P.isTagged(outcome, "Skipped"));
+      expect(outcome.reason).toBe(
+        "no attribute's order could be observed: /tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there); /projects/1/tasks: refused `sort` by `due`, `title`, `rank` with a 400 (not sortable there)",
+      );
+    }),
+  );
 
-  it("decides nothing on an attribute whose values are of more than one JSON type (S-KEY-2)", async () => {
-    const mixed: ReadonlyArray<Wire> = [
-      { type: "tasks", id: "1", attributes: { title: "a" } },
-      { type: "tasks", id: "2", attributes: { title: 1 } },
-    ];
-    const { outcome } = await run(serve(profileSorter, mixed));
-    expect(outcome._tag).toBe("Skipped");
-  });
+  it.effect("decides nothing on a server error", () =>
+    Effect.gen(function* () {
+      const failing = (path: string) =>
+        path.includes("sort=")
+          ? { status: 503, body: { errors: [{ status: "503" }] } }
+          : serve(profileSorter)(path);
+      const { outcome } = yield* run(failing);
+      assert(P.isTagged(outcome, "Skipped"));
+      expect(outcome.reason).toContain("`due`: `?sort=due` answered 503");
+    }),
+  );
 
-  it("keeps an ascending finding when the descending request decides nothing", async () => {
-    const failingDescending = (path: string) =>
-      path.includes("sort=-")
-        ? { status: 503, body: { errors: [{ status: "503" }] } }
-        : serve({ ...profileSorter, ignores: true })(path);
-    const { outcome } = await run(failingDescending);
-    expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
-      '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
-      '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
-    ]);
-  });
+  it.effect(
+    "decides nothing on an attribute whose values are of more than one JSON type (S-KEY-2)",
+    () =>
+      Effect.gen(function* () {
+        const mixed: ReadonlyArray<Wire> = [
+          { type: "tasks", id: "1", attributes: { title: "a" } },
+          { type: "tasks", id: "2", attributes: { title: 1 } },
+        ];
+        const { outcome } = yield* run(serve(profileSorter, mixed));
+        expect(outcome._tag).toBe("Skipped");
+      }),
+  );
 
-  it("stops at its request budget of 60, noting the endpoints it never probed", async () => {
-    // Twenty-one list endpoints, each costing a baseline and two sorted requests.
-    const many = HttpApi.make("many").add(
-      ...Arr.map(
-        Arr.makeBy(21, (n) => `t${n}`),
-        (type) => {
-          const Numbered = Resource.make(type, { attributes: { title: Schema.String } });
-          return Group.make(Numbered, Endpoint.list(Numbered, { sort: true }));
-        },
-      ),
-    );
-    const { outcome, sent } = await run(serve(profileSorter), many);
-    expect(sent).toHaveLength(60);
-    expect(outcome).toMatchObject({
-      _tag: "Passed",
-      probes: 60,
-      note: "not decided: /t20: not probed, the rule's 60-request budget ran out",
-    });
-  });
+  it.effect("keeps an ascending finding when the descending request decides nothing", () =>
+    Effect.gen(function* () {
+      const failingDescending = (path: string) =>
+        path.includes("sort=-")
+          ? { status: 503, body: { errors: [{ status: "503" }] } }
+          : serve({ ...profileSorter, ignores: true })(path);
+      const { outcome } = yield* run(failingDescending);
+      expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
+        '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
+        '`?sort=due` lists tasks:2 (NULL) before tasks:3 ("2026-01-01T00:00:00.000Z") — a NULL sorts after every value ascending (S-ORD-3)',
+      ]);
+    }),
+  );
 
-  it("skips an api with no list or related endpoint declaring `sort`", async () => {
-    const unsorted = HttpApi.make("unsorted").add(Group.make(Task, Endpoint.list(Task)));
-    const { outcome, sent } = await run(serve(profileSorter), unsorted);
-    expect(outcome).toMatchObject({
-      _tag: "Skipped",
-      reason: "no list or related endpoint in this api declares `sort`",
-    });
-    expect(sent).toEqual([]);
-  });
+  it.effect("stops at its request budget of 60, noting the endpoints it never probed", () =>
+    Effect.gen(function* () {
+      // Twenty-one list endpoints, each costing a baseline and two sorted requests.
+      const many = HttpApi.make("many").add(
+        ...Arr.map(
+          Arr.makeBy(21, (n) => `t${n}`),
+          (type) => {
+            const Numbered = Resource.make(type, { attributes: { title: Schema.String } });
+            return Group.make(Numbered, Endpoint.list(Numbered, { sort: true }));
+          },
+        ),
+      );
+      const { outcome, sent } = yield* run(serve(profileSorter), many);
+      expect(sent).toHaveLength(60);
+      expect(outcome).toMatchObject({
+        _tag: "Passed",
+        probes: 60,
+        note: "not decided: /t20: not probed, the rule's 60-request budget ran out",
+      });
+    }),
+  );
+
+  it.effect("skips an api with no list or related endpoint declaring `sort`", () =>
+    Effect.gen(function* () {
+      const unsorted = HttpApi.make("unsorted").add(Group.make(Task, Endpoint.list(Task)));
+      const { outcome, sent } = yield* run(serve(profileSorter), unsorted);
+      expect(outcome).toMatchObject({
+        _tag: "Skipped",
+        reason: "no list or related endpoint in this api declares `sort`",
+      });
+      expect(sent).toEqual([]);
+    }),
+  );
 });
 
 describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", () => {
@@ -453,70 +491,82 @@ describe("Conformance: several sort fields (filter-grammar §10.4, S-MULTI-1)", 
     expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#104-several-fields$/);
   });
 
-  it("passes a server that orders lexicographically, each term in its own direction", async () => {
-    const { outcome, sent } = await run(serve(profileSorter), api, MULTI);
-    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
-    // `rank` ties tasks 1 and 4, whose `title`s differ: both directions of each term are asked for.
-    expect(sent).toEqual([
-      "/tasks",
-      "/tasks?sort=rank,-title",
-      "/tasks?sort=-rank,title",
-      "/projects/1/tasks",
-      "/projects/1/tasks?sort=rank,-title",
-      "/projects/1/tasks?sort=-rank,title",
-    ]);
-  });
+  it.effect("passes a server that orders lexicographically, each term in its own direction", () =>
+    Effect.gen(function* () {
+      const { outcome, sent } = yield* run(serve(profileSorter), api, MULTI);
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+      // `rank` ties tasks 1 and 4, whose `title`s differ: both directions of each term are asked for.
+      expect(sent).toEqual([
+        "/tasks",
+        "/tasks?sort=rank,-title",
+        "/tasks?sort=-rank,title",
+        "/projects/1/tasks",
+        "/projects/1/tasks?sort=rank,-title",
+        "/projects/1/tasks?sort=-rank,title",
+      ]);
+    }),
+  );
 
-  it("fails a server that ignores every term but the first", async () => {
-    // Ties on `rank` fall to `id` order, which `rank,-title` happens to agree with; `-rank,title` does not.
-    const { outcome } = await run(serve({ ...profileSorter, firstTermOnly: true }), api, MULTI);
-    const findings = findingsOf(outcome);
-    expect(findings.map((found) => found.detail)).toEqual([
-      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
-      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
-    ]);
-    expect(findings[0]).toMatchObject({
-      expected:
-        "primary data ordered by `rank` descending, then by `title` ascending, each later term breaking only the ties the terms before it left (S-MULTI-1)",
-      observed: '`rank`, `title` in the order served: (3, "c"), (2, "b"), (2, "B"), (1, "a")',
-    });
-    expect(findings[0]?.probe?.url).toBe("/tasks?sort=-rank%2Ctitle");
-  });
+  it.effect("fails a server that ignores every term but the first", () =>
+    Effect.gen(function* () {
+      // Ties on `rank` fall to `id` order, which `rank,-title` happens to agree with; `-rank,title` does not.
+      const { outcome } = yield* run(serve({ ...profileSorter, firstTermOnly: true }), api, MULTI);
+      const findings = findingsOf(outcome);
+      expect(findings.map((found) => found.detail)).toEqual([
+        '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+        '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+      ]);
+      expect(findings[0]).toMatchObject({
+        expected:
+          "primary data ordered by `rank` descending, then by `title` ascending, each later term breaking only the ties the terms before it left (S-MULTI-1)",
+        observed: '`rank`, `title` in the order served: (3, "c"), (2, "b"), (2, "B"), (1, "a")',
+      });
+      expect(findings[0]?.probe?.url).toBe("/tasks?sort=-rank%2Ctitle");
+    }),
+  );
 
-  it("fails a server that applies the first term's direction to every term", async () => {
-    const { outcome } = await run(serve({ ...profileSorter, oneDirection: true }), api, MULTI);
-    expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
-      '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
-      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
-      '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
-      '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
-    ]);
-  });
+  it.effect("fails a server that applies the first term's direction to every term", () =>
+    Effect.gen(function* () {
+      const { outcome } = yield* run(serve({ ...profileSorter, oneDirection: true }), api, MULTI);
+      expect(findingsOf(outcome).map((found) => found.detail)).toEqual([
+        '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
+        '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+        '`?sort=rank,-title` lists tasks:4 (2, "B") before tasks:1 (2, "b")',
+        '`?sort=-rank,title` lists tasks:1 (2, "b") before tasks:4 (2, "B")',
+      ]);
+    }),
+  );
 
-  it("passes over a pair the server refuses for the next", async () => {
-    const { outcome, sent } = await run(
-      serve({ ...profileSorter, refuses: ["title"] }),
-      api,
-      MULTI,
-    );
-    expect(outcome).toMatchObject({ _tag: "Passed" });
-    expect(sent.slice(0, 4)).toEqual([
-      "/tasks",
-      "/tasks?sort=rank,-title",
-      "/tasks?sort=rank,-due",
-      "/tasks?sort=-rank,due",
-    ]);
-  });
+  it.effect("passes over a pair the server refuses for the next", () =>
+    Effect.gen(function* () {
+      const { outcome, sent } = yield* run(
+        serve({ ...profileSorter, refuses: ["title"] }),
+        api,
+        MULTI,
+      );
+      expect(outcome).toMatchObject({ _tag: "Passed" });
+      expect(sent.slice(0, 4)).toEqual([
+        "/tasks",
+        "/tasks?sort=rank,-title",
+        "/tasks?sort=rank,-due",
+        "/tasks?sort=-rank,due",
+      ]);
+    }),
+  );
 
-  it("skips a collection in which no two resources tie on an attribute another tells apart", async () => {
-    const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
-    const { outcome } = await run(serve(profileSorter, distinct), api, MULTI);
-    expect(outcome).toMatchObject({
-      _tag: "Skipped",
-      reason:
-        "no two-term order could be observed: /tasks: no two of its 4 resources tie on one attribute and differ on another, so no second term can be observed; /projects/1/tasks: no two of its 4 resources tie on one attribute and differ on another, so no second term can be observed",
-    });
-  });
+  it.effect(
+    "skips a collection in which no two resources tie on an attribute another tells apart",
+    () =>
+      Effect.gen(function* () {
+        const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
+        const { outcome } = yield* run(serve(profileSorter, distinct), api, MULTI);
+        expect(outcome).toMatchObject({
+          _tag: "Skipped",
+          reason:
+            "no two-term order could be observed: /tasks: no two of its 4 resources tie on one attribute and differ on another, so no second term can be observed; /projects/1/tasks: no two of its 4 resources tie on one attribute and differ on another, so no second term can be observed",
+        });
+      }),
+  );
 });
 
 describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () => {
@@ -528,55 +578,67 @@ describe("Conformance: the `id` tiebreak (filter-grammar §10.5, S-TIE-1)", () =
     expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#105-ties-and-stability$/);
   });
 
-  it("passes a server that breaks ties by `id` whatever the direction", async () => {
-    const { outcome, sent } = await run(serve(profileSorter), api, TIE);
-    expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
-    expect(sent).toEqual([
-      "/tasks",
-      "/tasks?sort=rank",
-      "/tasks?sort=-rank",
-      "/projects/1/tasks",
-      "/projects/1/tasks?sort=rank",
-      "/projects/1/tasks?sort=-rank",
-    ]);
-  });
+  it.effect("passes a server that breaks ties by `id` whatever the direction", () =>
+    Effect.gen(function* () {
+      const { outcome, sent } = yield* run(serve(profileSorter), api, TIE);
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 6, note: undefined });
+      expect(sent).toEqual([
+        "/tasks",
+        "/tasks?sort=rank",
+        "/tasks?sort=-rank",
+        "/projects/1/tasks",
+        "/projects/1/tasks?sort=rank",
+        "/projects/1/tasks?sort=-rank",
+      ]);
+    }),
+  );
 
-  it("fails a server that answers `-f` by reversing its answer to `f`", async () => {
-    // The order on `rank` itself is right both ways: only the tie shows the reversal.
-    const { outcome } = await run(serve({ ...profileSorter, reverses: true }), api, TIE);
-    const findings = findingsOf(outcome);
-    expect(findings.map((found) => found.detail)).toEqual([
-      "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
-      "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
-    ]);
-    expect(findings[0]).toMatchObject({
-      observed: "1 of the 1 tied pair both answers list in the other order: tasks:1 / tasks:4",
-    });
-    expect(findings[0]?.probe?.url).toBe("/tasks?sort=-rank");
-    const ordering = await run(serve({ ...profileSorter, reverses: true }));
-    expect(ordering.outcome).toMatchObject({ _tag: "Passed" });
-  });
+  it.effect("fails a server that answers `-f` by reversing its answer to `f`", () =>
+    Effect.gen(function* () {
+      // The order on `rank` itself is right both ways: only the tie shows the reversal.
+      const { outcome } = yield* run(serve({ ...profileSorter, reverses: true }), api, TIE);
+      const findings = findingsOf(outcome);
+      expect(findings.map((found) => found.detail)).toEqual([
+        "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
+        "`?sort=rank` lists tasks:1 before tasks:4 and `?sort=-rank` lists tasks:4 before tasks:1, though the two tie on `rank` (2)",
+      ]);
+      expect(findings[0]).toMatchObject({
+        observed: "1 of the 1 tied pair both answers list in the other order: tasks:1 / tasks:4",
+      });
+      expect(findings[0]?.probe?.url).toBe("/tasks?sort=-rank");
+      const ordering = yield* run(serve({ ...profileSorter, reverses: true }));
+      expect(ordering.outcome).toMatchObject({ _tag: "Passed" });
+    }),
+  );
 
-  it("passes over an attribute the server refuses for the next tie", async () => {
-    const { outcome, sent } = await run(serve({ ...profileSorter, refuses: ["rank"] }), api, TIE);
-    expect(outcome).toMatchObject({ _tag: "Passed" });
-    expect(sent.slice(0, 4)).toEqual([
-      "/tasks",
-      "/tasks?sort=rank",
-      "/tasks?sort=due",
-      "/tasks?sort=-due",
-    ]);
-  });
+  it.effect("passes over an attribute the server refuses for the next tie", () =>
+    Effect.gen(function* () {
+      const { outcome, sent } = yield* run(
+        serve({ ...profileSorter, refuses: ["rank"] }),
+        api,
+        TIE,
+      );
+      expect(outcome).toMatchObject({ _tag: "Passed" });
+      expect(sent.slice(0, 4)).toEqual([
+        "/tasks",
+        "/tasks?sort=rank",
+        "/tasks?sort=due",
+        "/tasks?sort=-due",
+      ]);
+    }),
+  );
 
-  it("skips a collection in which no two resources tie", async () => {
-    const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
-    const { outcome } = await run(serve(profileSorter, distinct), api, TIE);
-    expect(outcome).toMatchObject({
-      _tag: "Skipped",
-      reason:
-        "no tie could be observed: /tasks: no two of its 4 resources tie on an attribute, so no tiebreak can be observed; /projects/1/tasks: no two of its 4 resources tie on an attribute, so no tiebreak can be observed",
-    });
-  });
+  it.effect("skips a collection in which no two resources tie", () =>
+    Effect.gen(function* () {
+      const distinct = TASKS.map((task, at) => ({ ...task, attributes: { rank: at } }));
+      const { outcome } = yield* run(serve(profileSorter, distinct), api, TIE);
+      expect(outcome).toMatchObject({
+        _tag: "Skipped",
+        reason:
+          "no tie could be observed: /tasks: no two of its 4 resources tie on an attribute, so no tiebreak can be observed; /projects/1/tasks: no two of its 4 resources tie on an attribute, so no tiebreak can be observed",
+      });
+    }),
+  );
 });
 
 describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)", () => {
@@ -588,48 +650,56 @@ describe("Conformance: the order across pages (filter-grammar §10.6, S-PAGE-1)"
     expect(rule?.reference).toMatch(/docs\/filter-grammar\.md#106-with-filter-and-page$/);
   });
 
-  it("passes a server that sorts the collection before it pages it, walking `next`", async () => {
-    const { outcome, sent } = await run(serve(profileSorter), api, PAGES);
-    expect(outcome).toMatchObject({ _tag: "Passed", probes: 3, note: undefined });
-    // Only the list declares a page size; half the baseline's four resources a page.
-    expect(sent).toEqual([
-      "/tasks",
-      "/tasks?sort=due&page[limit]=2",
-      "/tasks?sort=due&page[offset]=2&page[limit]=2",
-    ]);
-  });
+  it.effect("passes a server that sorts the collection before it pages it, walking `next`", () =>
+    Effect.gen(function* () {
+      const { outcome, sent } = yield* run(serve(profileSorter), api, PAGES);
+      expect(outcome).toMatchObject({ _tag: "Passed", probes: 3, note: undefined });
+      // Only the list declares a page size; half the baseline's four resources a page.
+      expect(sent).toEqual([
+        "/tasks",
+        "/tasks?sort=due&page[limit]=2",
+        "/tasks?sort=due&page[offset]=2&page[limit]=2",
+      ]);
+    }),
+  );
 
-  it("fails a server that sorts each page on its own", async () => {
-    const { outcome } = await run(serve({ ...profileSorter, sortsEachPage: true }), api, PAGES);
-    const findings = findingsOf(outcome);
-    expect(findings.map((found) => found.detail)).toEqual([
-      'page 1 of `?sort=due&page[limit]=2` (/tasks?sort=due&page[limit]=2) lists tasks:2 (NULL), which sorts after tasks:3 ("2026-01-01T00:00:00.000Z") on page 2 (/tasks?sort=due&page[offset]=2&page[limit]=2)',
-    ]);
-    expect(findings[0]).toMatchObject({
-      observed:
-        '`due` page by page: ["2026-01-02T00:00:00.000Z", NULL] ["2026-01-01T00:00:00.000Z", NULL]',
-    });
-    // Each page is in order on its own, so the ordering rule cannot see it.
-    const ordering = await run(serve({ ...profileSorter, sortsEachPage: true }));
-    expect(ordering.outcome).toMatchObject({ _tag: "Passed" });
-  });
+  it.effect("fails a server that sorts each page on its own", () =>
+    Effect.gen(function* () {
+      const { outcome } = yield* run(serve({ ...profileSorter, sortsEachPage: true }), api, PAGES);
+      const findings = findingsOf(outcome);
+      expect(findings.map((found) => found.detail)).toEqual([
+        'page 1 of `?sort=due&page[limit]=2` (/tasks?sort=due&page[limit]=2) lists tasks:2 (NULL), which sorts after tasks:3 ("2026-01-01T00:00:00.000Z") on page 2 (/tasks?sort=due&page[offset]=2&page[limit]=2)',
+      ]);
+      expect(findings[0]).toMatchObject({
+        observed:
+          '`due` page by page: ["2026-01-02T00:00:00.000Z", NULL] ["2026-01-01T00:00:00.000Z", NULL]',
+      });
+      // Each page is in order on its own, so the ordering rule cannot see it.
+      const ordering = yield* run(serve({ ...profileSorter, sortsEachPage: true }));
+      expect(ordering.outcome).toMatchObject({ _tag: "Passed" });
+    }),
+  );
 
-  it("decides nothing on a server that ignores the page size", async () => {
-    const { outcome } = await run(serve({ ...profileSorter, unpaged: true }), api, PAGES);
-    expect(outcome).toMatchObject({
-      _tag: "Skipped",
-      reason:
-        "no order across pages could be observed: /tasks: `due`: `?sort=due&page[limit]=2` answered one page, so no page boundary can be observed; `title`: `?sort=title&page[limit]=2` answered one page, so no page boundary can be observed; `rank`: `?sort=rank&page[limit]=2` answered one page, so no page boundary can be observed",
-    });
-  });
+  it.effect("decides nothing on a server that ignores the page size", () =>
+    Effect.gen(function* () {
+      const { outcome } = yield* run(serve({ ...profileSorter, unpaged: true }), api, PAGES);
+      expect(outcome).toMatchObject({
+        _tag: "Skipped",
+        reason:
+          "no order across pages could be observed: /tasks: `due`: `?sort=due&page[limit]=2` answered one page, so no page boundary can be observed; `title`: `?sort=title&page[limit]=2` answered one page, so no page boundary can be observed; `rank`: `?sort=rank&page[limit]=2` answered one page, so no page boundary can be observed",
+      });
+    }),
+  );
 
-  it("skips an api with no endpoint declaring both `sort` and a page size", async () => {
-    const { outcome, sent } = await run(serve(profileSorter), unpagedApi, PAGES);
-    expect(outcome).toMatchObject({
-      _tag: "Skipped",
-      reason:
-        "no list or related endpoint in this api declares `sort` and `page[limit]` or `page[size]`",
-    });
-    expect(sent).toEqual([]);
-  });
+  it.effect("skips an api with no endpoint declaring both `sort` and a page size", () =>
+    Effect.gen(function* () {
+      const { outcome, sent } = yield* run(serve(profileSorter), unpagedApi, PAGES);
+      expect(outcome).toMatchObject({
+        _tag: "Skipped",
+        reason:
+          "no list or related endpoint in this api declares `sort` and `page[limit]` or `page[size]`",
+      });
+      expect(sent).toEqual([]);
+    }),
+  );
 });

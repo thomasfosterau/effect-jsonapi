@@ -19,7 +19,8 @@
  * `included` members, and the types it can name are those the include paths
  * reach — never the parent's own, which the document does not carry.
  */
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -471,14 +472,12 @@ describe("a compound relationship document served over HTTP (#439)", () => {
 
   // The kit's verdicts on the rules `only` names, run against this api.
   const verify = (only: ReadonlyArray<string>) =>
-    Effect.runPromise(
-      // SAFETY: `ArticlesLive` and `Middleware.layer` provide every service the
-      // router needs; the platform services `verify` names are never used.
-      Conformance.verify(Api, { ids: { articles: "1" }, only }).pipe(
-        Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
-        Effect.scoped,
-      ) as Effect.Effect<Conformance.Report>,
-    );
+    // SAFETY: `ArticlesLive` and `Middleware.layer` provide every service the
+    // router needs; the platform services `verify` names are never used.
+    Conformance.verify(Api, { ids: { articles: "1" }, only }).pipe(
+      Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
+      Effect.scoped,
+    ) as Effect.Effect<Conformance.Report>;
 
   it("answers `include=comments.author` with the comments and their authors", async () => {
     const response = await serve("/articles/1/relationships/comments?include=comments.author");
@@ -519,25 +518,27 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     expect(response.status).toBe(400);
   });
 
-  it("passes the compound-document rules, which the kit probes it for", async () => {
-    // The kit's compound probe asks a relationship endpoint declaring `include`
-    // for its own relationship: `?include=comments` (#439).
-    requested.length = 0;
-    const report = await verify([
-      "spec/document/full-linkage",
-      "spec/document/no-duplicate-resources",
-      "spec/document/included-on-include",
-    ]);
-    // `no-duplicate-resources` needs two resource objects in one document to
-    // compare, which `?include=comments` (one comment) does not give it, so
-    // it may skip; it must not fail on the identifier the member shares.
-    expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
-      "spec/document/full-linkage: Passed",
-      expect.stringMatching(/^spec\/document\/no-duplicate-resources: (Passed|Skipped)$/),
-      "spec/document/included-on-include: Passed",
-    ]);
-    expect(requested).toContainEqual(["comments"]);
-  });
+  it.effect("passes the compound-document rules, which the kit probes it for", () =>
+    Effect.gen(function* () {
+      // The kit's compound probe asks a relationship endpoint declaring `include`
+      // for its own relationship: `?include=comments` (#439).
+      requested.length = 0;
+      const report = yield* verify([
+        "spec/document/full-linkage",
+        "spec/document/no-duplicate-resources",
+        "spec/document/included-on-include",
+      ]);
+      // `no-duplicate-resources` needs two resource objects in one document to
+      // compare, which `?include=comments` (one comment) does not give it, so
+      // it may skip; it must not fail on the identifier the member shares.
+      expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
+        "spec/document/full-linkage: Passed",
+        expect.stringMatching(/^spec\/document\/no-duplicate-resources: (Passed|Skipped)$/),
+        "spec/document/included-on-include: Passed",
+      ]);
+      expect(requested).toContainEqual(["comments"]);
+    }),
+  );
 
   it("answers `fields[comments]` by narrowing the included comments alone (#485)", async () => {
     const response = await serve(
@@ -558,21 +559,25 @@ describe("a compound relationship document served over HTTP (#439)", () => {
     });
   });
 
-  it("passes the sparse-fieldset rule on its `included` members, which the kit probes it for", async () => {
-    // #485: the only endpoint declaring `fields`, so the rule can only be
-    // judged here: `?include=comments&fields[comments]=body`.
-    requestedFields.length = 0;
-    const report = await verify([
-      "spec/query/sparse-fieldsets-primary",
-      "spec/query/sparse-fieldsets-included",
-    ]);
-    // Its primary data is identifiers, which carry no attributes to project.
-    expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
-      "spec/query/sparse-fieldsets-primary: Skipped",
-      "spec/query/sparse-fieldsets-included: Passed",
-    ]);
-    expect(requestedFields).toContainEqual({ comments: ["body"] });
-  });
+  it.effect(
+    "passes the sparse-fieldset rule on its `included` members, which the kit probes it for",
+    () =>
+      Effect.gen(function* () {
+        // #485: the only endpoint declaring `fields`, so the rule can only be
+        // judged here: `?include=comments&fields[comments]=body`.
+        requestedFields.length = 0;
+        const report = yield* verify([
+          "spec/query/sparse-fieldsets-primary",
+          "spec/query/sparse-fieldsets-included",
+        ]);
+        // Its primary data is identifiers, which carry no attributes to project.
+        expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
+          "spec/query/sparse-fieldsets-primary: Skipped",
+          "spec/query/sparse-fieldsets-included: Passed",
+        ]);
+        expect(requestedFields).toContainEqual({ comments: ["body"] });
+      }),
+  );
 });
 
 // #483: on a `paginated` relationship's own endpoint, its name and the paths
@@ -800,21 +805,21 @@ describe("a paginated compound relationship document served over HTTP (#483)", (
     });
   });
 
-  it("passes the compound-document rules, which the kit probes it for", async () => {
-    const report = await Effect.runPromise(
+  it.effect("passes the compound-document rules, which the kit probes it for", () =>
+    Effect.gen(function* () {
       // SAFETY: `ThreadsLive` and `Middleware.layer` provide every service the
       // router needs; the platform services `verify` names are never used.
-      Conformance.verify(Api, {
+      const report = yield* Conformance.verify(Api, {
         ids: { threads: "1" },
         only: ["spec/document/full-linkage", "spec/document/included-on-include"],
       }).pipe(
         Effect.provide(Layer.provideMerge(ThreadsLive, Middleware.layer)),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report>,
-    );
-    expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
-      "spec/document/full-linkage: Passed",
-      "spec/document/included-on-include: Passed",
-    ]);
-  });
+      ) as Effect.Effect<Conformance.Report>;
+      expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
+        "spec/document/full-linkage: Passed",
+        "spec/document/included-on-include: Passed",
+      ]);
+    }),
+  );
 });

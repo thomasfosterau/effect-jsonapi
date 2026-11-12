@@ -5,7 +5,8 @@
  * typed by cardinality; a dotted path, hop by hop), and the page cursor
  * readers and href builders.
  */
-import { assert, describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assert, describe, expect } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -54,8 +55,8 @@ const canned = (status: number, body: string, contentType = MEDIA_TYPE): HttpCli
 const call = (
   client: HttpClient.HttpClient,
   decodeErrors = true,
-): Promise<Exit.Exit<unknown, unknown>> =>
-  Effect.runPromiseExit(
+): Effect.Effect<Exit.Exit<unknown, unknown>> =>
+  Effect.exit(
     Effect.gen(function* () {
       const api = yield* Client.make(Api, { baseUrl: "http://localhost", decodeErrors });
       return yield* api.people.get({ params: { id: Person.Id.make("1") }, query: {} });
@@ -70,67 +71,86 @@ const failureOf = <A, E>(exit: Exit.Exit<A, E>): E => {
 };
 
 describe("Client.make({ decodeErrors: true })", () => {
-  it("fails a call the server answered with an error document as a decoded ErrorResponse", async () => {
-    const body = JSON.stringify(ApiError.toDocument(new ApiError.Conflict({ detail: "taken" })));
-    const error = failureOf(await call(canned(409, body)));
-    expect(Client.isErrorResponse(error)).toBe(true);
-    const response = error as Client.ErrorResponse;
-    expect(response.status).toBe(409);
-    expect(response.message).toBe("taken");
-    expect(Option.map(response.document, (d) => d.errors[0]?.code)).toEqual(
-      Option.some("conflict"),
-    );
-  });
-
-  it("falls back to a status message when the body carries no document", async () => {
-    const error = failureOf(await call(canned(502, "<html>bad gateway</html>", "text/html")));
-    expect(Client.isErrorResponse(error)).toBe(true);
-    const response = error as Client.ErrorResponse;
-    expect(response.status).toBe(502);
-    expect(response.message).toBe("Request failed (502)");
-    expect(Option.isNone(response.document)).toBe(true);
-  });
-
-  it("leaves the raw HttpClientError in place without the option, and for a transport fault", async () => {
-    const body = JSON.stringify(ApiError.toDocument(new ApiError.Conflict({})));
-    const raw = failureOf(await call(canned(409, body), false));
-    expect(Client.isErrorResponse(raw)).toBe(false);
-    expect((raw as { readonly _tag?: string })._tag).toBe("HttpClientError");
-    const faulty = HttpClient.make(() => Effect.die(new Error("connection reset")));
-    const exit = await call(faulty);
-    expect(Exit.isFailure(exit)).toBe(true);
-    expect(Option.isNone(await Effect.runPromise(Client.toErrorResponse(new Error("x"))))).toBe(
-      true,
-    );
-  });
-
-  it("applies the caller's transformResponse after the decode, so it sees the ErrorResponse", async () => {
-    const seen: Array<unknown> = [];
-    const body = JSON.stringify(ApiError.toDocument(new ApiError.Conflict({})));
-    await Effect.runPromiseExit(
+  it.effect(
+    "fails a call the server answered with an error document as a decoded ErrorResponse",
+    () =>
       Effect.gen(function* () {
-        const api = yield* Client.make(Api, {
-          baseUrl: "http://localhost",
-          decodeErrors: true,
-          transformResponse: (effect) =>
-            Effect.tapError(effect, (cause) => Effect.sync(() => void seen.push(cause))),
-        });
-        return yield* api.people.get({ params: { id: Person.Id.make("1") }, query: {} });
-      }).pipe(Effect.provideService(HttpClient.HttpClient, canned(409, body))),
-    );
-    expect(seen).toHaveLength(1);
-    expect(Client.isErrorResponse(seen[0])).toBe(true);
-  });
+        const body = JSON.stringify(
+          ApiError.toDocument(new ApiError.Conflict({ detail: "taken" })),
+        );
+        const error = failureOf(yield* call(canned(409, body)));
+        expect(Client.isErrorResponse(error)).toBe(true);
+        const response = error as Client.ErrorResponse;
+        expect(response.status).toBe(409);
+        expect(response.message).toBe("taken");
+        expect(Option.map(response.document, (d) => d.errors[0]?.code)).toEqual(
+          Option.some("conflict"),
+        );
+      }),
+  );
 
-  it("failWithErrorResponse is the same seam, standalone", async () => {
-    const request = HttpClientRequest.get("http://localhost/people/1");
-    const effect = canned(404, JSON.stringify({ errors: [{ status: "404", title: "Not found" }] }))
-      .execute(request)
-      .pipe(Effect.flatMap((response) => HttpClientResponse.filterStatusOk(response)));
-    const error = failureOf(await Effect.runPromiseExit(Client.failWithErrorResponse(effect)));
-    expect(Client.isErrorResponse(error)).toBe(true);
-    expect((error as Client.ErrorResponse).message).toBe("Not found");
-  });
+  it.effect("falls back to a status message when the body carries no document", () =>
+    Effect.gen(function* () {
+      const error = failureOf(yield* call(canned(502, "<html>bad gateway</html>", "text/html")));
+      expect(Client.isErrorResponse(error)).toBe(true);
+      const response = error as Client.ErrorResponse;
+      expect(response.status).toBe(502);
+      expect(response.message).toBe("Request failed (502)");
+      expect(Option.isNone(response.document)).toBe(true);
+    }),
+  );
+
+  it.effect(
+    "leaves the raw HttpClientError in place without the option, and for a transport fault",
+    () =>
+      Effect.gen(function* () {
+        const body = JSON.stringify(ApiError.toDocument(new ApiError.Conflict({})));
+        const raw = failureOf(yield* call(canned(409, body), false));
+        expect(Client.isErrorResponse(raw)).toBe(false);
+        expect((raw as { readonly _tag?: string })._tag).toBe("HttpClientError");
+        const faulty = HttpClient.make(() => Effect.die(new Error("connection reset")));
+        const exit = yield* call(faulty);
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(Option.isNone(yield* Client.toErrorResponse(new Error("x")))).toBe(true);
+      }),
+  );
+
+  it.effect(
+    "applies the caller's transformResponse after the decode, so it sees the ErrorResponse",
+    () =>
+      Effect.gen(function* () {
+        const seen: Array<unknown> = [];
+        const body = JSON.stringify(ApiError.toDocument(new ApiError.Conflict({})));
+        yield* Effect.exit(
+          Effect.gen(function* () {
+            const api = yield* Client.make(Api, {
+              baseUrl: "http://localhost",
+              decodeErrors: true,
+              transformResponse: (effect) =>
+                Effect.tapError(effect, (cause) => Effect.sync(() => void seen.push(cause))),
+            });
+            return yield* api.people.get({ params: { id: Person.Id.make("1") }, query: {} });
+          }).pipe(Effect.provideService(HttpClient.HttpClient, canned(409, body))),
+        );
+        expect(seen).toHaveLength(1);
+        expect(Client.isErrorResponse(seen[0])).toBe(true);
+      }),
+  );
+
+  it.effect("failWithErrorResponse is the same seam, standalone", () =>
+    Effect.gen(function* () {
+      const request = HttpClientRequest.get("http://localhost/people/1");
+      const effect = canned(
+        404,
+        JSON.stringify({ errors: [{ status: "404", title: "Not found" }] }),
+      )
+        .execute(request)
+        .pipe(Effect.flatMap((response) => HttpClientResponse.filterStatusOk(response)));
+      const error = failureOf(yield* Effect.exit(Client.failWithErrorResponse(effect)));
+      expect(Client.isErrorResponse(error)).toBe(true);
+      expect((error as Client.ErrorResponse).message).toBe("Not found");
+    }),
+  );
 });
 
 // ── document readers and inputs ──────────────────────────────────────
@@ -159,17 +179,21 @@ describe("decodeInput", () => {
   );
   const decode = Client.decodeInput(ListPeople);
 
-  it("strips undefined members and applies the schema's defaults", async () => {
-    expect(await Effect.runPromise(decode({ limit: 5, q: undefined }))).toEqual({
-      offset: 0,
-      limit: 5,
-    });
-    expect(await Effect.runPromise(decode({}))).toEqual({ offset: 0, limit: 50 });
-  });
+  it.effect("strips undefined members and applies the schema's defaults", () =>
+    Effect.gen(function* () {
+      expect(yield* decode({ limit: 5, q: undefined })).toEqual({
+        offset: 0,
+        limit: 5,
+      });
+      expect(yield* decode({})).toEqual({ offset: 0, limit: 50 });
+    }),
+  );
 
-  it("still enforces bounds", async () => {
-    expect(Exit.isFailure(await Effect.runPromiseExit(decode({ limit: 0 })))).toBe(true);
-  });
+  it.effect("still enforces bounds", () =>
+    Effect.gen(function* () {
+      expect(Exit.isFailure(yield* Effect.exit(decode({ limit: 0 })))).toBe(true);
+    }),
+  );
 
   it("stripUndefined leaves a present key alone", () => {
     expect(Client.stripUndefined({ a: 1, b: undefined, c: null })).toEqual({ a: 1, c: null });

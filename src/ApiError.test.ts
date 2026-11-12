@@ -1,4 +1,5 @@
-import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -24,20 +25,20 @@ class RateLimited extends ApiError.make<RateLimited>()("RateLimited", {
 }) {}
 
 describe("ApiError.make", () => {
-  it("creates a yieldable tagged error class", async () => {
-    const error = new ArticleNotFound({ id: "42" });
-    expect(error._tag).toBe("ArticleNotFound");
-    expect(error.id).toBe("42");
-    expect(error).toBeInstanceOf(Error);
+  it.effect("creates a yieldable tagged error class", () =>
+    Effect.gen(function* () {
+      const error = new ArticleNotFound({ id: "42" });
+      expect(error._tag).toBe("ArticleNotFound");
+      expect(error.id).toBe("42");
+      expect(error).toBeInstanceOf(Error);
 
-    // usable in Effect error channels with catchTag
-    const recovered = await Effect.runPromise(
-      Effect.fail(new ArticleNotFound({ id: "42" })).pipe(
+      // usable in Effect error channels with catchTag
+      const recovered = yield* Effect.fail(new ArticleNotFound({ id: "42" })).pipe(
         Effect.catchTag("ArticleNotFound", (e) => Effect.succeed(`caught ${e.id}`)),
-      ),
-    );
-    expect(recovered).toBe("caught 42");
-  });
+      );
+      expect(recovered).toBe("caught 42");
+    }),
+  );
 
   it("exposes status / code / title statics", () => {
     expect(ArticleNotFound.status).toBe(404);

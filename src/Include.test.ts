@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Order from "effect/Order";
@@ -460,39 +461,47 @@ describe("feeding the resolver", () => {
   // The deepest path the surface declares — the depth cap that matches it.
   const maxDepth = Math.max(...surface.paths.map((path) => path.split(".").length));
 
-  it("supplies the whitelist `Query.validateIncludePaths` checks against", () => {
-    const validated = Query.validateIncludePaths(["author", "comments.author"], {
-      includable: surface.paths,
-      maxDepth,
-    }).pipe(Effect.runSync);
-    expect(validated.map((v) => v.path)).toEqual(["author", "comments.author"]);
-  });
+  it.effect("supplies the whitelist `Query.validateIncludePaths` checks against", () =>
+    Effect.gen(function* () {
+      const validated = yield* Query.validateIncludePaths(["author", "comments.author"], {
+        includable: surface.paths,
+        maxDepth,
+      });
+      expect(validated.map((v) => v.path)).toEqual(["author", "comments.author"]);
+    }),
+  );
 
-  it("rejects a deep path under a legal head through that same whitelist", () => {
-    const rejected = Query.validateIncludePaths(["comments.editor"], {
-      includable: surface.paths,
-      maxDepth,
-    }).pipe(Effect.flip, Effect.runSync);
-    expect(rejected._tag).toBe("UnsupportedIncludePath");
-  });
+  it.effect("rejects a deep path under a legal head through that same whitelist", () =>
+    Effect.gen(function* () {
+      const rejected = yield* Query.validateIncludePaths(["comments.editor"], {
+        includable: surface.paths,
+        maxDepth,
+      }).pipe(Effect.flip);
+      expect(rejected._tag).toBe("UnsupportedIncludePath");
+    }),
+  );
 
-  it("resolves to exactly the resources its own `included` union admits", () => {
-    const resolved = Handlers.resolveIncluded(article, ["author", "comments.author"], targets).pipe(
-      Effect.runSync,
-    );
-    expect(resolved?.map((r) => `${r.type}:${r.id}`)).toEqual([
-      "people:9",
-      "comments:5",
-      "people:7",
-    ]);
-    // Every type the walk produced is a member of the union derived from the
-    // same declaration — which is the whole point: nothing the resolver hoists
-    // can be stripped on encode for want of an arm.
-    const admitted = surface.included.members.map((member) => member.type);
-    expect(Arr.sort([...new Set(resolved?.map((r) => r.type))], Order.String)).toEqual(
-      Arr.sort([...admitted], Order.String),
-    );
-    // …and the union is not simply wide enough to admit anything.
-    expect(admitted).not.toContain("tags");
-  });
+  it.effect("resolves to exactly the resources its own `included` union admits", () =>
+    Effect.gen(function* () {
+      const resolved = yield* Handlers.resolveIncluded(
+        article,
+        ["author", "comments.author"],
+        targets,
+      );
+      expect(resolved?.map((r) => `${r.type}:${r.id}`)).toEqual([
+        "people:9",
+        "comments:5",
+        "people:7",
+      ]);
+      // Every type the walk produced is a member of the union derived from the
+      // same declaration — which is the whole point: nothing the resolver hoists
+      // can be stripped on encode for want of an arm.
+      const admitted = surface.included.members.map((member) => member.type);
+      expect(Arr.sort([...new Set(resolved?.map((r) => r.type))], Order.String)).toEqual(
+        Arr.sort([...admitted], Order.String),
+      );
+      // …and the union is not simply wide enough to admit anything.
+      expect(admitted).not.toContain("tags");
+    }),
+  );
 });

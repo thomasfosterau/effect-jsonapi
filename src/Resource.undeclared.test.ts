@@ -12,7 +12,8 @@
  * reports at most `maxUndeclaredMemberErrors` (default 12) of them at their own
  * pointers, and one summary error at the member for the rest (#308).
  */
-import { describe, expect, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Rec from "effect/Record";
@@ -646,28 +647,28 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     expect(issuesOf(Schema.encodeUnknownResult(codec)(value))).toEqual(cappedAt(path));
   });
 
-  it("a Client fails the call with the capped issues before sending anything", async () => {
-    const sent: Array<HttpClientRequest.HttpClientRequest> = [];
-    const recording = HttpClient.make((request) => {
-      sent.push(request);
-      return Effect.die("no request should be sent");
-    });
-    const error = await Effect.runPromise(
-      Effect.gen(function* () {
+  it.effect("a Client fails the call with the capped issues before sending anything", () =>
+    Effect.gen(function* () {
+      const sent: Array<HttpClientRequest.HttpClientRequest> = [];
+      const recording = HttpClient.make((request) => {
+        sent.push(request);
+        return Effect.die("no request should be sent");
+      });
+      const error = yield* Effect.gen(function* () {
         const client = yield* Client.make(Api, { baseUrl: "http://localhost" });
         return yield* client.capped.create({
           payload: { data: { type: "capped", attributes: { body: "b", ...extras(5) } } },
         });
-      }).pipe(Effect.provideService(HttpClient.HttpClient, recording), Effect.flip),
-    );
-    expect(Schema.isSchemaError(error)).toBe(true);
-    expect(
-      Schema.isSchemaError(error)
-        ? SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues
-        : [],
-    ).toEqual(cappedAt(["data", "attributes"]));
-    expect(sent).toEqual([]);
-  });
+      }).pipe(Effect.provideService(HttpClient.HttpClient, recording), Effect.flip);
+      expect(Schema.isSchemaError(error)).toBe(true);
+      expect(
+        Schema.isSchemaError(error)
+          ? SchemaIssue.makeFormatterStandardSchemaV1()(error.issue).issues
+          : [],
+      ).toEqual(cappedAt(["data", "attributes"]));
+      expect(sent).toEqual([]);
+    }),
+  );
 
   it("is 12 by default, and is read back from the definition", () => {
     expect(Note.maxUndeclaredMemberErrors).toBe(12);
