@@ -117,7 +117,6 @@ describe("standard errors", () => {
           code: "bad_request",
           title: "Bad Request",
           detail: "missing data member",
-          meta: { detail: "missing data member" },
         },
       ],
     });
@@ -452,7 +451,6 @@ describe("ApiError.toDocument", () => {
           code: "bad_request",
           title: "Bad Request",
           detail: "bad query",
-          meta: { detail: "bad query" },
         },
       ],
     });

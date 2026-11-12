@@ -1642,7 +1642,6 @@ describe("which property a renamed wire parameter decodes into (#305, #306 follo
       code: "bad_request",
       title: "Bad Request",
       detail: "Request query failed validation",
-      meta: { detail: "Request query failed validation" },
     };
     // A rejected `include` path, with the vocabulary it renders as `meta`.
     const includable = (parameter: string) => ({
