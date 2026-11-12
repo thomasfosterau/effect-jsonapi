@@ -100,3 +100,39 @@ jobs:
 
       - name: Audit
         run: pnpm audit --audit-level high
+
+  # The peer floor (#586): a typed `Client.make` consumer compiled against the
+  # packed package and the lowest `effect` the peer range admits (exactly
+  # 4.1.0, test/floor/package.json). A separate job so the required check
+  # above keeps its name and a floor failure is reported on its own line.
+  floor:
+    name: Peer floor (effect 4.1.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      NODE_OPTIONS: --max-old-space-size=2048
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # As the `ci` job above: Vite+ at the catalog pin, Node.js, pnpm, the
+      # dependency cache and a frozen, script-less install; then the
+      # repository's own `prepare` for the patched binaries.
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          node-version: "*"
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
+
+      - name: Patch the toolchain (repository `prepare` script)
+        run: pnpm run prepare
+
+      - name: Type-check the consumer at the effect floor
+        run: pnpm exec vp run typecheck:floor

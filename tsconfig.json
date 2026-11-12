@@ -15,5 +15,5 @@
     }
   },
   "include": ["src", "test", "vite.config.ts"],
-  "exclude": ["node_modules", "dist", "test/emitted"]
+  "exclude": ["node_modules", "dist", "test/emitted", "test/floor"]
 }
