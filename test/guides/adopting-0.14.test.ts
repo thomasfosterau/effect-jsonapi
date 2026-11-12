@@ -12,7 +12,7 @@
  * not hold.
  */
 import { it } from "@effect/vitest";
-import { describe, expect, onTestFinished } from "vite-plus/test";
+import { assert, describe, expect, onTestFinished } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -312,7 +312,8 @@ describe("5. Middleware.negotiate replaces the hand-rolled Accept / Content-Type
   it("returns the spec error a framework hook renders", () => {
     const error = Middleware.negotiate({ contentType: "application/vnd.api+json;charset=utf-8" });
     expect(error).toBeInstanceOf(ApiError.UnsupportedMediaType);
-    expect(ApiError.toDocument(error!).errors[0]?.status).toBe("415");
+    assert(error !== undefined);
+    expect(ApiError.toDocument(error).errors[0]?.status).toBe("415");
     expect(Middleware.negotiate({ accept: "application/vnd.api+json;foo=bar" })).toBeInstanceOf(
       ApiError.NotAcceptable,
     );

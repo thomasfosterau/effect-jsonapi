@@ -113,9 +113,9 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
   HttpClient.make((request, url) =>
     Effect.sync(() => {
       const headers = new Headers();
-      for (const [name, value] of Object.entries(request.headers)) {
+      Arr.forEach(Object.entries(request.headers), ([name, value]) => {
         if (value !== undefined) headers.set(name, value);
-      }
+      });
       const canned = serve({
         method: request.method,
         path: `${url.pathname}${url.search}`,
@@ -352,13 +352,10 @@ const conformantServe = (request: {
       .split(";")
       .slice(1)
       .map((part) => part.trim().toLowerCase());
-    const out: Array<string> = [];
-    for (const part of parts) {
-      const name = part.split("=")[0].trim();
-      if (name === "q") break;
-      out.push(name);
-    }
-    return out;
+    return Arr.takeWhile(
+      parts.map((part) => part.split("=")[0].trim()),
+      (name) => name !== "q",
+    );
   };
   const weightOf = (entry: string): number => {
     const match = /;\s*q=([0-9.]+)/.exec(entry);
@@ -399,7 +396,9 @@ const conformantServe = (request: {
   // The comma grammar and the repeated-key spelling denote the same set, so the
   // baseline unions repeated keys before reading any of them.
   const params = new URLSearchParams();
-  for (const key of new Set(raw.keys())) params.set(key, raw.getAll(key).join(","));
+  Arr.forEach(new Set(raw.keys()), (key) => {
+    params.set(key, raw.getAll(key).join(","));
+  });
   const refused = Arr.findFirst([...params.keys()], refusesParameter);
   if (Option.isSome(refused)) return badRequest({ source: { parameter: refused.value } });
 
@@ -466,12 +465,12 @@ describe("Conformance: the catalogue", () => {
   it("every rule has a unique id, a citation and a normative sentence", () => {
     const ids = Conformance.rules.map((rule) => rule.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const rule of Conformance.rules) {
+    Arr.forEach(Conformance.rules, (rule) => {
       expect(rule.requirement.length).toBeGreaterThan(20);
       expect(rule.reference).toMatch(/^https:\/\//);
       expect(rule.section).not.toBe("");
       expect(rule.id.startsWith(`${rule.tier}/`)).toBe(true);
-    }
+    });
   });
 
   it("separates spec rules from profile rules", () => {
@@ -480,15 +479,17 @@ describe("Conformance: the catalogue", () => {
     expect(spec.length).toBeGreaterThan(0);
     expect(profile.length).toBeGreaterThan(0);
     // The profile tier never cites the specification as its authority.
-    for (const rule of profile) expect(rule.reference).not.toContain("jsonapi.org/format");
+    Arr.forEach(profile, (rule) => {
+      expect(rule.reference).not.toContain("jsonapi.org/format");
+    });
   });
 
   it("declares its coverage gaps, each explained and some tracked", () => {
     expect(Conformance.gaps.length).toBeGreaterThan(0);
-    for (const gap of Conformance.gaps) {
+    Arr.forEach(Conformance.gaps, (gap) => {
       expect(gap.area).not.toBe("");
       expect(gap.reason.length).toBeGreaterThan(40);
-    }
+    });
     // The filter semantics gap is the one coupled to the profile's completion.
     expect(Conformance.gaps.some((gap) => gap.tracking.includes("#116"))).toBe(true);
   });
@@ -1197,10 +1198,10 @@ const broken = (
       assert(P.isTagged(outcome, "Failed"));
       expect(outcome.findings.length).toBeGreaterThan(0);
       // A finding always says what it wanted and what it got.
-      for (const found of outcome.findings) {
+      Arr.forEach(outcome.findings, (found) => {
         expect(found.expected).not.toBe("");
         expect(found.observed).not.toBe("");
-      }
+      });
     }),
   );
 
@@ -1665,10 +1666,15 @@ describe("Conformance: detects a deliberately broken server", () => {
     "profile/query/repeated-key-spelling",
     (canned, request) => {
       const params = new URLSearchParams(request.path.split("?")[1] ?? "");
-      for (const key of new Set(params.keys())) {
-        if (params.getAll(key).length > 1) {
-          return { status: 400, body: { errors: [{ status: "400", source: { parameter: key } }] } };
-        }
+      const repeated = Arr.findFirst(
+        new Set(params.keys()),
+        (key) => params.getAll(key).length > 1,
+      );
+      if (Option.isSome(repeated)) {
+        return {
+          status: 400,
+          body: { errors: [{ status: "400", source: { parameter: repeated.value } }] },
+        };
       }
       return canned;
     },
@@ -2977,6 +2983,73 @@ describe("Conformance: the filter grammar profile", () => {
 
   const row = { type: "products", id: "1", attributes: { name: "Widget", priceCents: 1200 } };
 
+  const declared = HashMap.fromIterable<string, ReadonlyArray<string>>([
+    ["name", ["eq", "ne"]],
+    ["priceCents", ["eq", "gt", "lt"]],
+  ]);
+
+  type Conditions = Map<string, { path?: string; operator?: string; value?: string }>;
+
+  /** The parameter a shorthand `filter[field]` / `filter[field][op]` key is refused at, if any. */
+  const shorthandRefusal = (
+    key: string,
+    segments: ReadonlyArray<string>,
+    value: string,
+    conditions: Conditions,
+  ): Option.Option<string> => {
+    // Anything deeper than `filter[field][op]` is a 400.
+    if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments)) return Option.some(key);
+    const field = segments[0];
+    const operators = Option.getOrUndefined(HashMap.get(declared, field));
+    const operator = segments.length === 2 ? segments[1] : "eq";
+    if (operators === undefined || !operators.includes(operator)) return Option.some(key);
+    conditions.set(key, { path: field, operator, value });
+    return Option.none();
+  };
+
+  /** The parameter a `filter[…]` key is refused at, if any; group members are collected. */
+  const keyRefusal = (
+    raw: URLSearchParams,
+    conditions: Conditions,
+    key: string,
+  ): Option.Option<string> => {
+    if (!key.startsWith("filter")) return Option.none();
+    // §2: a repeated `filter[…]` key is a 400.
+    if (raw.getAll(key).length > 1) return Option.some(key);
+    const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
+    const value = raw.get(key);
+    assert.exists(value);
+    // Group form: filter[id][condition][member].
+    if (segments.length === 3 && segments[1] === "condition") {
+      const member = segments[2];
+      if (member !== "path" && member !== "operator" && member !== "value") return Option.some(key);
+      const entry = conditions.get(segments[0]) ?? {};
+      entry[member] = value;
+      conditions.set(segments[0], entry);
+      return Option.none();
+    }
+    return shorthandRefusal(key, segments, value, conditions);
+  };
+
+  /** The parameter an incomplete or undeclared group condition is refused at, if any. */
+  const conditionRefusal = (
+    id: string,
+    condition: { path?: string; operator?: string; value?: string },
+  ): Option.Option<string> => {
+    const parameter = `filter[${id}][condition][operator]`;
+    if (
+      condition.path === undefined ||
+      condition.operator === undefined ||
+      condition.value === undefined
+    ) {
+      return Option.some(parameter);
+    }
+    const operators = Option.getOrUndefined(HashMap.get(declared, condition.path));
+    return operators === undefined || !operators.includes(condition.operator)
+      ? Option.some(parameter)
+      : Option.none();
+  };
+
   /** A server that implements the grammar's §2/§4/§5/§7 surface correctly. */
   const grammarServe = (request: { readonly path: string }): Canned => {
     const [, search = ""] = request.path.split("?");
@@ -2988,52 +3061,13 @@ describe("Conformance: the filter grammar profile", () => {
       body: { errors: [{ status: "400", title: "Bad Request", source: { parameter } }] },
     });
 
-    const declared = HashMap.fromIterable<string, ReadonlyArray<string>>([
-      ["name", ["eq", "ne"]],
-      ["priceCents", ["eq", "gt", "lt"]],
-    ]);
-    const conditions = new Map<string, { path?: string; operator?: string; value?: string }>();
-
-    for (const key of new Set(raw.keys())) {
-      if (!key.startsWith("filter")) continue;
-      // §2: a repeated `filter[…]` key is a 400.
-      if (raw.getAll(key).length > 1) return reject(key);
-      const segments = [...key.matchAll(/\[([^\]]*)\]/g)].map((match) => match[1]);
-      const value = raw.get(key)!;
-
-      // Group form: filter[id][condition][member].
-      if (segments.length === 3 && segments[1] === "condition") {
-        const entry = conditions.get(segments[0]) ?? {};
-        if (segments[2] === "path" || segments[2] === "operator" || segments[2] === "value") {
-          entry[segments[2]] = value;
-          conditions.set(segments[0], entry);
-          continue;
-        }
-        return reject(key);
-      }
-      // Shorthand: filter[field] or filter[field][op]. Anything deeper is a 400.
-      if (segments.length > 2 || Arr.isReadonlyArrayEmpty(segments)) return reject(key);
-      const field = segments[0];
-      const operators = Option.getOrUndefined(HashMap.get(declared, field));
-      if (operators === undefined) return reject(key);
-      const operator = segments.length === 2 ? segments[1] : "eq";
-      if (!operators.includes(operator)) return reject(key);
-      conditions.set(key, { path: field, operator, value });
-    }
-
-    for (const [id, condition] of conditions) {
-      if (
-        condition.path === undefined ||
-        condition.operator === undefined ||
-        condition.value === undefined
-      ) {
-        return reject(`filter[${id}][condition][operator]`);
-      }
-      const operators = Option.getOrUndefined(HashMap.get(declared, condition.path));
-      if (operators === undefined || !operators.includes(condition.operator)) {
-        return reject(`filter[${id}][condition][operator]`);
-      }
-    }
+    const conditions: Conditions = new Map();
+    const refused = Arr.findFirst(new Set(raw.keys()), (key) => keyRefusal(raw, conditions, key));
+    if (Option.isSome(refused)) return reject(refused.value);
+    const incomplete = Arr.findFirst(conditions, ([id, condition]) =>
+      conditionRefusal(id, condition),
+    );
+    if (Option.isSome(incomplete)) return reject(incomplete.value);
 
     return { contentType, body: { jsonapi: { version: "1.1" }, data: [row] } };
   };
@@ -3059,9 +3093,9 @@ describe("Conformance: the filter grammar profile", () => {
       const report = yield* verifyGrammar(grammarServe);
       expect(failed(report)).toEqual([]);
       // And genuinely ran, rather than skipping its way to a clean report.
-      for (const id of ["advertises-profile-uri", "rejections", "spelling-equivalence"]) {
+      Arr.forEach(["advertises-profile-uri", "rejections", "spelling-equivalence"], (id) => {
         expect(outcomeFor(report, `profile/filter/${id}`)._tag).toBe("Passed");
-      }
+      });
     }),
   );
 
@@ -3073,10 +3107,10 @@ describe("Conformance: the filter grammar profile", () => {
         ids: { articles: "1" },
         only: ["profile/filter"],
       });
-      for (const outcome of report.outcomes) {
+      Arr.forEach(report.outcomes, (outcome) => {
         assert(P.isTagged(outcome, "Skipped"));
         expect(outcome.reason).toContain("filter: true");
-      }
+      });
     }),
   );
 
@@ -3925,13 +3959,13 @@ describe("Conformance: the filter evaluation oracle", () => {
         const query = queryOf(request);
         const seen = new Set<string>();
         const dropped = new Set<string>();
-        for (const [key, value] of query) {
+        Arr.forEach(query, ([key, value]) => {
           const [, id, kind, member] =
             /^filter\[([^\]]+)\]\[(group|condition)\]\[([^\]]+)\]$/.exec(key) ?? [];
-          if (id === undefined) continue;
+          if (id === undefined) return;
           if (kind === "group") seen.add(id);
           if (member === "memberOf" && !seen.has(value)) dropped.add(id);
-        }
+        });
         const kept = Arr.filter(
           [...query],
           ([key]) => !Arr.some([...dropped], (id) => key.startsWith(`filter[${id}]`)),
@@ -11529,10 +11563,11 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       Effect.gen(function* () {
         const { report, seen } = yield* run({}, "none");
         expect(tags(report, CLIENT_ID_RULES)).toEqual(["Skipped", "Skipped", "Skipped"]);
-        for (const id of CLIENT_ID_RULES)
+        Arr.forEach(CLIENT_ID_RULES, (id) => {
           expect(outcomeFor(report, id)).toMatchObject({
             reason: expect.stringContaining('pass writes["posts"].clientId'),
           });
+        });
         // The relationship rules still ran — 13 creates — and no create carried an id.
         expect(seen.filter((line) => line === "POST /posts").length).toBe(13);
       }),
@@ -11548,10 +11583,10 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
       expect(failed(report)).toEqual([id]);
       const findings = findingsOf(report, id);
       expect(findings).not.toEqual([]);
-      for (const found of findings) {
+      Arr.forEach(findings, (found) => {
         expect(found.probe?.method).toBe(method);
         expect(found.detail).toMatch(/reads back/);
-      }
+      });
       expect(posts.size).toBe(0);
     }),
   );

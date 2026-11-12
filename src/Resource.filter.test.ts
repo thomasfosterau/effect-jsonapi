@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Rec from "effect/Record";
@@ -471,20 +472,23 @@ describe("Resource.filterable / Resource.sortable", () => {
     });
 
     it("round-trips: encode ∘ decode is identity on canonical strings, decode ∘ encode on values", () => {
-      for (const [key, input] of [
-        ["title", "Hello"],
-        ["count", "42"],
-        ["count", "-1.5"],
-        ["flag", "true"],
-        ["flag", "false"],
-        ["rating", "4.5"],
-        ["publishedAt", "2026-01-01T00:00:00.000Z"],
-        ["status", "published"],
-        ["priority", "3"],
-        ["price", "1250"],
-      ] as const) {
-        expect(encode(key)(decode(key)(input) as never)).toBe(input);
-      }
+      Arr.forEach(
+        [
+          ["title", "Hello"],
+          ["count", "42"],
+          ["count", "-1.5"],
+          ["flag", "true"],
+          ["flag", "false"],
+          ["rating", "4.5"],
+          ["publishedAt", "2026-01-01T00:00:00.000Z"],
+          ["status", "published"],
+          ["priority", "3"],
+          ["price", "1250"],
+        ] as const,
+        ([key, input]) => {
+          expect(encode(key)(decode(key)(input) as never)).toBe(input);
+        },
+      );
       expect(decode("count")(encode("count")(1e21))).toBe(1e21);
       expect(decode("count")(encode("count")(0.1))).toBe(0.1);
       expect(decode("flag")(encode("flag")(false))).toBe(false);
@@ -713,12 +717,12 @@ describe("Resource.filterable / Resource.sortable", () => {
       const Sugar = Resource("sugar", {
         attributes: { n: attribute(Schema.Number, { filter: ["eq"], sort: true }) },
       });
-      for (const R of [Piped, Wrapped, Sugar]) {
+      Arr.forEach([Piped, Wrapped, Sugar], (R) => {
         expect(Object.keys(filterable(R))).toEqual(["n"]);
         expect(filterable(R).n.operators).toEqual(["eq"]);
         expect(Schema.decodeUnknownSync(filterable(R).n.literal)("2")).toBe(2);
         expect(sortable(R)).toEqual(["n"]);
-      }
+      });
       // the same annotations, byte for byte
       const expected = { filter: { operators: ["eq"], literal: undefined }, sort: true };
       expect(annotationsOf(Piped.fields.attributes.fields.n)).toEqual(expected);

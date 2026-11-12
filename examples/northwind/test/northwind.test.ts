@@ -151,8 +151,9 @@ describe("northwind example: fetching", () => {
     // without discriminating on `type`
     const category = document.included?.[0];
     expect(category?.attributes.name).toBe("Beverages");
-    expectTypeOf(category!.attributes.name).toEqualTypeOf<string>();
-    expectTypeOf(category!.type).toEqualTypeOf<"categories">();
+    assert(category !== undefined);
+    expectTypeOf(category.attributes.name).toEqualTypeOf<string>();
+    expectTypeOf(category.type).toEqualTypeOf<"categories">();
   });
 
   it("fetches an employee with its territories included", async () => {
@@ -361,9 +362,9 @@ describe("northwind example: listing & filtering", () => {
 
     // only order 10249 has no shipped date
     expect(document.data.map((order) => order.id)).toContain(order10249.id);
-    for (const order of document.data) {
+    Arr.forEach(document.data, (order) => {
       expect(order.attributes.shippedDate).toBeUndefined();
-    }
+    });
   });
 });
 
@@ -823,7 +824,7 @@ describe("northwind example: heterogeneous search", () => {
 
     // The endpoint declares `fields`, so a client reads each attribute as
     // optional (#322).
-    for (const result of document.data) {
+    Arr.forEach(document.data, (result) => {
       if (result.type === "products") {
         expectTypeOf(result.attributes.unitPrice).toEqualTypeOf<number | undefined>();
       } else if (result.type === "customers") {
@@ -831,7 +832,7 @@ describe("northwind example: heterogeneous search", () => {
       } else {
         expectTypeOf(result.attributes.country).toEqualTypeOf<string | undefined>();
       }
-    }
+    });
   });
 
   it("supports include across the searched resources' graphs", async () => {

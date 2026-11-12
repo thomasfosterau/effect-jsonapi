@@ -40,12 +40,14 @@
  * rung comparison), {@link ownedCapabilities} (the owner, or a moderator
  * acting for them) and {@link noCapabilities} (a family with no write
  * surface). No hook means no stamp: a family that publishes the pair passes
- * one.
+ * one. Members of `included` are stamped too; pass
+ * `capabilitiesOnIncluded: false` to stamp the primary data only.
  *
  * @since 0.16.0
  */
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
+import * as HashSet from "effect/HashSet";
 import * as P from "effect/Predicate";
 import type * as ApiError from "./ApiError.js";
 import type * as Document from "./Document.js";
@@ -418,6 +420,17 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
    * document mixing families stamps each member honestly. Omit for no stamp.
    */
   readonly capabilities?: CapabilitiesHook<V> | undefined;
+  /**
+   * Whether `included` members are stamped with the {@link capabilities}
+   * rule too. Defaults to `true` — every emitted resource, primary and
+   * included alike. `false` stamps the primary data only; `included` members
+   * carry no capability `meta`. A relationship document's primary data is
+   * linkage, which carries no `meta`, so there `false` stamps nothing.
+   *
+   * @since 0.22.0
+   * @category models
+   */
+  readonly capabilitiesOnIncluded?: boolean;
 }
 
 /**
@@ -759,10 +772,21 @@ export const toWireSafeResource = <R extends ResourceLike>(resource: R): R =>
 // ---------------------------------------------------------------------------
 
 /** The resource-level transform every emitted resource goes through. */
-const onResourceFor = <V>(options: Options<V, any>) =>
-  Handlers.compose(
+const onResourceFor = <V>(
+  options: Pick<Options<V, any>, "capabilities" | "capabilitiesOnIncluded" | "viewer" | "fields">,
+  primary: ReadonlyArray<ResourceLike>,
+) => {
+  // With `capabilitiesOnIncluded: false` only the primary data is stamped. The
+  // one transform shapes both slots, so primary membership is by `(type, id)`;
+  // a resource that is both is shaped once, for the primary slot (#567).
+  const primaryKeys =
+    options.capabilitiesOnIncluded === false
+      ? HashSet.fromIterable(primary.map((r) => `${r.type}\0${r.id}`))
+      : undefined;
+  return Handlers.compose(
     Handlers.withMeta((resource) =>
-      options.capabilities === undefined
+      options.capabilities === undefined ||
+      (primaryKeys !== undefined && !HashSet.has(primaryKeys, `${resource.type}\0${resource.id}`))
         ? undefined
         : // The viewer is handed to the hook exactly as it was given: an
           // omitted option is `undefined`, which is then what `V` is.
@@ -770,6 +794,7 @@ const onResourceFor = <V>(options: Options<V, any>) =>
     ),
     Handlers.project(options.fields),
   );
+};
 
 // `ResourceLike`'s `relationships` values widen to `unknown`, which the
 // builders' stricter `ResourceValue` rejects; the builders only read
@@ -881,7 +906,7 @@ export const resource = <
           "included",
           included === undefined ? undefined : included.map((r) => asValue(stringifyLinks(r))),
         ),
-        onResource: onResourceFor(options),
+        onResource: onResourceFor(options, [wired]),
       });
       return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<
         R,
@@ -935,7 +960,7 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets, X ext
       const built = Handlers.collection(wired.map(asValue), {
         ...top,
         included: included.map((r) => asValue(stringifyLinks(r))),
-        onResource: onResourceFor(options),
+        onResource: onResourceFor(options, wired),
       });
       // SAFETY: `Handlers.collection` types its value over the builders' loose
       // `ResourceValue`; the value is `D` by construction — the wired, stamped
@@ -1169,6 +1194,8 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
   readonly key: string;
   readonly viewer?: V | undefined;
   readonly capabilities?: CapabilitiesHook<V> | undefined;
+  /** As {@link Options.capabilitiesOnIncluded}: `false` leaves `included` unstamped. */
+  readonly capabilitiesOnIncluded?: boolean;
   /**
    * Resources to carry in `included`, typically the related resources the
    * linkage names. Full linkage applies, and is checked: each must be
@@ -1256,7 +1283,7 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
   const included = Handlers.buildIncluded(
     relationshipRefs(input.parent, input.key),
     (input.included ?? []).map((r) => asValue(stringifyLinks(r))),
-    { onResource: onResourceFor(input) },
+    { onResource: onResourceFor(input, []) },
   );
   const rel = readRelationship(input.parent, input.key);
   const related = rel?.links?.related === undefined ? undefined : toLinkString(rel.links.related);

@@ -1,4 +1,5 @@
 import { it } from "@effect/vitest";
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
@@ -184,11 +185,13 @@ const samplePerson = Person.make({
   attributes: { firstName: "John", lastName: "Doe" },
 });
 
+const sampleCommentAuthor = { type: "people", id: Person.Id.make("9") } as const;
+
 const sampleComment = Comment.make({
   id: Comment.Id.make("5"),
   attributes: { body: "Nice" },
   relationships: {
-    author: { data: { type: "people", id: Person.Id.make("9") } },
+    author: { data: sampleCommentAuthor },
   },
 });
 
@@ -332,17 +335,14 @@ describe("endpoint conventions", () => {
   });
 
   it("attaches the JSON:API protocol middlewares to every endpoint", () => {
-    for (const endpoint of [
-      fetchArticle,
-      listArticles,
-      createArticle,
-      updateArticle,
-      deleteArticle,
-    ]) {
-      const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
-      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
-      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
-    }
+    Arr.forEach(
+      [fetchArticle, listArticles, createArticle, updateArticle, deleteArticle],
+      (endpoint) => {
+        const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
+        expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
+        expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
+      },
+    );
   });
 
   it("groups take the resource type as their identifier", () => {
@@ -494,18 +494,21 @@ describe("relationship endpoint conventions", () => {
   });
 
   it("attaches the JSON:API protocol middlewares", () => {
-    for (const endpoint of [
-      relatedAuthor,
-      relatedComments,
-      getCommentsRelationship,
-      updateAuthorRelationship,
-      addCommentsRelationship,
-      removeCommentsRelationship,
-    ]) {
-      const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
-      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
-      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
-    }
+    Arr.forEach(
+      [
+        relatedAuthor,
+        relatedComments,
+        getCommentsRelationship,
+        updateAuthorRelationship,
+        addCommentsRelationship,
+        removeCommentsRelationship,
+      ],
+      (endpoint) => {
+        const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
+        expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
+        expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
+      },
+    );
   });
 
   it("add/remove relationship endpoints only accept to-many relationship names", () => {
@@ -1204,7 +1207,7 @@ describe("Endpoint.resource / Group.resource", () => {
           )
           .handle("authorRelationship", ({ params }) =>
             Effect.succeed(
-              Handlers.linkage(sampleComment.relationships!.author.data, {
+              Handlers.linkage(sampleCommentAuthor, {
                 self: Handlers.relationshipLink("comments", params.id, "author"),
                 related: Handlers.relatedLink("comments", params.id, "author"),
               }),
@@ -1252,7 +1255,7 @@ describe("Endpoint.resource / Group.resource", () => {
 // payload tests above do.
 const payloadSchemaOf = (endpoint: {
   readonly payload: ReadonlyMap<string, { readonly schemas: ReadonlyArray<unknown> }>;
-}) => [...endpoint.payload.values()][0].schemas[0]! as Schema.Codec<unknown, unknown>;
+}) => [...endpoint.payload.values()][0].schemas[0] as Schema.Codec<unknown, unknown>;
 
 describe("Endpoint.create / Endpoint.update payload override", () => {
   const envelopedCreate = {
@@ -1875,7 +1878,7 @@ describe("Endpoint include path constraints", () => {
 
 // Reads the success schema off a constructed endpoint.
 const successSchemaOf = (endpoint: { readonly success: Iterable<unknown> }) =>
-  [...endpoint.success][0]! as Schema.Codec<any, any>;
+  [...endpoint.success][0] as Schema.Codec<any, any>;
 
 describe("primary-data success override", () => {
   // The wire variant of the resource: identical but for its link members, which
@@ -1982,12 +1985,12 @@ describe("primary-data success override", () => {
       }).map((endpoint) => [endpoint.identifier, endpoint]),
     );
 
-    for (const name of ["get", "create", "update"]) {
+    Arr.forEach(["get", "create", "update"], (name) => {
       const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]))({
         data: wireArticle,
       });
       expect(decoded.data.links.self).toBe("https://api.example.com/articles/1");
-    }
+    });
     const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list))({ data: [wireArticle] });
     expect(listed.data[0].links.self).toBe("https://api.example.com/articles/1");
   });
@@ -2000,12 +2003,12 @@ describe("primary-data success override", () => {
       ]),
     );
 
-    for (const name of ["get", "create", "update"]) {
+    Arr.forEach(["get", "create", "update"], (name) => {
       const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]))({
         data: wireArticle,
       });
       expect(decoded.data.links.self).toBeInstanceOf(URL);
-    }
+    });
     const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list))({ data: [wireArticle] });
     expect(listed.data[0].links.self).toBeInstanceOf(URL);
   });

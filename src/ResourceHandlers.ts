@@ -223,6 +223,8 @@ export interface ReadOnlyConfig<
   readonly viewer?: Effect.Effect<V, never, RV> | undefined;
   /** The capability rule every emitted resource is stamped with. Omit for no stamp. */
   readonly capabilities?: Assemble.CapabilitiesHook<V> | undefined;
+  /** `false` stamps the primary data only, leaving `included` members unstamped. Defaults to `true`. */
+  readonly capabilitiesOnIncluded?: boolean;
   /** Read-through on `get`; write-through and eviction on the writes. */
   readonly cache?: Cache<TResource, RC> | undefined;
   /** The `?include=` walk on `get` and `list`. */
@@ -521,7 +523,7 @@ export const readOnly = <
 >(
   config: ReadOnlyConfig<TQuery, TResource, TId, V, E, R, RV, RL, RC, Targets>,
 ): ReadOnlyHandlers<TResource, TId, TQuery, E, R, RV, RL, RC, Targets> => {
-  const { ops, segment, cache, include, capabilities } = config;
+  const { ops, segment, cache, include, capabilities, capabilitiesOnIncluded } = config;
   const maxPageLimit = config.maxPageLimit ?? 100;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
   // Built once per family: `Query.canonicalPairs` returns the encoder-bound
@@ -529,6 +531,7 @@ export const readOnly = <
   const linkPairs = Query.canonicalPairs(config.listQuery);
   const assemble = {
     ...definedMember("capabilities", capabilities),
+    ...definedMember("capabilitiesOnIncluded", capabilitiesOnIncluded),
     ...definedMember("includable", include?.includable),
     ...definedMember("targets", include?.targets),
     ...definedMember("depth", include?.depth),
@@ -689,7 +692,7 @@ export const make = <
   RT,
   Committed<NoInfer<HType>, TId>
 > => {
-  const { ops, segment, cache, capabilities } = config;
+  const { ops, segment, cache, capabilities, capabilitiesOnIncluded } = config;
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
   const transact = (config.transact ?? identityTransact) as Transact<Tx, ET, RT>;
   const hidden = config.hiddenWrite;
@@ -745,6 +748,7 @@ export const make = <
         if (cache !== undefined) yield* cache.set(result.id, reread.value);
         return yield* Assemble.resource(reread.value, {
           ...definedMember("capabilities", capabilities),
+          ...definedMember("capabilitiesOnIncluded", capabilitiesOnIncluded),
           viewer: yield* viewer,
         });
       }),
@@ -890,6 +894,8 @@ export interface RelatedConfig<
   readonly linkBase: Effect.Effect<string, never, RL>;
   readonly viewer?: Effect.Effect<V, never, RV> | undefined;
   readonly capabilities?: Assemble.CapabilitiesHook<V> | undefined;
+  /** `false` stamps the primary data only, leaving `included` members unstamped. Defaults to `true`. */
+  readonly capabilitiesOnIncluded?: boolean;
   /** The to-many page size when the caller names none. Defaults to `50`. */
   readonly defaultPageLimit?: number | undefined;
   /** The most related rows one page may resolve. Defaults to `100`. */
@@ -993,8 +999,10 @@ export const related = <
   R | RV | RL | Handlers.IncludeTargetServices<Targets>
 >) => {
   const viewer = (config.viewer ?? none) as Effect.Effect<V, never, RV>;
-  const capabilities =
-    config.capabilities === undefined ? {} : { capabilities: config.capabilities };
+  const capabilities = {
+    ...definedMember("capabilities", config.capabilities),
+    ...definedMember("capabilitiesOnIncluded", config.capabilitiesOnIncluded),
+  };
   const concurrency = config.concurrency ?? 6;
   const linkPairs =
     config.listQuery === undefined ? undefined : Query.canonicalPairs(config.listQuery);

@@ -183,8 +183,9 @@ describe("blog example: fetching", () => {
     // without discriminating on `type`
     const author = document.included?.[0];
     expect(author?.attributes.firstName).toBe("Dan");
-    expectTypeOf(author!.attributes.firstName).toEqualTypeOf<string>();
-    expectTypeOf(author!.type).toEqualTypeOf<"people">();
+    assert(author !== undefined);
+    expectTypeOf(author.attributes.firstName).toEqualTypeOf<string>();
+    expectTypeOf(author.type).toEqualTypeOf<"people">();
   });
 
   it("404s with a typed error for unknown articles", async () => {
@@ -652,7 +653,7 @@ describe("blog example: heterogeneous search", () => {
 
     // the union is discriminated by the `type` tag; the endpoint declares
     // `fields`, so a client reads each attribute as optional (#322)
-    for (const result of document.data) {
+    Arr.forEach(document.data, (result) => {
       if (result.type === "articles") {
         expectTypeOf(result.attributes.title).toEqualTypeOf<string | undefined>();
       } else {
@@ -664,7 +665,7 @@ describe("blog example: heterogeneous search", () => {
           result.type === "articles" ? result.attributes.title : result.attributes.firstName,
         ),
       ).toBe(true);
-    }
+    });
   });
 
   it("filters across both resource types", async () => {

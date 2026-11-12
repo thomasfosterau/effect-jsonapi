@@ -218,7 +218,10 @@ const seeded = () =>
 // SAFETY: the stub ops read the same members the family's list query decodes.
 const listQuery = peopleListQuery as ResourceHandlers.ListQuery<ListInput>;
 
-const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
+const handlersFor = (
+  ops: ReturnType<typeof makeOps>["ops"],
+  extra: { readonly capabilitiesOnIncluded?: boolean } = {},
+) => {
   const { cache, store: cacheStore, state } = makeCache();
   const { transact, opened } = makeTransact();
   const handlers = ResourceHandlers.make({
@@ -231,6 +234,7 @@ const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
     cache,
     transact,
     include: { includable: PERSON_INCLUDE.paths, targets },
+    ...extra,
   });
   return { handlers, cacheStore, state, opened };
 };
@@ -879,6 +883,19 @@ describe("list", () => {
     }),
   );
 
+  it.effect("stamps the page only when `capabilitiesOnIncluded` is false", () =>
+    Effect.gen(function* () {
+      const { ops } = seeded();
+      const { handlers } = handlersFor(ops, { capabilitiesOnIncluded: false });
+      const document = yield* handlers
+        .list({ query: { include: ["birthPlace"] } })
+        .pipe(Effect.provide(as(Option.some(ADMIN))));
+      expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
+      expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
+      expect(document.included?.[0]).not.toHaveProperty("meta");
+    }),
+  );
+
   /**
    * One test per axis the links have to carry, each asserting the parameter
    * reaches all five links: a client paginates by `next` / `prev`, and
@@ -908,9 +925,13 @@ describe("list", () => {
     it.effect("carries `?include=` and a `filter[…]` member into all five links", () =>
       Effect.gen(function* () {
         const included = yield* linksFor({ limit: 1, offset: 1, include: ["birthPlace"] });
-        for (const link of included) expect(link).toContain("include=birthPlace");
+        Arr.forEach(included, (link) => {
+          expect(link).toContain("include=birthPlace");
+        });
         const filtered = yield* linksFor({ limit: 1, offset: 1, q: "a" });
-        for (const link of filtered) expect(link).toContain("filter[q]=a");
+        Arr.forEach(filtered, (link) => {
+          expect(link).toContain("filter[q]=a");
+        });
       }),
     );
 
