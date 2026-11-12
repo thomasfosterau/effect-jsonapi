@@ -2911,8 +2911,8 @@ const validateStorageKeys = (
 ): void => {
   const claimed = MutableHashMap.empty<string, string>();
   Arr.forEach(R.toEntries(relationships), ([name, descriptor]) => {
-    if (!Relationship.isToOne(descriptor) || descriptor.key === undefined) return;
-    const key = descriptor.key;
+    if (!Relationship.isToOne(descriptor) || Option.isNone(descriptor.key)) return;
+    const key = descriptor.key.value;
     if (Object.hasOwn(attributes, key)) {
       throw declarationError(
         `${context}: relationship "${name}" declares storage key "${key}", which is also an attribute; ` +
