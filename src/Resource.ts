@@ -3906,7 +3906,7 @@ export const isFamily = (u: unknown): u is Family<string, ReadonlyArray<Any>, an
 export function family<const Name extends string, const Members extends ReadonlyArray<Any>>(
   name: Name,
   members: Members,
-): Family<Name, Members, undefined>;
+): Family<Name, Members>;
 export function family<
   const BaseType extends string,
   const BaseAttributes extends Schema.Struct.Fields,

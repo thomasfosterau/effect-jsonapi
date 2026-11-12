@@ -53,23 +53,23 @@ assertType<Effect.Effect<unknown, never, HttpClient.HttpClient>>(Client.make(Api
 // `@ts-expect-error` covers, so it is switched off for this one assertion.
 // @effect-diagnostics missingEffectContext:off
 // @ts-expect-error -- the requirement is not `never`
-assertType<Effect.Effect<unknown, never, never>>(Client.make(Api));
+assertType<Effect.Effect<unknown>>(Client.make(Api));
 // @effect-diagnostics missingEffectContext:error
 
 // ---------------------------------------------------------------------------
 // transform: the underlying client's channels survive
 // ---------------------------------------------------------------------------
 
-declare const custom: HttpClient.HttpClient.With<"boom", never>;
+declare const custom: HttpClient.HttpClient.With<"boom">;
 
 // control: the error channel is carried through unchanged
-assertType<HttpClient.HttpClient.With<"boom", never>>(Client.transform(custom));
-assertType<HttpClient.HttpClient.With<"boom", never>>(
+assertType<HttpClient.HttpClient.With<"boom">>(Client.transform(custom));
+assertType<HttpClient.HttpClient.With<"boom">>(
   Client.transformWith({ extensions: ["urn:ext"] })(custom),
 );
 
 // @ts-expect-error -- the transform does not discharge the client's errors
-assertType<HttpClient.HttpClient.With<never, never>>(Client.transform(custom));
+assertType<HttpClient.HttpClient.With<never>>(Client.transform(custom));
 
 // ---------------------------------------------------------------------------
 // Error documents: the decode is best-effort, so the result is optional
@@ -81,7 +81,7 @@ assertType<Option.Option<Client.ErrorDocument>>(Client.decodeErrorDocument("{}")
 assertType<Client.ErrorDocument>(Client.decodeErrorDocument("{}"));
 
 // control: the cause-based decode never fails and needs nothing
-assertType<Effect.Effect<Option.Option<Client.ErrorDocument>, never, never>>(
+assertType<Effect.Effect<Option.Option<Client.ErrorDocument>>>(
   Client.errorDocument(new Error("x")),
 );
 

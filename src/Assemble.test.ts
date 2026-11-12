@@ -115,7 +115,7 @@ const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
   return { calls, targets };
 };
 
-const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect);
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
 // A free-form resource read from JSON text, as a handler gets one from a
 // database driver, and the JSON text a value serialises to.

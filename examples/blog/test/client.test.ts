@@ -27,7 +27,7 @@ import { Article } from "../resources.js";
 
 const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.scoped, Effect.provide(ServerHttpClient)) as Effect.Effect<A, E, never>,
+    effect.pipe(Effect.scoped, Effect.provide(ServerHttpClient)) as Effect.Effect<A, E>,
   );
 
 /** A load balancer in front of the server, answering with its own opaque body. */

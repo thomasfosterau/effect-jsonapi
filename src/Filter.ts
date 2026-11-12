@@ -497,7 +497,7 @@ export type Ast<Fields extends FieldTypes = FieldTypes> =
  * @since 0.13.0
  * @category models
  */
-export type Node = Ast<FieldTypes>;
+export type Node = Ast;
 
 const Literal = Schema.Unknown;
 const LazyNode: Schema.Codec<Node> = Schema.suspend((): Schema.Codec<Node> => Ast);

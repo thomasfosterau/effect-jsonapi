@@ -477,7 +477,7 @@ describe("a compound relationship document served over HTTP (#439)", () => {
       Conformance.verify(Api, { ids: { articles: "1" }, only }).pipe(
         Effect.provide(Layer.provideMerge(ArticlesLive, Middleware.layer)),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
+      ) as Effect.Effect<Conformance.Report>,
     );
 
   it("answers `include=comments.author` with the comments and their authors", async () => {
@@ -810,7 +810,7 @@ describe("a paginated compound relationship document served over HTTP (#483)", (
       }).pipe(
         Effect.provide(Layer.provideMerge(ThreadsLive, Middleware.layer)),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
+      ) as Effect.Effect<Conformance.Report>,
     );
     expect(report.outcomes.map((outcome) => `${outcome.rule.id}: ${outcome._tag}`)).toEqual([
       "spec/document/full-linkage: Passed",

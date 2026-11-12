@@ -156,8 +156,6 @@ export default defineConfig({
       // in the conditional-type machinery can be load-bearing for the emitted
       // declarations, which this check does not see.
       "typescript/no-unnecessary-type-assertion": "warn",
-      // 66 sites (19 in src/), mostly explicit `Schema` / `Effect` type arguments.
-      "typescript/no-unnecessary-type-arguments": "warn",
       // 63 sites, 59 of them in tests (most in the type-level tests under test/).
       "typescript/no-unnecessary-type-parameters": "warn",
       // 43 sites, 39 in src/ (most in Resource.ts's mapped types).

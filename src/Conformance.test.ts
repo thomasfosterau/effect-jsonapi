@@ -172,7 +172,7 @@ const runOver =
       Conformance.verify(target, { ids: { articles: "1" }, ...options }).pipe(
         Effect.provide(live),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
+      ) as Effect.Effect<Conformance.Report>,
     );
 
 const verifyCanned = verifyOver(api);

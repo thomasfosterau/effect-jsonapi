@@ -164,11 +164,10 @@ const { report, resolved } = await Effect.runPromise(
       report: Conformance.verify(Api, { ids: IDS, mutating: true, writes: WRITES }),
     },
     { concurrency: 1 },
-  ).pipe(Effect.provide(NorthwindLive), Effect.scoped) as Effect.Effect<
-    { readonly report: Conformance.Report; readonly resolved: Record<keyof typeof IDS, string> },
-    never,
-    never
-  >,
+  ).pipe(Effect.provide(NorthwindLive), Effect.scoped) as Effect.Effect<{
+    readonly report: Conformance.Report;
+    readonly resolved: Record<keyof typeof IDS, string>;
+  }>,
 );
 
 describe("northwind: JSON:API conformance", () => {
@@ -326,7 +325,7 @@ describe("northwind: JSON:API conformance", () => {
       Conformance.verify(Api, { ids: IDS, tiers: ["spec"] }).pipe(
         Effect.provide(NorthwindLive),
         Effect.scoped,
-      ) as Effect.Effect<Conformance.Report, never, never>,
+      ) as Effect.Effect<Conformance.Report>,
     );
     expect(specOnly.outcomes.every((outcome) => outcome.rule.tier === "spec")).toBe(true);
     expect(

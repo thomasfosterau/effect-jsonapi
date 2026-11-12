@@ -658,12 +658,7 @@ export type IncludePathsOf<R extends Any, I> = LegalIncludePaths<R, I>;
 export interface Include<
   R extends Any,
   Paths extends string = IncludePath<R>,
-> extends Schema.decodeTo<
-  CommaSeparated<Schema.Literals<ReadonlyArray<Paths>>>,
-  Repeatable,
-  never,
-  never
-> {}
+> extends Schema.decodeTo<CommaSeparated<Schema.Literals<ReadonlyArray<Paths>>>, Repeatable> {}
 
 /**
  * Creates the `include` schema for one resource (or, for heterogeneous
@@ -791,9 +786,7 @@ export const Include = <
  */
 export const IncludeList: Schema.decodeTo<
   Schema.$Array<Schema.String>,
-  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>,
-  never,
-  never
+  Schema.Union<readonly [Schema.String, Schema.$Array<Schema.String>]>
 > = Schema.Union([Schema.String, Schema.Array(Schema.String)]).pipe(
   Schema.decodeTo(
     Schema.Array(Schema.String),
@@ -1074,9 +1067,7 @@ export const validateIncludePaths = (
  */
 export interface Fieldset<Field extends string> extends Schema.decodeTo<
   CommaSeparated<Schema.Literals<ReadonlyArray<Field>>>,
-  Repeatable,
-  never,
-  never
+  Repeatable
 > {}
 
 /**
@@ -1144,12 +1135,7 @@ const fieldsetOf = <Field extends string>(
  * @since 0.1.0
  * @category models
  */
-export interface Sort<Field extends string> extends Schema.decodeTo<
-  SortCodec<Field>,
-  Repeatable,
-  never,
-  never
-> {}
+export interface Sort<Field extends string> extends Schema.decodeTo<SortCodec<Field>, Repeatable> {}
 
 /**
  * Creates the `sort` schema for a set of sortable fields.
@@ -1700,9 +1686,7 @@ export type FlatSchema<R extends Any, O extends Options<R>> = [O["filter"]] exte
  */
 export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema.decodeTo<
   Schema.Struct<AsFields<NestedFields<R, O>>>,
-  FlatSchema<R, O>,
-  never,
-  never
+  FlatSchema<R, O>
 > {}
 
 // The runtime `FieldsetTypesOf`, as the resource definitions behind each
@@ -1962,8 +1946,7 @@ export type Pair = CanonicalPair;
 export interface FlatQuerySchema extends Schema.Codec<
   unknown,
   { readonly [key: string]: unknown },
-  unknown,
-  never
+  unknown
 > {}
 
 /**

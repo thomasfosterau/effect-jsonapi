@@ -1264,7 +1264,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
       id: "1",
       attributes: { title: "Hi" },
     });
-    const doc: Document.Value<typeof Article, typeof Article, typeof Document.AnyMeta> = {
+    const doc: Document.Value<typeof Article, typeof Article> = {
       data: item,
       included: [item],
       meta: { note: "x" },

@@ -202,7 +202,7 @@ const unquote = (value: string): string =>
  * @since 0.15.0
  * @category schemas
  */
-export interface Key extends Schema.decodeTo<Schema.String, Schema.String, never, never> {}
+export interface Key extends Schema.decodeTo<Schema.String, Schema.String> {}
 
 /**
  * The `Idempotency-Key` header value schema. See {@link Key}.
