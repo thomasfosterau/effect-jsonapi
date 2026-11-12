@@ -76,9 +76,7 @@ describe("Client.make({ decodeErrors: true })", () => {
     "fails a call the server answered with an error document as a decoded ErrorResponse",
     () =>
       Effect.gen(function* () {
-        const body = JSON.stringify(
-          ApiError.toDocument(new ApiError.Conflict({ detail: "taken" })),
-        );
+        const body = stringify(ApiError.toDocument(new ApiError.Conflict({ detail: "taken" })));
         const error = failureOf(yield* call(canned(409, body)));
         expect(Client.isErrorResponse(error)).toBe(true);
         const response = error as Client.ErrorResponse;
@@ -141,10 +139,7 @@ describe("Client.make({ decodeErrors: true })", () => {
   it.effect("failWithErrorResponse is the same seam, standalone", () =>
     Effect.gen(function* () {
       const request = HttpClientRequest.get("http://localhost/people/1");
-      const effect = canned(
-        404,
-        stringify({ errors: [{ status: "404", title: "Not found" }] }),
-      )
+      const effect = canned(404, stringify({ errors: [{ status: "404", title: "Not found" }] }))
         .execute(request)
         .pipe(Effect.flatMap((response) => HttpClientResponse.filterStatusOk(response)));
       const error = failureOf(yield* Effect.exit(Client.failWithErrorResponse(effect)));
