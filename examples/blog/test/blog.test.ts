@@ -8,6 +8,7 @@ import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
 import * as P from "effect/Predicate";
 import * as Rec from "effect/Record";
@@ -33,9 +34,9 @@ const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.scoped,
-      Effect.provide(ArticlesLive),
-      Effect.provide(SearchLive),
-      Effect.provide(Middleware.layer),
+      Effect.provide(
+        Layer.provideMerge(Layer.mergeAll(ArticlesLive, SearchLive), Middleware.layer),
+      ),
     ) as Effect.Effect<A, E>,
   );
 
@@ -43,9 +44,9 @@ const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E
   Effect.runPromiseExit(
     effect.pipe(
       Effect.scoped,
-      Effect.provide(ArticlesLive),
-      Effect.provide(SearchLive),
-      Effect.provide(Middleware.layer),
+      Effect.provide(
+        Layer.provideMerge(Layer.mergeAll(ArticlesLive, SearchLive), Middleware.layer),
+      ),
     ) as Effect.Effect<A, E>,
   );
 

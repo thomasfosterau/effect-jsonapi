@@ -9,6 +9,7 @@ import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
@@ -33,9 +34,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.scoped,
-      Effect.provide(ArticlesLive),
-      Effect.provide(OperationsLive),
-      Effect.provide(middleware),
+      Effect.provide(Layer.provideMerge(Layer.mergeAll(ArticlesLive, OperationsLive), middleware)),
     ) as Effect.Effect<A, E>,
   );
 
@@ -43,9 +42,7 @@ const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E
   Effect.runPromiseExit(
     effect.pipe(
       Effect.scoped,
-      Effect.provide(ArticlesLive),
-      Effect.provide(OperationsLive),
-      Effect.provide(middleware),
+      Effect.provide(Layer.provideMerge(Layer.mergeAll(ArticlesLive, OperationsLive), middleware)),
     ) as Effect.Effect<A, E>,
   );
 
