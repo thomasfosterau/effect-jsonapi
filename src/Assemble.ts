@@ -506,6 +506,25 @@ export interface Pagination {
    * link's own `page[*]` cursor replaces the pairs' rather than appending.
    */
   readonly query?: ReadonlyArray<Query.Pair> | undefined;
+  /**
+   * The total the offset pagination links are computed from — `last`, and
+   * whether `next` exists. Defaults to {@link Pagination.totalCount}; set it
+   * when the reported `meta.totalCount` is not what can be paged (a search
+   * engine's capped window, or an estimate). `meta.totalCount` is always
+   * `totalCount`, whatever `linkTotal` is.
+   *
+   * @since 0.22.0
+   */
+  readonly linkTotal?: number;
+  /**
+   * When `true`, `links.last` is omitted (the key is absent, not `null`)
+   * because the last page is not known. `self` / `first` / `prev` / `next`
+   * stay exact, computed from {@link Pagination.linkTotal}. Defaults to
+   * `false`.
+   *
+   * @since 0.22.0
+   */
+  readonly lastUnknown?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -901,6 +920,20 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
   );
 };
 
+// The pagination links of a `Pagination`: computed from `linkTotal` (default
+// `totalCount`), and without a `last` key when it is unknown.
+const paginationLinks = (pagination: Pagination): Handlers.LinksValue => {
+  const links = Handlers.offsetPaginationLinks(
+    pagination.baseUrl,
+    { offset: pagination.offset, limit: pagination.limit },
+    pagination.linkTotal ?? pagination.totalCount,
+    pagination.query === undefined ? undefined : { query: pagination.query },
+  );
+  if (pagination.lastUnknown !== true) return links;
+  const { last: _last, ...withoutLast } = links;
+  return withoutLast;
+};
+
 /**
  * Assembles a JSON:API document around a collection page: every resource
  * stamped and projected as {@link resource} does, `meta.totalCount` and the
@@ -910,6 +943,11 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
  * type per level across the whole page — into `included`. Members the caller
  * resolved itself (`included`) are emitted alongside. A collection served
  * whole, with no page math, goes through {@link unpaginatedCollection}.
+ *
+ * `Pagination.linkTotal` decouples the links from `meta.totalCount`, and
+ * `Pagination.lastUnknown` omits `links.last`: a search with no corpus count
+ * passes `linkTotal = offset + page.length + (hasMore ? 1 : 0)` so `next`
+ * exists exactly when there is more (the second example).
  *
  * @example
  * ```ts
@@ -926,7 +964,27 @@ const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
  * // → 42 https://example.test/people?filter[q]=ada&page[offset]=13&page[limit]=3
  * ```
  *
- * @since 0.16.0
+ * @example
+ * ```ts
+ * import { Effect } from "effect"
+ * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ *
+ * // A search with no corpus count: `next` exists exactly when there is more,
+ * // and the last page is unknown.
+ * const offset = 0
+ * const hasMore = true
+ * const hits = [1, 2, 3].map((n) => ({ type: "people", id: `${n}`, attributes: { name: `P${n}` } }))
+ * const document = Effect.runSync(Assemble.collection(hits, {
+ *   totalCount: hits.length, offset, limit: 3,
+ *   baseUrl: "https://example.test/search",
+ *   linkTotal: offset + hits.length + (hasMore ? 1 : 0),
+ *   lastUnknown: true
+ * }))
+ * console.log(document.links.next, "last" in document.links)
+ * // → https://example.test/search?page[offset]=3&page[limit]=3 false
+ * ```
+ *
+ * @since 0.16.0 (`linkTotal` and `lastUnknown` since 0.22.0)
  * @category constructors
  */
 export const collection = <
@@ -944,12 +1002,7 @@ export const collection = <
 > =>
   assembleCollection<CollectionDocument<R>, V, Targets>(resources, options, {
     meta: { totalCount: pagination.totalCount },
-    links: Handlers.offsetPaginationLinks(
-      pagination.baseUrl,
-      { offset: pagination.offset, limit: pagination.limit },
-      pagination.totalCount,
-      pagination.query === undefined ? undefined : { query: pagination.query },
-    ),
+    links: paginationLinks(pagination),
   });
 
 /**
@@ -1195,7 +1248,10 @@ export const relationship = <R extends ResourceLike, I extends ResourceLike = R,
  * // → https://example.test/contributions?filter[role]=author&page[offset]=1&page[limit]=1
  * ```
  *
- * @since 0.16.0 (`input.query` since 0.21.0)
+ * `input.linkTotal` and `input.lastUnknown` are {@link Pagination}'s, forwarded
+ * as given.
+ *
+ * @since 0.16.0 (`input.query` since 0.21.0, `input.linkTotal` and `input.lastUnknown` since 0.22.0)
  * @category constructors
  */
 export const edgePage = <R extends ResourceLike, V = unknown>(
@@ -1205,6 +1261,8 @@ export const edgePage = <R extends ResourceLike, V = unknown>(
     readonly limit: number;
     readonly offset: number;
     readonly query?: ReadonlyArray<Query.Pair> | undefined;
+    readonly linkTotal?: number;
+    readonly lastUnknown?: boolean;
   },
   base: string,
   viewer?: V,
@@ -1220,6 +1278,8 @@ export const edgePage = <R extends ResourceLike, V = unknown>(
         limit: input.limit,
         baseUrl: `${base}/${segment}`,
         ...definedMember("query", input.query),
+        ...definedMember("linkTotal", input.linkTotal),
+        ...definedMember("lastUnknown", input.lastUnknown),
       },
       { viewer, capabilities: noCapabilities },
     ),
