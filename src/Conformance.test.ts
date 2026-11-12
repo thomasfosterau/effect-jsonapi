@@ -422,7 +422,7 @@ const conformantServe = (request: {
     };
   }
 
-  const project = (type: string, attributes: Readonly<Record<string, unknown>>) => {
+  const project = (type: string, attributes: R.ReadonlyRecord<string, unknown>) => {
     const requested = params.get(`fields[${type}]`);
     if (requested === null) return attributes;
     const keep = HashSet.fromIterable(requested.split(","));
@@ -1208,7 +1208,7 @@ const broken = (
 
 const withData = (
   canned: Canned,
-  change: (body: Record<string, unknown>) => Record<string, unknown>,
+  change: (body: R.ReadonlyRecord<string, unknown>) => R.ReadonlyRecord<string, unknown>,
 ): Canned => {
   const body = canned.body;
   if (!P.isObjectOrArray(body) || !("data" in body)) return canned;
@@ -1572,7 +1572,7 @@ describe("Conformance: detects a deliberately broken server", () => {
   );
 
   // #494: a relationship is a field, so a fieldset that leaves it out drops it.
-  const withAuthor = (body: Record<string, unknown>) => {
+  const withAuthor = (body: R.ReadonlyRecord<string, unknown>) => {
     const data = body["data"];
     return P.isObjectOrArray(data) && "type" in data && data.type === "articles"
       ? {
@@ -6129,8 +6129,8 @@ describe("Conformance: the write fixture", () => {
     (canned, request) =>
       creates(request, canned)
         ? withData(canned, (body) => {
-            const data = body["data"] as Record<string, unknown>;
-            const attributes = data["attributes"] as Record<string, unknown>;
+            const data = body["data"] as R.ReadonlyRecord<string, unknown>;
+            const attributes = data["attributes"] as R.ReadonlyRecord<string, unknown>;
             return { ...body, data: { ...data, attributes: { ...attributes, rating: 5 } } };
           })
         : canned,
@@ -6144,8 +6144,8 @@ describe("Conformance: the write fixture", () => {
     (canned, request) =>
       request.method === "PATCH" && canned.status === undefined
         ? withData(canned, (body) => {
-            const data = body["data"] as Record<string, unknown>;
-            const attributes = data["attributes"] as Record<string, unknown>;
+            const data = body["data"] as R.ReadonlyRecord<string, unknown>;
+            const attributes = data["attributes"] as R.ReadonlyRecord<string, unknown>;
             return { ...body, data: { ...data, attributes: { ...attributes, title: "unstored" } } };
           })
         : canned,
@@ -6169,7 +6169,7 @@ describe("Conformance: the write fixture", () => {
         }
         return request.method === "GET" && MutableHashSet.has(patched, id)
           ? withData(canned, (body) => {
-              const data = body["data"] as Record<string, unknown>;
+              const data = body["data"] as R.ReadonlyRecord<string, unknown>;
               return { ...body, data: { ...data, attributes: { title: "unstored" } } };
             })
           : canned;
@@ -6277,7 +6277,7 @@ describe("Conformance: atomic operations processing", () => {
 
   const atomicType = `${MEDIA_TYPE};ext="${ATOMIC_EXTENSION_URI}"`;
 
-  type Fields = Readonly<Record<string, unknown>>;
+  type Fields = R.ReadonlyRecord<string, unknown>;
   interface Stored {
     readonly type: string;
     readonly id: string;

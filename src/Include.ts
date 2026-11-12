@@ -269,7 +269,7 @@ export const nested = <R extends Any, const S extends Spec<R>>(
  * @category guards
  */
 export const isBranch = (u: unknown): u is AnyBranch =>
-  P.isObjectOrArray(u) && (u as Record<string, unknown>)[TAG] === "branch";
+  P.isObjectOrArray(u) && (u as R.ReadonlyRecord<string, unknown>)[TAG] === "branch";
 
 // ---------------------------------------------------------------------------
 // The derivations
@@ -433,7 +433,7 @@ export type SurfaceFor<R extends Any> = AnySurface & { readonly resource: R };
  * @category guards
  */
 export const isSurface = (u: unknown): u is AnySurface =>
-  P.isObjectOrArray(u) && (u as Record<string, unknown>)[TAG] === "surface";
+  P.isObjectOrArray(u) && (u as R.ReadonlyRecord<string, unknown>)[TAG] === "surface";
 
 // ---------------------------------------------------------------------------
 // The walk

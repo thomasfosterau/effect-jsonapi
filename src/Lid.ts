@@ -27,6 +27,7 @@ import * as Option from "effect/Option";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as R from "effect/Record";
 import * as Arr from "effect/Array";
+import * as Types from "effect/Types";
 import type { MetaValue } from "./Handlers.js";
 import type * as Relationship from "./Relationship.js";
 import type { Any, RefValue } from "./Resource.js";
@@ -227,7 +228,7 @@ export const make = (): LidMap => {
     // `_resource` only pins down the return type.
     resolveLinkage: (_resource, relationships) => {
       if (relationships === undefined) return {};
-      const resolved: Record<string, unknown> = {};
+      const resolved: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
       Arr.forEach(R.toEntries(relationships), ([key, value]) => {
         const linkage = value.data;
         // An own data property, so a member named `__proto__` stays a key

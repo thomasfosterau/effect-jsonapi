@@ -42,6 +42,7 @@
  * @since 0.13.0
  */
 import * as Schema from "effect/Schema";
+import * as R from "effect/Record";
 import type { FieldCodecs } from "./internal/filter.js";
 import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js";
 import {
@@ -361,9 +362,7 @@ export type CompareOperator = (typeof compareOperators)[number];
  * @since 0.13.0
  * @category models
  */
-export interface FieldTypes {
-  readonly [field: string]: unknown;
-}
+export type FieldTypes = R.ReadonlyRecord<string, unknown>;
 
 /**
  * A comparison of one field against one typed literal.

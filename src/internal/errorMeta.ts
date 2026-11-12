@@ -23,11 +23,12 @@ import type * as Schema from "effect/Schema";
 import type * as SchemaIssue from "effect/SchemaIssue";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as R from "effect/Record";
 import type { Family } from "./vocabulary.js";
 import { vocabularyOf } from "./vocabulary.js";
 
 /** The `meta` a vocabulary renders as: members merged into the error object's `meta`. */
-type ErrorMeta = Readonly<Record<string, unknown>>;
+type ErrorMeta = R.ReadonlyRecord<string, unknown>;
 
 // The `meta` member each family's vocabulary renders under. A family not
 // listed here publishes its vocabulary to the support check only.

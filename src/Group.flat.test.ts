@@ -27,7 +27,7 @@ const decode = <S extends Schema.Top>(schema: S) =>
 /** A built group's endpoints, structurally. */
 interface GroupLike {
   readonly identifier: string;
-  readonly endpoints: Readonly<Record<string, unknown>>;
+  readonly endpoints: R.ReadonlyRecord<string, unknown>;
 }
 interface EndpointLike {
   readonly method: string;
@@ -250,7 +250,7 @@ describe("the wire contract", () => {
     readonly paths: Readonly<
       Record<
         string,
-        Readonly<Record<string, { readonly responses: Readonly<Record<string, unknown>> }>>
+        Readonly<Record<string, { readonly responses: R.ReadonlyRecord<string, unknown> }>>
       >
     >;
   }

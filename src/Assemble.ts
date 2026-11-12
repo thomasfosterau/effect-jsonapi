@@ -93,7 +93,7 @@ export type LinkLike = string | URL | { readonly href: string | URL };
 export interface RelationshipObject {
   readonly data?: Ref | ReadonlyArray<Ref> | null | undefined;
   readonly links?: { readonly related?: LinkLike; readonly self?: LinkLike } | undefined;
-  readonly meta?: { readonly [key: string]: unknown } | undefined;
+  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
 }
 
 /**
@@ -110,10 +110,10 @@ export interface RelationshipObject {
 export interface ResourceLike {
   readonly type: string;
   readonly id: string;
-  readonly attributes: { readonly [key: string]: unknown };
-  readonly relationships?: { readonly [key: string]: unknown } | undefined;
+  readonly attributes: R.ReadonlyRecord<string, unknown>;
+  readonly relationships?: R.ReadonlyRecord<string, unknown> | undefined;
   readonly links?: { readonly self?: LinkLike | undefined } | undefined;
-  readonly meta?: { readonly [key: string]: unknown } | undefined;
+  readonly meta?: R.ReadonlyRecord<string, unknown> | undefined;
 }
 
 /**
@@ -167,10 +167,10 @@ export const JSONAPI_MEMBER = { version: "1.1" } as const;
  * @category models
  */
 export interface ResourceDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
-  readonly data: WireResource<R> & { readonly meta?: { readonly [key: string]: unknown } };
+  readonly data: WireResource<R> & { readonly meta?: R.ReadonlyRecord<string, unknown> };
   readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly self?: string };
-  readonly meta?: { readonly [key: string]: unknown };
+  readonly meta?: R.ReadonlyRecord<string, unknown>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
 }
 
@@ -183,11 +183,11 @@ export interface ResourceDocument<R extends ResourceLike, I extends ResourceLike
  */
 export interface CollectionDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
   readonly data: ReadonlyArray<
-    WireResource<R> & { readonly meta?: { readonly [key: string]: unknown } }
+    WireResource<R> & { readonly meta?: R.ReadonlyRecord<string, unknown> }
   >;
   readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links: Handlers.LinksValue;
-  readonly meta: { readonly totalCount: number; readonly [key: string]: unknown };
+  readonly meta: { readonly totalCount: number } & R.ReadonlyRecord<string, unknown>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
 }
 
@@ -266,7 +266,7 @@ export interface RelationshipDocument<R extends ResourceLike, I extends Resource
 export type CapabilitiesHook<V = unknown> = (
   resource: ResourceLike,
   viewer: V,
-) => { readonly [key: string]: unknown };
+) => R.ReadonlyRecord<string, unknown>;
 
 /**
  * The capability rule of a family whose writes gate on a role rung:

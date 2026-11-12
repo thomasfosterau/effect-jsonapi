@@ -81,6 +81,7 @@ import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
+import * as Types from "effect/Types";
 import { HttpApiEndpoint, HttpApiSchema } from "effect/http-api";
 import * as Atomic from "./Atomic.js";
 import { AnyMeta, CollectionDocument, DataDocument, LinkageDocument, wire } from "./Document.js";
@@ -4095,7 +4096,7 @@ const pick = <C extends object, K extends keyof C & string, F>(
 // gave it.
 interface OpConfig {
   readonly emit: boolean;
-  readonly config: Record<string, unknown>;
+  readonly config: R.ReadonlyRecord<string, unknown>;
 }
 
 /**
@@ -4241,7 +4242,7 @@ export const resource = <
   const gMeta = options?.meta;
   const gErrors = options?.errors;
   const gIdem = options?.idempotency;
-  const endpointsOpt = options?.endpoints as Record<string, unknown> | undefined;
+  const endpointsOpt = options?.endpoints as R.ReadonlyRecord<string, unknown> | undefined;
   const relationshipsOpt = options?.relationships ?? true;
 
   // The resource's base meta schema, for resolving `meta` functions.
@@ -4259,12 +4260,12 @@ export const resource = <
     const value = endpointsOpt[op];
     if (value === undefined || value === true) return { emit: true, config: {} };
     if (value === false) return { emit: false, config: {} };
-    return { emit: true, config: value as Record<string, unknown> };
+    return { emit: true, config: value as R.ReadonlyRecord<string, unknown> };
   };
 
   // The shared name / path / errors (and, optionally, meta) overrides of an op.
-  const commonOpts = (config: Record<string, unknown>, withMeta: boolean) => {
-    const out: Record<string, unknown> = {};
+  const commonOpts = (config: R.ReadonlyRecord<string, unknown>, withMeta: boolean) => {
+    const out: Types.Mutable<R.ReadonlyRecord<string, unknown>> = {};
     const errors = pick(config, "errors", gErrors);
     if (errors !== undefined) out.errors = errors;
     if ("name" in config) out.name = config.name;
@@ -4282,19 +4283,23 @@ export const resource = <
   // An endpoint's `success` override is per-endpoint only: the primary-data
   // endpoints answer with a single-resource document and `list` with a
   // collection, so there is no sensible top-level default to fall back to.
-  const successOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+  const successOpt = (
+    config: R.ReadonlyRecord<string, unknown>,
+  ): R.ReadonlyRecord<string, unknown> =>
     config.success !== undefined ? { success: config.success } : {};
 
   // Likewise `status`: each endpoint's default (201 for `create`, 200 for
   // `update`, 204 for `delete`) is the constructor's, so an absent key must
   // stay absent rather than resolve to some shared number here.
-  const statusOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+  const statusOpt = (
+    config: R.ReadonlyRecord<string, unknown>,
+  ): R.ReadonlyRecord<string, unknown> =>
     config.status !== undefined ? { status: config.status } : {};
 
   // A read endpoint's `query` override is per-endpoint only: it replaces that
   // endpoint's whole composed query, and `get`'s and `list`'s compositions
   // differ, so there is no sensible top-level default to fall back to.
-  const queryOpt = (config: Record<string, unknown>): Record<string, unknown> =>
+  const queryOpt = (config: R.ReadonlyRecord<string, unknown>): R.ReadonlyRecord<string, unknown> =>
     config.query !== undefined ? { query: config.query } : {};
 
   const endpoints: Array<HttpApiEndpoint.Top> = [];
@@ -4333,12 +4338,14 @@ export const resource = <
   // top-level default to fall back to.
   // `idempotency` is the one write option with a top-level default, so an
   // absent per-endpoint key inherits it rather than staying absent.
-  const idempotencyOpt = (config: Record<string, unknown>): Record<string, unknown> => {
+  const idempotencyOpt = (
+    config: R.ReadonlyRecord<string, unknown>,
+  ): R.ReadonlyRecord<string, unknown> => {
     const idempotency = pick(config, "idempotency", gIdem);
     return idempotency !== undefined ? { idempotency } : {};
   };
 
-  const payloadOpt = (config: Record<string, unknown>) => ({
+  const payloadOpt = (config: R.ReadonlyRecord<string, unknown>) => ({
     ...definedMember("payload", config.payload),
     ...definedMember("payloadMediaType", config.payloadMediaType),
   });

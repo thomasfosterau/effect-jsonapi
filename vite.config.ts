@@ -131,14 +131,13 @@ export default defineConfig({
       // `no-cause-in-http-response` (no sites), left the count unchanged.
       "effect/require-safety-comment-for-type-assertion": "warn",
       "effect/no-chained-type-assertions": "warn",
-      // This rule and `no-known-value-widening` only check the built-in
-      // `Record<K, V>` while no local binding is named `Record`, so importing
-      // effect's `Record` module under that name hides every such site in
-      // the file (#275). Never bind it as `Record`: spell the alias `R`
+      // `no-unsafe-dictionary-type` and `no-known-value-widening` (both at
+      // `error`) only check the built-in `Record<K, V>` while no local
+      // binding is named `Record`, so importing effect's `Record` module
+      // under that name hides every such site in the file (#275). Never bind it as `Record`: spell the alias `R`
       // (`import * as R from "effect/Record"`), the alias
       // `effect/prefer-namespace-imports` requires. No other binding in a
       // file may be called `R`, so a resource type parameter is `Res`.
-      "effect/no-unsafe-dictionary-type": "warn",
       "effect/avoid-any": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/prefer-option-over-null": "warn",

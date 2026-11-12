@@ -901,7 +901,7 @@ describe("Query.canonical", () => {
     filter: { author: Schema.String, q: Schema.String },
   });
   const decode = Schema.decodeUnknownSync(query as Schema.Codec<any, any>) as (
-    input: Record<string, unknown>,
+    input: R.ReadonlyRecord<string, unknown>,
   ) => typeof query.Type;
   const canonical = Query.canonical(query);
   const pairs = Query.canonicalPairs(query);
@@ -929,7 +929,7 @@ describe("Query.canonical", () => {
   });
 
   it("is byte-identical for equal queries whatever the wire spelling: key order and repeated include", () => {
-    const spellings: ReadonlyArray<Record<string, unknown>> = [
+    const spellings: ReadonlyArray<R.ReadonlyRecord<string, unknown>> = [
       {
         include: "author,comments.author",
         "fields[articles]": "title,body",
