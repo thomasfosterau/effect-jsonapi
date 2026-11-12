@@ -443,7 +443,7 @@ const responseOf = (effect: Effect.Effect<unknown>) =>
       contentType: web.headers.get("content-type"),
       body: yield* Effect.tryPromise({
         try: () => web.json() as Promise<{ errors: ReadonlyArray<{ code?: string }> }>,
-        catch: (cause) => cause,
+        catch: (cause) => new Cause.UnknownError(cause),
       }).pipe(Effect.orDie),
     };
   });

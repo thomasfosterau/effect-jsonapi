@@ -1,5 +1,6 @@
 import { it } from "@effect/vitest";
 import { describe, expect, onTestFinished } from "vite-plus/test";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -403,15 +404,20 @@ describe("Idempotency.layer", () => {
       const store = Idempotency.memoryStore();
       const { dispose, request } = server({ api, live, store });
       yield* Effect.addFinalizer(() =>
-        Effect.orDie(Effect.tryPromise({ try: () => dispose(), catch: (cause) => cause })),
+        Effect.orDie(
+          Effect.tryPromise({
+            try: () => dispose(),
+            catch: (cause) => new Cause.UnknownError(cause),
+          }),
+        ),
       );
       yield* Effect.tryPromise({
         try: () => request({ body: createBody }),
-        catch: (cause) => cause,
+        catch: (cause) => new Cause.UnknownError(cause),
       });
       yield* Effect.tryPromise({
         try: () => request({ body: createBody }),
-        catch: (cause) => cause,
+        catch: (cause) => new Cause.UnknownError(cause),
       });
       expect(calls).toBe(2);
       expect(yield* store.claim(attempt("k1", "fp"))).toEqual({ _tag: "Claimed" });
@@ -540,11 +546,16 @@ describe("Idempotency.layer", () => {
       const store = Idempotency.memoryStore();
       const { dispose, request } = server({ api, live, store });
       yield* Effect.addFinalizer(() =>
-        Effect.orDie(Effect.tryPromise({ try: () => dispose(), catch: (cause) => cause })),
+        Effect.orDie(
+          Effect.tryPromise({
+            try: () => dispose(),
+            catch: (cause) => new Cause.UnknownError(cause),
+          }),
+        ),
       );
       const read = yield* Effect.tryPromise({
         try: () => request({ method: "GET", url: "http://localhost/articles/1", key: "k1" }),
-        catch: (cause) => cause,
+        catch: (cause) => new Cause.UnknownError(cause),
       });
       expect(read.status).toBe(200);
       expect(yield* store.claim(attempt("k1", "fp"))).toEqual({ _tag: "Claimed" });

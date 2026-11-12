@@ -53,6 +53,7 @@
  * @since 0.15.0
  */
 import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Opt from "effect/Option";
@@ -499,7 +500,7 @@ export const fingerprint = (request: Fingerprinted): Effect.Effect<string> =>
       globalThis.crypto.subtle
         .digest("SHA-256", new TextEncoder().encode(canonical(request)))
         .then(hex),
-    catch: (cause) => cause,
+    catch: (cause) => new Cause.UnknownError(cause),
   }).pipe(
     // SHA-256 is mandatory in every WebCrypto implementation, so a rejection
     // is a broken runtime, not a failure a caller could recover from.
