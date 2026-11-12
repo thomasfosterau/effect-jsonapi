@@ -1,5 +1,239 @@
 # @thomasfosterau/effect-jsonapi
 
+## 0.22.0
+
+### Minor Changes
+
+- 51ef5a4: **Breaking (types only):** the "option omitted" sentinel of the generic option parameters is `never`, no longer `undefined` (#533). This covers:
+  
+  - the `page` / `filter` parameters of `Endpoint.list`, `collection`, `related`, `getRelationship` and `resource`, and of `Endpoint.ResourceEndpoint`, `ResourceEndpoints` and `ResourceOptions`;
+  - `Group.resource`'s `Page` / `Filter`, and the `Surface` of `Group.flat`, `Group.flatReadOnly`, `Group.FlatOptions` and `Group.FlatReadOnlyOptions`;
+  - `Endpoint.polymorphic`'s and `Resource.Family`'s `Base`, `Resource.attribute`'s `Clearable`, and `Resource.extend`'s and `Resource.ExtendedId`'s custom id;
+  - `Query.Include`'s `options`, and `Query.Options`' `page` / `filter` members, which no longer take `undefined`; `Query.QuerySchema`, `NestedFields`, `FlatFields` and `FlatSchema` read a `never` `page` / `filter` as absent;
+  - `Handlers.paginatedRelationship`'s `Self`;
+  - `Idempotency.HeadersFor` / `Applied`, which now require an `Idempotency.Option`;
+  - `Assemble.unpaginatedCollection`'s `Self` / `M`, and `Assemble.UnpaginatedCollectionOptions` and `UnpaginatedCollectionDocument`. Their "maybe passed" state (`string | undefined`, `Meta | undefined`), which made the document's `links` / `meta` optional, is gone: a document has `links` exactly when a `self` is passed, and `meta` exactly when a `meta` is.
+  
+  Code that relies on inference is unaffected: omitting an option derives the same query, document, id and `clearable` types as before. Two kinds of code change:
+  
+  - **An explicit `undefined` type argument** for one of these parameters is now a constraint error. Omit the type argument, or pass `never`: `Endpoint.ResourceEndpoints<…, Sort, never, never, Meta>`, `Resource.ExtendedId<BaseId, "editors", false>`, `Idempotency.HeadersFor<false>`, `Assemble.UnpaginatedCollectionDocument<R, never, Meta>`.
+  - **An explicit or maybe-`undefined` value** for one of these options (`{ page: undefined }` and `{ filter: undefined }` in `Endpoint.*`, `Group.resource` or `Query.schema`; `{ include: undefined }` in `Group.flat*`; `{ self: undefined }` in `Handlers.paginatedRelationship`; `{ clearable: undefined }`; `{ self: maybeSelf }` / `{ meta: maybeMeta }` in `Assemble.unpaginatedCollection`) no longer stands for "omitted". Under `exactOptionalPropertyTypes` it is a compile error. Leave the key out instead, passing it only when it is defined:
+  
+    ```ts
+    // before: Endpoint.list(Article, { page: maybePage })
+    const listArticles =
+      maybePage === undefined ? Endpoint.list(Article) : Endpoint.list(Article, { page: maybePage });
+  
+    // before: Assemble.unpaginatedCollection(rows, { self: options.self })
+    const document =
+      options.self === undefined
+        ? Assemble.unpaginatedCollection(rows)
+        : Assemble.unpaginatedCollection(rows, { self: options.self });
+    ```
+  
+  `Relationship.StorageKey` and `Relationship.Paginated`'s `order` are unchanged: their sentinel is the type of a runtime property, tracked separately.
+- 01d1481: **Breaking (types only):** the published `Schema.TaggedError` classes (`NotFound`, `Unauthorized`, `Forbidden`, `Redirect`, `HttpError`, `ValidationFailure`, `JsonapiError`, `UnknownFamily`, `FamilyMismatch`, `ErrorResponse`, `ContractViolation`, `DomainMismatch`, `InvalidAllowedQueryParameter`) carry a nominal brand, so a structurally compatible object literal is no longer assignable where one of these instances is expected. Instances built with `new`, and `_tag` / `instanceof` narrowing, are unaffected. Migration: construct the error with `new` (for example `new ServerErrors.NotFound({ … })`) instead of writing an object literal of its shape.
+- ae9270d: Add `capabilitiesOnIncluded` to `Assemble.Options` (and `Assemble.RelationshipInput`, and the `ResourceHandlers` read-only, writable and related configs): `false` stamps the `capabilities` hook's result on primary data only, leaving `included` members without capability `meta`. It defaults to `true`, today's behaviour, so existing callers are unchanged. From gardeneria#1263 O5.
+- 5c99ab0: **Breaking:** the `effect` peer is now `^4.1.0` (was `^4.0.0`). The published declarations need effect 4.1's HttpApi types: on effect 4.0.6 a `Group.resource` endpoint's `~Success` resolves to `any`, so a typed `Client.make` consumer loses every response type without a compile error at the declaration. Migration: move the application to `effect` >= 4.1.0 (website, gardeneria, preferenceflow, in-the-dark) before bumping this package. A new CI job (`vp run typecheck:floor`) compiles a typed `Client.make` consumer against the packed package and effect 4.1.0 exactly, so the floor cannot drift again (#586).
+- efb7526: A flat group's include surface now types its documents end to end (#595).
+  
+  - **`Group.flat` / `Group.flatReadOnly` keep the surface's `included` union in their success schemas.** It used to be inferred while the surface type was still generic, which widened it to `Schema.Top`: every endpoint's decoding services became `unknown`, so a typed `Client.make` method required `unknown`, and `effect/cli` commands built on one failed to type-check. A flat group without a surface is unchanged.
+  - **`Assemble` and `ResourceHandlers` type `included` by the include registry.** `Assemble.ResourceDocument`, `CollectionDocument` and `UnpaginatedCollectionDocument` gain a trailing `I` parameter, the `included` members' type, defaulting to `ResourceLike`. `Assemble.resource` / `collection` / `unpaginatedCollection` set it from their `targets` through the new `Assemble.TargetsIncluded<Targets>`: what the loaders return, or `never` with no registry. `ResourceHandlers.readOnly` / `make` handlers get the same type, with writes typed `never`. A family's handlers then satisfy a group whose `included` is the surface's precise union, with no cast. Declare the registry with `satisfies Handlers.IncludeTargets` so the loaders' types stay visible; an annotated registry keeps the loose `ResourceLike`.
+  - **Migration:** drop any `Schema.Codec<…, never, never>` cast around a flat group's documents, and any cast on handler output. Code that names a document's exact type from a call with no registry sees `included?: ReadonlyArray<never>` instead of `ReadonlyArray<WireResource<ResourceLike>>`, which is still assignable to the old type.
+- 4c8f411: **Breaking:** `Client.IncludedIndex` (what `Client.indexIncluded` returns and `Hydrated.index` carries) and `Include.Surface`'s `targets` member are now an effect `HashMap` keyed the same way, no longer a native `ReadonlyMap`. `Client.related`, `Client.walk` and `Client.hydrate` take and return them unchanged, so code that only passes the index along is unaffected. Migration: read an entry with `HashMap.get(index, key)` (an `Option`) instead of `index.get(key)`, test for one with `HashMap.has(index, key)` instead of `index.has(key)`, and count them with `HashMap.size(index)` instead of `index.size`; the same for `surface.targets`. An index you built yourself from a `Map` becomes `HashMap.fromIterable(entries)`.
+- cd0af49: **Breaking (wire):** `Negotiation.NOT_ACCEPTABLE`, `NOT_ACCEPTABLE_REFUSED` and `UNSUPPORTED_MEDIA_TYPE` now carry the codes `not_acceptable` and `unsupported_media_type`, the spellings `ApiError.NotAcceptable` / `ApiError.UnsupportedMediaType` (and so `Negotiation.toApiError`) already use. They replace the hyphenated `not-acceptable` / `unsupported-media-type` (#577). These are the canonical codes of the two negotiation errors: effect-ext's `Negotiate` returns a tagged verdict and defines none of its own. Migration: a host or test matching `errors[].code` on a 406 / 415 from `Negotiation.errorResponse` reads the underscored code.
+- 2688394: `Negotiation.representation({ extensions, servesPath })` and `Negotiation.toApiError(negotiation)`: the JSON:API half of a media-type-agnostic negotiator such as `@thomasfosterau/effect-ext/Negotiate`'s `negotiateRepresentation` (#577). `representation` is the JSON:API `Representation`, whose `acceptsParameters` is JSON:API §5's rule (only `ext` / `profile`, every `ext` URI in `extensions`, none by default). `toApiError` maps that negotiator's `NotAcceptable` / `UnsupportedMediaType` refusal of the JSON:API representation to `ApiError.NotAcceptable` (406) / `ApiError.UnsupportedMediaType` (415), and anything else to `Option.none()`. Both are typed structurally, so this package does not import effect-ext's `Negotiate` (whose former optional peer on this package was a cycle).
+- dbae674: **Breaking (types):** the published declarations no longer spell `any` (#533, #536). Almost every site widens to the same set of accepted values (`unknown`, a constrained generic or `never` in a parameter position), so call sites compile unchanged; the ones a consumer can notice are in `Registry`:
+  
+  - `Registry.RawHandler<R>` takes `request: never` (was `any`) and `R` defaults to `unknown` (was `any`); `Registry.Family<R>` defaults to `unknown` too. A host that called a handler out of `family.handlers` directly, or annotated `Registry.Family` bare and then passed it to `webHandler`, now supplies a typed request and `Context` itself. Migration: annotate `Registry.Family<YourServices>`, and type the request you hand a raw handler.
+  - `Registry.HandlersFor<G>` types a handler's error and requirement channels as `unknown` (was `any`). Declarations written with `satisfies Registry.FamilyFor<typeof group>` are unaffected: the `ResourceHandlers` constructors (`make`, `readOnly`) return `NoInfer<…>` so the requirement channel is not inferred from that contextual type.
+  - `Registry.familyLayer`, `Registry.layer` and `Registry.webHandler` are generic over the api's identifier and groups (`HttpApi.HttpApi<ApiId, Groups>`) rather than taking `HttpApi.HttpApi<any, any>`. Any concrete `HttpApi` still passes; a caller that held its api as `HttpApi<any, any>` should pass the concrete value.
+  
+  - `Client.decodeInput` constrains `S` to `Schema.Codec<unknown, unknown, unknown, unknown>` (was `Schema.Top`), so the schema is decoded without an internal assertion. A value typed only as `Schema.Top` must be narrowed to a codec first.
+  - `Resource.createAttributeFields` and `Resource.updateAttributeFields` return `CreateAttributes<A>` / `UpdateAttributes<A>` (was `Record<string, Schema.Top>`); `Resource.attributeKeys`, `relationshipKeys`, `sortable`, `annotate`, `Include.paths`, `Document.wire`, `Document.LinkageDocument`, `Atomic.Operations`, `Assemble.toWireSafeResource` and `Query.bracketPageKeys` are now overloaded function declarations with the same call signature.
+  
+  Also widened without a consumer-visible effect: the `Schema.Codec<any, string>` id-schema bound (now `Schema.Codec<unknown, string>`) across `Resource`, `Endpoint` and `Group`; `Handlers.IncludeTargets` loaders (`IncludeTarget<ResourceValue, unknown, unknown>`); the `Resource.Family` bound of the include-path helpers; and `Query.bracketKeys`'s input constraint. `Resource.extend`, `Resource.annotate`, `Resource.family` and `ApiError.make` no longer round-trip through `as unknown as` internally; their signatures are unchanged.
+- a41d580: **Breaking:** `Client`, `Conformance`, `Middleware`, `Negotiation`, `Registry`, `ServerErrors`, `ApiError` and `Idempotency` no longer spell "absent" as `undefined` in their options and results (`effect/prefer-option-over-null`, 4 of 6, #533). Options members are `readonly x?: T`, so under `exactOptionalPropertyTypes` they no longer accept an explicit `undefined`; a "maybe" result is an `Option`; a record member that may be absent is optional.
+  
+  Options members (`readonly x?: T | undefined` → `readonly x?: T`):
+  
+  - `Client.MakeOptions`: `baseUrl`, `transformClient`, `transformResponse`, `decodeErrors`.
+  - `Client.PageCursorOptions`: `key`, `defaultLimit`, `maxLimit`.
+  - `Conformance.Options`: `ids`, `paths`, `absentId`, `extensions`, `mutating`, `writes`, `tiers`, `only`, `skip`, `requestTimeout`, `target`; `Conformance.format`'s `width`.
+  - `Conformance.WriteFixture`: `create`, `update`, `cleanup`, `clientId`.
+  - `Middleware.QueryParameterOptions.allowedQueryParameters`, `Middleware.SchemaErrorsOptions.checkLinkage`, `Middleware.QueryParameterCheck.declared`.
+  - `Negotiation.Options`: `fallback`, `alternates`.
+  - `Registry.Options.respond`; `Registry.webHandler`'s `disableLogger`.
+  - `ServerErrors.SchemaIssueOptions`: `status`, `prefix`; `ServerErrors.RespondOptions`: `materialise`, `override`.
+  
+  Results and signatures:
+  
+  - `Middleware.negotiate(headers, options?)` takes the request's headers as a `Headers.Input` — a web `Headers` (`request.headers`), an effect `Headers` or a plain record — instead of `{ contentType?, accept? }`, and returns `Option<UnsupportedMediaType | NotAcceptable>` (was the error or `undefined`).
+  - `Middleware.checkQueryParameters` returns `Option<ErrorDocument>` (was the document or `undefined`).
+  - `Middleware.contentTypeIsAcceptable` / `acceptIsAcceptable` take `header?: string` (was a required `string | undefined`).
+  - `ApiError` classes' static `title` is `Option<string>` (was `string | undefined`). `ApiError.make`'s `detail` / `source` callbacks return the value, or an `Option` of it when an occurrence may carry none (was the value or `undefined`).
+  - `Client.related` / `Client.walk` take `data: LinkedResource` (was `LinkedResource | undefined`; pass `{}` for no primary data — `Client.hydrate` does). `Client.indexIncluded(included?)` takes an optional parameter.
+  - `Client.LooseInput<T>` is `{ readonly [K in keyof T]?: T[K] }` (no `| undefined`); build one from maybe-undefined values with `Client.stripUndefined`. `Client.PageFilters` is `{ readonly [key: string]: string }`.
+  - `Conformance.Report`'s `writes` / `samples`, `Conformance.Write`'s `id` / `detail`, a `Finding`'s `probe` and a `Passed` outcome's `note` are optional members (a `Write`'s `id` and `detail`, a finding's `probe` and a pass's `note` were required `T | undefined`).
+  - `Idempotency.headersFor` (internal) returns `Option<Schema.Top>`.
+  
+  Migration for the apps:
+  
+  - An options key whose value may be `undefined` is left out rather than set to `undefined`. A conditional empty-object spread (`...(x === undefined ? {} : { x })`) is rejected by `effect/no-conditional-empty-object-spread`, so copy this helper (it is what the package uses internally) and spread one call per key:
+  
+    ```ts
+    import * as P from "effect/Predicate";
+  
+    const definedMember = <const K extends string, A>(
+      key: K,
+      value: A,
+    ): { readonly [P in K]?: Exclude<A, undefined> } => {
+      const member: { [P in K]?: Exclude<A, undefined> } = {};
+      if (P.isNotUndefined(value)) member[key] = value;
+      return member;
+    };
+  
+    Client.make(Api, { ...definedMember("baseUrl", env.API_URL), decodeErrors: true });
+    ```
+  
+    For a value already held as an `Option`, the same shape with `if (Option.isSome(value)) member[key] = value.value` (the package's `someMember`).
+  
+  - A "maybe" result is now an `Option`: `Option.getOrUndefined` keeps the old behaviour (`Option.getOrUndefined(Middleware.negotiate(request.headers))`); `Option.isSome` / `Option.match` replace the `!== undefined` checks.
+  - `Middleware.negotiate({ contentType, accept })` becomes `Middleware.negotiate(request.headers)` (or `{ "content-type": …, accept: … }`).
+  - A `detail` / `source` callback that returned `undefined` returns an `Option` instead: `(e) => Option.fromUndefinedOr(e.reason)`.
+  - Wire shapes are unchanged.
+- 442a256: **Breaking:** `Negotiation.Options`' `onExplicitRefusal` and `extensions` are `readonly x?: T`, like the rest of its members (`effect/prefer-option-over-null`, 6 of 6, #533): they were `?: T | undefined`, so under `exactOptionalPropertyTypes` they no longer accept an explicit `undefined`.
+  
+  Migration for the apps: leave the key out rather than set it to `undefined`. With a maybe-undefined value, spread one `definedMember("extensions", extensions)` (the helper the 4-of-6 changeset gives) into the options object instead of writing `extensions: extensions`; a conditional empty-object spread is rejected by `effect/no-conditional-empty-object-spread`.
+- ed15763: **Breaking:** the server modules (`Assemble`, `Handlers`, `ResourceHandlers`, `Document`, `Endpoint`, `Query`, `FlatQuery`, `Group`, `Filter`, `Resource`, `Lid`) no longer spell "absent" as `undefined` in their options and results (`effect/prefer-option-over-null`, 3 of 6, #533). Options members are `readonly x?: T`, so under `exactOptionalPropertyTypes` they no longer accept an explicit `undefined`. A "maybe" result is an `Option`, and a record member that may be absent is optional.
+  
+  Options members (`readonly x?: T | undefined` → `readonly x?: T`):
+  
+  - `Assemble.Options`: `viewer`, `fields`, `include`, `includable`, `targets`, `depth`, `concurrency`, `capabilities`. `Assemble.CollectionOptions.included`, `Assemble.UnpaginatedCollectionOptions.query`, `Assemble.Pagination.query`, and `Assemble.RelationshipInput`'s `viewer`, `capabilities`, `included` and `fields`. `Assemble.OwnedCapabilitiesOptions`: `canModerate`, `relationship`. `Assemble.edgePage`'s `input.query`.
+  - `Handlers.data` / `collection` / `linkage` / `buildIncluded` options: `included`, `onResource`, `checkLinkage`. `Handlers.ResolveIncludedOptions`: `depth`, `concurrency`.
+  - `ResourceHandlers.IncludeConfig`: `depth`, `concurrency`. `ResourceHandlers.ReadOnlyConfig`: `viewer`, `capabilities`, `cache`, `include`, `maxPageLimit`. `ResourceHandlers.Config`: `transact`, `hiddenWrite`. `ResourceHandlers.RelatedConfig`: `includable`, `listQuery`, `viewer`, `capabilities`, `defaultPageLimit`, `maxPageLimit`, `concurrency`.
+  - `ResourceHandlers.GetRequest.query` and `RelatedRequest.query`: the decoded `?include=` (`Endpoint.FlatGetQuery`'s type) and `offset` / `limit`, with no `| undefined`. A request HttpApi decodes from the endpoints still assigns.
+  - `Document.DataDocument` / `CollectionDocument` / `LinkageDocument` / `Document` options: `included`, `meta`, `error`. `Document.WireOptions.toManyMeta`.
+  - `Endpoint.FlatDocumentOptions`: `included`, `toManyMeta`. `Endpoint.FlatRelatedOptions`: `query`, `included`.
+  - `Group.FlatReadOnlyOptions`: `filters`, `toManyMeta`. `Group.FlatOptions.hiddenWrites`.
+  - `Query.Options`: `include`, `fields`, `sort`. `Query.FlatListOptions` / `Query.flatList` options: `filters`, `include`. (`page` and `filter` changed with the type-level sentinels, #627.)
+  - `FlatQuery.PaginationOptions.defaultLimit`. `FlatQuery.SlugOptions`: `maxLength`, `reserved`. `FlatQuery.idList`'s `maxLength`.
+  - `Filter.able`'s `literal`. `Filter.LiteralCodecs`' `operators`.
+  - `Resource.make` / `Resource.extend` options: `id`, `maxUndeclaredMemberErrors`. `Resource.attribute` / `readOnlyAttribute`'s `filterLiteral`. `Resource.Any`: `declaredAttributes`, `maxUndeclaredMemberErrors`.
+  
+  Results and signatures:
+  
+  - `Handlers.resolveIncluded(primary, paths, targets, options?)` takes `paths: Option<ReadonlyArray<string>>` (was `ReadonlyArray<string> | undefined`) and returns `Effect<Option<ReadonlyArray<…>>, …>` (was the array or `undefined`). `Option.none()` still means "the request carried no `include`".
+  - `Handlers.withMeta(compute)`: `compute` returns `Option<M>` (was `M | undefined`). Return `Option.none()` for a resource it has nothing to say about.
+  - `Handlers.project(fields?)` / `Handlers.project(resource, fields?)` take an optional `fields` (was a required `F | undefined`). `Handlers.Fields`' index signature is `ReadonlyArray<string>` (was `ReadonlyArray<string> | undefined`), as a decoded `query.fields` is.
+  - `Assemble.OwnedCapabilitiesOptions.viewerId` returns `Option<string>` (was `string | undefined`).
+  - `Document.href(link)` takes a `Link` only. The `Link | undefined` overload is gone.
+  - `Lid.LidMap.id` returns `Option<string>` (was `string | undefined`). `LidMap.resolveLinkage`'s `relationships` is an optional parameter.
+  - `FlatQuery.suppliedValue(field?)` takes an optional parameter.
+  - `Filter.Annotation.literal` and `Resource.AttributeDescriptor.annotations` are optional members (were required `T | undefined`). `Resource.attributeAnnotations` (`AttributeAnnotationsOf`) has no key for an attribute that carries no annotations (was the key set to `undefined`).
+  - `Resource.family`'s `maxUndeclaredMemberErrors` on a name-only family is the default cap, `12` (was `undefined`, which the atomic operations read as `12`). It is typed `number`.
+  
+  Migration for the apps:
+  
+  - An options key whose value may be `undefined` is left out rather than set to `undefined`. Use the `definedMember` helper from the migration guide (#620) and spread one call per key: `Handlers.data(article, { ...definedMember("included", included), self })`. A value held as an `Option` takes the `Option` form of the same helper (`someMember`).
+  - `Handlers.resolveIncluded(x, query.include, targets)` becomes `Handlers.resolveIncluded(x, Option.fromUndefinedOr(query.include), targets)`. Hand its `Option` result to the builder with `someMember("included", included)`, or `Option.match` it.
+  - `Handlers.withMeta((r) => ({ … }))` becomes `Handlers.withMeta((r) => Option.some({ … }))`, and `() => undefined` becomes `() => Option.none()`.
+  - `viewerId: (v) => v?.id` becomes `viewerId: (v) => Option.fromNullishOr(v?.id)`.
+  - `Document.href(maybeLink)` becomes `Option.map(Option.fromUndefinedOr(maybeLink), Document.href)`. Use `Option.getOrUndefined` to keep the old behaviour.
+  - `lids.id(lid)` is an `Option`: `Option.getOrThrowWith(lids.id(lid), () => new Lid.UnknownLidError(lid))`, or `Option.getOrUndefined`.
+  - Wire shapes are unchanged.
+- 3c74fe9: **Breaking:** the wire-shape types are spelled from their schemas, and wire members that are optional in JSON:API no longer take an explicit `undefined` (part of #533).
+  
+  Every `| null` in a wire type stays: `data: null`, `links.next: null` and nullable attributes are unchanged, and the respelled types (`Handlers.LinkageValue`, `LinksValue`'s `first` / `last` / `prev` / `next`, `ResourceValue`'s relationship `data`, `resolveIncluded`'s `primary`, `data`'s bound; `Atomic.RelationshipDataValue`, `ResultValue.data`, `result`'s bound; `Lid.RefLinkageValue`, `ResolvedLinkage`; `Assemble.RelationshipDocument.data`; `Client.hydrate`'s `data`; `Resource.attribute` / `readOnlyAttribute` / `Filter.able`'s nullable-schema match) are identical to the old ones. What changes, under `exactOptionalPropertyTypes`, is that these optional members are now `?: T`, as `Schema.optionalKey` decodes them, not `?: T | undefined`:
+  
+  - `Assemble.ResourceLike`: `relationships`, `links`, `links.self`, `meta`
+  - `Assemble.RelationshipObject`: `data`, `links`, `meta`
+  - `Client.AnyDocument.included`, `Client.IncludedResource` (`attributes`, `relationships`, `links`, `meta`), `Client.DocumentMembers` (`meta`, `links`, `jsonapi`), `Client.ResourceDocument` / `CollectionDocument` `included`, `Client.LinkedResource.relationships`, `Client.hydrate`'s `document.included`
+  - `Conformance.WritePayload`: `attributes`, `relationships`, `meta`
+  
+  `Client.readTotalCount`'s `source` is an optional parameter (`readTotalCount()` and `readTotalCount(undefined)` both still give `0`).
+  
+  A decoded document or resource still assigns as it is. Code that builds one of these values with `{ links: maybeLinks }`, where `maybeLinks` might be `undefined`, stops compiling: leave the key out when the value is absent, spreading one call per key of the `definedMember` helper from the 0.22 migration notes (#620):
+  
+  ```ts
+  // before: { type, id, attributes, meta: row.meta }, with `row.meta` possibly `undefined`
+  const resource: Assemble.ResourceLike = {
+    type,
+    id,
+    attributes,
+    ...definedMember("meta", row.meta),
+  };
+  ```
+- 68c2b3f: `Assemble.Pagination` gains `linkTotal` and `lastUnknown`, and `Assemble.edgePage`'s `input` forwards both. `linkTotal` is the total the pagination links (`last`, and whether `next` exists) are computed from, defaulting to `totalCount`; `meta.totalCount` stays `totalCount`. `lastUnknown: true` omits `links.last` (the key is absent, not `null`) while `self` / `first` / `prev` / `next` stay exact. A search with no corpus count passes `linkTotal = offset + page.length + (hasMore ? 1 : 0)` and `lastUnknown: true`. Additive; no published type changes (`LinksValue.last` was already optional). From gardeneria#1263 O8 (#569).
+- 06fa426: **Breaking:** a relationship descriptor's storage `key` and canonical `order` are `Option`s, no longer `T | undefined` (#626, part of #533).
+  
+  - `Relationship.one` / `optional` descriptors (`Relationship.One`, `Optional`, `one`, `optional`) carry `key: Option.Option<K>`: `Option.some("authorId")` when a `key` is declared, `Option.none()` when none is. A declared key still infers its literal (`Option<"authorId">`); an undeclared one reads as `Option<never>`.
+  - `Relationship.paginated` descriptors (`Relationship.Paginated`, `paginated`) carry `order: Option.Option<O>` the same way, with the declared `const` tuple as `O` and `Option<never>` when no order is declared.
+  - `Relationship.StorageKey` is `string` (it was `string | undefined`), and `Paginated`'s `O` is constrained by `Order<R>` alone. The lowercase annotations default the undeclared parameter to `never`, so `Relationship.one<Comment>` and `Relationship.paginated<Comment>` still name an unkeyed / order-less descriptor. An explicit `undefined` type argument (`Relationship.one<Comment, false, undefined>`, `Relationship.paginated<Comment, undefined>`) is now a constraint error: omit it, or pass `never`.
+  - The wide forms (`Relationship.One<Any>`, `Optional<Any>`, `Paginated<Any>`, `Descriptor`) still match keyed and unkeyed, ordered and order-less descriptors alike.
+  
+  The wire schema, the query grammar and the endpoints are unchanged. Migration, for apps that derive storage (a table, a sync engine's node graph) or a default sort from the descriptors:
+  
+  ```ts
+  import { Option } from "effect";
+  
+  // before: const column = descriptor.key ?? defaultColumn
+  const column = Option.getOrElse(descriptor.key, () => defaultColumn);
+  
+  // before: if (descriptor.order !== undefined) { … descriptor.order … }
+  if (Option.isSome(descriptor.order)) {
+    const terms = descriptor.order.value;
+  }
+  
+  // before: descriptor.order?.map(toSql)
+  const orderBy = Option.map(descriptor.order, (terms) => terms.map(toSql));
+  
+  // branching on both cases at once
+  const label = Option.match(descriptor.key, {
+    onNone: () => "unkeyed",
+    onSome: (key) => `keyed by ${key}`,
+  });
+  
+  // to keep the old `string | undefined` shape while migrating
+  const legacyKey = Option.getOrUndefined(descriptor.key);
+  ```
+  
+  The `key` and `order` options themselves no longer accept `undefined` (they were typed `K | undefined` through the parameter). Under `exactOptionalPropertyTypes`, `{ key: maybeKey }` / `{ order: maybeOrder }` is a compile error; pass the key only when it is defined:
+  
+  ```ts
+  // before: Relationship.one(() => Person, { key: maybeKey })
+  const author =
+    maybeKey === undefined
+      ? Relationship.one(() => Person)
+      : Relationship.one(() => Person, { key: maybeKey });
+  ```
+- 1348b44: The error funnel can be overridden, and an `ApiError.make` error no longer repeats its `detail` in `meta` (#565).
+  
+  - **New `ServerErrors.RespondOptions.override`.** These are mapping arms `ServerErrors.respond` consults **before** `fromTaggedError`, so an application can render a cause the package already maps (an `ApiError.Conflict` in its own wording, say) its own way. `none` hands the cause on to `fromTaggedError` and then to `materialise`, which are unchanged.
+  - **Breaking wire change: a `detail` field is encoded only as the error object's top-level `detail`, never also as `meta.detail`.** `new ApiError.Conflict({ detail: "id mismatch" })` now encodes as `{ status: "409", code: "conflict", title: "Conflict", detail: "id mismatch" }`, and every `BadRequest` the `SchemaErrors` middleware answers loses its `meta: { detail: "Request query failed validation" }` the same way. Other fields still go to `meta`.
+  - **No empty `meta`.** An `ApiError.make` error whose fields are all optional and absent (or only the `detail` field) no longer carries `meta: {}`: `new ApiError.Conflict({})` encodes as `{ status: "409", code: "conflict", title: "Conflict" }`.
+  - Decoding is unchanged: a `detail` field already falls back to the error object's `detail`, so typed clients and the round trip are unaffected.
+  
+  **Migration** (website, gardeneria, preferenceflow, in-the-dark, and any other consumer): code that reads `errors[].meta.detail` reads `errors[].detail` instead, and tests that match an error body exactly drop `meta.detail` (and `meta: {}`) from the expected body.
+- 42dc8e1: **Breaking:** the schemas this package publishes no longer use `Schema.Number`, which accepts `NaN`, `Infinity` and `-Infinity`. Each is now `Schema.Finite` or, where the value is a count, status or index, `Schema.Int` (both also reject the non-finite values). Decoding or constructing a value with `NaN` or an infinity now fails with a schema error, and the emitted declarations name `Schema.Finite` / `Schema.Int` where they named `Schema.Number`. The accepted values narrowed for:
+  
+  - `Query.Page.offset(...)` and `Query.Page.number(...)` with `fromString: false`: the `offset`, `limit`, `number` and `size` leaves build on `Schema.Finite` instead of `Schema.Number` (they were already integer-checked and bounded). The default `fromString: true` path already decoded through `FiniteFromString`, so the wire strings `NaN`, `Infinity` and `-Infinity` were already refused and the error messages for wire input are unchanged.
+  - `FlatQuery.PageOffset`, `FlatQuery.pageLimit(...)`, `FlatQuery.pagination(...)` and the `DefaultedPagination` / `RequiredPagination` types: now typed `Schema.Finite` (the runtime schemas from `effect-ext`'s `Bounded` already were).
+  - `ServerErrors.Redirect.status`, `ServerErrors.HttpError.status` and `ServerErrors.JsonapiError.status`: now `Schema.Int`, so a fractional status is refused too.
+  - `ServerErrors.ValidationFailure` issue `path` segments given as numbers: now `Schema.Int` (array indices).
+  - `ApiError.UnsupportedIncludeDepth` `maxDepth` field: now `Schema.Int`.
+  - `Client.ErrorResponse.status`: now `Schema.Int`.
+  - `Conformance.ContractViolation.remaining`: now `Schema.Int`.
+  
+  Migration: a handler or client that builds one of these errors or a `fromString: false` page query from a computed number must pass a finite value (an integer for the `Schema.Int` fields); `Number.isFinite` or `Math.trunc` at the boundary is enough. Code that annotated these schemas as `Schema.Number` (for example `const page: Schema.Number = FlatQuery.PageOffset`) should say `Schema.Finite`. Attribute and meta schemas you declare yourself are unaffected; consider `Schema.Finite` over `Schema.Number` there as well.
+
+### Patch Changes
+
+- b71426d: The declaration helpers' construction-time errors are now tagged. An invalid resource, attribute, relationship, include path, filter or `Query.schema` option still throws synchronously with the same message, but the thrown value is an internal `DeclarationError` (a `Schema.TaggedError`, so `instanceof Error` still holds) with `name` and `_tag` `"DeclarationError"`, instead of a bare `Error`. `Handlers` and `ApiError.toDocument` misuse errors and `Endpoint.getRelationship`'s unknown-relationship error are tagged the same way. No class is exported; match on `message` as before.
+- 9d5680b: The `@thomasfosterau/effect-ext` dependency range widens from `^0.1.0` to `^0.1.0 || ^0.2.0` (#585), so an application already on effect-ext 0.2 no longer gets a second, nested 0.1 copy under this package. Nothing this package imports from effect-ext changed incompatibly in 0.2.0, and the test suite now runs against 0.2.0.
+- b6442e8: `ServerErrors.schemaIssueToErrors` now walks a schema issue with `@thomasfosterau/effect-ext`'s `Issues.leaves` / `Issues.message` instead of a local copy (#555). The error objects it renders are unchanged: a struct-level check's message for the fields it points at, with no appended path. The effect-ext dependency floor moves to `^0.2.0`, the release that carries that walk.
+- bab3831: The open `meta`, `attributes`, `relationships` and `links` objects of the wire-shape types (`Assemble.WireResource`, `Assemble.ResourceDocument`, `Handlers.MetaValue`, `Client` create/update inputs, `Client.readTotalCount`, …) and `Filter.FieldTypes` are now spelled `ReadonlyRecord<string, unknown>` from `effect/Record` instead of a hand-written index signature. The types are identical, so no migration is needed; `Filter.FieldTypes` is now a type alias rather than an interface.
+
 ## 0.21.0
 
 ### Minor Changes
