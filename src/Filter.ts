@@ -199,7 +199,7 @@ export const AnnotationId = "@thomasfosterau/effect-jsonapi/filter";
  */
 export interface Annotation {
   readonly operators: ReadonlyArray<Operator>;
-  readonly literal: Schema.Codec<unknown, string> | undefined;
+  readonly literal?: Schema.Codec<unknown, string>;
 }
 
 /**
@@ -322,7 +322,7 @@ export type OperatorsIn<D extends true | ReadonlyArray<Operator>> = [D] extends 
  */
 export function able<const Ops extends true | ReadonlyArray<Operator> = true>(
   operators?: Ops,
-  options?: { readonly literal?: undefined },
+  options?: { readonly literal?: never },
 ): <S extends Schema.Top>(self: S) => Declared<S, OperatorsIn<Ops>>;
 export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
   operators: Ops,
@@ -332,12 +332,13 @@ export function able<const Ops extends true | ReadonlyArray<Operator>, Literal>(
 ) => Declared<S, OperatorsIn<Ops>, Literal>;
 export function able(
   operators: true | ReadonlyArray<Operator> = true,
-  options?: { readonly literal?: Schema.Codec<unknown, string> | undefined },
+  options?: { readonly literal?: Schema.Codec<unknown, string> },
 ): (self: Schema.Top) => Schema.Top {
-  const annotation: Annotation = {
-    operators: resolveOperators(operators, Operator, "Filter.able"),
-    literal: options?.literal,
-  };
+  const resolved = resolveOperators(operators, Operator, "Filter.able");
+  const annotation: Annotation =
+    options?.literal === undefined
+      ? { operators: resolved }
+      : { operators: resolved, literal: options.literal };
   return (self) => self.annotate({ [AnnotationId]: annotation });
 }
 
@@ -719,7 +720,7 @@ export interface LiteralCodecs {
   readonly [field: string]: {
     readonly literal: Schema.Top;
     /** When present, each condition's operator is checked against it. */
-    readonly operators?: ReadonlyArray<string> | undefined;
+    readonly operators?: ReadonlyArray<string>;
   };
 }
 

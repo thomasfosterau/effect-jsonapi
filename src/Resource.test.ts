@@ -6,6 +6,7 @@ import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
+import * as Struct from "effect/Struct";
 import * as Types from "effect/Types";
 import { AnyMeta, CollectionDocument, DataDocument } from "./Document.js";
 import * as Filter from "./Filter.js";
@@ -1074,8 +1075,8 @@ describe("Resource attribute annotations", () => {
     expect(annotations.plain?.dbColumn).toBeUndefined();
   });
 
-  it("exposes a key for every attribute", () => {
-    expect(R.keys(attributeAnnotations(Widget))).toEqual(["name", "note", "plain"]);
+  it("exposes a key for every annotated attribute, and none for the rest", () => {
+    expect(Struct.keys(attributeAnnotations(Widget))).toEqual(["name", "note"]);
   });
 });
 
@@ -1739,7 +1740,7 @@ describe("Resource.attribute with resource: false (input-only)", () => {
 
   it("keeps input-only attributes out of attributeKeys, attributeAnnotations, filterable and sortable", () => {
     expect(attributeKeys(Upload)).toEqual(["fileName"]);
-    expect(R.keys(attributeAnnotations(Upload))).toEqual(["fileName"]);
+    expect(Struct.keys(attributeAnnotations(Upload))).toEqual(["fileName"]);
     expect(R.keys(filterable(Upload))).toEqual(["fileName"]);
     expect(sortable(Upload)).toEqual(["fileName"]);
   });

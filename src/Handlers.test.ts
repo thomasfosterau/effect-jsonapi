@@ -1,5 +1,6 @@
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
@@ -107,10 +108,10 @@ describe("Handlers.data", () => {
     expect(Handlers.data(null, { included: [] })).toEqual({ data: null, included: [] });
   });
 
-  it("omits `included` when the caller passed `undefined` (#232)", () => {
-    // `undefined` is "no include was requested": the document stays bare.
-    expect(Handlers.data(article, { included: undefined })).toEqual({ data: article });
-    expect("included" in Handlers.data(article, { included: undefined })).toBe(false);
+  it("omits `included` when the caller passed none (#232)", () => {
+    // No `included` is "no include was requested": the document stays bare.
+    expect(Handlers.data(article, {})).toEqual({ data: article });
+    expect("included" in Handlers.data(article, {})).toBe(false);
   });
 });
 
@@ -158,7 +159,7 @@ describe("Handlers.collection", () => {
       included: [],
     });
     expect(Handlers.collection([], { included: [] })).toEqual({ data: [], included: [] });
-    expect(Handlers.collection([article], { included: undefined })).toEqual({ data: [article] });
+    expect(Handlers.collection([article], {})).toEqual({ data: [article] });
   });
 
   it("appends the request's canonical query to the self link", () => {
@@ -313,7 +314,7 @@ describe("Handlers.linkage", () => {
         included: [],
       });
       expect(Handlers.linkage(ids("5"))).not.toHaveProperty("included");
-      expect(Handlers.linkage(ids("5"), { included: undefined })).not.toHaveProperty("included");
+      expect(Handlers.linkage(ids("5"), {})).not.toHaveProperty("included");
     });
 
     it("seeds full linkage from a to-one identifier", () => {
@@ -377,9 +378,11 @@ describe("Handlers.linkage", () => {
       // the other's transformed value.
       const doc = Handlers.linkage(ids("5"), {
         included: [comment("5"), person("9")],
-        onResource: Handlers.withMeta((resource) => ({
-          slot: resource.attributes === undefined ? "identifier" : "resource",
-        })),
+        onResource: Handlers.withMeta((resource) =>
+          Option.some({
+            slot: resource.attributes === undefined ? "identifier" : "resource",
+          }),
+        ),
       });
       expect(doc.data).toEqual([{ type: "comments", id: "5", meta: { slot: "identifier" } }]);
       expect(doc.included).toEqual([
@@ -418,8 +421,8 @@ describe("Handlers.project", () => {
     // absent entirely…
     expect(Handlers.project(relatedArticle, { people: ["firstName"] })).toBe(relatedArticle);
     expect(Handlers.project(relatedArticle, undefined)).toBe(relatedArticle);
-    // …or present with no set for this type
-    expect(Handlers.project(relatedArticle, { articles: undefined })).toBe(relatedArticle);
+    // …including a data-first call with no fieldset at all
+    expect(Handlers.project(relatedArticle)).toBe(relatedArticle);
   });
 
   // §Sparse Fieldsets: "An empty value indicates that no fields should be
@@ -566,7 +569,9 @@ describe("Handlers.project", () => {
 
 describe("Handlers.withMeta", () => {
   it("merges the computed members over the resource's own meta", () => {
-    const stamp = Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }));
+    const stamp = Handlers.withMeta((resource) =>
+      Option.some({ href: `/${resource.type}/${resource.id}` }),
+    );
     expect(stamp({ ...relatedArticle, meta: { views: 3 } }).meta).toEqual({
       views: 3,
       href: "/articles/2",
@@ -575,24 +580,24 @@ describe("Handlers.withMeta", () => {
   });
 
   it("computed members win over the resource's own", () => {
-    const stamp = Handlers.withMeta(() => ({ views: 0 }));
+    const stamp = Handlers.withMeta(() => Option.some({ views: 0 }));
     expect(stamp({ ...relatedArticle, meta: { views: 3 } }).meta).toEqual({ views: 0 });
   });
 
   it("emits no `meta` member when the merged result is empty", () => {
     // an empty `meta` object is a *present* meta to the spec — not the same
     // statement as having none
-    expect(Handlers.withMeta(() => ({}))(relatedArticle)).not.toHaveProperty("meta");
-    expect(Handlers.withMeta(() => undefined)(relatedArticle)).toBe(relatedArticle);
+    expect(Handlers.withMeta(() => Option.some({}))(relatedArticle)).not.toHaveProperty("meta");
+    expect(Handlers.withMeta(() => Option.none())(relatedArticle)).toBe(relatedArticle);
     // …including when the resource arrived carrying an empty one
-    expect(Handlers.withMeta(() => undefined)({ ...relatedArticle, meta: {} })).not.toHaveProperty(
-      "meta",
-    );
+    expect(
+      Handlers.withMeta(() => Option.none())({ ...relatedArticle, meta: {} }),
+    ).not.toHaveProperty("meta");
   });
 
   it("computes per resource, over every type in the document", () => {
     const stamp = Handlers.withMeta((resource) =>
-      resource.type === "articles" ? { kind: "article" } : undefined,
+      resource.type === "articles" ? Option.some({ kind: "article" }) : Option.none(),
     );
     expect(stamp(relatedArticle).meta).toEqual({ kind: "article" });
     expect(stamp(author)).not.toHaveProperty("meta");
@@ -603,7 +608,7 @@ describe("Handlers.compose", () => {
   it("applies the first transform, then the second", () => {
     const onResource = Handlers.compose(
       Handlers.project({ articles: ["title"] }),
-      Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` })),
+      Handlers.withMeta((resource) => Option.some({ href: `/${resource.type}/${resource.id}` })),
     );
     expect(onResource(relatedArticle)).toEqual({
       type: "articles",
@@ -864,7 +869,9 @@ describe("the per-resource transform pass", () => {
   it("buildIncluded applies it to the deduplicated members", () => {
     expect(
       Handlers.buildIncluded([article], [author, author], {
-        onResource: Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` })),
+        onResource: Handlers.withMeta((resource) =>
+          Option.some({ href: `/${resource.type}/${resource.id}` }),
+        ),
       }),
     ).toEqual([{ ...author, meta: { href: "/people/9" } }]);
   });
@@ -872,18 +879,22 @@ describe("the per-resource transform pass", () => {
   it("applies to a linkage document's resource identifiers", () => {
     const document = Handlers.linkage([{ type: "comments", id: "5" }], {
       self: "/articles/1/relationships/comments",
-      onResource: Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` })),
+      onResource: Handlers.withMeta((resource) =>
+        Option.some({ href: `/${resource.type}/${resource.id}` }),
+      ),
     });
     expect(document.data).toEqual([{ type: "comments", id: "5", meta: { href: "/comments/5" } }]);
     // a to-one identifier, and an empty to-one which has nothing to shape
     expect(
       Handlers.linkage(
         { type: "people", id: "9" },
-        { onResource: Handlers.withMeta(() => ({ canEdit: true })) },
+        { onResource: Handlers.withMeta(() => Option.some({ canEdit: true })) },
       ).data,
     ).toEqual({ type: "people", id: "9", meta: { canEdit: true } });
     expect(
-      Handlers.linkage(null, { onResource: Handlers.withMeta(() => ({ canEdit: true })) }).data,
+      Handlers.linkage(null, {
+        onResource: Handlers.withMeta(() => Option.some({ canEdit: true })),
+      }).data,
     ).toBeNull();
   });
 });
@@ -938,7 +949,7 @@ describe("the sparse-fieldset exemption from full linkage", () => {
   });
 
   it("is carried through `compose`, on either side", () => {
-    const stamp = Handlers.withMeta(() => ({ seen: true }));
+    const stamp = Handlers.withMeta(() => Option.some({ seen: true }));
     Arr.forEach(
       [
         Handlers.compose(stamp, Handlers.project({ articles: ["title"] })),

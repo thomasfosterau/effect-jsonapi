@@ -32,6 +32,7 @@ import * as Relationship from "./Relationship.js";
 import * as Resource from "./Resource.js";
 import * as ResourceHandlers from "./ResourceHandlers.js";
 import * as ServerErrors from "./ServerErrors.js";
+import { definedMember } from "./internal/members.js";
 
 // ── The family under test ────────────────────────────────────────────
 
@@ -396,8 +397,7 @@ describe("a write whose re-read fails", () => {
     ops: ReturnType<typeof hidingOps>["ops"],
     options: {
       readonly transact?: ResourceHandlers.Transact<Transaction, CommitFailed, never>;
-      // oxlint-disable-next-line effect/prefer-option-over-null -- forwarded as is to `ResourceHandlers.make`'s own `?: T | undefined` option
-      readonly hiddenWrite?: HiddenRule | undefined;
+      readonly hiddenWrite?: HiddenRule;
       readonly evicting?: Deferred.Deferred<void>;
     } = {},
   ) => {
@@ -427,7 +427,7 @@ describe("a write whose re-read fails", () => {
       capabilities,
       cache,
       transact: options.transact ?? makeTransact().transact,
-      hiddenWrite: options.hiddenWrite,
+      ...definedMember("hiddenWrite", options.hiddenWrite),
     });
     return { handlers, cacheStore };
   };

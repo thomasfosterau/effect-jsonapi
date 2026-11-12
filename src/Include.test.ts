@@ -490,12 +490,14 @@ describe("feeding the resolver", () => {
 
   it.effect("resolves to exactly the resources its own `included` union admits", () =>
     Effect.gen(function* () {
-      const resolved = yield* Handlers.resolveIncluded(
-        article,
-        ["author", "comments.author"],
-        targets,
+      const resolved = yield* Effect.fromOption(
+        yield* Handlers.resolveIncluded(
+          article,
+          Option.some(["author", "comments.author"]),
+          targets,
+        ),
       );
-      expect(resolved?.map((r) => `${r.type}:${r.id}`)).toEqual([
+      expect(resolved.map((r) => `${r.type}:${r.id}`)).toEqual([
         "people:9",
         "comments:5",
         "people:7",
@@ -504,7 +506,7 @@ describe("feeding the resolver", () => {
       // same declaration — which is the whole point: nothing the resolver hoists
       // can be stripped on encode for want of an arm.
       const admitted = surface.included.members.map((member) => member.type);
-      expect(Arr.sort(Arr.dedupe(resolved?.map((r) => r.type) ?? []), Order.String)).toEqual(
+      expect(Arr.sort(Arr.dedupe(resolved.map((r) => r.type)), Order.String)).toEqual(
         Arr.sort([...admitted], Order.String),
       );
       // …and the union is not simply wide enough to admit anything.

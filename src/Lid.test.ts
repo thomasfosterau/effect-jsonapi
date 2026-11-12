@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { make as lidMap, UnknownLidError } from "./Lid.js";
 import * as Relationship from "./Relationship.js";
@@ -38,9 +39,9 @@ const Article = Resource("articles", {
 describe("lidMap", () => {
   it("assigns and resolves lids", () => {
     const lids = lidMap();
-    expect(lids.id("a1")).toBeUndefined();
+    expect(lids.id("a1")).toStrictEqual(Option.none());
     lids.assign("a1", "42");
-    expect(lids.id("a1")).toBe("42");
+    expect(lids.id("a1")).toStrictEqual(Option.some("42"));
   });
 
   it("resolves lid-based refs to typed identifiers", () => {

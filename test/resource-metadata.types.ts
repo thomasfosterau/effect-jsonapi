@@ -121,7 +121,10 @@ assertType<boolean>(descriptor.clearable);
 assertType<boolean>(descriptor.nullable);
 assertType<boolean>(descriptor.readOnly);
 assertType<Schema.Codec<unknown, unknown>>(descriptor.schema);
-assertType<Schema.Annotations.Annotations | undefined>(descriptor.annotations);
+assertType<Schema.Annotations.Annotations>(descriptor.annotations ?? {});
+// `annotations` is an optional member: a descriptor without annotations has no key.
+// @ts-expect-error -- an explicit `undefined` is not an annotation bag
+export const unannotated: Resource.AttributeDescriptor = { ...descriptor, annotations: undefined };
 
 // `update` is the narrower union: an attribute is never *required* on update.
 // @ts-expect-error -- "required" is not an update presence

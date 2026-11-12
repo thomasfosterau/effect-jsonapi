@@ -56,7 +56,7 @@ import type * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
 import { assign } from "./internal/define.js";
 import * as Query from "./Query.js";
-import { definedMember, someMember } from "./internal/members.js";
+import { definedMember, someMember, stampMeta } from "./internal/members.js";
 
 // ---------------------------------------------------------------------------
 // Shapes
@@ -293,12 +293,12 @@ export const roleCapabilities =
  * @category models
  */
 export interface OwnedCapabilitiesOptions<V> {
-  /** The viewer's id, or `undefined` for an anonymous viewer. */
-  readonly viewerId: (viewer: V) => string | undefined;
+  /** The viewer's id, or `Option.none()` for an anonymous viewer. */
+  readonly viewerId: (viewer: V) => Option.Option<string>;
   /** Whether the viewer may act on any owner's behalf (a moderator rung). Defaults to never. */
-  readonly canModerate?: ((viewer: V) => boolean) | undefined;
+  readonly canModerate?: (viewer: V) => boolean;
   /** The relationship the owner rides on. Defaults to `"owner"`. */
-  readonly relationship?: string | undefined;
+  readonly relationship?: string;
 }
 
 /**
@@ -312,10 +312,11 @@ export interface OwnedCapabilitiesOptions<V> {
  * @example
  * ```ts
  * import { Assemble } from "@thomasfosterau/effect-jsonapi"
+ * import * as Option from "effect/Option"
  *
  * interface User { readonly id: string; readonly role: "user" | "moderator" }
  * const owned = Assemble.ownedCapabilities({
- *   viewerId: (viewer: User | null | undefined) => viewer?.id,
+ *   viewerId: (viewer: User | null | undefined) => Option.fromNullishOr(viewer?.id),
  *   canModerate: (viewer) => viewer?.role === "moderator"
  * })
  * const garden = {
@@ -333,8 +334,7 @@ export const ownedCapabilities =
   <V>(options: OwnedCapabilitiesOptions<V>): CapabilitiesHook<V> =>
   (resource, viewer) => {
     const ownerId = relationshipRefs(resource, options.relationship ?? "owner")[0]?.id;
-    const id = options.viewerId(viewer);
-    const isOwner = id !== undefined && ownerId !== undefined && id === ownerId;
+    const isOwner = ownerId !== undefined && Option.contains(options.viewerId(viewer), ownerId);
     const write = isOwner || (options.canModerate?.(viewer) ?? false);
     return { canEdit: write, canDelete: write };
   };
@@ -372,27 +372,27 @@ export const MAX_INCLUDE_DEPTH = 3;
  */
 export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = never> {
   /** The current request's viewer, as the application's auth layer produced it. */
-  readonly viewer?: V | undefined;
+  readonly viewer?: V;
   /**
    * Sparse fieldsets keyed by resource `type` to the field names —
    * attributes and relationships (#494) — the caller wants. Missing means the
    * full resource; an empty set, no fields. A relationship a set excludes is
    * exempt from the full-linkage check (`Handlers.project`).
    */
-  readonly fields?: Handlers.Fields | undefined;
+  readonly fields?: Handlers.Fields;
   /**
    * The requested `?include=` paths (JSON:API §7.1 dot paths), or `undefined`
    * when the request carried no `include`. Presence is the signal: any array,
    * even the `[]` a bare `?include=` decodes to, answers with the `included`
    * key.
    */
-  readonly include?: ReadonlyArray<string> | undefined;
+  readonly include?: ReadonlyArray<string>;
   /**
    * The legal include paths — anything else fails
    * `ApiError.UnsupportedIncludePath`, which publishes this set as
    * `meta.includablePaths`. Required whenever `include` is non-empty.
    */
-  readonly includable?: ReadonlyArray<string> | undefined;
+  readonly includable?: ReadonlyArray<string>;
   /**
    * The registry the walk loads through, keyed by target type
    * (`Handlers.IncludeTargets`). Omit it and no walk runs — `include` is
@@ -400,17 +400,17 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
    * (`[]` for {@link resource}): a request carrying `include` always gets the
    * key, empty when nothing remains (JSON:API 1.1 §Fetching Includes).
    */
-  readonly targets?: Targets | undefined;
+  readonly targets?: Targets;
   /** The maximum number of hops. Defaults to {@link MAX_INCLUDE_DEPTH}. */
-  readonly depth?: number | undefined;
+  readonly depth?: number;
   /** How many loader calls of one level may run at once. Defaults to unbounded. */
-  readonly concurrency?: number | "unbounded" | undefined;
+  readonly concurrency?: number | "unbounded";
   /**
    * The capability rule stamped onto every emitted resource — primary and
    * included alike, keyed by resource rather than by handler, so a compound
    * document mixing families stamps each member honestly. Omit for no stamp.
    */
-  readonly capabilities?: CapabilitiesHook<V> | undefined;
+  readonly capabilities?: CapabilitiesHook<V>;
   /**
    * Whether `included` members are stamped with the {@link capabilities}
    * rule too. Defaults to `true` — every emitted resource, primary and
@@ -439,7 +439,7 @@ export interface CollectionOptions<
   X extends ResourceLike = never,
 > extends Options<V, Targets> {
   /** Members the caller already resolved; `X` is their type, part of the document's `included` type. */
-  readonly included?: ReadonlyArray<X> | undefined;
+  readonly included?: ReadonlyArray<X>;
 }
 
 /**
@@ -482,8 +482,7 @@ export interface UnpaginatedCollectionOptions<
    * theirs, so `self` names the request the document answers. It rides on
    * `self`: a call with no `self` can't pass it.
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
-  readonly query?: ([Self] extends [never] ? never : ReadonlyArray<Query.Pair>) | undefined;
+  readonly query?: [Self] extends [never] ? never : ReadonlyArray<Query.Pair>;
   /**
    * The document's top-level `meta` — document-level metadata that isn't
    * page math: a generation timestamp, a cache hint, an application-specific
@@ -525,7 +524,7 @@ export interface Pagination {
    * query on the next page rather than an unfiltered, un-included one. Each
    * link's own `page[*]` cursor replaces the pairs' rather than appending.
    */
-  readonly query?: ReadonlyArray<Query.Pair> | undefined;
+  readonly query?: ReadonlyArray<Query.Pair>;
   /**
    * The total the offset pagination links are computed from — `last`, and
    * whether `next` exists. Defaults to {@link Pagination.totalCount}; set it
@@ -775,17 +774,20 @@ const onResourceFor = <V>(
     options.capabilitiesOnIncluded === false
       ? HashSet.fromIterable(primary.map((r) => `${r.type}\0${r.id}`))
       : undefined;
-  return Handlers.compose(
-    Handlers.withMeta((resource) =>
+  // `Handlers.withMeta`'s stamp, called directly: its `Option`-returning
+  // compute would allocate a `Some` per stamped resource.
+  const stamp = Handlers.transform<Handlers.WithMetaLambda<Handlers.MetaValue>>((resource) =>
+    stampMeta(
+      resource,
       options.capabilities === undefined ||
-      (primaryKeys !== undefined && !HashSet.has(primaryKeys, `${resource.type}\0${resource.id}`))
+        (primaryKeys !== undefined && !HashSet.has(primaryKeys, `${resource.type}\0${resource.id}`))
         ? undefined
         : // The viewer is handed to the hook exactly as it was given: an
           // omitted option is `undefined`, which is then what `V` is.
           options.capabilities(resource as ResourceLike, options.viewer as V),
     ),
-    Handlers.project(options.fields),
   );
+  return Handlers.compose(stamp, Handlers.project(options.fields));
 };
 
 // `ResourceLike`'s `relationships` values widen to `unknown`, which the
@@ -820,13 +822,12 @@ const walk = <V, Targets extends Handlers.IncludeTargets>(
   }).pipe(
     Effect.flatMap(() =>
       options.targets === undefined
-        ? Effect.succeed([])
-        : Handlers.resolveIncluded(primary.map(asValue), include, options.targets, {
+        ? Effect.succeedSome([])
+        : Handlers.resolveIncluded(primary.map(asValue), Option.some(include), options.targets, {
             depth,
-            concurrency: options.concurrency,
+            ...definedMember("concurrency", options.concurrency),
           }),
     ),
-    Effect.asSome,
   ) as Effect.Effect<
     Option.Option<ReadonlyArray<ResourceLike>>,
     | ApiError.UnsupportedIncludeDepth
@@ -1180,8 +1181,8 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
   readonly parent: R;
   /** The relationship key under `parent.relationships`. */
   readonly key: string;
-  readonly viewer?: V | undefined;
-  readonly capabilities?: CapabilitiesHook<V> | undefined;
+  readonly viewer?: V;
+  readonly capabilities?: CapabilitiesHook<V>;
   /** As {@link Options.capabilitiesOnIncluded}: `false` leaves `included` unstamped. */
   readonly capabilitiesOnIncluded?: boolean;
   /**
@@ -1190,7 +1191,7 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
    * reachable from the primary identifiers, or {@link relationship} throws
    * (#498).
    */
-  readonly included?: ReadonlyArray<I> | undefined;
+  readonly included?: ReadonlyArray<I>;
   /**
    * Sparse fieldsets keyed by resource `type` to the field names —
    * attributes and relationships (#494) — the caller wants: the
@@ -1201,8 +1202,7 @@ export interface RelationshipInput<R extends ResourceLike, I extends ResourceLik
    *
    * @since 0.18.0
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as `Options.fields` spells it
-  readonly fields?: Handlers.Fields | undefined;
+  readonly fields?: Handlers.Fields;
 }
 
 /**
@@ -1332,7 +1332,7 @@ export const edgePage = <R extends ResourceLike, V = unknown>(
   input: {
     readonly limit: number;
     readonly offset: number;
-    readonly query?: ReadonlyArray<Query.Pair> | undefined;
+    readonly query?: ReadonlyArray<Query.Pair>;
     readonly linkTotal?: number;
     readonly lastUnknown?: boolean;
   },

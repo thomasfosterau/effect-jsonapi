@@ -136,8 +136,8 @@ export type ResolvedLinkage<R extends Any> = {
 export interface LidMap {
   /** Records the server-assigned id for a lid. */
   readonly assign: (lid: string, id: string) => void;
-  /** The id assigned to a lid, if any. */
-  readonly id: (lid: string) => string | undefined;
+  /** The id assigned to a lid, or `Option.none()` when none was. */
+  readonly id: (lid: string) => Option.Option<string>;
   /**
    * Resolves a ref (id- or lid-based) to the resource's typed identifier.
    * Throws {@link UnknownLidError} for unassigned lids.
@@ -146,12 +146,12 @@ export interface LidMap {
   /**
    * Resolves every lid-based identifier inside relationship linkage to an
    * id-based identifier — the shape the resource's own relationship schemas
-   * expect. `undefined` linkage resolves to an empty record. Throws
+   * expect. Absent linkage resolves to an empty record. Throws
    * {@link UnknownLidError} for unassigned lids.
    */
   readonly resolveLinkage: <R extends Any>(
     resource: R,
-    relationships: RefLinkageValue | undefined,
+    relationships?: RefLinkageValue,
   ) => ResolvedLinkage<R>;
 }
 
@@ -216,7 +216,7 @@ export const make = (): LidMap => {
     assign: (lid, id) => {
       MutableHashMap.set(ids, lid, id);
     },
-    id: (lid) => Option.getOrUndefined(MutableHashMap.get(ids, lid)),
+    id: (lid) => MutableHashMap.get(ids, lid),
     identifier: (resource, ref) => {
       if (ref.type !== resource.type) {
         throw declarationError(

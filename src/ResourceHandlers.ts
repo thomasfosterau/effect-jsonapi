@@ -43,6 +43,7 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
 import * as Ref from "effect/Ref";
+import type * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
 import type * as Handlers from "./Handlers.js";
@@ -167,9 +168,9 @@ export interface IncludeConfig<Targets extends Handlers.IncludeTargets> {
   /** The loader registry the walk resolves through (`Handlers.IncludeTargets`). */
   readonly targets: Targets;
   /** The maximum number of hops. Defaults to `Assemble.MAX_INCLUDE_DEPTH`. */
-  readonly depth?: number | undefined;
+  readonly depth?: number;
   /** How many loader calls of one level may run at once. Defaults to unbounded. */
-  readonly concurrency?: number | "unbounded" | undefined;
+  readonly concurrency?: number | "unbounded";
 }
 
 /**
@@ -221,21 +222,21 @@ export interface ReadOnlyConfig<
   /** The absolute origin the links are built under (`"https://example.test"`). */
   readonly linkBase: Effect.Effect<string, never, RL>;
   /** The request's viewer, for the capability hook. Omit for none. */
-  readonly viewer?: Effect.Effect<V, never, RV> | undefined;
+  readonly viewer?: Effect.Effect<V, never, RV>;
   /** The capability rule every emitted resource is stamped with. Omit for no stamp. */
-  readonly capabilities?: Assemble.CapabilitiesHook<V> | undefined;
+  readonly capabilities?: Assemble.CapabilitiesHook<V>;
   /** `false` stamps the primary data only, leaving `included` members unstamped. Defaults to `true`. */
   readonly capabilitiesOnIncluded?: boolean;
   /** Read-through on `get`; write-through and eviction on the writes. */
-  readonly cache?: Cache<TResource, RC> | undefined;
+  readonly cache?: Cache<TResource, RC>;
   /** The `?include=` walk on `get` and `list`. */
-  readonly include?: IncludeConfig<Targets> | undefined;
+  readonly include?: IncludeConfig<Targets>;
   /**
    * The page size a collection reports when the query names no `limit` (a
    * query whose `limit` is defaulted on decode never reaches this). Defaults
    * to `100`.
    */
-  readonly maxPageLimit?: number | undefined;
+  readonly maxPageLimit?: number;
 }
 
 /**
@@ -270,15 +271,14 @@ export interface Config<
    * lands after it commits but before it returns its result is seen as a
    * write that never succeeded, so it evicts nothing (see {@link make}).
    */
-  readonly transact?: Transact<Tx, ET, RT> | undefined;
+  readonly transact?: Transact<Tx, ET, RT>;
   /**
    * Which failures of the post-write re-read mean the committed resource is
    * hidden from its writer, answered with a {@link CommittedDocument} rather
    * than the failure. Omit to fail the write with the re-read's error, as a
    * group without `Group.flat`'s `hiddenWrites` declares.
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes, as the sibling options do
-  readonly hiddenWrite?: HiddenWrite<NoInfer<E>, HType> | undefined;
+  readonly hiddenWrite?: HiddenWrite<NoInfer<E>, HType>;
 }
 
 /**
@@ -350,8 +350,14 @@ export interface CommittedDocument<TType extends string = string, TId extends st
  */
 export interface GetRequest<TId extends string> {
   readonly params: { readonly id: TId };
-  readonly query?: { readonly include?: ReadonlyArray<string> | undefined } | undefined;
+  readonly query?: IncludeQuery;
 }
+
+/**
+ * The decoded open `?include=` query (`Query.includeListField`), as the
+ * endpoint decodes it: what `Endpoint.FlatGetQuery` decodes to.
+ */
+type IncludeQuery = Schema.Struct<typeof Query.includeListField>["Type"];
 
 /** The failures a read handler adds to the operation's own. */
 type ReadError<E, Targets extends Handlers.IncludeTargets> =
@@ -560,7 +566,7 @@ export const readOnly = <
         // `next` is the *same* query on the next page.
         query: linkPairs(query),
       },
-      { ...assemble, viewer: yield* viewer, include: window.include },
+      { ...assemble, viewer: yield* viewer, ...definedMember("include", window.include) },
     );
   });
 
@@ -572,7 +578,7 @@ export const readOnly = <
     return yield* Assemble.resource(resource, {
       ...assemble,
       viewer: yield* viewer,
-      include: query?.include,
+      ...definedMember("include", query?.include),
     });
   });
 
@@ -888,23 +894,23 @@ export interface RelatedConfig<
    */
   readonly targets: Targets;
   /** The related resource's includable paths (the to-one `?include=` whitelist). */
-  readonly includable?: ReadonlyArray<string> | undefined;
+  readonly includable?: ReadonlyArray<string>;
   /**
    * The to-many endpoint's wire query, for the pagination links
    * (`Endpoint.flatRelated`'s `query`, bracketed). Omit for cursor-only links.
    */
-  readonly listQuery?: ListQuery<unknown> | undefined;
+  readonly listQuery?: ListQuery<unknown>;
   readonly linkBase: Effect.Effect<string, never, RL>;
-  readonly viewer?: Effect.Effect<V, never, RV> | undefined;
-  readonly capabilities?: Assemble.CapabilitiesHook<V> | undefined;
+  readonly viewer?: Effect.Effect<V, never, RV>;
+  readonly capabilities?: Assemble.CapabilitiesHook<V>;
   /** `false` stamps the primary data only, leaving `included` members unstamped. Defaults to `true`. */
   readonly capabilitiesOnIncluded?: boolean;
   /** The to-many page size when the caller names none. Defaults to `50`. */
-  readonly defaultPageLimit?: number | undefined;
+  readonly defaultPageLimit?: number;
   /** The most related rows one page may resolve. Defaults to `100`. */
-  readonly maxPageLimit?: number | undefined;
+  readonly maxPageLimit?: number;
   /** How many target types' loaders may run at once. Defaults to `6`. */
-  readonly concurrency?: number | undefined;
+  readonly concurrency?: number;
 }
 
 /**
@@ -915,13 +921,10 @@ export interface RelatedConfig<
  */
 export interface RelatedRequest<TId extends string> {
   readonly params: { readonly id: TId };
-  readonly query?:
-    | {
-        readonly offset?: number | undefined;
-        readonly limit?: number | undefined;
-        readonly include?: ReadonlyArray<string> | undefined;
-      }
-    | undefined;
+  readonly query?: IncludeQuery & {
+    readonly offset?: number;
+    readonly limit?: number;
+  };
 }
 
 /** Loads a set of refs through the registry, grouped by type, one call per distinct type. */
@@ -1059,8 +1062,8 @@ export const related = <
     return yield* Assemble.resource(resource, {
       ...capabilities,
       viewer: yield* viewer,
-      include: query?.include,
-      includable: config.includable,
+      ...definedMember("include", query?.include),
+      ...definedMember("includable", config.includable),
       targets: config.targets,
     });
   });

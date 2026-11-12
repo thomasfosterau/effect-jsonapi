@@ -131,7 +131,7 @@ import type {
   ToManyName,
 } from "./Resource.js";
 import { directTargets } from "./Resource.js";
-import { definedMember } from "./internal/members.js";
+import { definedMember, someMember } from "./internal/members.js";
 import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
@@ -2561,7 +2561,7 @@ export const getRelationship = <
   const success: RelationshipSuccess<R, Name, DocMeta, Include, Fields> = cast(
     LinkageDocument(linkageData(descriptor, target), {
       meta: (options?.meta ?? AnyMeta) as DocMeta,
-      included: Option.getOrUndefined(included),
+      ...someMember("included", included),
     }),
   );
 
@@ -4473,15 +4473,14 @@ export interface FlatDocumentOptions<Included extends Schema.Top, TM extends Sch
    * member survives the success-schema encode — without it the response
    * encoder strips whatever the handler resolved.
    */
-  readonly included?: Included | undefined;
+  readonly included?: Included;
   /**
    * The schema every to-many relationship object's `meta` is narrowed to, in
    * the primary data and `included` alike (`Document.wire`'s `toManyMeta`).
    *
    * @since 0.20.0
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes
-  readonly toManyMeta?: TM | undefined;
+  readonly toManyMeta?: TM;
 }
 
 // `never` is what a flat group without an include surface passes as
@@ -4529,10 +4528,14 @@ export const ResourceDocument = <
 ): DataDocument<WireSchema<S, TM>, WireSchema<IncludedOrNone<Included>, TM>> =>
   asJsonApi(
     DataDocument(
-      wire(resource, { toManyMeta: options?.toManyMeta }),
+      wire(resource, { ...definedMember("toManyMeta", options?.toManyMeta) }),
       options?.included === undefined
         ? undefined
-        : { included: wire(options.included, { toManyMeta: options.toManyMeta }) },
+        : {
+            included: wire(options.included, {
+              ...definedMember("toManyMeta", options.toManyMeta),
+            }),
+          },
     ),
   );
 
@@ -4688,10 +4691,14 @@ export const FlatCollectionDocument = <
 ): CollectionDocument<WireSchema<S, TM>, WireSchema<IncludedOrNone<Included>, TM>> =>
   asJsonApi(
     CollectionDocument(
-      wire(resource, { toManyMeta: options?.toManyMeta }),
+      wire(resource, { ...definedMember("toManyMeta", options?.toManyMeta) }),
       options?.included === undefined
         ? undefined
-        : { included: wire(options.included, { toManyMeta: options.toManyMeta }) },
+        : {
+            included: wire(options.included, {
+              ...definedMember("toManyMeta", options.toManyMeta),
+            }),
+          },
     ),
   );
 
@@ -4742,13 +4749,13 @@ export interface FlatRelatedOptions<Key extends string> {
    * To-many only: the flat page-cursor struct, bracketed on the wire.
    * Defaults to `FlatQuery.pagination({ maxLimit: 100 })`.
    */
-  readonly query?: Query.FlatListStruct | undefined;
+  readonly query?: Query.FlatListStruct;
   /**
    * To-one only: the `included` union an `?include=` walk over the related
    * resource can hoist. Omit when the relationship supports no includes —
    * the endpoint then carries no `include` parameter at all.
    */
-  readonly included?: Schema.Top | undefined;
+  readonly included?: Schema.Top;
 }
 
 /**

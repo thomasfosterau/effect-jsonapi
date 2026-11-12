@@ -121,8 +121,8 @@ export type Link = typeof Link.Type;
 /**
  * Extracts the wire string from a {@link Link}: a `string` passes through, a
  * `URL` becomes its `.href`, and a {@link LinkObject} recurses on its own
- * `href` member. Also accepts `undefined` so it composes directly with an
- * optional link (`resource.links?.self`) without a separate guard.
+ * `href` member. An optional link (`resource.links?.self`) composes through
+ * `Option`: `Option.map(Option.fromUndefinedOr(link), Document.href)`.
  *
  * The decoded type of any link is `string | URL | LinkObject` — every
  * resource derived from `Resource.make` inherits it — so code that only wants
@@ -132,20 +132,18 @@ export type Link = typeof Link.Type;
  * @example
  * ```ts
  * import { Document } from "@thomasfosterau/effect-jsonapi"
+ * import * as Option from "effect/Option"
  *
  * Document.href("/articles/1") // "/articles/1"
  * Document.href(new URL("https://example.com/articles/1")) // "https://example.com/articles/1"
  * Document.href({ href: "https://example.com/articles/1" }) // "https://example.com/articles/1"
- * Document.href(undefined) // undefined
+ * Option.map(Option.fromUndefinedOr(undefined), Document.href) // Option.none()
  * ```
  *
  * @since 0.15.0
  * @category accessors
  */
-export function href(link: Link): string;
-export function href(link: Link | undefined): string | undefined;
-export function href(link: Link | undefined): string | undefined {
-  if (link === undefined) return undefined;
+export function href(link: Link): string {
   if (P.isString(link)) return link;
   if (link instanceof URL) return link.href;
   return href(link.href);
@@ -618,8 +616,8 @@ export const DataDocument = <
 >(
   data: R,
   options?: {
-    readonly included?: Included | undefined;
-    readonly meta?: M | undefined;
+    readonly included?: Included;
+    readonly meta?: M;
   },
 ): DataDocument<R, Included, M> =>
   Schema.Struct({
@@ -692,8 +690,8 @@ export const CollectionDocument = <
 >(
   resource: R,
   options?: {
-    readonly included?: Included | undefined;
-    readonly meta?: M | undefined;
+    readonly included?: Included;
+    readonly meta?: M;
   },
 ): CollectionDocument<R, Included, M> =>
   Schema.Struct({
@@ -802,8 +800,8 @@ export function LinkageDocument<
 >(
   data: D,
   options?: {
-    readonly meta?: M | undefined;
-    readonly included?: Included | undefined;
+    readonly meta?: M;
+    readonly included?: Included;
   },
 ): LinkageDocument<D, M, Included>;
 // The struct's fields are `LinkageDocumentFields<D, M, Included>`: `included`
@@ -916,13 +914,13 @@ export const Document = <
 >(
   resource: R,
   options?: {
-    readonly included?: Included | undefined;
-    readonly meta?: M | undefined;
-    readonly error?: E | undefined;
+    readonly included?: Included;
+    readonly meta?: M;
+    readonly error?: E;
   },
 ): Document<R, Included, M, E> =>
   Schema.Union([
-    DataDocument(resource, { included: options?.included, meta: options?.meta }),
+    DataDocument(resource, options),
     ErrorDocument(options?.error),
     MetaDocument(options?.meta),
   ]);
@@ -1018,8 +1016,7 @@ export interface WireOptions<TM extends Schema.Top = never> {
    * family whose every to-many arm carries the same meta, such as
    * `{ totalCount }`. To-one relationships keep their own.
    */
-  // oxlint-disable-next-line effect/prefer-option-over-null -- the `?: T | undefined` spelling AGENTS.md requires under exactOptionalPropertyTypes
-  readonly toManyMeta?: TM | undefined;
+  readonly toManyMeta?: TM;
 }
 
 const isStructLike = (
@@ -1207,11 +1204,7 @@ export function wire<S extends Schema.Top, TM extends Schema.Top = never>(
 export function wire(schema: Schema.Top, options?: WireOptions<Schema.Top>): Schema.Top {
   const toManyMeta = Option.fromUndefinedOr(options?.toManyMeta);
   if (isUnionLike(schema)) {
-    return Schema.Union(
-      schema.members.map((member) =>
-        wire(member, { toManyMeta: Option.getOrUndefined(toManyMeta) }),
-      ),
-    );
+    return Schema.Union(schema.members.map((member) => wire(member, options)));
   }
   if (!isStructLike(schema)) return schema;
   const fields = { ...schema.fields };

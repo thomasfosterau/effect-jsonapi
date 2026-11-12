@@ -61,7 +61,7 @@ import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
 import { isLinkageData, reachable, seeds } from "./internal/linkage.js";
 import type { Pair } from "./Query.js";
-import { definedMember, someMember } from "./internal/members.js";
+import { definedMember, someMember, stampMeta } from "./internal/members.js";
 import { declarationError } from "./internal/errors.js";
 
 /**
@@ -285,7 +285,7 @@ export const transform = <F extends TransformLambda>(
  * @category models
  */
 export interface Fields {
-  readonly [type: string]: ReadonlyArray<string> | undefined;
+  readonly [type: string]: ReadonlyArray<string>;
 }
 
 // The attributes a fieldset selects. A selection known only as an *array* of
@@ -544,18 +544,20 @@ const bothProjections = (
  * @since 0.15.0
  * @category constructors
  */
-export function project<const F extends Fields>(
-  fields: F | undefined,
-): ResourceTransform<ProjectLambda<F>>;
+export function project<const F extends Fields>(fields?: F): ResourceTransform<ProjectLambda<F>>;
 export function project<Res extends ResourceValue, const F extends Fields>(
   resource: Res,
-  fields: F | undefined,
+  fields?: F,
 ): Projected<Res, F>;
 export function project(...args: ReadonlyArray<unknown>) {
-  // SAFETY: the overloads type `args` as `(fields)` or `(resource, fields)`,
-  // `fields` a `Fields` or `undefined`.
-  const fields = Option.fromUndefinedOr(args[args.length >= 2 ? 1 : 0]) as Option.Option<Fields>;
-  return args.length >= 2
+  // Data-first when a resource leads: its `type` is a string, where a
+  // fieldset's members (a `type` key included) are arrays.
+  const dataFirst =
+    args.length >= 2 || (P.hasProperty(args[0], "type") && P.isString(args[0].type));
+  // SAFETY: the overloads type `args` as `(fields?)` or `(resource, fields?)`,
+  // `fields` a `Fields` when present.
+  const fields = Option.fromUndefinedOr(args[dataFirst ? 1 : 0]) as Option.Option<Fields>;
+  return dataFirst
     ? projectResource(args[0] as AnyResourceValue, fields)
     : projecting((resource: AnyResourceValue) => projectResource(resource, fields), fields);
 }
@@ -595,16 +597,6 @@ export interface WithMetaLambda<M extends MetaValue> extends TransformLambda {
   readonly Out: WithMeta<this["In"], M>;
 }
 
-const stampMeta = (resource: AnyResourceValue, computed?: MetaValue): AnyResourceValue => {
-  const merged = { ...resource.meta, ...computed };
-  if (Arr.isReadonlyArrayNonEmpty(R.keys(merged))) return { ...resource, meta: merged };
-  // An empty `meta` is a *present* meta object to the spec, which is a
-  // different statement from having none: emit no member at all.
-  if (resource.meta === undefined) return resource;
-  const { meta: _meta, ...rest } = resource;
-  return rest;
-};
-
 /**
  * Builds a {@link ResourceTransform} that stamps computed `meta` onto every
  * resource the document carries — the standard home for per-viewer,
@@ -617,24 +609,25 @@ const stampMeta = (resource: AnyResourceValue, computed?: MetaValue): AnyResourc
  *
  * The computation is handed every resource in the document, of every type, so
  * it receives the widest {@link AnyResourceValue} shape — switch on `type` to
- * narrow, and return `undefined` for the resources it has nothing to say about.
+ * narrow, and return `Option.none()` for the resources it has nothing to say
+ * about.
  *
  * @example
  * ```ts
- * import { Schema } from "effect"
+ * import { Option, Schema } from "effect"
  * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } })
  * const article = Article.make({ id: Article.Id.make("1"), attributes: { title: "Hi" } })
  *
  * const forViewer = (viewer: { readonly id: string; readonly admin: boolean }) =>
- *   Handlers.withMeta((resource) => ({ canEdit: viewer.admin && resource.type === "articles" }))
+ *   Handlers.withMeta((resource) => Option.some({ canEdit: viewer.admin && resource.type === "articles" }))
  *
  * const document = Handlers.data(article, { onResource: forViewer({ id: "9", admin: true }) })
  * console.log(document.data.meta)   // → { canEdit: true }
  *
  * // nothing computed → no `meta` member, rather than an empty one
- * console.log("meta" in Handlers.data(article, { onResource: Handlers.withMeta(() => undefined) }).data)
+ * console.log("meta" in Handlers.data(article, { onResource: Handlers.withMeta(() => Option.none()) }).data)
  * // → false
  * ```
  *
@@ -642,9 +635,10 @@ const stampMeta = (resource: AnyResourceValue, computed?: MetaValue): AnyResourc
  * @category constructors
  */
 export const withMeta = <const M extends MetaValue>(
-  compute: (resource: AnyResourceValue) => M | undefined,
+  compute: (resource: AnyResourceValue) => Option.Option<M>,
 ): ResourceTransform<WithMetaLambda<M>> =>
-  ((resource: AnyResourceValue) => stampMeta(resource, compute(resource))) as ResourceTransform<
+  ((resource: AnyResourceValue) =>
+    stampMeta(resource, Option.getOrUndefined(compute(resource)))) as ResourceTransform<
     WithMetaLambda<M>
   >;
 
@@ -675,7 +669,7 @@ export interface ComposeLambda<
  *
  * @example
  * ```ts
- * import { Schema } from "effect"
+ * import { Option, Schema } from "effect"
  * import { Handlers, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Article = Resource.make("articles", {
@@ -685,7 +679,7 @@ export interface ComposeLambda<
  *
  * const onResource = Handlers.compose(
  *   Handlers.project({ articles: ["title"] }),
- *   Handlers.withMeta((resource) => ({ href: `/${resource.type}/${resource.id}` }))
+ *   Handlers.withMeta((resource) => Option.some({ href: `/${resource.type}/${resource.id}` }))
  * )
  *
  * const document = Handlers.data(article, { onResource })
@@ -854,14 +848,14 @@ export const buildIncluded = <
      * resolver linked. Skip it only when you know every emitted `included`
      * member is reachable from the emitted primary data.
      */
-    readonly checkLinkage?: boolean | undefined;
+    readonly checkLinkage?: boolean;
     /**
      * Applied to every deduplicated included resource, after dedup and before
      * the full-linkage check.
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F> | undefined;
+    readonly onResource?: ResourceTransform<F>;
   },
 ): ReadonlyArray<Transformed<F, Included>> =>
   includedFor(primary, isLinkageData(primary), included, options);
@@ -1024,7 +1018,7 @@ export interface ResolveIncludedOptions {
    * `"unbounded"`, which is a level's distinct target types — a number you
    * control, since it is bounded by the registry, not by the request.
    */
-  readonly concurrency?: number | "unbounded" | undefined;
+  readonly concurrency?: number | "unbounded";
   /**
    * The maximum number of relationship hops to walk. Defaults to `3`, the
    * deepest path `Query.Include` legalises.
@@ -1034,7 +1028,7 @@ export interface ResolveIncludedOptions {
    * an ergonomic one: raise it only as far as the paths you actually serve
    * need. Segments beyond the cap are not walked.
    */
-  readonly depth?: number | undefined;
+  readonly depth?: number;
 }
 
 // A node of the trie the requested paths form: `["author", "comments.author"]`
@@ -1243,8 +1237,9 @@ const resolve = (
  *   target, an id the batch didn't return, a row the viewer may not see: all
  *   are normal outcomes, and simply absent from `included`. A loader's own
  *   failure propagates and fails the document.
- * - **`undefined` when nothing was requested** (`paths` is `undefined`), so
- *   the builders omit the member. An empty array is the different statement
+ * - **`Option.none()` when nothing was requested** (`paths` is
+ *   `Option.none()`), so the caller omits the member. An empty array is the
+ *   different statement
  *   "your walk resolved to nothing" — including for an empty `paths`, which is
  *   a bare `?include=`: the request carried `include` — and {@link data} /
  *   {@link collection} emit it as `included: []`, because §Fetching Includes
@@ -1285,7 +1280,7 @@ const resolve = (
  *
  * @example
  * ```ts
- * import { Effect, Schema } from "effect"
+ * import { Effect, Option, Schema } from "effect"
  * import { Handlers, Relationship, Resource } from "@thomasfosterau/effect-jsonapi"
  *
  * const Person = Resource.make("people", {
@@ -1331,8 +1326,10 @@ const resolve = (
  * }
  *
  * const document = Effect.runSync(
- *   Handlers.resolveIncluded(article, ["author", "comments.author"], targets).pipe(
- *     Effect.map((included) => Handlers.data(article, { included, self: "/articles/1" }))
+ *   Handlers.resolveIncluded(article, Option.some(["author", "comments.author"]), targets).pipe(
+ *     Effect.map((included) =>
+ *       Handlers.data(article, { included: Option.getOrElse(included, () => []), self: "/articles/1" })
+ *     )
  *   )
  * )
  *
@@ -1349,25 +1346,29 @@ const resolve = (
  */
 export const resolveIncluded = <Targets extends IncludeTargets>(
   primary: ResourceValue | null | ReadonlyArray<ResourceValue>,
-  paths: ReadonlyArray<string> | undefined,
+  paths: Option.Option<ReadonlyArray<string>>,
   targets: Targets,
   options?: ResolveIncludedOptions,
 ): Effect.Effect<
-  ReadonlyArray<IncludeTargetResource<Targets>> | undefined,
+  Option.Option<ReadonlyArray<IncludeTargetResource<Targets>>>,
   IncludeTargetError<Targets>,
   IncludeTargetServices<Targets>
 > =>
-  paths === undefined
-    ? Effect.undefined
-    : Arr.isReadonlyArrayEmpty(paths)
-      ? Effect.succeed([])
-      : resolve(
-          primary === null ? [] : Array.isArray(primary) ? primary : [primary as ResourceValue],
-          paths,
-          targets,
-          options?.concurrency ?? "unbounded",
-          options?.depth ?? 3,
-        );
+  Option.match(paths, {
+    onNone: () => Effect.succeedNone,
+    onSome: (paths) =>
+      Arr.isReadonlyArrayEmpty(paths)
+        ? Effect.succeedSome([])
+        : Effect.asSome(
+            resolve(
+              primary === null ? [] : Array.isArray(primary) ? primary : [primary as ResourceValue],
+              paths,
+              targets,
+              options?.concurrency ?? "unbounded",
+              options?.depth ?? 3,
+            ),
+          ),
+  });
 
 /**
  * A top-level JSON:API document *value* — the shape {@link data} and
@@ -1430,9 +1431,9 @@ const linkWithQuery = (link: LinkValue, query: string): LinkValue =>
 // option, and `query` is appended to whichever `self` the document ends up
 // with — a `query` with no self link to carry it is a programming error.
 const buildLinks = (options: {
-  readonly self?: string | undefined;
-  readonly query?: string | ReadonlyArray<Pair> | undefined;
-  readonly links?: LinksValue | undefined;
+  readonly self?: string;
+  readonly query?: string | ReadonlyArray<Pair>;
+  readonly links?: LinksValue;
 }): Option.Option<LinksValue> => {
   const links =
     options.self !== undefined
@@ -1461,13 +1462,13 @@ const build = (
   data: ResourceValue | ReadonlyArray<ResourceValue> | LinkageValue | null,
   primary: ReadonlyArray<ResourceValue>,
   options?: {
-    readonly included?: ReadonlyArray<ResourceValue> | undefined;
-    readonly meta?: MetaValue | undefined;
-    readonly jsonapi?: JsonApiObjectValue | undefined;
-    readonly self?: string | undefined;
-    readonly query?: string | ReadonlyArray<Pair> | undefined;
-    readonly links?: LinksValue | undefined;
-    readonly checkLinkage?: boolean | undefined;
+    readonly included?: ReadonlyArray<ResourceValue>;
+    readonly meta?: MetaValue;
+    readonly jsonapi?: JsonApiObjectValue;
+    readonly self?: string;
+    readonly query?: string | ReadonlyArray<Pair>;
+    readonly links?: LinksValue;
+    readonly checkLinkage?: boolean;
   },
   onResource?: ResourceTransform<TransformLambda>,
   asLinkage = false,
@@ -1486,7 +1487,10 @@ const build = (
           primary,
           asLinkage,
           options.included,
-          { checkLinkage: options.checkLinkage, onResource },
+          {
+            ...definedMember("checkLinkage", options.checkLinkage),
+            ...definedMember("onResource", onResource),
+          },
           originals,
         );
   return {
@@ -1621,7 +1625,7 @@ export const data = <
      * `included`; `undefined` omits it. Pass an array whenever the request
      * carried `include` (JSON:API 1.1 §Fetching Includes).
      */
-    readonly included?: ReadonlyArray<Included> | undefined;
+    readonly included?: ReadonlyArray<Included>;
     readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
     readonly jsonapi?: J;
@@ -1634,7 +1638,7 @@ export const data = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F> | undefined;
+    readonly onResource?: ResourceTransform<F>;
     /**
      * `false` skips the full-linkage check, which is on by default. The check
      * runs on the resources the document emits, after dedup and `onResource`,
@@ -1643,7 +1647,7 @@ export const data = <
      * resolver linked. Skip it only when you know every emitted `included`
      * member is reachable from the emitted primary data.
      */
-    readonly checkLinkage?: boolean | undefined;
+    readonly checkLinkage?: boolean;
   },
 ): DocumentValue<TransformedData<F, Res>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
@@ -1747,7 +1751,7 @@ export const collection = <
      * `included`; `undefined` omits it. Pass an array whenever the request
      * carried `include` (JSON:API 1.1 §Fetching Includes).
      */
-    readonly included?: ReadonlyArray<Included> | undefined;
+    readonly included?: ReadonlyArray<Included>;
     readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
     readonly jsonapi?: J;
@@ -1768,7 +1772,7 @@ export const collection = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F> | undefined;
+    readonly onResource?: ResourceTransform<F>;
     /**
      * `false` skips the full-linkage check, which is on by default. The check
      * runs on the resources the document emits, after dedup and `onResource`,
@@ -1777,7 +1781,7 @@ export const collection = <
      * resolver linked. Skip it only when you know every emitted `included`
      * member is reachable from the emitted primary data.
      */
-    readonly checkLinkage?: boolean | undefined;
+    readonly checkLinkage?: boolean;
   },
 ): DocumentValue<ReadonlyArray<Transformed<F, Res>>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
@@ -2094,14 +2098,14 @@ export const linkage = <
      *
      * @since 0.18.0
      */
-    readonly included?: ReadonlyArray<Included> | undefined;
+    readonly included?: ReadonlyArray<Included>;
     /**
      * `false` skips the full-linkage check on `included`, which is on by
      * default — as on {@link data}.
      *
      * @since 0.18.0
      */
-    readonly checkLinkage?: boolean | undefined;
+    readonly checkLinkage?: boolean;
     readonly meta?: M;
     /** The top-level `jsonapi` object, e.g. `Document.v1_1`. Omitted by default. */
     readonly jsonapi?: J;
@@ -2121,7 +2125,7 @@ export const linkage = <
      *
      * @since 0.15.0
      */
-    readonly onResource?: ResourceTransform<F> | undefined;
+    readonly onResource?: ResourceTransform<F>;
   },
 ): LinkageDocumentValue<TransformedLinkage<F, Data>, M, J, Transformed<F, Included>> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
@@ -2135,10 +2139,10 @@ export const linkage = <
     transformed,
     transformed === null ? [] : Arr.ensure(transformed),
     {
-      included: options?.included,
-      checkLinkage: options?.checkLinkage,
-      meta: options?.meta,
-      jsonapi: options?.jsonapi,
+      ...definedMember("included", options?.included),
+      ...definedMember("checkLinkage", options?.checkLinkage),
+      ...definedMember("meta", options?.meta),
+      ...definedMember("jsonapi", options?.jsonapi),
       ...someMember("links", linkageLinks(options)),
     },
     options?.onResource,

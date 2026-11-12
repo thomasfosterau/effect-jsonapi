@@ -702,16 +702,13 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     ]);
   });
 
-  it("is carried by a family anchored on a base, and absent on a name-only one", () => {
+  it("is carried by a family anchored on a base, and the default on a name-only one", () => {
     // The member's cap differs from the base's, so a family that read its cap
     // from a member instead of the base would carry 4, not 2.
     const Member = extend(Capped, "members", { maxUndeclaredMemberErrors: 4 });
     const Anchored = family(Capped, [Member]);
     const Named = family("named", [Member]);
-    expect([Anchored.maxUndeclaredMemberErrors, Named.maxUndeclaredMemberErrors]).toEqual([
-      2,
-      undefined,
-    ]);
+    expect([Anchored.maxUndeclaredMemberErrors, Named.maxUndeclaredMemberErrors]).toEqual([2, 12]);
     expect(
       issuesOf(
         Schema.decodeResult(Atomic.AddOperation(Anchored))({
@@ -817,11 +814,8 @@ describe("the maxUndeclaredMemberErrors option (#308)", () => {
     );
   });
 
-  it("accepts an explicit undefined as the default", () => {
-    expect(
-      Resource("plain", { attributes: {}, maxUndeclaredMemberErrors: undefined })
-        .maxUndeclaredMemberErrors,
-    ).toBe(12);
+  it("takes an omitted cap as the default", () => {
+    expect(Resource("plain", { attributes: {} }).maxUndeclaredMemberErrors).toBe(12);
   });
 
   // An unchecked caller's `null` counts as not given, as `undefined` does.

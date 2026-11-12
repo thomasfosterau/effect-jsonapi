@@ -79,7 +79,7 @@ export interface PaginationOptions {
    * Pass `false` to make both keys **required** instead (no defaults) —
    * for a contract whose every list request must spell its window.
    */
-  readonly defaultLimit?: number | false | undefined;
+  readonly defaultLimit?: number | false;
 }
 
 /**
@@ -340,7 +340,7 @@ export const DEFAULT_MAX_ID_LIST: 100 = Bounded.DEFAULT_MAX_ID_LIST;
  * @category constructors
  */
 export const idList = (options?: {
-  readonly maxLength?: number | undefined;
+  readonly maxLength?: number;
 }): Schema.Codec<ReadonlyArray<string>, string | ReadonlyArray<string>> =>
   Bounded.idList({ maxLength: Option.fromUndefinedOr(options?.maxLength) });
 
@@ -443,13 +443,13 @@ export const SLUG_PATTERN: RegExp = Ids.SLUG_PATTERN;
  */
 export interface SlugOptions {
   /** The longest slug accepted. Defaults to `200`. */
-  readonly maxLength?: number | undefined;
+  readonly maxLength?: number;
   /**
    * Path segments a slug may never equal — the static sibling routes
    * (`create`, `edit`, `search`) a slug would otherwise shadow and make
    * unreachable.
    */
-  readonly reserved?: ReadonlyArray<string> | undefined;
+  readonly reserved?: ReadonlyArray<string>;
 }
 
 /**
@@ -558,5 +558,5 @@ export const slugCreateFields = <S extends Schema.String>(schema: S) =>
  * @since 0.16.0
  * @category utils
  */
-export const suppliedValue: <A>(field: Option.Option<A> | undefined) => Option.Option<A> =
+export const suppliedValue: <A>(field?: Option.Option<A>) => Option.Option<A> =
   TriState.suppliedValue;

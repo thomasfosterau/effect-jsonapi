@@ -164,7 +164,7 @@ describe("2. Handlers.resolveIncluded replaces planIncludes / include-targets", 
 
       const included = yield* Handlers.resolveIncluded(
         bibliography,
-        ["entries", "entries.bibliography"],
+        Option.some(["entries", "entries.bibliography"]),
         targets,
         {
           concurrency: 4,
@@ -174,21 +174,27 @@ describe("2. Handlers.resolveIncluded replaces planIncludes / include-targets", 
       // walk order, one entry per (type, id); the bibliography is the primary
       // resource, so the second hop resolves back into the document and adds
       // nothing to `included`
-      expect(included?.map((r) => `${r.type}:${r.id}`)).toEqual([
-        "bibliography-entries:e1",
-        "bibliography-entries:e2",
-      ]);
+      expect(
+        Option.map(
+          included,
+          Arr.map((r) => `${r.type}:${r.id}`),
+        ),
+      ).toStrictEqual(Option.some(["bibliography-entries:e1", "bibliography-entries:e2"]));
       // one batched call for the two entries; the second level asks for
       // nothing, because `b1` is already in the document
       expect(calls).toEqual([{ type: "bibliography-entries", ids: ["e1", "e2"] }]);
     }),
   );
 
-  it.effect("returns `undefined` when nothing was asked for, so the member is omitted", () =>
+  it.effect("returns `Option.none()` when nothing was asked for, so the member is omitted", () =>
     Effect.gen(function* () {
-      const included = yield* Handlers.resolveIncluded(bibliography, undefined, {});
-      expect(included).toBeUndefined();
-      expect("included" in Handlers.data(bibliography, { included })).toBe(false);
+      const included = yield* Handlers.resolveIncluded(bibliography, Option.none(), {});
+      expect(included).toStrictEqual(Option.none());
+      const document = Option.match(included, {
+        onNone: () => Handlers.data(bibliography),
+        onSome: (included) => Handlers.data(bibliography, { included }),
+      });
+      expect("included" in document).toBe(false);
     }),
   );
 
@@ -218,10 +224,12 @@ describe("3. Handlers.compose(project, withMeta) replaces projectFields / withVi
   it("runs once per resource, in every slot of the document", () => {
     const viewer = { role: "admin" as const };
     // website's `defaultCapabilities`: `canEdit` / `canDelete` on the viewer's role
-    const capabilities = Handlers.withMeta(() => ({
-      canEdit: viewer.role === "admin",
-      canDelete: viewer.role === "admin",
-    }));
+    const capabilities = Handlers.withMeta(() =>
+      Option.some({
+        canEdit: viewer.role === "admin",
+        canDelete: viewer.role === "admin",
+      }),
+    );
     const onResource = Handlers.compose(
       Handlers.project({ bibliographies: ["title"] }),
       capabilities,
@@ -237,7 +245,7 @@ describe("3. Handlers.compose(project, withMeta) replaces projectFields / withVi
   });
 
   it("emits no `meta` member when the computation yields nothing", () => {
-    const noCapabilities = Handlers.withMeta(() => undefined);
+    const noCapabilities = Handlers.withMeta(() => Option.none());
     expect("meta" in Handlers.data(bibliography, { onResource: noCapabilities }).data).toBe(false);
   });
 });
