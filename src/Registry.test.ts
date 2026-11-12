@@ -101,17 +101,17 @@ const families: ReadonlyArray<Registry.Family<Store>> = [peopleFamily, contestsF
 
 describe("registry ↔ contract", () => {
   it("gives every group a family with exactly its endpoint names", () => {
-    for (const [identifier, group] of Object.entries(Api.groups)) {
+    Arr.forEach(Object.entries(Api.groups), ([identifier, group]) => {
       const family = families.find((f) => f.group === identifier);
       assert(family !== undefined, identifier);
       expect(Arr.sort(Object.keys(family.handlers), Order.String)).toEqual(
         Arr.sort(Object.keys(group.endpoints), Order.String),
       );
       expect(() => Registry.checkFamily(Api, family)).not.toThrow();
-      for (const endpoint of Object.keys(group.endpoints)) {
+      Arr.forEach(Object.keys(group.endpoints), (endpoint) => {
         expect(Option.isSome(Registry.handlerFor(families, identifier, endpoint))).toBe(true);
-      }
-    }
+      });
+    });
   });
 
   it("refuses a family naming an unknown group, or drifting from its endpoints", () => {

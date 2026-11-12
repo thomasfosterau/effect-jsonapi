@@ -142,7 +142,6 @@ export default defineConfig({
       // everywhere (`import * as Rec from "effect/Record"`), never `R`,
       // which is the resource type parameter in many files.
       "effect/no-unsafe-dictionary-type": "warn",
-      "effect/imperative-loops": "warn",
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-any": "warn",
       "effect/prefer-effect-is": "warn",
