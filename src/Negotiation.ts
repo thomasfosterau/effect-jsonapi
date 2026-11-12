@@ -38,7 +38,9 @@
  * @since 0.16.0
  */
 import * as Arr from "effect/Array";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as ApiError from "./ApiError.js";
 import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
 
 /**
@@ -593,3 +595,168 @@ export const requestForRouter = (request: Request): Request => {
   headers.set("content-type", "application/json");
   return new Request(request, { headers });
 };
+
+// ---------------------------------------------------------------------------
+// The JSON:API representation for a generic negotiator (#577)
+// ---------------------------------------------------------------------------
+
+/**
+ * A requested media type as a generic negotiator hands it to
+ * {@link Representation.acceptsParameters}: its parameters before `q`
+ * (RFC 9110 §12.4.2), names lower-cased and values unquoted.
+ *
+ * Spelled structurally, so `@thomasfosterau/effect-ext/Mime`'s `MimeType`
+ * (what `@thomasfosterau/effect-ext/Negotiate` passes) is one, without this
+ * package importing that module.
+ *
+ * @since 0.22.0
+ * @category models
+ */
+export interface Parameterised {
+  readonly parameters: ReadonlyArray<readonly [name: string, value: string]>;
+}
+
+/**
+ * The JSON:API representation, in the shape a media-type-agnostic negotiator
+ * takes one (`@thomasfosterau/effect-ext/Negotiate`'s `Representation`):
+ * `application/vnd.api+json`, the paths it is served at, and JSON:API §5's
+ * parameter rule. Built by {@link representation}.
+ *
+ * @since 0.22.0
+ * @category models
+ */
+export interface Representation {
+  /** Always the JSON:API media type, `application/vnd.api+json`. */
+  readonly mediaType: typeof MEDIA_TYPE;
+  /** Whether the representation is served at a request path. Omitted → every path. */
+  readonly servesPath?: (pathname: string) => boolean;
+  /**
+   * JSON:API §5: whether a requested instance's media-type parameters are
+   * acceptable — only `ext` and `profile`, and every `ext` URI declared.
+   */
+  readonly acceptsParameters: (mediaType: Parameterised) => boolean;
+}
+
+/**
+ * Options of {@link representation}.
+ *
+ * @since 0.22.0
+ * @category models
+ */
+export interface RepresentationOptions {
+  /**
+   * The JSON:API extension URIs the api supports (e.g. `Atomic.EXTENSION_URI`).
+   * An instance whose `ext` names any other URI is refused. Defaults to none,
+   * so an api with no extension refuses every `ext`, as §5 requires.
+   */
+  readonly extensions?: ReadonlyArray<string>;
+  /**
+   * The paths the api serves, e.g. a {@link Negotiator}'s `isApiPath`.
+   * Omitted → every path.
+   */
+  readonly servesPath?: (pathname: string) => boolean;
+}
+
+/**
+ * The JSON:API representation for a media-type-agnostic negotiator such as
+ * `@thomasfosterau/effect-ext/Negotiate`'s `negotiateRepresentation`. Its
+ * `acceptsParameters` is JSON:API §5's rule, the one `Middleware`'s
+ * `contentTypeIsAcceptable` / `acceptIsAcceptable` apply: an instance may
+ * carry only `ext` and `profile`, and every `ext` URI must be in
+ * `extensions`. The negotiator then answers a read whose every JSON:API
+ * instance is refused `NotAcceptable`, and such a write
+ * `UnsupportedMediaType`; {@link toApiError} turns either into the 406 / 415
+ * `ApiError`.
+ *
+ * @example
+ * ```ts
+ * import { strictEqual } from "node:assert"
+ * import { Atomic, Negotiation } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const jsonApi = Negotiation.representation({
+ *   extensions: [Atomic.EXTENSION_URI],
+ *   servesPath: (pathname) => pathname.startsWith("/articles")
+ * })
+ *
+ * strictEqual(jsonApi.mediaType, "application/vnd.api+json")
+ * strictEqual(jsonApi.servesPath?.("/articles/1"), true)
+ * // `profile` and a declared `ext` are acceptable…
+ * strictEqual(jsonApi.acceptsParameters({ parameters: [["ext", Atomic.EXTENSION_URI]] }), true)
+ * strictEqual(jsonApi.acceptsParameters({ parameters: [["profile", "https://example.com/p"]] }), true)
+ * // …any other parameter, or an undeclared `ext`, is not.
+ * strictEqual(jsonApi.acceptsParameters({ parameters: [["charset", "utf-8"]] }), false)
+ * strictEqual(jsonApi.acceptsParameters({ parameters: [["ext", "https://example.com/ext"]] }), false)
+ * ```
+ *
+ * @since 0.22.0
+ * @category constructors
+ */
+export const representation = (options: RepresentationOptions = {}): Representation => {
+  const extensions = options.extensions ?? [];
+  const acceptsParameters = (mediaType: Parameterised): boolean =>
+    parametersAreAcceptable(mediaType.parameters, extensions);
+  return options.servesPath === undefined
+    ? { mediaType: MEDIA_TYPE, acceptsParameters }
+    : { mediaType: MEDIA_TYPE, servesPath: options.servesPath, acceptsParameters };
+};
+
+/**
+ * A generic negotiator's verdict, spelled structurally:
+ * `@thomasfosterau/effect-ext/Negotiate`'s `Negotiation` is one.
+ *
+ * @since 0.22.0
+ * @category models
+ */
+export type Outcome =
+  | { readonly _tag: "Selected"; readonly representation: { readonly mediaType: string } }
+  | { readonly _tag: "Fallback" }
+  | { readonly _tag: "NotAcceptable"; readonly representation: { readonly mediaType: string } }
+  | {
+      readonly _tag: "UnsupportedMediaType";
+      readonly representation: { readonly mediaType: string };
+    };
+
+/**
+ * The JSON:API §5 error a generic negotiator's refusal of the JSON:API
+ * representation calls for: `NotAcceptable` (a read) is
+ * `ApiError.NotAcceptable` (406), `UnsupportedMediaType` (a write) is
+ * `ApiError.UnsupportedMediaType` (415). Any other outcome, or a refusal of
+ * another representation (a Markdown alternate, say), is `Option.none()`:
+ * that refusal is the host's to render, not a JSON:API error.
+ *
+ * Render the error with `ApiError.toDocument`, or fail an `HttpApi` handler
+ * with it (both classes are in `ApiError.Standard`, which every JSON:API
+ * endpoint declares).
+ *
+ * @example
+ * ```ts
+ * import { strictEqual } from "node:assert"
+ * import { Option } from "effect"
+ * import { ApiError, Negotiation } from "@thomasfosterau/effect-jsonapi"
+ *
+ * const jsonApi = Negotiation.representation()
+ *
+ * const refused = Negotiation.toApiError({ _tag: "NotAcceptable", representation: jsonApi })
+ * strictEqual(
+ *   Option.map(refused, (error) => ApiError.toDocument(error).errors[0]?.status).pipe(Option.getOrNull),
+ *   "406"
+ * )
+ * strictEqual(Option.isNone(Negotiation.toApiError({ _tag: "Fallback" })), true)
+ * ```
+ *
+ * @since 0.22.0
+ * @category utils
+ */
+export const toApiError = (
+  outcome: Outcome,
+): Option.Option<ApiError.NotAcceptable | ApiError.UnsupportedMediaType> =>
+  Match.valueTags(outcome, {
+    Selected: () => Option.none(),
+    Fallback: () => Option.none(),
+    NotAcceptable: ({ representation: refused }) =>
+      refused.mediaType === MEDIA_TYPE ? Option.some(new ApiError.NotAcceptable()) : Option.none(),
+    UnsupportedMediaType: ({ representation: refused }) =>
+      refused.mediaType === MEDIA_TYPE
+        ? Option.some(new ApiError.UnsupportedMediaType())
+        : Option.none(),
+  });
