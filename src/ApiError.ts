@@ -39,6 +39,7 @@ import { ErrorDocument, ErrorObject } from "./Document.js";
 import type { ErrorSource } from "./Document.js";
 import { asJsonApi } from "./internal/httpMedia.js";
 import { definedMember } from "./internal/members.js";
+import { declarationError } from "./internal/errors.js";
 
 /**
  * The wire document schema every {@link make} error encodes to.
@@ -247,10 +248,10 @@ const makeWire = (
           const first = doc.errors[0];
           const meta = first?.meta ?? {};
           const fields: Record<string, unknown> = {};
-          for (const key of options.fieldKeys) {
+          Arr.forEach(options.fieldKeys, (key) => {
             if (key in meta) fields[key] = meta[key];
             else if (key === "detail" && first?.detail !== undefined) fields[key] = first.detail;
-          }
+          });
           return { _tag: options.tag, ...fields };
         },
         // class encoded form -> document. An optional field the instance
@@ -417,7 +418,7 @@ export const make =
 export const toDocument = (error: Any): typeof WireDocument.Type => {
   const wire = (error as { readonly constructor?: { readonly wire?: unknown } }).constructor?.wire;
   if (wire === undefined || !Schema.isSchema(wire)) {
-    throw new Error(
+    throw declarationError(
       "ApiError.toDocument expects an instance of an ApiError.make(...) class (with a static `wire` schema)",
     );
   }

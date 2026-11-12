@@ -17,6 +17,11 @@ import { HttpServerResponse } from "effect/http";
 import * as ApiError from "./ApiError.js";
 import * as ServerErrors from "./ServerErrors.js";
 
+/** A tagged failure standing in for an arbitrary cause. */
+class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()("Boom", {
+  message: Schema.String,
+}) {}
+
 describe("pathToJsonPointer", () => {
   it("returns empty string for an empty path", () => {
     expect(ServerErrors.pathToJsonPointer([])).toBe("");
@@ -50,9 +55,9 @@ const issueFor = <S extends Schema.Top>(
   const exit = Effect.runSyncExit(
     Schema.decodeEffect(schema as unknown as Schema.Codec<S["Type"]>)(input, options),
   );
-  if (Exit.isSuccess(exit)) throw new Error("expected schema to fail");
+  assert(Exit.isFailure(exit), "expected schema to fail");
   const error = Cause.findErrorOption(exit.cause);
-  if (Option.isNone(error)) throw new Error("Cause has no failure");
+  assert(Option.isSome(error), "Cause has no failure");
   return (error.value as { readonly issue: SchemaIssue.Issue }).issue;
 };
 
@@ -272,7 +277,7 @@ class DbDown extends Schema.TaggedError<DbDown, { readonly brand: unique symbol 
 /** Unwrap the mapping's verdict, failing the test when it declined to map. */
 const mapped = (cause: unknown): ServerErrors.JsonapiError => {
   const result = ServerErrors.fromTaggedError(cause);
-  if (Option.isNone(result)) throw new Error("expected the seam to map the error");
+  assert(Option.isSome(result), "expected the seam to map the error");
   expect(result.value).toBeInstanceOf(ServerErrors.JsonapiError);
   return result.value;
 };
@@ -408,7 +413,7 @@ describe("fromTaggedError", () => {
     const passed = ServerErrors.fromTaggedError(own);
     assert(Option.isSome(passed));
     expect(passed.value).toBe(own);
-    expect(Option.isNone(ServerErrors.fromTaggedError(new Error("oops")))).toBe(true);
+    expect(Option.isNone(ServerErrors.fromTaggedError(new Boom({ message: "oops" })))).toBe(true);
     expect(Option.isNone(ServerErrors.fromTaggedError("strings are not errors"))).toBe(true);
     expect(Option.isNone(ServerErrors.fromTaggedError({ random: "object" }))).toBe(true);
   });
@@ -431,9 +436,7 @@ describe("JsonapiError.toDocument", () => {
 const responseOf = (effect: Effect.Effect<unknown>) =>
   Effect.gen(function* () {
     const value = yield* effect;
-    if (!HttpServerResponse.isHttpServerResponse(value)) {
-      return yield* Effect.die(new Error("expected a response"));
-    }
+    assert(HttpServerResponse.isHttpServerResponse(value), "expected a response");
     const web = HttpServerResponse.toWeb(value);
     return {
       status: web.status,

@@ -497,10 +497,13 @@ export const make = (options: Options): Negotiator => {
     const entries = acceptEntries(request.headers.get("accept"), clean);
     // Alternates are negotiated first: they apply to their own paths, an
     // orthogonal media type / path set from the JSON:API surface.
-    for (const alternate of alternates) {
-      if (alternate.matches(pathname) && wins(entries, (e) => e.base === alternate.mediaType)) {
-        return { representation: alternate.mediaType, dispatch: false };
-      }
+    const alternate = Arr.findFirst(
+      alternates,
+      (candidate) =>
+        candidate.matches(pathname) && wins(entries, (e) => e.base === candidate.mediaType),
+    );
+    if (Option.isSome(alternate)) {
+      return { representation: alternate.value.mediaType, dispatch: false };
     }
     const jsonapi = entries.filter((entry) => entry.base === MEDIA_TYPE);
     if (Arr.isReadonlyArrayEmpty(jsonapi) || !isApiPath(pathname)) return html;

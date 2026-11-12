@@ -42,6 +42,7 @@ import type { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import { HttpApiBuilder } from "effect/http-api";
 import * as Middleware from "./Middleware.js";
 import * as ServerErrors from "./ServerErrors.js";
+import { declarationError } from "./internal/errors.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -350,7 +351,8 @@ export const layer = <R>(
   options?: Options<R>,
 ): Layer.Layer<never, never, HttpRouter.HttpRouter | HttpRouter.Request<"Requires", R>> => {
   const [first, ...rest] = families.map((family) => familyLayer(api, family, options));
-  if (first === undefined) throw new Error("Registry.layer: at least one family is required");
+  if (first === undefined)
+    throw declarationError("Registry.layer: at least one family is required");
   const groups = rest.reduce((merged, next) => Layer.merge(merged, next), first);
   return HttpApiBuilder.layer(api).pipe(
     Layer.provideMerge(groups),

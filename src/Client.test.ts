@@ -26,6 +26,11 @@ import { make as Resource } from "./Resource.js";
 import { MEDIA_TYPE } from "./internal/media.js";
 import { stringify } from "./internal/json.js";
 
+/** A tagged failure standing in for an arbitrary cause. */
+class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()("Boom", {
+  message: Schema.String,
+}) {}
+
 // ---------------------------------------------------------------------------
 // mediaType
 // ---------------------------------------------------------------------------
@@ -352,7 +357,7 @@ describe("Client.decodeErrorDocument", () => {
     it("a hostile value whose own accessors throw", () => {
       const hostile = {
         get errors(): never {
-          throw new Error("boom");
+          throw new Boom({ message: "boom" });
         },
       };
       expect(Option.isNone(decodeErrorDocument(hostile))).toBe(true);
@@ -410,7 +415,7 @@ describe("Client.errorDocument", () => {
 
   it.effect("degrades to none for a cause that is not an HttpClientError at all", () =>
     Effect.gen(function* () {
-      expect(Option.isNone(yield* errorDocument(new Error("boom")))).toBe(true);
+      expect(Option.isNone(yield* errorDocument(new Boom({ message: "boom" })))).toBe(true);
       expect(Option.isNone(yield* errorDocument(undefined))).toBe(true);
       expect(Option.isNone(yield* errorDocument("nope"))).toBe(true);
     }),
@@ -422,7 +427,7 @@ describe("Client.errorDocument", () => {
       const broken = new Response(
         new ReadableStream({
           start(controller) {
-            controller.error(new Error("connection reset"));
+            controller.error(new Boom({ message: "connection reset" }));
           },
         }),
         { status: 502 },

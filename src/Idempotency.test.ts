@@ -16,6 +16,11 @@ import { MEDIA_TYPE } from "./internal/media.js";
 import { definedMember } from "./internal/members.js";
 import { parse, stringify } from "./internal/json.js";
 
+/** A tagged failure standing in for an arbitrary cause. */
+class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()("Boom", {
+  message: Schema.String,
+}) {}
+
 const Article = Resource("articles", {
   attributes: { title: Schema.NonEmptyString, body: Schema.String },
 });
@@ -458,7 +463,7 @@ describe("Idempotency.layer", () => {
     const live = articlesLive(api, () =>
       Effect.sync(() => {
         calls += 1;
-        if (calls === 1) throw new Error("boom");
+        if (calls === 1) throw new Boom({ message: "boom" });
         return { data: sample };
       }),
     );

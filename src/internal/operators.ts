@@ -9,6 +9,7 @@
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { render } from "./json.js";
+import { declarationError } from "./errors.js";
 
 /** The six comparison operators: one literal against the field. */
 export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const;
@@ -44,19 +45,19 @@ export const resolveOperators = <const L extends ReadonlyArray<string>>(
 ): ReadonlyArray<L[number]> => {
   if (filter === true) return allowed.literals;
   if (Arr.isReadonlyArrayEmpty(filter)) {
-    throw new Error(
+    throw declarationError(
       `${subject} declares filter: [] — no operators; omit \`filter\` (or pass false) instead`,
     );
   }
   const isAllowed = Schema.is(allowed);
   const operators: Array<L[number]> = [];
-  for (const operator of filter) {
+  Arr.forEach(filter, (operator) => {
     if (!isAllowed(operator)) {
-      throw new Error(
+      throw declarationError(
         `${subject} declares filter operator ${render(operator)}; expected one of ${allowed.literals.join(", ")}`,
       );
     }
     if (!operators.includes(operator)) operators.push(operator);
-  }
+  });
   return operators;
 };

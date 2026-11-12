@@ -15,6 +15,11 @@ import type { HttpClient } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import { Client, Endpoint, Group, Resource } from "@thomasfosterau/effect-jsonapi";
 
+/** A tagged failure standing in for an arbitrary cause. */
+class Boom extends Schema.TaggedError<Boom, { readonly brand: unique symbol }>()("Boom", {
+  message: Schema.String,
+}) {}
+
 const Article = Resource.make("articles", {
   attributes: { title: Schema.NonEmptyString },
 });
@@ -83,7 +88,7 @@ assertType<Client.ErrorDocument>(Client.decodeErrorDocument("{}"));
 
 // control: the cause-based decode never fails and needs nothing
 assertType<Effect.Effect<Option.Option<Client.ErrorDocument>>>(
-  Client.errorDocument(new Error("x")),
+  Client.errorDocument(new Boom({ message: "x" })),
 );
 
 // control

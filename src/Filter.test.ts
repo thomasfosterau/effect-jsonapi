@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
@@ -24,7 +25,9 @@ describe("Filter", () => {
   });
 
   it("guards operator names", () => {
-    for (const operator of Filter.operators) expect(Filter.isOperator(operator)).toBe(true);
+    Arr.forEach(Filter.operators, (operator) => {
+      expect(Filter.isOperator(operator)).toBe(true);
+    });
     expect(Filter.isOperator("like")).toBe(false);
     expect(Filter.isOperator("between")).toBe(false);
     expect(Filter.isOperator("")).toBe(false);
@@ -35,7 +38,9 @@ describe("Filter", () => {
 
   it("spells the operators as typed constants", () => {
     expect(Object.keys(Filter.Op)).toEqual([...Filter.operators]);
-    for (const operator of Filter.operators) expect(Filter.Op[operator]).toBe(operator);
+    Arr.forEach(Filter.operators, (operator) => {
+      expect(Filter.Op[operator]).toBe(operator);
+    });
     expect(Object.isFrozen(Filter.Op)).toBe(true);
     expectTypeOf(Filter.Op.eq).toEqualTypeOf<"eq">();
     expectTypeOf(Filter.Op.in).toEqualTypeOf<"in">();
@@ -46,8 +51,9 @@ describe("Filter", () => {
   it("narrows to the relationship subset, itself a schema", () => {
     expect(Relationship.filterOperators).toEqual(["eq", "ne", "in", "nin", "isnull"]);
     expect(Relationship.FilterOperator.literals).toBe(Relationship.filterOperators);
-    for (const operator of Relationship.filterOperators)
+    Arr.forEach(Relationship.filterOperators, (operator) => {
       expect(Filter.isOperator(operator)).toBe(true);
+    });
     expect(Schema.is(Relationship.FilterOperator)("lt")).toBe(false);
     expectTypeOf<Relationship.FilterOperator>().toEqualTypeOf<
       "eq" | "ne" | "in" | "nin" | "isnull"

@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Match from "effect/Match";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -304,7 +305,7 @@ describe("relationship operation schemas", () => {
   });
 
   it("decodes `many` relationship add / update / remove", () => {
-    for (const op of ["add", "update", "remove"]) {
+    Arr.forEach(["add", "update", "remove"], (op) => {
       const operation = decodeOperation({
         op,
         ref: { type: "articles", id: "1", relationship: "comments" },
@@ -316,13 +317,13 @@ describe("relationship operation schemas", () => {
       expect(operation.op).toBe(op);
       expect(operation.ref.relationship).toBe("comments");
       expect(operation.data).toHaveLength(2);
-    }
+    });
   });
 
   it("decodes `paginated` relationship add / update / remove", () => {
     // paginated relationships have no inline linkage, but they ARE manageable
     // through relationship operations
-    for (const op of ["add", "update", "remove"]) {
+    Arr.forEach(["add", "update", "remove"], (op) => {
       const operation = decodeOperation({
         op,
         ref: { type: "articles", id: "1", relationship: "subscribers" },
@@ -330,7 +331,7 @@ describe("relationship operation schemas", () => {
       }) as any;
       expect(operation.op).toBe(op);
       expect(operation.ref.relationship).toBe("subscribers");
-    }
+    });
   });
 
   it("rejects relationship refs with unknown relationship names", () => {

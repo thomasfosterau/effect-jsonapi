@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { tryStringify } from "./json.js";
+import { declarationError } from "./errors.js";
 
 /**
  * How many undeclared members a closed struct reports at their own paths
@@ -41,7 +42,7 @@ export const validateMaxUndeclaredMemberErrors = (where: string, cap: number): n
   if (P.isNumber(cap) && (cap === Number.POSITIVE_INFINITY || (Number.isInteger(cap) && cap > 0))) {
     return cap;
   }
-  throw new Error(
+  throw declarationError(
     `${where}: maxUndeclaredMemberErrors must be a positive integer or Infinity, got ${showValue(cap)}`,
   );
 };
