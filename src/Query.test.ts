@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { afterEach, describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -1131,54 +1132,66 @@ describe("Query.canonical", () => {
 describe("Query.validateIncludePaths", () => {
   const options = { includable: ["author", "comments", "comments.author"], maxDepth: 2 };
 
-  it("returns each path split into segments when every path is includable and within depth", () => {
-    const result = Effect.runSync(
-      Query.validateIncludePaths(["author", "comments.author"], options),
-    );
-    expect(result).toEqual([
-      { path: "author", segments: ["author"] },
-      { path: "comments.author", segments: ["comments", "author"] },
-    ]);
-  });
+  it.effect(
+    "returns each path split into segments when every path is includable and within depth",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* Query.validateIncludePaths(["author", "comments.author"], options);
+        expect(result).toEqual([
+          { path: "author", segments: ["author"] },
+          { path: "comments.author", segments: ["comments", "author"] },
+        ]);
+      }),
+  );
 
-  it("returns an empty array for an empty request", () => {
-    expect(Effect.runSync(Query.validateIncludePaths([], options))).toEqual([]);
-  });
+  it.effect("returns an empty array for an empty request", () =>
+    Effect.gen(function* () {
+      expect(yield* Query.validateIncludePaths([], options)).toEqual([]);
+    }),
+  );
 
-  it("fails with UnsupportedIncludePath for a path outside the includable set", () => {
-    const thrown = Effect.runSync(Effect.flip(Query.validateIncludePaths(["publisher"], options)));
-    expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    expect(thrown).toMatchObject({ path: "publisher", includablePaths: options.includable });
-  });
+  it.effect("fails with UnsupportedIncludePath for a path outside the includable set", () =>
+    Effect.gen(function* () {
+      const thrown = yield* Effect.flip(Query.validateIncludePaths(["publisher"], options));
+      expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      expect(thrown).toMatchObject({ path: "publisher", includablePaths: options.includable });
+    }),
+  );
 
-  it("fails with UnsupportedIncludeDepth for an over-deep path", () => {
-    const thrown = Effect.runSync(
-      Effect.flip(Query.validateIncludePaths(["comments.author.employer"], options)),
-    );
-    expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-    expect(thrown).toMatchObject({
-      path: "comments.author.employer",
-      maxDepth: 2,
-      includablePaths: options.includable,
-    });
-  });
+  it.effect("fails with UnsupportedIncludeDepth for an over-deep path", () =>
+    Effect.gen(function* () {
+      const thrown = yield* Effect.flip(
+        Query.validateIncludePaths(["comments.author.employer"], options),
+      );
+      expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+      expect(thrown).toMatchObject({
+        path: "comments.author.employer",
+        maxDepth: 2,
+        includablePaths: options.includable,
+      });
+    }),
+  );
 
-  it("checks depth before membership: an over-deep, non-includable path fails as depth, not membership", () => {
-    const thrown = Effect.runSync(
-      Effect.flip(Query.validateIncludePaths(["publisher.address.city"], options)),
-    );
-    expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
-  });
+  it.effect(
+    "checks depth before membership: an over-deep, non-includable path fails as depth, not membership",
+    () =>
+      Effect.gen(function* () {
+        const thrown = yield* Effect.flip(
+          Query.validateIncludePaths(["publisher.address.city"], options),
+        );
+        expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludeDepth);
+      }),
+  );
 
-  it("matches the whole dotted path, not just the head segment", () => {
-    // "comments" alone is includable, but "comments.body" (a non-relationship
-    // member) is not — membership is checked against the full path
-    const thrown = Effect.runSync(
-      Effect.flip(Query.validateIncludePaths(["comments.body"], options)),
-    );
-    expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludePath);
-    expect(thrown).toMatchObject({ path: "comments.body" });
-  });
+  it.effect("matches the whole dotted path, not just the head segment", () =>
+    Effect.gen(function* () {
+      // "comments" alone is includable, but "comments.body" (a non-relationship
+      // member) is not — membership is checked against the full path
+      const thrown = yield* Effect.flip(Query.validateIncludePaths(["comments.body"], options));
+      expect(thrown).toBeInstanceOf(ApiError.UnsupportedIncludePath);
+      expect(thrown).toMatchObject({ path: "comments.body" });
+    }),
+  );
 });
 
 describe("Query.schema: undeclared parameters never reach the decoded query (issue #260)", () => {

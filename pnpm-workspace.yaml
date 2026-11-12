@@ -63,6 +63,12 @@ catalog:
   # `components` table in node_modules/@effect/tsgo/dist/effect-tsgo.cjs
   # before bumping any of the three.
   "@effect/tsgo": 0.63.0
+  # Effect-aware test runner (`it.effect`, `layer`, `TestClock`): tests run
+  # their Effects through it instead of `Effect.runPromise` in the body
+  # (`effect/effect-run-in-body`, #600). Pinned to the `effect` release below
+  # (it peers `effect` at the same version and `vitest >=5 <6`, which
+  # the `vitest` pin satisfies).
+  "@effect/vitest": 4.1.2
   # The Effect lint preset (`effect.configs.recommended` in vite.config.ts):
   # 74 `effect/` rules, including the anti-slop set. Replaced
   # @mpsuesser/oxlint-plugin-effect (#532). It ranges its oxlint plugin API

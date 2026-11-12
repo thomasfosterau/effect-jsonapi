@@ -218,6 +218,21 @@ export default defineConfig({
       "unicorn/prefer-set-has": "off",
       // Reports prose comments that mention `expect(` as commented-out tests.
       "vitest/no-commented-out-tests": "off",
+      // `@effect/vitest`'s runners (#600) are test blocks the rule does not
+      // know by default: without them every `expect` in an `it.effect` body
+      // reads as standalone.
+      "vitest/no-standalone-expect": [
+        "error",
+        {
+          additionalTestBlockFunctions: [
+            "it.effect",
+            "it.live",
+            "it.layer",
+            "it.effect.each",
+            "it.live.each",
+          ],
+        },
+      ],
     },
     overrides: [
       // `strict-effect-provide` flags `Effect.provide` outside an

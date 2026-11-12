@@ -1,4 +1,5 @@
-import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -688,27 +689,27 @@ describe("Endpoint.operations", () => {
 // ---------------------------------------------------------------------------
 
 describe("HTTP round-trip via HttpApiTest", () => {
-  it("fetches a single resource document", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("fetches a single resource document", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toMatchObject({ type: "articles", id: "1" });
-    // `data` is non-null now — the resource itself, no optional chaining needed
-    expect(result.data.attributes.title).toBe("Hello");
-    // The branded id type flows through the client
-    expectTypeOf<typeof result.data.id>().toEqualTypeOf<typeof Article.Id.Type>();
-    expect(result.data.attributes.createdAt).toBeInstanceOf(Date);
-  });
+      expect(result.data).toMatchObject({ type: "articles", id: "1" });
+      // `data` is non-null now — the resource itself, no optional chaining needed
+      expect(result.data.attributes.title).toBe("Hello");
+      // The branded id type flows through the client
+      expectTypeOf<typeof result.data.id>().toEqualTypeOf<typeof Article.Id.Type>();
+      expect(result.data.attributes.createdAt).toBeInstanceOf(Date);
+    }),
+  );
 
-  it("serves compound documents when include is requested", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("serves compound documents when include is requested", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.get({
@@ -716,16 +717,16 @@ describe("HTTP round-trip via HttpApiTest", () => {
             query: { include: ["author"] },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.included).toHaveLength(1);
-    expect(result.included?.[0]).toMatchObject({ type: "people", id: "9" });
-  });
+      expect(result.included).toHaveLength(1);
+      expect(result.included?.[0]).toMatchObject({ type: "people", id: "9" });
+    }),
+  );
 
-  it("lists a collection document with typed query params", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("lists a collection document with typed query params", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.list({
@@ -736,16 +737,16 @@ describe("HTTP round-trip via HttpApiTest", () => {
             },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toHaveLength(1);
-    expect(result.meta?.total).toBe(1);
-  });
+      expect(result.data).toHaveLength(1);
+      expect(result.meta?.total).toBe(1);
+    }),
+  );
 
-  it("creates a resource from a JSON:API payload (201)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("creates a resource from a JSON:API payload (201)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.create({
@@ -762,16 +763,16 @@ describe("HTTP round-trip via HttpApiTest", () => {
             },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toMatchObject({ type: "articles", id: "new-id" });
-    expect(result.data.attributes.title).toBe("New article");
-  });
+      expect(result.data).toMatchObject({ type: "articles", id: "new-id" });
+      expect(result.data.attributes.title).toBe("New article");
+    }),
+  );
 
-  it("updates a resource with a partial attributes payload", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("updates a resource with a partial attributes payload", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.update({
@@ -785,47 +786,49 @@ describe("HTTP round-trip via HttpApiTest", () => {
             },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.data.attributes.title).toBe("Updated title");
-    expect(result.data.attributes.body).toBe("World");
-  });
+      expect(result.data.attributes.title).toBe("Updated title");
+      expect(result.data.attributes.body).toBe("World");
+    }),
+  );
 
-  it("deletes a resource (204, no content)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("deletes a resource (204, no content)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.delete({ params: { id: Article.Id.make("1") } });
         }),
-      ),
-    );
-    expect(result).toBeUndefined();
-  });
+      );
+      expect(result).toBeUndefined();
+    }),
+  );
 
-  it("surfaces domain errors as typed tagged errors on the client", async () => {
-    const exit = await Effect.runPromiseExit(
-      withHandlers(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("missing") },
-            query: {},
-          });
-        }),
-      ),
-    );
+  it.effect("surfaces domain errors as typed tagged errors on the client", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        withHandlers(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.get({
+              params: { id: Article.Id.make("missing") },
+              query: {},
+            });
+          }),
+        ),
+      );
 
-    assert(Exit.isFailure(exit));
-    const error = findFailure(exit.cause);
-    expect(error).toBeInstanceOf(ArticleNotFound);
-    expect((error as ArticleNotFound).id).toBe("missing");
-  });
+      assert(Exit.isFailure(exit));
+      const error = findFailure(exit.cause);
+      expect(error).toBeInstanceOf(ArticleNotFound);
+      expect((error as ArticleNotFound).id).toBe("missing");
+    }),
+  );
 
-  it("recovers from domain errors with catchTag", async () => {
-    const recovered = await Effect.runPromise(
-      withHandlers(
+  it.effect("recovers from domain errors with catchTag", () =>
+    Effect.gen(function* () {
+      const recovered = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles
@@ -836,46 +839,48 @@ describe("HTTP round-trip via HttpApiTest", () => {
               ),
             );
         }),
-      ),
-    );
+      );
 
-    expect(recovered).toBe("not found: missing");
-  });
+      expect(recovered).toBe("not found: missing");
+    }),
+  );
 
-  it("rejects unknown include paths with a 400 BadRequest", async () => {
-    const exit = await Effect.runPromiseExit(
-      withHandlers(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.get({
-            params: { id: Article.Id.make("1") },
-            // Bypass client-side validation to test the server's response
-            query: { include: ["publisher"] } as never,
-          });
-        }),
-      ),
-    );
+  it.effect("rejects unknown include paths with a 400 BadRequest", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        withHandlers(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.get({
+              params: { id: Article.Id.make("1") },
+              // Bypass client-side validation to test the server's response
+              query: { include: ["publisher"] } as never,
+            });
+          }),
+        ),
+      );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-  });
+      expect(Exit.isFailure(exit)).toBe(true);
+    }),
+  );
 
-  it("fetches related to-one resources (GET /articles/:id/author)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("fetches related to-one resources (GET /articles/:id/author)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.author({ params: { id: Article.Id.make("1") }, query: {} });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toMatchObject({ type: "people", id: "9" });
-    expect(result.links?.self).toBe("/articles/1/author");
-  });
+      expect(result.data).toMatchObject({ type: "people", id: "9" });
+      expect(result.links?.self).toBe("/articles/1/author");
+    }),
+  );
 
-  it("fetches related to-many resources with pagination (GET /articles/:id/comments)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("fetches related to-many resources with pagination (GET /articles/:id/comments)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.comments({
@@ -883,18 +888,18 @@ describe("HTTP round-trip via HttpApiTest", () => {
             query: { page: { offset: 0, limit: 10 } },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toHaveLength(1);
-    expect(result.data[0]).toMatchObject({ type: "comments", id: "5" });
-    // Full resource objects, not just identifiers
-    expect(result.data[0]?.attributes.body).toBe("Nice");
-  });
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toMatchObject({ type: "comments", id: "5" });
+      // Full resource objects, not just identifiers
+      expect(result.data[0]?.attributes.body).toBe("Nice");
+    }),
+  );
 
-  it("fetches relationship linkage (GET /articles/:id/relationships/comments)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("fetches relationship linkage (GET /articles/:id/relationships/comments)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.commentsRelationship({
@@ -902,18 +907,18 @@ describe("HTTP round-trip via HttpApiTest", () => {
             query: {},
           });
         }),
-      ),
-    );
+      );
 
-    // Identifiers only — no attributes
-    expect(result.data).toEqual([{ type: "comments", id: "5" }]);
-    expect(result.links?.self).toBe("/articles/1/relationships/comments");
-    expect(result.links?.related).toBe("/articles/1/comments");
-  });
+      // Identifiers only — no attributes
+      expect(result.data).toEqual([{ type: "comments", id: "5" }]);
+      expect(result.links?.self).toBe("/articles/1/relationships/comments");
+      expect(result.links?.related).toBe("/articles/1/comments");
+    }),
+  );
 
-  it("replaces a to-one relationship (PATCH /articles/:id/relationships/author)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("replaces a to-one relationship (PATCH /articles/:id/relationships/author)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.updateAuthorRelationship({
@@ -921,15 +926,15 @@ describe("HTTP round-trip via HttpApiTest", () => {
             payload: { data: Person.ref("42") },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toEqual({ type: "people", id: "42" });
-  });
+      expect(result.data).toEqual({ type: "people", id: "42" });
+    }),
+  );
 
-  it("clears an optional to-one relationship (PATCH with null data)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("clears an optional to-one relationship (PATCH with null data)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.updateAuthorRelationship({
@@ -937,15 +942,15 @@ describe("HTTP round-trip via HttpApiTest", () => {
             payload: { data: null },
           });
         }),
-      ),
-    );
+      );
 
-    expect(result.data).toBeNull();
-  });
+      expect(result.data).toBeNull();
+    }),
+  );
 
-  it("adds to a to-many relationship (POST /articles/:id/relationships/comments)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
+  it.effect("adds to a to-many relationship (POST /articles/:id/relationships/comments)", () =>
+    Effect.gen(function* () {
+      const result = yield* withHandlers(
         Effect.gen(function* () {
           const client = yield* buildClient;
           return yield* client.articles.addCommentsRelationship({
@@ -953,48 +958,52 @@ describe("HTTP round-trip via HttpApiTest", () => {
             payload: { data: [Comment.ref("12")] },
           });
         }),
-      ),
-    );
+      );
 
-    // Existing linkage plus the added identifier
-    expect(result.data).toEqual([
-      { type: "comments", id: "5" },
-      { type: "comments", id: "12" },
-    ]);
-  });
+      // Existing linkage plus the added identifier
+      expect(result.data).toEqual([
+        { type: "comments", id: "5" },
+        { type: "comments", id: "12" },
+      ]);
+    }),
+  );
 
-  it("removes from a to-many relationship (DELETE /articles/:id/relationships/comments, 204)", async () => {
-    const result = await Effect.runPromise(
-      withHandlers(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.removeCommentsRelationship({
-            params: { id: Article.Id.make("1") },
-            payload: { data: [Comment.ref("5")] },
-          });
-        }),
-      ),
-    );
+  it.effect(
+    "removes from a to-many relationship (DELETE /articles/:id/relationships/comments, 204)",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* withHandlers(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.removeCommentsRelationship({
+              params: { id: Article.Id.make("1") },
+              payload: { data: [Comment.ref("5")] },
+            });
+          }),
+        );
 
-    expect(result).toBeUndefined();
-  });
+        expect(result).toBeUndefined();
+      }),
+  );
 
-  it("relationship endpoints surface domain errors as typed tagged errors", async () => {
-    const exit = await Effect.runPromiseExit(
-      withHandlers(
-        Effect.gen(function* () {
-          const client = yield* buildClient;
-          return yield* client.articles.commentsRelationship({
-            params: { id: Article.Id.make("missing") },
-            query: {},
-          });
-        }),
-      ),
-    );
+  it.effect("relationship endpoints surface domain errors as typed tagged errors", () =>
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(
+        withHandlers(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.articles.commentsRelationship({
+              params: { id: Article.Id.make("missing") },
+              query: {},
+            });
+          }),
+        ),
+      );
 
-    assert(Exit.isFailure(exit));
-    expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
-  });
+      assert(Exit.isFailure(exit));
+      expect(findFailure(exit.cause)).toBeInstanceOf(ArticleNotFound);
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1159,56 +1168,56 @@ describe("Endpoint.resource / Group.resource", () => {
     expect(decoded.meta).toEqual({ revision: 3, total: 1 });
   });
 
-  it("round-trips through a fully generated group (every endpoint handled & callable)", async () => {
-    // Comment has a single `author: one(Person)` relationship → 8 endpoints.
-    const commentsGroup = Group.resource(Comment);
-    const CommentApi = HttpApi.make("blog").add(commentsGroup);
+  it.effect("round-trips through a fully generated group (every endpoint handled & callable)", () =>
+    Effect.gen(function* () {
+      // Comment has a single `author: one(Person)` relationship → 8 endpoints.
+      const commentsGroup = Group.resource(Comment);
+      const CommentApi = HttpApi.make("blog").add(commentsGroup);
 
-    const CommentsLive = HttpApiBuilder.group(CommentApi, "comments", (handlers) =>
-      handlers
-        .handle("get", () => Effect.succeed(Handlers.data(sampleComment)))
-        .handle("list", () => Effect.succeed(Handlers.collection([sampleComment])))
-        .handle("create", ({ payload }) =>
-          Effect.succeed(
-            Handlers.data(
-              Comment.make({
-                id: Comment.Id.make("new"),
-                attributes: payload.data.attributes,
-                relationships: { author: payload.data.relationships.author },
+      const CommentsLive = HttpApiBuilder.group(CommentApi, "comments", (handlers) =>
+        handlers
+          .handle("get", () => Effect.succeed(Handlers.data(sampleComment)))
+          .handle("list", () => Effect.succeed(Handlers.collection([sampleComment])))
+          .handle("create", ({ payload }) =>
+            Effect.succeed(
+              Handlers.data(
+                Comment.make({
+                  id: Comment.Id.make("new"),
+                  attributes: payload.data.attributes,
+                  relationships: { author: payload.data.relationships.author },
+                }),
+              ),
+            ),
+          )
+          .handle("update", () => Effect.succeed(Handlers.data(sampleComment)))
+          .handle("delete", () => Effect.void)
+          .handle("author", ({ params }) =>
+            Effect.succeed(
+              Handlers.data(samplePerson, {
+                self: Handlers.relatedLink("comments", params.id, "author"),
               }),
             ),
+          )
+          .handle("authorRelationship", ({ params }) =>
+            Effect.succeed(
+              Handlers.linkage(sampleComment.relationships!.author.data, {
+                self: Handlers.relationshipLink("comments", params.id, "author"),
+                related: Handlers.relatedLink("comments", params.id, "author"),
+              }),
+            ),
+          )
+          .handle("updateAuthorRelationship", ({ payload }) =>
+            Effect.succeed(Handlers.linkage(payload.data)),
           ),
-        )
-        .handle("update", () => Effect.succeed(Handlers.data(sampleComment)))
-        .handle("delete", () => Effect.void)
-        .handle("author", ({ params }) =>
-          Effect.succeed(
-            Handlers.data(samplePerson, {
-              self: Handlers.relatedLink("comments", params.id, "author"),
-            }),
-          ),
-        )
-        .handle("authorRelationship", ({ params }) =>
-          Effect.succeed(
-            Handlers.linkage(sampleComment.relationships!.author.data, {
-              self: Handlers.relationshipLink("comments", params.id, "author"),
-              related: Handlers.relatedLink("comments", params.id, "author"),
-            }),
-          ),
-        )
-        .handle("updateAuthorRelationship", ({ payload }) =>
-          Effect.succeed(Handlers.linkage(payload.data)),
-        ),
-    );
+      );
 
-    const withComments = <A, E>(effect: Effect.Effect<A, E, any>) =>
-      effect.pipe(
-        Effect.scoped,
-        Effect.provide(Layer.provideMerge(CommentsLive, Middleware.layer)),
-      ) as Effect.Effect<A, E>;
+      const withComments = <A, E>(effect: Effect.Effect<A, E, any>) =>
+        effect.pipe(
+          Effect.scoped,
+          Effect.provide(Layer.provideMerge(CommentsLive, Middleware.layer)),
+        ) as Effect.Effect<A, E>;
 
-    const result = await Effect.runPromise(
-      withComments(
+      const result = yield* withComments(
         Effect.gen(function* () {
           const client = yield* HttpApiTest.groups(CommentApi, ["comments"]);
           const fetched = yield* client.comments.get({
@@ -1222,13 +1231,13 @@ describe("Endpoint.resource / Group.resource", () => {
           const deleted = yield* client.comments.delete({ params: { id: Comment.Id.make("5") } });
           return { fetched, author, deleted };
         }),
-      ),
-    );
+      );
 
-    expect(result.fetched.data).toMatchObject({ type: "comments", id: "5" });
-    expect(result.author.data).toMatchObject({ type: "people", id: "9" });
-    expect(result.deleted).toBeUndefined();
-  });
+      expect(result.fetched.data).toMatchObject({ type: "comments", id: "5" });
+      expect(result.author.data).toMatchObject({ type: "people", id: "9" });
+      expect(result.deleted).toBeUndefined();
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1395,47 +1404,49 @@ describe("HTTP round-trip with a flat write payload", () => {
   );
 
   const run = <A, E>(effect: Effect.Effect<A, E, any>) =>
-    Effect.runPromise(
-      effect.pipe(
-        Effect.scoped,
-        Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
-      ) as Effect.Effect<A, E>,
-    );
+    effect.pipe(
+      Effect.scoped,
+      Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
+    ) as Effect.Effect<A, E>;
 
-  it("creates from a flat body and still answers with a JSON:API document (201)", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const client = yield* HttpApiTest.groups(FlatApi, ["articles"]);
-        return yield* client.articles.create({
-          payload: {
-            title: "New article",
-            body: "Contents",
-            createdAt: new Date("2024-06-01T00:00:00.000Z"),
-          },
-        });
-      }),
-    );
+  it.effect("creates from a flat body and still answers with a JSON:API document (201)", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        Effect.gen(function* () {
+          const client = yield* HttpApiTest.groups(FlatApi, ["articles"]);
+          return yield* client.articles.create({
+            payload: {
+              title: "New article",
+              body: "Contents",
+              createdAt: new Date("2024-06-01T00:00:00.000Z"),
+            },
+          });
+        }),
+      );
 
-    expect(result.data).toMatchObject({ type: "articles", id: "new-id" });
-    expect(result.data.attributes.title).toBe("New article");
-    expect(result.data.attributes.createdAt).toBeInstanceOf(Date);
-  });
+      expect(result.data).toMatchObject({ type: "articles", id: "new-id" });
+      expect(result.data.attributes.title).toBe("New article");
+      expect(result.data.attributes.createdAt).toBeInstanceOf(Date);
+    }),
+  );
 
-  it("updates from a flat body carrying the id", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const client = yield* HttpApiTest.groups(FlatApi, ["articles"]);
-        return yield* client.articles.update({
-          params: { id: Article.Id.make("1") },
-          payload: { id: Article.Id.make("1"), title: "Updated" },
-        });
-      }),
-    );
+  it.effect("updates from a flat body carrying the id", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        Effect.gen(function* () {
+          const client = yield* HttpApiTest.groups(FlatApi, ["articles"]);
+          return yield* client.articles.update({
+            params: { id: Article.Id.make("1") },
+            payload: { id: Article.Id.make("1"), title: "Updated" },
+          });
+        }),
+      );
 
-    expect(result.data.attributes.title).toBe("Updated");
-    // the untouched attribute survives
-    expect(result.data.attributes.body).toBe("World");
-  });
+      expect(result.data.attributes.title).toBe("Updated");
+      // the untouched attribute survives
+      expect(result.data.attributes.body).toBe("World");
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1741,21 +1752,21 @@ describe("HTTP round-trip with an overridden list query", () => {
     ),
   );
 
-  it("decodes the bracketed page cursor flat and serves a JSON:API collection", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
+  it.effect("decodes the bracketed page cursor flat and serves a JSON:API collection", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.gen(function* () {
         const client = yield* HttpApiTest.groups(FlatApi, ["articles"]);
         return yield* client.articles.list({ query: { offset: 3, limit: 1, authorId: "9" } });
       }).pipe(
         Effect.scoped,
         Effect.provide(Layer.provideMerge(FlatLive, Middleware.layer)),
-      ) as Effect.Effect<any>,
-    );
+      ) as Effect.Effect<any>;
 
-    expect(result.data).toHaveLength(1);
-    expect(result.data[0]).toMatchObject({ type: "articles", id: "1" });
-    expect(result.meta).toEqual({ total: 3 });
-  });
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toMatchObject({ type: "articles", id: "1" });
+      expect(result.meta).toEqual({ total: 3 });
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -2059,61 +2070,65 @@ describe("HTTP round-trip with a wire success document", () => {
   );
 
   const run = <A, E>(effect: Effect.Effect<A, E, any>) =>
-    Effect.runPromise(
-      effect.pipe(
-        Effect.scoped,
-        Effect.provide(Layer.provideMerge(WireLive, Middleware.layer)),
-      ) as Effect.Effect<A, E>,
-    );
+    effect.pipe(
+      Effect.scoped,
+      Effect.provide(Layer.provideMerge(WireLive, Middleware.layer)),
+    ) as Effect.Effect<A, E>;
 
-  it("answers `get` with the wire document — links.self is a string on the client", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const client = yield* HttpApiTest.groups(WireApi, ["articles"]);
-        return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
-      }),
-    );
+  it.effect("answers `get` with the wire document — links.self is a string on the client", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        Effect.gen(function* () {
+          const client = yield* HttpApiTest.groups(WireApi, ["articles"]);
+          return yield* client.articles.get({ params: { id: Article.Id.make("1") }, query: {} });
+        }),
+      );
 
-    expect(result.data).toMatchObject({ type: "articles", id: "1" });
-    expect(result.data.links?.self).toBe("https://api.example.com/articles/1");
-    expectTypeOf(result.data.links?.self).toEqualTypeOf<string | undefined>();
-  });
+      expect(result.data).toMatchObject({ type: "articles", id: "1" });
+      expect(result.data.links?.self).toBe("https://api.example.com/articles/1");
+      expectTypeOf(result.data.links?.self).toEqualTypeOf<string | undefined>();
+    }),
+  );
 
-  it("answers `list` with the wire collection, pagination links included", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const client = yield* HttpApiTest.groups(WireApi, ["articles"]);
-        return yield* client.articles.list({ query: { page: { offset: 0, limit: 10 } } });
-      }),
-    );
+  it.effect("answers `list` with the wire collection, pagination links included", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        Effect.gen(function* () {
+          const client = yield* HttpApiTest.groups(WireApi, ["articles"]);
+          return yield* client.articles.list({ query: { page: { offset: 0, limit: 10 } } });
+        }),
+      );
 
-    expect(result.data[0].links?.self).toBe("https://api.example.com/articles/1");
-    expect(result.meta).toEqual({ total: 1 });
-    expect(result.links?.first).toBe("/articles?page[offset]=0&page[limit]=10");
-    expect(result.links?.next).toBeNull();
-  });
+      expect(result.data[0].links?.self).toBe("https://api.example.com/articles/1");
+      expect(result.meta).toEqual({ total: 1 });
+      expect(result.links?.first).toBe("/articles?page[offset]=0&page[limit]=10");
+      expect(result.links?.next).toBeNull();
+    }),
+  );
 
-  it("answers `create` with the wire document, still at 201", async () => {
-    const result = await run(
-      Effect.gen(function* () {
-        const client = yield* HttpApiTest.groups(WireApi, ["articles"]);
-        return yield* client.articles.create({
-          payload: {
-            data: {
-              type: "articles",
-              attributes: {
-                title: "Hello",
-                body: "World",
-                createdAt: new Date("2024-01-01T00:00:00.000Z"),
+  it.effect("answers `create` with the wire document, still at 201", () =>
+    Effect.gen(function* () {
+      const result = yield* run(
+        Effect.gen(function* () {
+          const client = yield* HttpApiTest.groups(WireApi, ["articles"]);
+          return yield* client.articles.create({
+            payload: {
+              data: {
+                type: "articles",
+                attributes: {
+                  title: "Hello",
+                  body: "World",
+                  createdAt: new Date("2024-01-01T00:00:00.000Z"),
+                },
               },
             },
-          },
-        });
-      }),
-    );
+          });
+        }),
+      );
 
-    expect(result.data.links?.self).toBe("https://api.example.com/articles/1");
-  });
+      expect(result.data.links?.self).toBe("https://api.example.com/articles/1");
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------

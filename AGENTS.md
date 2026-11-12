@@ -14,7 +14,7 @@
 
 - **`exactOptionalPropertyTypes` is on.** An optional option a caller may forward an explicit `undefined` for is spelled `?: T | undefined`; a bare `?: T` rejects `{ x: maybeUndefined }` at every call site that threads its own optional through.
 - **Relative imports carry a `.js` extension** (`./Resource.js`), unlike the `.ts` used in effect-web and prosekit-utilities.
-- **Tests import from `vite-plus/test`**, never `vitest`.
+- **Tests import from `vite-plus/test`**, never `vitest` — with one exception: Effect tests import `it` (and `layer`) from `@effect/vitest`, which wraps vitest and adds `it.effect` / `it.live` / `it.layer`. `describe`, `expect` and the hooks still come from `vite-plus/test`; `it.effect` runs under a `TestClock`, so a test that really sleeps uses `it.live`. Run an Effect with `it.effect(…, () => Effect.gen(…))`, never `Effect.runPromise` / `runSync` in a test body (`effect/effect-run-in-body`).
 - **Every export has a doc comment** with a summary, an `@example` for principal APIs, `@since` and a `@category` from the vocabulary in [CONTRIBUTING.md](CONTRIBUTING.md#documentation).
 - **Schema-backed errors are `Schema.TaggedError<Self>()(tag, fields)`** — the spelling in the pinned `effect`; `Schema.TaggedErrorClass` was the beta-line name.
 
