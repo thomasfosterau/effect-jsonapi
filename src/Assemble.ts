@@ -126,6 +126,25 @@ export type WireResource<R extends ResourceLike> = Document.Wire<R> & {
 };
 
 /**
+ * The type of the `included` members a walk through `Targets` resolves to:
+ * what the registry's loaders return (`Handlers.IncludeTargetResource`).
+ * With no registry nothing is walked, so nothing can be included: `never`,
+ * which is also what lets such a document (a write's, say) satisfy a success
+ * schema whose `included` is an include surface's precise union (#595). A
+ * registry whose loaders' types aren't visible (annotated as
+ * `Handlers.IncludeTargets` rather than checked with `satisfies`) gives the
+ * loose {@link ResourceLike}.
+ *
+ * @since 0.22.0
+ * @category type-level
+ */
+export type TargetsIncluded<Targets extends Handlers.IncludeTargets> = [Targets] extends [never]
+  ? never
+  : [Extract<Handlers.IncludeTargetResource<Targets>, ResourceLike>] extends [never]
+    ? ResourceLike
+    : Extract<Handlers.IncludeTargetResource<Targets>, ResourceLike>;
+
+/**
  * The `jsonapi` member every assembled document carries.
  *
  * @since 0.16.0
@@ -135,15 +154,18 @@ export const JSONAPI_MEMBER = { version: "1.1" } as const;
 
 /**
  * A single-resource document as {@link resource} assembles it, with the
- * `jsonapi` member always present. `included` is the loose {@link ResourceLike}
- * because the walk resolves through an untyped-by-type registry.
+ * `jsonapi` member always present. `I` is the `included` members' type:
+ * {@link resource} sets it to what the include registry's loaders return
+ * ({@link TargetsIncluded}), so a document is assignable to a success schema
+ * whose `included` is the include surface's precise union (#595). Written by
+ * hand, it defaults to the loose {@link ResourceLike}.
  *
  * @since 0.16.0
  * @category models
  */
-export interface ResourceDocument<R extends ResourceLike> {
+export interface ResourceDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
   readonly data: WireResource<R> & { readonly meta?: { readonly [key: string]: unknown } };
-  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links?: { readonly self?: string };
   readonly meta?: { readonly [key: string]: unknown };
   readonly jsonapi: typeof JSONAPI_MEMBER;
@@ -156,11 +178,11 @@ export interface ResourceDocument<R extends ResourceLike> {
  * @since 0.16.0
  * @category models
  */
-export interface CollectionDocument<R extends ResourceLike> {
+export interface CollectionDocument<R extends ResourceLike, I extends ResourceLike = ResourceLike> {
   readonly data: ReadonlyArray<
     WireResource<R> & { readonly meta?: { readonly [key: string]: unknown } }
   >;
-  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly included?: ReadonlyArray<WireResource<I>>;
   readonly links: Handlers.LinksValue;
   readonly meta: { readonly totalCount: number; readonly [key: string]: unknown };
   readonly jsonapi: typeof JSONAPI_MEMBER;
@@ -193,9 +215,10 @@ export type UnpaginatedCollectionDocument<
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- a type-level switch on the `meta` option's type, not a runtime value: `undefined` selects the document with no `meta`
   M extends Handlers.MetaValue | undefined = undefined,
+  I extends ResourceLike = ResourceLike,
 > = {
   readonly data: ReadonlyArray<WireResource<R> & { readonly meta?: Handlers.MetaValue }>;
-  readonly included?: ReadonlyArray<WireResource<ResourceLike>>;
+  readonly included?: ReadonlyArray<WireResource<I>>;
   readonly jsonapi: typeof JSONAPI_MEMBER;
 } & ([Self] extends [undefined]
   ? unknown
@@ -409,8 +432,10 @@ export interface Options<V = unknown, Targets extends Handlers.IncludeTargets = 
 export interface CollectionOptions<
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  X extends ResourceLike = never,
 > extends Options<V, Targets> {
-  readonly included?: ReadonlyArray<ResourceLike> | undefined;
+  /** Members the caller already resolved; `X` is their type, part of the document's `included` type. */
+  readonly included?: ReadonlyArray<X> | undefined;
 }
 
 /**
@@ -437,7 +462,8 @@ export interface UnpaginatedCollectionOptions<
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- inferred from the `meta` option as passed; an `Option` there would stop a caller forwarding its own optional `meta`
   M extends Handlers.MetaValue | undefined = undefined,
-> extends CollectionOptions<V, Targets> {
+  X extends ResourceLike = never,
+> extends CollectionOptions<V, Targets, X> {
   /**
    * The collection's own absolute URL, emitted as the document's
    * `links.self`. Supplied by the handler, as {@link Pagination.baseUrl} is,
@@ -841,7 +867,7 @@ export const resource = <
   resource: R,
   options: Options<V, Targets> = {},
 ): Effect.Effect<
-  ResourceDocument<R>,
+  ResourceDocument<R, TargetsIncluded<Targets>>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
@@ -857,7 +883,10 @@ export const resource = <
         ),
         onResource: onResourceFor(options),
       });
-      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<R>;
+      return { ...built, jsonapi: JSONAPI_MEMBER } as unknown as ResourceDocument<
+        R,
+        TargetsIncluded<Targets>
+      >;
     }),
   );
 };
@@ -883,9 +912,9 @@ const withoutEmptyIncluded = <T extends { readonly included?: ReadonlyArray<unkn
  * own `self` (with the query it carries) and the caller's own `meta`, or
  * nothing — and the document type `D` that difference produces.
  */
-const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets>(
+const assembleCollection = <D, V, Targets extends Handlers.IncludeTargets, X extends ResourceLike>(
   resources: ReadonlyArray<ResourceLike>,
-  options: CollectionOptions<V, Targets>,
+  options: CollectionOptions<V, Targets, X>,
   top: {
     readonly meta?: Handlers.MetaValue;
     readonly links?: Handlers.LinksValue;
@@ -993,19 +1022,24 @@ export const collection = <
   R extends ResourceLike,
   V = unknown,
   Targets extends Handlers.IncludeTargets = never,
+  X extends ResourceLike = never,
 >(
   resources: ReadonlyArray<R>,
   pagination: Pagination,
-  options: CollectionOptions<V, Targets> = {},
+  options: CollectionOptions<V, Targets, X> = {},
 ): Effect.Effect<
-  CollectionDocument<R>,
+  CollectionDocument<R, TargetsIncluded<Targets> | X>,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > =>
-  assembleCollection<CollectionDocument<R>, V, Targets>(resources, options, {
-    meta: { totalCount: pagination.totalCount },
-    links: paginationLinks(pagination),
-  });
+  assembleCollection<CollectionDocument<R, TargetsIncluded<Targets> | X>, V, Targets, X>(
+    resources,
+    options,
+    {
+      meta: { totalCount: pagination.totalCount },
+      links: paginationLinks(pagination),
+    },
+  );
 
 /**
  * Assembles a JSON:API document around a whole, **unpaginated** collection —
@@ -1087,13 +1121,19 @@ export const unpaginatedCollection = <
   Self extends string | undefined = undefined,
   // oxlint-disable-next-line effect/prefer-option-over-null -- see `UnpaginatedCollectionOptions`: inferred from the `meta` option as passed
   const M extends Handlers.MetaValue | undefined = undefined,
+  X extends ResourceLike = never,
 >(
   resources: ReadonlyArray<R>,
-  options: UnpaginatedCollectionOptions<V, Targets, Self, M> = {},
+  options: UnpaginatedCollectionOptions<V, Targets, Self, M, X> = {},
 ): Effect.Effect<
   // `Self` is widened to `string`, so a literal `self` doesn't leak into the
   // type; `M` is not, since the document emits that very value.
-  UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
+  UnpaginatedCollectionDocument<
+    R,
+    Self extends string ? string : undefined,
+    M,
+    TargetsIncluded<Targets> | X
+  >,
   IncludeError | Handlers.IncludeTargetError<Targets>,
   Handlers.IncludeTargetServices<Targets>
 > => {
@@ -1104,9 +1144,15 @@ export const unpaginatedCollection = <
         ? { self: options.self }
         : { self: options.self, query: options.query };
   return assembleCollection<
-    UnpaginatedCollectionDocument<R, Self extends string ? string : undefined, M>,
+    UnpaginatedCollectionDocument<
+      R,
+      Self extends string ? string : undefined,
+      M,
+      TargetsIncluded<Targets> | X
+    >,
     V,
-    Targets
+    Targets,
+    X
   >(resources, options, options.meta === undefined ? links : { ...links, meta: options.meta });
 };
 

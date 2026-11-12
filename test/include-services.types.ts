@@ -17,9 +17,12 @@ import {
   Client,
   FlatQuery,
   Group,
+  Handlers,
   Include,
+  Registry,
   Relationship,
   Resource,
+  ResourceHandlers,
 } from "@thomasfosterau/effect-jsonapi";
 
 const WidgetId = Schema.String.pipe(Schema.brand("WidgetId"));
@@ -92,3 +95,75 @@ const program = Effect.fn("program")(function* () {
   yield* client.gadgets.list({ query: { limit: 10, offset: 0 } });
 });
 export const requirements: Effect.Effect<void, unknown, HttpClient.HttpClient> = program();
+
+// ---------------------------------------------------------------------------
+// The handlers satisfy a group whose `included` is the surface's precise union
+// ---------------------------------------------------------------------------
+
+// The include registry's loaders return the members' own resource values
+// (`satisfies`, so their types stay visible), and the handlers' documents type
+// `included` by them: a `Group.flatReadOnly` success with the surface's union
+// is then satisfiable without a cast.
+const gadgetTargets = {
+  widgets: (ids: ReadonlyArray<string>) =>
+    Effect.succeed(
+      ids.map((id) => Widget.make({ id: WidgetId.make(id), attributes: { name: "w" } })),
+    ),
+} satisfies Handlers.IncludeTargets;
+
+const GADGET_INCLUDE = Include.make(Gadget, { widgets: Widget });
+const gadgetGroup = Group.flatReadOnly({
+  resource: Gadget,
+  list: ListWidgets,
+  include: GADGET_INCLUDE,
+});
+
+export const gadgetFamily = {
+  group: "gadgets",
+  handlers: ResourceHandlers.readOnly({
+    segment: "gadgets",
+    listQuery: gadgetGroup.listQuery,
+    linkBase: Effect.succeed("https://example.test"),
+    include: { includable: GADGET_INCLUDE.paths, targets: gadgetTargets },
+    ops: {
+      list: () => Effect.succeed({ items: [], totalCount: 0 }),
+      get: (id: string) =>
+        Effect.succeed(Gadget.make({ id: GadgetId.make(id), attributes: { name: "g" } })),
+    },
+  }),
+} satisfies Registry.FamilyFor<typeof gadgetGroup.group>;
+
+// …and so do the CRUD handlers, writes included, over a `Group.flat` with a
+// surface.
+const widgetTargets = {
+  gadgets: (ids: ReadonlyArray<string>) =>
+    Effect.succeed(
+      ids.map((id) => Gadget.make({ id: GadgetId.make(id), attributes: { name: "g" } })),
+    ),
+} satisfies Handlers.IncludeTargets;
+
+const widgetGroup = Group.flat({
+  resource: Widget,
+  create: Schema.Struct({ name: Schema.String }),
+  update: Schema.Struct({ id: WidgetId }),
+  list: ListWidgets,
+  include: WIDGET_INCLUDE,
+});
+
+export const widgetFamily = {
+  group: "widgets",
+  handlers: ResourceHandlers.make({
+    segment: "widgets",
+    listQuery: widgetGroup.listQuery,
+    linkBase: Effect.succeed("https://example.test"),
+    include: { includable: WIDGET_INCLUDE.paths, targets: widgetTargets },
+    ops: {
+      list: () => Effect.succeed({ items: [], totalCount: 0 }),
+      get: (id: string) =>
+        Effect.succeed(Widget.make({ id: WidgetId.make(id), attributes: { name: "w" } })),
+      create: (_input: { readonly name: string }) => Effect.succeed({ id: WidgetId.make("1") }),
+      update: (input: { readonly id: string }) => Effect.succeed({ id: input.id }),
+      delete: () => Effect.void,
+    },
+  }),
+} satisfies Registry.FamilyFor<typeof widgetGroup.group>;
