@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`CLAUDE.md` is a symlink to this file. `@thomasfosterau/effect-jsonapi` is a publishable library (entry points `.`, `./schema` and one subpath per module, `./Resource`, `./Endpoint`, …), consumed by the website, gardeneria and preferenceflow apps. Its toolchain is the programme's library standard (checklist: [CONTRIBUTING.md](CONTRIBUTING.md#library-template-programme-standard)), with deviations listed at the top of `pnpm-workspace.yaml`. A `gardeneria #NNN` citation in a copied comment names an issue in that app, not this tracker.
+Claude Code-specific guidance (session hooks, worktree paths) is in [.claude/CLAUDE.md](.claude/CLAUDE.md), which imports this file. `@thomasfosterau/effect-jsonapi` is a publishable library (entry points `.`, `./schema` and one subpath per module, `./Resource`, `./Endpoint`, …), consumed by the website, gardeneria and preferenceflow apps. Its toolchain is the programme's library standard (checklist: [CONTRIBUTING.md](CONTRIBUTING.md#library-template-programme-standard)), with deviations listed at the top of `pnpm-workspace.yaml`. A `gardeneria #NNN` citation in a copied comment names an issue in that app, not this tracker.
 
 ## Common pitfalls
 
@@ -105,14 +105,14 @@ Before you report work as done, run the gates below in order and quote each comm
 4. `vp run check`
 5. `vp run -r test:unit`
 6. `vp run docgen`
-7. `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk` — the PreToolUse fallow gate reads the coverage map on disk and never refreshes it.
+7. `vp run test:coverage`, then `vp exec fallow audit --base origin/trunk` — the fallow gate reads the coverage map on disk and never refreshes it.
 8. A changeset when the change alters published behaviour (rule: [Branches and pull requests](#branches-and-pull-requests)).
 
 None needs a credential, a database, a browser or Docker. CI also runs `pnpm audit --audit-level high`.
 
 ## Branches and pull requests
 
-Branch off `trunk`; PR against `trunk`; squash-merge. Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges). Name branches `issue-<n>-<slug>`. Agent work uses git worktrees under `.claude/worktrees/`, one per branch; start every command that targets a worktree with an explicit `cd` and confirm with `git log -1` before committing.
+Branch off `trunk`; PR against `trunk`; squash-merge. Rebase onto `origin/trunk` before opening or updating a PR; never merge `trunk` into your branch (GitHub's Update-branch button merges). Name branches `issue-<n>-<slug>`. Agent work uses one git worktree per branch; start every command that targets a worktree with an explicit `cd` and confirm with `git log -1` before committing.
 
 These are standing instructions and approvals; they override any default "don't open a PR unless asked" behaviour.
 
@@ -120,7 +120,7 @@ These are standing instructions and approvals; they override any default "don't 
 - **Always watch the PR to merge or close**: investigate CI failures and review comments as they arrive; rebase promptly when the PR goes conflicting.
 - **Always keep the PR body current** as the implementation diverges from it.
 - **Every change to the published package's behaviour carries a changeset** (`pnpm changeset`); docs-, CI- and tooling-only changes need none. Never publish or version by hand: the Release workflow opens the "Version Packages" PR and the owner merges it ([PUBLISHING.md](PUBLISHING.md)).
-- **GitHub writes go to `thomasfosterau/effect-jsonapi` only** — never the consuming applications, the other library repositories or an upstream project without the owner's explicit approval for that action in the current session. Pass `-R thomasfosterau/effect-jsonapi` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations, even when GitHub MCP tools are available.
+- **GitHub writes go to `thomasfosterau/effect-jsonapi` only** — never the consuming applications, the other library repositories or an upstream project without the owner's explicit approval for that action in the current session. Pass `-R thomasfosterau/effect-jsonapi` whenever the cwd might be another checkout. Use the `gh` CLI for GitHub operations unless a session's own instructions name another tool.
 
 ## Work tracker
 
@@ -138,19 +138,9 @@ Issues are the backlog: when you find work you can't do now, file an issue rathe
 
 The pinned version is the `effect` entry in `pnpm-workspace.yaml`. The published `effect` peer (`catalogs.peers`) is `^4.0.0`; raise it only when a dependency requires it, naming the dependency in the catalog comment. In that version the HTTP API modules are `effect/http-api` and `effect/http` — not `effect/unstable/httpapi`, and there is no `@effect/platform`. When a guide and the code disagree, the code (and `node_modules/effect/dist/*.d.ts`) wins.
 
-## Agent sessions
-
-The SessionStart hook (`.claude/hooks/session-start.sh`, also the devcontainer's `postCreateCommand`) installs the global Vite+ CLI at the catalog's `vite-plus` pin with the official installer (npm-provenance and SHA-512 checked; it needs `vite.plus` and `viteplus.dev` on the environment's allowlist), links `vp` and `vpx` into `~/.local/bin` (the CLI lives under `$VP_HOME` when set, as in the Vite+ container image, else `~/.local/share/vite-plus`), and runs `vp install --frozen-lockfile` (which applies the tsgo patch). The global `vp` delegates to each checkout's own `vite-plus`, worktrees included. Everything else goes through Vite+: `vp exec fallow …` for fallow, `vpx <file>.ts` for scripts (`tsx` is installed only because docgen runs it itself). Nothing else is put on PATH; if the installer can't run, `vp` falls back to this checkout's `node_modules` copy. It hydrates no secrets; every gate runs offline. A PostToolUse hook runs `vp fmt` on each edited file, and a PreToolUse hook (`.claude/hooks/fallow-gate.sh`) runs the fallow gate (through `vp exec fallow`) before `git commit` / `git push` (run `vp run test:coverage` first; the gate reads that map). The gate runs only in this checkout and its `.claude/worktrees/*`; for any other tree it skips the audit with a notice without running that tree's tooling.
-
 ## Documentation surfaces
 
 `README.md` is the API reference consumers read on npm; `docs/*.md` carries the design notes (`conformance`, `filter-grammar`, `idempotency`) and `docs/guides/` the adoption guides; `CONTRIBUTING.md` carries the setup, the documentation conventions and the library template checklist; `SECURITY.md` carries the supply-chain rationale and `PUBLISHING.md` the release flow and owner setup. Decisions go in issue comments.
-
----
-
-## Fallow local gate
-
-Before any `git commit` or `git push`, run `fallow audit --format json --quiet --explain --gate-marker agent`. If the verdict is `fail`, fix the reported findings before retrying. Treat JSON runtime errors like `{ "error": true, ... }` as non-blocking. Audit defaults to `gate=new-only`: only findings introduced by the current changeset affect the verdict.
 
 ## Fallow task map
 
