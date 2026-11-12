@@ -2,8 +2,8 @@ name: CI
 
 # The repository's single CI workflow. Every gate lives in the `ci` task in
 # vite.config.ts, so CI runs `vp run ci` and nothing else after its install,
-# and a local `vp run ci` is the same pipeline. The `test` job runs it on each
-# Node.js line of the matrix; the `ci` job reduces the matrix to one check.
+# and a local `vp run ci` is the same pipeline. The `ci` job runs it on each
+# Node.js line of the matrix.
 #
 # The matrix covers the active LTS line (`lts`) and the newest released line
 # (`latest`). `latest` maps to setup-vp's `node-version: "*"`, which resolves
@@ -13,10 +13,10 @@ name: CI
 # next line ships); the run log's `node --version` shows each. package.json's
 # `engines.node` (`>=22`) must cover both.
 #
-# The `ci` job's name is load-bearing: the `Default` ruleset on `trunk`
-# must require the check `ci`. Renaming it leaves the required check unreported and
-# every pull request blocked. The matrix legs report as `ci (node lts)` and
-# `ci (node latest)`.
+# The check names are load-bearing: the `Default` ruleset on `trunk` requires
+# each matrix leg, `ci (node lts)` and `ci (node latest)`. Renaming the job or
+# a matrix value leaves a required check unreported and every pull request
+# blocked.
 
 on:
   pull_request:
@@ -32,7 +32,7 @@ concurrency:
 permissions: {}
 
 jobs:
-  test:
+  ci:
     name: ci (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -83,18 +83,4 @@ jobs:
             vp-task-v1-${{ runner.os }}-node-${{ matrix.node }}-
 
       - name: Run the CI pipeline
-        run: pnpm exec vp run ci
-
-  # One stable check name for the required-check ruleset, whatever the matrix.
-  ci:
-    name: ci
-    needs: [test]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions: {}
-    steps:
-      - name: Require every matrix leg to pass
-        env:
-          RESULT: ${{ needs.test.result }}
-        run: test "$RESULT" = success
+        run: vp run ci
