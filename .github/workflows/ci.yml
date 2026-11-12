@@ -119,8 +119,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup toolchain
-        uses: ./.github/actions/setup
+      # As the `ci` job above: Vite+ at the catalog pin, Node.js, pnpm, the
+      # dependency cache and a frozen, script-less install; then the
+      # repository's own `prepare` for the patched binaries.
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          node-version: "*"
+          version-file: pnpm-workspace.yaml
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile", "--ignore-scripts"]
+
+      - name: Patch the toolchain (repository `prepare` script)
+        run: pnpm run prepare
 
       - name: Type-check the consumer at the effect floor
         run: pnpm exec vp run typecheck:floor
