@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { AnyMeta } from "./Document.js";
 import * as Relationship from "./Relationship.js";
 import {

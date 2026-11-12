@@ -3,7 +3,7 @@
  * error class whose wire encoding is a spec-compliant JSON:API error document
  * with the declared HTTP status.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { ApiError } from "@thomasfosterau/effect-jsonapi";
 export class UserNotFound extends ApiError.make<UserNotFound>()("UserNotFound", {
   status: 404,

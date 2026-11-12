@@ -6,7 +6,11 @@
  * readers and href builders.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Option, Schema } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";

@@ -129,7 +129,7 @@ export default defineConfig({
       // `Record<K, V>` while no local binding is named `Record`, so importing
       // effect's `Record` module under that name hides every such site in
       // the file (#275). Never bind it as `Record`: spell the alias `Rec`
-      // everywhere (`import { Record as Rec } from "effect"`), never `R`,
+      // everywhere (`import * as Rec from "effect/Record"`), never `R`,
       // which is the resource type parameter in many files.
       "effect/no-unsafe-dictionary-type": "warn",
       "effect/no-runtime-typeof": "warn",
@@ -142,7 +142,6 @@ export default defineConfig({
       "effect/avoid-direct-json": "warn",
       "effect/prefer-effect-is": "warn",
       "effect/effect-run-in-body": "warn",
-      "effect/no-barrel-imports": "warn",
       "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
       // `typeAware` turned these on. Each sits at `warn` with its count on
@@ -248,34 +247,6 @@ export default defineConfig({
         files: ["src/Endpoint.ts"],
         rules: {
           "effect/avoid-ts-ignore": "off",
-        },
-      },
-      // The schema tier: every module `src/schema.ts` reaches. That entry point
-      // resolves `effect` and nothing else, and test/entry-points.test.ts keys
-      // the externals it walks by specifier, so an `effect/Schema`-style
-      // subpath import here fails it. The barrel is the only import these
-      // files can use, so `no-barrel-imports` is not debt in them. A module
-      // that joins the tier joins this list, and one that leaves it leaves:
-      // test/entry-points.test.ts pins these `files` to its `SCHEMA_TIER`.
-      {
-        files: [
-          "src/schema.ts",
-          "src/Document.ts",
-          "src/Filter.ts",
-          "src/FlatQuery.ts",
-          "src/Include.ts",
-          "src/Relationship.ts",
-          "src/Resource.ts",
-          "src/Sort.ts",
-          "src/internal/filter.ts",
-          "src/internal/includeGraph.ts",
-          "src/internal/media.ts",
-          "src/internal/operators.ts",
-          "src/internal/refusedClientId.ts",
-          "src/internal/schemaExt.ts",
-        ],
-        rules: {
-          "effect/no-barrel-imports": "off",
         },
       },
       // Build/test configs and the module-hook fixture are evaluated by Vite /

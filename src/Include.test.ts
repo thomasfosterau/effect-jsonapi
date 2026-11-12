@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Array as Arr, Effect, Order, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import * as Endpoint from "./Endpoint.js";
 import * as Handlers from "./Handlers.js";
 import * as Include from "./Include.js";

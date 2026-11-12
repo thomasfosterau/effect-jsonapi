@@ -22,7 +22,11 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import { Array as Arr, Effect, Layer, Match, Order } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Order from "effect/Order";
 import { HttpApiBuilder } from "effect/http-api";
 import { Atomic, Document, Handlers, Lid, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import { Api, ArticleCommentsQuery, ArticlesQuery, SearchQuery } from "./api.js";

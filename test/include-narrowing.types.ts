@@ -13,7 +13,8 @@
  * This file is type-checked by `tsconfig.test.json`; the `@ts-expect-error`
  * annotations are the assertions.
  */
-import { Effect, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { Client, Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 const Person = Resource.make("people", {
   attributes: { firstName: Schema.NonEmptyString },

@@ -287,7 +287,7 @@ const foreign = (graph: Graph): ReadonlyArray<string> =>
  */
 const beyondEffect = (label: string, graph: Graph): ReadonlyArray<string> =>
   [...graph.externals.keys()]
-    .filter((specifier) => specifier !== "effect" && !SCHEMA_TIER_EFFECT_EXT.includes(specifier))
+    .filter((specifier) => !isEffect(specifier) && !SCHEMA_TIER_EFFECT_EXT.includes(specifier))
     .map((specifier) => `${label}: ${specifier}`);
 
 /**
@@ -358,9 +358,11 @@ describe("schema-only entry point", () => {
   });
 
   it("declares `effect` and the schema tier's effect-ext subpaths as its only externals", () => {
-    expect(Arr.sort([...schema.externals.keys()], Order.String)).toEqual(
-      Arr.sort([...SCHEMA_TIER_EFFECT_EXT, "effect"], Order.String),
+    const externals = [...schema.externals.keys()];
+    expect(externals.filter((specifier) => !isEffect(specifier))).toEqual(
+      Arr.sort([...SCHEMA_TIER_EFFECT_EXT], Order.String),
     );
+    expect(externals.some(isEffect)).toBe(true);
   });
 
   it("reaches exactly the modules assigned to the schema tier", () => {
@@ -368,28 +370,17 @@ describe("schema-only entry point", () => {
   });
 
   /**
-   * The lint exemption follows the tier. `vite.config.ts` turns
-   * `effect/no-barrel-imports` off for exactly the modules this entry point
-   * reaches, because the plain `effect` barrel is the only import they may
-   * use. A module that leaves the tier must lose the exemption, and one that
-   * joins it must gain it, so the override's `files` are pinned to
-   * `SCHEMA_TIER` (which includes `schema.ts` itself). Every override that
-   * names the rule counts, whatever severity it spells (`"off"`, `["off"]`,
-   * `0`, `"allow"`), so a second exemption cannot slip past by spelling "off"
-   * differently.
+   * The schema tier imports `effect` modules by their owning subpath
+   * (`effect/Schema`), like every other module, so `no-barrel-imports` has
+   * no exemption left. No override may name the rule again, whatever severity
+   * it spells (`"off"`, `["off"]`, `0`, `"allow"`).
    */
-  it("exempts exactly the schema tier from `no-barrel-imports`", () => {
+  it("exempts nothing from `no-barrel-imports`", () => {
     const overrides = (config.lint?.overrides ?? []).filter(
       (override) => override.rules !== undefined && "effect/no-barrel-imports" in override.rules,
     );
-    expect(overrides).toHaveLength(1);
-    expect(overrides[0]?.rules?.["effect/no-barrel-imports"]).toEqual("off");
-    expect(Arr.sort(overrides[0]?.files ?? [], Order.String)).toEqual(
-      Arr.sort(
-        SCHEMA_TIER.map((module) => `src/${module}`),
-        Order.String,
-      ),
-    );
+    expect(overrides).toEqual([]);
+    expect(config.lint?.rules?.["effect/no-barrel-imports"]).toBeUndefined();
   });
 
   it("reaches none of the HTTP-tier modules", () => {

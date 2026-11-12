@@ -41,7 +41,7 @@
  *
  * @since 0.13.0
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import type { FieldCodecs } from "./internal/filter.js";
 import { literalEncoder, operatorCheck, prepare } from "./internal/filter.js";
 import {

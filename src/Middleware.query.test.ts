@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Effect, Layer, Match, Result, Schema, SchemaTransformation, Tracer } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
+import * as Tracer from "effect/Tracer";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";

@@ -9,7 +9,8 @@
  *   `Type` is the flat list input, so a handler can require "this family's
  *   own list query" and its `list` operation is typed by it.
  */
-import { Effect, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import {
   Assemble,
   FlatQuery,

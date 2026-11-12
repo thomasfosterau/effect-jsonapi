@@ -7,19 +7,17 @@
  * and `list` through stand-in targets, and the §7.4 related handler.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Context,
-  Deferred,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  Order,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import type * as Assemble from "./Assemble.js";
 import * as FlatQuery from "./FlatQuery.js";

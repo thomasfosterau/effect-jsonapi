@@ -12,7 +12,12 @@
  * not hold.
  */
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Array as Arr, Effect, Layer, Option, Order, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
 import {

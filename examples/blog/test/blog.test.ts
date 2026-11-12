@@ -4,17 +4,15 @@
  * in-memory `HttpApiTest` client.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Effect,
-  Exit,
-  Order,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { Atomic, Client, Middleware, Resource } from "@thomasfosterau/effect-jsonapi";
 import { Api, SearchQuery } from "../api.js";
@@ -693,7 +691,7 @@ describe("blog example: heterogeneous search", () => {
     );
 
     const next = document.links?.next;
-    assert(Predicate.isString(next));
+    assert(P.isString(next));
     expect(next).toBe(
       "/search?include=author&fields[articles]=title&filter[q]=e&page[offset]=1&page[limit]=1",
     );

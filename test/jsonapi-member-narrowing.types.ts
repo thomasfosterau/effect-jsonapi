@@ -12,7 +12,7 @@
  * annotations are the assertions. Every binding is exported so an unused-local
  * error can never stand in for the assertion an `@ts-expect-error` expects.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Document, Handlers, Resource } from "@thomasfosterau/effect-jsonapi";
 
 const Article = Resource.make("articles", { attributes: { title: Schema.NonEmptyString } });

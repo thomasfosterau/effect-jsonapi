@@ -23,7 +23,14 @@
  * @since 0.18.0
  * @internal
  */
-import { Array as Arr, Effect, Formatter, Match, Option, Order, Result, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Formatter from "effect/Formatter";
+import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import {
   type Context,
   describe,

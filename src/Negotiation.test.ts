@@ -6,7 +6,7 @@
  * an alternate representation negotiated ahead of JSON:API.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
 import * as Endpoint from "./Endpoint.js";
 import * as Group from "./Group.js";

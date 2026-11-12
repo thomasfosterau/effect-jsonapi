@@ -6,7 +6,13 @@
  * error seam's 404 / 409 through the flat presets end to end.
  */
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Array as Arr, Context, Effect, Layer, Option, Order, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as Schema from "effect/Schema";
 import { HttpServerResponse } from "effect/http";
 import { HttpApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";

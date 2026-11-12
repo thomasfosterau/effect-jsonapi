@@ -37,7 +37,8 @@
  *
  * @since 0.16.0
  */
-import { Array as Arr, Option } from "effect";
+import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import { MEDIA_TYPE, parametersAreAcceptable, parseMediaType } from "./internal/media.js";
 
 /**

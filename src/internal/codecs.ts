@@ -3,7 +3,10 @@
  *
  * @internal
  */
-import { Option, Record as Rec, Schema, SchemaTransformation } from "effect";
+import * as Option from "effect/Option";
+import * as Rec from "effect/Record";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { define } from "./define.js";
 import { vocabularyAnnotations } from "./vocabulary.js";
 

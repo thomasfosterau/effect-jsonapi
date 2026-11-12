@@ -16,7 +16,7 @@
  * This file is type-checked by `tsconfig.test.json`; the `@ts-expect-error`
  * annotations are the assertions.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Query } from "@thomasfosterau/effect-jsonapi";
 
 // Whether two types are identical (not merely mutually assignable) — see

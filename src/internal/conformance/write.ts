@@ -26,22 +26,20 @@
  * @since 0.17.0
  * @internal
  */
-import {
-  Array as Arr,
-  Cause,
-  Data,
-  Effect,
-  Equal,
-  Exit,
-  Formatter,
-  MutableHashSet,
-  Option,
-  Order,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Eq from "effect/Equal";
+import * as Exit from "effect/Exit";
+import * as Formatter from "effect/Formatter";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HEADER as IDEMPOTENCY_HEADER } from "../../Idempotency.js";
 import { MEDIA_TYPE } from "../media.js";
 import {
@@ -131,7 +129,7 @@ export const refusedOnKeyGrounds = (
     const source = error["source"];
     return (
       isJsonObject(source) &&
-      Predicate.isString(source["header"]) &&
+      P.isString(source["header"]) &&
       source["header"].toLowerCase() === IDEMPOTENCY_HEADER
     );
   });
@@ -273,7 +271,7 @@ const usable = (
         `${endpoint.path} has ${endpoint.params.length} path parameters — the kit can substitute only the id it created`,
       );
     const resolution = resolvePath(create, ctx.options);
-    if (Predicate.isTagged(resolution, "Unresolved")) return yield* Result.fail(resolution.reason);
+    if (P.isTagged(resolution, "Unresolved")) return yield* Result.fail(resolution.reason);
     return { key, ...fixture, createPath: resolution.path, createEndpoint: create, endpoint };
   });
 
@@ -1017,7 +1015,7 @@ export const readBackDifferences = (
   const attributes = Arr.filterMap(
     Arr.fromRecord(membersOf(expected, "attributes")),
     ([name, value]) =>
-      Equal.equals(value, storedAttributes[name])
+      Eq.equals(value, storedAttributes[name])
         ? Result.failVoid
         : Result.succeed(
             `attributes.${name}: ${rendered(value)} · read back ${shown(Rec.get(storedAttributes, name))}`,
@@ -1033,7 +1031,7 @@ export const readBackDifferences = (
             Option.filter(Rec.get(storedRelationships, name), isJsonObject),
             linkageValue,
           );
-          return Option.exists(read, (other) => Equal.equals(linkage, other))
+          return Option.exists(read, (other) => Eq.equals(linkage, other))
             ? Result.failVoid
             : Result.succeed(
                 `relationships.${name}.data: ${rendered(linkage)} · read back ${Option.match(read, {

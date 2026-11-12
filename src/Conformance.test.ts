@@ -7,25 +7,23 @@
  * once it has been shown to report the right things against a broken one.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import {
-  Array as Arr,
-  Cause,
-  Deferred,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  HashMap,
-  Layer,
-  Match,
-  MutableHashMap,
-  MutableHashSet,
-  Option,
-  Predicate,
-  Record as Rec,
-  Result,
-  Schema,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as HashMap from "effect/HashMap";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as Option from "effect/Option";
+import * as P from "effect/Predicate";
+import * as Rec from "effect/Record";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 import { HttpClientRequest } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup } from "effect/http-api";
@@ -179,7 +177,7 @@ const verifyCanned = verifyOver(api);
 
 const failed = (report: Conformance.Report): ReadonlyArray<string> =>
   report.outcomes
-    .filter((outcome) => Predicate.isTagged(outcome, "Failed"))
+    .filter((outcome) => P.isTagged(outcome, "Failed"))
     .map((outcome) => outcome.rule.id);
 
 const outcomeFor = (report: Conformance.Report, id: string): Conformance.Outcome => {
@@ -712,7 +710,7 @@ describe("Conformance: the report", () => {
       // value the rule died with.
       const died = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined;
       expect(died).toMatchObject({ _tag: "RuleDied", rule: rule.id });
-      expect(Predicate.hasProperty(died, "cause") && died.cause).toBe(defect);
+      expect(P.hasProperty(died, "cause") && died.cause).toBe(defect);
     };
     await diesNaming(report);
     await diesNaming({
@@ -765,7 +763,7 @@ describe("Conformance: discovery and selection", () => {
       only: ["spec/document/top-level-members"],
     });
     const partial = outcomeFor(documents, "spec/document/top-level-members");
-    assert(Predicate.isTagged(partial, "Passed"));
+    assert(P.isTagged(partial, "Passed"));
     expect(partial.note).toContain("not probed");
     expect(partial.note).toContain(`ids["articles"]`);
 
@@ -782,7 +780,7 @@ describe("Conformance: discovery and selection", () => {
       }),
     );
     const skipped = outcomeFor(none, "spec/document/top-level-members");
-    assert(Predicate.isTagged(skipped, "Skipped"));
+    assert(P.isTagged(skipped, "Skipped"));
     expect(skipped.reason).toContain(`ids["articles"]`);
   });
 
@@ -929,7 +927,7 @@ describe("Conformance: requestTimeout", () => {
     );
     const why = (outcomes: ReadonlyArray<Conformance.Outcome>) =>
       Arr.map(outcomes, (outcome) =>
-        Predicate.isTagged(outcome, "Failed")
+        P.isTagged(outcome, "Failed")
           ? {
               ...outcome,
               findings: Arr.map(outcome.findings, (found) => ({
@@ -1154,7 +1152,7 @@ const broken = (
     const report = await verifyCanned((request) => mutate(conformantServe(request), request));
     expect(failed(report)).toContain(id);
     const outcome = outcomeFor(report, id);
-    assert(Predicate.isTagged(outcome, "Failed"));
+    assert(P.isTagged(outcome, "Failed"));
     expect(outcome.findings.length).toBeGreaterThan(0);
     // A finding always says what it wanted and what it got.
     for (const found of outcome.findings) {
@@ -1287,7 +1285,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     const outcome = outcomeFor(report, "spec/document/included-on-include");
     expect(outcome._tag).toBe("Failed");
     expect(
-      Predicate.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.detail) : [],
+      P.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.detail) : [],
     ).toEqual([
       "/articles/1?include= answered a request carrying `include` with no top-level `included` array",
       "/articles?include= answered a request carrying `include` with no top-level `included` array",
@@ -1323,7 +1321,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     );
     const outcome = outcomeFor(report, id);
     expect(outcome._tag).toBe("Failed");
-    return Predicate.isTagged(outcome, "Failed")
+    return P.isTagged(outcome, "Failed")
       ? Arr.dedupe(outcome.findings.map((found) => found.observed))
       : [];
   };
@@ -1396,7 +1394,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     });
     const outcome = outcomeFor(orphaned, "spec/document/full-linkage");
     expect(
-      Predicate.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.observed) : [],
+      P.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.observed) : [],
     ).toEqual(["people:7"]);
   });
 
@@ -1425,9 +1423,7 @@ describe("Conformance: detects a deliberately broken server", () => {
         only: ["spec/document/no-duplicate-resources"],
       });
       const outcome = outcomeFor(report, "spec/document/no-duplicate-resources");
-      return Predicate.isTagged(outcome, "Failed")
-        ? outcome.findings.map((found) => found.observed)
-        : [];
+      return P.isTagged(outcome, "Failed") ? outcome.findings.map((found) => found.observed) : [];
     };
     expect(await findingsOf([person("9")])).toEqual([]);
     expect(await findingsOf([person("9"), person("2")])).toEqual([]);
@@ -1941,7 +1937,7 @@ describe("Conformance: include / sort on an endpoint that does not declare them"
     // The transport's own words, between the parentheses, are not pinned.
     expect(
       [outcomeFor(report, INCLUDE), outcomeFor(report, SORT)].map((outcome) =>
-        Predicate.isTagged(outcome, "Skipped")
+        P.isTagged(outcome, "Skipped")
           ? outcome.reason.replace(/no response \(.*\),/, "no response (…),")
           : outcome._tag,
       ),
@@ -2412,8 +2408,7 @@ describe("Conformance: a family or member the endpoint does not declare", () => 
       Arr.filter(PROBES, ([id]) => {
         const outcome = outcomeFor(report, id);
         return (
-          Predicate.isTagged(outcome, "Skipped") &&
-          outcome.reason.includes("a lost response says nothing")
+          P.isTagged(outcome, "Skipped") && outcome.reason.includes("a lost response says nothing")
         );
       }),
     ).toEqual([]);
@@ -2898,7 +2893,7 @@ describe("Conformance: the filter grammar profile", () => {
       }),
     );
     for (const outcome of report.outcomes) {
-      assert(Predicate.isTagged(outcome, "Skipped"));
+      assert(P.isTagged(outcome, "Skipped"));
       expect(outcome.reason).toContain("filter: true");
     }
   });
@@ -2932,7 +2927,7 @@ describe("Conformance: the filter grammar profile", () => {
         : grammarServe(request),
     );
     const outcome = outcomeFor(report, "profile/filter/rejections");
-    assert(Predicate.isTagged(outcome, "Failed"));
+    assert(P.isTagged(outcome, "Failed"));
     expect(outcome.findings.some((found) => found.detail.includes("outside the core"))).toBe(true);
   });
 
@@ -2943,7 +2938,7 @@ describe("Conformance: the filter grammar profile", () => {
       return { ...canned, body: { errors: [{ status: "400", title: "Bad Request" }] } };
     });
     const outcome = outcomeFor(report, "profile/filter/rejections");
-    assert(Predicate.isTagged(outcome, "Failed"));
+    assert(P.isTagged(outcome, "Failed"));
     expect(outcome.findings.every((found) => found.detail.includes("source.parameter"))).toBe(true);
   });
 
@@ -3070,11 +3065,11 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   /** A decoded literal as the scalar it compares as: `price`'s a number, every other a string. */
   const scalarOf = (literal: Filter.Compare["value"]): Scalar =>
-    Predicate.isNumber(literal) ? literal : String(literal);
+    P.isNumber(literal) ? literal : String(literal);
 
   /** Numbers numerically, strings by code unit, which is code point here. */
   const order = (v: Scalar, x: Scalar): number =>
-    Predicate.isNumber(v) && Predicate.isNumber(x)
+    P.isNumber(v) && P.isNumber(x)
       ? v - x
       : String(v) < String(x)
         ? -1
@@ -3164,15 +3159,13 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   /** Three-valued everywhere but `ne` on `colour`, which includes the NULL rows. */
   const twoValuedNe: Evaluator = (node, row) =>
-    Predicate.isTagged(node, "Compare") && node.op === "ne" && node.field === "colour"
+    P.isTagged(node, "Compare") && node.op === "ne" && node.field === "colour"
       ? twoValued(node, row)
       : threeValued(node, row);
 
   /** NULL sorted below every value, as JavaScript's `null < 1` has it. */
   const nullSmallest: Evaluator = (node, row) =>
-    Predicate.isTagged(node, "Compare") &&
-    isOrdering(node.op) &&
-    Option.isNone(valueIn(row, node.field))
+    P.isTagged(node, "Compare") && isOrdering(node.op) && Option.isNone(valueIn(row, node.field))
       ? Option.some(node.op === "lt" || node.op === "lte")
       : threeValued(node, row);
 
@@ -3336,7 +3329,7 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   const findingsOf = (report: Conformance.Report): ReadonlyArray<Conformance.Finding> => {
     const outcome = outcomeFor(report, RULE);
-    return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    return P.isTagged(outcome, "Failed") ? outcome.findings : [];
   };
 
   const rulesOf = (report: Conformance.Report): ReadonlyArray<string> =>
@@ -3575,8 +3568,7 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   /** `Not(And(…))` read as `And(Not(…), …)`: a negation pushed through a group without flipping it. */
   const pushedNot: Evaluator = (node, row) =>
-    Predicate.isTagged(node, "Not") &&
-    (Predicate.isTagged(node.member, "And") || Predicate.isTagged(node.member, "Or"))
+    P.isTagged(node, "Not") && (P.isTagged(node.member, "And") || P.isTagged(node.member, "Or"))
       ? threeValued(
           {
             ...node.member,
@@ -3588,13 +3580,13 @@ describe("Conformance: the filter evaluation oracle", () => {
 
   /** `Not(In(…))` read as the complement of `in`'s matches, an UNKNOWN negated to TRUE. */
   const complementedIn: Evaluator = (node, row) =>
-    Predicate.isTagged(node, "Not") && Predicate.isTagged(node.member, "In")
+    P.isTagged(node, "Not") && P.isTagged(node.member, "In")
       ? Option.some(!Option.contains(threeValued(node.member, row), true))
       : threeValued(node, row);
 
   /** A negation flag set rather than toggled: `Not(Not(x))` read as `Not(x)`. */
   const flaggedNot: Evaluator = (node, row) =>
-    Predicate.isTagged(node, "Not") && Predicate.isTagged(node.member, "Not")
+    P.isTagged(node, "Not") && P.isTagged(node.member, "Not")
       ? threeValued(node.member, row)
       : threeValued(node, row);
 
@@ -4014,7 +4006,7 @@ describe("Conformance: the write fixture", () => {
   /** Every outcome as the report gives it, less the request count a redirect adds to. */
   const verdicts = (report: Conformance.Report) =>
     report.outcomes.map((outcome) =>
-      Predicate.isTagged(outcome, "Passed") || Predicate.isTagged(outcome, "Failed")
+      P.isTagged(outcome, "Passed") || P.isTagged(outcome, "Failed")
         ? { ...outcome, probes: 0 }
         : outcome,
     );
@@ -4303,7 +4295,7 @@ describe("Conformance: the write fixture", () => {
       expect(
         transport.report.outcomes.some(
           (outcome) =>
-            Predicate.isTagged(outcome, "Skipped") &&
+            P.isTagged(outcome, "Skipped") &&
             outcome.reason.includes(
               `a redirect the transport followed itself, ending at http://fixture.test/`,
             ) &&
@@ -4432,7 +4424,7 @@ describe("Conformance: the write fixture", () => {
         HttpClient.mapRequestEffect(canned, (request) => Effect.fail(unprepared(request))),
     });
     expect(outcomeFor(report, "spec/target/reachable")._tag).toBe("Failed");
-    expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual([]);
+    expect(report.outcomes.filter((outcome) => P.isTagged(outcome, "Errored"))).toEqual([]);
   });
 
   /** A transport that fails every request it is handed, as a refused connection does. */
@@ -4447,7 +4439,7 @@ describe("Conformance: the write fixture", () => {
   /** `spec/target/reachable`'s first finding's `observed`, or `""` when it has none. */
   const reachableObserved = (report: Conformance.Report): string => {
     const outcome = outcomeFor(report, "spec/target/reachable");
-    return Predicate.isTagged(outcome, "Failed") ? (outcome.findings[0]?.observed ?? "") : "";
+    return P.isTagged(outcome, "Failed") ? (outcome.findings[0]?.observed ?? "") : "";
   };
 
   it("does not read a preparation that fails after the client's rewrite as a redirect the transport followed", async () => {
@@ -4735,10 +4727,10 @@ describe("Conformance: the write fixture", () => {
     // Only the rules whose probe died — the two that PATCH — are Errored, and
     // each names the defect.
     const dying = ["spec/status/update-response", "spec/status/update-read-back"];
-    const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
+    const errored = report.outcomes.filter((outcome) => P.isTagged(outcome, "Errored"));
     expect(errored.map((outcome) => outcome.rule.id)).toEqual(dying);
     expect(errored[0]).toMatchObject({ message: "TransportFellOver" });
-    expect(Predicate.isTagged(errored[0], "Errored") && errored[0].defect).toBeInstanceOf(
+    expect(P.isTagged(errored[0], "Errored") && errored[0].defect).toBeInstanceOf(
       TransportFellOver,
     );
     // The rules after it still ran, the write rules among them.
@@ -4778,7 +4770,7 @@ describe("Conformance: the write fixture", () => {
     expect(report.outcomes.map((outcome) => outcome.rule.id)).toEqual(
       Conformance.rules.map((rule) => rule.id),
     );
-    const errored = report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"));
+    const errored = report.outcomes.filter((outcome) => P.isTagged(outcome, "Errored"));
     // The atomic processing rules read the fixtures too; against this server,
     // whose operations endpoint applies only `add`, they otherwise skip (their
     // own fixture is under "Conformance: atomic operations processing"). So
@@ -4905,8 +4897,8 @@ describe("Conformance: the write fixture", () => {
     const [outcome] = report.outcomes;
     expect(report.outcomes.length).toBe(1);
     expect(outcome?._tag).toBe("Errored");
-    expect(Predicate.isTagged(outcome, "Errored") && outcome.message).toBe("[unrenderable defect]");
-    expect(Predicate.isTagged(outcome, "Errored") && Object.is(outcome.defect, revoked)).toBe(true);
+    expect(P.isTagged(outcome, "Errored") && outcome.message).toBe("[unrenderable defect]");
+    expect(P.isTagged(outcome, "Errored") && Object.is(outcome.defect, revoked)).toBe(true);
     expect(Conformance.format(report)).toContain("the rule died: [unrenderable defect]");
     // What the dead rule created, if anything, was still removed.
     expect(MutableHashMap.size(store)).toBe(0);
@@ -4921,11 +4913,11 @@ describe("Conformance: the write fixture", () => {
       () => ({ only: ["spec/status/update-response"] }),
     );
     const [outcome] = report.outcomes;
-    const message = Predicate.isTagged(outcome, "Errored") ? outcome.message : "";
+    const message = P.isTagged(outcome, "Errored") ? outcome.message : "";
     expect(message.length).toBe(500);
     expect(message).toBe(`${"x".repeat(499)}…`);
     // The defect itself is kept whole.
-    expect(Predicate.isTagged(outcome, "Errored") && outcome.defect).toBe("x".repeat(10_000));
+    expect(P.isTagged(outcome, "Errored") && outcome.defect).toBe("x".repeat(10_000));
   });
 
   it("does not split a surrogate pair when it caps a message", async () => {
@@ -4937,7 +4929,7 @@ describe("Conformance: the write fixture", () => {
       () => ({ only: ["spec/status/update-response"] }),
     );
     const [outcome] = report.outcomes;
-    expect(Predicate.isTagged(outcome, "Errored") && outcome.message).toBe(`${"x".repeat(498)}…`);
+    expect(P.isTagged(outcome, "Errored") && outcome.message).toBe(`${"x".repeat(498)}…`);
   });
 
   it("leaves a message at the cap as it is", async () => {
@@ -4949,7 +4941,7 @@ describe("Conformance: the write fixture", () => {
       () => ({ only: ["spec/status/update-response"] }),
     );
     const [outcome] = report.outcomes;
-    expect(Predicate.isTagged(outcome, "Errored") && outcome.message).toBe("x".repeat(500));
+    expect(P.isTagged(outcome, "Errored") && outcome.message).toBe("x".repeat(500));
   });
 
   it("stops at an external interrupt, cleaning up what the interrupted rule created", async () => {
@@ -5202,9 +5194,7 @@ describe("Conformance: the write fixture", () => {
       const { report, writes } = await run(undefined, (store, cleaned) => ({
         writes: { articles: { ...fixture(store, cleaned), ...override(thrown) } },
       }));
-      expect(report.outcomes.filter((outcome) => Predicate.isTagged(outcome, "Errored"))).toEqual(
-        [],
-      );
+      expect(report.outcomes.filter((outcome) => P.isTagged(outcome, "Errored"))).toEqual([]);
       expect(failed(report)).toEqual([]);
       expected(report, writes, rendered);
     },
@@ -5521,7 +5511,7 @@ describe("Conformance: the write fixture", () => {
       const { report, store, writes } = await run(change);
       expect(failed(report)).toEqual([id]);
       const outcome = outcomeFor(report, id);
-      const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+      const findings = P.isTagged(outcome, "Failed") ? outcome.findings : [];
       // Each finding says what it wanted, what it got, and which write it sent.
       expect(
         findings.map((found) => ({
@@ -5634,7 +5624,7 @@ describe("Conformance: the write fixture", () => {
       request.method === "PATCH" ? { body } : canned,
     );
     const outcome = outcomeFor(report, "spec/status/update-response");
-    const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    const findings = P.isTagged(outcome, "Failed") ? outcome.findings : [];
     expect(findings.map((found) => found.detail)).toEqual([expect.stringContaining(detail)]);
   });
 
@@ -5741,7 +5731,7 @@ describe("Conformance: the write fixture", () => {
       "spec/status/update-read-back",
     ]);
     const outcome = outcomeFor(report, "spec/status/create-read-back");
-    const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    const findings = P.isTagged(outcome, "Failed") ? outcome.findings : [];
     expect(findings.map((found) => found.detail)).toEqual([
       expect.stringMatching(
         /^articles:\d+, which the 201 creating it answered, does not read back/,
@@ -6128,7 +6118,7 @@ describe("Conformance: atomic operations processing", () => {
   };
 
   const findingsOf = (outcome: Conformance.Outcome) =>
-    Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    P.isTagged(outcome, "Failed") ? outcome.findings : [];
 
   describe("against a conformant server", () => {
     it.each([
@@ -6396,7 +6386,7 @@ describe("Conformance: an atomic remove naming an absent resource", () => {
   it("fails a remove answered 404", async () => {
     const { outcome, posts } = await run("404");
     expect(outcome._tag).toBe("Failed");
-    expect(Predicate.isTagged(outcome, "Failed") ? outcome.findings : []).toEqual([
+    expect(P.isTagged(outcome, "Failed") ? outcome.findings : []).toEqual([
       expect.objectContaining({
         detail: expect.stringMatching(
           /^a `remove` from the `tags` of posts:100 naming tags:conformance-absent-id-0000, which does not exist, answered 404: /,
@@ -6534,7 +6524,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
   const failure = async (serve: (request: CannedRequest) => Canned) => {
     const outcome = outcomeFor(await verifyPaged(serve, offsetApi), RULE);
     expect(outcome._tag).toBe("Failed");
-    const findings = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    const findings = P.isTagged(outcome, "Failed") ? outcome.findings : [];
     Arr.forEach(findings, (found) => {
       expect(found.expected).not.toBe("");
       expect(found.observed).not.toBe("");
@@ -6548,7 +6538,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
   ) => {
     const outcome = outcomeFor(await verifyPaged(serve, target), RULE);
     expect(outcome._tag).toBe("Skipped");
-    return Predicate.isTagged(outcome, "Skipped") ? outcome.reason : "";
+    return P.isTagged(outcome, "Skipped") ? outcome.reason : "";
   };
   const skipReason = (serve: (request: CannedRequest) => Canned) =>
     skipReasonOver(serve, offsetApi);
@@ -6567,7 +6557,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
       "/tags?page[offset]=6&page[limit]=3",
       "/tags?page[offset]=0&page[limit]=3",
     ]);
-    expect(Predicate.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(server.paths.length);
+    expect(P.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(server.paths.length);
   });
 
   it("works off the links, not the strategy: page number and size", async () => {
@@ -6680,7 +6670,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
     );
     const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
     expect(outcome._tag).toBe("Failed");
-    const details = Predicate.isTagged(outcome, "Failed")
+    const details = P.isTagged(outcome, "Failed")
       ? outcome.findings.map((found) => found.detail).join("\n")
       : "";
     expect(details).toContain(
@@ -6700,7 +6690,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
     );
     const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
     expect(outcome._tag).toBe("Failed");
-    const details = Predicate.isTagged(outcome, "Failed")
+    const details = P.isTagged(outcome, "Failed")
       ? outcome.findings.map((found) => found.detail).join("\n")
       : "";
     expect(details).toContain(
@@ -6721,7 +6711,7 @@ describe("Conformance: pagination links enumerate the collection", () => {
     );
     const outcome = outcomeFor(await verifyPaged(server.serve, offsetApi), RULE);
     expect(outcome._tag).toBe("Failed");
-    const details = Predicate.isTagged(outcome, "Failed")
+    const details = P.isTagged(outcome, "Failed")
       ? outcome.findings.map((found) => found.detail).join("\n")
       : "";
     expect(details).toContain(
@@ -7504,7 +7494,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
 
   const findingsOf = (outcome: Conformance.Outcome): ReadonlyArray<string> => {
     expect(outcome._tag).toBe("Failed");
-    const found = Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    const found = P.isTagged(outcome, "Failed") ? outcome.findings : [];
     Arr.forEach(found, (finding) => {
       expect(finding.expected).not.toBe("");
       expect(finding.observed).not.toBe("");
@@ -7518,13 +7508,13 @@ describe("Conformance: `self` and `related` links dereference", () => {
   const skipReasonOf = async (id: string, serve: (request: CannedRequest) => Canned) => {
     const outcome = outcomeFor(await run(serve), id);
     expect(outcome._tag).toBe("Skipped");
-    return Predicate.isTagged(outcome, "Skipped") ? outcome.reason : "";
+    return P.isTagged(outcome, "Skipped") ? outcome.reason : "";
   };
 
   const noteOf = async (id: string, serve: (request: CannedRequest) => Canned) => {
     const outcome = outcomeFor(await run(serve), id);
     expect(outcome._tag).toBe("Passed");
-    return Predicate.isTagged(outcome, "Passed") ? outcome.note : undefined;
+    return P.isTagged(outcome, "Passed") ? outcome.note : undefined;
   };
 
   it("follows every resource's `self` link, once each, and passes", async () => {
@@ -7536,7 +7526,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     // has not already fetched: `/articles/1` is the get endpoint's own answer,
     // so it costs nothing.
     expect(server.paths()).toEqual(["/articles/1", "/articles", "/articles/2"]);
-    expect(Predicate.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(3);
+    expect(P.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(3);
   });
 
   it("follows every relationship's `related` link, once each, and passes", async () => {
@@ -7563,7 +7553,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       "/articles/2/tags",
       "/articles/2/comments",
     ]);
-    expect(Predicate.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(8);
+    expect(P.isTagged(outcome, "Passed") ? outcome.probes : 0).toBe(8);
   });
 
   it("detects a `self` that leads to a different resource", async () => {
@@ -7936,7 +7926,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       ),
     ]);
     const related = outcomeFor(report, RELATED);
-    expect(Predicate.isTagged(related, "Failed") && related.findings[0]?.expected).toBe(
+    expect(P.isTagged(related, "Failed") && related.findings[0]?.expected).toBe(
       "a 2xx response with the related resource data as primary data",
     );
     expect(outcomeFor(report, MATCHES)).toMatchObject({
@@ -8240,7 +8230,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     expect(hopped.urls.every((url) => url.startsWith("http://fixture.test/"))).toBe(true);
     // The hop is a request of its own, counted against the rule's budget.
     const probesOf = (outcome: Conformance.Outcome) =>
-      Predicate.isTagged(outcome, "Passed") ? outcome.probes : -1;
+      P.isTagged(outcome, "Passed") ? outcome.probes : -1;
     expect(probesOf(outcomeFor(report, SELF))).toBe(probesOf(outcomeFor(direct, SELF)) + 1);
     // What the redirect leads to is what is graded.
     expect(
@@ -8349,7 +8339,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       ),
       MATCHES,
     );
-    expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
+    expect(P.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
       `${`people:${long}`.slice(0, 199)}… as primary data`,
     );
   });
@@ -8576,14 +8566,14 @@ describe("Conformance: `self` and `related` links dereference", () => {
     // The MUST holds the answer to being resource linkage, not to naming the
     // relationship's own identifiers, and says so whether the relationship
     // carries linkage (`tags`) or only links (`comments`).
-    expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
+    expect(P.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
       "a 2xx response with resource linkage as primary data",
     );
     const linksOnly = outcomeFor(
       await run(at("/articles/2/relationships/comments", notFound)),
       RELATIONSHIP_SELF,
     );
-    expect(Predicate.isTagged(linksOnly, "Failed") && linksOnly.findings).toEqual([
+    expect(P.isTagged(linksOnly, "Failed") && linksOnly.findings).toEqual([
       expect.objectContaining({
         detail: expect.stringContaining("articles:2's `comments`"),
         expected: "a 2xx response with resource linkage as primary data",
@@ -8760,7 +8750,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     ]);
     const outcome = outcomeFor(report, RELATIONSHIP_SELF);
     expect(
-      Predicate.isTagged(outcome, "Failed") && outcome.findings.map(({ expected }) => expected),
+      P.isTagged(outcome, "Failed") && outcome.findings.map(({ expected }) => expected),
     ).toEqual([
       "`null` or a resource identifier as primary data, as the relationship's to-one linkage is",
       "an array of resource identifiers as primary data, as the relationship's to-many linkage is",
@@ -8838,7 +8828,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
       "the `self` link of articles:2's `comments` (in /articles, at /data/1) answers to-one linkage (`null` or a resource identifier) where the relationship is to-many, as the relationship endpoint `articles.commentsRelationship` (`GET /articles/:id/relationships/comments`) declares | comments:5",
     ]);
     expect(
-      Predicate.isTagged(outcome, "Failed") && outcome.findings.map(({ expected }) => expected),
+      P.isTagged(outcome, "Failed") && outcome.findings.map(({ expected }) => expected),
     ).toEqual([
       "`null` or a resource identifier as primary data, as the success schema of `articles.authorRelationship` (`GET /articles/:id/relationships/author`), the relationship endpoint the link resolves to, declares",
       "an array of resource identifiers as primary data, as the success schema of `articles.commentsRelationship` (`GET /articles/:id/relationships/comments`), the relationship endpoint the link resolves to, declares",
@@ -8923,7 +8913,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     (path: string, self: Json, serve: (request: CannedRequest) => Canned = linked()) =>
     (request: CannedRequest): Canned => {
       const answer = serve(request);
-      if (withoutQuery(request).path !== path || !Predicate.isObject(answer.body)) return answer;
+      if (withoutQuery(request).path !== path || !P.isObject(answer.body)) return answer;
       return { ...answer, body: { ...answer.body, links: { self } } };
     };
 
@@ -8974,7 +8964,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     expect(await unanswered({ data: "x" })).toEqual([finding('{"data":"x"}')]);
     expect(await unanswered({ data: [{ id: "1" }] })).toEqual([finding('{"data":[{"id":"1"}]}')]);
     const outcome = outcomeFor(await run(answering({ body: { meta: {} } })), TOP_SELF);
-    expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
+    expect(P.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
       "a resource object, an array of them or `null` as primary data",
     );
   });
@@ -8982,7 +8972,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
   it("leaves a top-level `self` that does not answer to the MUST, rather than reporting it twice", async () => {
     const report = await run(selfAt("/articles/1", "/articles/one"));
     const outcome = outcomeFor(report, TOP_SELF);
-    expect(Predicate.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
+    expect(P.isTagged(outcome, "Failed") && outcome.findings[0]?.expected).toBe(
       "a 2xx response with resource data as primary data",
     );
     expect(outcomeFor(report, TOP_MATCHES)).toMatchObject({
@@ -9000,7 +8990,7 @@ describe("Conformance: `self` and `related` links dereference", () => {
     const documents = "no JSON:API read endpoint answering a document in this api";
     expect(
       report.outcomes.map((outcome) =>
-        Predicate.isTagged(outcome, "Skipped") ? outcome.reason : outcome._tag,
+        P.isTagged(outcome, "Skipped") ? outcome.reason : outcome._tag,
       ),
     ).toEqual([resources, resources, resources, resources, resources, documents, documents]);
     expect(report.outcomes.map(({ rule }) => rule.id)).toEqual(LINK_RULES);
@@ -10367,7 +10357,7 @@ describe("Conformance: client-generated ids and relationship mutation", () => {
 
   const findingsOf = (report: Conformance.Report, id: string) => {
     const outcome = outcomeFor(report, id);
-    return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    return P.isTagged(outcome, "Failed") ? outcome.findings : [];
   };
 
   it("passes a conformant server on every rule its fixture opts into, and leaves nothing behind", async () => {
@@ -10898,7 +10888,7 @@ describe("Conformance: client-generated ids through atomic operations", () => {
 
   const findingsOf = (report: Conformance.Report, id: string) => {
     const outcome = outcomeFor(report, id);
-    return Predicate.isTagged(outcome, "Failed") ? outcome.findings : [];
+    return P.isTagged(outcome, "Failed") ? outcome.findings : [];
   };
 
   it("passes a server that honours the id, and leaves nothing behind", async () => {

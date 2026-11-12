@@ -9,7 +9,8 @@
  * accessor.
  */
 import { assert, describe, expect, it } from "vite-plus/test";
-import { Effect, Option } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { HttpApiClient } from "effect/http-api";
 import { ApiError, Client, MEDIA_TYPE } from "@thomasfosterau/effect-jsonapi";

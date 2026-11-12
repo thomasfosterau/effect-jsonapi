@@ -4,7 +4,8 @@
  * list, the slug, the list-input factory, and the tri-state reader.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Option, Schema } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Resource from "./Resource.js";
 

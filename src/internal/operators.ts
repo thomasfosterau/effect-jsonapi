@@ -6,7 +6,8 @@
  *
  * @internal
  */
-import { Array as Arr, Schema } from "effect";
+import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 
 /** The six comparison operators: one literal against the field. */
 export const compareOperators = ["eq", "ne", "lt", "lte", "gt", "gte"] as const;

@@ -21,7 +21,11 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
-import { Array as Arr, Effect, Iterable, Layer, Order as Ord } from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Iterable from "effect/Iterable";
+import * as Layer from "effect/Layer";
+import * as Ord from "effect/Order";
 import { HttpApiBuilder } from "effect/http-api";
 import { Document, Handlers, Middleware, Query } from "@thomasfosterau/effect-jsonapi";
 import {

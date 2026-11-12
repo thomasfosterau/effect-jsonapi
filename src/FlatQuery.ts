@@ -27,7 +27,9 @@
 import * as Bounded from "@thomasfosterau/effect-ext/Bounded";
 import * as Ids from "@thomasfosterau/effect-ext/Ids";
 import * as TriState from "@thomasfosterau/effect-ext/TriState";
-import { Option, Schema, SchemaTransformation } from "effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Resource from "./Resource.js";
 
 // ---------------------------------------------------------------------------

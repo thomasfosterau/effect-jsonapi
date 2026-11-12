@@ -4,7 +4,7 @@
  * canonical pairs the links are spelled from.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import * as FlatQuery from "./FlatQuery.js";
 import * as Query from "./Query.js";
 

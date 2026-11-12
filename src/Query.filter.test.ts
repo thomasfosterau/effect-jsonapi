@@ -1,16 +1,14 @@
 import { assert, describe, expect, expectTypeOf, it, onTestFinished } from "vite-plus/test";
-import {
-  Array as Arr,
-  Effect,
-  Layer,
-  Match,
-  Order,
-  Predicate,
-  Result,
-  Schema,
-  SchemaGetter,
-  SchemaIssue,
-} from "effect";
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Match from "effect/Match";
+import * as Order from "effect/Order";
+import * as P from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaGetter from "effect/SchemaGetter";
+import * as SchemaIssue from "effect/SchemaIssue";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, OpenApi } from "effect/http-api";
 import * as ApiError from "./ApiError.js";
@@ -71,7 +69,7 @@ const firstKey = (
   path: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }> | undefined,
 ): string => {
   const segment = path?.[0];
-  return String(Predicate.isObject(segment) ? segment.key : segment);
+  return String(P.isObject(segment) ? segment.key : segment);
 };
 
 // The offending keys of a failed decode, in order, with their messages.
@@ -1007,53 +1005,46 @@ describe(`Query.Filter: generated round trips (seed ${SEED}, ${CASES} cases)`, (
     const has = (predicate: (n: Filter.Node) => boolean): boolean => {
       const visit = (n: Filter.Node): boolean =>
         predicate(n) ||
-        (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")
+        (P.isTagged(n, "And") || P.isTagged(n, "Or")
           ? n.members.some(visit)
-          : Predicate.isTagged(n, "Not")
+          : P.isTagged(n, "Not")
             ? visit(n.member)
             : false);
       return trees.some(visit);
     };
     expect(
-      has(
-        (n) =>
-          (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")) && n.members.length === 1,
-      ),
+      has((n) => (P.isTagged(n, "And") || P.isTagged(n, "Or")) && n.members.length === 1),
     ).toBe(true);
-    expect(has((n) => Predicate.isTagged(n, "Not") && Predicate.isTagged(n.member, "Not"))).toBe(
-      true,
-    );
+    expect(has((n) => P.isTagged(n, "Not") && P.isTagged(n.member, "Not"))).toBe(true);
     expect(
       has(
-        (n) =>
-          (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")) &&
-          Arr.isReadonlyArrayEmpty(n.members),
+        (n) => (P.isTagged(n, "And") || P.isTagged(n, "Or")) && Arr.isReadonlyArrayEmpty(n.members),
       ),
     ).toBe(true);
     expect(
       has(
         (n) =>
-          (Predicate.isTagged(n, "And") || Predicate.isTagged(n, "Or")) &&
+          (P.isTagged(n, "And") || P.isTagged(n, "Or")) &&
           new Set(
             n.members
-              .filter((m) => Predicate.isTagged(m, "Compare"))
+              .filter((m) => P.isTagged(m, "Compare"))
               .map((m) => `${m.field}/${(m as Filter.Compare).op}`),
-          ).size < n.members.filter((m) => Predicate.isTagged(m, "Compare")).length,
+          ).size < n.members.filter((m) => P.isTagged(m, "Compare")).length,
       ),
     ).toBe(true);
     expect(
       has(
         (n) =>
-          (Predicate.isTagged(n, "In") || Predicate.isTagged(n, "NotIn")) &&
+          (P.isTagged(n, "In") || P.isTagged(n, "NotIn")) &&
           n.values.some((v) => typeof v === "string" && /[,\\]/.test(v)),
       ),
     ).toBe(true);
     expect(
       has(
         (n) =>
-          Predicate.isTagged(n, "Not") &&
-          Predicate.isTagged(n.member, "Or") &&
-          n.member.members.some((m) => Predicate.isTagged(m, "And")),
+          P.isTagged(n, "Not") &&
+          P.isTagged(n.member, "Or") &&
+          n.member.members.some((m) => P.isTagged(m, "And")),
       ),
     ).toBe(true);
   });

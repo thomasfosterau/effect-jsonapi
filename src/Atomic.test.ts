@@ -1,5 +1,8 @@
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Match, Result, Schema, SchemaIssue } from "effect";
+import * as Match from "effect/Match";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
 import * as Atomic from "./Atomic.js";
 import * as Middleware from "./Middleware.js";
 import * as Relationship from "./Relationship.js";

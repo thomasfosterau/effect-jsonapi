@@ -33,7 +33,7 @@
  * an employee carries a plain `managerId` attribute, and an employee's direct
  * reports are listed with GET /employees?filter[manager]=<id>.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { Relationship, Resource } from "@thomasfosterau/effect-jsonapi";
 export const Category = Resource.make("categories", {
   attributes: {

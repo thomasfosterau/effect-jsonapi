@@ -3,7 +3,7 @@
  * query parameters and JSON:API error documents — composed into a vanilla
  * `HttpApi`.
  */
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
 import { HttpApi } from "effect/http-api";
 import { Endpoint, Group, Query } from "@thomasfosterau/effect-jsonapi";
 import {

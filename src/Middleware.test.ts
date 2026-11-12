@@ -1,5 +1,11 @@
 import { describe, expect, it, onTestFinished } from "vite-plus/test";
-import { Effect, ErrorReporter, Layer, Result, Schema, SchemaIssue, Tracer } from "effect";
+import * as Effect from "effect/Effect";
+import * as ErrorReporter from "effect/ErrorReporter";
+import * as Layer from "effect/Layer";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as Tracer from "effect/Tracer";
 import { HttpRouter } from "effect/http";
 import {
   HttpApi,

@@ -6,7 +6,11 @@
  * relationships) and all-or-nothing semantics.
  */
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
-import { Cause, Effect, Exit, Result, Schema } from "effect";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { HttpApiTest, OpenApi } from "effect/http-api";
 import { ApiError, Atomic, Middleware } from "@thomasfosterau/effect-jsonapi";
 import { Api } from "../api.js";
