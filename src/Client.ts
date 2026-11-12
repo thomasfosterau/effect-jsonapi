@@ -727,7 +727,10 @@ export const errorMessage = (document: ErrorDocument): string => {
  * @since 0.16.0
  * @category errors
  */
-export class ErrorResponse extends Schema.TaggedError<ErrorResponse>()("ErrorResponse", {
+export class ErrorResponse extends Schema.TaggedError<
+  ErrorResponse,
+  { readonly brand: unique symbol }
+>()("ErrorResponse", {
   status: Schema.Number,
   message: Schema.String,
   document: Schema.Option(WireDocument),

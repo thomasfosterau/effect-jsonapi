@@ -4710,10 +4710,10 @@ describe("Conformance: the write fixture", () => {
     expect(disposals(writes)).not.toContain("left");
   });
 
-  class TransportFellOver extends Schema.TaggedError<TransportFellOver>()(
-    "TransportFellOver",
-    {},
-  ) {}
+  class TransportFellOver extends Schema.TaggedError<
+    TransportFellOver,
+    { readonly brand: unique symbol }
+  >()("TransportFellOver", {}) {}
 
   it("reports a rule that dies as Errored, and still reports every other rule and the writes", async () => {
     const { report, store, writes } = await run((canned, request) => {
@@ -4751,10 +4751,10 @@ describe("Conformance: the write fixture", () => {
     expect(text).toContain("not decided — the rule died: TransportFellOver");
   });
 
-  class FixturesUnreadable extends Schema.TaggedError<FixturesUnreadable>()(
-    "FixturesUnreadable",
-    {},
-  ) {}
+  class FixturesUnreadable extends Schema.TaggedError<
+    FixturesUnreadable,
+    { readonly brand: unique symbol }
+  >()("FixturesUnreadable", {}) {}
 
   it("reports a rule that throws before its Effect starts as Errored, keeping the report", async () => {
     // Reading `writes["articles"]` throws. The write rules read it while
@@ -4795,7 +4795,10 @@ describe("Conformance: the write fixture", () => {
     expect(MutableHashMap.size(store)).toBe(0);
   });
 
-  class TransportRefused extends Schema.TaggedError<TransportRefused>()("TransportRefused", {
+  class TransportRefused extends Schema.TaggedError<
+    TransportRefused,
+    { readonly brand: unique symbol }
+  >()("TransportRefused", {
     message: Schema.String,
   }) {}
 
@@ -5021,9 +5024,12 @@ describe("Conformance: the write fixture", () => {
     expect(Conformance.format(report)).toContain("CLEANUP FAILED");
   });
 
-  class FixtureBroke extends Schema.TaggedError<FixtureBroke>()("FixtureBroke", {
-    message: Schema.String,
-  }) {}
+  class FixtureBroke extends Schema.TaggedError<FixtureBroke, { readonly brand: unique symbol }>()(
+    "FixtureBroke",
+    {
+      message: Schema.String,
+    },
+  ) {}
 
   /** An error whose `message` getter throws: reading it, as `String` does, throws. */
   const messageThrows = Object.defineProperty(new FixtureBroke({ message: "" }), "message", {

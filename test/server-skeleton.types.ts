@@ -160,7 +160,10 @@ assertType<Registry.FamilyFor<G>>({
 
 // ── Hidden writes (Group.flat `hiddenWrites`, ResourceHandlers `hiddenWrite`) ──
 
-class NotFound extends Schema.TaggedError<NotFound>()("NotFound", { id: Schema.String }) {}
+class NotFound extends Schema.TaggedError<NotFound, { readonly brand: unique symbol }>()(
+  "NotFound",
+  { id: Schema.String },
+) {}
 const hidingOps = {
   list: () => Effect.succeed({ items: [], totalCount: 0 }),
   get: (id: PersonId): Effect.Effect<typeof Person.Type, NotFound> =>

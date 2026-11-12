@@ -41,9 +41,12 @@ export interface FieldCodecs {
  * is an `Error`, so the callers that turn a throw into a schema issue read its
  * `message` unchanged.
  */
-class InvalidFilter extends Schema.TaggedError<InvalidFilter>()("InvalidFilter", {
-  message: Schema.String,
-}) {}
+class InvalidFilter extends Schema.TaggedError<InvalidFilter, { readonly brand: unique symbol }>()(
+  "InvalidFilter",
+  {
+    message: Schema.String,
+  },
+) {}
 
 // A field's declaration, or `undefined` when the field is undeclared. Only an
 // own entry counts: the declaration is a plain object (`Resource.filterable`)
