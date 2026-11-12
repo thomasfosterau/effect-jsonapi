@@ -21,7 +21,7 @@
  */
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import { declaredNames } from "./declaredQuery.js";
@@ -153,7 +153,7 @@ export const vocabularyAnnotations = (
   });
 
 const isVocabulary = (value: unknown): value is Vocabulary =>
-  Predicate.hasProperty(value, "family") && Predicate.hasProperty(value, "values");
+  P.hasProperty(value, "family") && P.hasProperty(value, "values");
 
 /**
  * The vocabulary a schema node publishes through its annotations, if any.

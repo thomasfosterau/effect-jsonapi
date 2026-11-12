@@ -7,6 +7,7 @@
  * @since 0.15.0
  * @internal
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
@@ -573,9 +574,9 @@ export const discover = (api: HttpApi.HttpApi<string, any>): ReadonlyArray<Disco
   const groups = api.groups as unknown as Readonly<
     Record<string, { readonly endpoints: Readonly<Record<string, HttpApiEndpoint.Top>> }>
   >;
-  return Arr.flatMap(Object.keys(groups), (group) => {
+  return Arr.flatMap(R.keys(groups), (group) => {
     const endpoints = groups[group].endpoints;
-    return Arr.map(Object.keys(endpoints), (name): Discovered => {
+    return Arr.map(R.keys(endpoints), (name): Discovered => {
       const endpoint = endpoints[name];
       const segments = endpoint.path.split("/").filter((segment) => segment !== "");
       const query = wireKeys(endpoint.query);
@@ -801,7 +802,7 @@ const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 const headerRecord = (headers: Readonly<Record<string, string | undefined>>) => {
   const out: Record<string, string> = {};
-  Arr.forEach(Object.keys(headers), (key) => {
+  Arr.forEach(R.keys(headers), (key) => {
     const value = headers[key];
     if (value !== undefined) out[key.toLowerCase()] = value;
   });

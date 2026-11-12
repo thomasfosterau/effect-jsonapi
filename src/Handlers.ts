@@ -47,13 +47,15 @@
  *
  * @since 0.1.0
  */
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as MutableHashMap from "effect/MutableHashMap";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
@@ -188,7 +190,7 @@ export interface TransformLambda {
  * @since 0.15.0
  * @category type-level
  */
-export type Transformed<F extends TransformLambda, R> = (F & { readonly In: R })["Out"];
+export type Transformed<F extends TransformLambda, Res> = (F & { readonly In: Res })["Out"];
 
 /**
  * The {@link TransformLambda} of a transform that leaves the type alone —
@@ -226,7 +228,7 @@ export interface IdentityLambda extends TransformLambda {
  * @category models
  */
 export interface ResourceTransform<F extends TransformLambda = IdentityLambda> {
-  <R extends ResourceValue>(resource: R): Transformed<F, R>;
+  <Res extends ResourceValue>(resource: Res): Transformed<F, Res>;
 }
 
 /**
@@ -304,14 +306,14 @@ type SelectedAttributes<A, Keys> = [Keys] extends [never]
 // The `relationships` a fieldset keeps: the member as narrowed by
 // `SelectedAttributes`, optional because the projection omits it when nothing
 // is left in it, and absent when a literal set keeps none of it.
-type SelectedRelationships<R, Keys> = {
+type SelectedRelationships<Res, Keys> = {
   readonly [
-    K in keyof R as K extends "relationships"
-      ? [keyof SelectedAttributes<Exclude<R[K], undefined>, Keys>] extends [never]
+    K in keyof Res as K extends "relationships"
+      ? [keyof SelectedAttributes<Exclude<Res[K], undefined>, Keys>] extends [never]
         ? never
         : K
       : never
-  ]+?: SelectedAttributes<Exclude<R[K], undefined>, Keys>;
+  ]+?: SelectedAttributes<Exclude<Res[K], undefined>, Keys>;
 };
 
 /**
@@ -324,17 +326,17 @@ type SelectedRelationships<R, Keys> = {
  * @since 0.15.0 (`relationships` since 0.18.0)
  * @category type-level
  */
-export type Projected<R, F> = R extends { readonly type: infer T; readonly attributes: infer A }
+export type Projected<Res, F> = Res extends { readonly type: infer T; readonly attributes: infer A }
   ? T extends keyof F
     ? [Exclude<F[T], undefined>] extends [never]
-      ? R
+      ? Res
       : Simplify<
-          Omit<R, "attributes" | "relationships"> & {
+          Omit<Res, "attributes" | "relationships"> & {
             readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>>;
-          } & SelectedRelationships<R, Exclude<F[T], undefined>>
+          } & SelectedRelationships<Res, Exclude<F[T], undefined>>
         >
-    : R
-  : R;
+    : Res
+  : Res;
 
 /**
  * The {@link TransformLambda} of {@link project}.
@@ -348,12 +350,12 @@ export interface ProjectLambda<F> extends TransformLambda {
 
 const selectMembers = <V>(
   members: { readonly [key: string]: V },
-  requested: ReadonlySet<string>,
+  requested: MutableHashSet.MutableHashSet<string>,
 ) => {
   const projected: Record<string, V> = {};
-  Arr.forEach(Object.keys(members), (name) => {
+  Arr.forEach(R.keys(members), (name) => {
     // An own `__proto__` member (as `JSON.parse` gives) stays a member.
-    if (requested.has(name)) assign(projected, name, members[name]);
+    if (MutableHashSet.has(requested, name)) assign(projected, name, members[name]);
   });
   return projected;
 };
@@ -363,10 +365,10 @@ const selectMembers = <V>(
 const requestedFor = (
   fields: Fields | undefined,
   type: string,
-): ReadonlySet<string> | undefined => {
+): MutableHashSet.MutableHashSet<string> | undefined => {
   if (fields === undefined || !Object.hasOwn(fields, type)) return undefined;
   const requested = fields[type];
-  return requested === undefined ? undefined : new Set(requested);
+  return requested === undefined ? undefined : MutableHashSet.fromIterable(requested);
 };
 
 const projectResource = (
@@ -394,10 +396,7 @@ const projectResource = (
       "attributes",
       attributes === undefined ? undefined : selectMembers(attributes, requested),
     ),
-    ...definedMember(
-      "relationships",
-      Arr.isReadonlyArrayNonEmpty(Object.keys(kept)) ? kept : undefined,
-    ),
+    ...definedMember("relationships", Arr.isReadonlyArrayNonEmpty(R.keys(kept)) ? kept : undefined),
   };
 };
 
@@ -429,13 +428,18 @@ const bothProjections = (
   second: Fields | undefined,
 ): Fields | undefined => {
   if (first === undefined || second === undefined) return first ?? second;
-  const types = Arr.dedupe([...Object.keys(first), ...Object.keys(second)]);
-  return Object.fromEntries(
+  const types = Arr.dedupe([
+    ...R.keys<string, Fields[string]>(first),
+    ...R.keys<string, Fields[string]>(second),
+  ]);
+  return R.fromEntries(
     types.flatMap((type) => {
       const a = requestedFor(first, type);
       const b = requestedFor(second, type);
       if (a === undefined) return b === undefined ? [] : [[type, [...b]]];
-      return [[type, b === undefined ? [...a] : [...a].filter((name) => b.has(name))]];
+      return [
+        [type, b === undefined ? [...a] : [...a].filter((name) => MutableHashSet.has(b, name))],
+      ];
     }),
   );
 };
@@ -530,10 +534,10 @@ const bothProjections = (
 export function project<const F extends Fields>(
   fields: F | undefined,
 ): ResourceTransform<ProjectLambda<F>>;
-export function project<R extends ResourceValue, const F extends Fields>(
-  resource: R,
+export function project<Res extends ResourceValue, const F extends Fields>(
+  resource: Res,
   fields: F | undefined,
-): Projected<R, F>;
+): Projected<Res, F>;
 export function project(...args: ReadonlyArray<unknown>) {
   return args.length >= 2
     ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
@@ -548,13 +552,13 @@ export function project(...args: ReadonlyArray<unknown>) {
 // ---------------------------------------------------------------------------
 
 // The `meta` a resource already carries, if any.
-type ExistingMeta<R> = R extends { readonly meta?: infer E } ? Exclude<E, undefined> : never;
+type ExistingMeta<Res> = Res extends { readonly meta?: infer E } ? Exclude<E, undefined> : never;
 
 // What `withMeta` leaves under `meta`: the computed members merged over
 // whatever the resource already declared.
-type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never]
+type MergedMeta<Res, M extends MetaValue> = [ExistingMeta<Res>] extends [never]
   ? M
-  : Simplify<ExistingMeta<R> & M>;
+  : Simplify<ExistingMeta<Res> & M>;
 
 /**
  * The type of a resource with computed `meta` merged in. The member stays
@@ -564,9 +568,9 @@ type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never]
  * @since 0.15.0
  * @category type-level
  */
-export type WithMeta<R, M extends MetaValue> = R extends AnyResourceValue
-  ? Simplify<Omit<R, "meta"> & { readonly meta?: MergedMeta<R, M> }>
-  : R;
+export type WithMeta<Res, M extends MetaValue> = Res extends AnyResourceValue
+  ? Simplify<Omit<Res, "meta"> & { readonly meta?: MergedMeta<Res, M> }>
+  : Res;
 
 /**
  * The {@link TransformLambda} of {@link withMeta}.
@@ -583,7 +587,7 @@ const stampMeta = (
   computed: MetaValue | undefined,
 ): AnyResourceValue => {
   const merged = { ...resource.meta, ...computed };
-  if (Arr.isReadonlyArrayNonEmpty(Object.keys(merged))) return { ...resource, meta: merged };
+  if (Arr.isReadonlyArrayNonEmpty(R.keys(merged))) return { ...resource, meta: merged };
   // An empty `meta` is a *present* meta object to the spec, which is a
   // different statement from having none: emit no member at all.
   if (resource.meta === undefined) return resource;
@@ -700,7 +704,7 @@ const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}
 // The keys of every resource identifier in a resource's inline relationship
 // linkage — the edges the full-linkage walk follows out of it.
 const linkageKeys = (resource: ResourceValue): Array<string> =>
-  Arr.flatMap(Rec.values(resource.relationships ?? {}), ({ data: linkage }) =>
+  Arr.flatMap(R.values(resource.relationships ?? {}), ({ data: linkage }) =>
     linkage === null || linkage === undefined
       ? []
       : Arr.map(Array.isArray(linkage) ? linkage : [linkage], key),
@@ -722,7 +726,10 @@ const walkKeys = (
 ): Array<string> => {
   const requested = requestedFor(fields, original.type);
   if (requested === undefined || original.relationships === undefined) return linkageKeys(mapped);
-  const excluded = Rec.filter(original.relationships, (_, name) => !requested.has(name));
+  const excluded = R.filter(
+    original.relationships,
+    (_, name) => !MutableHashSet.has(requested, name),
+  );
   return [...linkageKeys(mapped), ...linkageKeys({ ...original, relationships: excluded })];
 };
 
@@ -733,12 +740,13 @@ const walkKeys = (
 const memoise = <F extends TransformLambda>(
   onResource: ResourceTransform<F>,
 ): ResourceTransform<F> => {
-  const mapped = new Map<string, unknown>();
+  const mapped = MutableHashMap.empty<string, unknown>();
   return projecting((resource: ResourceValue) => {
     const k = key(resource);
-    if (mapped.has(k)) return mapped.get(k);
+    const memoised = MutableHashMap.get(mapped, k);
+    if (Option.isSome(memoised)) return memoised.value;
     const transformed = onResource(resource);
-    mapped.set(k, transformed);
+    MutableHashMap.set(mapped, k, transformed);
     return transformed;
   }, projectionOf(onResource));
 };
@@ -865,11 +873,11 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
   // Dedupe by (type, id), against the primary data as well as within
   // `included`: the one-resource-object-per-pair rule is document-wide.
   // Linkage is no resource object, so there is nothing to dedupe against.
-  const seen = new Set<string>(asLinkage ? [] : primary.map(key));
+  const seen = MutableHashSet.fromIterable(asLinkage ? [] : primary.map(key));
   const deduped = Arr.filter(included, (resource) => {
     const k = key(resource);
-    if (seen.has(k)) return false;
-    seen.add(k);
+    if (MutableHashSet.has(seen, k)) return false;
+    MutableHashSet.add(seen, k);
     return true;
   });
 
@@ -929,9 +937,9 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
  * @since 0.15.0
  * @category models
  */
-export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, R = never> = (
+export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, Req = never> = (
   ids: ReadonlyArray<string>,
-) => Effect.Effect<ReadonlyArray<A>, E, R>;
+) => Effect.Effect<ReadonlyArray<A>, E, Req>;
 
 /**
  * The registry {@link resolveIncluded} walks: one {@link IncludeTarget} per
@@ -959,8 +967,8 @@ export interface IncludeTargets {
 // The `(resource, error, services)` triple a target's Effect carries.
 type IncludeTargetTypes<T> = T extends (
   ids: ReadonlyArray<string>,
-) => Effect.Effect<ReadonlyArray<infer A>, infer E, infer R>
-  ? { readonly resource: A; readonly error: E; readonly services: R }
+) => Effect.Effect<ReadonlyArray<infer A>, infer E, infer Req>
+  ? { readonly resource: A; readonly error: E; readonly services: Req }
   : never;
 
 /**
@@ -1024,22 +1032,24 @@ export interface ResolveIncludedOptions {
 // share the node, so the prefix is walked once however many paths spell it.
 interface PathNode {
   readonly segment: string;
-  readonly children: Map<string, PathNode>;
+  readonly children: MutableHashMap.MutableHashMap<string, PathNode>;
 }
 
 // The requested paths as a trie. `Map` preserves insertion order, so walking
 // it walks the paths in the order the client asked for them.
-const pathTrie = (paths: ReadonlyArray<string>): Map<string, PathNode> => {
-  const root = new Map<string, PathNode>();
+const pathTrie = (
+  paths: ReadonlyArray<string>,
+): MutableHashMap.MutableHashMap<string, PathNode> => {
+  const root = MutableHashMap.empty<string, PathNode>();
   Arr.forEach(paths, (path) => {
     Arr.reduce(
       Arr.filter(path.split("."), (segment) => segment !== ""),
       root,
       (level, segment) => {
-        let node = level.get(segment);
+        let node = Option.getOrUndefined(MutableHashMap.get(level, segment));
         if (node === undefined) {
-          node = { segment, children: new Map() };
-          level.set(segment, node);
+          node = { segment, children: MutableHashMap.empty() };
+          MutableHashMap.set(level, segment, node);
         }
         return node.children;
       },
@@ -1066,7 +1076,7 @@ const linkageIdentifiers = (
 // One level of the walk: the trie nodes still to read, and the resources to
 // read them off.
 interface Level {
-  readonly nodes: Map<string, PathNode>;
+  readonly nodes: MutableHashMap.MutableHashMap<string, PathNode>;
   readonly parents: ReadonlyArray<ResourceValue>;
 }
 
@@ -1083,9 +1093,9 @@ const resolve = (
     // never emitted into `included` (the spec's one-resource-object-per-`(type,
     // id)` rule spans the whole document), but the walk still steps *through*
     // it, which is what makes a cycle terminate instead of looping.
-    const known = new Map<string, ResourceValue>();
+    const known = MutableHashMap.empty<string, ResourceValue>();
     Arr.forEach(primary, (resource) => {
-      known.set(key(resource), resource);
+      MutableHashMap.set(known, key(resource), resource);
     });
 
     // `included`, in walk order.
@@ -1102,25 +1112,27 @@ const resolve = (
           // Every identifier this level reaches, deduplicated across paths, parents
           // and rows, in walk order — and, per branch that has further segments,
           // the keys it reached, so the next level knows its parents.
-          const levelIdentifiers = new Map<string, ResourceIdentifierValue>();
+          const levelIdentifiers = MutableHashMap.empty<string, ResourceIdentifierValue>();
           const branches: Array<{
-            readonly nodes: Map<string, PathNode>;
+            readonly nodes: MutableHashMap.MutableHashMap<string, PathNode>;
             readonly keys: ReadonlyArray<string>;
           }> = [];
           Arr.forEach(level, ({ nodes, parents }) => {
-            Arr.forEach(nodes.values(), (node) => {
+            Arr.forEach(MutableHashMap.values(nodes), (node) => {
               const keys: Array<string> = [];
-              const reached = new Set<string>();
+              const reached = MutableHashSet.empty<string>();
               Arr.forEach(parents, (parent) => {
                 Arr.forEach(linkageIdentifiers(parent, node.segment), (identifier) => {
                   const k = key(identifier);
-                  if (reached.has(k)) return;
-                  reached.add(k);
+                  if (MutableHashSet.has(reached, k)) return;
+                  MutableHashSet.add(reached, k);
                   keys.push(k);
-                  if (!levelIdentifiers.has(k)) levelIdentifiers.set(k, identifier);
+                  if (!MutableHashMap.has(levelIdentifiers, k))
+                    MutableHashMap.set(levelIdentifiers, k, identifier);
                 });
               });
-              if (node.children.size > 0) branches.push({ nodes: node.children, keys });
+              if (MutableHashMap.size(node.children) > 0)
+                branches.push({ nodes: node.children, keys });
             });
           });
 
@@ -1131,14 +1143,14 @@ const resolve = (
             readonly load: IncludeTarget<ResourceValue, any, any>;
             readonly ids: Array<string>;
           }> = [];
-          const byType = new Map<string, Array<string>>();
+          const byType = MutableHashMap.empty<string, Array<string>>();
           Arr.forEach(levelIdentifiers, ([k, identifier]) => {
-            if (known.has(k)) return;
+            if (MutableHashMap.has(known, k)) return;
             if (!Object.hasOwn(targets, identifier.type)) return;
-            const ids = byType.get(identifier.type);
+            const ids = Option.getOrUndefined(MutableHashMap.get(byType, identifier.type));
             if (ids === undefined) {
               const fresh = [identifier.id];
-              byType.set(identifier.type, fresh);
+              MutableHashMap.set(byType, identifier.type, fresh);
               batches.push({ load: targets[identifier.type], ids: fresh });
             } else {
               ids.push(identifier.id);
@@ -1151,20 +1163,25 @@ const resolve = (
 
           // Index what came back. A row nobody referenced is ignored: adding it
           // would break the full linkage `buildIncluded` checks.
-          const loaded = new Map<string, ResourceValue>();
+          const loaded = MutableHashMap.empty<string, ResourceValue>();
           Arr.forEach(rows, (batch) => {
             Arr.forEach(batch, (row) => {
               const k = key(row);
-              if (!levelIdentifiers.has(k) || known.has(k) || loaded.has(k)) return;
-              loaded.set(k, row);
+              if (
+                !MutableHashMap.has(levelIdentifiers, k) ||
+                MutableHashMap.has(known, k) ||
+                MutableHashMap.has(loaded, k)
+              )
+                return;
+              MutableHashMap.set(loaded, k, row);
             });
           });
 
           // Emit in walk order, not in whichever order the batches completed.
-          Arr.forEach(levelIdentifiers.keys(), (k) => {
-            const resource = loaded.get(k);
+          Arr.forEach(MutableHashMap.keys(levelIdentifiers), (k) => {
+            const resource = Option.getOrUndefined(MutableHashMap.get(loaded, k));
             if (resource === undefined) return;
-            known.set(k, resource);
+            MutableHashMap.set(known, k, resource);
             included.push(resource);
           });
 
@@ -1174,8 +1191,7 @@ const resolve = (
           const next: Array<Level> = [];
           Arr.forEach(branches, (branch) => {
             const parents = branch.keys.flatMap((k) => {
-              const resource = known.get(k);
-              return resource === undefined ? [] : [resource];
+              return Arr.fromOption(MutableHashMap.get(known, k));
             });
             if (Arr.isReadonlyArrayNonEmpty(parents)) next.push({ nodes: branch.nodes, parents });
           });
@@ -1387,7 +1403,9 @@ export type DocumentValue<
 
 // The primary `data` of a document with the transform applied. `data(null)`
 // has no resource to transform, so a nullable primary stays nullable.
-type TransformedData<F extends TransformLambda, R> = R extends null ? null : Transformed<F, R>;
+type TransformedData<F extends TransformLambda, Res> = Res extends null
+  ? null
+  : Transformed<F, Res>;
 
 // Appends a query string (no leading `?`) to a path, whichever separator the
 // path needs; a path with no query is returned as is.
@@ -1580,13 +1598,13 @@ const build = (
  * @category constructors
  */
 export const data = <
-  R extends ResourceValue | null,
+  Res extends ResourceValue | null,
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
   F extends TransformLambda = IdentityLambda,
 >(
-  resource: R,
+  resource: Res,
   options?: {
     /**
      * The compound document's members. An array — even `[]` — emits
@@ -1617,7 +1635,7 @@ export const data = <
      */
     readonly checkLinkage?: boolean | undefined;
   },
-): DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J> => {
+): DocumentValue<TransformedData<F, Res>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const primary =
     resource === null
@@ -1632,7 +1650,7 @@ export const data = <
     onResource,
     false,
     resource === null ? [] : [resource],
-  ) as DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J>;
+  ) as DocumentValue<TransformedData<F, Res>, Transformed<F, Included>, M, J>;
 };
 
 /**
@@ -1706,13 +1724,13 @@ export const data = <
  * @category constructors
  */
 export const collection = <
-  R extends ResourceValue,
+  Res extends ResourceValue,
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
   F extends TransformLambda = IdentityLambda,
 >(
-  resources: ReadonlyArray<R>,
+  resources: ReadonlyArray<Res>,
   options?: {
     /**
      * The compound document's members. An array — even `[]` — emits
@@ -1751,11 +1769,11 @@ export const collection = <
      */
     readonly checkLinkage?: boolean | undefined;
   },
-): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
+): DocumentValue<ReadonlyArray<Transformed<F, Res>>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const primary = mapResources(resources, onResource);
   return build(primary, primary, options, onResource, false, resources) as DocumentValue<
-    ReadonlyArray<Transformed<F, R>>,
+    ReadonlyArray<Transformed<F, Res>>,
     Transformed<F, Included>,
     M,
     J
@@ -2140,7 +2158,7 @@ const withPage = (
   page: Record<string, number>,
   query: ReadonlyArray<Pair> | undefined,
 ): string => {
-  const cursor: ReadonlyArray<Pair> = Object.entries(page).map(([key, value]) => [
+  const cursor: ReadonlyArray<Pair> = R.toEntries(page).map(([key, value]) => [
     `page[${key}]`,
     String(value),
   ]);

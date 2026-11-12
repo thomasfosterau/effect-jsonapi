@@ -16,7 +16,7 @@
 // `Query`, which is HTTP-tier.
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import type {
   Any,
   IncludableTargets,
@@ -37,14 +37,14 @@ const dedupe = <A>(values: ReadonlyArray<A>): ReadonlyArray<A> =>
  * explicit allow-list (both read off the option's `paths`), else the graph
  * derived to the requested depth, else the depth-2 default.
  */
-export type LegalIncludePaths<R extends Any, I> = Extract<
+export type LegalIncludePaths<Res extends Any, I> = Extract<
   I extends { readonly paths: ReadonlyArray<infer P> }
     ? P
     : I extends { readonly depth: infer D }
       ? D extends IncludeDepth
-        ? IncludePathsTo<R, D>
-        : IncludePath<R>
-      : IncludePath<R>,
+        ? IncludePathsTo<Res, D>
+        : IncludePath<Res>
+      : IncludePath<Res>,
   string
 >;
 
@@ -70,22 +70,22 @@ export type DeclaresSurface<I> = [I] extends [
 // union (`Resource.DefaultIncluded`), which a server MAY include by default —
 // none under a declared surface, whose own `included` union replaces that
 // default. A `paginated` relationship's target never appears in `included`.
-type DefaultTargets<R extends Any, I> =
+type DefaultTargets<Res extends Any, I> =
   DeclaresSurface<I> extends true
     ? never
-    : R extends Any
-      ? IncludableTargets<R["relationships"]>
+    : Res extends Any
+      ? IncludableTargets<Res["relationships"]>
       : never;
 
-// The resource definitions each of `R`'s members reaches along `Paths`. The
+// The resource definitions each of `Res`'s members reaches along `Paths`. The
 // paths are the whole endpoint's, so on a heterogeneous endpoint each member
 // walks every path, and one it has no includable relationship for reaches
 // nothing — `Resource.ResolveIncludePath`, which never crosses a `paginated`
 // relationship.
-type ReachedBy<R extends Any, Paths> = ResolveIncludePath<R, Paths>;
+type ReachedBy<Res extends Any, Paths> = ResolveIncludePath<Res, Paths>;
 
 /**
- * The resource definitions a response of an endpoint over `R` with the
+ * The resource definitions a response of an endpoint over `Res` with the
  * `include` option `I` can carry in `included`: the non-`paginated` direct
  * targets (unless `I` is a declared `Include.Surface`) and, when `I` turns
  * `include` on, every resource a legal include path reaches — the leaf of each
@@ -95,12 +95,12 @@ type ReachedBy<R extends Any, Paths> = ResolveIncludePath<R, Paths>;
  *
  * Distributes over unions of resource definitions.
  */
-export type IncludedResources<R extends Any, I> =
-  | DefaultTargets<R, I>
-  | (IncludeEnabled<I> extends true ? ReachedBy<R, LegalIncludePaths<R, I>> : never);
+export type IncludedResources<Res extends Any, I> =
+  | DefaultTargets<Res, I>
+  | (IncludeEnabled<I> extends true ? ReachedBy<Res, LegalIncludePaths<Res, I>> : never);
 
 /**
- * `R` with every `Resource.family` in it replaced by its members, and a
+ * `Res` with every `Resource.family` in it replaced by its members, and a
  * member that is itself a family by that family's members in turn. A
  * family's `type` is its name, never a wire type: the resource objects a
  * response carries for it are its members', so a sparse fieldset names a
@@ -110,11 +110,11 @@ export type IncludedResources<R extends Any, I> =
  *
  * Distributes over unions of resource definitions.
  */
-export type ExpandFamilies<R> = R extends {
+export type ExpandFamilies<Res> = Res extends {
   readonly members: ReadonlyArray<infer M extends Any>;
 }
   ? ExpandFamilies<M>
-  : R;
+  : Res;
 
 /**
  * The runtime {@link ExpandFamilies}: each resource, a family replaced by its
@@ -145,7 +145,7 @@ const reachedBy = (resource: Any, segments: ReadonlyArray<string>): ReadonlyArra
   Arr.matchLeft(segments, {
     onEmpty: (): ReadonlyArray<Any> => [],
     onNonEmpty: (segment, rest) =>
-      Option.match(Rec.get(resource.relationships, segment), {
+      Option.match(R.get(resource.relationships, segment), {
         onNone: (): ReadonlyArray<Any> => [],
         onSome: (descriptor) => {
           if (descriptor.kind === "paginated") return [];

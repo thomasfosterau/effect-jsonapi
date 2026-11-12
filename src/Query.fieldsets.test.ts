@@ -17,7 +17,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import { HttpRouter } from "effect/http";
@@ -83,7 +83,7 @@ const Employee: Employee = Resource.make("employees", {
 // The `fields[TYPE]` parameters a query schema declares on the wire.
 const declared = (query: { readonly from: { readonly fields: Schema.Struct.Fields } }) =>
   Arr.sort(
-    Arr.filter(Rec.keys(query.from.fields), (key) => key.startsWith("fields[")),
+    Arr.filter(R.keys(query.from.fields), (key) => key.startsWith("fields[")),
     Order.String,
   );
 
@@ -418,7 +418,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
       },
     });
     const Track = Resource.family("tracks", [Song, Clip]);
-    expect(Rec.keys(Track.relationships)).toEqual(["owner"]);
+    expect(R.keys(Track.relationships)).toEqual(["owner"]);
     expectFieldsets(Query.schema(Track, { fields: true }), [
       "fields[clips]",
       "fields[owners]",

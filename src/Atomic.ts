@@ -58,6 +58,7 @@
  * @see {@link https://jsonapi.org/ext/atomic/}
  * @since 0.1.0
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -357,7 +358,7 @@ const maxUndeclaredMemberErrorsOf = (operation: string, resource: Any): number =
 // Runtime construction of the add / update operation relationship members.
 const addRelationshipMembers = (relationships: Relationships, cap: number) => {
   const fields: Record<string, Schema.Top> = {};
-  const entries = Object.entries(relationships);
+  const entries = R.toEntries(relationships);
   Arr.forEach(entries, ([key, descriptor]) => {
     if (descriptor.kind === "paginated") return;
     fields[key] =
@@ -371,7 +372,7 @@ const addRelationshipMembers = (relationships: Relationships, cap: number) => {
 
 const updateRelationshipFields = (relationships: Relationships, cap: number): Schema.Top => {
   const fields: Record<string, Schema.Top> = {};
-  Arr.forEach(Object.entries(relationships), ([key, descriptor]) => {
+  Arr.forEach(R.toEntries(relationships), ([key, descriptor]) => {
     if (descriptor.kind === "paginated") return;
     fields[key] = Schema.optionalKey(refSchemaFor(descriptor));
   });
@@ -693,7 +694,7 @@ export interface ResourceOperations<R extends Any> {
  */
 export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R> => {
   const relationships: Record<string, Record<string, Schema.Top>> = {};
-  Arr.forEach(Object.entries(resource.relationships), ([key, descriptor]) => {
+  Arr.forEach(R.toEntries(resource.relationships), ([key, descriptor]) => {
     const ref = RelationshipRef(resource, key as RelationshipName<R>);
     if (Relationship.isToOne(descriptor)) {
       relationships[key] = {
@@ -707,7 +708,7 @@ export const operationsFor = <R extends Any>(resource: R): ResourceOperations<R>
       };
     } else {
       const data = Schema.Array(Ref(descriptor.ref));
-      relationships[key] = Object.fromEntries(
+      relationships[key] = R.fromEntries(
         (["add", "update", "remove"] as const).map((op) => [
           op,
           Schema.Struct({
@@ -779,9 +780,7 @@ export interface Operations<R extends Any> extends Schema.Union<ReadonlyArray<Op
 // `relationship` member, which resource-operation refs forbid, so decoding is
 // unambiguous.
 const flattenOperations = (operations: ResourceOperations<Any>): Array<Schema.Top> => [
-  ...Object.values(operations.relationships).flatMap(
-    (ops) => Object.values(ops) as Array<Schema.Top>,
-  ),
+  ...R.values(operations.relationships).flatMap((ops) => R.values<string, Schema.Top>(ops)),
   operations.add,
   operations.update,
   operations.remove,

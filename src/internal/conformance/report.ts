@@ -10,6 +10,7 @@
  * @since 0.15.0
  * @internal
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Match from "effect/Match";
 import * as P from "effect/Predicate";
@@ -144,7 +145,7 @@ const renderOutcome = (outcome: Outcome, width: number): string => {
         Arr.forEach(outcome.findings, (found) => {
           lines.push(hang(found.detail, "      · ", "        "));
           if (found.probe !== undefined) {
-            const headers = Object.entries(found.probe.headers)
+            const headers = R.toEntries(found.probe.headers)
               .map(([name, value]) => `${name}: ${value}`)
               .join(", ");
             lines.push(

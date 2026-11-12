@@ -17,7 +17,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import ts from "typescript";
 import { assert, describe, expect, it } from "vite-plus/test";
@@ -543,7 +543,7 @@ describe("module subpaths, from source", { timeout: LOAD_TIMEOUT }, () => {
           PUBLIC_MODULES.map((module) =>
             import(`@thomasfosterau/effect-jsonapi/${module}`).then((subpath) =>
               Arr.some(
-                Rec.toEntries(index),
+                R.toEntries(index),
                 ([name, namespace]) => name === module && namespace === subpath,
               )
                 ? []
@@ -582,7 +582,7 @@ describe("package exports map", () => {
     expect(manifest.exports).toEqual({
       ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
       "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" },
-      ...Rec.fromEntries(
+      ...R.fromEntries(
         PUBLIC_MODULES.map(
           (module) =>
             [

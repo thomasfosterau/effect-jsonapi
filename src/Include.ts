@@ -62,6 +62,9 @@
  *
  * @since 0.15.0
  */
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as HashMap from "effect/HashMap";
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -353,7 +356,7 @@ export interface AnySurface {
   readonly resource: Any;
   readonly paths: ReadonlyArray<string>;
   readonly included: Schema.Top;
-  readonly targets: ReadonlyMap<string, Any>;
+  readonly targets: HashMap.HashMap<string, Any>;
   has(path: string): boolean;
 }
 
@@ -388,7 +391,7 @@ export interface Surface<R extends Any, S extends AnySpec> {
    * itself an accepted path, so a resolver stepping one level at a time can
    * look up the target type of each hop it is about to load.
    */
-  readonly targets: ReadonlyMap<string, Members<S>>;
+  readonly targets: HashMap.HashMap<string, Members<S>>;
   /**
    * Whether a path is on the whitelist — the whole dotted path, not its head
    * segment.
@@ -476,7 +479,7 @@ const walk = (
   depth: number,
   out: Array<Entry>,
 ): void => {
-  Arr.forEach(Object.entries(spec), ([key, value]) => {
+  Arr.forEach(R.toEntries(spec), ([key, value]) => {
     // `Spec` marks every key optional, so an explicitly-undefined key is
     // representable; it declares nothing.
     if (value === undefined) return;
@@ -532,11 +535,11 @@ const entriesOf = (owner: Any | undefined, spec: AnySpec): ReadonlyArray<Entry> 
  * @category accessors
  */
 export const paths = <const S extends AnySpec>(spec: S): ReadonlyArray<Paths<S>> => {
-  const seen = new Set<string>();
+  const seen = MutableHashSet.empty<string>();
   const out: Array<string> = [];
   Arr.forEach(entriesOf(undefined, spec), (entry) => {
-    if (seen.has(entry.path)) return;
-    seen.add(entry.path);
+    if (MutableHashSet.has(seen, entry.path)) return;
+    MutableHashSet.add(seen, entry.path);
     out.push(entry.path);
   });
   return out as unknown as ReadonlyArray<Paths<S>>;
@@ -758,14 +761,14 @@ export function included(
 ): Schema.Top {
   if (isMembers(source)) return endpointIncluded(source, options?.include ?? false);
   if (Schema.isSchema(source)) return endpointIncluded([source], options?.include ?? false);
-  const seen = new Set<Any>();
-  const members: Array<Any> = [];
-  Arr.forEach(entriesOf(undefined, source), (entry) => {
-    if (seen.has(entry.target)) return;
-    seen.add(entry.target);
-    members.push(entry.target);
-  });
-  return Schema.Union(members);
+  // By identity: `Arr.dedupe` compares structurally, which would hash whole
+  // schema graphs.
+  return Schema.Union(
+    Arr.dedupeWith(
+      Arr.map(entriesOf(undefined, source), (entry) => entry.target),
+      Object.is,
+    ),
+  );
 }
 
 /**
@@ -835,22 +838,22 @@ export const make = <R extends Any, const S extends Spec<R>>(
     );
   }
 
-  const seenPath = new Set<string>();
-  const targets = new Map<string, Any>();
+  const seenPath = MutableHashSet.empty<string>();
   const declared: Array<string> = [];
-  const seenTarget = new Set<Any>();
-  const members: Array<Any> = [];
+  const targetEntries: Array<readonly [string, Any]> = [];
   Arr.forEach(entries, (entry) => {
-    if (!seenPath.has(entry.path)) {
-      seenPath.add(entry.path);
-      declared.push(entry.path);
-      targets.set(entry.path, entry.target);
-    }
-    if (!seenTarget.has(entry.target)) {
-      seenTarget.add(entry.target);
-      members.push(entry.target);
-    }
+    if (MutableHashSet.has(seenPath, entry.path)) return;
+    MutableHashSet.add(seenPath, entry.path);
+    declared.push(entry.path);
+    targetEntries.push([entry.path, entry.target]);
   });
+  const targets = HashMap.fromIterable(targetEntries);
+  // By identity: `Arr.dedupe` compares structurally, which would hash whole
+  // schema graphs.
+  const members = Arr.dedupeWith(
+    Arr.map(entries, (entry) => entry.target),
+    Object.is,
+  );
 
   // Built against the erased shape first — which pins `TAG` to the discriminant
   // the interfaces declare — then widened to the precise one, whose `paths` and
@@ -861,7 +864,7 @@ export const make = <R extends Any, const S extends Spec<R>>(
     paths: declared,
     included: Schema.Union(members),
     targets,
-    has: (path: string) => seenPath.has(path),
+    has: (path: string) => HashMap.has(targets, path),
   };
   return { ...surface, spec } as unknown as Surface<R, AsSpec<S>>;
 };

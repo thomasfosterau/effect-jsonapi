@@ -48,6 +48,8 @@
  *
  * @since 0.1.0
  */
+import * as MutableHashSet from "effect/MutableHashSet";
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Schema from "effect/Schema";
 import { AnyMeta, PaginatedRelationshipLinks, RelationshipLinks } from "./Document.js";
@@ -678,14 +680,14 @@ export const paginated = <
         "Relationship.paginated: `order` declares no terms; name at least one, or omit the option",
       );
     }
-    const seen = new Set<string>();
+    const seen = MutableHashSet.empty<string>();
     Arr.forEach(order, (term) => {
-      if (seen.has(term.field)) {
+      if (MutableHashSet.has(seen, term.field)) {
         throw declarationError(
           `Relationship.paginated: \`order\` names "${term.field}" more than once; each term must order by a distinct field`,
         );
       }
-      seen.add(term.field);
+      MutableHashSet.add(seen, term.field);
     });
   }
   return {
@@ -912,6 +914,6 @@ export type RelationshipSchemas<Rels extends Relationships> = {
 export const makeRelationshipSchemas = <Rels extends Relationships>(
   rels: Rels,
 ): RelationshipSchemas<Rels> =>
-  Object.fromEntries(
-    Object.entries(rels).map(([key, descriptor]) => [key, schemaFor(descriptor)]),
+  R.fromEntries(
+    R.toEntries(rels).map(([key, descriptor]) => [key, schemaFor(descriptor)]),
   ) as RelationshipSchemas<Rels>;

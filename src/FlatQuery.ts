@@ -24,6 +24,7 @@
 // (#552), which resolve `effect` alone. This module keeps their public names,
 // plain-value option objects and declared `Schema.*` types, so no
 // effect-ext type reaches the published declarations.
+import * as MutableHashSet from "effect/MutableHashSet";
 import * as Bounded from "@thomasfosterau/effect-ext/Bounded";
 import * as Ids from "@thomasfosterau/effect-ext/Ids";
 import * as TriState from "@thomasfosterau/effect-ext/TriState";
@@ -204,13 +205,13 @@ const SortFields = Schema.Array(
  * occurrence wins rather than the request failing.
  */
 const parseSortFields = (value: string): ReadonlyArray<SortField> => {
-  const seen = new Set<string>();
+  const seen = MutableHashSet.empty<string>();
   const fields: Array<SortField> = [];
   Arr.forEach(value.split(","), (key) => {
     const descending = key.startsWith("-");
     const field = descending ? key.slice(1) : key;
-    if (seen.has(field)) return;
-    seen.add(field);
+    if (MutableHashSet.has(seen, field)) return;
+    MutableHashSet.add(seen, field);
     fields.push({ field, direction: descending ? "desc" : "asc" });
   });
   return fields;

@@ -40,13 +40,13 @@
 import * as Arr from "effect/Array";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Equal from "effect/Equal";
+import * as Eq from "effect/Equal";
 import * as HashSet from "effect/HashSet";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Order from "effect/Order";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import type * as Filter from "../../Filter.js";
 import { PROFILE_URI } from "../../Filter.js";
@@ -284,9 +284,7 @@ const linkageOf = (relationship: ResourceObject): Option.Option<Json | Null> => 
   if (!("data" in relationship)) return Option.none();
   const data = relationship["data"];
   if (data === null) return Option.some(NULL);
-  return isJsonObject(data) && Predicate.isString(data["id"])
-    ? Option.some(data["id"])
-    : Option.none();
+  return isJsonObject(data) && P.isString(data["id"]) ? Option.some(data["id"]) : Option.none();
 };
 
 /**
@@ -297,7 +295,7 @@ const linkageOf = (relationship: ResourceObject): Option.Option<Json | Null> => 
 const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
   Option.map(Option.fromUndefinedOr(identity(resource)), (key) => {
     const attributes = objectIn(resource["attributes"]);
-    const relationships = Rec.filterMap(
+    const relationships = R.filterMap(
       objectIn(resource["relationships"]),
       (relationship, name): Result.Result<Json | Null, void> =>
         name in attributes || !isJsonObject(relationship)
@@ -309,11 +307,11 @@ const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
     );
     return {
       key,
-      type: Predicate.isString(resource["type"]) ? resource["type"] : "",
+      type: P.isString(resource["type"]) ? resource["type"] : "",
       label: resourceLabel(resource),
       resource,
       row: {
-        ...Rec.filterMap(attributes, (value): Result.Result<Json | Null, void> =>
+        ...R.filterMap(attributes, (value): Result.Result<Json | Null, void> =>
           value === null
             ? Result.succeed(NULL)
             : isJson(value)
@@ -322,9 +320,9 @@ const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
         ),
         ...relationships,
       },
-      members: Rec.keys(attributes),
-      composite: Rec.keys(Rec.filter(attributes, (value) => value !== null && !isJson(value))),
-      toOne: Rec.keys(relationships),
+      members: R.keys(attributes),
+      composite: R.keys(R.filter(attributes, (value) => value !== null && !isJson(value))),
+      toOne: R.keys(relationships),
     };
   });
 
@@ -334,11 +332,9 @@ const candidateOf = (resource: ResourceObject): Option.Option<Candidate> =>
  * its JavaScript spelling (`1e21`).
  */
 const spell = (value: Json): Option.Option<string> => {
-  if (Predicate.isString(value)) return Option.some(value.replace(/[\\,]/g, (c) => `\\${c}`));
+  if (P.isString(value)) return Option.some(value.replace(/[\\,]/g, (c) => `\\${c}`));
   const text = String(value);
-  return Predicate.isBoolean(value) || /^-?\d+(\.\d+)?$/.test(text)
-    ? Option.some(text)
-    : Option.none();
+  return P.isBoolean(value) || /^-?\d+(\.\d+)?$/.test(text) ? Option.some(text) : Option.none();
 };
 
 /**
@@ -363,7 +359,7 @@ interface Discriminating {
 
 /** The JSON type of a non-NULL value: F-ORD-1's domain. */
 const domainOf = (value: Json): string =>
-  Predicate.isString(value) ? "string" : Predicate.isNumber(value) ? "number" : "boolean";
+  P.isString(value) ? "string" : P.isNumber(value) ? "number" : "boolean";
 
 /** F-ORD-1's order on two values of one JSON type. */
 const jsonOrder: Order.Order<Json> = (a, b) => {
@@ -684,8 +680,7 @@ const respelledPairsOf = (root: Tree): Pairs =>
   Arr.reverse(groupForm(root, 0, Option.none(), "r").pairs);
 
 /** A literal as a finding names it: a string quoted, so `"1"` is not `1`. */
-const shown = (value: Json): string =>
-  Predicate.isString(value) ? `"${quote(value)}"` : String(value);
+const shown = (value: Json): string => (P.isString(value) ? `"${quote(value)}"` : String(value));
 
 /** A tree as a finding names it, in the AST's own vocabulary. */
 const show = (node: Tree): string =>
@@ -832,7 +827,7 @@ const representationChanged = (
         onSome: (candidate) => {
           const members = Arr.filter(
             REPRESENTATION,
-            (member) => !Equal.equals(candidate.resource[member], resource[member]),
+            (member) => !Eq.equals(candidate.resource[member], resource[member]),
           );
           return Arr.isReadonlyArrayEmpty(members)
             ? Result.failVoid
@@ -1092,7 +1087,7 @@ const sparseFamily = (
 const linkedRelationships = (candidates: ReadonlyArray<Candidate>): ReadonlyArray<string> =>
   Arr.filter(
     Arr.dedupe(
-      Arr.flatMap(candidates, ({ resource }) => Rec.keys(objectIn(resource["relationships"]))),
+      Arr.flatMap(candidates, ({ resource }) => R.keys(objectIn(resource["relationships"]))),
     ),
     (name) =>
       Arr.some(candidates, ({ resource }) =>

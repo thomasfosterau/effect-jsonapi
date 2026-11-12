@@ -23,6 +23,9 @@
  *
  * @since 0.1.0
  */
+import * as Option from "effect/Option";
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import type { MetaValue } from "./Handlers.js";
 import type * as Relationship from "./Relationship.js";
@@ -199,20 +202,20 @@ interface ResolvedRef {
  * @category constructors
  */
 export const make = (): LidMap => {
-  const ids = new Map<string, string>();
+  const ids = MutableHashMap.empty<string, string>();
 
   const resolveRef = (ref: RefValue): ResolvedRef => {
     if ("id" in ref) return ref;
-    const id = ids.get(ref.lid);
+    const id = Option.getOrUndefined(MutableHashMap.get(ids, ref.lid));
     if (id === undefined) throw new UnknownLidError(ref.lid);
     return { type: ref.type, id };
   };
 
   return {
     assign: (lid, id) => {
-      ids.set(lid, id);
+      MutableHashMap.set(ids, lid, id);
     },
-    id: (lid) => ids.get(lid),
+    id: (lid) => Option.getOrUndefined(MutableHashMap.get(ids, lid)),
     identifier: (resource, ref) => {
       if (ref.type !== resource.type) {
         throw declarationError(
@@ -225,7 +228,7 @@ export const make = (): LidMap => {
     resolveLinkage: (_resource, relationships) => {
       if (relationships === undefined) return {};
       const resolved: Record<string, unknown> = {};
-      Arr.forEach(Object.entries(relationships), ([key, value]) => {
+      Arr.forEach(R.toEntries(relationships), ([key, value]) => {
         const linkage = value.data;
         // An own data property, so a member named `__proto__` stays a key
         // instead of re-parenting `resolved` (plain assignment would).

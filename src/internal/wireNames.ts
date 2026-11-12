@@ -19,8 +19,8 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaGetter from "effect/SchemaGetter";
@@ -62,7 +62,7 @@ const decodeProbe = (
   transformation: SchemaTransformation.Transformation<unknown, unknown, unknown, unknown>,
   entries: ReadonlyArray<readonly [name: string, index: number]>,
 ): Option.Option<ReadonlyArray<readonly [key: PropertyKey, value: unknown]>> => {
-  const input = Rec.fromEntries(
+  const input = R.fromEntries(
     Arr.map(entries, ([name, index]) => [name, sentinel(index)] as const),
   );
   const decode = Effect.suspend(() =>
@@ -76,7 +76,7 @@ const decodeProbe = (
     },
     onSuccess: (decoded) => decoded,
   });
-  return Option.map(Option.filter(output, Predicate.isObject), (decoded) =>
+  return Option.map(Option.filter(output, P.isObject), (decoded) =>
     Arr.map(Reflect.ownKeys(decoded), (key) => [key, decoded[key]] as const),
   );
 };
@@ -273,7 +273,7 @@ const formatted = (
 ): ReadonlyArray<WireLeaf> =>
   Arr.map(format(issue).issues, (leaf) => {
     const below = Arr.map(leaf.path ?? [], (segment) =>
-      Predicate.isPropertyKey(segment) ? segment : segment.key,
+      P.isPropertyKey(segment) ? segment : segment.key,
     );
     return {
       message: Option.getOrElse(message, () => leaf.message),

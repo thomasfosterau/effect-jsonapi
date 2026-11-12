@@ -52,6 +52,8 @@
  * @see `docs/idempotency.md` for the profile's normative semantics.
  * @since 0.15.0
  */
+import * as MutableHashMap from "effect/MutableHashMap";
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -395,8 +397,11 @@ const isJsonArray = (value: Schema.Json): value is Schema.JsonArray => Array.isA
 const canonicalValue = (value: Schema.Json): Schema.Json => {
   if (isJsonArray(value)) return value.map(canonicalValue);
   if (P.isObjectKeyword(value)) {
-    return Object.fromEntries(
-      Arr.sort(Object.keys(value), Order.String).map((key) => [key, canonicalValue(value[key])]),
+    return R.fromEntries(
+      Arr.sort(R.keys<string, Schema.Json>(value), Order.String).map((key) => [
+        key,
+        canonicalValue(value[key]),
+      ]),
     );
   }
   return value;
@@ -718,14 +723,17 @@ export const memoryStore = (): Store => {
   type Entry =
     | { readonly state: "in-progress"; readonly fingerprint: string }
     | { readonly state: "completed"; readonly fingerprint: string; readonly response: Recorded };
-  const entries = new Map<string, Entry>();
+  const entries = MutableHashMap.empty<string, Entry>();
 
   return {
     claim: (attempt) =>
       Effect.sync(() => {
-        const entry = entries.get(attempt.key);
+        const entry = Opt.getOrUndefined(MutableHashMap.get(entries, attempt.key));
         if (entry === undefined) {
-          entries.set(attempt.key, { state: "in-progress", fingerprint: attempt.fingerprint });
+          MutableHashMap.set(entries, attempt.key, {
+            state: "in-progress",
+            fingerprint: attempt.fingerprint,
+          });
           return { _tag: "Claimed" } as const;
         }
         return entry.state === "in-progress"
@@ -738,7 +746,7 @@ export const memoryStore = (): Store => {
       }),
     complete: (attempt, response) =>
       Effect.sync(() => {
-        entries.set(attempt.key, {
+        MutableHashMap.set(entries, attempt.key, {
           state: "completed",
           fingerprint: attempt.fingerprint,
           response,
@@ -746,7 +754,7 @@ export const memoryStore = (): Store => {
       }),
     release: (attempt) =>
       Effect.sync(() => {
-        entries.delete(attempt.key);
+        MutableHashMap.remove(entries, attempt.key);
       }),
   };
 };

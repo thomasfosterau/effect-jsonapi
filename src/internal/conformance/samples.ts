@@ -14,7 +14,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as MutableHashMap from "effect/MutableHashMap";
 import * as Option from "effect/Option";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import type { Context, Discovered, ResolvedOptions } from "./core.js";
 import { jsonApiAccept } from "./core.js";
@@ -68,7 +68,7 @@ const plainRead = (probe: Parameters<Context["request"]>[0]): boolean =>
   (probe.method ?? "GET") === "GET" &&
   probe.body === undefined &&
   (probe.headers === undefined ||
-    (Rec.keys(probe.headers).length === 1 && probe.headers["accept"] === jsonApiAccept["accept"]));
+    (R.keys(probe.headers).length === 1 && probe.headers["accept"] === jsonApiAccept["accept"]));
 
 /**
  * The run's sample ledger: the status the first plain read of each sample URL

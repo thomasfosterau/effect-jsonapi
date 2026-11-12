@@ -25,8 +25,8 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -92,7 +92,7 @@ const wire = {
   revisions: { type: "revisions", id: "3", attributes: { editedAt: "2026-01-01" } },
 } as const;
 type WireType = keyof typeof wire;
-const types: ReadonlyArray<WireType> = Rec.keys(wire);
+const types: ReadonlyArray<WireType> = R.keys(wire);
 
 const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>
   // SAFETY: every endpoint under test declares exactly one success schema, a
@@ -130,7 +130,7 @@ const accepts = (endpoint: { readonly query: Schema.Top | undefined }, paths: st
   return (
     Exit.isSuccess(decoded) &&
     // SAFETY: a query codec decodes to a struct.
-    Rec.has(decoded.value as Rec.ReadonlyRecord<string, unknown>, "include")
+    R.has(decoded.value as R.ReadonlyRecord<string, unknown>, "include")
   );
 };
 
@@ -256,15 +256,15 @@ const firstAttribute = {
 // endpoint's query decodes into a `fields` member (one it does not declare is
 // dropped; `Middleware` answers it with a 400, as the HTTP cases below show).
 const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<string> =>
-  Rec.toEntries(firstAttribute)
+  R.toEntries(firstAttribute)
     .filter(([type, attribute]) => {
       const decoded = Schema.decodeExit(queryOf(endpoint))({
         [`fields[${type}]`]: attribute,
       });
       return (
         Exit.isSuccess(decoded) &&
-        Predicate.hasProperty(decoded.value, "fields") &&
-        Predicate.hasProperty(decoded.value.fields, type)
+        P.hasProperty(decoded.value, "fields") &&
+        P.hasProperty(decoded.value.fields, type)
       );
     })
     .map(([type]) => `fields[${type}]`)
@@ -276,19 +276,19 @@ const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<strin
 // keeps none.
 const narrowed = <
   T extends {
-    readonly attributes: Rec.ReadonlyRecord<string, unknown>;
-    readonly relationships?: Rec.ReadonlyRecord<string, unknown>;
+    readonly attributes: R.ReadonlyRecord<string, unknown>;
+    readonly relationships?: R.ReadonlyRecord<string, unknown>;
   },
 >(
   resource: T,
   ...names: ReadonlyArray<string>
 ) => {
   const { relationships, ...rest } = resource;
-  const kept = Rec.filter(relationships ?? {}, (_, key) => names.includes(key));
+  const kept = R.filter(relationships ?? {}, (_, key) => names.includes(key));
   return {
     ...rest,
-    attributes: Rec.filter(resource.attributes, (_, key) => names.includes(key)),
-    ...definedMember("relationships", Rec.isEmptyRecord(kept) ? undefined : kept),
+    attributes: R.filter(resource.attributes, (_, key) => names.includes(key)),
+    ...definedMember("relationships", R.isEmptyRecord(kept) ? undefined : kept),
   };
 };
 

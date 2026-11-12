@@ -16,11 +16,12 @@
  *
  * @internal
  */
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import type * as Schema from "effect/Schema";
 import { assign } from "./define.js";
 import { stringify } from "./json.js";
@@ -48,8 +49,7 @@ export const reachable = (
 };
 
 /** @internal */
-export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> =>
-  Predicate.isObject(u);
+export const isRecord = (u: unknown): u is Readonly<Record<string, unknown>> => P.isObject(u);
 
 /**
  * Whether a JSON value is an array.
@@ -63,8 +63,7 @@ export const isJsonArray = (json: Schema.Json): json is Schema.JsonArray => Arra
  *
  * @internal
  */
-export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject =>
-  Predicate.isObject(json);
+export const isJsonObject = (json: Schema.Json): json is Schema.JsonObject => P.isObject(json);
 
 /**
  * The comparable string `identity` gives a resource with this `type` and `id`.
@@ -81,11 +80,11 @@ export const idKey = (type: string, id: string): string => stringify(["id", type
  */
 export const identity = (resource: Readonly<Record<string, unknown>>): string | undefined => {
   const type = resource["type"];
-  if (!Predicate.isString(type)) return undefined;
+  if (!P.isString(type)) return undefined;
   const id = resource["id"];
-  if (Predicate.isString(id)) return idKey(type, id);
+  if (P.isString(id)) return idKey(type, id);
   const lid = resource["lid"];
-  if (Predicate.isString(lid)) return stringify(["lid", type, lid]);
+  if (P.isString(lid)) return stringify(["lid", type, lid]);
   return undefined;
 };
 
@@ -156,7 +155,7 @@ export const linkageOf = (resource: Readonly<Record<string, unknown>>): Readonly
     const key = identity(value);
     if (key !== undefined) out.push(key);
   };
-  Arr.forEach(Object.keys(relationships), (name) => {
+  Arr.forEach(R.keys(relationships), (name) => {
     const relationship = relationships[name];
     if (!isRecord(relationship)) return;
     const data = relationship["data"];
@@ -223,7 +222,7 @@ export const unlinkedIncluded = (
   // have had relationships excluded, whose linkage the wire no longer shows.
   const fieldsetOn = (resource: Schema.JsonObject): boolean => {
     const type = resource["type"];
-    return fields !== undefined && Predicate.isString(type) && Object.hasOwn(fields, type);
+    return fields !== undefined && P.isString(type) && Object.hasOwn(fields, type);
   };
   const reached = [
     ...(asLinkage ? [] : primaries),

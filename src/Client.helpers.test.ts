@@ -5,6 +5,7 @@
  * typed by cardinality; a dotted path, hop by hop), and the page cursor
  * readers and href builders.
  */
+import * as HashMap from "effect/HashMap";
 import { it } from "@effect/vitest";
 import { assert, describe, expect } from "vite-plus/test";
 import * as Cause from "effect/Cause";
@@ -273,7 +274,7 @@ describe("hydration", () => {
 
   it("hydrate binds the definition and the index once", () => {
     const book = Client.hydrate(Book, document);
-    expect(book.index.size).toBe(4);
+    expect(HashMap.size(book.index)).toBe(4);
     expect(book.walk("authors.contributor").map((p) => p.id)).toEqual(["p1"]);
     expect(Option.map(book.related("publisher"), (p) => p.id)).toEqual(Option.some("p9"));
     expect(Client.hydrate(Book, { data: null, included: [] }).related("authors")).toEqual([]);

@@ -37,6 +37,8 @@
  *
  * @since 0.16.0
  */
+import * as HashSet from "effect/HashSet";
+import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
@@ -263,7 +265,7 @@ export const SERVICE_UNAVAILABLE: NegotiationError = {
   detail: "The API is temporarily unavailable.",
 };
 
-const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+const WRITE_METHODS: HashSet.HashSet<string> = HashSet.make("POST", "PUT", "PATCH", "DELETE");
 
 /**
  * Whether a method mutates state — the methods negotiated on `Content-Type`,
@@ -281,7 +283,7 @@ const WRITE_METHODS: ReadonlySet<string> = new Set(["POST", "PUT", "PATCH", "DEL
  * @category guards
  */
 export const isMutatingMethod = (method: string): boolean =>
-  WRITE_METHODS.has(method.toUpperCase());
+  HashSet.has(WRITE_METHODS, method.toUpperCase());
 
 // ---------------------------------------------------------------------------
 // Known-endpoint path matching
@@ -309,7 +311,7 @@ const routePattern = (path: string): Option.Option<RegExp> => {
 const groupsOf = (api: Options["api"]): ReadonlyArray<GroupLike> =>
   Array.isArray(api)
     ? (api as ReadonlyArray<GroupLike>)
-    : Object.values((api as { readonly groups: { readonly [id: string]: GroupLike } }).groups);
+    : R.values((api as { readonly groups: { readonly [id: string]: GroupLike } }).groups);
 
 /**
  * A matcher for the detail page of each listed URL segment — `/posts/<id>`,
@@ -342,7 +344,7 @@ interface AcceptEntry {
   readonly weight: number;
 }
 
-const ALLOWED_PARAMETERS: ReadonlySet<string> = new Set(["ext", "profile"]);
+const ALLOWED_PARAMETERS: HashSet.HashSet<string> = HashSet.make("ext", "profile");
 
 // Whether a JSON:API instance's media-type parameters are allowed: only `ext`
 // and `profile`, and — when the host lists its extensions — every `ext` URI
@@ -351,7 +353,7 @@ const cleanParameters =
   (extensions: Option.Option<ReadonlyArray<string>>) =>
   (parameters: ReadonlyArray<readonly [name: string, value: string]>): boolean =>
     Option.match(extensions, {
-      onNone: () => parameters.every(([name]) => ALLOWED_PARAMETERS.has(name)),
+      onNone: () => parameters.every(([name]) => HashSet.has(ALLOWED_PARAMETERS, name)),
       onSome: (supported) => parametersAreAcceptable(parameters, supported),
     });
 
@@ -482,9 +484,7 @@ export const make = (options: Options): Negotiator => {
   const refuseExplicitly = options.onExplicitRefusal === "notAcceptable";
   const clean = cleanParameters(Option.fromUndefinedOr(options.extensions));
   const patterns = groupsOf(options.api).flatMap((group) =>
-    Object.values(group.endpoints).flatMap((endpoint) =>
-      Arr.fromOption(routePattern(endpoint.path)),
-    ),
+    R.values(group.endpoints).flatMap((endpoint) => Arr.fromOption(routePattern(endpoint.path))),
   );
   const isApiPath = (pathname: string): boolean =>
     patterns.some((pattern) => pattern.test(pathname));
