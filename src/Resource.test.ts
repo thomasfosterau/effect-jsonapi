@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Brand from "effect/Brand";
 import * as Option from "effect/Option";
@@ -29,6 +30,8 @@ import {
   sortable,
 } from "./Resource.js";
 import * as Sort from "./Sort.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 // ---------------------------------------------------------------------------
 // Test fixtures: a small resource graph (DAG ordering: Person ← Comment ← Article)
@@ -144,7 +147,7 @@ describe("Resource", () => {
   it("constructs values with make (type tag auto-filled)", () => {
     const article = Article.make({
       id: Article.Id.make("1"),
-      attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01") },
+      attributes: { title: "Hello", body: "World", createdAt: at("2024-01-01") },
       relationships: {
         author: { data: { type: "people", id: Person.Id.make("9") } },
         comments: { data: [] },
@@ -195,7 +198,7 @@ describe("Resource.createPayload", () => {
         data: {
           type: "articles",
           id: "1",
-          attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01") },
+          attributes: { title: "Hello", body: "World", createdAt: at("2024-01-01") },
         },
       }),
     ).toThrow("Client-generated ids are not supported by this endpoint");
@@ -641,7 +644,7 @@ describe("Resource.ref", () => {
   it("refs are usable as relationship linkage", () => {
     const article = Article.make({
       id: Article.Id.make("1"),
-      attributes: { title: "Hello", body: "World", createdAt: new Date("2024-01-01") },
+      attributes: { title: "Hello", body: "World", createdAt: at("2024-01-01") },
       relationships: {
         author: { data: Person.ref("9") },
         comments: { data: [Comment.ref("5")] },
@@ -1339,7 +1342,7 @@ describe("Resource.readOnlyAttribute", () => {
     const decoded = Schema.decodeUnknownSync(Post)({
       type: "posts",
       id: "1",
-      attributes: { title: "Hello", createdAt: new Date("2024-01-01"), updatedAt: null },
+      attributes: { title: "Hello", createdAt: at("2024-01-01"), updatedAt: null },
       relationships: { author: { data: { type: "people", id: "9" } } },
     });
     expect(decoded.attributes.title).toBe("Hello");
@@ -1365,7 +1368,7 @@ describe("Resource.readOnlyAttribute", () => {
       data: {
         type: "posts",
         id: "1",
-        attributes: { title: "Hello", createdAt: new Date("2024-01-01"), updatedAt: null },
+        attributes: { title: "Hello", createdAt: at("2024-01-01"), updatedAt: null },
         relationships: { author: { data: { type: "people", id: "9" } } },
       },
     });
@@ -1390,7 +1393,7 @@ describe("Resource.readOnlyAttribute", () => {
     const stray = Schema.decodeUnknownResult(Post.createPayload)({
       data: {
         type: "posts",
-        attributes: { title: "Hello", createdAt: new Date("2024-01-01") },
+        attributes: { title: "Hello", createdAt: at("2024-01-01") },
         relationships: { author: { data: { type: "people", id: "9" } } },
       },
     });
@@ -1493,7 +1496,7 @@ describe("Resource.attribute", () => {
       id: "1",
       attributes: {
         name: "x",
-        createdAt: new Date("2024-01-01"),
+        createdAt: at("2024-01-01"),
         slug: "s",
         summary: null,
         status: null,

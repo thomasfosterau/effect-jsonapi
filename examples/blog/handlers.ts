@@ -22,6 +22,7 @@
  * reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -39,6 +40,8 @@ import {
   TitleTaken,
 } from "./errors.js";
 import { Article, Comment, Person, Tag } from "./resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 /**
  * Drops every `undefined` member of a payload's `attributes`. In-process — and
@@ -99,7 +102,7 @@ export const sampleArticle: Article = Article.make({
   attributes: {
     title: "JSON:API paints my bikeshed!",
     body: "The shortest article. Ever.",
-    createdAt: new Date("2024-01-01T00:00:00.000Z"),
+    createdAt: at("2024-01-01T00:00:00.000Z"),
   },
   relationships: {
     // `one`: inline identifier, never null

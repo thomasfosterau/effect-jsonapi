@@ -5,6 +5,7 @@
  * lid-based references, relationship operations (including on `paginated`
  * relationships) and all-or-nothing semantics.
  */
+import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -25,6 +26,9 @@ import {
   sampleTag,
 } from "../handlers.js";
 import { Article, Comment, Person, Tag } from "../resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
+const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 const buildClient = HttpApiTest.groups(Api, ["articles", "operations"]);
 
@@ -65,7 +69,7 @@ describe("atomic operations: creating with lids", () => {
               attributes: {
                 title: "Atomic bikeshedding",
                 body: "Both or neither.",
-                createdAt: new Date("2024-06-01T00:00:00.000Z"),
+                createdAt: at("2024-06-01T00:00:00.000Z"),
               },
               relationships: {
                 author: { data: Person.ref(sampleAuthor.id) },
@@ -126,7 +130,7 @@ describe("atomic operations: creating with lids", () => {
               attributes: {
                 title: "Fetch me later",
                 body: "",
-                createdAt: new Date("2024-06-02T00:00:00.000Z"),
+                createdAt: at("2024-06-02T00:00:00.000Z"),
               },
               relationships: {
                 author: { data: Person.ref(sampleAuthor.id) },
@@ -306,7 +310,7 @@ describe("atomic operations: all-or-nothing", () => {
           payload: Atomic.request(
             // this one would succeed...
             Atomic.add(Article, {
-              attributes: { title: "Never persisted", body: "", createdAt: new Date() },
+              attributes: { title: "Never persisted", body: "", createdAt: now() },
               relationships: { author: { data: Person.ref(sampleAuthor.id) } },
             }),
             // ...but this one fails (unknown article), so nothing is applied
@@ -342,7 +346,7 @@ describe("atomic operations: all-or-nothing", () => {
         return yield* client.operations.operations({
           payload: Atomic.request(
             Atomic.add(Article, {
-              attributes: { title: "Refers to nothing", body: "", createdAt: new Date() },
+              attributes: { title: "Refers to nothing", body: "", createdAt: now() },
               relationships: {
                 author: { data: Person.lidRef("never-declared") },
               },

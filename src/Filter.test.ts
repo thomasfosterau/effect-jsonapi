@@ -1,9 +1,13 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 import * as SchemaGetter from "effect/SchemaGetter";
 import * as Filter from "./Filter.js";
 import * as Relationship from "./Relationship.js";
 import { attribute, filterable, make as Resource } from "./Resource.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
+const now = (): Date => DateTime.toDateUtc(DateTime.nowUnsafe());
 
 describe("Filter", () => {
   it("names the closed operator core in the grammar's order, as a schema", () => {
@@ -169,7 +173,7 @@ describe("Filter AST", () => {
     // an undeclared field, or a literal of the wrong type, is not a node of
     // the tree: test/rejected-calls.types.ts
     // the untyped Node admits anything
-    expectTypeOf(Filter.eq("anything", new Date())).toMatchTypeOf<Filter.Node>();
+    expectTypeOf(Filter.eq("anything", now())).toMatchTypeOf<Filter.Node>();
     expectTypeOf<Filter.Node>().toEqualTypeOf<Filter.Ast>();
   });
 
@@ -185,7 +189,7 @@ describe("Filter AST", () => {
     ).toBe(true);
     expect(is({ _tag: "Or", members: [] })).toBe(true);
     // literals are open: their types come from the resource declaration
-    expect(is({ _tag: "Compare", op: "eq", field: "when", value: new Date() })).toBe(true);
+    expect(is({ _tag: "Compare", op: "eq", field: "when", value: now() })).toBe(true);
     // …but the shape is closed
     expect(is({ _tag: "Compare", op: "like", field: "age", value: 18 })).toBe(false);
     expect(is({ _tag: "In", field: "status", values: [] })).toBe(false);
@@ -225,8 +229,8 @@ describe("Filter AST", () => {
         ),
       ).toEqual(Filter.and(Filter.isIn("age", [1, 3]), Filter.eq("status", "open")));
       // dates sort by their ISO encoding
-      const a = new Date("2026-01-01T00:00:00.000Z");
-      const b = new Date("2025-01-01T00:00:00.000Z");
+      const a = at("2026-01-01T00:00:00.000Z");
+      const b = at("2025-01-01T00:00:00.000Z");
       expect(Filter.normalise(Filter.isIn("when", [a, b, a]), fields)).toEqual(
         Filter.isIn("when", [b, a]),
       );

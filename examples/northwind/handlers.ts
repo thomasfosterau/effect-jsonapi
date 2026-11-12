@@ -21,6 +21,7 @@
  * other reads declare no `fields`, so their clients read every attribute as
  * required.
  */
+import * as DateTime from "effect/DateTime";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Iterable from "effect/Iterable";
@@ -64,6 +65,8 @@ import {
   Supplier,
   Territory,
 } from "./resources.js";
+
+const at = (input: string | number): Date => DateTime.toDateUtc(DateTime.makeUnsafe(input));
 
 /**
  * Drops every `undefined` member of a payload's `attributes`. In-process — and
@@ -207,7 +210,7 @@ export const andrew: Employee = Employee.make({
     firstName: "Andrew",
     lastName: "Fuller",
     title: "Vice President, Sales",
-    hireDate: new Date("1992-08-14T00:00:00.000Z"),
+    hireDate: at("1992-08-14T00:00:00.000Z"),
   },
   relationships: { territories: { data: [Territory.ref(santaMonica.id)] } },
 });
@@ -218,7 +221,7 @@ export const nancy: Employee = Employee.make({
     firstName: "Nancy",
     lastName: "Davolio",
     title: "Sales Representative",
-    hireDate: new Date("1992-05-01T00:00:00.000Z"),
+    hireDate: at("1992-05-01T00:00:00.000Z"),
     managerId: andrew.id,
   },
   relationships: { territories: { data: [Territory.ref(westboro.id), Territory.ref(boston.id)] } },
@@ -230,7 +233,7 @@ export const janet: Employee = Employee.make({
     firstName: "Janet",
     lastName: "Leverling",
     title: "Sales Representative",
-    hireDate: new Date("1992-04-01T00:00:00.000Z"),
+    hireDate: at("1992-04-01T00:00:00.000Z"),
     managerId: andrew.id,
   },
   relationships: { territories: { data: [] } },
@@ -242,7 +245,7 @@ export const margaret: Employee = Employee.make({
     firstName: "Margaret",
     lastName: "Peacock",
     title: "Sales Representative",
-    hireDate: new Date("1993-05-03T00:00:00.000Z"),
+    hireDate: at("1993-05-03T00:00:00.000Z"),
     managerId: andrew.id,
   },
   relationships: { territories: { data: [] } },
@@ -306,9 +309,9 @@ const orderLineItems = (orderId: string) =>
 export const order10248: Order = Order.make({
   id: Order.Id.make("10248"),
   attributes: {
-    orderDate: new Date("1996-07-04T00:00:00.000Z"),
-    requiredDate: new Date("1996-08-01T00:00:00.000Z"),
-    shippedDate: new Date("1996-07-16T00:00:00.000Z"),
+    orderDate: at("1996-07-04T00:00:00.000Z"),
+    requiredDate: at("1996-08-01T00:00:00.000Z"),
+    shippedDate: at("1996-07-16T00:00:00.000Z"),
     freight: 32.38,
     shipCity: "Berlin",
     shipCountry: "Germany",
@@ -324,8 +327,8 @@ export const order10248: Order = Order.make({
 export const order10249: Order = Order.make({
   id: Order.Id.make("10249"),
   attributes: {
-    orderDate: new Date("1996-07-05T00:00:00.000Z"),
-    requiredDate: new Date("1996-08-16T00:00:00.000Z"),
+    orderDate: at("1996-07-05T00:00:00.000Z"),
+    requiredDate: at("1996-08-16T00:00:00.000Z"),
     // not yet shipped: no shippedDate, no shipper
     freight: 11.61,
     shipCity: "London",
@@ -342,9 +345,9 @@ export const order10249: Order = Order.make({
 export const order10250: Order = Order.make({
   id: Order.Id.make("10250"),
   attributes: {
-    orderDate: new Date("1996-07-08T00:00:00.000Z"),
-    requiredDate: new Date("1996-08-05T00:00:00.000Z"),
-    shippedDate: new Date("1996-07-12T00:00:00.000Z"),
+    orderDate: at("1996-07-08T00:00:00.000Z"),
+    requiredDate: at("1996-08-05T00:00:00.000Z"),
+    shippedDate: at("1996-07-12T00:00:00.000Z"),
     freight: 65.83,
     shipCity: "Tsawassen",
     shipCountry: "Canada",

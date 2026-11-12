@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 import * as Filter from "./Filter.js";
 import {
@@ -106,7 +107,9 @@ describe("filter profile §6.2 — comparison domains", () => {
     ];
     for (let i = 0; i < instants.length; i++) {
       for (let j = 0; j < instants.length; j++) {
-        const chronological = Date.parse(instants[i]) < Date.parse(instants[j]);
+        const chronological =
+          DateTime.toEpochMillis(DateTime.makeUnsafe(instants[i])) <
+          DateTime.toEpochMillis(DateTime.makeUnsafe(instants[j]));
         expect(evaluate(Filter.lt("createdAt", instants[j]), { createdAt: instants[i] })).toBe(
           truth(chronological),
         );
