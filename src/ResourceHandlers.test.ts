@@ -218,7 +218,10 @@ const seeded = () =>
 // SAFETY: the stub ops read the same members the family's list query decodes.
 const listQuery = peopleListQuery as ResourceHandlers.ListQuery<ListInput>;
 
-const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
+const handlersFor = (
+  ops: ReturnType<typeof makeOps>["ops"],
+  extra: { readonly capabilitiesOnIncluded?: boolean } = {},
+) => {
   const { cache, store: cacheStore, state } = makeCache();
   const { transact, opened } = makeTransact();
   const handlers = ResourceHandlers.make({
@@ -231,6 +234,7 @@ const handlersFor = (ops: ReturnType<typeof makeOps>["ops"]) => {
     cache,
     transact,
     include: { includable: PERSON_INCLUDE.paths, targets },
+    ...extra,
   });
   return { handlers, cacheStore, state, opened };
 };
@@ -878,6 +882,19 @@ describe("list", () => {
       expect(plain).not.toHaveProperty("included");
     }),
   );
+
+  it("stamps the page only when `capabilitiesOnIncluded` is false", async () => {
+    const { ops } = seeded();
+    const { handlers } = handlersFor(ops, { capabilitiesOnIncluded: false });
+    const document = await success(
+      handlers
+        .list({ query: { include: ["birthPlace"] } })
+        .pipe(Effect.provide(as(Option.some(ADMIN)))),
+    );
+    expect(document.data[0]?.meta).toEqual({ canEdit: true, canDelete: true });
+    expect(document.included?.map((r) => r.id)).toEqual([PLACE]);
+    expect(document.included?.[0]).not.toHaveProperty("meta");
+  });
 
   /**
    * One test per axis the links have to carry, each asserting the parameter

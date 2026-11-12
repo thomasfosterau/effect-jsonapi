@@ -237,6 +237,35 @@ describe("Assemble.resource", () => {
     }),
   );
 
+  it.effect("stamps included members unless `capabilitiesOnIncluded` is false", () =>
+    Effect.gen(function* () {
+      const stamped = { canEdit: true, canDelete: true };
+      const { targets } = registry([place]);
+      const options = {
+        viewer: ADMIN,
+        capabilities: familyCapabilities,
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      };
+      const both = yield* Assemble.resource(person("p1"), options);
+      expect(both.data.meta).toEqual(stamped);
+      expect(both.included?.[0]?.meta).toEqual(stamped);
+      const explicit = yield* Assemble.resource(person("p1"), {
+        ...options,
+        capabilitiesOnIncluded: true,
+      });
+      expect(explicit.included?.[0]?.meta).toEqual(stamped);
+      const primaryOnly = yield* Assemble.resource(person("p1"), {
+        ...options,
+        capabilitiesOnIncluded: false,
+      });
+      expect(primaryOnly.data.meta).toEqual(stamped);
+      expect(primaryOnly.included).toHaveLength(1);
+      expect(primaryOnly.included?.[0]).not.toHaveProperty("meta");
+    }),
+  );
+
   it.effect("resolves a to-many include in one loader call per level", () =>
     Effect.gen(function* () {
       const { calls, targets } = registry([candidate("c-1"), candidate("c-2")]);
@@ -575,6 +604,28 @@ describe("Assemble.collection", () => {
       expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
     }),
   );
+
+  it.effect("stamps the page only when `capabilitiesOnIncluded` is false", () =>
+    Effect.gen(function* () {
+      const stamped = { canEdit: true, canDelete: true };
+      const { targets } = registry([place]);
+      const document = yield* Assemble.collection(
+        page,
+        { totalCount: 3, offset: 0, limit: 10, baseUrl },
+        {
+          viewer: ADMIN,
+          capabilities: familyCapabilities,
+          capabilitiesOnIncluded: false,
+          include: ["birthPlace"],
+          includable: ["birthPlace"],
+          targets,
+        },
+      );
+      expect(document.data.map((resource) => resource.meta)).toEqual(page.map(() => stamped));
+      expect(document.included?.map((r) => r.id)).toEqual(["place-1"]);
+      expect(document.included?.[0]).not.toHaveProperty("meta");
+    }),
+  );
 });
 
 describe("Assemble.unpaginatedCollection", () => {
@@ -624,6 +675,25 @@ describe("Assemble.unpaginatedCollection", () => {
       expect(calls).toEqual([{ type: "places", ids: ["place-1"] }]);
       expect(ids(document.included)).toEqual(["places:place-1"]);
       expect(document.included?.[0]?.meta).toEqual({ canEdit: false, canDelete: false });
+    }),
+  );
+
+  it.effect("leaves included members unstamped when `capabilitiesOnIncluded` is false", () =>
+    Effect.gen(function* () {
+      const { targets } = registry([place]);
+      const document = yield* Assemble.unpaginatedCollection(whole, {
+        viewer: ADMIN,
+        capabilities: familyCapabilities,
+        capabilitiesOnIncluded: false,
+        include: ["birthPlace"],
+        includable: ["birthPlace"],
+        targets,
+      });
+      expect(document.data.map((resource) => resource.meta)).toEqual(
+        whole.map(() => ({ canEdit: true, canDelete: true })),
+      );
+      expect(ids(document.included)).toEqual(["places:place-1"]);
+      expect(document.included?.[0]).not.toHaveProperty("meta");
     }),
   );
 
