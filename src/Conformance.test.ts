@@ -23,7 +23,7 @@ import * as MutableHashMap from "effect/MutableHashMap";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
@@ -114,7 +114,7 @@ const cannedClient = (serve: (request: CannedRequest) => Canned): HttpClient.Htt
   HttpClient.make((request, url) =>
     Effect.sync(() => {
       const headers = new Headers();
-      Arr.forEach(Rec.toEntries<string, unknown>(request.headers), ([name, value]) => {
+      Arr.forEach(R.toEntries<string, unknown>(request.headers), ([name, value]) => {
         if (P.isString(value)) headers.set(name, value);
       });
       const canned = serve({
@@ -223,7 +223,7 @@ const queryOf = (request: { readonly path: string }): URLSearchParams =>
   new URLSearchParams(request.path.split("?")[1] ?? "");
 
 /** A canned request's path without its query. */
-const withoutQuery = <R extends { readonly path: string }>(request: R): R => ({
+const withoutQuery = <Res extends { readonly path: string }>(request: Res): Res => ({
   ...request,
   path: request.path.replace(/\?.*$/, ""),
 });
@@ -426,7 +426,7 @@ const conformantServe = (request: {
     const requested = params.get(`fields[${type}]`);
     if (requested === null) return attributes;
     const keep = HashSet.fromIterable(requested.split(","));
-    return Rec.fromEntries(Rec.toEntries(attributes).filter(([key]) => HashSet.has(keep, key)));
+    return R.fromEntries(R.toEntries(attributes).filter(([key]) => HashSet.has(keep, key)));
   };
 
   const articleObject = {
@@ -1314,7 +1314,7 @@ describe("Conformance: detects a deliberately broken server", () => {
     "spec/document/included-on-include",
     (canned, request) =>
       queryOf(request).has("include")
-        ? withData(canned, (body) => Rec.remove(body, "included"))
+        ? withData(canned, (body) => R.remove(body, "included"))
         : canned,
   );
 
@@ -1324,7 +1324,7 @@ describe("Conformance: detects a deliberately broken server", () => {
       const report = yield* verifyCanned((request) =>
         withData(conformantServe(request), (body) =>
           Array.isArray(body["included"]) && Arr.isArrayEmpty(body["included"])
-            ? Rec.remove(body, "included")
+            ? R.remove(body, "included")
             : body,
         ),
       );
@@ -3420,7 +3420,7 @@ describe("Conformance: the filter evaluation oracle", () => {
   const project = (row: ProductRow, names: ReadonlyArray<string>): ProductRow => ({
     type: row.type,
     id: row.id,
-    attributes: Rec.filter(row.attributes, (_, name) => Arr.contains(names, name)),
+    attributes: R.filter(row.attributes, (_, name) => Arr.contains(names, name)),
     relationships: Arr.contains(names, "maker") ? (row.relationships ?? {}) : {},
   });
 
@@ -3439,8 +3439,8 @@ describe("Conformance: the filter evaluation oracle", () => {
     evaluate: Evaluator,
     rows: ReadonlyArray<ProductRow>,
   ): Option.Option<ReadonlyArray<ProductRow>> => {
-    const record = Rec.fromEntries(Arr.filter([...query], ([key]) => key.startsWith("filter")));
-    return Rec.isEmptyRecord(record)
+    const record = R.fromEntries(Arr.filter([...query], ([key]) => key.startsWith("filter")));
+    return R.isEmptyRecord(record)
       ? Option.some(rows)
       : Option.map(decodeFilter(record), (node) =>
           Arr.filter(rows, (row) => Option.contains(evaluate(node, row), true)),
@@ -6024,10 +6024,8 @@ describe("Conformance: the write fixture", () => {
     7,
   );
 
-  brokenWrite(
-    "a 201 without a Location header",
-    "spec/status/create-location",
-    (canned, request) => (creates(request, canned) ? { ...canned, headers: {} } : canned),
+  brokenWrite("a 201 without a Location header", "spec/status/create-location", (canned, request) =>
+    creates(request, canned) ? { ...canned, headers: {} } : canned,
   );
 
   brokenWrite(
@@ -6408,7 +6406,7 @@ describe("Conformance: atomic operations processing", () => {
       const one = (ref: Ref) =>
         Result.map(resolve(draft, ref), (id): Ref => ({ type: ref.type, id }));
       return Result.all(
-        Rec.map(relationships, ({ data }) => {
+        R.map(relationships, ({ data }) => {
           if (data === null) return Result.succeed({ data });
           if ("type" in data) return Result.map(one(data), (linked) => ({ data: linked }));
           return Result.map(Result.all(Arr.map(data, one)), (linked) => ({ data: linked }));

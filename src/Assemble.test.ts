@@ -13,7 +13,7 @@ import { describe, expect } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as ApiError from "./ApiError.js";
 import * as Assemble from "./Assemble.js";
@@ -119,7 +119,7 @@ const registry = (known: ReadonlyArray<Assemble.ResourceLike>) => {
           (r) => r.type === type && ids.includes(r.id),
         ) as ReadonlyArray<Handlers.ResourceValue>;
       });
-  const targets = Rec.fromEntries(
+  const targets = R.fromEntries(
     Arr.dedupe(known.map((r) => r.type)).map((type) => [type, target(type)]),
   ) satisfies Handlers.IncludeTargets;
   return { calls, targets };
@@ -210,9 +210,9 @@ describe("Assemble.resource", () => {
   it.effect("applies sparse fieldset projection to attributes, by type", () =>
     Effect.gen(function* () {
       const projected = yield* Assemble.resource(person("p1"), { fields: { people: ["name"] } });
-      expect(Rec.keys(projected.data.attributes)).toEqual(["name"]);
+      expect(R.keys(projected.data.attributes)).toEqual(["name"]);
       const untouched = yield* Assemble.resource(person("p1"), { fields: { places: ["name"] } });
-      expect(Rec.keys(untouched.data.attributes).length).toBeGreaterThan(1);
+      expect(R.keys(untouched.data.attributes).length).toBeGreaterThan(1);
     }),
   );
 
@@ -1245,7 +1245,7 @@ describe("helpers", () => {
     const linked = Assemble.toWireSafeResource({
       type: "things",
       id: "2",
-      attributes: Rec.fromEntries([["__proto__", { at: new URL("https://example.test/a") }]]),
+      attributes: R.fromEntries([["__proto__", { at: new URL("https://example.test/a") }]]),
     });
     expect(toJson(linked.attributes)).toBe('{"__proto__":{"at":"https://example.test/a"}}');
   });
@@ -1282,11 +1282,11 @@ describe("helpers", () => {
       const coerced = Assemble.toWireSafeResource({
         type: "things",
         id: "1",
-        attributes: Rec.fromEntries([
+        attributes: R.fromEntries([
           [key, { at: new URL("https://example.test/a") }],
           ["title", "T"],
         ]),
-        meta: Rec.fromEntries([[key, 1]]),
+        meta: R.fromEntries([[key, 1]]),
       });
       const { attributes, meta } = coerced;
       expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);

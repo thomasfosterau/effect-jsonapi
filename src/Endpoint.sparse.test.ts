@@ -16,10 +16,11 @@
 import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder, HttpApiClient, OpenApi } from "effect/http-api";
@@ -112,7 +113,7 @@ const only = <O extends { readonly attributes: Readonly<Record<string, unknown>>
   ...names: ReadonlyArray<keyof O["attributes"] & string>
 ) => ({
   ...object,
-  attributes: Rec.fromEntries(names.map((name) => [name, object.attributes[name]] as const)),
+  attributes: R.fromEntries(names.map((name) => [name, object.attributes[name]] as const)),
 });
 
 // A wire resource as `Handlers.project` answers a fieldset naming `names`:
@@ -128,11 +129,11 @@ const projected = <
   ...names: ReadonlyArray<(keyof O["attributes"] | keyof NonNullable<O["relationships"]>) & string>
 ) => {
   const { relationships, ...rest } = object;
-  const kept = Rec.filter(relationships ?? {}, (_, name) => names.includes(name));
+  const kept = R.filter(relationships ?? {}, (_, name) => names.includes(name));
   return {
     ...rest,
-    attributes: Rec.filter(object.attributes, (_, name) => names.includes(name)),
-    ...definedMember("relationships", Rec.isEmptyRecord(kept) ? undefined : kept),
+    attributes: R.filter(object.attributes, (_, name) => names.includes(name)),
+    ...definedMember("relationships", R.isEmptyRecord(kept) ? undefined : kept),
   };
 };
 
@@ -147,7 +148,7 @@ type Wire = Readonly<Record<string, unknown>>;
 
 // Whether an endpoint's success document decodes `document`.
 const decodes = (endpoint: { readonly success: Iterable<Schema.Top> }, document: Wire) =>
-  Exit.isSuccess(Schema.decodeUnknownExit(successOf(endpoint))(document));
+  Exit.isSuccess(Schema.decodeExit(successOf(endpoint))(document));
 
 // Whether the document admits `primary` (wrapped in an array for a collection)
 // and the `included` members.
@@ -297,7 +298,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
         admitsPartial(endpoint, holder, many, [only(wire.editors, "name"), only(reviewer)]),
       ).toBe(true);
       // …and still decodes as itself, `type` and `id` intact.
-      const decoded = Schema.decodeUnknownSync(successOf(endpoint))({
+      const decoded = Schema.decodeSync(successOf(endpoint))({
         data: many ? [holder] : holder,
         included: [only(wire.editors, "note")],
       });
@@ -341,7 +342,7 @@ describe("the default document of an endpoint declaring `fields` is partial (#32
       expect(admitsPartial(endpoint, only(wire.others), false)).toBe(true);
       // Whole members still decode, as themselves.
       expect(
-        Schema.decodeUnknownSync(successOf(endpoint))({ data: only(reviewer, "name") }),
+        Schema.decodeSync(successOf(endpoint))({ data: only(reviewer, "name") }),
       ).toMatchObject({ data: { type: "reviewers", id: "8", attributes: { name: "Rue" } } });
       expect(admitsPartial(endpoint, wire.others, false)).toBe(true);
       expect(admitsPartial(endpoint, only(wire.tags), false)).toBe(false);
@@ -819,7 +820,10 @@ describe("a projected answer over HTTP (#322)", () => {
   const inMemory = HttpClient.make((request) =>
     Effect.gen(function* () {
       const web = yield* HttpClientRequest.toWeb(request);
-      const response = yield* Effect.tryPromise(() => fetchApp(web));
+      const response = yield* Effect.tryPromise({
+        try: () => fetchApp(web),
+        catch: (cause) => new Cause.UnknownError(cause),
+      });
       return HttpClientResponse.fromWeb(request, response);
     }).pipe(Effect.orDie),
   );

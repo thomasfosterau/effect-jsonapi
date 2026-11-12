@@ -34,8 +34,8 @@ import * as Effect from "effect/Effect";
 import * as HashSet from "effect/HashSet";
 import * as MutableHashSet from "effect/MutableHashSet";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import type * as Schema from "effect/Schema";
 import {
@@ -214,7 +214,7 @@ interface Found {
 const NO_IDENTITY = "a string `type` and `id`";
 
 const memberOf = (resource: JsonObject): Option.Option<Member> =>
-  Predicate.isString(resource["type"]) && Predicate.isString(resource["id"])
+  P.isString(resource["type"]) && P.isString(resource["id"])
     ? Option.map(Option.fromUndefinedOr(identity(resource)), (key) => ({
         key,
         label: quote(resourceLabel(resource)),
@@ -296,7 +296,7 @@ const relationshipLinks =
   (from: Target, body: Body, ctx: Context): ReadonlyArray<Found> =>
     Arr.flatMap(carriersIn(body), ({ pointer, resource, label }) => {
       const relationships = objectIn(resource["relationships"]);
-      return Arr.filterMap(Rec.keys(relationships), (key) => {
+      return Arr.filterMap(R.keys(relationships), (key) => {
         const relationship = relationships[key];
         if (!isJsonObject(relationship)) return Result.fail(undefined);
         const of = `${label}'s \`${quote(key)}\``;
@@ -505,7 +505,7 @@ const dataOf = (observation: Observation): Option.Option<Schema.Json> =>
  * left to the rules that compare identities.
  */
 const isResourceObject = (value: Schema.Json): boolean =>
-  isJsonObject(value) && Predicate.isString(value["type"]);
+  isJsonObject(value) && P.isString(value["type"]);
 
 /** `true` when an answer's primary data is resource data: a resource object, an array of them, or `null`. */
 const isResourceData = (observation: Observation): boolean =>
@@ -545,14 +545,14 @@ const ignoredMember = (key: string): boolean => key.startsWith("@") || EXTENSION
  */
 const notAnIdentifier = (value: Schema.Json): Option.Option<string> => {
   if (!isJsonObject(value)) return Option.some(`is ${quote(value)}, not an object`);
-  if (!Predicate.isString(value["type"])) return Option.some("has no string `type`");
-  if (!Predicate.isString(value["id"])) {
+  if (!P.isString(value["type"])) return Option.some("has no string `type`");
+  if (!P.isString(value["id"])) {
     return Option.some(
-      Predicate.isString(value["lid"]) ? "has a `lid` but no string `id`" : "has no string `id`",
+      P.isString(value["lid"]) ? "has a `lid` but no string `id`" : "has no string `id`",
     );
   }
   return Arr.match(
-    Rec.keys(objectIn(value)).filter(
+    R.keys(objectIn(value)).filter(
       (key) => !HashSet.has(IDENTIFIER_MEMBERS, key) && !ignoredMember(key),
     ),
     {

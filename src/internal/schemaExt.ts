@@ -18,7 +18,7 @@ import * as MutableHashSet from "effect/MutableHashSet";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -68,7 +68,7 @@ const moreUndeclared = (count: number): string =>
 // more there are (#308), so the issues, and the 400 a server renders from
 // them, stay bounded however many keys a request sends. The keys are still
 // all read, so the count is exact; only the issues are capped.
-// It reads the enumerable own string keys (`Rec.keys`), then the enumerable
+// It reads the enumerable own string keys (`R.keys`), then the enumerable
 // own symbol keys, which is the order `Reflect.ownKeys` gives, at a fraction of
 // its cost. So a symbol key counts too, and an own `__proto__` / `constructor`
 // (`JSON.parse` makes both) is rejected like any other name. A non-enumerable
@@ -101,7 +101,7 @@ const noMembers = (declared: MutableHashSet.MutableHashSet<PropertyKey>, cap: nu
     (input, ast, options) => {
       if (!P.isObject(input)) return "Expected object";
       const undeclared: Array<PropertyKey> = [
-        ...Arr.filter(Rec.keys(input), (key) => !MutableHashSet.has(declared, key)),
+        ...Arr.filter(R.keys(input), (key) => !MutableHashSet.has(declared, key)),
         ...Arr.filter(
           Object.getOwnPropertySymbols(input),
           (key) =>
@@ -195,7 +195,7 @@ export const closedStruct = <const Fields extends Schema.Struct.Fields>(
   fields: Fields,
   cap: number,
 ): Schema.Struct<Fields> => {
-  const struct = Rec.isEmptyReadonlyRecord(fields)
+  const struct = R.isEmptyReadonlyRecord(fields)
     ? Schema.Struct<Fields>(fields).annotate(nullAsObject)
     : Schema.Struct(fields);
   const { ast } = struct;

@@ -55,7 +55,7 @@ import * as HashMap from "effect/HashMap";
 import * as HashSet from "effect/HashSet";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import type { JsonApiObject } from "./Document.js";
 import { serialise, withPagePairs } from "./internal/canonical.js";
 import { assign } from "./internal/define.js";
@@ -190,7 +190,7 @@ export interface TransformLambda {
  * @since 0.15.0
  * @category type-level
  */
-export type Transformed<F extends TransformLambda, R> = (F & { readonly In: R })["Out"];
+export type Transformed<F extends TransformLambda, Res> = (F & { readonly In: Res })["Out"];
 
 /**
  * The {@link TransformLambda} of a transform that leaves the type alone —
@@ -228,7 +228,7 @@ export interface IdentityLambda extends TransformLambda {
  * @category models
  */
 export interface ResourceTransform<F extends TransformLambda = IdentityLambda> {
-  <R extends ResourceValue>(resource: R): Transformed<F, R>;
+  <Res extends ResourceValue>(resource: Res): Transformed<F, Res>;
 }
 
 /**
@@ -306,14 +306,14 @@ type SelectedAttributes<A, Keys> = [Keys] extends [never]
 // The `relationships` a fieldset keeps: the member as narrowed by
 // `SelectedAttributes`, optional because the projection omits it when nothing
 // is left in it, and absent when a literal set keeps none of it.
-type SelectedRelationships<R, Keys> = {
+type SelectedRelationships<Res, Keys> = {
   readonly [
-    K in keyof R as K extends "relationships"
-      ? [keyof SelectedAttributes<Exclude<R[K], undefined>, Keys>] extends [never]
+    K in keyof Res as K extends "relationships"
+      ? [keyof SelectedAttributes<Exclude<Res[K], undefined>, Keys>] extends [never]
         ? never
         : K
       : never
-  ]+?: SelectedAttributes<Exclude<R[K], undefined>, Keys>;
+  ]+?: SelectedAttributes<Exclude<Res[K], undefined>, Keys>;
 };
 
 /**
@@ -326,17 +326,17 @@ type SelectedRelationships<R, Keys> = {
  * @since 0.15.0 (`relationships` since 0.18.0)
  * @category type-level
  */
-export type Projected<R, F> = R extends { readonly type: infer T; readonly attributes: infer A }
+export type Projected<Res, F> = Res extends { readonly type: infer T; readonly attributes: infer A }
   ? T extends keyof F
     ? [Exclude<F[T], undefined>] extends [never]
-      ? R
+      ? Res
       : Simplify<
-          Omit<R, "attributes" | "relationships"> & {
+          Omit<Res, "attributes" | "relationships"> & {
             readonly attributes: SelectedAttributes<A, Exclude<F[T], undefined>>;
-          } & SelectedRelationships<R, Exclude<F[T], undefined>>
+          } & SelectedRelationships<Res, Exclude<F[T], undefined>>
         >
-    : R
-  : R;
+    : Res
+  : Res;
 
 /**
  * The {@link TransformLambda} of {@link project}.
@@ -353,7 +353,7 @@ const selectMembers = <V>(
   requested: MutableHashSet.MutableHashSet<string>,
 ) => {
   const projected: Record<string, V> = {};
-  Arr.forEach(Rec.keys(members), (name) => {
+  Arr.forEach(R.keys(members), (name) => {
     // An own `__proto__` member (as `JSON.parse` gives) stays a member.
     if (MutableHashSet.has(requested, name)) assign(projected, name, members[name]);
   });
@@ -396,10 +396,7 @@ const projectResource = (
       "attributes",
       attributes === undefined ? undefined : selectMembers(attributes, requested),
     ),
-    ...definedMember(
-      "relationships",
-      Arr.isReadonlyArrayNonEmpty(Rec.keys(kept)) ? kept : undefined,
-    ),
+    ...definedMember("relationships", Arr.isReadonlyArrayNonEmpty(R.keys(kept)) ? kept : undefined),
   };
 };
 
@@ -432,10 +429,10 @@ const bothProjections = (
 ): Fields | undefined => {
   if (first === undefined || second === undefined) return first ?? second;
   const types = Arr.dedupe([
-    ...Rec.keys<string, Fields[string]>(first),
-    ...Rec.keys<string, Fields[string]>(second),
+    ...R.keys<string, Fields[string]>(first),
+    ...R.keys<string, Fields[string]>(second),
   ]);
-  return Rec.fromEntries(
+  return R.fromEntries(
     types.flatMap((type) => {
       const a = requestedFor(first, type);
       const b = requestedFor(second, type);
@@ -537,10 +534,10 @@ const bothProjections = (
 export function project<const F extends Fields>(
   fields: F | undefined,
 ): ResourceTransform<ProjectLambda<F>>;
-export function project<R extends ResourceValue, const F extends Fields>(
-  resource: R,
+export function project<Res extends ResourceValue, const F extends Fields>(
+  resource: Res,
   fields: F | undefined,
-): Projected<R, F>;
+): Projected<Res, F>;
 export function project(...args: ReadonlyArray<unknown>) {
   return args.length >= 2
     ? projectResource(args[0] as AnyResourceValue, args[1] as Fields | undefined)
@@ -555,13 +552,13 @@ export function project(...args: ReadonlyArray<unknown>) {
 // ---------------------------------------------------------------------------
 
 // The `meta` a resource already carries, if any.
-type ExistingMeta<R> = R extends { readonly meta?: infer E } ? Exclude<E, undefined> : never;
+type ExistingMeta<Res> = Res extends { readonly meta?: infer E } ? Exclude<E, undefined> : never;
 
 // What `withMeta` leaves under `meta`: the computed members merged over
 // whatever the resource already declared.
-type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never]
+type MergedMeta<Res, M extends MetaValue> = [ExistingMeta<Res>] extends [never]
   ? M
-  : Simplify<ExistingMeta<R> & M>;
+  : Simplify<ExistingMeta<Res> & M>;
 
 /**
  * The type of a resource with computed `meta` merged in. The member stays
@@ -571,9 +568,9 @@ type MergedMeta<R, M extends MetaValue> = [ExistingMeta<R>] extends [never]
  * @since 0.15.0
  * @category type-level
  */
-export type WithMeta<R, M extends MetaValue> = R extends AnyResourceValue
-  ? Simplify<Omit<R, "meta"> & { readonly meta?: MergedMeta<R, M> }>
-  : R;
+export type WithMeta<Res, M extends MetaValue> = Res extends AnyResourceValue
+  ? Simplify<Omit<Res, "meta"> & { readonly meta?: MergedMeta<Res, M> }>
+  : Res;
 
 /**
  * The {@link TransformLambda} of {@link withMeta}.
@@ -590,7 +587,7 @@ const stampMeta = (
   computed: MetaValue | undefined,
 ): AnyResourceValue => {
   const merged = { ...resource.meta, ...computed };
-  if (Arr.isReadonlyArrayNonEmpty(Rec.keys(merged))) return { ...resource, meta: merged };
+  if (Arr.isReadonlyArrayNonEmpty(R.keys(merged))) return { ...resource, meta: merged };
   // An empty `meta` is a *present* meta object to the spec, which is a
   // different statement from having none: emit no member at all.
   if (resource.meta === undefined) return resource;
@@ -707,7 +704,7 @@ const key = (identifier: ResourceIdentifierValue): string => `${identifier.type}
 // The keys of every resource identifier in a resource's inline relationship
 // linkage — the edges the full-linkage walk follows out of it.
 const linkageKeys = (resource: ResourceValue): Array<string> =>
-  Arr.flatMap(Rec.values(resource.relationships ?? {}), ({ data: linkage }) =>
+  Arr.flatMap(R.values(resource.relationships ?? {}), ({ data: linkage }) =>
     linkage === null || linkage === undefined
       ? []
       : Arr.map(Array.isArray(linkage) ? linkage : [linkage], key),
@@ -729,7 +726,7 @@ const walkKeys = (
 ): Array<string> => {
   const requested = requestedFor(fields, original.type);
   if (requested === undefined || original.relationships === undefined) return linkageKeys(mapped);
-  const excluded = Rec.filter(
+  const excluded = R.filter(
     original.relationships,
     (_, name) => !MutableHashSet.has(requested, name),
   );
@@ -940,9 +937,9 @@ const includedFor = <Included extends ResourceValue, F extends TransformLambda>(
  * @since 0.15.0
  * @category models
  */
-export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, R = never> = (
+export type IncludeTarget<A extends ResourceValue = ResourceValue, E = never, Req = never> = (
   ids: ReadonlyArray<string>,
-) => Effect.Effect<ReadonlyArray<A>, E, R>;
+) => Effect.Effect<ReadonlyArray<A>, E, Req>;
 
 /**
  * The registry {@link resolveIncluded} walks: one {@link IncludeTarget} per
@@ -970,8 +967,8 @@ export interface IncludeTargets {
 // The `(resource, error, services)` triple a target's Effect carries.
 type IncludeTargetTypes<T> = T extends (
   ids: ReadonlyArray<string>,
-) => Effect.Effect<ReadonlyArray<infer A>, infer E, infer R>
-  ? { readonly resource: A; readonly error: E; readonly services: R }
+) => Effect.Effect<ReadonlyArray<infer A>, infer E, infer Req>
+  ? { readonly resource: A; readonly error: E; readonly services: Req }
   : never;
 
 /**
@@ -1406,7 +1403,9 @@ export type DocumentValue<
 
 // The primary `data` of a document with the transform applied. `data(null)`
 // has no resource to transform, so a nullable primary stays nullable.
-type TransformedData<F extends TransformLambda, R> = R extends null ? null : Transformed<F, R>;
+type TransformedData<F extends TransformLambda, Res> = Res extends null
+  ? null
+  : Transformed<F, Res>;
 
 // Appends a query string (no leading `?`) to a path, whichever separator the
 // path needs; a path with no query is returned as is.
@@ -1599,13 +1598,13 @@ const build = (
  * @category constructors
  */
 export const data = <
-  R extends ResourceValue | null,
+  Res extends ResourceValue | null,
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
   F extends TransformLambda = IdentityLambda,
 >(
-  resource: R,
+  resource: Res,
   options?: {
     /**
      * The compound document's members. An array — even `[]` — emits
@@ -1636,7 +1635,7 @@ export const data = <
      */
     readonly checkLinkage?: boolean | undefined;
   },
-): DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J> => {
+): DocumentValue<TransformedData<F, Res>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const primary =
     resource === null
@@ -1651,7 +1650,7 @@ export const data = <
     onResource,
     false,
     resource === null ? [] : [resource],
-  ) as DocumentValue<TransformedData<F, R>, Transformed<F, Included>, M, J>;
+  ) as DocumentValue<TransformedData<F, Res>, Transformed<F, Included>, M, J>;
 };
 
 /**
@@ -1725,13 +1724,13 @@ export const data = <
  * @category constructors
  */
 export const collection = <
-  R extends ResourceValue,
+  Res extends ResourceValue,
   const Included extends ResourceValue = never,
   const M extends MetaValue = never,
   const J extends JsonApiObjectValue = never,
   F extends TransformLambda = IdentityLambda,
 >(
-  resources: ReadonlyArray<R>,
+  resources: ReadonlyArray<Res>,
   options?: {
     /**
      * The compound document's members. An array — even `[]` — emits
@@ -1770,11 +1769,11 @@ export const collection = <
      */
     readonly checkLinkage?: boolean | undefined;
   },
-): DocumentValue<ReadonlyArray<Transformed<F, R>>, Transformed<F, Included>, M, J> => {
+): DocumentValue<ReadonlyArray<Transformed<F, Res>>, Transformed<F, Included>, M, J> => {
   const onResource = options?.onResource === undefined ? undefined : memoise(options.onResource);
   const primary = mapResources(resources, onResource);
   return build(primary, primary, options, onResource, false, resources) as DocumentValue<
-    ReadonlyArray<Transformed<F, R>>,
+    ReadonlyArray<Transformed<F, Res>>,
     Transformed<F, Included>,
     M,
     J
@@ -2159,7 +2158,7 @@ const withPage = (
   page: Record<string, number>,
   query: ReadonlyArray<Pair> | undefined,
 ): string => {
-  const cursor: ReadonlyArray<Pair> = Rec.toEntries(page).map(([key, value]) => [
+  const cursor: ReadonlyArray<Pair> = R.toEntries(page).map(([key, value]) => [
     `page[${key}]`,
     String(value),
   ]);

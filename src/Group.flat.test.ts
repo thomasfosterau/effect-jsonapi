@@ -137,7 +137,7 @@ describe("Group.flat: hiddenWrites", () => {
     (name) => {
       const invalid = { data: { type: "widgets", id, attributes: { name: 42 } } };
       expect(Exit.isFailure(encode(hiding, name)(invalid))).toBe(true);
-      expect(Exit.isFailure(Schema.decodeUnknownExit(successOf(hiding, name))(invalid))).toBe(true);
+      expect(Exit.isFailure(Schema.decodeExit(successOf(hiding, name))(invalid))).toBe(true);
     },
   );
 

@@ -6,7 +6,7 @@
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { define } from "./define.js";
@@ -161,8 +161,8 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
   const nested: Record<string, V | Record<string, V>> = {};
   // Whether a bare key holds `name`, wherever it sits in `flat`.
   const holdsBare = (name: string): boolean =>
-    Option.getOrUndefined(Rec.get(flat, name)) !== undefined;
-  Arr.forEach(Rec.toEntries(flat), ([key, value]) => {
+    Option.getOrUndefined(R.get(flat, name)) !== undefined;
+  Arr.forEach(R.toEntries(flat), ([key, value]) => {
     if (value === undefined) return;
     const [, name, member] = bracketKey.exec(key) ?? [];
     if (name === undefined || member === undefined || holdsBare(name)) {
@@ -170,7 +170,7 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
     } else {
       // No bare key holds the name, so an own entry under it is a group this
       // loop made.
-      const group = Option.getOrElse(Rec.get(nested, name), () => {
+      const group = Option.getOrElse(R.get(nested, name), () => {
         const made = {};
         define(nested, name, made);
         return made;
@@ -186,10 +186,10 @@ export const nest = <V>(flat: { readonly [key: string]: V }) => {
  */
 export const flatten = (nested: { readonly [key: string]: unknown }) => {
   const flat: Record<string, unknown> = {};
-  Arr.forEach(Rec.toEntries(nested), ([key, value]) => {
+  Arr.forEach(R.toEntries(nested), ([key, value]) => {
     if (value === undefined) return;
     if (P.isObject(value)) {
-      Arr.forEach(Rec.toEntries(value), ([sub, subValue]) => {
+      Arr.forEach(R.toEntries(value), ([sub, subValue]) => {
         if (subValue === undefined) return;
         define(flat, `${key}[${sub}]`, subValue);
       });

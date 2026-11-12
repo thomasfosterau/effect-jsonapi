@@ -52,7 +52,7 @@ import type * as SchemaAST from "effect/SchemaAST";
 import type * as Types from "effect/Types";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -586,8 +586,8 @@ export const bracketPageKeys = <S extends OffsetPageStruct>(schema: S): BracketP
 
 // Normalises "one resource or several" to an array (heterogeneous endpoints
 // pass several).
-const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArray<R> =>
-  Array.isArray(resource) ? (resource as ReadonlyArray<R>) : [resource as R];
+const toResources = <Res extends Any>(resource: Res | ReadonlyArray<Res>): ReadonlyArray<Res> =>
+  Array.isArray(resource) ? (resource as ReadonlyArray<Res>) : [resource as Res];
 
 /**
  * Constrains the `include` paths an endpoint advertises.
@@ -605,9 +605,9 @@ const toResources = <R extends Any>(resource: R | ReadonlyArray<R>): ReadonlyArr
  * @since 0.9.0
  * @category models
  */
-export interface IncludeOptions<R extends Any> {
+export interface IncludeOptions<Res extends Any> {
   /** The exact set of legal paths. Anything else fails decoding (→ 400). */
-  readonly paths?: ReadonlyArray<IncludePathsTo<R, 3>>;
+  readonly paths?: ReadonlyArray<IncludePathsTo<Res, 3>>;
   /** How many hops into the relationship graph to derive. Defaults to 2. */
   readonly depth?: IncludeDepth;
   /**
@@ -632,7 +632,7 @@ export interface IncludeOptions<R extends Any> {
  * @since 0.9.0
  * @category models
  */
-export type IncludeOption<R extends Any> = boolean | IncludeOptions<R> | SurfaceFor<R>;
+export type IncludeOption<Res extends Any> = boolean | IncludeOptions<Res> | SurfaceFor<Res>;
 
 /**
  * The `include` paths an {@link IncludeOption} legalises: a declared
@@ -643,7 +643,7 @@ export type IncludeOption<R extends Any> = boolean | IncludeOptions<R> | Surface
  * @since 0.9.0
  * @category type-level
  */
-export type IncludePathsOf<R extends Any, I> = LegalIncludePaths<R, I>;
+export type IncludePathsOf<Res extends Any, I> = LegalIncludePaths<Res, I>;
 
 /**
  * The decoded `include` schema: a comma-separated list of relationship paths,
@@ -656,8 +656,8 @@ export type IncludePathsOf<R extends Any, I> = LegalIncludePaths<R, I>;
  * @category models
  */
 export interface Include<
-  R extends Any,
-  Paths extends string = IncludePath<R>,
+  Res extends Any,
+  Paths extends string = IncludePath<Res>,
 > extends Schema.decodeTo<CommaSeparated<Schema.Literals<ReadonlyArray<Paths>>>, Repeatable> {}
 
 /**
@@ -725,14 +725,14 @@ export interface Include<
  * @category constructors
  */
 export const Include = <
-  R extends Any,
-  const O extends IncludeOptions<R> | AnySurface | undefined = undefined,
+  Res extends Any,
+  const O extends IncludeOptions<Res> | AnySurface | undefined = undefined,
 >(
-  resource: R | ReadonlyArray<R>,
+  resource: Res | ReadonlyArray<Res>,
   options?: O,
-): Include<R, IncludePathsOf<R, O>> => {
+): Include<Res, IncludePathsOf<Res, O>> => {
   const paths = includePathsFor(toResources(resource), options) as ReadonlyArray<
-    IncludePathsOf<R, O>
+    IncludePathsOf<Res, O>
   >;
   return repeatable(
     CommaSeparated(
@@ -1100,7 +1100,7 @@ export interface Fieldset<Field extends string> extends Schema.decodeTo<
  * @since 0.1.0
  * @category constructors
  */
-export const Fieldset = <R extends Any>(resource: R): Fieldset<FieldKeys<R>> =>
+export const Fieldset = <Res extends Any>(resource: Res): Fieldset<FieldKeys<Res>> =>
   fieldsetOf(resource.type, fieldKeys(resource));
 
 // The fieldset schema of the wire type `type` over the vocabulary `fields`.
@@ -1184,8 +1184,8 @@ export const FILTER_PROFILE_URI: typeof PROFILE_URI = PROFILE_URI;
  * @since 0.13.0
  * @category type-level
  */
-export type FilterFields<R extends Any> = {
-  readonly [K in FilterableKeys<R>]: Filterable<R>[K]["literal"]["Type"];
+export type FilterFields<Res extends Any> = {
+  readonly [K in FilterableKeys<Res>]: Filterable<Res>[K]["literal"]["Type"];
 };
 
 /**
@@ -1195,17 +1195,20 @@ export type FilterFields<R extends Any> = {
  * @since 0.13.0
  * @category type-level
  */
-export type FilterAst<R extends Any> = Ast<FilterFields<R>>;
+export type FilterAst<Res extends Any> = Ast<FilterFields<Res>>;
 
 /**
  * The schema of a decoded {@link FilterAst} as it sits in a query's nested
- * shape (the `filter` key of `Query.schema(R, { filter: true })`): the tree
+ * shape (the `filter` key of `Query.schema(Res, { filter: true })`): the tree
  * is already decoded, so both sides are the AST.
  *
  * @since 0.13.0
  * @category models
  */
-export interface FilterAstSchema<R extends Any> extends Schema.Codec<FilterAst<R>, FilterAst<R>> {}
+export interface FilterAstSchema<Res extends Any> extends Schema.Codec<
+  FilterAst<Res>,
+  FilterAst<Res>
+> {}
 
 /**
  * The `filter[...]` codec of a resource: the flat record of `filter[...]`
@@ -1214,8 +1217,8 @@ export interface FilterAstSchema<R extends Any> extends Schema.Codec<FilterAst<R
  * @since 0.13.0
  * @category models
  */
-export interface Filter<R extends Any> extends Schema.Codec<
-  FilterAst<R>,
+export interface Filter<Res extends Any> extends Schema.Codec<
+  FilterAst<Res>,
   { readonly [key: string]: string }
 > {}
 
@@ -1403,7 +1406,7 @@ const messageOf = (cause: unknown): string => (P.isError(cause) ? cause.message 
  * @since 0.13.0
  * @category constructors
  */
-export const Filter = <R extends Any>(resource: R): Filter<R> => {
+export const Filter = <Res extends Any>(resource: Res): Filter<Res> => {
   const fields = filterable(resource) as FieldCodecs;
   const from = Schema.Record(Schema.String, FilterWireValue);
   return from.pipe(
@@ -1417,7 +1420,7 @@ export const Filter = <R extends Any>(resource: R): Filter<R> => {
         encode: (node, options) => encodeFilterNode(fields, node, options),
       }),
     ),
-  ) as unknown as Filter<R>;
+  ) as unknown as Filter<Res>;
 };
 
 // ---------------------------------------------------------------------------
@@ -1442,7 +1445,7 @@ export type FilterOption = boolean | Schema.Struct.Fields;
  * @since 0.1.0
  * @category models
  */
-export interface Options<R extends Any> {
+export interface Options<Res extends Any> {
   /**
    * Enable `?include=` — compound document inclusion. `true` legalises the
    * resource's whole relationship graph to a depth of 2; an
@@ -1456,7 +1459,7 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted — `?include=a,b` and `?include=a&include=b`
    * — and decode to the same set.
    */
-  readonly include?: IncludeOption<R> | undefined;
+  readonly include?: IncludeOption<Res> | undefined;
   /**
    * Enable `?fields[TYPE]=` — sparse fieldsets for every type the response
    * can carry, and no other: this resource; its non-`paginated` direct
@@ -1495,7 +1498,7 @@ export interface Options<R extends Any> {
    * Both wire spellings are accepted — `?sort=-createdAt,title` and
    * `?sort=-createdAt&sort=title` — and decode to the same list.
    */
-  readonly sort?: boolean | ReadonlyArray<AttributeKeys<R>> | undefined;
+  readonly sort?: boolean | ReadonlyArray<AttributeKeys<Res>> | undefined;
   /**
    * Enable `?page[*]=` pagination. Pass one of the {@link Page} strategies or
    * custom `Schema.Struct.Fields` (each key becomes `page[<key>]`). Under the
@@ -1560,8 +1563,8 @@ export interface Options<R extends Any> {
  * @since 0.1.0 (`I` and family members since 0.17.0)
  * @category type-level
  */
-export type FieldsetResources<R extends Any, I = false> = ExpandFamilies<
-  R | (I extends unknown ? IncludedResources<R, I> : never)
+export type FieldsetResources<Res extends Any, I = false> = ExpandFamilies<
+  Res | (I extends unknown ? IncludedResources<Res, I> : never)
 >;
 
 /**
@@ -1573,23 +1576,23 @@ export type FieldsetResources<R extends Any, I = false> = ExpandFamilies<
  * @since 0.18.0
  * @category type-level
  */
-export type FieldsetTypesOf<R extends Any, O extends Options<R>> = [O["fields"]] extends [true]
-  ? FieldsetResources<R, O["include"]>["type"]
+export type FieldsetTypesOf<Res extends Any, O extends Options<Res>> = [O["fields"]] extends [true]
+  ? FieldsetResources<Res, O["include"]>["type"]
   : O["fields"] extends ReadonlyArray<infer T>
-    ? Extract<FieldsetResources<R, O["include"]>["type"], T>
+    ? Extract<FieldsetResources<Res, O["include"]>["type"], T>
     : never;
 
 // The nested `fields` member of a query declaring `fields[TYPE]` for `Types`:
 // one optional fieldset per type, its vocabulary the fields (attributes and
 // relationships, #494) of every definition sharing that wire type (#362); no
 // member when `Types` is empty.
-type NestedFieldsets<R extends Any, I, Types extends string> = [Types] extends [never]
+type NestedFieldsets<Res extends Any, I, Types extends string> = [Types] extends [never]
   ? Record<never, never>
   : {
       readonly fields: Schema.optionalKey<
         Schema.Struct<{
           readonly [TypeName in Types]: Schema.optionalKey<
-            Fieldset<FieldKeys<Extract<FieldsetResources<R, I>, { type: TypeName }>>>
+            Fieldset<FieldKeys<Extract<FieldsetResources<Res, I>, { type: TypeName }>>>
           >;
         }>
       >;
@@ -1601,13 +1604,13 @@ type NestedFieldsets<R extends Any, I, Types extends string> = [Types] extends [
  * @since 0.1.0
  * @category type-level
  */
-export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
+export type NestedFields<Res extends Any, O extends Options<Res>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true
-    ? { readonly include: Schema.optionalKey<Include<R, IncludePathsOf<R, O["include"]>>> }
+    ? { readonly include: Schema.optionalKey<Include<Res, IncludePathsOf<Res, O["include"]>>> }
     : Record<never, never>) &
-    NestedFieldsets<R, O["include"], FieldsetTypesOf<R, O>> &
+    NestedFieldsets<Res, O["include"], FieldsetTypesOf<Res, O>> &
     (O["sort"] extends true
-      ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<R>>> }
+      ? { readonly sort: Schema.optionalKey<Sort<AttributeKeys<Res>>> }
       : O["sort"] extends ReadonlyArray<string>
         ? { readonly sort: Schema.optionalKey<Sort<O["sort"][number]>> }
         : Record<never, never>) &
@@ -1615,7 +1618,7 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
       ? { readonly page: Schema.optionalKey<Schema.Struct<O["page"]>> }
       : Record<never, never>) &
     ([O["filter"]] extends [true]
-      ? { readonly filter: Schema.optionalKey<FilterAstSchema<R>> }
+      ? { readonly filter: Schema.optionalKey<FilterAstSchema<Res>> }
       : O["filter"] extends Schema.Struct.Fields
         ? { readonly filter: Schema.optionalKey<Schema.Struct<O["filter"]>> }
         : Record<never, never>)
@@ -1630,12 +1633,12 @@ export type NestedFields<R extends Any, O extends Options<R>> = Types.Simplify<
  * @since 0.1.0
  * @category type-level
  */
-export type FlatFields<R extends Any, O extends Options<R>> = Types.Simplify<
+export type FlatFields<Res extends Any, O extends Options<Res>> = Types.Simplify<
   (IncludeEnabled<O["include"]> extends true
     ? { readonly include: Schema.optionalKey<Repeatable> }
     : Record<never, never>) & {
     readonly [
-      TypeName in FieldsetTypesOf<R, O> as `fields[${TypeName}]`
+      TypeName in FieldsetTypesOf<Res, O> as `fields[${TypeName}]`
     ]: Schema.optionalKey<Repeatable>;
   } & (O["sort"] extends true | ReadonlyArray<string>
       ? { readonly sort: Schema.optionalKey<Repeatable> }
@@ -1671,9 +1674,9 @@ type AsFields<T> = T extends Schema.Struct.Fields ? T : never;
  * @since 0.13.0
  * @category type-level
  */
-export type FlatSchema<R extends Any, O extends Options<R>> = [O["filter"]] extends [true]
-  ? Schema.StructWithRest<Schema.Struct<AsFields<FlatFields<R, O>>>, readonly [FilterRestSchema]>
-  : Schema.Struct<AsFields<FlatFields<R, O>>>;
+export type FlatSchema<Res extends Any, O extends Options<Res>> = [O["filter"]] extends [true]
+  ? Schema.StructWithRest<Schema.Struct<AsFields<FlatFields<Res, O>>>, readonly [FilterRestSchema]>
+  : Schema.Struct<AsFields<FlatFields<Res, O>>>;
 
 /**
  * The full query schema for a resource and feature set: a flat, bracket-keyed
@@ -1682,9 +1685,9 @@ export type FlatSchema<R extends Any, O extends Options<R>> = [O["filter"]] exte
  * @since 0.1.0
  * @category models
  */
-export interface QuerySchema<R extends Any, O extends Options<R>> extends Schema.decodeTo<
-  Schema.Struct<AsFields<NestedFields<R, O>>>,
-  FlatSchema<R, O>
+export interface QuerySchema<Res extends Any, O extends Options<Res>> extends Schema.decodeTo<
+  Schema.Struct<AsFields<NestedFields<Res, O>>>,
+  FlatSchema<Res, O>
 > {}
 
 // The runtime `FieldsetTypesOf`, as the resource definitions behind each
@@ -1751,10 +1754,10 @@ const fieldsetTargetsOf = (
  * @since 0.1.0
  * @category constructors
  */
-export const schema = <R extends Any, const O extends Options<R>>(
-  resource: R | ReadonlyArray<R>,
+export const schema = <Res extends Any, const O extends Options<Res>>(
+  resource: Res | ReadonlyArray<Res>,
   options: O,
-): QuerySchema<R, O> => {
+): QuerySchema<Res, O> => {
   const resources = toResources(resource);
   const nestedFields: Record<string, Schema.Top> = {};
   const flatFields: Record<string, Schema.Top> = {};
@@ -1782,14 +1785,14 @@ export const schema = <R extends Any, const O extends Options<R>>(
     // sharing a wire type share its `fields[TYPE]`, whose vocabulary is the
     // union of their fields — attributes and relationships (#494) — as
     // `NestedFields` types it (#362).
-    const fieldsetFields = Rec.map(
+    const fieldsetFields = R.map(
       Arr.groupBy(fieldsetTargets, (target) => target.type),
       (targets, type) =>
         Schema.optionalKey(fieldsetOf(type, Arr.dedupe(targets.flatMap((t) => fieldKeys(t))))),
     );
     Object.assign(
       flatFields,
-      Rec.mapEntries(fieldsetFields, (_, type) => [
+      R.mapEntries(fieldsetFields, (_, type) => [
         `fields[${type}]`,
         Schema.optionalKey(Repeatable),
       ]),
@@ -1811,7 +1814,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
 
   if (options.page !== undefined) {
     nestedFields.page = Schema.optionalKey(Schema.Struct(options.page));
-    Arr.forEach(Rec.keys(options.page), (key) => {
+    Arr.forEach(R.keys(options.page), (key) => {
       flatFields[`page[${key}]`] = Schema.optionalKey(Schema.String);
     });
   }
@@ -1834,7 +1837,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
       AstSchema.annotate(
         vocabularyAnnotation({
           family: "filter",
-          values: Rec.keys<string, FieldCodec>(filterFields),
+          values: R.keys<string, FieldCodec>(filterFields),
         }),
       ),
     );
@@ -1843,7 +1846,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
     flatFields.filter = Schema.optionalKey(FilterWireValue);
   } else if (P.isObjectOrArray(options.filter)) {
     nestedFields.filter = Schema.optionalKey(Schema.Struct(options.filter));
-    Arr.forEach(Rec.keys(options.filter), (key) => {
+    Arr.forEach(R.keys(options.filter), (key) => {
       flatFields[`filter[${key}]`] = Schema.optionalKey(Schema.String);
     });
   }
@@ -1862,7 +1865,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
   // only the declared keys makes the empty case drop them too (#260); with
   // fields it is a no-op, the struct having dropped the rest already.
   const declaredOnly = (values: Values): Values =>
-    Rec.filter(values, (_, key) => Rec.has(flatFields, key));
+    R.filter(values, (_, key) => R.has(flatFields, key));
   return flat.pipe(
     Schema.decodeTo(
       nested,
@@ -1877,14 +1880,14 @@ export const schema = <R extends Any, const O extends Options<R>>(
             decode: (flatValues, parseOptions) => {
               // The flat struct has already decoded every `filter[...]` key
               // (and the bare `filter`) as a `FilterWireValue`.
-              const filterKeys = Rec.filter(
+              const filterKeys = R.filter(
                 flatValues,
                 (value, key): value is FilterWireValue =>
                   isFilterKey(key) && isFilterWireValue(value),
               );
-              const others = Rec.filter(flatValues, (_, key) => !isFilterKey(key));
+              const others = R.filter(flatValues, (_, key) => !isFilterKey(key));
               const nestedValues = nest(others);
-              if (Rec.isEmptyRecord(filterKeys)) return Effect.succeed(nestedValues);
+              if (R.isEmptyRecord(filterKeys)) return Effect.succeed(nestedValues);
               return Effect.map(
                 decodeFilterRecord(fields, flat.ast, filterKeys, parseOptions),
                 (filter) => ({
@@ -1907,7 +1910,7 @@ export const schema = <R extends Any, const O extends Options<R>>(
             },
           }),
     ),
-  ) as unknown as QuerySchema<R, O>;
+  ) as unknown as QuerySchema<Res, O>;
 };
 
 // ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { declaresName } from "../declaredQuery.js";
@@ -435,7 +435,7 @@ const includableOf = (body: Body): ReadonlyArray<string> =>
     onSome: (first) => {
       const relationships = first["relationships"];
       if (!isJsonObject(relationships)) return [];
-      return Rec.keys<string, Schema.Json>(relationships).filter((name) => {
+      return R.keys<string, Schema.Json>(relationships).filter((name) => {
         const relationship = relationships[name];
         return isJsonObject(relationship) && "data" in relationship;
       });
@@ -570,7 +570,7 @@ const topLevelMembers: RuleImpl = {
               finding(topLevelMembers.rule, {
                 detail: `${where} answered a document with none of \`data\`, \`errors\`, \`meta\``,
                 expected: "at least one of `data`, `errors`, `meta`",
-                observed: `top-level members: ${Rec.keys<string, Schema.Json>(body).join(", ") || "(none)"}`,
+                observed: `top-level members: ${R.keys<string, Schema.Json>(body).join(", ") || "(none)"}`,
                 probe: observation.probe,
               }),
             ];
@@ -595,7 +595,7 @@ const dataAndErrorsExclusive: RuleImpl = {
               finding(dataAndErrorsExclusive.rule, {
                 detail: `${where} answered a document carrying both \`data\` and \`errors\``,
                 expected: "one of `data` / `errors`, never both",
-                observed: `top-level members: ${Rec.keys<string, Schema.Json>(body).join(", ")}`,
+                observed: `top-level members: ${R.keys<string, Schema.Json>(body).join(", ")}`,
                 probe: observation.probe,
               }),
             ]
@@ -621,7 +621,7 @@ const includedRequiresData: RuleImpl = {
               finding(includedRequiresData.rule, {
                 detail: `${where} answered \`included\` with no top-level \`data\``,
                 expected: "`included` only alongside `data`",
-                observed: `top-level members: ${Rec.keys<string, Schema.Json>(body).join(", ")}`,
+                observed: `top-level members: ${R.keys<string, Schema.Json>(body).join(", ")}`,
                 probe: observation.probe,
               }),
             ]
@@ -1019,7 +1019,7 @@ const errorSourceDiscrimination: RuleImpl = {
       }
       const findings: Array<Finding> = [];
       Arr.forEach(sources, ({ observation, source }) => {
-        Arr.forEach(Rec.keys<string, Schema.Json>(source), (key) => {
+        Arr.forEach(R.keys<string, Schema.Json>(source), (key) => {
           if (key !== "pointer" && key !== "parameter" && key !== "header") {
             findings.push(
               finding(errorSourceDiscrimination.rule, {
@@ -1117,8 +1117,8 @@ const fieldNamesOf = (resource: Readonly<Record<string, unknown>>): ReadonlyArra
   const attributes = resource["attributes"];
   const relationships = resource["relationships"];
   return [
-    ...(isRecord(attributes) ? Rec.keys(attributes) : []),
-    ...(isRecord(relationships) ? Rec.keys(relationships) : []),
+    ...(isRecord(attributes) ? R.keys(attributes) : []),
+    ...(isRecord(relationships) ? R.keys(relationships) : []),
   ];
 };
 
@@ -1471,7 +1471,7 @@ const noEndpointWhere = (claim: string, opaque: ReadonlyArray<string>): string =
 const attributeNamesOf = (data: Schema.JsonArray): ReadonlyArray<string> =>
   Option.match(Arr.findFirst(data, isJsonObject), {
     onNone: () => [],
-    onSome: (first) => Rec.keys(objectIn(first["attributes"])),
+    onSome: (first) => R.keys(objectIn(first["attributes"])),
   });
 
 /** The attribute names the first primary resource object of a response carries. */
@@ -2261,12 +2261,7 @@ const updateResponse: RuleImpl = {
     ),
 };
 
-const judgeUpdate = (
-  target: Target,
-  type: string,
-  id: string,
-  observation: Observation,
-): Verdict =>
+const judgeUpdate = (target: Target, type: string, id: string, observation: Observation): Verdict =>
   observation.status < 200 || observation.status >= 300
     ? undecided(
         `the server did not accept writes["${target.key}"].update on the resource the kit had just created (${describe(observation)})`,

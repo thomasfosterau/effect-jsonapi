@@ -30,7 +30,7 @@ import * as R from "effect/Record";
 import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { PROFILE_URI } from "../../Filter.js";
@@ -134,11 +134,7 @@ const NO_GRAMMAR =
  * whose value `accepts` admits (any, by default). Guessing would make every
  * rejection rule pass for the wrong reason (an undeclared field is also a 400).
  */
-const learnField = (
-  ctx: Context,
-  path: string,
-  accepts: Predicate.Predicate<Schema.Json> = () => true,
-) =>
+const learnField = (ctx: Context, path: string, accepts: P.Predicate<Schema.Json> = () => true) =>
   Effect.gen(function* () {
     const observation = yield* ctx.request({ url: path, headers: jsonApiAccept });
     const attributes = Option.flatMap(firstResourceOf(observation.body), (first) =>
@@ -299,8 +295,8 @@ const spellingEquivalence: RuleImpl = {
       if (target === undefined) return skip(spellingEquivalence.rule, NO_GRAMMAR);
       // The first string attribute, not the first attribute: a resource that
       // leads with a number (`number` on an issue) still has one to spell (#458).
-      const learned = yield* learnField(ctx, target.path, Predicate.isString);
-      if (learned === undefined || !Predicate.isString(learned.value)) {
+      const learned = yield* learnField(ctx, target.path, P.isString);
+      if (learned === undefined || !P.isString(learned.value)) {
         return skip(
           spellingEquivalence.rule,
           `${target.path} returned no resource with a string attribute to build equivalent filters from`,
@@ -414,7 +410,7 @@ const decodeJsonApiProfile = Schema.decodeUnknownOption(
 const documentProfiles = (observation: Observation): ReadonlyArray<string> =>
   Option.match(Option.flatMap(observation.body, decodeJsonApiProfile), {
     onNone: () => [],
-    onSome: ({ jsonapi }) => Arr.filter(jsonapi.profile, Predicate.isString),
+    onSome: ({ jsonapi }) => Arr.filter(jsonapi.profile, P.isString),
   });
 
 /** The profile URIs an answer's `Content-Type` names in its `profile` parameter (space-separated). */
@@ -712,7 +708,7 @@ const learnFamilies = (ctx: Context, endpoint: Discovered, path: string) =>
     const attributeKeys = isJsonObject(attributes) ? R.keys<string, Schema.Json>(attributes) : [];
     const type = first["type"];
     if (
-      Predicate.isString(type) &&
+      P.isString(type) &&
       endpoint.queryKeys.includes(`fields[${type}]`) &&
       attributeKeys.length >= 2
     ) {

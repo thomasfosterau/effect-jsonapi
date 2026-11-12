@@ -17,7 +17,7 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Order from "effect/Order";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
 import { HttpRouter } from "effect/http";
@@ -83,7 +83,7 @@ const Employee: Employee = Resource.make("employees", {
 // The `fields[TYPE]` parameters a query schema declares on the wire.
 const declared = (query: { readonly from: { readonly fields: Schema.Struct.Fields } }) =>
   Arr.sort(
-    Arr.filter(Rec.keys(query.from.fields), (key) => key.startsWith("fields[")),
+    Arr.filter(R.keys(query.from.fields), (key) => key.startsWith("fields[")),
     Order.String,
   );
 
@@ -127,7 +127,7 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
       "fields[tags]",
     ]);
     expect(
-      Schema.decodeUnknownSync(query)({
+      Schema.decodeSync(query)({
         include: "comments.author",
         "fields[people]": "name",
       }),
@@ -140,7 +140,7 @@ describe("Query.schema `fields: true` — the types the include paths reach (#31
     const query = Query.schema(Article, { include: true, fields: true });
     expect(admitsNoValue(query.ast, "fields[labels]")).toBe(true);
     expect(admitsNoValue(query.ast, "fields[people]")).toBe(false);
-    expect(() => Schema.decodeUnknownSync(query)({ "fields[labels]": "name" })).toThrow(
+    expect(() => Schema.decodeSync(query)({ "fields[labels]": "name" })).toThrow(
       'This endpoint supports no sparse fieldset for type "labels".',
     );
   });
@@ -342,12 +342,12 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
     expectFieldsets(query, ["fields[editors]", "fields[holders]", "fields[reviewers]"]);
     // Each member's fieldset is its own attributes, inherited ones included.
     expect(
-      Schema.decodeUnknownSync(query)({
+      Schema.decodeSync(query)({
         "fields[editors]": "name,level",
         "fields[reviewers]": "score",
       }),
     ).toEqual({ fields: { editors: ["name", "level"], reviewers: ["score"] } });
-    expect(() => Schema.decodeUnknownSync(query)({ "fields[editors]": "score" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "fields[editors]": "score" })).toThrow();
   });
 
   it("declares the members of a family an include path reaches, and not before", () => {
@@ -418,7 +418,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
       },
     });
     const Track = Resource.family("tracks", [Song, Clip]);
-    expect(Rec.keys(Track.relationships)).toEqual(["owner"]);
+    expect(R.keys(Track.relationships)).toEqual(["owner"]);
     expectFieldsets(Query.schema(Track, { fields: true }), [
       "fields[clips]",
       "fields[owners]",
@@ -444,11 +444,11 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
       "fields[pairs]",
       "fields[reviewers]",
     ]);
-    expect(Schema.decodeUnknownSync(query)({ "fields[nodes]": "name" })).toEqual({
+    expect(Schema.decodeSync(query)({ "fields[nodes]": "name" })).toEqual({
       fields: { nodes: ["name"] },
     });
     // `level` is an `editors` attribute, not a `nodes` one.
-    expect(() => Schema.decodeUnknownSync(query)({ "fields[nodes]": "level" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "fields[nodes]": "level" })).toThrow();
   });
 
   // A family can be a member of another family: the inner family's members
@@ -468,7 +468,7 @@ describe("Query.schema `fields: true` — a family's member types (#350)", () =>
       "fields[reviewers]",
     ]);
     expect(
-      Schema.decodeUnknownSync(query)({ "fields[editors]": "level", "fields[others]": "rank" }),
+      Schema.decodeSync(query)({ "fields[editors]": "level", "fields[others]": "rank" }),
     ).toEqual({ fields: { editors: ["level"], others: ["rank"] } });
     // The outer family as the primary resource. (A name-only family's
     // synthesised relationships are typed as the open record, so its type
@@ -661,7 +661,7 @@ describe("Query.schema `fields` as an allow-list of types (#485)", () => {
     expectFieldsets(query, ["fields[comments]", "fields[people]"]);
     // The nested record decodes exactly what the flat one declares…
     expect(
-      Schema.decodeUnknownSync(query)({
+      Schema.decodeSync(query)({
         include: "comments.author",
         "fields[comments]": "body",
         "fields[people]": "name,email",
@@ -679,13 +679,13 @@ describe("Query.schema `fields` as an allow-list of types (#485)", () => {
 
   it("keeps each listed type's vocabulary", () => {
     const query = Query.schema(Article, { include: true, fields: ["people"] });
-    expect(() => Schema.decodeUnknownSync(query)({ "fields[people]": "title" })).toThrow();
+    expect(() => Schema.decodeSync(query)({ "fields[people]": "title" })).toThrow();
   });
 
   it("declares none for an empty list, as `false` does", () => {
     const query = Query.schema(Article, { include: true, fields: [] });
     expectFieldsets(query, []);
-    expect(Schema.decodeUnknownSync(query)({ include: "comments" })).toEqual({
+    expect(Schema.decodeSync(query)({ include: "comments" })).toEqual({
       include: ["comments"],
     });
   });

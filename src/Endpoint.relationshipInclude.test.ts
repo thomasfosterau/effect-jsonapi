@@ -25,8 +25,8 @@ import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
-import * as Predicate from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as P from "effect/Predicate";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import { HttpRouter } from "effect/http";
 import { HttpApi, HttpApiBuilder } from "effect/http-api";
@@ -92,7 +92,7 @@ const wire = {
   revisions: { type: "revisions", id: "3", attributes: { editedAt: "2026-01-01" } },
 } as const;
 type WireType = keyof typeof wire;
-const types: ReadonlyArray<WireType> = Rec.keys(wire);
+const types: ReadonlyArray<WireType> = R.keys(wire);
 
 const successOf = (endpoint: { readonly success: Iterable<Schema.Top> }) =>
   // SAFETY: every endpoint under test declares exactly one success schema, a
@@ -115,7 +115,7 @@ const admitted = (
 ): ReadonlyArray<WireType> =>
   types.filter((type) =>
     Exit.isSuccess(
-      Schema.decodeUnknownExit(successOf(endpoint))(
+      Schema.decodeExit(successOf(endpoint))(
         { data, included: [wire[type]] },
         { onExcessProperty: "error" },
       ),
@@ -126,11 +126,11 @@ const admitted = (
 // `include` (a query that declares none drops the key; `Middleware` answers
 // it with a 400, as the HTTP cases below show).
 const accepts = (endpoint: { readonly query: Schema.Top | undefined }, paths: string): boolean => {
-  const decoded = Schema.decodeUnknownExit(queryOf(endpoint))({ include: paths });
+  const decoded = Schema.decodeExit(queryOf(endpoint))({ include: paths });
   return (
     Exit.isSuccess(decoded) &&
     // SAFETY: a query codec decodes to a struct.
-    Rec.has(decoded.value as Rec.ReadonlyRecord<string, unknown>, "include")
+    R.has(decoded.value as R.ReadonlyRecord<string, unknown>, "include")
   );
 };
 
@@ -143,10 +143,7 @@ describe("`getRelationship`'s `?include=` (#439)", () => {
     expect(admitted(endpoint, commentIds)).toEqual([]);
     // Without `included`, the linkage document is exactly what it was.
     expect(
-      Schema.decodeUnknownSync(successOf(endpoint))(
-        { data: commentIds },
-        { onExcessProperty: "error" },
-      ),
+      Schema.decodeSync(successOf(endpoint))({ data: commentIds }, { onExcessProperty: "error" }),
     ).toEqual({ data: commentIds });
   });
 
@@ -259,15 +256,15 @@ const firstAttribute = {
 // endpoint's query decodes into a `fields` member (one it does not declare is
 // dropped; `Middleware` answers it with a 400, as the HTTP cases below show).
 const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<string> =>
-  Rec.toEntries(firstAttribute)
+  R.toEntries(firstAttribute)
     .filter(([type, attribute]) => {
-      const decoded = Schema.decodeUnknownExit(queryOf(endpoint))({
+      const decoded = Schema.decodeExit(queryOf(endpoint))({
         [`fields[${type}]`]: attribute,
       });
       return (
         Exit.isSuccess(decoded) &&
-        Predicate.hasProperty(decoded.value, "fields") &&
-        Predicate.hasProperty(decoded.value.fields, type)
+        P.hasProperty(decoded.value, "fields") &&
+        P.hasProperty(decoded.value.fields, type)
       );
     })
     .map(([type]) => `fields[${type}]`)
@@ -279,19 +276,19 @@ const fieldsets = (endpoint: Parameters<typeof queryOf>[0]): ReadonlyArray<strin
 // keeps none.
 const narrowed = <
   T extends {
-    readonly attributes: Rec.ReadonlyRecord<string, unknown>;
-    readonly relationships?: Rec.ReadonlyRecord<string, unknown>;
+    readonly attributes: R.ReadonlyRecord<string, unknown>;
+    readonly relationships?: R.ReadonlyRecord<string, unknown>;
   },
 >(
   resource: T,
   ...names: ReadonlyArray<string>
 ) => {
   const { relationships, ...rest } = resource;
-  const kept = Rec.filter(relationships ?? {}, (_, key) => names.includes(key));
+  const kept = R.filter(relationships ?? {}, (_, key) => names.includes(key));
   return {
     ...rest,
-    attributes: Rec.filter(resource.attributes, (_, key) => names.includes(key)),
-    ...definedMember("relationships", Rec.isEmptyRecord(kept) ? undefined : kept),
+    attributes: R.filter(resource.attributes, (_, key) => names.includes(key)),
+    ...definedMember("relationships", R.isEmptyRecord(kept) ? undefined : kept),
   };
 };
 
@@ -306,7 +303,7 @@ describe("`getRelationship`'s `fields` (#485)", () => {
     expect(fieldsets(endpoint)).toEqual(["fields[comments]", "fields[people]"]);
     // Positive control: the parent's own read declares its type.
     expect(fieldsets(Endpoint.get(Article, { fields: true }))).toContain("fields[articles]");
-    const decoded = Schema.decodeUnknownSync(queryOf(endpoint))({
+    const decoded = Schema.decodeSync(queryOf(endpoint))({
       include: "comments.author",
       "fields[comments]": "body",
       "fields[people]": "name",
@@ -363,8 +360,8 @@ describe("`getRelationship`'s `fields` (#485)", () => {
     const sparse = Endpoint.getRelationship(Article, "comments", { include: true, fields: true });
     const strict = Endpoint.getRelationship(Article, "comments", { include: true });
     const document = { data: commentIds, included: [narrowed(wire.comments, "body")] };
-    expect(Exit.isSuccess(Schema.decodeUnknownExit(successOf(sparse))(document))).toBe(true);
-    expect(Exit.isSuccess(Schema.decodeUnknownExit(successOf(strict))(document))).toBe(false);
+    expect(Exit.isSuccess(Schema.decodeExit(successOf(sparse))(document))).toBe(true);
+    expect(Exit.isSuccess(Schema.decodeExit(successOf(strict))(document))).toBe(false);
     // The union is unchanged otherwise: the same types, and still none
     // without `include`.
     expect(admitted(sparse, commentIds)).toEqual(["comments", "people"]);
@@ -639,7 +636,7 @@ describe("`getRelationship`'s `?include=` on a `paginated` relationship (#483)",
     const endpoint = Endpoint.getRelationship(Thread, "comments", { include: true, fields: true });
     expect(fieldsets(endpoint)).toEqual(["fields[comments]", "fields[people]"]);
     expect(
-      Schema.decodeUnknownSync(queryOf(endpoint))({
+      Schema.decodeSync(queryOf(endpoint))({
         include: "comments.author",
         "fields[people]": "name",
       }),

@@ -113,10 +113,6 @@ export default defineConfig({
       // machinery in Resource.ts / Query.ts / Endpoint.ts structurally
       // requires (see `AsFields` in AGENTS.md). Stays visible as a warning.
       "effect/casting-awareness": "warn",
-      // Hard-codes abbreviations (`Arr`, `P`, `R`, …) with no options, so it is
-      // unsatisfiable under the full-name convention (`import { Option } from
-      // "effect"`) this library shares with its consumers.
-      "effect/prefer-namespace-imports": "off",
 
       // ---- Effect preset: staged rollout ---------------------------------
       // `effect.configs.recommended` turns on every rule at `error`. The
@@ -138,13 +134,13 @@ export default defineConfig({
       // This rule and `no-known-value-widening` only check the built-in
       // `Record<K, V>` while no local binding is named `Record`, so importing
       // effect's `Record` module under that name hides every such site in
-      // the file (#275). Never bind it as `Record`: spell the alias `Rec`
-      // everywhere (`import * as Rec from "effect/Record"`), never `R`,
-      // which is the resource type parameter in many files.
+      // the file (#275). Never bind it as `Record`: spell the alias `R`
+      // (`import * as R from "effect/Record"`), the alias
+      // `effect/prefer-namespace-imports` requires. No other binding in a
+      // file may be called `R`, so a resource type parameter is `Res`.
       "effect/no-unsafe-dictionary-type": "warn",
       "effect/avoid-any": "warn",
       "effect/prefer-effect-is": "warn",
-      "effect/effect-run-in-body": "warn",
       "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
       // `typeAware` turned these on. Each sits at `warn` with its count on
@@ -170,6 +166,7 @@ export default defineConfig({
       "effecttsgo/global-error-in-effect-failure": "error",
       "effecttsgo/schema-class-missing-brand": "error",
       "effecttsgo/unnecessary-typeof-type": "error",
+      "effecttsgo/prefer-typed-schema-decoder": "error",
       // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
       // surface this library is built on (`effect/http`, `effect/http-api`,
       // much of it `@stability unstable`) does not flood the gates (#205):

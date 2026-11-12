@@ -16,7 +16,7 @@ describe("Filter", () => {
     expect(Filter.operators).toEqual(["eq", "ne", "lt", "lte", "gt", "gte", "in", "nin", "isnull"]);
     // `operators` is derived from the schema, not a second list
     expect(Filter.Operator.literals).toBe(Filter.operators);
-    expect(Schema.decodeUnknownSync(Filter.Operator)("gt")).toBe("gt");
+    expect(Schema.decodeSync(Filter.Operator)("gt")).toBe("gt");
     expect(() => Schema.decodeUnknownSync(Filter.Operator)("like")).toThrow();
     expectTypeOf<Filter.Operator>().toEqualTypeOf<
       "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "in" | "nin" | "isnull"
@@ -71,8 +71,8 @@ describe("Filter", () => {
       expect(Filter.AnnotationId).toBe("@thomasfosterau/effect-jsonapi/filter");
       expect(annotationOf(declared)).toEqual({ operators: ["eq", "gt"], literal: undefined });
       // the schema is otherwise unchanged
-      expect(Schema.decodeUnknownSync(declared)(3)).toBe(3);
-      expect(() => Schema.decodeUnknownSync(declared)(3.5)).toThrow();
+      expect(Schema.decodeSync(declared)(3)).toBe(3);
+      expect(() => Schema.decodeSync(declared)(3.5)).toThrow();
       expectTypeOf(declared.Type).toEqualTypeOf<number>();
       expectTypeOf(declared).toMatchTypeOf<typeof Schema.Int>();
     });
@@ -206,7 +206,7 @@ describe("Filter AST", () => {
       false,
     );
     expect(
-      Schema.decodeUnknownSync(Filter.Ast)({ _tag: "Compare", op: "gt", field: "age", value: 18 }),
+      Schema.decodeSync(Filter.Ast)({ _tag: "Compare", op: "gt", field: "age", value: 18 }),
     ).toEqual(Filter.gt("age", 18));
     expectTypeOf<typeof Filter.Ast.Type>().toEqualTypeOf<Filter.Node>();
   });

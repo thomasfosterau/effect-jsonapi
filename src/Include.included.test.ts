@@ -12,7 +12,7 @@
  * `test/include-depth-included.types.ts`.
  */
 import { describe, expect, it } from "vite-plus/test";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
 import * as Endpoint from "./Endpoint.js";
@@ -63,7 +63,7 @@ const Article = Resource.make("articles", {
 
 // The members of a union schema (none for anything else).
 const membersOf = (union: Schema.Top): ReadonlyArray<Schema.Top> =>
-  Predicate.hasProperty(union, "members") && Array.isArray(union.members)
+  P.hasProperty(union, "members") && Array.isArray(union.members)
     ? union.members.filter(Schema.isSchema)
     : [];
 
@@ -72,15 +72,15 @@ const membersOf = (union: Schema.Top): ReadonlyArray<Schema.Top> =>
 // wrapper (`HttpApiSchema.asJson`'s) that holds the struct under `schema`;
 // `Schema.Never`, which has no members, when there is none.
 const includedOf = (schema: Schema.Top): Schema.Top => {
-  if (Predicate.hasProperty(schema, "fields") && Predicate.hasProperty(schema.fields, "included")) {
+  if (P.hasProperty(schema, "fields") && P.hasProperty(schema.fields, "included")) {
     const optional = schema.fields.included;
-    return Predicate.hasProperty(optional, "schema") &&
-      Predicate.hasProperty(optional.schema, "value") &&
+    return P.hasProperty(optional, "schema") &&
+      P.hasProperty(optional.schema, "value") &&
       Schema.isSchema(optional.schema.value)
       ? optional.schema.value
       : Schema.Never;
   }
-  return Predicate.hasProperty(schema, "schema") && Schema.isSchema(schema.schema)
+  return P.hasProperty(schema, "schema") && Schema.isSchema(schema.schema)
     ? includedOf(schema.schema)
     : Schema.Never;
 };
@@ -238,7 +238,7 @@ describe("Include.included(resource, { include }) is the default document's unio
     const included = Include.included(Article, { include: true });
     const document = Document.DataDocument(WireArticle, { included });
     const encode = Schema.encodeUnknownSync(document);
-    const value = Schema.decodeUnknownSync(document)({
+    const value = Schema.decodeSync(document)({
       data: { type: "articles", id: "1", attributes: { title: "Hello" } },
       included: [
         { type: "comments", id: "5", attributes: { body: "First" } },

@@ -20,7 +20,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import ts from "typescript";
 import { assert, describe, expect, it } from "vite-plus/test";
@@ -497,7 +497,7 @@ describe("effect-ext subpaths", () => {
 describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
   it("still exports every namespace, unchanged", async () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
-    expect(Arr.sort(Rec.keys(index), Order.String)).toEqual([
+    expect(Arr.sort(R.keys(index), Order.String)).toEqual([
       "ApiError",
       "Assemble",
       "Atomic",
@@ -530,7 +530,7 @@ describe("root entry point", { timeout: LOAD_TIMEOUT }, () => {
     const index = await import("@thomasfosterau/effect-jsonapi");
     const schema = await import("@thomasfosterau/effect-jsonapi/schema");
     // Not a second API: same modules, fewer of them.
-    Arr.forEach(Rec.keys(schema), (name) => {
+    Arr.forEach(R.keys(schema), (name) => {
       expect(index[name as keyof typeof index], `${name} differs between entry points`).toBe(
         schema[name],
       );
@@ -546,7 +546,7 @@ describe("module subpaths, from source", { timeout: LOAD_TIMEOUT }, () => {
           PUBLIC_MODULES.map((module) =>
             import(`@thomasfosterau/effect-jsonapi/${module}`).then((subpath) =>
               Arr.some(
-                Rec.toEntries(index),
+                R.toEntries(index),
                 ([name, namespace]) => name === module && namespace === subpath,
               )
                 ? []
@@ -585,7 +585,7 @@ describe("package exports map", () => {
     expect(manifest.exports).toEqual({
       ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
       "./schema": { types: "./dist/schema.d.ts", default: "./dist/schema.js" },
-      ...Rec.fromEntries(
+      ...R.fromEntries(
         PUBLIC_MODULES.map(
           (module) =>
             [
@@ -598,7 +598,7 @@ describe("package exports map", () => {
   });
 
   it("points every declared subpath at a real source module", () => {
-    Arr.forEach(Rec.toEntries(manifest.exports), ([subpath, target]) => {
+    Arr.forEach(R.toEntries(manifest.exports), ([subpath, target]) => {
       const source = path.join(SRC, `${path.basename(target.default, ".js")}.ts`);
       expect(fs.existsSync(source), `${subpath} -> ${target.default} has no source`).toBe(true);
     });

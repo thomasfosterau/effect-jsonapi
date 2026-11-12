@@ -92,7 +92,7 @@ describe("family as a relationship target", () => {
   });
 
   it("linkage decodes for any member, and rejects the family name", () => {
-    const toPerson = Schema.decodeUnknownSync(Edge)({
+    const toPerson = Schema.decodeSync(Edge)({
       type: "edges",
       id: "1",
       attributes: { weight: 1 },
@@ -100,7 +100,7 @@ describe("family as a relationship target", () => {
     });
     expect(toPerson.relationships?.to.data.type).toBe("people");
 
-    const toOrg = Schema.decodeUnknownSync(Edge)({
+    const toOrg = Schema.decodeSync(Edge)({
       type: "edges",
       id: "1",
       attributes: { weight: 1 },
@@ -134,7 +134,7 @@ describe("family as a relationship target", () => {
         archive: Relationship.paginated(() => AnyNode),
       },
     });
-    const decoded = Schema.decodeUnknownSync(Graph)({
+    const decoded = Schema.decodeSync(Graph)({
       type: "graphs",
       id: "1",
       attributes: { label: "g" },
@@ -165,7 +165,7 @@ describe("family as a relationship target", () => {
 
   it("compound included admits a concrete member (nested-union flattening)", () => {
     const doc = Edge.document();
-    const decoded = Schema.decodeUnknownSync(doc)({
+    const decoded = Schema.decodeSync(doc)({
       data: {
         type: "edges",
         id: "1",
@@ -193,8 +193,7 @@ describe("Resource.family (no-base form)", () => {
   it("decodes members and carries the caller-provided family name", () => {
     expect(Media.type).toBe("media");
     expect(
-      Schema.decodeUnknownSync(Media)({ type: "articles", id: "1", attributes: { title: "t" } })
-        .type,
+      Schema.decodeSync(Media)({ type: "articles", id: "1", attributes: { title: "t" } }).type,
     ).toBe("articles");
     expectTypeOf<typeof Media.Type>().toEqualTypeOf<typeof Article.Type | typeof Photo.Type>();
   });
@@ -204,7 +203,7 @@ describe("Resource.family (no-base form)", () => {
       attributes: { slot: Schema.String },
       relationships: { item: Relationship.one(() => Media) },
     });
-    const decoded = Schema.decodeUnknownSync(Ref)({
+    const decoded = Schema.decodeSync(Ref)({
       type: "refs",
       id: "1",
       attributes: { slot: "a" },
@@ -247,9 +246,9 @@ describe("Resource.family edge cases", () => {
   it("works with a single member", () => {
     const Only = Resource("onlys", { attributes: { v: Schema.String } });
     const Solo = family("solo", [Only]);
-    expect(
-      Schema.decodeUnknownSync(Solo)({ type: "onlys", id: "1", attributes: { v: "x" } }).type,
-    ).toBe("onlys");
+    expect(Schema.decodeSync(Solo)({ type: "onlys", id: "1", attributes: { v: "x" } }).type).toBe(
+      "onlys",
+    );
   });
 });
 
@@ -276,12 +275,12 @@ describe("family endpoints", () => {
 
   it("polymorphic success document data is the member union", () => {
     const successSchema = [...fetchNode.success][0];
-    const decoded = Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+    const decoded = Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
       data: personWire,
     }) as { readonly data: { readonly type: string } };
     expect(decoded.data.type).toBe("people");
     expect(() =>
-      Schema.decodeUnknownSync(successSchema as Schema.Codec<unknown, unknown>)({
+      Schema.decodeSync(successSchema as Schema.Codec<unknown, unknown>)({
         data: { type: "tags", id: "1", attributes: { label: "x" } },
       }),
     ).toThrow();

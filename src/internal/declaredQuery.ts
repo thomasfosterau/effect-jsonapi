@@ -13,7 +13,7 @@
  */
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
-import * as Predicate from "effect/Predicate";
+import * as P from "effect/Predicate";
 import * as SchemaAST from "effect/SchemaAST";
 
 /**
@@ -67,7 +67,7 @@ const familyPrefix = (parameter: SchemaAST.AST): Option.Option<string> => {
   const [head] = parameter.parts;
   return head !== undefined &&
     SchemaAST.isLiteral(head) &&
-    Predicate.isString(head.literal) &&
+    P.isString(head.literal) &&
     head.literal.includes("[")
     ? Option.some(head.literal)
     : Option.none();

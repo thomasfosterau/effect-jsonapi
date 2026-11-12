@@ -1,6 +1,6 @@
 import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
 import * as Arr from "effect/Array";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Schema from "effect/Schema";
 import * as Document from "./Document.js";
 import * as Handlers from "./Handlers.js";
@@ -514,9 +514,7 @@ describe("Handlers.project", () => {
     const resource = {
       type: "articles",
       id: "3",
-      attributes: Schema.decodeUnknownSync(Json)(
-        '{"__proto__":{"inner":2},"title":"T","body":"B"}',
-      ),
+      attributes: Schema.decodeSync(Json)('{"__proto__":{"inner":2},"title":"T","body":"B"}'),
     };
     const { attributes } = Handlers.project(resource, { articles: ["__proto__", "title"] });
     expect(Object.getPrototypeOf(attributes)).toBe(Object.prototype);
@@ -534,7 +532,7 @@ describe("Handlers.project", () => {
       const resource = {
         type: "articles",
         id: "3",
-        attributes: Rec.fromEntries([
+        attributes: R.fromEntries([
           [key, { inner: 2 }],
           ["title", "T"],
           ["body", "B"],
@@ -643,7 +641,7 @@ describe("the per-resource transform pass", () => {
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     // the assertion that matters: one type, one shape
     assert(document.included !== undefined);
-    expect(Rec.keys(document.data.attributes)).toEqual(Rec.keys(document.included[0].attributes));
+    expect(R.keys(document.data.attributes)).toEqual(R.keys(document.included[0].attributes));
     // …and the relationship that carried the linkage went with the
     // fieldset, which exempts the member it linked (#494)
     expect("relationships" in document.data).toBe(false);
@@ -657,9 +655,7 @@ describe("the per-resource transform pass", () => {
     expect(document.data[0]?.attributes).toEqual({ title: "Hi" });
     expect(document.included?.[0]?.attributes).toEqual({ title: "Yo" });
     assert(document.included !== undefined);
-    expect(Rec.keys(document.data[0].attributes)).toEqual(
-      Rec.keys(document.included[0].attributes),
-    );
+    expect(R.keys(document.data[0].attributes)).toEqual(R.keys(document.included[0].attributes));
   });
 
   it("leaves types with no requested set untouched, in either slot", () => {
@@ -1025,7 +1021,7 @@ describe("relationship URL helpers", () => {
   it("paginatedRelationship with self: false omits the self link", () => {
     const value = Handlers.paginatedRelationship("people", "9", "articles", { self: false });
     expect(value).toEqual({ links: { related: "/people/9/articles" } });
-    expect(Rec.keys(value.links)).toEqual(["related"]);
+    expect(R.keys(value.links)).toEqual(["related"]);
   });
 
   it("paginatedRelationship with a self string uses that path verbatim", () => {
@@ -1181,7 +1177,7 @@ describe("pagination links", () => {
 
     it("keeps the request's pairs, its own page[*] included, on `self` when the window is unpageable", () => {
       // ?sort=-title&page[limit]=0 — `PageInt` admits 0, so the request decodes and nothing can be paged
-      const request = Schema.decodeUnknownSync(listQuery as Schema.Codec<any, any>)({
+      const request = Schema.decodeSync(listQuery as Schema.Codec<any, any>)({
         sort: "-title",
         "page[limit]": "0",
       }) as typeof listQuery.Type;
@@ -1251,7 +1247,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
 
   it("Document.Value names a data-document value type", () => {
     const doc: Document.Value<typeof Article> = {
-      data: Schema.decodeUnknownSync(Article)({
+      data: Schema.decodeSync(Article)({
         type: "articles",
         id: "1",
         attributes: { title: "Hi" },
@@ -1262,7 +1258,7 @@ describe("Handlers.DocumentValue / Document.Value", () => {
   });
 
   it("Document.Value carries included and meta when parameterized", () => {
-    const item = Schema.decodeUnknownSync(Article)({
+    const item = Schema.decodeSync(Article)({
       type: "articles",
       id: "1",
       attributes: { title: "Hi" },

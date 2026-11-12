@@ -93,7 +93,7 @@ import * as Layer from "effect/Layer";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as P from "effect/Predicate";
-import * as Rec from "effect/Record";
+import * as R from "effect/Record";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as SchemaAST from "effect/SchemaAST";
@@ -1269,7 +1269,7 @@ const transformSchemaError = (
 const searchPairs = (
   params: Readonly<Record<string, string | ReadonlyArray<string>>>,
 ): ReadonlyArray<readonly [string, string]> =>
-  Rec.toEntries(params).flatMap(([name, value]) =>
+  R.toEntries(params).flatMap(([name, value]) =>
     Arr.map(Arr.ensure(value), (one) => [name, one] as const),
   );
 
@@ -1374,7 +1374,7 @@ export const schemaErrorsLayer = (options?: SchemaErrorsOptions): Layer.Layer<Sc
       const params = yield* ParsedSearchParams;
       if (Option.isSome(declared)) {
         const rejected = rejectQueryParameters(
-          Rec.keys(params),
+          R.keys(params),
           declared.value,
           allowedQueryParameters,
         );
