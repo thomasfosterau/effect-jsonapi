@@ -973,7 +973,7 @@ export const decodeInput =
   (
     input: LooseInput<S["Encoded"]>,
   ): Effect.Effect<S["Type"], Schema.SchemaError, S["DecodingServices"]> =>
-    Schema.decodeUnknownEffect(
+    Schema.decodeEffect(
       schema as unknown as Schema.Codec<S["Type"], S["Encoded"], S["DecodingServices"]>,
     )(stripUndefined(input as object));
 

@@ -238,7 +238,7 @@ describe("Include.included(resource, { include }) is the default document's unio
     const included = Include.included(Article, { include: true });
     const document = Document.DataDocument(WireArticle, { included });
     const encode = Schema.encodeUnknownSync(document);
-    const value = Schema.decodeUnknownSync(document)({
+    const value = Schema.decodeSync(document)({
       data: { type: "articles", id: "1", attributes: { title: "Hello" } },
       included: [
         { type: "comments", id: "5", attributes: { body: "First" } },

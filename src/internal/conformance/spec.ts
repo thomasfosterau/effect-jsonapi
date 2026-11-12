@@ -2261,12 +2261,7 @@ const updateResponse: RuleImpl = {
     ),
 };
 
-const judgeUpdate = (
-  target: Target,
-  type: string,
-  id: string,
-  observation: Observation,
-): Verdict =>
+const judgeUpdate = (target: Target, type: string, id: string, observation: Observation): Verdict =>
   observation.status < 200 || observation.status >= 300
     ? undecided(
         `the server did not accept writes["${target.key}"].update on the resource the kit had just created (${describe(observation)})`,

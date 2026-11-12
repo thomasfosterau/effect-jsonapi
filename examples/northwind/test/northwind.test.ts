@@ -3,8 +3,9 @@
  * (request encoding → routing → middleware → handler → response decoding)
  * through the in-memory `HttpApiTest` client.
  */
+import { it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
-import { assert, describe, expect, expectTypeOf, it } from "vite-plus/test";
+import { assert, describe, expect, expectTypeOf } from "vite-plus/test";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -73,15 +74,11 @@ const buildClient = HttpApiTest.groups(Api, [
 
 const jsonText = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-const run = <A, E>(effect: Effect.Effect<A, E, any>): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
-  );
+const run = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<A, E> =>
+  effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>;
 
-const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Promise<Exit.Exit<A, E>> =>
-  Effect.runPromiseExit(
-    effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>,
-  );
+const runExit = <A, E>(effect: Effect.Effect<A, E, any>): Effect.Effect<Exit.Exit<A, E>> =>
+  Effect.exit(effect.pipe(Effect.scoped, Effect.provide(NorthwindLive)) as Effect.Effect<A, E>);
 
 const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
   const result = Cause.findError(cause);
@@ -89,283 +86,320 @@ const findFailure = <E>(cause: Cause.Cause<E>): E | undefined => {
 };
 
 describe("northwind example: fetching", () => {
-  it("fetches a product document with a self link", async () => {
-    const document = await run(
+  it.effect("fetches a product document with a self link", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.get({ params: { id: Product.Id.make("1") }, query: {} });
+        }),
+      );
+
+      expect(document.data).toMatchObject({
+        type: "products",
+        id: "1",
+        attributes: { name: "Chai", unitPrice: 18 },
+      });
+      expect(document.links?.self).toBe("/products/1");
+    }),
+  );
+
+  it.effect("serves compound documents for ?include=category,supplier", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.get({
+            params: { id: Product.Id.make("1") },
+            query: { include: ["category", "supplier"] },
+          });
+        }),
+      );
+
+      expect(
+        Arr.sort(document.included?.map((resource) => resource.type) ?? [], Ord.String),
+      ).toEqual(["categories", "suppliers"]);
+    }),
+  );
+
+  it.effect("omits `included` when the request carries no `include` (#232)", () =>
+    Effect.gen(function* () {
+      const { list, one } = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          const one = yield* client.products.get({
+            params: { id: Product.Id.make("1") },
+            query: {},
+          });
+          const list = yield* client.products.list({ query: {} });
+          return { list, one };
+        }),
+      );
+      expect(one).not.toHaveProperty("included");
+      expect(list).not.toHaveProperty("included");
+    }),
+  );
+
+  it.effect("narrows `included` to the requested include paths on the client", () =>
+    Effect.gen(function* () {
+      const include = ["category"] as const;
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products
+            .get({ params: { id: Product.Id.make("1") }, query: { include } })
+            .pipe(Client.narrowIncluded(Product, include));
+        }),
+      );
+
+      // Runtime: only the requested category was included
+      expect(document.included?.map((resource) => resource.type)).toEqual(["categories"]);
+      // Types: `included` is narrowed to Category — its attributes are accessible
+      // without discriminating on `type`
+      const category = document.included?.[0];
+      expect(category?.attributes.name).toBe("Beverages");
+      assert(category !== undefined);
+      expectTypeOf(category.attributes.name).toEqualTypeOf<string>();
+      expectTypeOf(category.type).toEqualTypeOf<"categories">();
+    }),
+  );
+
+  it.effect("fetches an employee with its territories included", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.employees.get({
+            params: { id: nancy.id },
+            query: { include: ["territories"] },
+          });
+        }),
+      );
+
+      expect(document.data?.attributes.lastName).toBe("Davolio");
+      // dates decode through the wire format
+      expect(document.data?.attributes.hireDate).toBeInstanceOf(Date);
+      expect(document.included?.map((resource) => resource.type)).toEqual([
+        "territories",
+        "territories",
+      ]);
+    }),
+  );
+
+  it.effect("resolves the depth-2 path employee.territories on an order (#338)", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.get({
+            params: { id: order10248.id },
+            query: { include: ["employee.territories"] },
+          });
+        }),
+      );
+
+      // The salesperson (the path's first hop) and both of Nancy's territories
+      // (its last) — not the employee alone.
+      expect(document.included?.map((resource) => `${resource.type}:${resource.id}`)).toEqual([
+        `employees:${nancy.id}`,
+        `territories:${westboro.id}`,
+        `territories:${boston.id}`,
+      ]);
+    }),
+  );
+
+  it.effect(
+    "resolves depth-2 paths across a page of orders, contributing each resource once (#338)",
+    () =>
       Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.get({ params: { id: Product.Id.make("1") }, query: {} });
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.orders.list({
+              query: {
+                include: ["customer", "employee.territories"],
+                sort: [{ field: "orderDate", direction: "asc" }],
+              },
+            });
+          }),
+        );
+
+        // Three orders, three salespeople; only Nancy (10248) and Andrew (10250)
+        // have territories.
+        const keys = document.included?.map((resource) => `${resource.type}:${resource.id}`) ?? [];
+        expect(
+          Arr.sort(
+            keys.filter((key) => key.startsWith("territories:")),
+            Ord.String,
+          ),
+        ).toEqual(
+          Arr.sort(
+            [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"],
+            Ord.String,
+          ),
+        );
+        expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
+        expect(new Set(keys).size).toBe(keys.length);
       }),
-    );
+  );
 
-    expect(document.data).toMatchObject({
-      type: "products",
-      id: "1",
-      attributes: { name: "Chai", unitPrice: 18 },
-    });
-    expect(document.links?.self).toBe("/products/1");
-  });
+  it.effect("404s with a typed error for unknown products", () =>
+    Effect.gen(function* () {
+      const exit = yield* runExit(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.get({ params: { id: Product.Id.make("nope") }, query: {} });
+        }),
+      );
 
-  it("serves compound documents for ?include=category,supplier", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.get({
-          params: { id: Product.Id.make("1") },
-          query: { include: ["category", "supplier"] },
-        });
-      }),
-    );
-
-    expect(Arr.sort(document.included?.map((resource) => resource.type) ?? [], Ord.String)).toEqual(
-      ["categories", "suppliers"],
-    );
-  });
-
-  it("omits `included` when the request carries no `include` (#232)", async () => {
-    const { list, one } = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        const one = yield* client.products.get({ params: { id: Product.Id.make("1") }, query: {} });
-        const list = yield* client.products.list({ query: {} });
-        return { list, one };
-      }),
-    );
-    expect(one).not.toHaveProperty("included");
-    expect(list).not.toHaveProperty("included");
-  });
-
-  it("narrows `included` to the requested include paths on the client", async () => {
-    const include = ["category"] as const;
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products
-          .get({ params: { id: Product.Id.make("1") }, query: { include } })
-          .pipe(Client.narrowIncluded(Product, include));
-      }),
-    );
-
-    // Runtime: only the requested category was included
-    expect(document.included?.map((resource) => resource.type)).toEqual(["categories"]);
-    // Types: `included` is narrowed to Category — its attributes are accessible
-    // without discriminating on `type`
-    const category = document.included?.[0];
-    expect(category?.attributes.name).toBe("Beverages");
-    assert(category !== undefined);
-    expectTypeOf(category.attributes.name).toEqualTypeOf<string>();
-    expectTypeOf(category.type).toEqualTypeOf<"categories">();
-  });
-
-  it("fetches an employee with its territories included", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.employees.get({
-          params: { id: nancy.id },
-          query: { include: ["territories"] },
-        });
-      }),
-    );
-
-    expect(document.data?.attributes.lastName).toBe("Davolio");
-    // dates decode through the wire format
-    expect(document.data?.attributes.hireDate).toBeInstanceOf(Date);
-    expect(document.included?.map((resource) => resource.type)).toEqual([
-      "territories",
-      "territories",
-    ]);
-  });
-
-  it("resolves the depth-2 path employee.territories on an order (#338)", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.get({
-          params: { id: order10248.id },
-          query: { include: ["employee.territories"] },
-        });
-      }),
-    );
-
-    // The salesperson (the path's first hop) and both of Nancy's territories
-    // (its last) — not the employee alone.
-    expect(document.included?.map((resource) => `${resource.type}:${resource.id}`)).toEqual([
-      `employees:${nancy.id}`,
-      `territories:${westboro.id}`,
-      `territories:${boston.id}`,
-    ]);
-  });
-
-  it("resolves depth-2 paths across a page of orders, contributing each resource once (#338)", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.list({
-          query: {
-            include: ["customer", "employee.territories"],
-            sort: [{ field: "orderDate", direction: "asc" }],
-          },
-        });
-      }),
-    );
-
-    // Three orders, three salespeople; only Nancy (10248) and Andrew (10250)
-    // have territories.
-    const keys = document.included?.map((resource) => `${resource.type}:${resource.id}`) ?? [];
-    expect(
-      Arr.sort(
-        keys.filter((key) => key.startsWith("territories:")),
-        Ord.String,
-      ),
-    ).toEqual(
-      Arr.sort(
-        [`territories:${westboro.id}`, `territories:${boston.id}`, "territories:90405"],
-        Ord.String,
-      ),
-    );
-    expect(keys.filter((key) => key.startsWith("employees:"))).toHaveLength(3);
-    expect(new Set(keys).size).toBe(keys.length);
-  });
-
-  it("404s with a typed error for unknown products", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.get({ params: { id: Product.Id.make("nope") }, query: {} });
-      }),
-    );
-
-    assert(Exit.isFailure(exit));
-    const error = findFailure(exit.cause);
-    expect(error).toBeInstanceOf(ProductNotFound);
-    expect((error as ProductNotFound).id).toBe("nope");
-  });
+      assert(Exit.isFailure(exit));
+      const error = findFailure(exit.cause);
+      expect(error).toBeInstanceOf(ProductNotFound);
+      expect((error as ProductNotFound).id).toBe("nope");
+    }),
+  );
 });
 
 describe("northwind example: listing & filtering", () => {
-  it("lists products sorted by price with offset pagination", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.list({
-          query: {
-            sort: [{ field: "unitPrice", direction: "desc" }],
-            page: { offset: 0, limit: 2 },
-          },
-        });
-      }),
-    );
+  it.effect("lists products sorted by price with offset pagination", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.list({
+            query: {
+              sort: [{ field: "unitPrice", direction: "desc" }],
+              page: { offset: 0, limit: 2 },
+            },
+          });
+        }),
+      );
 
-    // most expensive first: Chef Anton's Gumbo Mix (21.35), Chang (19)
-    expect(document.data.map((product) => product.attributes.name)).toEqual([
-      gumbo.attributes.name,
-      "Chang",
-    ]);
-    expect(document.meta?.total).toBe(5);
-    expect(document.links?.next).toBe("/products?sort=-unitPrice&page[offset]=2&page[limit]=2");
-  });
+      // most expensive first: Chef Anton's Gumbo Mix (21.35), Chang (19)
+      expect(document.data.map((product) => product.attributes.name)).toEqual([
+        gumbo.attributes.name,
+        "Chang",
+      ]);
+      expect(document.meta?.total).toBe(5);
+      expect(document.links?.next).toBe("/products?sort=-unitPrice&page[offset]=2&page[limit]=2");
+    }),
+  );
 
-  it("serves a category's products via filter[category]", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.list({
-          query: {
-            filter: { category: beverages.id },
-            sort: [{ field: "name", direction: "asc" }],
-          },
-        });
-      }),
-    );
+  it.effect("serves a category's products via filter[category]", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.list({
+            query: {
+              filter: { category: beverages.id },
+              sort: [{ field: "name", direction: "asc" }],
+            },
+          });
+        }),
+      );
 
-    expect(document.data.map((product) => product.attributes.name)).toEqual(["Chai", "Chang"]);
-  });
+      expect(document.data.map((product) => product.attributes.name)).toEqual(["Chai", "Chang"]);
+    }),
+  );
 
-  it("filters products by a numeric price range (decoded from the query string)", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.list({ query: { filter: { minPrice: 10, maxPrice: 19 } } });
-      }),
-    );
+  it.effect("filters products by a numeric price range (decoded from the query string)", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.list({ query: { filter: { minPrice: 10, maxPrice: 19 } } });
+        }),
+      );
 
-    const prices = Arr.sort(
-      document.data.map((product) => product.attributes.unitPrice),
-      Ord.Number,
-    );
-    expect(prices).toEqual([10, 18, 19]);
-  });
+      const prices = Arr.sort(
+        document.data.map((product) => product.attributes.unitPrice),
+        Ord.Number,
+      );
+      expect(prices).toEqual([10, 18, 19]);
+    }),
+  );
 
-  it("filters products by discontinued flag", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.list({ query: { filter: { discontinued: "true" } } });
-      }),
-    );
+  it.effect("filters products by discontinued flag", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.list({ query: { filter: { discontinued: "true" } } });
+        }),
+      );
 
-    expect(document.data.map((product) => product.id)).toEqual([gumbo.id]);
-  });
+      expect(document.data.map((product) => product.id)).toEqual([gumbo.id]);
+    }),
+  );
 
-  it("filters suppliers by country", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.suppliers.list({ query: { filter: { country: "Japan" } } });
-      }),
-    );
+  it.effect("filters suppliers by country", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.suppliers.list({ query: { filter: { country: "Japan" } } });
+        }),
+      );
 
-    expect(document.data.map((supplier) => supplier.attributes.companyName)).toEqual([
-      "Tokyo Traders",
-    ]);
-  });
+      expect(document.data.map((supplier) => supplier.attributes.companyName)).toEqual([
+        "Tokyo Traders",
+      ]);
+    }),
+  );
 
-  it("lists an employee's direct reports via filter[manager]", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.employees.list({
-          query: {
-            filter: { manager: andrew.id },
-            sort: [{ field: "lastName", direction: "asc" }],
-          },
-        });
-      }),
-    );
+  it.effect("lists an employee's direct reports via filter[manager]", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.employees.list({
+            query: {
+              filter: { manager: andrew.id },
+              sort: [{ field: "lastName", direction: "asc" }],
+            },
+          });
+        }),
+      );
 
-    // Andrew Fuller's reports, by surname
-    expect(document.data.map((employee) => employee.attributes.lastName)).toEqual([
-      "Davolio",
-      "Leverling",
-      "Peacock",
-    ]);
-  });
+      // Andrew Fuller's reports, by surname
+      expect(document.data.map((employee) => employee.attributes.lastName)).toEqual([
+        "Davolio",
+        "Leverling",
+        "Peacock",
+      ]);
+    }),
+  );
 
-  it("serves a customer's orders via filter[customer]", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.list({ query: { filter: { customer: alfreds.id } } });
-      }),
-    );
+  it.effect("serves a customer's orders via filter[customer]", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.list({ query: { filter: { customer: alfreds.id } } });
+        }),
+      );
 
-    expect(document.data.map((order) => order.id)).toEqual([order10248.id]);
-  });
+      expect(document.data.map((order) => order.id)).toEqual([order10248.id]);
+    }),
+  );
 
-  it("filters orders by shipped status", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.list({ query: { filter: { shipped: "false" } } });
-      }),
-    );
+  it.effect("filters orders by shipped status", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.list({ query: { filter: { shipped: "false" } } });
+        }),
+      );
 
-    // only order 10249 has no shipped date
-    expect(document.data.map((order) => order.id)).toContain(order10249.id);
-    Arr.forEach(document.data, (order) => {
-      expect(order.attributes.shippedDate).toBeUndefined();
-    });
-  });
+      // only order 10249 has no shipped date
+      expect(document.data.map((order) => order.id)).toContain(order10249.id);
+      Arr.forEach(document.data, (order) => {
+        expect(order.attributes.shippedDate).toBeUndefined();
+      });
+    }),
+  );
 });
 
 describe("northwind example: pagination links carry the request's query (#447)", () => {
@@ -373,78 +407,84 @@ describe("northwind example: pagination links carry the request's query (#447)",
   const searchOf = (link: string): Record<string, string> =>
     Rec.fromEntries(new URL(link, "https://example.test").searchParams);
 
-  it("`next` on GET /products keeps `sort`, `filter` and `include`, and continues the order", async () => {
-    const [first, second] = await run(
+  it.effect(
+    "`next` on GET /products keeps `sort`, `filter` and `include`, and continues the order",
+    () =>
       Effect.gen(function* () {
-        const client = yield* buildClient;
-        const first = yield* client.products.list({
-          query: {
-            include: ["category"],
-            filter: { maxPrice: 20 },
-            sort: [{ field: "unitPrice", direction: "desc" }],
-            page: { offset: 0, limit: 1 },
-          },
-        });
-        const next = first.links?.next;
-        assert(P.isString(next));
-        const query = yield* Schema.decodeUnknownEffect(ProductsQuery)(searchOf(next));
-        const second = yield* client.products.list({ query });
-        return [first, second] as const;
+        const [first, second] = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            const first = yield* client.products.list({
+              query: {
+                include: ["category"],
+                filter: { maxPrice: 20 },
+                sort: [{ field: "unitPrice", direction: "desc" }],
+                page: { offset: 0, limit: 1 },
+              },
+            });
+            const next = first.links?.next;
+            assert(P.isString(next));
+            const query = yield* Schema.decodeEffect(ProductsQuery)(searchOf(next));
+            const second = yield* client.products.list({ query });
+            return [first, second] as const;
+          }),
+        );
+
+        expect(first.links?.next).toBe(
+          "/products?include=category&filter[maxPrice]=20&sort=-unitPrice&page[offset]=1&page[limit]=1",
+        );
+        expect(first.links?.last).toMatch(
+          /^\/products\?include=category&filter\[maxPrice\]=20&sort=-unitPrice&/,
+        );
+        // Following `next` serves the second page of the same query, not the
+        // default order: still at most 20, still descending by price.
+        const [top] = first.data;
+        const [next] = second.data;
+        assert.isDefined(top);
+        assert.isDefined(next);
+        expect(next.attributes.unitPrice).toBeLessThanOrEqual(20);
+        expect(next.attributes.unitPrice).toBeLessThanOrEqual(top.attributes.unitPrice);
+        expect(next.id).not.toBe(top.id);
+        expect(second.links?.prev).toBe(
+          "/products?include=category&filter[maxPrice]=20&sort=-unitPrice&page[offset]=0&page[limit]=1",
+        );
       }),
-    );
+  );
 
-    expect(first.links?.next).toBe(
-      "/products?include=category&filter[maxPrice]=20&sort=-unitPrice&page[offset]=1&page[limit]=1",
-    );
-    expect(first.links?.last).toMatch(
-      /^\/products\?include=category&filter\[maxPrice\]=20&sort=-unitPrice&/,
-    );
-    // Following `next` serves the second page of the same query, not the
-    // default order: still at most 20, still descending by price.
-    const [top] = first.data;
-    const [next] = second.data;
-    assert.isDefined(top);
-    assert.isDefined(next);
-    expect(next.attributes.unitPrice).toBeLessThanOrEqual(20);
-    expect(next.attributes.unitPrice).toBeLessThanOrEqual(top.attributes.unitPrice);
-    expect(next.id).not.toBe(top.id);
-    expect(second.links?.prev).toBe(
-      "/products?include=category&filter[maxPrice]=20&sort=-unitPrice&page[offset]=0&page[limit]=1",
-    );
-  });
+  it.effect("`next` on GET /search keeps `fields`, `filter` and `include`", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.search.search({
+            query: {
+              include: ["category"],
+              fields: { products: ["name"] },
+              filter: { q: "a" },
+              page: { offset: 0, limit: 1 },
+            },
+          });
+        }),
+      );
 
-  it("`next` on GET /search keeps `fields`, `filter` and `include`", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.search.search({
-          query: {
-            include: ["category"],
-            fields: { products: ["name"] },
-            filter: { q: "a" },
-            page: { offset: 0, limit: 1 },
-          },
-        });
-      }),
-    );
-
-    expect(document.links?.next).toBe(
-      "/search?include=category&fields[products]=name&filter[q]=a&page[offset]=1&page[limit]=1",
-    );
-    const next = document.links?.next;
-    assert(P.isString(next));
-    expect(Schema.decodeUnknownSync(SearchQuery)(searchOf(next))).toEqual({
-      include: ["category"],
-      fields: { products: ["name"] },
-      filter: { q: "a" },
-      page: { offset: 1, limit: 1 },
-    });
-  });
+      expect(document.links?.next).toBe(
+        "/search?include=category&fields[products]=name&filter[q]=a&page[offset]=1&page[limit]=1",
+      );
+      const next = document.links?.next;
+      assert(P.isString(next));
+      expect(yield* Schema.decodeEffect(SearchQuery)(searchOf(next))).toEqual({
+        include: ["category"],
+        fields: { products: ["name"] },
+        filter: { q: "a" },
+        page: { offset: 1, limit: 1 },
+      });
+    }),
+  );
 });
 
 describe("northwind example: writing", () => {
-  it("adds a product to the catalog (201) and then removes it (204)", async () => {
-    await run(
+  it.effect("adds a product to the catalog (201) and then removes it (204)", () =>
+    run(
       Effect.gen(function* () {
         const client = yield* buildClient;
 
@@ -472,254 +512,279 @@ describe("northwind example: writing", () => {
 
         yield* client.products.delete({ params: { id: created.data.id } });
       }),
-    );
-  });
+    ),
+  );
 
-  it("409s when the product name is already taken", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.create({
-          payload: {
-            data: {
-              type: "products",
-              attributes: {
-                name: chai.attributes.name,
-                unitPrice: 1,
-                unitsInStock: 1,
-                discontinued: false,
-              },
-              relationships: {
-                category: { data: Category.ref(beverages.id) },
-                supplier: { data: Supplier.ref(exotic.id) },
-              },
-            },
-          },
-        });
-      }),
-    );
-
-    assert(Exit.isFailure(exit));
-    expect(findFailure(exit.cause)).toBeInstanceOf(ProductNameTaken);
-  });
-
-  it("404s when creating a product in a missing category", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.create({
-          payload: {
-            data: {
-              type: "products",
-              attributes: {
-                name: "Phantom Tea",
-                unitPrice: 1,
-                unitsInStock: 1,
-                discontinued: false,
-              },
-              relationships: {
-                category: { data: Category.ref("does-not-exist") },
-                supplier: { data: Supplier.ref(exotic.id) },
+  it.effect("409s when the product name is already taken", () =>
+    Effect.gen(function* () {
+      const exit = yield* runExit(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.create({
+            payload: {
+              data: {
+                type: "products",
+                attributes: {
+                  name: chai.attributes.name,
+                  unitPrice: 1,
+                  unitsInStock: 1,
+                  discontinued: false,
+                },
+                relationships: {
+                  category: { data: Category.ref(beverages.id) },
+                  supplier: { data: Supplier.ref(exotic.id) },
+                },
               },
             },
-          },
-        });
-      }),
-    );
+          });
+        }),
+      );
 
-    assert(Exit.isFailure(exit));
-    expect(findFailure(exit.cause)).toBeInstanceOf(CategoryNotFound);
-  });
+      assert(Exit.isFailure(exit));
+      expect(findFailure(exit.cause)).toBeInstanceOf(ProductNameTaken);
+    }),
+  );
 
-  it("marks a product discontinued with a partial update", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.update({
-          params: { id: Product.Id.make("2") },
-          payload: {
-            data: {
-              type: "products",
-              id: Product.Id.make("2"),
-              attributes: { discontinued: true },
-            },
-          },
-        });
-      }),
-    );
-
-    expect(document.data?.attributes.discontinued).toBe(true);
-    // other attributes are untouched
-    expect(document.data?.attributes.name).toBe("Chang");
-    // a write response advertises JSON:API 1.1 too, not only the reads
-    expect(document.jsonapi?.version).toBe("1.1");
-  });
-
-  it("opens an order against a customer and employee (201)", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.create({
-          payload: {
-            data: {
-              type: "orders",
-              attributes: {
-                orderDate: at("1996-07-09T00:00:00.000Z"),
-                requiredDate: at("1996-08-06T00:00:00.000Z"),
-                freight: 12.34,
-                shipCity: "Berlin",
-                shipCountry: "Germany",
-              },
-              relationships: {
-                customer: { data: Customer.ref(alfreds.id) },
-                employee: { data: Employee.ref(nancy.id) },
-                // an order is opened unshipped
-                shipper: { data: null },
+  it.effect("404s when creating a product in a missing category", () =>
+    Effect.gen(function* () {
+      const exit = yield* runExit(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.create({
+            payload: {
+              data: {
+                type: "products",
+                attributes: {
+                  name: "Phantom Tea",
+                  unitPrice: 1,
+                  unitsInStock: 1,
+                  discontinued: false,
+                },
+                relationships: {
+                  category: { data: Category.ref("does-not-exist") },
+                  supplier: { data: Supplier.ref(exotic.id) },
+                },
               },
             },
-          },
-        });
-      }),
-    );
+          });
+        }),
+      );
 
-    expect(document.data?.attributes.shipCountry).toBe("Germany");
-    expect(document.data?.relationships?.customer.data?.id).toBe(alfreds.id);
-    // the paginated line-item feed exists as a link, with no inline data
-    expect(document.data?.relationships?.lineItems.links?.related).toBe(
-      `/orders/${document.data?.id}/lineItems`,
-    );
-  });
+      assert(Exit.isFailure(exit));
+      expect(findFailure(exit.cause)).toBeInstanceOf(CategoryNotFound);
+    }),
+  );
 
-  it("404s when opening an order for a missing customer", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.create({
-          payload: {
-            data: {
-              type: "orders",
-              attributes: {
-                orderDate: now(),
-                requiredDate: now(),
-                freight: 0,
-                shipCountry: "Germany",
-              },
-              relationships: {
-                customer: { data: Customer.ref("ghost") },
-                employee: { data: Employee.ref(nancy.id) },
+  it.effect("marks a product discontinued with a partial update", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.update({
+            params: { id: Product.Id.make("2") },
+            payload: {
+              data: {
+                type: "products",
+                id: Product.Id.make("2"),
+                attributes: { discontinued: true },
               },
             },
-          },
-        });
-      }),
-    );
+          });
+        }),
+      );
 
-    assert(Exit.isFailure(exit));
-    expect(findFailure(exit.cause)).toBeInstanceOf(CustomerNotFound);
-  });
+      expect(document.data?.attributes.discontinued).toBe(true);
+      // other attributes are untouched
+      expect(document.data?.attributes.name).toBe("Chang");
+      // a write response advertises JSON:API 1.1 too, not only the reads
+      expect(document.jsonapi?.version).toBe("1.1");
+    }),
+  );
 
-  it("records an order's shipped date with a partial update", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.update({
-          params: { id: order10249.id },
-          payload: {
-            data: {
-              type: "orders",
-              id: order10249.id,
-              attributes: { shippedDate: at("1996-07-10T00:00:00.000Z") },
+  it.effect("opens an order against a customer and employee (201)", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.create({
+            payload: {
+              data: {
+                type: "orders",
+                attributes: {
+                  orderDate: at("1996-07-09T00:00:00.000Z"),
+                  requiredDate: at("1996-08-06T00:00:00.000Z"),
+                  freight: 12.34,
+                  shipCity: "Berlin",
+                  shipCountry: "Germany",
+                },
+                relationships: {
+                  customer: { data: Customer.ref(alfreds.id) },
+                  employee: { data: Employee.ref(nancy.id) },
+                  // an order is opened unshipped
+                  shipper: { data: null },
+                },
+              },
             },
-          },
-        });
-      }),
-    );
+          });
+        }),
+      );
 
-    expect(document.data?.attributes.shippedDate).toBeInstanceOf(Date);
-  });
+      expect(document.data?.attributes.shipCountry).toBe("Germany");
+      expect(document.data?.relationships?.customer.data?.id).toBe(alfreds.id);
+      // the paginated line-item feed exists as a link, with no inline data
+      expect(document.data?.relationships?.lineItems.links?.related).toBe(
+        `/orders/${document.data?.id}/lineItems`,
+      );
+    }),
+  );
+
+  it.effect("404s when opening an order for a missing customer", () =>
+    Effect.gen(function* () {
+      const exit = yield* runExit(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.create({
+            payload: {
+              data: {
+                type: "orders",
+                attributes: {
+                  orderDate: now(),
+                  requiredDate: now(),
+                  freight: 0,
+                  shipCountry: "Germany",
+                },
+                relationships: {
+                  customer: { data: Customer.ref("ghost") },
+                  employee: { data: Employee.ref(nancy.id) },
+                },
+              },
+            },
+          });
+        }),
+      );
+
+      assert(Exit.isFailure(exit));
+      expect(findFailure(exit.cause)).toBeInstanceOf(CustomerNotFound);
+    }),
+  );
+
+  it.effect("records an order's shipped date with a partial update", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.update({
+            params: { id: order10249.id },
+            payload: {
+              data: {
+                type: "orders",
+                id: order10249.id,
+                attributes: { shippedDate: at("1996-07-10T00:00:00.000Z") },
+              },
+            },
+          });
+        }),
+      );
+
+      expect(document.data?.attributes.shippedDate).toBeInstanceOf(Date);
+    }),
+  );
 });
 
 describe("northwind example: related & relationship endpoints", () => {
-  it("GET /products/:id/supplier serves the supplying company", async () => {
-    const document = await run(
+  it.effect("GET /products/:id/supplier serves the supplying company", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.products.supplier({
+            params: { id: Product.Id.make("1") },
+            query: {},
+          });
+        }),
+      );
+
+      expect(document.data).toMatchObject({
+        type: "suppliers",
+        id: exotic.id,
+        attributes: { companyName: "Exotic Liquids" },
+      });
+      expect(document.links?.self).toBe("/products/1/supplier");
+    }),
+  );
+
+  it.effect("GET /orders/:id/lineItems serves the paginated line-item feed with its products", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.orders.lineItems({
+            params: { id: order10248.id },
+            query: { include: ["product"] },
+          });
+        }),
+      );
+
+      expect(document.data).toHaveLength(2);
+      expect(document.meta?.total).toBe(2);
+      // each line item's product is brought into the compound document
+      expect(document.included?.map((resource) => resource.type)).toEqual(["products", "products"]);
+    }),
+  );
+
+  it.effect(
+    "resolves the depth-2 path product.category,product.supplier on the line-item feed (#338)",
+    () =>
       Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.products.supplier({ params: { id: Product.Id.make("1") }, query: {} });
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            return yield* client.orders.lineItems({
+              params: { id: order10248.id },
+              query: { include: ["product.category", "product.supplier"] },
+            });
+          }),
+        );
+
+        // Each path's intermediate product is included alongside its last hop, in
+        // walk order: the products first, then their categories, then their
+        // suppliers.
+        expect(document.included?.map((resource) => `${resource.type}:${resource.id}`)).toEqual([
+          `products:${chai.id}`,
+          `products:${konbu.id}`,
+          `categories:${beverages.id}`,
+          `categories:${seafood.id}`,
+          `suppliers:${exotic.id}`,
+          `suppliers:${tokyo.id}`,
+        ]);
       }),
-    );
+  );
 
-    expect(document.data).toMatchObject({
-      type: "suppliers",
-      id: exotic.id,
-      attributes: { companyName: "Exotic Liquids" },
-    });
-    expect(document.links?.self).toBe("/products/1/supplier");
-  });
+  it.effect("reassigns a product's category through the relationship endpoint", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          const linkage = yield* client.products.updateCategoryRelationship({
+            params: { id: Product.Id.make("4") },
+            payload: { data: Category.ref(seafood.id) },
+          });
+          // the product reflects the reassignment
+          const product = yield* client.products.get({
+            params: { id: Product.Id.make("4") },
+            query: {},
+          });
+          expect(product.data?.relationships?.category?.data?.id).toBe(seafood.id);
+          return linkage;
+        }),
+      );
 
-  it("GET /orders/:id/lineItems serves the paginated line-item feed with its products", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.lineItems({
-          params: { id: order10248.id },
-          query: { include: ["product"] },
-        });
-      }),
-    );
+      expect(document.data).toEqual({ type: "categories", id: seafood.id });
+    }),
+  );
 
-    expect(document.data).toHaveLength(2);
-    expect(document.meta?.total).toBe(2);
-    // each line item's product is brought into the compound document
-    expect(document.included?.map((resource) => resource.type)).toEqual(["products", "products"]);
-  });
-
-  it("resolves the depth-2 path product.category,product.supplier on the line-item feed (#338)", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.orders.lineItems({
-          params: { id: order10248.id },
-          query: { include: ["product.category", "product.supplier"] },
-        });
-      }),
-    );
-
-    // Each path's intermediate product is included alongside its last hop, in
-    // walk order: the products first, then their categories, then their
-    // suppliers.
-    expect(document.included?.map((resource) => `${resource.type}:${resource.id}`)).toEqual([
-      `products:${chai.id}`,
-      `products:${konbu.id}`,
-      `categories:${beverages.id}`,
-      `categories:${seafood.id}`,
-      `suppliers:${exotic.id}`,
-      `suppliers:${tokyo.id}`,
-    ]);
-  });
-
-  it("reassigns a product's category through the relationship endpoint", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        const linkage = yield* client.products.updateCategoryRelationship({
-          params: { id: Product.Id.make("4") },
-          payload: { data: Category.ref(seafood.id) },
-        });
-        // the product reflects the reassignment
-        const product = yield* client.products.get({
-          params: { id: Product.Id.make("4") },
-          query: {},
-        });
-        expect(product.data?.relationships?.category?.data?.id).toBe(seafood.id);
-        return linkage;
-      }),
-    );
-
-    expect(document.data).toEqual({ type: "categories", id: seafood.id });
-  });
-
-  it("assigns and clears an order's shipper (optional to-one)", async () => {
-    await run(
+  it.effect("assigns and clears an order's shipper (optional to-one)", () =>
+    run(
       Effect.gen(function* () {
         const client = yield* buildClient;
 
@@ -744,11 +809,11 @@ describe("northwind example: related & relationship endpoints", () => {
         });
         expect(cleared.data).toBeNull();
       }),
-    );
-  });
+    ),
+  );
 
-  it("POST assigns territories, DELETE unassigns them, PATCH replaces them", async () => {
-    await run(
+  it.effect("POST assigns territories, DELETE unassigns them, PATCH replaces them", () =>
+    run(
       Effect.gen(function* () {
         const client = yield* buildClient;
         const employeeId = margaret.id; // starts with no territories
@@ -790,80 +855,93 @@ describe("northwind example: related & relationship endpoints", () => {
         });
         expect(replaced.data).toEqual([{ type: "territories", id: westboro.id }]);
       }),
-    );
-  });
+    ),
+  );
 
-  it("404s when assigning a missing territory", async () => {
-    const exit = await runExit(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.employees.addTerritoriesRelationship({
-          params: { id: janet.id },
-          payload: { data: [Territory.ref("99999")] },
-        });
-      }),
-    );
+  it.effect("404s when assigning a missing territory", () =>
+    Effect.gen(function* () {
+      const exit = yield* runExit(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.employees.addTerritoriesRelationship({
+            params: { id: janet.id },
+            payload: { data: [Territory.ref("99999")] },
+          });
+        }),
+      );
 
-    assert(Exit.isFailure(exit));
-    expect(findFailure(exit.cause)).toBeInstanceOf(Error);
-  });
+      assert(Exit.isFailure(exit));
+      expect(findFailure(exit.cause)).toBeInstanceOf(Error);
+    }),
+  );
 });
 
 describe("northwind example: heterogeneous search", () => {
-  it("returns a mixed collection of products, customers and suppliers, discriminated by type", async () => {
-    const document = await run(
+  it.effect(
+    "returns a mixed collection of products, customers and suppliers, discriminated by type",
+    () =>
       Effect.gen(function* () {
-        const client = yield* buildClient;
-        // "a" hits all three stores
-        return yield* client.search.search({ query: { filter: { q: "a" } } });
-      }),
-    );
+        const document = yield* run(
+          Effect.gen(function* () {
+            const client = yield* buildClient;
+            // "a" hits all three stores
+            return yield* client.search.search({ query: { filter: { q: "a" } } });
+          }),
+        );
 
-    const types = Arr.sort([...new Set(document.data.map((result) => result.type))], Ord.String);
-    expect(types).toEqual(["customers", "products", "suppliers"]);
+        const types = Arr.sort(
+          [...new Set(document.data.map((result) => result.type))],
+          Ord.String,
+        );
+        expect(types).toEqual(["customers", "products", "suppliers"]);
 
-    // The endpoint declares `fields`, so a client reads each attribute as
-    // optional (#322).
-    Arr.forEach(document.data, (result) => {
-      if (result.type === "products") {
-        expectTypeOf(result.attributes.unitPrice).toEqualTypeOf<number | undefined>();
-      } else if (result.type === "customers") {
-        expectTypeOf(result.attributes.companyName).toEqualTypeOf<string | undefined>();
-      } else {
-        expectTypeOf(result.attributes.country).toEqualTypeOf<string | undefined>();
-      }
-    });
-  });
-
-  it("supports include across the searched resources' graphs", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.search.search({
-          query: { filter: { q: "chai" }, include: ["category"] },
+        // The endpoint declares `fields`, so a client reads each attribute as
+        // optional (#322).
+        Arr.forEach(document.data, (result) => {
+          if (result.type === "products") {
+            expectTypeOf(result.attributes.unitPrice).toEqualTypeOf<number | undefined>();
+          } else if (result.type === "customers") {
+            expectTypeOf(result.attributes.companyName).toEqualTypeOf<string | undefined>();
+          } else {
+            expectTypeOf(result.attributes.country).toEqualTypeOf<string | undefined>();
+          }
         });
       }),
-    );
+  );
 
-    // the matched product's category is included
-    expect(document.data.map((result) => result.type)).toEqual(["products"]);
-    expect(document.included?.map((resource) => resource.type)).toEqual(["categories"]);
-  });
+  it.effect("supports include across the searched resources' graphs", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.search.search({
+            query: { filter: { q: "chai" }, include: ["category"] },
+          });
+        }),
+      );
 
-  it("paginates heterogeneous results with links", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.search.search({
-          query: { filter: { q: "" }, page: { offset: 0, limit: 2 } },
-        });
-      }),
-    );
+      // the matched product's category is included
+      expect(document.data.map((result) => result.type)).toEqual(["products"]);
+      expect(document.included?.map((resource) => resource.type)).toEqual(["categories"]);
+    }),
+  );
 
-    expect(document.data).toHaveLength(2);
-    expect(document.meta?.total).toBeGreaterThan(2);
-    expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=2&page[limit]=2");
-  });
+  it.effect("paginates heterogeneous results with links", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.search.search({
+            query: { filter: { q: "" }, page: { offset: 0, limit: 2 } },
+          });
+        }),
+      );
+
+      expect(document.data).toHaveLength(2);
+      expect(document.meta?.total).toBeGreaterThan(2);
+      expect(document.links?.next).toBe("/search?filter[q]=&page[offset]=2&page[limit]=2");
+    }),
+  );
 });
 
 describe("northwind example: spec compliance on the wire", () => {
@@ -926,7 +1004,7 @@ describe("northwind example: spec compliance on the wire", () => {
   it("sample resources decode against their own schemas (round-trip)", () => {
     const encoded = Schema.encodeUnknownSync(Order)(order10248);
     expect(encoded.attributes.orderDate).toBe("1996-07-04T00:00:00.000Z");
-    const decoded = Schema.decodeUnknownSync(Order)(encoded);
+    const decoded = Schema.decodeSync(Order)(encoded);
     expect(decoded).toEqual(order10248);
 
     // the unshipped order encodes a null shipper and no shipped date
@@ -938,14 +1016,16 @@ describe("northwind example: spec compliance on the wire", () => {
     expect(product.relationships?.category.data.id).toBe(beverages.id);
   });
 
-  it("speedy express is reachable as a shipper", async () => {
-    const document = await run(
-      Effect.gen(function* () {
-        const client = yield* buildClient;
-        return yield* client.shippers.get({ params: { id: speedy.id }, query: {} });
-      }),
-    );
+  it.effect("speedy express is reachable as a shipper", () =>
+    Effect.gen(function* () {
+      const document = yield* run(
+        Effect.gen(function* () {
+          const client = yield* buildClient;
+          return yield* client.shippers.get({ params: { id: speedy.id }, query: {} });
+        }),
+      );
 
-    expect(document.data?.attributes.companyName).toBe("Speedy Express");
-  });
+      expect(document.data?.attributes.companyName).toBe("Speedy Express");
+    }),
+  );
 });

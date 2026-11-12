@@ -145,7 +145,6 @@ export default defineConfig({
       "effect/avoid-native-object-helpers": "warn",
       "effect/avoid-any": "warn",
       "effect/prefer-effect-is": "warn",
-      "effect/effect-run-in-body": "warn",
       "effect/prefer-option-over-null": "warn",
       // ---- Type-aware rules (tsgolint): staged rollout (#535) ------------
       // `typeAware` turned these on. Each sits at `warn` with its count on
@@ -171,6 +170,7 @@ export default defineConfig({
       "effecttsgo/global-error-in-effect-failure": "error",
       "effecttsgo/schema-class-missing-brand": "error",
       "effecttsgo/unnecessary-typeof-type": "error",
+      "effecttsgo/prefer-typed-schema-decoder": "error",
       // tsconfig.json keeps `unstableApiUsage` at "suggestion" so the HTTP
       // surface this library is built on (`effect/http`, `effect/http-api`,
       // much of it `@stability unstable`) does not flood the gates (#205):
