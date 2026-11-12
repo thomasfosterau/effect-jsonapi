@@ -9,6 +9,7 @@
 import { it } from "@effect/vitest";
 import { assert, describe, expect } from "vite-plus/test";
 import * as Arr from "effect/Array";
+import * as Option from "effect/Option";
 import * as Effect from "effect/Effect";
 import * as P from "effect/Predicate";
 import * as Schema from "effect/Schema";
@@ -135,11 +136,11 @@ const ordered = (
   const sorted = Arr.sort(
     rows,
     orderOf<(typeof rows)[number]>((a, b) => {
-      for (const { field, sign } of applied) {
+      const decided = Arr.findFirst(applied, ({ field, sign }) => {
         const order = sign * sorter.compare(valueOf(a, field), valueOf(b, field), field);
-        if (order !== 0) return order;
-      }
-      return ascending(a.id, b.id);
+        return order !== 0 ? Option.some(order) : Option.none();
+      });
+      return Option.getOrElse(decided, () => ascending(a.id, b.id));
     }),
   );
   return reversed ? sorted.toReversed() : sorted;

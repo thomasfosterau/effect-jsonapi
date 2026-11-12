@@ -1,4 +1,5 @@
 import { it } from "@effect/vitest";
+import * as Arr from "effect/Array";
 import * as DateTime from "effect/DateTime";
 import { assert, describe, expect, expectTypeOf, onTestFinished } from "vite-plus/test";
 import * as Cause from "effect/Cause";
@@ -332,17 +333,14 @@ describe("endpoint conventions", () => {
   });
 
   it("attaches the JSON:API protocol middlewares to every endpoint", () => {
-    for (const endpoint of [
-      fetchArticle,
-      listArticles,
-      createArticle,
-      updateArticle,
-      deleteArticle,
-    ]) {
-      const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
-      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
-      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
-    }
+    Arr.forEach(
+      [fetchArticle, listArticles, createArticle, updateArticle, deleteArticle],
+      (endpoint) => {
+        const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
+        expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
+        expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
+      },
+    );
   });
 
   it("groups take the resource type as their identifier", () => {
@@ -494,18 +492,21 @@ describe("relationship endpoint conventions", () => {
   });
 
   it("attaches the JSON:API protocol middlewares", () => {
-    for (const endpoint of [
-      relatedAuthor,
-      relatedComments,
-      getCommentsRelationship,
-      updateAuthorRelationship,
-      addCommentsRelationship,
-      removeCommentsRelationship,
-    ]) {
-      const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
-      expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
-      expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
-    }
+    Arr.forEach(
+      [
+        relatedAuthor,
+        relatedComments,
+        getCommentsRelationship,
+        updateAuthorRelationship,
+        addCommentsRelationship,
+        removeCommentsRelationship,
+      ],
+      (endpoint) => {
+        const middlewareIds = [...endpoint.middlewares].map((m) => m.key);
+        expect(middlewareIds).toContain("effect-jsonapi/ContentNegotiation");
+        expect(middlewareIds).toContain("effect-jsonapi/SchemaErrors");
+      },
+    );
   });
 
   it("add/remove relationship endpoints only accept to-many relationship names", () => {
@@ -1982,12 +1983,12 @@ describe("primary-data success override", () => {
       }).map((endpoint) => [endpoint.identifier, endpoint]),
     );
 
-    for (const name of ["get", "create", "update"]) {
+    Arr.forEach(["get", "create", "update"], (name) => {
       const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]))({
         data: wireArticle,
       });
       expect(decoded.data.links.self).toBe("https://api.example.com/articles/1");
-    }
+    });
     const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list))({ data: [wireArticle] });
     expect(listed.data[0].links.self).toBe("https://api.example.com/articles/1");
   });
@@ -2000,12 +2001,12 @@ describe("primary-data success override", () => {
       ]),
     );
 
-    for (const name of ["get", "create", "update"]) {
+    Arr.forEach(["get", "create", "update"], (name) => {
       const decoded = Schema.decodeUnknownSync(successSchemaOf(byName[name]))({
         data: wireArticle,
       });
       expect(decoded.data.links.self).toBeInstanceOf(URL);
-    }
+    });
     const listed = Schema.decodeUnknownSync(successSchemaOf(byName.list))({ data: [wireArticle] });
     expect(listed.data[0].links.self).toBeInstanceOf(URL);
   });

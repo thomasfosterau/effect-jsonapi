@@ -1,5 +1,6 @@
 import { it } from "@effect/vitest";
 import { describe, expect, expectTypeOf } from "vite-plus/test";
+import * as Arr from "effect/Array";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -24,11 +25,11 @@ const store = (
 ) => {
   const calls: Array<Call> = [];
   const byType = new Map<string, Map<string, Handlers.ResourceValue>>();
-  for (const row of rows) {
+  Arr.forEach(rows, (row) => {
     const existing = byType.get(row.type) ?? new Map<string, Handlers.ResourceValue>();
     existing.set(row.id, row);
     byType.set(row.type, existing);
-  }
+  });
 
   const target =
     (type: string): Handlers.IncludeTarget =>
